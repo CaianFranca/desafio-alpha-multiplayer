@@ -1,28 +1,36 @@
 ---
 name: implement
-description: "Implement a piece of work based on a spec, set of tickets, or repasse document."
+description: "Implementa um trabalho a partir de um pedido, spec, tickets ou documento de repasse."
 disable-model-invocation: true
 ---
 
-Implement the work described by the user in the spec, tickets, or repasse document.
+Implemente o trabalho descrito pelo usuário: um pedido, uma spec, tickets ou um documento de repasse.
 
-## Repasse workflow
+O fluxo acontece em duas fases, cada uma em sua própria sessão:
 
-If the work is defined by a repasse document (handoff written by the repasse skill, by default under `.scratch/repasse/`):
+1. **Planejamento**: `/implement <pedido|spec|tickets>` explora o repositório, carrega a skill `repasse`, gera um brief compacto em `.scratch/repasse/` e encerra sem tocar no código.
+2. **Execução**: numa sessão nova (janela de contexto vazia), `/implement <caminho-do-repasse>.md` lê o brief e executa.
 
-1. Ask the user for the document path (default: `.scratch/repasse/`).
-2. Spawn the `executar-repasse` subagent with the path so it can read and implement the work, then check its report.
-3. Continue with the normal workflow below (review, commit).
-4. On success, delete the repasse document. On failure, keep it so the work can be resumed.
+## Modo planejamento
 
-## Normal workflow
+Entrada é um pedido, spec ou tickets — não um repasse:
 
-Implement the work described by the user in the spec or tickets.
+1. Explore o repositório e leia os artefatos relevantes (spec, tickets, `CONTEXT.md`, ADRs). Não altere código.
+2. Pergunte ao usuário apenas se faltar uma decisão essencial para escrever um plano coerente.
+3. Carregue a skill `repasse` (via ferramenta de skills) com o plano como contexto da conversa. Ela grava o brief e devolve o caminho.
+4. Pare imediatamente. Informe o caminho completo e oriente o usuário:
+   - abrir uma nova seção com `/new`;
+   - executar `/implement <caminho-completo>` nessa seção vazia.
 
-Use /tdd where possible, at pre-agreed seams.
+## Modo execução
 
-Run typechecking regularly, single test files regularly, and the full test suite once at the end.
+Entrada é um caminho de arquivo `.md`:
 
-Once done, use /code-review to review the work.
-
-Commit your work to the current branch.
+1. Valide o arquivo: existe, é `.md`, está dentro do workspace atual e é um repasse (em `.scratch/repasse/` ou com a estrutura de repasse). Se não for um repasse, trate como entrada do modo planejamento.
+2. Leia o brief por completo.
+3. Confira a consistência com o estado atual do repositório: adapte caminhos e detalhes mecânicos. Se houver pendência bloqueadora, contradição ou mudança de escopo/comportamento, pergunte antes de editar.
+4. Implemente diretamente, sem TDD. Escreva testes quando o usuário pedir ou quando forem necessários para validar a mudança.
+5. Rode typechecking regularmente, os arquivos de teste relevantes durante o trabalho e a suíte completa uma vez ao final.
+6. Use `/code-review` ao final, com o estado da branch antes da implementação como ponto fixo; o repasse é a fonte do eixo Spec.
+7. Commite o trabalho na branch atual.
+8. Mantenha o arquivo de repasse: ele é local (`.scratch/` está no `.gitignore`) e não vai ao remoto. Em falha, ele permanece para retomada.

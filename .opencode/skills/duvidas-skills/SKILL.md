@@ -19,6 +19,7 @@ O caminho que a maior parte do trabalho percorre. Você tem uma ideia e quer que
 3. **É uma construção de múltiplas sessões?**
    - **Sim** → **`/transformar-em-spec`** (transforma a thread em uma spec), depois **`/transformar-em-tickets`** para dividi-la em tickets tracer-bullet, cada um declarando suas **arestas de bloqueio**. Num tracker local são um arquivo por ticket em `.scratch/<feature>/issues/`, resolvidos na ordem dos bloqueios; num tracker real as arestas viram links nativos de bloqueio, então qualquer ticket cujos bloqueios terminaram pode ser pego.
    - **Não** → **`/transformar-em-spec`** e siga direto para **`/transformar-em-tickets`** quando a conversa afinar — as tickets são o contrato do trabalho que vem depois.
+4. **Implementar** → **`/implement`** planeja: explora o repositório, carrega **`/repasse`** e grava um brief compacto em `.scratch/repasse/`. Depois abra uma **nova seção com `/new`** e execute **`/implement <caminho-do-repasse>.md`** na janela vazia — ela valida o brief, implementa (sem TDD), roda typechecking e testes, revisa com **`/code-review`** e commita.
 
 ### Higiene de contexto
 
@@ -40,7 +41,7 @@ Uma **fase** é um pedaço de trabalho dentro de uma sessão — a entrevista, a
 
 - **Continuar** — permaneça. Não custa nada, não perde nada.
 - **`/clear`** — esvazie a janela, quando nada daqui importa para o que vem a seguir.
-- **`/repasse`** — escreva um arquivo markdown portátil. Estreito: apenas para um **novo harness**, um **novo diretório**, um **colega**, ou bifurcar uma tarefa lateral **no meio da fase**. O que compra é portabilidade.
+- **`/repasse`** — escreva um arquivo markdown portátil. Estreito: apenas para um **novo harness**, um **novo diretório**, um **colega**, ou bifurcar uma tarefa lateral **no meio da fase**. O que compra é portabilidade. É também o plano que **`/implement`** gera antes de executar.
 - **Subagente** — envie uma tarefa bem delimitada para sua própria janela e receba um relatório de volta.
 - **`/compact`** — comprima este contexto e semeie uma sessão nova com ele. O **padrão**, no fundo da árvore, não a primeira opção.
 
