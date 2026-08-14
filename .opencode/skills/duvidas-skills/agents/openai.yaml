@@ -1,0 +1,5 @@
+interface:
+  display_name: "Dúvidas de Skills"
+  short_description: "Encontre a skill ou o fluxo certo"
+policy:
+  allow_implicit_invocation: false

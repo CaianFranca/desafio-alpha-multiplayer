@@ -1,0 +1,5 @@
+interface:
+  display_name: "Repasse"
+  short_description: "Compila uma conversa em um documento de repasse"
+policy:
+  allow_implicit_invocation: false
