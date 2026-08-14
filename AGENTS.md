@@ -12,18 +12,3 @@ Vocabulário de labels em português (5 estados + 2 categorias), mapeado para os
 
 Layout single-context — `CONTEXT.md` + `docs/adr/` na raiz. Veja `docs/agents/domain.md`.
 
-## Backend
-
-Ao trabalhar em `backend/` ou `packages/`, leia `backend/AGENTS.md`.
-
-## Frontend
-
-Ao trabalhar em `frontend/`, leia `frontend/AGENTS.md`.
-
-## Infra
-
-Ao trabalhar em `infra/`, leia `infra/AGENTS.md`.
-
-## Dados
-
-Ao trabalhar em `db/`, leia `db/AGENTS.md`.
