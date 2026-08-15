@@ -26,11 +26,14 @@ Entrada é um pedido, spec ou tickets — não um repasse:
 
 Entrada é um caminho de arquivo `.md`:
 
-1. Valide o arquivo: existe, é `.md`, está dentro do workspace atual e é um repasse (em `.scratch/repasse/` ou com a estrutura de repasse). Se não for um repasse, trate como entrada do modo planejamento.
-2. Leia o brief por completo.
-3. Confira a consistência com o estado atual do repositório: adapte caminhos e detalhes mecânicos. Se houver pendência bloqueadora, contradição ou mudança de escopo/comportamento, pergunte antes de editar.
-4. Implemente diretamente, sem TDD. Escreva testes quando o usuário pedir ou quando forem necessários para validar a mudança.
-5. Rode typechecking regularmente, os arquivos de teste relevantes durante o trabalho e a suíte completa uma vez ao final.
-6. Use `/code-review` ao final, com o estado da branch antes da implementação como ponto fixo; o repasse é a fonte do eixo Spec.
-7. Commite o trabalho na branch atual.
-8. Mantenha o arquivo de repasse: ele é local (`.scratch/` está no `.gitignore`) e não vai ao remoto. Em falha, ele permanece para retomada.
+1. Valide o arquivo: existe, é `.md`, está dentro do workspace atual e é um repasse (em `.scratch/repasse/` ou com a estrutura de repasse). Se não for um repasse, trate como entrada do modo planejamento sem executar operações Git.
+2. Antes de ler ou editar o código, sincronize a branch atual com o remoto executando `git pull`. Se o comando falhar, pare e informe o erro.
+3. Após um `git pull` bem-sucedido, crie a branch de trabalho com `git switch -c feature/<slug-do-trabalho>`. Use um slug curto, em minúsculas e separado por hífens; se a criação falhar, pare e informe o erro.
+4. Confirme que `git branch --show-current` retorna a branch `feature/...` recém-criada.
+5. Leia o brief por completo.
+6. Confira a consistência com o estado atual do repositório: adapte caminhos e detalhes mecânicos. Se houver pendência bloqueadora, contradição ou mudança de escopo/comportamento, pergunte antes de editar.
+7. Implemente diretamente, sem TDD. Escreva testes quando o usuário pedir ou quando forem necessários para validar a mudança.
+8. Rode typechecking regularmente, os arquivos de teste relevantes durante o trabalho e a suíte completa uma vez ao final.
+9. Use `/code-review` ao final, com o estado da branch antes da implementação como ponto fixo; o repasse é a fonte do eixo Spec.
+10. Commite o trabalho na branch `feature/...` criada nesta execução.
+11. Mantenha o arquivo de repasse: ele é local (`.scratch/` está no `.gitignore`) e não vai ao remoto. Em falha, ele permanece para retomada.
