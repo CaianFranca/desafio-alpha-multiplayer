@@ -1,6 +1,6 @@
 ---
 name: threejs-board-pieces
-description: "Renderiza e manipula peças do tabuleiro 3D em Three.js (The Night Cage): escolha de representação (BoxGeometry/primitivas/InstancedMesh), criação e sincronização de meshes com o estado autoritativo do jogo, posicionamento em casas, animação de movimento, seleção via raycast, destaque e interação (clique, hover, drag). Use ao trabalhar com peças/peões do tabuleiro em frontend/web/src/game ou components: renderizar, sincronizar com o estado do jogo, ou interagir com peças."
+description: "Renderiza e manipula peças do tabuleiro 3D em Three.js (Flicker of Sanity): escolha de representação (BoxGeometry/primitivas/InstancedMesh), criação e sincronização de meshes com o estado autoritativo do jogo, posicionamento em casas, animação de movimento, seleção via raycast, destaque e interação (clique, hover, drag). Use ao trabalhar com peças/peões do tabuleiro em frontend/web/src/game ou components: renderizar, sincronizar com o estado do jogo, ou interagir com peças."
 ---
 
 # Peças do Tabuleiro — Three.js

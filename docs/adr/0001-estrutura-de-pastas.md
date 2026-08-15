@@ -5,7 +5,7 @@ Data: 2026-08-13
 
 ## Contexto
 
-O sistema é client-server escalável horizontalmente (The Night Cage): um
+O sistema é client-server escalável horizontalmente (Flicker of Sanity): um
 frontend React, dois backends distintos (lobby e jogo, com múltiplas
 instâncias do servidor de jogo), Redis como estado volátil, PostgreSQL
 como persistência e NGINX roteando conexões. Sem uma estrutura definida,

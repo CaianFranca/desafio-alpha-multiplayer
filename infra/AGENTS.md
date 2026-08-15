@@ -1,4 +1,4 @@
-# Infra — The Night Cage
+# Infra — Flicker of Sanity
 
 ## Docs atuais via Context7
 

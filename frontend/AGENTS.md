@@ -1,4 +1,4 @@
-# Frontend — The Night Cage
+# Frontend — Flicker of Sanity
 
 ## Docs atuais via Context7
 
