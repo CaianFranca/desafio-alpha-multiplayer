@@ -1,4 +1,4 @@
 interface:
   display_name: "Three.js Board Pieces"
   short_description: "Render and interact with Three.js board pieces"
-  default_prompt: "Load threejs-board-pieces/SKILL.md (try ~/.codex/skills/threejs-board-pieces/SKILL.md, then ~/.claude/skills, ~/.agents/skills, or repo skills/) and follow it exactly. Non-negotiables: the scene only mirrors the authoritative game state; verify through build and one real interaction path."
+  default_prompt: "Load threejs-board-pieces/SKILL.md (try ~/.codex/skills/threejs-board-pieces/SKILL.md, then ~/.claude/skills, ~/.agents/skills, or repo skills/) and follow its process. Load the rendering or interaction reference only for that branch. Treat the scene as a projection of authoritative state and report checks that are blocked by the repository's current maturity."
