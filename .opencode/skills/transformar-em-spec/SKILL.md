@@ -18,7 +18,7 @@ Escreva todo o conteúdo produzido em português brasileiro, incluindo título, 
 
 Confirme com o usuário se esses seams correspondem às expectativas dele.
 
-3. Escreva a spec usando o template abaixo e publique-a no rastreador de issues do projeto. Aplique a label de triagem `ready-for-agent`; não é necessária triagem adicional.
+3. Escreva a spec usando o template abaixo e publique-a no rastreador de issues do projeto. Aplique a label de triagem `pronto-para-agente`; não é necessária triagem adicional.
 
 <spec-template>
 

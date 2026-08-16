@@ -16,7 +16,8 @@ Você cria **um** ticket (issue do GitHub) no rastreador configurado do projeto,
 O prompt contém o ticket a publicar:
 
 - **Título**: título do ticket.
-- **O que construir**: o comportamento fim a fim que o ticket entrega, da perspectiva do usuário, não uma lista de implementação por camada.
+- **Área**: exatamente uma das labels `frontend`, `backend`, `banco-de-dados` ou `infra`.
+- **O que construir**: o resultado verificável que o ticket entrega dentro da área responsável, descrito pelo efeito observável, não uma lista de arquivos.
 - **Critérios de aceitação**: lista de critérios.
 - **Origem**: número ou URL da issue pai, opcional; omita a seção se estiver ausente.
 - **Bloqueado por**: referências da divisão (por exemplo, `01`, `02` ou títulos) dos tickets que bloqueiam este. Nesta fase são apenas referências; a conexão real com números de issues é feita depois pela skill.
@@ -33,7 +34,7 @@ Parte de #<parent-number> (somente se Origem foi informada; omita a seção caso
 
 ## O que construir
 
-<o comportamento fim a fim, da perspectiva do usuário>
+<o resultado verificável dentro da área responsável, descrito pelo efeito observável>
 
 ## Critérios de aceitação
 
@@ -45,12 +46,13 @@ Parte de #<parent-number> (somente se Origem foi informada; omita a seção caso
 - <referências da divisão recebidas>, ou "Nenhum — pode começar imediatamente" se não houver bloqueios
 ```
 
-3. Aplicar a label de triagem `ready-for-agent`: `gh issue edit <number> --add-label ready-for-agent`. Se a label não existir, criar primeiro: `gh label create ready-for-agent` (ou `gh api ...` se o repo não permitir `gh label`).
+3. Aplicar a label de área recebida no prompt e a label de triagem `pronto-para-agente`: `gh issue edit <number> --add-label "<area>" --add-label pronto-para-agente`. Se alguma label não existir, criar primeiro (ou usar `gh api ...` se o repo não permitir `gh label`).
 4. Não fechar nem modificar nenhum issue parent.
 
 ## Regras
 
 - Não edite o corpo depois de criado a menos que a skill peça — a fase de amarração de dependências é responsabilidade da skill.
+- Recuse o ticket se a área estiver ausente, inválida ou se houver mais de uma área; a divisão deve ser corrigida antes da publicação.
 - Não use `#` em referências de Blocked by que ainda não existem (o número real só é conhecido depois de todas as issues criadas).
 - Se `gh issue create` falhar, leia o erro, corrija o que for corrigível e retente uma vez; se persistir, falhe alto e retorne o erro.
 - Evite file paths e trechos de código no corpo — envelhecem rápido.

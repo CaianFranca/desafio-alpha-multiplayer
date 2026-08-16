@@ -19,15 +19,19 @@ Quando uma skill mencionar um papel (ex.: "aplique o label AFK-ready da triagem"
 ## Labels de área (fora da triagem)
 
 Labels de área **não fazem parte do fluxo de triagem** — são opcionais e servem
-para filtrar issues pela parte do sistema afetada. Uma issue pode carregar mais
-de uma área quando atravessar fronteiras do sistema:
+para filtrar issues pela parte do sistema afetada. Uma issue pai ou spec pode
+carregar mais de uma área quando atravessar fronteiras do sistema. Tickets de
+implementação derivados dela devem carregar exatamente uma área, para manter
+as responsabilidades dos grupos separadas:
 
 | Label             | Área                                                          |
 | ----------------- | ------------------------------------------------------------- |
 | `frontend`        | React, TypeScript, CSS, telas, tabuleiro e cliente WebSocket  |
-| `backend`         | Servidores de Lobby e de Jogo, APIs e regras de negócio       |
+| `backend`         | Servidores, APIs, regras de negócio, engine, shared e OpenAPI |
 | `infra`           | NGINX, Docker, Docker Compose e configuração de implantação   |
 | `banco-de-dados`  | PostgreSQL, Redis, migrations, seeds e persistência de estado |
 
-Redis e PostgreSQL ficam agrupados em `banco-de-dados`. Esses labels não
-substituem os dois labels obrigatórios da triagem: uma categoria e um estado.
+Redis e PostgreSQL ficam agrupados em `banco-de-dados`. Cada ticket que
+atravessar duas áreas deve ser dividido em tickets separados e conectado por
+dependências. Esses labels não substituem os dois labels obrigatórios da
+triagem: uma categoria e um estado.

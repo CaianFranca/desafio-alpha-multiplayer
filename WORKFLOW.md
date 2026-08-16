@@ -133,11 +133,21 @@ nova seção limpa para o próximo ticket.
 
 - **Fundação primeiro:** o primeiro bloco prepara scaffold, serviços, CI e
   convenções e desbloqueia o restante do time.
-- **Um ticket, uma área:** não misture frontend, backend, banco e proxy no
-  mesmo ticket.
-- **Contrato separado:** OpenAPI deve ser um ticket próprio para permitir
-  trabalho paralelo. Migrations pertencem ao ticket do backend ou do fluxo de
-  dados que as exige.
+- **Um ticket, uma área:** tickets de implementação devem ficar dentro de uma
+  única área (`frontend`, `backend`, `banco-de-dados` ou `infra`). A issue
+  pai/spec pode envolver várias áreas, mas não se deve misturar grupos no mesmo
+  ticket.
+- **Separação por dependência:** quando uma entrega atravessar áreas, divida-a
+  em tickets separados e registre os bloqueios entre eles. O label de área
+  identifica o grupo responsável; a dependência identifica a ordem de trabalho.
+- **Contrato separado:** OpenAPI deve ser um ticket próprio de `backend` para
+  permitir trabalho paralelo. `packages/engine` e `packages/shared` também
+  pertencem a `backend`. Migrations, seeds e persistência pertencem a
+  `banco-de-dados`.
+- **Quantidade de tickets:** não há quantidade fixa por spec. Crie um ticket
+  para cada entrega coerente, verificável e executável por um grupo. Divida
+  entregas independentes, com bloqueios diferentes ou grandes demais; não
+  crie tickets apenas por arquivo, camada ou teste.
 - **Branch e PR:** cada ticket tem branch própria, PR própria e code-review
   antes do merge.
 - **Bloqueios reais:** um ticket só entra na fronteira de trabalho quando seus

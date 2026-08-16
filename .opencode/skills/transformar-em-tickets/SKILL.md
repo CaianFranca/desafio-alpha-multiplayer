@@ -6,7 +6,8 @@ disable-model-invocation: true
 
 # Transformar em tickets
 
-Quebre um plano, uma spec ou uma conversa em um conjunto de **tickets** — fatias verticais tracer-bullet, cada uma declarando os tickets que a **bloqueiam**.
+Quebre um plano, uma spec ou uma conversa em um conjunto de **tickets**
+delimitados por área, cada um declarando os tickets que o **bloqueiam**.
 
 ## Regra principal de idioma
 
@@ -26,30 +27,59 @@ Se ainda não explorou a base de código, faça isso para entender o estado atua
 
 Procure oportunidades de refatorar antes para facilitar a implementação. Primeiro torne a mudança fácil; depois faça a mudança fácil.
 
-### 3. Esboçar fatias verticais
+### 3. Esboçar tickets delimitados por área
 
-Divida o trabalho em tickets **tracer-bullet**.
+Divida o trabalho em tickets executáveis por grupos separados. A issue pai ou
+spec pode atravessar várias áreas, mas cada ticket de implementação deve ter
+exatamente uma área: `frontend`, `backend`, `banco-de-dados` ou `infra`.
 
-<vertical-slice-rules>
+<area-ticket-rules>
 
-- Cada fatia percorre um caminho estreito, mas COMPLETO, por todas as camadas (schema, API, UI e testes): é vertical, não uma fatia horizontal de uma única camada
-- Uma fatia concluída pode ser demonstrada ou verificada por conta própria
-- Cada fatia deve caber em uma única janela de contexto nova
-- Qualquer refatoração preparatória deve ser feita primeiro
+- Não misture tarefas de áreas diferentes no mesmo ticket.
+- Quando uma entrega atravessar áreas, divida-a em tickets separados e dê a
+  cada um as dependências que realmente o bloqueiam.
+- `packages/engine`, `packages/shared` e contratos OpenAPI pertencem a
+  `backend`.
+- Migrations, seeds e persistência pertencem a `banco-de-dados`.
+- Cada ticket deve entregar um resultado coerente e verificável por conta
+  própria dentro da sua área.
+- Não há quantidade fixa de tickets por spec.
+- Divida tickets quando as entregas forem independentes, tiverem bloqueios
+  diferentes ou forem grandes demais para uma janela de contexto.
+- Não crie tickets apenas por arquivo, camada ou teste. Testes relacionados
+  permanecem no ticket da área responsável.
+- Qualquer refatoração preparatória deve ser feita primeiro.
 
-</vertical-slice-rules>
+</area-ticket-rules>
 
-Dê a cada ticket suas **arestas de bloqueio**: os outros tickets que precisam ser concluídos antes que ele possa começar. Um ticket sem bloqueadores pode começar imediatamente.
+Dê a cada ticket suas **arestas de bloqueio**: os outros tickets que precisam
+ser concluídos antes que ele possa começar. Um ticket sem bloqueadores pode
+começar imediatamente.
 
-**Refatorações amplas são a exceção à divisão vertical.** Uma **refatoração ampla** é uma mudança mecânica — renomear uma coluna ou alterar o tipo de um símbolo compartilhado — cujo **raio de impacto** alcança a base inteira, fazendo uma única edição quebrar milhares de pontos de chamada de uma vez e impedindo que qualquer fatia vertical permaneça verde. Não a force em um tracer-bullet; sequencie-a como **expandir–contrair**. Primeiro expanda: adicione a nova forma ao lado da antiga para não quebrar nada. Depois migre os pontos de chamada em lotes dimensionados pelo raio de impacto (por pacote ou diretório), cada lote em seu próprio ticket bloqueado pela expansão, mantendo a CI verde entre lotes porque a forma antiga ainda existe. Por fim, contraia: remova a forma antiga quando não restar nenhum chamador, em um ticket bloqueado por todos os lotes de migração. Quando nem os lotes puderem permanecer verdes sozinhos, mantenha a sequência, mas faça-os compartilhar uma branch de integração que bloqueie um ticket final de integração e verificação: o estado verde só é garantido nesse ticket final.
+**Refatorações amplas são a exceção à divisão por área.** Uma
+**refatoração ampla** é uma mudança mecânica — renomear uma coluna ou alterar
+o tipo de um símbolo compartilhado — cujo **raio de impacto** alcança a base
+inteira, fazendo uma única edição quebrar milhares de pontos de chamada de uma
+vez. Não a force em um ticket comum; sequencie-a como **expandir–contrair**.
+Primeiro expanda: adicione a nova forma ao lado da antiga para não quebrar
+nada. Depois migre os pontos de chamada em lotes dimensionados pelo raio de
+impacto (por pacote ou diretório), cada lote em seu próprio ticket da área
+responsável e bloqueado pela expansão, mantendo a CI verde entre lotes porque
+a forma antiga ainda existe. Por fim, contraia: remova a forma antiga quando
+não restar nenhum chamador, em um ticket bloqueado por todos os lotes de
+migração. Quando nem os lotes puderem permanecer verdes sozinhos, mantenha a
+sequência, mas faça-os compartilhar uma branch de integração que bloqueie um
+ticket final de integração e verificação pertencente à área responsável.
 
 ### 4. Validar com o usuário
 
 Apresente a divisão proposta como uma lista numerada. Para cada ticket, mostre:
 
 - **Título**: nome curto e descritivo
+- **Área**: exatamente uma das quatro áreas de trabalho; este é um metadado da
+  divisão e da label, não uma seção obrigatória do corpo publicado
 - **Bloqueado por**: quais outros tickets, se houver, precisam ser concluídos primeiro
-- **O que entrega**: o comportamento fim a fim que este ticket torna possível
+- **O que entrega**: o resultado verificável que este ticket torna possível dentro da sua área
 
 Pergunte ao usuário:
 
@@ -72,7 +102,7 @@ Não feche nem modifique nenhuma issue pai.
 
 ### 5a. Publicar pelos subagentes `criar-ticket` (GitHub)
 
-**Fase 1 — criação em paralelo.** Inicie um subagente `criar-ticket` por ticket aprovado, todos em um único lote paralelo. Cada subagente começa com contexto novo; por isso, inclua no prompt o **payload completo** do ticket: título, o que construir, critérios de aceitação, referência à issue pai (se houver) e os tickets que o bloqueiam como referências da divisão (`01`, `02` ou títulos), não números de issues, que ainda não existem. O subagente cria a issue com o corpo definido no `<issue-template>`, aplica a label `ready-for-agent` e retorna o número da issue.
+**Fase 1 — criação em paralelo.** Inicie um subagente `criar-ticket` por ticket aprovado, todos em um único lote paralelo. Cada subagente começa com contexto novo; por isso, inclua no prompt o **payload completo** do ticket: título, área única, o que construir, critérios de aceitação, referência à issue pai (se houver) e os tickets que o bloqueiam como referências da divisão (`01`, `02` ou títulos), não números de issues, que ainda não existem. O subagente cria a issue com o corpo definido no `<issue-template>`, aplica a label de área e o estado `pronto-para-agente`, e retorna o número da issue.
 
 **Fase 2 — conectar as arestas de bloqueio.** Colete todos os números retornados; antes de continuar, tente novamente ou corrija qualquer subagente que tenha falhado. Depois, para cada ticket com bloqueadores:
 
@@ -86,7 +116,7 @@ Somente depois de conectar as arestas os tickets terão identificadores reais; o
 
 # <NN> — <Título do ticket>
 
-**O que construir:** o comportamento fim a fim que este ticket torna possível, da perspectiva do usuário, não uma lista de implementação por camada.
+**O que construir:** o resultado verificável que este ticket torna possível dentro da sua área, descrito pelo efeito observável, não uma lista de arquivos.
 
 **Bloqueado por:** os números ou títulos dos tickets que bloqueiam este, ou "Nenhum — pode começar imediatamente".
 
@@ -105,7 +135,7 @@ Uma referência à issue pai no rastreador, caso a origem seja uma issue existen
 
 ## O que construir
 
-O comportamento fim a fim que este ticket torna possível, da perspectiva do usuário, não uma implementação organizada por camadas.
+O resultado verificável que este ticket torna possível dentro da sua área, descrito pelo efeito observável, não uma implementação organizada por arquivos.
 
 ## Critérios de aceitação
 
