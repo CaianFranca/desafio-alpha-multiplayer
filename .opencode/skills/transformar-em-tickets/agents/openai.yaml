@@ -1,5 +1,5 @@
 interface:
-  display_name: "To Tickets"
-  short_description: "Split a plan into tracer-bullet tickets"
+  display_name: "Transformar em tickets"
+  short_description: "Dividir um plano em tickets tracer-bullet"
 policy:
   allow_implicit_invocation: false

@@ -1,115 +1,121 @@
 ---
 name: transformar-em-tickets
-description: Quebra um plano, spec ou a conversa atual em tickets tracer-bullet, cada um declarando suas arestas de bloqueio, publicados no tracker configurado.
+description: Quebra um plano, spec ou a conversa atual em tickets tracer-bullet em português brasileiro, cada um declarando suas arestas de bloqueio, publicados no rastreador configurado.
 disable-model-invocation: true
 ---
 
-# To Tickets
+# Transformar em tickets
 
-Break a plan, spec, or conversation into a set of **tickets** — tracer-bullet vertical slices, each declaring the tickets that **block** it.
+Quebre um plano, uma spec ou uma conversa em um conjunto de **tickets** — fatias verticais tracer-bullet, cada uma declarando os tickets que a **bloqueiam**.
 
-## Process
+## Regra principal de idioma
 
-### 1. Gather context
+Escreva todo o conteúdo produzido em português brasileiro, incluindo títulos, descrições, critérios de aceitação, perguntas de validação, nomes de seções e templates dos tickets. Preserve em seu idioma original apenas identificadores que precisam ser exatos, como nomes de comandos, labels, nomes próprios, símbolos de código e contratos externos.
 
-Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
+O rastreador de issues e o vocabulário das labels de triagem devem ter sido fornecidos — execute `/setup-matt-pocock-skills` se não tiver essas informações.
 
-### 2. Explore the codebase (optional)
+## Processo
 
-If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use the project's domain glossary vocabulary, and respect ADRs in the area you're touching.
+### 1. Reunir contexto
 
-Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
+Trabalhe com o que já estiver no contexto da conversa. Se o usuário passar uma referência como argumento (caminho de spec, número ou URL de issue), busque-a e leia o corpo completo e os comentários.
 
-### 3. Draft vertical slices
+### 2. Explorar a base de código (opcional)
 
-Break the work into **tracer bullet** tickets.
+Se ainda não explorou a base de código, faça isso para entender o estado atual. Os títulos e as descrições dos tickets devem usar o vocabulário do glossário de domínio do projeto e respeitar os ADRs da área alterada.
+
+Procure oportunidades de refatorar antes para facilitar a implementação. Primeiro torne a mudança fácil; depois faça a mudança fácil.
+
+### 3. Esboçar fatias verticais
+
+Divida o trabalho em tickets **tracer-bullet**.
 
 <vertical-slice-rules>
 
-- Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests) — vertical, NOT a horizontal slice of one layer
-- A completed slice is demoable or verifiable on its own
-- Each slice is sized to fit in a single fresh context window
-- Any prefactoring should be done first
+- Cada fatia percorre um caminho estreito, mas COMPLETO, por todas as camadas (schema, API, UI e testes): é vertical, não uma fatia horizontal de uma única camada
+- Uma fatia concluída pode ser demonstrada ou verificada por conta própria
+- Cada fatia deve caber em uma única janela de contexto nova
+- Qualquer refatoração preparatória deve ser feita primeiro
 
 </vertical-slice-rules>
 
-Give each ticket its **blocking edges** — the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
+Dê a cada ticket suas **arestas de bloqueio**: os outros tickets que precisam ser concluídos antes que ele possa começar. Um ticket sem bloqueadores pode começar imediatamente.
 
-**Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change — rename a column, retype a shared symbol — whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket — green is promised only there.
+**Refatorações amplas são a exceção à divisão vertical.** Uma **refatoração ampla** é uma mudança mecânica — renomear uma coluna ou alterar o tipo de um símbolo compartilhado — cujo **raio de impacto** alcança a base inteira, fazendo uma única edição quebrar milhares de pontos de chamada de uma vez e impedindo que qualquer fatia vertical permaneça verde. Não a force em um tracer-bullet; sequencie-a como **expandir–contrair**. Primeiro expanda: adicione a nova forma ao lado da antiga para não quebrar nada. Depois migre os pontos de chamada em lotes dimensionados pelo raio de impacto (por pacote ou diretório), cada lote em seu próprio ticket bloqueado pela expansão, mantendo a CI verde entre lotes porque a forma antiga ainda existe. Por fim, contraia: remova a forma antiga quando não restar nenhum chamador, em um ticket bloqueado por todos os lotes de migração. Quando nem os lotes puderem permanecer verdes sozinhos, mantenha a sequência, mas faça-os compartilhar uma branch de integração que bloqueie um ticket final de integração e verificação: o estado verde só é garantido nesse ticket final.
 
-### 4. Quiz the user
+### 4. Validar com o usuário
 
-Present the proposed breakdown as a numbered list. For each ticket, show:
+Apresente a divisão proposta como uma lista numerada. Para cada ticket, mostre:
 
-- **Title**: short descriptive name
-- **Blocked by**: which other tickets (if any) must complete first
-- **What it delivers**: the end-to-end behaviour this ticket makes work
+- **Título**: nome curto e descritivo
+- **Bloqueado por**: quais outros tickets, se houver, precisam ser concluídos primeiro
+- **O que entrega**: o comportamento fim a fim que este ticket torna possível
 
-Ask the user:
+Pergunte ao usuário:
 
-- Does the granularity feel right? (too coarse / too fine)
-- Are the blocking edges correct — does each ticket only depend on tickets that genuinely gate it?
-- Should any tickets be merged or split further?
+- A granularidade parece adequada? (ampla demais ou detalhada demais)
+- As arestas de bloqueio estão corretas? Cada ticket depende apenas de tickets que realmente o impedem de começar?
+- Algum ticket deve ser mesclado ou dividido novamente?
 
-Iterate until the user approves the breakdown.
+Itere até que o usuário aprove a divisão.
 
-### 5. Publish the tickets to the configured tracker
+### 5. Publicar os tickets no rastreador configurado
 
-Publish the approved tickets. **How** depends on the configured tracker — the tickets are the same either way, only the shape of the blocking edges changes:
+Publique os tickets aprovados. **Como** fazer isso depende do rastreador configurado: os tickets são os mesmos nos dois casos; apenas o formato das arestas de bloqueio muda:
 
-- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below — one ticket per file, never a single combined file.
-- **A real issue tracker (GitHub, Linear, …)** → delegate publishing to the **`criar-ticket` subagent**, one subagent per ticket, run in parallel. Follow the GitHub flow below (adapt naming if the tracker differs).
+- **Arquivos locais** → escreva um arquivo por ticket em `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numerado a partir de `01` na ordem das dependências, com os bloqueadores primeiro. O campo "Bloqueado por" de cada arquivo deve listar os números ou títulos dos tickets dos quais ele depende. Use o template de ticket abaixo: um ticket por arquivo, nunca um único arquivo combinado.
+- **Rastreador real de issues (GitHub, Linear etc.)** → delegue a publicação ao **subagente `criar-ticket`**, um subagente por ticket, executados em paralelo. Siga o fluxo do GitHub abaixo, adaptando os nomes se o rastreador for diferente.
 
-Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
+Trabalhe na **fronteira**: qualquer ticket cujos bloqueadores tenham sido concluídos. Em uma cadeia puramente linear, isso significa seguir de cima para baixo.
 
-Do NOT close or modify any parent issue.
+Não feche nem modifique nenhuma issue pai.
 
-### 5a. Publish via the `criar-ticket` subagents (GitHub)
+### 5a. Publicar pelos subagentes `criar-ticket` (GitHub)
 
-**Phase 1 — parallel creation.** Launch one `criar-ticket` subagent per approved ticket, all in a single parallel batch. Each subagent starts with fresh context, so embed the **full payload** of that ticket in its prompt: title, What to build, acceptance criteria, parent reference (if any), and its blocked-by tickets as breakdown references (`01`, `02`, … or titles) — not issue numbers, which don't exist yet. The subagent creates the issue (body per the `<issue-template>`), applies the `ready-for-agent` label, and returns the issue number.
+**Fase 1 — criação em paralelo.** Inicie um subagente `criar-ticket` por ticket aprovado, todos em um único lote paralelo. Cada subagente começa com contexto novo; por isso, inclua no prompt o **payload completo** do ticket: título, o que construir, critérios de aceitação, referência à issue pai (se houver) e os tickets que o bloqueiam como referências da divisão (`01`, `02` ou títulos), não números de issues, que ainda não existem. O subagente cria a issue com o corpo definido no `<issue-template>`, aplica a label `ready-for-agent` e retorna o número da issue.
 
-**Phase 2 — wire the blocking edges.** Collect every returned number; retry or repair any subagent that failed before proceeding. Then, for each ticket with blockers:
+**Fase 2 — conectar as arestas de bloqueio.** Colete todos os números retornados; antes de continuar, tente novamente ou corrija qualquer subagente que tenha falhado. Depois, para cada ticket com bloqueadores:
 
-- Resolve each blocker's **database id** — the numeric `.id`, not the `#number` or `node_id`: `gh api repos/<owner>/<repo>/issues/<n> --jq .id`.
-- Post the native edge: `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>` (see `docs/agents/issue-tracker.md`).
-- Where native dependencies are unavailable, fall back to editing the child's body so the "Blocked by" line lists the real `#<number>`s: `gh issue edit <child> --body-file -`.
+- Resolva o **id do banco de dados** de cada bloqueador: o `.id` numérico, não o `#number` nem o `node_id`: `gh api repos/<owner>/<repo>/issues/<n> --jq .id`.
+- Publique a aresta nativa: `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>` (consulte `docs/agents/issue-tracker.md`).
+- Quando as dependências nativas não estiverem disponíveis, edite o corpo da issue filha para que a linha "Bloqueado por" liste os `#<number>` reais: `gh issue edit <child> --body-file -`.
 
-Only after wiring do the tickets carry real identifiers; the bodies written in phase 1 intentionally reference the breakdown instead.
+Somente depois de conectar as arestas os tickets terão identificadores reais; os corpos escritos na fase 1 devem referenciar intencionalmente a divisão, não os números finais.
 
 <local-ticket-template>
 
-# <NN> — <Ticket title>
+# <NN> — <Título do ticket>
 
-**What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective — not a layer-by-layer implementation list.
+**O que construir:** o comportamento fim a fim que este ticket torna possível, da perspectiva do usuário, não uma lista de implementação por camada.
 
-**Blocked by:** the numbers/titles of the tickets that gate this one, or "None — can start immediately".
+**Bloqueado por:** os números ou títulos dos tickets que bloqueiam este, ou "Nenhum — pode começar imediatamente".
 
-**Status:** ready-for-agent
+**Status:** pronto para agente
 
-- [ ] Acceptance criterion 1
-- [ ] Acceptance criterion 2
+- [ ] Critério de aceitação 1
+- [ ] Critério de aceitação 2
 
 </local-ticket-template>
 
 <issue-template>
 
-## Parent
+## Origem
 
-A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
+Uma referência à issue pai no rastreador, caso a origem seja uma issue existente. Omita esta seção quando não houver issue pai.
 
-## What to build
+## O que construir
 
-The end-to-end behaviour this ticket makes work, from the user's perspective — not layer-by-layer implementation.
+O comportamento fim a fim que este ticket torna possível, da perspectiva do usuário, não uma implementação organizada por camadas.
 
-## Acceptance criteria
+## Critérios de aceitação
 
-- [ ] Criterion 1
-- [ ] Criterion 2
+- [ ] Critério 1
+- [ ] Critério 2
 
-## Blocked by
+## Bloqueado por
 
-- A reference to each blocking ticket, or "None — can start immediately".
+- Uma referência a cada ticket bloqueador, ou "Nenhum — pode começar imediatamente".
 
 </issue-template>
 
-In either form, avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
+Em qualquer formato, evite caminhos específicos de arquivos e trechos de código, pois eles envelhecem rapidamente. Exceção: se um protótipo produziu um trecho que codifica uma decisão com mais precisão do que a prosa (máquina de estados, reducer, schema ou formato de tipo), inclua-o e registre brevemente que ele veio de um protótipo. Recorte apenas as partes que expressam decisões; não inclua uma demonstração funcional.
