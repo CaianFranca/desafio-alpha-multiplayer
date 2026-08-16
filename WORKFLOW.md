@@ -19,6 +19,7 @@ backlog priorizado
   -> spec e tickets
   -> implementação
   -> code-review
+  -> preview da PR
   -> PR e merge
 ```
 
@@ -45,6 +46,7 @@ devem ser assumidos por devs.
 | `/transformar-em-tickets` | Dividir a spec em tickets e declarar bloqueios. |
 | `/implement` | Planejar e executar um ticket em sua própria branch. |
 | `/code-review` | Revisar a mudança nos eixos Standards e Spec. |
+| `criar-pr` | Preparar o preview e criar a PR depois da aprovação humana. |
 | `/triagem` | Organizar bugs e pedidos que chegam fora do fluxo. |
 
 A entrevista, a spec e os tickets pertencem à mesma seção. Não limpe o
@@ -113,8 +115,19 @@ estado da branch antes da implementação.
 - **Standards:** a mudança segue as convenções do repositório?
 - **Spec:** a mudança implementa o ticket e a spec?
 
-Resolva os achados, commite na branch e abra ou atualize a PR. Ao terminar,
-abra uma nova seção limpa para o próximo ticket.
+Resolva os achados e commite na branch. Depois, acione o subagente `criar-pr`:
+
+1. O subagente analisa repasse, diff, issue, branch, validações, impactos e
+   code-review; se não houver resultado de review, executa `/code-review`.
+2. O subagente devolve um preview com título, issues, corpo, base, validações e
+   ações de publicação, sem fazer mutações.
+3. O humano aprova o preview completo ou pede ajustes. O mesmo subagente é
+   retomado até a aprovação.
+4. Após a aprovação, o subagente publica a branch se necessário e cria a PR.
+
+O subagente não altera código, não faz merge, não automatiza reviewers ou
+labels e não cria uma segunda PR para a mesma branch. Ao terminar, abra uma
+nova seção limpa para o próximo ticket.
 
 ## Regras de organização
 

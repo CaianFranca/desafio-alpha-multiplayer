@@ -27,6 +27,11 @@ Uma ou duas frases: o que deve estar pronto ao final.
 - O que está fora do escopo.
 - Pendências: questões em aberto que bloqueiam a execução, se houver.
 
+## Issue
+
+- Principal: #123 Título da issue principal
+- Relacionadas: nenhuma
+
 ## Execução
 
 1. Passo concreto.

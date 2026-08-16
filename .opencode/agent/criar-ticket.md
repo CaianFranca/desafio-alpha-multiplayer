@@ -1,6 +1,7 @@
 ---
 description: Cria um ticket — uma issue no tracker GitHub via gh CLI — a partir de um ticket tracer-bullet aprovado pela skill transformar-em-tickets. Use quando a skill delegar a criação de um único ticket.
 mode: subagent
+hidden: true
 permission:
   bash:
     "*": ask
