@@ -16,17 +16,18 @@ Toda issue triada deve carregar **exatamente um papel de estado e um de categori
 
 Quando uma skill mencionar um papel (ex.: "aplique o label AFK-ready da triagem"), use a string de label correspondente desta tabela.
 
-## Area labels (fora da triagem)
+## Labels de área (fora da triagem)
 
-Labels de área **não fazem parte do fluxo de triagem** — são opcionais e servem para filtrar issues por módulo da arquitetura:
+Labels de área **não fazem parte do fluxo de triagem** — são opcionais e servem
+para filtrar issues pela parte do sistema afetada. Uma issue pode carregar mais
+de uma área quando atravessar fronteiras do sistema:
 
-| Label            | Área                                                        |
-| ---------------- | ----------------------------------------------------------- |
-| `frontend`       | React + TypeScript + CSS (telas, tabuleiro, WebSocket client) |
-| `backend-lobby`  | Servidor de Lobby (Express, autenticação, salas)            |
-| `backend-jogo`   | Servidor de Jogo (WS, validação de jogadas, minigames)      |
-| `redis`          | Estado volátil, Pub/Sub, mapeamento de salas                |
-| `postgres`       | Persistência, usuários, partidas, ranking                   |
-| `infra`          | NGINX, Docker, Docker Compose                               |
+| Label             | Área                                                          |
+| ----------------- | ------------------------------------------------------------- |
+| `frontend`        | React, TypeScript, CSS, telas, tabuleiro e cliente WebSocket  |
+| `backend`         | Servidores de Lobby e de Jogo, APIs e regras de negócio       |
+| `infra`           | NGINX, Docker, Docker Compose e configuração de implantação   |
+| `banco-de-dados`  | PostgreSQL, Redis, migrations, seeds e persistência de estado |
 
-Edite a coluna da direita para combinar com o vocabulário que você realmente usa.
+Redis e PostgreSQL ficam agrupados em `banco-de-dados`. Esses labels não
+substituem os dois labels obrigatórios da triagem: uma categoria e um estado.
