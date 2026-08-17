@@ -1,5 +1,5 @@
 ---
-description: Prepara e cria uma pull request a partir de um repasse aprovado, com preview humano obrigatório e sem alterar código ou fazer merge.
+description: Prepara e cria uma pull request a partir de um plano aprovado e um relatório de execução, com preview humano obrigatório e sem alterar código ou fazer merge.
 mode: subagent
 permission:
   edit: deny
@@ -38,8 +38,8 @@ entrega.
 
 ## Entrada
 
-O prompt deve trazer o caminho de um repasse em `.scratch/repasse/` ou o
-conteúdo completo dele. O repasse precisa conter:
+O prompt deve trazer o plano aprovado e o relatório completo do executor. O plano
+precisa conter:
 
 ```markdown
 ## Issue
@@ -58,7 +58,7 @@ Faça todas as verificações abaixo antes de propor a publicação. Esta fase n
 faz `push`, não cria nem edita PR, não altera arquivos e não cria um arquivo de
 proposta.
 
-1. Leia o repasse e identifique objetivo, decisões, limites, validações,
+1. Leia o plano e o relatório e identifique objetivo, decisões, limites, validações,
    referências e a issue principal/relacionadas.
 2. Confirme o repositório com `git remote -v`. Sem remote, peça ao usuário
    `-R <owner>/<repo>` e pare; nunca chute o repositório.
@@ -68,7 +68,7 @@ proposta.
    bloquear a proposta.
 4. Consulte a branch default no GitHub com `gh repo view --json
    defaultBranchRef --jq .defaultBranchRef.name`. Use-a como base, salvo uma
-   instrução explícita no repasse.
+   instrução explícita no plano.
 5. Confirme `git status --porcelain` vazio. Mudanças não commitadas, conflitos,
    detached HEAD ou divergência que torne o estado inconsistente bloqueiam o
    fluxo com a explicação e o comando de diagnóstico.
@@ -81,13 +81,13 @@ proposta.
 8. Leia a issue principal e as relacionadas com `gh issue view <n> --comments`.
    Confirme que o diff entrega o objetivo e que o texto `Closes #<principal>`
    e as linhas `Related to #<relacionada>` são os vínculos corretos.
-9. Procure um resultado de `/code-review` já fornecido no contexto ou em um
-   artefato explicitamente referenciado pelo repasse. Se não houver resultado,
+9. Procure um resultado de `/code-review` já fornecido no relatório do executor
+   ou no contexto. Se não houver resultado,
    carregue e execute a skill `code-review` automaticamente, usando a merge
    base entre a branch atual e a base como ponto fixo. Não pule o eixo Spec.
 10. Trate achados relevantes do eixo Spec e violações de padrões documentados
     como bloqueios. Registre smells julgamentais como riscos. Falha de teste,
-    typecheck ou validação declarada pelo repasse também bloqueia a proposta;
+    typecheck ou validação declarada pelo plano também bloqueia a proposta;
     ausência de uma suíte aplicável deve ser registrada como limitação.
 11. Inspecione os scripts de validação e os resultados disponíveis. Não edite
     código nem corrija a entrega nesta fase. Registre testes, typecheck,
