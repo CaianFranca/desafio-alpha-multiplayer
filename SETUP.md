@@ -1,7 +1,7 @@
 # Setup do Ambiente
 
 Guia de instalação e configuração para quem chega no projeto: estrutura das
-áreas, GitHub CLI (`gh`) e Context7 (MCP) — ver seção 3.
+áreas, Docker Compose local, GitHub CLI (`gh`) e Context7 (MCP) — ver seção 4.
 
 ## 1. Mapa do monorepo
 
@@ -11,6 +11,8 @@ Cada área tem seu próprio `AGENTS.md` e `opencode.json`. Ver
 
 ```
 desafio-alpha-multiplayer/
+├── docker-compose.yml          # entrada do ambiente local
+├── .env.example                # variáveis do Compose
 ├── frontend/
 │   └── web/                    # app React + Vite + Three.js (tabuleiro)
 │       └── src/
@@ -46,7 +48,55 @@ desafio-alpha-multiplayer/
 - **infra/** — configuração de infraestrutura (NGINX roteando `/ws/lobby` e
   `/ws/game/<server-id>`). Ver `infra/AGENTS.md`.
 
-## 2. GitHub CLI (`gh`)
+## 2. Docker Compose local
+
+O Compose da raiz é a entrada do ambiente de desenvolvimento local. A produção
+está fora do escopo desta configuração. Os serviços de aplicação ainda não têm
+Dockerfiles nem contratos de execução, então o Compose atual sobe apenas
+PostgreSQL e Redis.
+
+Crie o arquivo local de ambiente e suba o perfil completo:
+
+```sh
+cp .env.example .env
+docker compose up -d
+```
+
+O arquivo `.env` é ignorado pelo Git e o template define
+`COMPOSE_PROFILES=full`, portanto `docker compose up` representa o caminho
+completo do ambiente local. Para usar um perfil isolado, substitua o perfil
+carregado pelo ambiente do comando:
+
+```sh
+COMPOSE_PROFILES=db docker compose up -d
+COMPOSE_PROFILES=backend docker compose up -d
+COMPOSE_PROFILES=nginx docker compose up -d
+```
+
+O perfil `frontend` fica reservado para quando o Dockerfile e o contrato do
+frontend existirem. Até lá, não há serviço nesse perfil.
+
+| Perfil | Serviços disponíveis agora | Serviços futuros previstos |
+| --- | --- | --- |
+| `db` | PostgreSQL, Redis | — |
+| `backend` | PostgreSQL, Redis | lobby-server, game-server |
+| `frontend` | — | frontend |
+| `nginx` | PostgreSQL, Redis | frontend, lobby-server, game-server, NGINX |
+| `full` | PostgreSQL, Redis | frontend, lobby-server, game-server, NGINX |
+
+Comandos úteis:
+
+```sh
+docker compose ps
+docker compose config
+docker compose down
+```
+
+O PostgreSQL usa o volume nomeado `postgres_data`. O Redis é deliberadamente
+volátil no ambiente local. Não há migração do volume criado pela configuração
+anterior em `infra/`.
+
+## 3. GitHub CLI (`gh`)
 
 Instalação por sistema operacional: https://github.com/cli/cli#installation
 
@@ -84,25 +134,25 @@ gh issue view <número> --comments   # ler uma issue
 gh issue create --title "..." --body "..."   # criar issue
 ```
 
-## 3. Context7 (MCP)
+## 4. Context7 (MCP)
 
 O Context7 injeta documentação atualizada de bibliotecas (Express, React,
 Three.js, Redis, etc.) direto no contexto do agente. Os `opencode.json` de
 cada área (backend, frontend, infra) já vêm com o MCP configurado — basta
 criar a conta, gerar uma API key e gravá-la no repo.
 
-### 3.1 Criar conta
+### 4.1 Criar conta
 
 Acesse https://context7.com/dashboard e faça sign in. É gratuito,
 sem cartão de crédito.
 
-### 3.2 Criar uma API key
+### 4.2 Criar uma API key
 
 No dashboard, no card **API Keys**, clique em **Create API Key**, dê um nome
 (ex.: "opencode") e copie a chave gerada (`ctx7sk-...`). Ela é exibida
 **uma única vez** — se perdida, revogue e crie outra.
 
-### 3.3 Gravar a chave no repo
+### 4.3 Gravar a chave no repo
 
 A chave fica num arquivo na raiz do repositório, ignorado pelo git (nada
 vai para o GitHub):
@@ -116,7 +166,7 @@ Ou apenas crie o arquivo `.context7-key` na raiz do projeto e cole a chave nele
 
 Os `opencode.json` de cada área leem esse arquivo via `{file:../.context7-key}`.
 
-### 3.4 Verificar
+### 4.4 Verificar
 
 ```sh
 opencode mcp list
