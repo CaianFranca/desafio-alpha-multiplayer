@@ -19,7 +19,7 @@ O caminho que a maior parte do trabalho percorre. Você tem uma ideia e quer que
 3. **É uma construção de múltiplas sessões?**
    - **Sim** → **`/transformar-em-spec`** (transforma a thread em uma spec), depois **`/transformar-em-tickets`** para dividi-la em tickets tracer-bullet, cada um declarando suas **arestas de bloqueio**. Num tracker local são um arquivo por ticket em `.scratch/<feature>/issues/`, resolvidos na ordem dos bloqueios; num tracker real as arestas viram links nativos de bloqueio, então qualquer ticket cujos bloqueios terminaram pode ser pego.
    - **Não** → **`/transformar-em-spec`** e siga direto para **`/transformar-em-tickets`** quando a conversa afinar — as tickets são o contrato do trabalho que vem depois.
-4. **Implementar** → **`/implement`** planeja: explora o repositório, carrega **`/repasse`** e grava um brief compacto em `.scratch/repasse/`. Depois abra uma **nova seção com `/new`** e execute **`/implement <caminho-do-repasse>.md`** na janela vazia — ela valida o brief, implementa (sem TDD), roda typechecking e testes, revisa com **`/code-review`** e commita.
+4. **Planejar a implementação** → **`/implement`** explora o repositório, carrega **`/repasse`** e grava um brief compacto em `.scratch/repasse/`, sem alterar o código. Depois abra uma **nova seção com `/new`** e execute **`/implement-exec <caminho-do-repasse>.md`** na janela vazia — o comando delega ao subagente `implement-dev`, que valida o brief, implementa (sem TDD), roda typechecking e testes, revisa com **`/code-review`** e commita.
 
 ### Higiene de contexto
 

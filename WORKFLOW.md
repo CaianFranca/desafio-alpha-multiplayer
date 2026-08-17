@@ -44,7 +44,8 @@ devem ser assumidos por devs.
 | `/entrevistar-com-docs` | Entrevistar o grupo e registrar decisões de domínio e arquitetura. |
 | `/transformar-em-spec` | Publicar a conversa consolidada como spec no GitHub Issues. |
 | `/transformar-em-tickets` | Dividir a spec em tickets e declarar bloqueios. |
-| `/implement` | Planejar e executar um ticket em sua própria branch. |
+| `/implement` | Planejar um ticket e gerar o repasse sem alterar o código. |
+| `/implement-exec` | Delegar a execução de um repasse aprovado ao subagente dev. |
 | `/code-review` | Revisar a mudança nos eixos Standards e Spec. |
 | `criar-pr` | Preparar o preview e criar a PR depois da aprovação humana. |
 | `/triagem` | Organizar bugs e pedidos que chegam fora do fluxo. |
@@ -87,15 +88,17 @@ improvisados para contornar dependências.
 
 ### 5. Implementar um ticket
 
-Cada ticket usa uma branch própria e segue `/implement`:
+Cada ticket usa uma branch própria e segue `/implement` e `/implement-exec`:
 
 1. Leia o ticket, a spec, os ADRs e o `AGENTS.md` da área.
 2. Execute `/implement` em modo de planejamento. O repasse fica em
    `.scratch/repasse/` e não altera o código.
-3. Em uma nova seção, execute `/implement` juntamente com o caminho do arquivo do repasse `/implement .scratch/repasse/repasse2026..`.
-4. Sincronize a branch e confirme que ela é `feature/...`.
-5. Implemente e adicione os testes necessários.
-6. Rode typechecking, testes relevantes e a suíte completa ao final.
+3. Em uma nova seção, execute `/implement-exec` juntamente com o caminho do
+   arquivo do repasse: `/implement-exec .scratch/repasse/repasse-20260817-0947.md`.
+   O comando delega a execução ao subagente `implement-dev`.
+4. O subagente sincroniza a branch, confirma que ela é `feature/...`, implementa
+   e adiciona os testes necessários.
+5. Rode typechecking, testes relevantes e a suíte completa ao final.
 
 Consulte também o `AGENTS.md` da área alterada:
 

@@ -10,7 +10,7 @@ Escreva um **brief de repasse** compacto com o trabalho a executar, para um agen
 Salve em `.scratch/repasse/repasse-YYYYMMDD-HHMM.md` no diretório de trabalho atual — `.scratch/` está no `.gitignore`, então o arquivo fica local. Ao final, informe o caminho completo e oriente o usuário:
 
 - abrir uma nova seção com `/new`;
-- executar `/implement <caminho-completo>` nessa seção vazia.
+- executar `/implement-exec <caminho-completo>` nessa seção vazia.
 
 ## Template
 
