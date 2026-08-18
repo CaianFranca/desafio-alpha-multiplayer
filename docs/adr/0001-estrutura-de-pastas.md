@@ -59,6 +59,8 @@ desafio-alpha-multiplayer/
 - **packages/shared** — protocolo WS (tipos de mensagem) tipado de um lado só.
 - **lobby-server e game-server como apps separados** — o NGINX roteia
   `/ws/lobby` vs `/ws/game/<server-id>`; deploy e escala independentes.
+  O estado da Sala no Lobby segue o write-model do ADR-0002; o Redis do
+  game-server representa apenas o estado da Partida após o handoff.
 - **db/ e infra/ fora dos apps** — migrations (Knex) e docker/nginx não
   pertencem a nenhum serviço em particular.
 

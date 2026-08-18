@@ -12,10 +12,18 @@ _Avoid_: usuário anônimo, convidado
 Pessoa autenticada na aplicação, apta a criar salas e participar de partidas.
 _Avoid_: usuário, conta, participante
 
+**Membro**:
+Jogador associado a uma sala por um vínculo com ordem de entrada, prontidão e presença próprias; o vínculo termina por saída, expulsão, expiração da reconexão ou encerramento da sala.
+_Avoid_: participante, jogador da sala
+
+**Anfitrião**:
+Membro responsável pela sala; quem a cria assume o papel, que passa circularmente ao membro restante seguinte na ordem de entrada quando o vínculo do anfitrião termina.
+_Avoid_: proprietário, dono, host
+
 ## Partidas
 
 **Sala**:
-Sessão criada por um jogador para reunir até quatro jogadores antes de uma partida.
+Sessão criada por um jogador para reunir membros antes de uma partida; aceita até quatro e só pode ser encaminhada à partida com exatamente quatro.
 _Avoid_: room, sessão de jogo
 
 **Lobby**:
@@ -25,6 +33,28 @@ _Avoid_: sala de espera
 **Partida**:
 Jogo em andamento entre os jogadores de uma sala, do início até a vitória ou derrota.
 _Avoid_: jogo, sessão
+
+**AFK**:
+Jogador conectado, mas inativo durante a partida; pertence ao domínio da partida, não ao lobby.
+_Avoid_: ausente, inativo
+
+## Salas e Presença
+
+**Presença**:
+Estado de conectividade de um Membro: conectado ou em reconexão.
+_Avoid_: ativo, ausente, online
+
+**Reconexão**:
+Janela em que um Membro desconectado preserva seu vínculo, vaga, ordem, prontidão e papel; ao expirar, o vínculo termina.
+
+**Expulsão**:
+Término imediato do vínculo de um Membro, decidido pelo Anfitrião; o retorno exige nova autorização explícita.
+
+**Prontidão**:
+Declaração individual de um Membro de que está preparado para o encaminhamento da sala à partida.
+
+**Estado da Sala**:
+Situação da sala em seu ciclo de vida: aberta, encaminhada, encerrada ou expirada.
 
 ## Mundo do Jogo
 
