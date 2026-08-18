@@ -49,8 +49,12 @@ _Avoid_: room, sessão de jogo
 _Avoid_: sala de espera
 
 **Partida**:
-Jogo em andamento entre os jogadores de uma sala, do início até a vitória ou derrota.
+Jogo entre os quatro Jogadores de uma Sala, do Encaminhamento até a vitória ou derrota; estados: preparada, em andamento, terminada.
 _Avoid_: jogo, sessão
+
+**Encaminhamento**:
+Atividade iniciada pelo Anfitrião que leva uma Sala aberta com quatro Membros conectados e prontos a uma Partida; a composição congela somente quando o game-server aceita, e a recusa ou a falha mantém a Sala aberta.
+_Avoid_: handoff, transição
 
 **AFK**:
 Jogador conectado, mas inativo durante a partida; pertence ao domínio da partida, não ao lobby.
