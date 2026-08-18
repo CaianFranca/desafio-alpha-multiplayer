@@ -20,10 +20,28 @@ _Avoid_: participante, jogador da sala
 Membro responsável pela sala; quem a cria assume o papel, que passa circularmente ao membro restante seguinte na ordem de entrada quando o vínculo do anfitrião termina.
 _Avoid_: proprietário, dono, host
 
+## Identidade e Acesso
+
+**Cadastro**:
+Registro persistente que liga Apelido, email e Credenciais a um Jogador.
+_Avoid_: conta, registro, account
+
+**Apelido**:
+Identificação pública única de um Jogador.
+_Avoid_: username, nick, nome de usuário, nome de exibição, tag
+
+**Credenciais**:
+Conjunto de email e senha que um Jogador usa para se autenticar.
+_Avoid_: dados de acesso, login
+
+**Sessão**:
+Vínculo de autenticação de um Jogador; no máximo uma ativa por Jogador; termina por logout, novo login ou expiração.
+_Avoid_: login ativo, conexão
+
 ## Partidas
 
 **Sala**:
-Sessão criada por um jogador para reunir membros antes de uma partida; aceita até quatro e só pode ser encaminhada à partida com exatamente quatro.
+Reunião criada por um jogador para reunir membros antes de uma partida; aceita até quatro e só pode ser encaminhada à partida com exatamente quatro.
 _Avoid_: room, sessão de jogo
 
 **Lobby**:
