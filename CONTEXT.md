@@ -58,6 +58,14 @@ _Avoid_: ausente, inativo
 
 ## Salas e Presença
 
+**Código de Sala**:
+Identificação curta e digitável de uma Sala; seis caracteres alfanuméricos maiúsculos, fixa enquanto a Sala existir.
+_Avoid_: código de convite, código
+
+**Convite**:
+Link compartilhável que embute o Código de Sala; qualquer Membro pode compartilhá-lo.
+_Avoid_: invite, link de convite
+
 **Presença**:
 Estado de conectividade de um Membro: conectado ou em reconexão.
 _Avoid_: ativo, ausente, online
@@ -66,13 +74,13 @@ _Avoid_: ativo, ausente, online
 Janela em que um Membro desconectado preserva seu vínculo, vaga, ordem, prontidão e papel; ao expirar, o vínculo termina.
 
 **Expulsão**:
-Término imediato do vínculo de um Membro, decidido pelo Anfitrião; o retorno exige nova autorização explícita.
+Término imediato do vínculo de um Membro, decidido pelo Anfitrião e comunicado ao expulso e aos demais; o Jogador expulso fica impedido de reentrar na Sala até o Anfitrião desbloqueá-lo.
 
 **Prontidão**:
 Declaração individual de um Membro de que está preparado para o encaminhamento da sala à partida.
 
 **Estado da Sala**:
-Situação da sala em seu ciclo de vida: aberta, encaminhada, encerrada ou expirada.
+Situação da sala em seu ciclo de vida: aberta, encaminhada, encerrada ou expirada; uma sala vazia é encerrada quando o último vínculo termina por saída ou expulsão, e expirada quando termina por expiração da reconexão.
 
 ## Mundo do Jogo
 
