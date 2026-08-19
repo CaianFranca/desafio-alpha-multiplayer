@@ -3,6 +3,7 @@
     "target": "es2023",
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    "types": ["node"],
     "strict": true,
     "noEmit": true,
     "noImplicitReturns": true,
