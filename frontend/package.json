@@ -11,26 +11,28 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "react-router-dom": "latest",
-    "vite": "latest"
+    "@vitejs/plugin-react": "6.0.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.2",
+    "vite": "8.2.1"
   },
   "devDependencies": {
-    "@eslint/js": "latest",
-    "@tailwindcss/vite": "latest",
-    "@testing-library/jest-dom": "latest",
-    "@testing-library/react": "latest",
-    "@testing-library/user-event": "latest",
-    "eslint": "latest",
-    "eslint-plugin-react-hooks": "latest",
-    "eslint-plugin-react-refresh": "latest",
-    "globals": "latest",
-    "jsdom": "latest",
-    "tailwindcss": "latest",
-    "typescript": "latest",
-    "typescript-eslint": "latest",
-    "vitest": "latest"
+    "@eslint/js": "10.0.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.5",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "eslint": "10.8.1",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.4",
+    "globals": "17.11.0",
+    "jsdom": "30.0.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.11"
   }
 }
