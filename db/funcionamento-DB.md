@@ -31,14 +31,14 @@ Tabela de relacao N:N entre jogadores para gestao de pedidos de amizade.
 |------------|---------------------------------------|---------------------------|----------------------------------|
 | usuario_fk | uuid                                  | FK -> jogadores.id, PK    | Jogador que envia/recebe         |
 | amigo_id   | uuid                                  | FK -> jogadores.id, PK    | Amigo associado                  |
-| status     | enum('pendente','aceito')             | NOT NULL                  | Estado do pedido                 |
+| status     | enum('pendente_recebeu', 'pendente_enviou', 'aceito')             | NOT NULL                  | Estado do pedido                 |
 
 **Regra de negocio:**
 
 Quando um jogador envia um pedido de amizade, duas linhas sao criadas:
 
-- Uma com `usuario_fk` = remetente, `amigo_id` = destinatario, status = 'pendente'
-- Uma com `usuario_fk` = destinatario, `amigo_id` = remetente, status = 'pendente'
+- Uma com `usuario_fk` = remetente, `amigo_id` = destinatario, status = 'pendente_enviou'
+- Uma com `usuario_fk` = destinatario, `amigo_id` = remetente, status = 'pendente_recebeu'
 
 Ao aceitar, ambas as linhas sao atualizadas para status = 'aceito'.
 
