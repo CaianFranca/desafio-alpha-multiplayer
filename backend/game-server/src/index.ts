@@ -1,7 +1,7 @@
 import http from 'node:http';
 import express from 'express';
-import { gameServerPort } from './config.ts';
-import { createWebSocketServer } from './ws.ts';
+import { getConfig } from '@flicker/config';
+import { createWebSocketServer } from './ws/ws.ts';
 
 const app = express();
 
@@ -11,7 +11,9 @@ app.get('/health', (_req, res) => {
 
 const server = http.createServer(app);
 
-createWebSocketServer(server);
+const wss = createWebSocketServer(server);
+
+const { gameServerPort } = getConfig();
 
 server.listen(gameServerPort, () => {
   console.log(`[game-server] listening on http://localhost:${gameServerPort}`);

@@ -1,6 +1,6 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, type RawData } from 'ws';
-import type { ClientMessage, ServerMessage } from './protocol.ts';
+import type { ClientMessage, ServerMessage } from '@flicker/shared';
 
 export function createWebSocketServer(server: Server): WebSocketServer {
   const wss = new WebSocketServer({ server });
@@ -12,10 +12,10 @@ export function createWebSocketServer(server: Server): WebSocketServer {
       console.error('[ws] error:', error.message);
     });
 
-    socket.on('message', (data, isBinary) => {
+    socket.on('message', (data) => {
       const reply = handleMessage(data);
       if (reply) {
-        socket.send(JSON.stringify(reply), { binary: isBinary });
+        socket.send(JSON.stringify(reply));
       }
     });
 
@@ -41,6 +41,8 @@ function handleMessage(data: RawData): ServerMessage | null {
   switch (parsed.type) {
     case 'PING':
       return { type: 'PONG' };
+    default:
+      return null;
   }
 }
 

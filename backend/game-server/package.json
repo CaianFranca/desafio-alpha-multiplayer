@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@flicker/config": "*",
+    "@flicker/shared": "*",
     "express": "^5.1.0",
     "ws": "^8.18.0"
   },
