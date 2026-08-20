@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { BackLink } from '../ui/BackLink'
 
 export function LoadingPage() {
   return (
@@ -18,9 +18,7 @@ export function ErrorPage({ message }: ErrorPageProps) {
       <p className="text-(--color-accent) text-xs font-bold tracking-[.16em] uppercase">Erro</p>
       <h1 id="error-title">Algo deu errado</h1>
       <p className="text-(--color-muted) text-lg leading-relaxed my-6 mb-8">{message ?? 'Ocorreu um erro inesperado. Tente novamente.'}</p>
-      <Link to="/" className="inline-block border-2 border-(--color-muted) rounded-lg bg-transparent text-(--color-muted) cursor-pointer font-sans font-semibold px-5 py-3 text-center hover:border-white hover:text-white transition-colors">
-        ← Voltar ao início
-      </Link>
+      <BackLink />
     </section>
   )
 }

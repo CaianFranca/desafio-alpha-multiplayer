@@ -8,6 +8,11 @@ function renderWithRouter(initialEntries: string[] = ['/']) {
   return render(<RouterProvider router={router} />)
 }
 
+function setViewport(width: number) {
+  Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width })
+  window.dispatchEvent(new Event('resize'))
+}
+
 describe('homepage structure', () => {
   it('renders all main sections', () => {
     renderWithRouter()
@@ -112,5 +117,30 @@ describe('hero CTAs', () => {
     await user.click(heroLogin)
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
+  })
+})
+
+describe('responsive sections', () => {
+  it.each([
+    ['mobile (375px)', 375],
+    ['tablet (768px)', 768],
+    ['desktop (1280px)', 1280],
+  ])('renders all sections at %s', (_label, width) => {
+    setViewport(width)
+    renderWithRouter()
+
+    expect(screen.getByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /a história/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /características do jogo/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /objetivos/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /pronto para enfrentar o sanatório/i })).toBeInTheDocument()
+    expect(screen.getByRole('contentinfo')).toBeInTheDocument()
+  })
+
+  it('skip-link is present for keyboard navigation', () => {
+    renderWithRouter()
+
+    const skipLink = screen.getByText(/pular para o conteúdo/i)
+    expect(skipLink).toHaveAttribute('href', '#main-content')
   })
 })
