@@ -1,0 +1,12 @@
+{
+  "name": "flicker-of-sanity",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "backend/game-server"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev": "npm run dev --workspace=@flicker/game-server"
+  }
+}
