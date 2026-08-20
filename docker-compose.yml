@@ -17,6 +17,20 @@ services:
       retries: 5
       start_period: 10s
 
+  db-migrate:
+    build: ./db
+    profiles: [db, backend, nginx, full]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-flicker}
+      POSTGRES_USER: ${POSTGRES_USER:-flicker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flicker_dev_password}
+
   redis:
     image: redis:7
     profiles: [db, backend, nginx, full]
