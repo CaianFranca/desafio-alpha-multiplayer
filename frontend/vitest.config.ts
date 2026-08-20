@@ -1,9 +1,9 @@
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
+import { defineConfig, mergeConfig } from 'vitest/config'
+import viteConfig from './vite.config.ts'
 
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
+export default mergeConfig(
+  viteConfig,
+  defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: './tests/setup.ts',
@@ -11,3 +11,4 @@ export default defineConfig({
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
   },
 })
+)
