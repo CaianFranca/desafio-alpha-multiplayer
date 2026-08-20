@@ -1,7 +1,7 @@
 import type { Knex } from 'knex';
 
 export async function seed(knex: Knex): Promise<void> {
-  await knex('jogadores')
+  await knex('usuarios')
     .insert({
       apelido: 'Testador',
       email: 'teste@flicker.local',

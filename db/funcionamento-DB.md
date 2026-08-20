@@ -9,9 +9,9 @@ TypeScript.
 
 ## Esquema Atual
 
-### jogadores
+### usuarios
 
-Tabela de cadastro de Jogadores (dominio CONTEXT.md).
+Tabela de cadastro de Usuarios (dominio CONTEXT.md).
 
 | Coluna      | Tipo         | Constraints                  | Descricao                              |
 |-------------|--------------|------------------------------|----------------------------------------|
@@ -29,8 +29,8 @@ Tabela de relacao N:N entre jogadores para gestao de pedidos de amizade.
 
 | Coluna     | Tipo                                  | Constraints               | Descricao                        |
 |------------|---------------------------------------|---------------------------|----------------------------------|
-| usuario_fk | uuid                                  | FK -> jogadores.id, PK    | Jogador que envia/recebe         |
-| amigo_id   | uuid                                  | FK -> jogadores.id, PK    | Amigo associado                  |
+| usuario_fk | uuid                                  | FK -> usuarios.id, PK     | Jogador que envia/recebe         |
+| amigo_id   | uuid                                  | FK -> usuarios.id, PK     | Amigo associado                  |
 | status     | enum('pendente_recebeu', 'pendente_enviou', 'aceito')             | NOT NULL                  | Estado do pedido                 |
 
 **Regra de negocio:**
@@ -60,7 +60,7 @@ Tabela N:N entre jogadores e partidas (historico).
 | Coluna              | Tipo | Constraints                   | Descricao         |
 |---------------------|------|-------------------------------|--------------------|
 | registro_partida_id | uuid | FK -> registro_partida.id, PK | Partida            |
-| usuario_id          | uuid | FK -> jogadores.id, PK        | Jogador            |
+| usuario_id          | uuid | FK -> usuarios.id, PK         | Jogador            |
 
 ## Comandos Knex
 
