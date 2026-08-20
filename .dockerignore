@@ -1,0 +1,17 @@
+**/.git
+**/node_modules
+**/dist
+**/.env
+**/.scratch
+.context7-key
+backend/
+db/
+docs/
+packages/
+infra/nginx/
+.opencode/
+AGENTS.md
+CONTEXT.md
+GRILLING-SESSION.md
+SETUP.md
+WORKFLOW.md
