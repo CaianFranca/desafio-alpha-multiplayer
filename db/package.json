@@ -1,0 +1,21 @@
+{
+  "name": "desafio-alpha-multiplayer-db",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "migrate:make": "knex migrate:make --knexfile knexfile.ts",
+    "migrate:latest": "knex migrate:latest --knexfile knexfile.ts",
+    "migrate:rollback": "knex migrate:rollback --knexfile knexfile.ts",
+    "seed:run": "knex seed:run --knexfile knexfile.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "knex": "^3.1.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.5.0"
+  }
+}
