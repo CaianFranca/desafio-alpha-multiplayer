@@ -93,8 +93,4 @@ export const stubs = {
     title: 'Entrar',
     message: 'Esta página está em construção.',
   },
-  criarSala: {
-    title: 'Criar Sala',
-    message: 'Esta página está em construção.',
-  },
 } as const

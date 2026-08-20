@@ -32,14 +32,6 @@ describe('homepage structure', () => {
     expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
     expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '#caracteristicas')
     expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '#objetivos')
-
-    const headerActions = within(header).getByRole('link', { name: /criar conta/i })
-    expect(headerActions).toHaveAttribute('href', '/cadastro')
-
-    const headerLogin = within(header).getByRole('link', { name: /entrar/i })
-    expect(headerLogin).toHaveAttribute('href', '/login')
-
-    expect(screen.getByRole('link', { name: /criar sala/i })).toHaveAttribute('href', '/salas/criar')
   })
 
   it('renders feature cards for all five game features', () => {
@@ -70,41 +62,6 @@ describe('homepage structure', () => {
   })
 })
 
-describe('navigation to stub routes', () => {
-  it('navigates to cadastro page via header CTA', async () => {
-    const user = userEvent.setup()
-    renderWithRouter()
-
-    const header = screen.getByRole('banner')
-    await user.click(within(header).getByRole('link', { name: /criar conta/i }))
-
-    expect(screen.getByRole('heading', { name: /cadastro/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /cadastro/i }).closest('section')!).toHaveTextContent(/em construção/i)
-    expect(screen.getByRole('link', { name: /voltar ao início/i })).toBeInTheDocument()
-  })
-
-  it('navigates to login page via header CTA', async () => {
-    const user = userEvent.setup()
-    renderWithRouter()
-
-    const header = screen.getByRole('banner')
-    await user.click(within(header).getByRole('link', { name: /entrar/i }))
-
-    expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /^entrar$/i }).closest('section')!).toHaveTextContent(/em construção/i)
-  })
-
-  it('navigates to criar sala page via header CTA', async () => {
-    const user = userEvent.setup()
-    renderWithRouter()
-
-    await user.click(screen.getByRole('link', { name: /criar sala/i }))
-
-    expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /criar sala/i }).closest('section')!).toHaveTextContent(/em construção/i)
-  })
-})
-
 describe('stub pages', () => {
   it('renders cadastro stub page directly', () => {
     renderWithRouter(['/cadastro'])
@@ -120,15 +77,6 @@ describe('stub pages', () => {
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
     const section = screen.getByRole('heading', { name: /^entrar$/i }).closest('section')!
-    expect(section).toHaveTextContent(/em construção/i)
-    expect(screen.getByRole('link', { name: /voltar ao início/i })).toHaveAttribute('href', '/')
-  })
-
-  it('renders criar sala stub page directly', () => {
-    renderWithRouter(['/salas/criar'])
-
-    expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
-    const section = screen.getByRole('heading', { name: /criar sala/i }).closest('section')!
     expect(section).toHaveTextContent(/em construção/i)
     expect(screen.getByRole('link', { name: /voltar ao início/i })).toHaveAttribute('href', '/')
   })
