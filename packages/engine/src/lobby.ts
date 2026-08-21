@@ -25,6 +25,7 @@ export interface Sala {
   readonly membros: readonly Membro[];
   readonly proximaOrdemDeEntrada: number;
   readonly anfitriaoId: string | null;
+  readonly jogadoresBloqueados: readonly string[];
 }
 
 export interface EstadoDoLobby {
@@ -53,10 +54,26 @@ export interface SairDaSalaComando {
   readonly membroId?: string;
 }
 
+export interface ExpulsarMembroComando {
+  readonly tipo: 'expulsar_membro';
+  readonly salaId: string;
+  readonly anfitriaoMembroId: string;
+  readonly membroAlvoId: string;
+}
+
+export interface AutorizarRetornoComando {
+  readonly tipo: 'autorizar_retorno';
+  readonly salaId: string;
+  readonly anfitriaoMembroId: string;
+  readonly jogadorId: string;
+}
+
 export type Comando =
   | CriarSalaComando
   | EntrarNaSalaComando
-  | SairDaSalaComando;
+  | SairDaSalaComando
+  | ExpulsarMembroComando
+  | AutorizarRetornoComando;
 
 export interface SalaCriadaEvento {
   readonly tipo: 'sala_criada';
@@ -90,11 +107,36 @@ export interface SalaEncerradaEvento {
   readonly motivo: 'saida';
 }
 
+export interface MembroExpulsoEvento {
+  readonly tipo: 'membro_expulsado';
+  readonly salaId: string;
+  readonly membroId: string;
+  readonly jogadorId: string;
+  readonly ordemDeEntrada: number;
+  readonly motivo: 'expulsao';
+}
+
+export interface AnfitriaoSucedidoEvento {
+  readonly tipo: 'anfitriao_sucedido';
+  readonly salaId: string;
+  readonly anfitriaoAnteriorId: string;
+  readonly anfitriaoNovoId: string;
+}
+
+export interface RetornoAutorizadoEvento {
+  readonly tipo: 'retorno_autorizado';
+  readonly salaId: string;
+  readonly jogadorId: string;
+}
+
 export type EventoDeDominio =
   | SalaCriadaEvento
   | MembroAdmitidoEvento
   | MembroSaiuEvento
-  | SalaEncerradaEvento;
+  | SalaEncerradaEvento
+  | MembroExpulsoEvento
+  | AnfitriaoSucedidoEvento
+  | RetornoAutorizadoEvento;
 
 export type CodigoDeErro =
   | 'DADOS_INVALIDOS'
@@ -106,7 +148,10 @@ export type CodigoDeErro =
   | 'SALA_CHEIA'
   | 'JOGADOR_JA_ASSOCIADO'
   | 'MEMBRO_NAO_ENCONTRADO'
-  | 'MEMBRO_NAO_ATIVO';
+  | 'MEMBRO_NAO_ATIVO'
+  | 'APENAS_ANFITRIAO'
+  | 'JOGADOR_EXPULSO'
+  | 'JOGADOR_NAO_BLOQUEADO';
 
 export interface ErroDeDominio {
   readonly tipo: 'erro_de_dominio';
@@ -147,6 +192,10 @@ export function aplicarComando(
       return entrarNaSala(estado, comando);
     case 'sair_da_sala':
       return sairDaSala(estado, comando);
+    case 'expulsar_membro':
+      return expulsarMembro(estado, comando);
+    case 'autorizar_retorno':
+      return autorizarRetorno(estado, comando);
     default:
       return rejeitar('DADOS_INVALIDOS', 'O comando de domínio é inválido.');
   }
@@ -199,6 +248,7 @@ export function criarSala(
     membros: [membroAtivo(comando.membroId, comando.jogadorId, 1)],
     proximaOrdemDeEntrada: 2,
     anfitriaoId: comando.membroId,
+    jogadoresBloqueados: [],
   };
 
   return sucesso(
@@ -234,6 +284,21 @@ export function entrarNaSala(
   );
   if (dadosInvalidos) {
     return dadosInvalidos;
+  }
+
+  const jogadorExpulso = sala.jogadoresBloqueados.includes(comando.jogadorId) &&
+    sala.membros.some(
+      (membro) =>
+        membro.jogadorId === comando.jogadorId &&
+        membro.estado === 'encerrado' &&
+        membro.motivoEncerramento === 'expulsao',
+    );
+  if (jogadorExpulso) {
+    return rejeitar(
+      'JOGADOR_EXPULSO',
+      'O Jogador foi expulso da Sala e ainda não teve o retorno autorizado pelo Anfitrião.',
+      { salaId: sala.id, jogadorId: comando.jogadorId },
+    );
   }
 
   const membroAtivoExistente = sala.membros.find(
@@ -354,13 +419,15 @@ export function sairDaSala(
     item.id === membro.id ? membroEncerrado : item,
   );
   const aindaHaMembrosAtivos = membros.some((item) => item.estado === 'ativo');
+  const anfitriaoSaiu = sala.anfitriaoId === membro.id;
+  const anfitriaoNovoId = aindaHaMembrosAtivos
+    ? (anfitriaoSaiu ? sucederAnfitriao(membros, membro) : sala.anfitriaoId)
+    : null;
   const novaSala: Sala = {
     ...sala,
     membros,
     estado: aindaHaMembrosAtivos ? sala.estado : 'encerrada',
-    anfitriaoId: aindaHaMembrosAtivos && sala.anfitriaoId !== membro.id
-      ? sala.anfitriaoId
-      : null,
+    anfitriaoId: anfitriaoNovoId,
   };
 
   const eventos: EventoDeDominio[] = [
@@ -373,11 +440,147 @@ export function sairDaSala(
       motivo: 'saida',
     },
   ];
+  if (anfitriaoSaiu && anfitriaoNovoId !== null) {
+    eventos.push({
+      tipo: 'anfitriao_sucedido',
+      salaId: sala.id,
+      anfitriaoAnteriorId: membro.id,
+      anfitriaoNovoId,
+    });
+  }
   if (!aindaHaMembrosAtivos) {
     eventos.push({ tipo: 'sala_encerrada', salaId: sala.id, motivo: 'saida' });
   }
 
   return sucesso(substituirSala(estado, novaSala), eventos);
+}
+
+export function expulsarMembro(
+  estado: EstadoDoLobby,
+  comando: ExpulsarMembroComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(
+    comando.salaId,
+    comando.anfitriaoMembroId,
+    comando.membroAlvoId,
+  );
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const sala = estado.salas.find((item) => item.id === comando.salaId);
+  if (!sala) {
+    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
+      salaId: comando.salaId,
+    });
+  }
+
+  const anfitriao = sala.membros.find(
+    (item) => item.id === comando.anfitriaoMembroId && item.estado === 'ativo',
+  );
+  if (!anfitriao || sala.anfitriaoId !== comando.anfitriaoMembroId) {
+    return rejeitar(
+      'APENAS_ANFITRIAO',
+      'Apenas o Anfitrião atual da Sala pode expulsar Membros.',
+      { salaId: sala.id, membroId: comando.anfitriaoMembroId },
+    );
+  }
+
+  const alvo = sala.membros.find((item) => item.id === comando.membroAlvoId);
+  if (!alvo || alvo.estado !== 'ativo') {
+    return rejeitar(
+      alvo ? 'MEMBRO_NAO_ATIVO' : 'MEMBRO_NAO_ENCONTRADO',
+      alvo ? 'O vínculo do Membro já está encerrado.' : 'O Membro não pertence à Sala.',
+      { salaId: sala.id, membroId: comando.membroAlvoId },
+    );
+  }
+
+  if (alvo.id === anfitriao.id) {
+    return rejeitar(
+      'APENAS_ANFITRIAO',
+      'O Anfitrião não pode expulsar a si mesmo; ele deve sair da Sala.',
+      { salaId: sala.id, membroId: alvo.id },
+    );
+  }
+
+  const alvoEncerrado: Membro = {
+    ...alvo,
+    estado: 'encerrado',
+    motivoEncerramento: 'expulsao',
+  };
+  const novaSala: Sala = {
+    ...sala,
+    membros: sala.membros.map((item) =>
+      item.id === alvo.id ? alvoEncerrado : item,
+    ),
+    jogadoresBloqueados: [...sala.jogadoresBloqueados, alvo.jogadorId],
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'membro_expulsado',
+      salaId: sala.id,
+      membroId: alvo.id,
+      jogadorId: alvo.jogadorId,
+      ordemDeEntrada: alvo.ordemDeEntrada,
+      motivo: 'expulsao',
+    },
+  ]);
+}
+
+export function autorizarRetorno(
+  estado: EstadoDoLobby,
+  comando: AutorizarRetornoComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(
+    comando.salaId,
+    comando.anfitriaoMembroId,
+    comando.jogadorId,
+  );
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const sala = estado.salas.find((item) => item.id === comando.salaId);
+  if (!sala) {
+    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
+      salaId: comando.salaId,
+    });
+  }
+
+  const anfitriao = sala.membros.find(
+    (item) => item.id === comando.anfitriaoMembroId && item.estado === 'ativo',
+  );
+  if (!anfitriao || sala.anfitriaoId !== comando.anfitriaoMembroId) {
+    return rejeitar(
+      'APENAS_ANFITRIAO',
+      'Apenas o Anfitrião atual da Sala pode autorizar o retorno de Jogadores expulsos.',
+      { salaId: sala.id, membroId: comando.anfitriaoMembroId },
+    );
+  }
+
+  if (!sala.jogadoresBloqueados.includes(comando.jogadorId)) {
+    return rejeitar(
+      'JOGADOR_NAO_BLOQUEADO',
+      'O Jogador não está bloqueado nesta Sala.',
+      { salaId: sala.id, jogadorId: comando.jogadorId },
+    );
+  }
+
+  const novaSala: Sala = {
+    ...sala,
+    jogadoresBloqueados: sala.jogadoresBloqueados.filter(
+      (jogadorId) => jogadorId !== comando.jogadorId,
+    ),
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'retorno_autorizado',
+      salaId: sala.id,
+      jogadorId: comando.jogadorId,
+    },
+  ]);
 }
 
 function membroAtivo(id: string, jogadorId: string, ordemDeEntrada: number): Membro {
@@ -388,6 +591,23 @@ function membroAtivo(id: string, jogadorId: string, ordemDeEntrada: number): Mem
     estado: 'ativo',
     motivoEncerramento: null,
   };
+}
+
+function sucederAnfitriao(
+  membros: readonly Membro[],
+  anfitriaoSaido: Membro,
+): string | null {
+  const ativos = membros.filter((item) => item.estado === 'ativo');
+  if (ativos.length === 0) {
+    return null;
+  }
+  const porOrdem = [...ativos].sort(
+    (a, b) => a.ordemDeEntrada - b.ordemDeEntrada,
+  );
+  const sucessor =
+    porOrdem.find((item) => item.ordemDeEntrada > anfitriaoSaido.ordemDeEntrada) ??
+    porOrdem[0];
+  return sucessor.id;
 }
 
 function encontrarMembro(estado: EstadoDoLobby, membroId: string): Membro | undefined {
