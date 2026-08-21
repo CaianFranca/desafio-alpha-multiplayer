@@ -1,11 +1,25 @@
 // Protocolo WS de Sala — DTOs tipados compartilhados via @flicker/shared.
 // Vocabulário canônico: Sala, Membro, Anfitrião, Código de Sala, Convite, Presença, Prontidão, Estado da Sala.
 // Apenas type/interface, sem runtime, sem validação, sem dependência de @flicker/engine.
+//
+// Fronteira shared (DTO de transporte) vs engine (domínio): propositalmente
+// divergem para desacoplar wire do modelo interno. Sync manual quando engine evolui.
+//   shared.Sala.codigoDeSala  <-> engine.Sala.codigo
+//   shared.MembroDaSala       <-> engine.Membro
+//   shared type:'CRIAR_SALA'  <-> engine tipo:'criar_sala' (UPPER_SNAKE no wire, snake no domínio)
+//   shared client type:'TYPE' <-> engine Comando.tipo
+// Ver ADR correspondente para convenção de literais wire (UPPER_SNAKE em type, ver Presenca abaixo).
 
 // --- Tipos base ---
 
 export type CodigoDeSala = string; // seis caracteres alfanuméricos maiúsculos
 
+/**
+ * Presença do Membro no wire. Usa snake_case para literal composto ('em_reconexao'),
+ * distinto de engine.MotivoDeEncerramento ('saida' sem underscore) — domínios diferentes.
+ * Mantido snake para consistência com `type` UPPER_SNAKE no wire; ver comentário de fronteira no topo.
+ * Se ADR futuro padronizar kebab/camel para literais, renomear aqui antes de breaking.
+ */
 export type Presenca = 'conectado' | 'em_reconexao';
 
 export type EstadoDaSala = 'aberta' | 'encerrada';
@@ -143,9 +157,22 @@ export interface MensagemDeChatEvento {
   enviadoEm: string;
 }
 
+export type CodigoDeErroDaSala =
+  | 'DADOS_INVALIDOS'
+  | 'SALA_JA_EXISTE'
+  | 'CODIGO_SALA_JA_EXISTE'
+  | 'MEMBRO_ID_JA_EXISTE'
+  | 'SALA_NAO_ENCONTRADA'
+  | 'SALA_ENCERRADA'
+  | 'SALA_CHEIA'
+  | 'JOGADOR_JA_ASSOCIADO'
+  | 'MEMBRO_NAO_ENCONTRADO'
+  | 'MEMBRO_NAO_ATIVO'
+  | (string & {});
+
 export interface ErroDaSalaEvento {
   type: 'ERRO_DA_SALA';
-  codigo: string;
+  codigo: CodigoDeErroDaSala;
   mensagem: string;
 }
 
