@@ -286,14 +286,7 @@ export function entrarNaSala(
     return dadosInvalidos;
   }
 
-  const jogadorExpulso = sala.jogadoresBloqueados.includes(comando.jogadorId) &&
-    sala.membros.some(
-      (membro) =>
-        membro.jogadorId === comando.jogadorId &&
-        membro.estado === 'encerrado' &&
-        membro.motivoEncerramento === 'expulsao',
-    );
-  if (jogadorExpulso) {
+  if (sala.jogadoresBloqueados.includes(comando.jogadorId)) {
     return rejeitar(
       'JOGADOR_EXPULSO',
       'O Jogador foi expulso da Sala e ainda não teve o retorno autorizado pelo Anfitrião.',
@@ -468,23 +461,16 @@ export function expulsarMembro(
     return dadosInvalidos;
   }
 
-  const sala = estado.salas.find((item) => item.id === comando.salaId);
-  if (!sala) {
-    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
-      salaId: comando.salaId,
-    });
-  }
-
-  const anfitriao = sala.membros.find(
-    (item) => item.id === comando.anfitriaoMembroId && item.estado === 'ativo',
+  const contexto = exigirAnfitriaoAtual(
+    estado,
+    comando.salaId,
+    comando.anfitriaoMembroId,
+    'expulsar Membros',
   );
-  if (!anfitriao || sala.anfitriaoId !== comando.anfitriaoMembroId) {
-    return rejeitar(
-      'APENAS_ANFITRIAO',
-      'Apenas o Anfitrião atual da Sala pode expulsar Membros.',
-      { salaId: sala.id, membroId: comando.anfitriaoMembroId },
-    );
+  if (!('sala' in contexto)) {
+    return contexto;
   }
+  const { sala, anfitriao } = contexto;
 
   const alvo = sala.membros.find((item) => item.id === comando.membroAlvoId);
   if (!alvo || alvo.estado !== 'ativo') {
@@ -541,23 +527,16 @@ export function autorizarRetorno(
     return dadosInvalidos;
   }
 
-  const sala = estado.salas.find((item) => item.id === comando.salaId);
-  if (!sala) {
-    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
-      salaId: comando.salaId,
-    });
-  }
-
-  const anfitriao = sala.membros.find(
-    (item) => item.id === comando.anfitriaoMembroId && item.estado === 'ativo',
+  const contexto = exigirAnfitriaoAtual(
+    estado,
+    comando.salaId,
+    comando.anfitriaoMembroId,
+    'autorizar o retorno de Jogadores expulsos',
   );
-  if (!anfitriao || sala.anfitriaoId !== comando.anfitriaoMembroId) {
-    return rejeitar(
-      'APENAS_ANFITRIAO',
-      'Apenas o Anfitrião atual da Sala pode autorizar o retorno de Jogadores expulsos.',
-      { salaId: sala.id, membroId: comando.anfitriaoMembroId },
-    );
+  if (!('sala' in contexto)) {
+    return contexto;
   }
+  const { sala } = contexto;
 
   if (!sala.jogadoresBloqueados.includes(comando.jogadorId)) {
     return rejeitar(
@@ -591,6 +570,33 @@ function membroAtivo(id: string, jogadorId: string, ordemDeEntrada: number): Mem
     estado: 'ativo',
     motivoEncerramento: null,
   };
+}
+
+function exigirAnfitriaoAtual(
+  estado: EstadoDoLobby,
+  salaId: string,
+  anfitriaoMembroId: string,
+  acao: string,
+): { sala: Sala; anfitriao: Membro } | OperacaoRejeitada {
+  const sala = estado.salas.find((item) => item.id === salaId);
+  if (!sala) {
+    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
+      salaId,
+    });
+  }
+
+  const anfitriao = sala.membros.find(
+    (item) => item.id === anfitriaoMembroId && item.estado === 'ativo',
+  );
+  if (!anfitriao || sala.anfitriaoId !== anfitriaoMembroId) {
+    return rejeitar(
+      'APENAS_ANFITRIAO',
+      `Apenas o Anfitrião atual da Sala pode ${acao}.`,
+      { salaId: sala.id, membroId: anfitriaoMembroId },
+    );
+  }
+
+  return { sala, anfitriao };
 }
 
 function sucederAnfitriao(
