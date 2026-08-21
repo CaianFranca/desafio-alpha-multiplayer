@@ -306,7 +306,7 @@ test('expulsão libera a vaga que um novo Jogador admite imediatamente', () => {
   if (!resultado.sucesso) return;
   const sala = resultado.estado.salas[0];
   assert.equal(sala.membros.filter((membro) => membro.estado === 'ativo').length, 2);
-  assert.equal(sala.jogadoresBloqueados, estado.salas[0].jogadoresBloqueados);
+  assert.deepEqual(sala.jogadoresBloqueados, ['jogador-2']);
   const reentrada = entrarNaSala(resultado.estado, entrar('jogador-2', 'membro-4'));
   assert.equal(reentrada.sucesso, false);
   if (reentrada.sucesso) return;
