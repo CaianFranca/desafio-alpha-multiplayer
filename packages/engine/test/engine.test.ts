@@ -180,6 +180,20 @@ test('sucessão circular: Anfitrião com a maior ordem é sucedido pelo de menor
   );
 });
 
+test('saída de Membro comum preserva o Anfitrião sem evento de sucessão', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  const resultado = sairDaSala(estado, sair('jogador-2'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.salas[0].anfitriaoId, 'membro-1');
+  assert.equal(
+    resultado.eventos.some((evento) => evento.tipo === 'anfitriao_sucedido'),
+    false,
+  );
+});
+
 test('saída do último Membro encerra a Sala sem Anfitrião e sem evento de sucessão', () => {
   let estado = aplicar(estadoDoLobbyVazio(), criar());
   estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
@@ -279,6 +293,24 @@ test('expulsa Membro ativo com motivo expulsao, libera a vaga e bloqueia o retor
     assert.equal(evento.ordemDeEntrada, 2);
     assert.equal(evento.motivo, 'expulsao');
   }
+});
+
+test('expulsão libera a vaga que um novo Jogador admite imediatamente', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, expulsar('membro-1', 'membro-2'));
+
+  const resultado = entrarNaSala(estado, entrar('jogador-3', 'membro-3'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const sala = resultado.estado.salas[0];
+  assert.equal(sala.membros.filter((membro) => membro.estado === 'ativo').length, 2);
+  assert.equal(sala.jogadoresBloqueados, estado.salas[0].jogadoresBloqueados);
+  const reentrada = entrarNaSala(resultado.estado, entrar('jogador-2', 'membro-4'));
+  assert.equal(reentrada.sucesso, false);
+  if (reentrada.sucesso) return;
+  assert.equal(reentrada.erro.codigo, 'JOGADOR_EXPULSO');
 });
 
 test('rejeita expulsão por Membro que não é o Anfitrião atual', () => {
