@@ -1,4 +1,6 @@
 export type {
+  AnfitriaoSucedidoEvento,
+  AutorizarRetornoComando,
   CodigoDeErro,
   Comando,
   CriarSalaComando,
@@ -8,19 +10,24 @@ export type {
   EstadoDoLobby,
   EstadoDoVinculo,
   EventoDeDominio,
+  ExpulsarMembroComando,
   Membro,
+  MembroExpulsoEvento,
   MotivoDeEncerramento,
   Resultado,
+  RetornoAutorizadoEvento,
   Sala,
   SairDaSalaComando,
 } from './lobby.ts';
 
 export {
   MOTIVOS_DE_ENCERRAMENTO,
-  aplicarComando,
   admitirMembro,
+  aplicarComando,
+  autorizarRetorno,
   criarSala,
   estadoDoLobbyVazio,
   entrarNaSala,
+  expulsarMembro,
   sairDaSala,
 } from './lobby.ts';
