@@ -3,3 +3,5 @@
 .scratch/
 **/node_modules
 **/dist
+frontend/web/media/*
+!frontend/web/media/.gitkeep

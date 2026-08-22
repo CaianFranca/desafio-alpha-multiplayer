@@ -51,9 +51,11 @@ desafio-alpha-multiplayer/
 ## 2. Docker Compose local
 
 O Compose da raiz é a entrada do ambiente de desenvolvimento local. A produção
-está fora do escopo desta configuração. Os serviços de aplicação ainda não têm
-Dockerfiles nem contratos de execução, então o Compose atual sobe apenas
-PostgreSQL e Redis.
+está fora do escopo desta configuração. O NGINX já tem Dockerfile e contrato
+de execução: ele serve o build estático do frontend e os arquivos de
+`frontend/web/media`, então o Compose atual sobe PostgreSQL, Redis e NGINX.
+Os demais serviços de aplicação ainda não têm Dockerfiles nem contratos de
+execução.
 
 Crie o arquivo local de ambiente e suba o perfil completo:
 
@@ -81,8 +83,8 @@ frontend existirem. Até lá, não há serviço nesse perfil.
 | `db` | PostgreSQL, Redis | — |
 | `backend` | PostgreSQL, Redis | lobby-server, game-server |
 | `frontend` | — | frontend |
-| `nginx` | PostgreSQL, Redis | frontend, lobby-server, game-server, NGINX |
-| `full` | PostgreSQL, Redis | frontend, lobby-server, game-server, NGINX |
+| `nginx` | PostgreSQL, Redis, NGINX | frontend, lobby-server, game-server |
+| `full` | PostgreSQL, Redis, NGINX | frontend, lobby-server, game-server |
 
 Comandos úteis:
 
