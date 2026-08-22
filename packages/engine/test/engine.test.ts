@@ -416,8 +416,16 @@ test('presença é agregada por Jogador: desconectar e reconectar refletem o ví
   assert.equal(membro.estado, 'ativo');
   assert.equal(membro.presenca, 'em_reconexao');
 
-  estado = aplicar(estado, reconectar('jogador-1'));
-  assert.equal(estado.salas[0].membros[0].presenca, 'conectado');
+  const resultado = reconectarJogador(estado, reconectar('jogador-1'));
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.deepEqual(resultado.eventos.map((evento) => evento.tipo), ['membro_reconectado']);
+  const evento = resultado.eventos[0];
+  if (evento.tipo === 'membro_reconectado') {
+    assert.equal(evento.membroId, 'membro-1');
+    assert.equal(evento.jogadorId, 'jogador-1');
+    assert.equal(evento.ordemDeEntrada, 1);
+  }
 });
 
 test('perda de conexão entra em reconexão preservando vínculo, vaga, ordem, pronto e papel', () => {
@@ -442,6 +450,7 @@ test('perda de conexão entra em reconexão preservando vínculo, vaga, ordem, p
   if (evento.tipo === 'membro_desconectado') {
     assert.equal(evento.membroId, 'membro-1');
     assert.equal(evento.jogadorId, 'jogador-1');
+    assert.equal(evento.ordemDeEntrada, 1);
   }
   assert.notEqual(resultado.estado, estado);
   assert.notDeepEqual(resultado.estado.salas[0].membros[0], antes.salas[0].membros[0]);
@@ -474,6 +483,8 @@ test('expiração encerra o vínculo com motivo expiracao e libera a vaga para n
   const expirado = sala.membros.find((membro) => membro.id === 'membro-2');
   assert.equal(expirado?.estado, 'encerrado');
   assert.equal(expirado?.motivoEncerramento, 'expiracao');
+  assert.equal(expirado?.presenca, 'conectado');
+  assert.equal(expirado?.pronto, false);
   assert.deepEqual(
     resultado.eventos.map((evento) => evento.tipo),
     ['vinculo_expirado'],
@@ -494,7 +505,7 @@ test('expiração exige Membro ativo em janela de reconexão', () => {
   const conectado = expirarReconexao(estado, expirar('membro-1'));
   assert.equal(conectado.sucesso, false);
   if (conectado.sucesso) return;
-  assert.equal(conectado.erro.codigo, 'MEMBRO_NAO_ATIVO');
+  assert.equal(conectado.erro.codigo, 'MEMBRO_NAO_EM_RECONEXAO');
 
   estado = aplicar(estado, sair('jogador-1'));
   const encerrado = expirarReconexao(estado, expirar('membro-1'));
@@ -597,4 +608,52 @@ test('confirmar_consistencia_da_sala é idempotente quando a Sala já é consist
   const resultado = confirmarConsistenciaDaSala(estado, confirmar());
 
   assert.deepEqual(resultado, { sucesso: true, estado, eventos: [] });
+});
+
+test('confirmar_consistencia_da_sala em Sala inexistente retorna SALA_NAO_ENCONTRADA', () => {
+  const resultado = confirmarConsistenciaDaSala(estadoDoLobbyVazio(), confirmar('sala-fantasma'));
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_NAO_ENCONTRADA');
+});
+
+test('expulsar_membro rejeita Sala inconsistente com SALA_INCONSISTENTE', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  const inconsistente: EstadoDoLobby = {
+    salas: [{ ...estado.salas[0], consistente: false }],
+  };
+
+  const resultado = expulsarMembro(inconsistente, expulsar('membro-1', 'membro-2'));
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_INCONSISTENTE');
+});
+
+test('autorizar_retorno rejeita Sala inconsistente com SALA_INCONSISTENTE', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, expulsar('membro-1', 'membro-2'));
+  const inconsistente: EstadoDoLobby = {
+    salas: [{ ...estado.salas[0], consistente: false }],
+  };
+
+  const resultado = autorizarRetorno(inconsistente, autorizar('membro-1', 'jogador-2'));
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_INCONSISTENTE');
+});
+
+test('expirar_reconexao rejeita Sala inconsistente com SALA_INCONSISTENTE', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, desconectar('jogador-1'));
+  const inconsistente: EstadoDoLobby = {
+    salas: [{ ...estado.salas[0], consistente: false }],
+  };
+
+  const resultado = expirarReconexao(inconsistente, expirar('membro-1'));
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_INCONSISTENTE');
 });

@@ -165,6 +165,7 @@ export interface MembroDesconectadoEvento {
   readonly salaId: string;
   readonly membroId: string;
   readonly jogadorId: string;
+  readonly ordemDeEntrada: number;
 }
 
 export interface MembroReconectadoEvento {
@@ -172,6 +173,7 @@ export interface MembroReconectadoEvento {
   readonly salaId: string;
   readonly membroId: string;
   readonly jogadorId: string;
+  readonly ordemDeEntrada: number;
 }
 
 export interface VinculoExpiradoEvento {
@@ -217,6 +219,7 @@ export type CodigoDeErro =
   | 'JOGADOR_JA_ASSOCIADO'
   | 'MEMBRO_NAO_ENCONTRADO'
   | 'MEMBRO_NAO_ATIVO'
+  | 'MEMBRO_NAO_EM_RECONEXAO'
   | 'APENAS_ANFITRIAO'
   | 'JOGADOR_EXPULSO'
   | 'JOGADOR_NAO_BLOQUEADO'
@@ -355,11 +358,6 @@ export function entrarNaSala(
     });
   }
 
-  const salaInconsistente = exigirSalaConsistente(sala);
-  if (salaInconsistente) {
-    return salaInconsistente;
-  }
-
   const dadosInvalidos = validarTexto(
     comando.salaId,
     comando.membroId,
@@ -367,6 +365,11 @@ export function entrarNaSala(
   );
   if (dadosInvalidos) {
     return dadosInvalidos;
+  }
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
   }
 
   if (sala.jogadoresBloqueados.includes(comando.jogadorId)) {
@@ -710,6 +713,7 @@ export function desconectarJogador(
       salaId: sala.id,
       membroId: membro.id,
       jogadorId: membro.jogadorId,
+      ordemDeEntrada: membro.ordemDeEntrada,
     },
   ]);
 }
@@ -760,6 +764,7 @@ export function reconectarJogador(
       salaId: sala.id,
       membroId: membro.id,
       jogadorId: membro.jogadorId,
+      ordemDeEntrada: membro.ordemDeEntrada,
     },
   ]);
 }
@@ -798,15 +803,21 @@ export function expirarReconexao(
 
   if (membro.presenca !== 'em_reconexao') {
     return rejeitar(
-      'MEMBRO_NAO_ATIVO',
-      'A reconexão do Membro não está em janela de expiração.',
+      'MEMBRO_NAO_EM_RECONEXAO',
+      'O Membro não está em janela de reconexão.',
       { salaId: sala.id, membroId: comando.membroId },
     );
   }
 
   const membros = sala.membros.map((item) =>
     item.id === membro.id
-      ? { ...item, estado: 'encerrado' as const, motivoEncerramento: 'expiracao' as const }
+      ? {
+          ...item,
+          estado: 'encerrado' as const,
+          motivoEncerramento: 'expiracao' as const,
+          presenca: 'conectado' as const,
+          pronto: false,
+        }
       : item,
   );
   const aindaHaMembrosAtivos = membros.some((item) => item.estado === 'ativo');
