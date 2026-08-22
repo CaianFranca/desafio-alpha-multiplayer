@@ -37,6 +37,19 @@ function getVideo(section: HTMLElement) {
   return video as HTMLVideoElement
 }
 
+function getTrailerItem(section: HTMLElement, titulo: string) {
+  const heading = within(section).getByRole('heading', { name: titulo })
+  const item = heading.closest('li')
+  if (!item) throw new Error('item de trailer deveria existir')
+  return item
+}
+
+function getControlBar(item: HTMLElement) {
+  const bar = item.querySelector('div.bg-linear-to-t')
+  if (!bar) throw new Error('barra de controles deveria existir')
+  return bar as HTMLElement
+}
+
 beforeEach(() => {
   FakeIntersectionObserver.instances = []
   vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
@@ -85,7 +98,8 @@ describe('seção de trailers', () => {
     const section = renderHome()
     expect(section.querySelector('video')).toBeNull()
 
-    await user.click(within(section).getByRole('button', { name: trailers.labels.play }))
+    const item = getTrailerItem(section, trailers.items[0]!.titulo)
+    await user.click(within(item).getByRole('button', { name: trailers.labels.play }))
 
     const video = getVideo(section)
     expect(video.getAttribute('src')).toBe(trailers.items[0]?.src)
@@ -96,25 +110,32 @@ describe('seção de trailers', () => {
     const section = renderHome()
     act(() => FakeIntersectionObserver.instances[0].trigger(true))
 
+    const item = getTrailerItem(section, trailers.items[0]!.titulo)
     const video = getVideo(section)
-    expect(within(section).getByRole('status')).toHaveTextContent(trailers.mensagens.carregando)
+    expect(within(item).getByRole('status')).toHaveTextContent(trailers.mensagens.carregando)
+    expect(getControlBar(item)).toHaveClass('opacity-100')
+
     act(() => video.dispatchEvent(new Event('canplay')))
-    expect(within(section).queryByText(trailers.mensagens.carregando)).not.toBeInTheDocument()
+    expect(within(item).queryByText(trailers.mensagens.carregando)).not.toBeInTheDocument()
 
-    const botaoPlay = within(section).getByRole('button', { name: trailers.labels.play })
-    botaoPlay.focus()
+    act(() => video.dispatchEvent(new Event('play')))
+    expect(getControlBar(item)).toHaveClass('opacity-0')
+
+    const botaoPausar = within(item).getByRole('button', { name: trailers.labels.pause })
+    botaoPausar.focus()
     await user.keyboard('{Enter}')
-    expect(botaoPlay).toHaveAccessibleName(trailers.labels.pause)
-    expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled()
-
-    await user.click(within(section).getByRole('button', { name: trailers.labels.pause }))
+    expect(botaoPausar).toHaveAccessibleName(trailers.labels.play)
+    expect(getControlBar(item)).toHaveClass('opacity-100')
     expect(window.HTMLMediaElement.prototype.pause).toHaveBeenCalled()
-    expect(within(section).getByRole('button', { name: trailers.labels.play })).toBeInTheDocument()
+
+    await user.click(within(item).getByRole('button', { name: trailers.labels.play }))
+    expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled()
+    expect(within(item).getByRole('button', { name: trailers.labels.pause })).toBeInTheDocument()
 
     expect(video.muted).toBe(true)
-    await user.click(within(section).getByRole('button', { name: trailers.labels.som }))
+    await user.click(within(item).getByRole('button', { name: trailers.labels.som }))
     expect(video.muted).toBe(false)
-    await user.click(within(section).getByRole('button', { name: trailers.labels.mudo }))
+    await user.click(within(item).getByRole('button', { name: trailers.labels.mudo }))
     expect(video.muted).toBe(true)
   })
 
