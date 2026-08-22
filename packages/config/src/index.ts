@@ -21,6 +21,7 @@ export interface Config {
 const DEFAULT_GAME_SERVER_PORT = 3000;
 const DEFAULT_LOBBY_SERVER_PORT = 3001;
 const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
+const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
 
 let envLoaded = false;
 
@@ -68,17 +69,22 @@ export function getConfig(): Config {
 
   const jwtSecret = process.env.JWT_SECRET ?? DEFAULT_JWT_SECRET;
 
-  if (process.env.NODE_ENV === 'production' && jwtSecret === DEFAULT_JWT_SECRET) {
-    throw new Error('JWT_SECRET deve ser definido em produção');
-  }
-
   const postgres = {
     host: process.env.POSTGRES_HOST ?? 'localhost',
     port: parsePort(process.env.POSTGRES_PORT as string | undefined, 5432),
     user: process.env.POSTGRES_USER ?? 'flicker',
-    password: process.env.POSTGRES_PASSWORD ?? 'flicker_dev_password',
+    password: process.env.POSTGRES_PASSWORD ?? DEFAULT_POSTGRES_PASSWORD,
     database: process.env.POSTGRES_DB ?? 'flicker',
   };
+
+  if (process.env.NODE_ENV === 'production') {
+    if (jwtSecret === DEFAULT_JWT_SECRET) {
+      throw new Error('JWT_SECRET deve ser definido em produção');
+    }
+    if (postgres.password === DEFAULT_POSTGRES_PASSWORD) {
+      throw new Error('POSTGRES_PASSWORD deve ser definido em produção');
+    }
+  }
 
   const redis = {
     host: process.env.REDIS_HOST ?? 'localhost',

@@ -10,13 +10,21 @@ const app = express();
 
 app.use(express.json());
 
+async function verificarPostgres(): Promise<void> {
+  await pool.query('SELECT 1');
+}
+
+async function verificarRedis(): Promise<void> {
+  if (redisClient.status === 'wait') {
+    await redisClient.connect();
+  }
+  await redisClient.ping();
+}
+
 app.get('/health', async (_req, res) => {
   try {
-    await pool.query('SELECT 1');
-    if (redisClient.status === 'wait') {
-      await redisClient.connect();
-    }
-    await redisClient.ping();
+    await verificarPostgres();
+    await verificarRedis();
     res.status(200).json({ status: 'ok' });
   } catch (error) {
     console.error('[health] check falhou:', (error as Error).message);
@@ -35,16 +43,13 @@ const { lobbyServerPort } = getConfig();
 // Validação assíncrona de PG/Redis no boot — loga mas não impede listen (compose depends_on já garante ordem)
 async function validarDependencias(): Promise<void> {
   try {
-    await pool.query('SELECT 1');
+    await verificarPostgres();
     console.log('[lobby-server] postgres conectado');
   } catch (error) {
     console.warn('[lobby-server] postgres ainda não disponível:', (error as Error).message);
   }
   try {
-    if (redisClient.status === 'wait') {
-      await redisClient.connect();
-    }
-    await redisClient.ping();
+    await verificarRedis();
     console.log('[lobby-server] redis conectado');
   } catch (error) {
     console.warn('[lobby-server] redis ainda não disponível:', (error as Error).message);

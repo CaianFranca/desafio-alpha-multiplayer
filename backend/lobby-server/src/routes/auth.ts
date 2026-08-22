@@ -57,6 +57,7 @@ authRouter.post('/register', async (req, res) => {
   try {
     const hash = await bcrypt.hash(senha, 10);
 
+    // tabela 'usuarios' = Cadastro (CONTEXT.md:25) — dívida herdada
     const result = await pool.query(
       `INSERT INTO usuarios (apelido, email, senha)
        VALUES ($1, $2, $3)
@@ -66,7 +67,8 @@ authRouter.post('/register', async (req, res) => {
 
     res.status(201).json(result.rows[0]);
   } catch (error: unknown) {
-    const pgError = error as { code?: string; constraint?: string };
+    type PgError = { code?: string; constraint?: string };
+    const pgError = error as PgError;
     if (pgError.code === '23505') {
       // Mensagem genérica mantém compatibilidade com bootstrap; detalhe por campo virá em ST-04
       res.status(409).json({ error: 'apelido ou email já cadastrado' });
@@ -100,44 +102,25 @@ authRouter.post('/login', async (req, res) => {
       return;
     }
 
-    const user = result.rows[0] as {
+    // tabela 'usuarios' = Cadastro (CONTEXT.md:25) — dívida herdada do rename, não bloquear bootstrap
+    const jogador = result.rows[0] as {
       id: string;
       apelido: string;
       email: string;
       senha: string;
     };
 
-    let senhaValida = false;
-    let precisaMigrar = false;
-
-    try {
-      senhaValida = await bcrypt.compare(senha, user.senha);
-    } catch {
-      senhaValida = false;
-    }
-
-    if (!senhaValida && user.senha === senha) {
-      senhaValida = true;
-      precisaMigrar = true;
-    }
+    const senhaValida = await bcrypt.compare(senha, jogador.senha).catch(() => false);
 
     if (!senhaValida) {
       res.status(401).json({ error: 'credenciais inválidas' });
       return;
     }
 
-    if (precisaMigrar) {
-      try {
-        const novoHash = await bcrypt.hash(senha, 10);
-        await pool.query(`UPDATE usuarios SET senha = $1 WHERE id = $2`, [novoHash, user.id]);
-      } catch (migrateError) {
-        console.error('[auth/login] auto-migração falhou:', migrateError);
-      }
-    }
-
+    // TODO #24: Sessão única (CONTEXT.md:38) — bootstrap emite JWT stateless; registro em Redis (uma Sessão por Jogador) vem em ST-04
     const { jwtSecret } = getConfig();
     const token = jwt.sign(
-      { id: user.id, apelido: user.apelido, email: user.email },
+      { id: jogador.id, apelido: jogador.apelido, email: jogador.email },
       jwtSecret,
       { expiresIn: '15m' },
     );
