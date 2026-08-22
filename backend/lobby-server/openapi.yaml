@@ -1,0 +1,375 @@
+openapi: 3.0.3
+info:
+  title: Flicker of Sanity — API de Autenticação
+  version: 0.1.0
+  description: |
+    Contrato da API de autenticação do lobby-server sob `/api/auth`.
+
+    Fluxo de Identidade e Acesso: a pessoa chega como Visitante, cria um
+    Cadastro (Apelido, email e senha) e passa a ser reconhecida como Jogador.
+    O login usa as Credenciais (email e senha) e estabelece uma Sessão,
+    representada por cookies httpOnly: `access_token` (15 minutos) e
+    `refresh_token` (7 dias, com rotação a cada uso). Os tokens nunca ficam
+    no localStorage. Cada Jogador mantém no máximo uma Sessão ativa: um novo
+    login encerra a anterior.
+
+    Mensagens de erro são em pt-BR e seguem o vocabulário do glossário de
+    domínio (Cadastro, Apelido, Credenciais, Sessão).
+servers:
+  - url: http://localhost:3000
+    description: Desenvolvimento local do lobby-server (porta definitiva definida no bootstrap do serviço)
+tags:
+  - name: Autenticação
+    description: Cadastro, login, logout e identificação do Jogador autenticado
+paths:
+  /api/auth/register:
+    post:
+      tags:
+        - Autenticação
+      operationId: registrarCadastro
+      summary: Cria um Cadastro e inicia a Sessão
+      security: []
+      description: |
+        Registra um Cadastro com Apelido, email e senha e, em caso de sucesso,
+        já autentica o novo Jogador (auto-login), retornando os cookies de
+        Sessão. O Apelido é único (case-insensitive) com 3 a 20 caracteres; o
+        email é único (case-insensitive); a senha tem mínimo de 8 caracteres.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CadastroRequest"
+            examples:
+              cadastroValido:
+                summary: Cadastro válido
+                value:
+                  apelido: ana
+                  email: ana@exemplo.com
+                  senha: senha-segura-1
+      responses:
+        "201":
+          description: |
+            Cadastro criado e Sessão iniciada. O corpo retorna o Jogador e os
+            cookies `access_token` e `refresh_token` são entregues como
+            httpOnly.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SetCookieAccess"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JogadorResponse"
+              examples:
+                jogadoraCriada:
+                  value:
+                    id: 5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90
+                    apelido: ana
+                    email: ana@exemplo.com
+        "400":
+          $ref: "#/components/responses/ErroValidacao"
+        "409":
+          description: |
+            Conflito: o Apelido ou o email informado já pertence a outro
+            Cadastro. O campo `campo` indica qual dos dois conflitou.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErroResponse"
+              examples:
+                apelidoEmUso:
+                  summary: Apelido já usado por outro Cadastro
+                  value:
+                    erros:
+                      - campo: apelido
+                        mensagem: Apelido já está em uso.
+                emailEmUso:
+                  summary: Email já usado por outro Cadastro
+                  value:
+                    erros:
+                      - campo: email
+                        mensagem: Email já está em uso.
+  /api/auth/login:
+    post:
+      tags:
+        - Autenticação
+      operationId: entrarComCredenciais
+      summary: Autentica o Jogador com as Credenciais e inicia a Sessão
+      security: []
+      description: |
+        Valida as Credenciais (email e senha) e inicia a Sessão do Jogador,
+        retornando os cookies httpOnly. O login é feito por email. Uma Sessão
+        nova encerra a Sessão anterior do mesmo Jogador (uma única Sessão
+        ativa por Jogador). Falhas de autenticação respondem com erro
+        genérico, sem revelar se o email existe.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              credenciaisValidas:
+                summary: Credenciais válidas
+                value:
+                  email: ana@exemplo.com
+                  senha: senha-segura-1
+      responses:
+        "200":
+          description: |
+            Sessão iniciada. O corpo retorna o Jogador e os cookies
+            `access_token` e `refresh_token` são entregues como httpOnly.
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SetCookieAccess"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JogadorResponse"
+              examples:
+                jogadoraAutenticada:
+                  value:
+                    id: 5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90
+                    apelido: ana
+                    email: ana@exemplo.com
+        "400":
+          $ref: "#/components/responses/ErroValidacao"
+        "401":
+          description: |
+            Credenciais inválidas. Mensagem genérica, sem indicar se o email
+            existe ou se a senha está errada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErroResponse"
+              examples:
+                credenciaisInvalidas:
+                  value:
+                    erros:
+                      - mensagem: Credenciais inválidas.
+  /api/auth/logout:
+    post:
+      tags:
+        - Autenticação
+      operationId: encerrarSessao
+      summary: Encerra a Sessão atual
+      security:
+        - SessaoCookie: []
+      description: |
+        Revoga a Sessão ativa do Jogador e limpa os cookies de Sessão. Depois
+        do logout, a pessoa volta ao estado de Visitante. Requer Sessão
+        válida.
+      responses:
+        "204":
+          description: |
+            Sessão encerrada. Os cookies `access_token` e `refresh_token` são
+            removidos (`Max-Age=0`).
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SetCookieLimpeza"
+        "401":
+          $ref: "#/components/responses/SessaoInvalida"
+  /api/auth/me:
+    get:
+      tags:
+        - Autenticação
+      operationId: obterJogadorAutenticado
+      summary: Retorna o Jogador da Sessão ativa
+      security:
+        - SessaoCookie: []
+      description: |
+        Retorna id, Apelido e email do Jogador autenticado para reidratar o
+        estado no carregamento da aplicação. Requer Sessão válida; Sessão
+        ausente ou expirada responde 401.
+      responses:
+        "200":
+          description: Jogador da Sessão ativa.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JogadorResponse"
+              examples:
+                jogadoraAutenticada:
+                  value:
+                    id: 5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90
+                    apelido: ana
+                    email: ana@exemplo.com
+        "401":
+          $ref: "#/components/responses/SessaoInvalida"
+components:
+  securitySchemes:
+    SessaoCookie:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: |
+        JWT de acesso da Sessão, entregue em cookie httpOnly (`access_token`)
+        por register e login. A validade da Sessão é revalidada no servidor.
+  headers:
+    SetCookieAccess:
+      description: |
+        Cookies de Sessão entregues como httpOnly. Dois cookies:
+        `access_token` (JWT de acesso, expira em 15 minutos) e `refresh_token`
+        (JWT de renovação, expira em 7 dias e é rotacionado a cada uso).
+        Ambos usam HttpOnly e SameSite=Strict; nunca ficam no localStorage.
+      required: false
+      schema:
+        type: string
+      example: >-
+        access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...;
+        Path=/; HttpOnly; SameSite=Strict; Max-Age=900,
+        refresh_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...;
+        Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=604800
+    SetCookieLimpeza:
+      description: |
+        Limpeza dos cookies de Sessão após o logout, com `Max-Age=0`.
+      required: false
+      schema:
+        type: string
+      example: >-
+        access_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0,
+        refresh_token=; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=0
+  responses:
+    ErroValidacao:
+      description: |
+        Erro de validação por campo. Cada item lista o `campo` reprovado e a
+        mensagem em pt-BR.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErroResponse"
+          examples:
+            camposVazios:
+              summary: Campos obrigatórios vazios
+              value:
+                erros:
+                  - campo: apelido
+                    mensagem: Informe o apelido.
+                  - campo: email
+                    mensagem: Informe o email.
+                  - campo: senha
+                    mensagem: Informe a senha.
+            apelidoForaDoIntervalo:
+              summary: Apelido fora do intervalo permitido
+              value:
+                erros:
+                  - campo: apelido
+                    mensagem: O apelido deve ter entre 3 e 20 caracteres.
+            emailInvalido:
+              summary: Email inválido
+              value:
+                erros:
+                  - campo: email
+                    mensagem: Informe um email válido.
+            senhaCurta:
+              summary: Senha abaixo do mínimo
+              value:
+                erros:
+                  - campo: senha
+                    mensagem: A senha deve ter no mínimo 8 caracteres.
+    SessaoInvalida:
+      description: |
+        Sessão ausente, revogada ou expirada. A pessoa volta ao estado de
+        Visitante.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErroResponse"
+          examples:
+            sessaoInvalida:
+              value:
+                erros:
+                  - mensagem: Sessão inválida ou expirada.
+  schemas:
+    CadastroRequest:
+      type: object
+      title: CadastroRequest
+      description: Dados enviados na criação do Cadastro de um Jogador.
+      required:
+        - apelido
+        - email
+        - senha
+      properties:
+        apelido:
+          type: string
+          minLength: 3
+          maxLength: 20
+          description: Apelido público e único do Jogador (case-insensitive), de 3 a 20 caracteres.
+          example: ana
+        email:
+          type: string
+          format: email
+          description: Email do Cadastro, único (case-insensitive); usado no login.
+          example: ana@exemplo.com
+        senha:
+          type: string
+          format: password
+          minLength: 8
+          description: Senha das Credenciais, com mínimo de 8 caracteres.
+          example: senha-segura-1
+    LoginRequest:
+      type: object
+      title: LoginRequest
+      description: Credenciais usadas no login (email e senha).
+      required:
+        - email
+        - senha
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email do Cadastro.
+          example: ana@exemplo.com
+        senha:
+          type: string
+          format: password
+          description: Senha das Credenciais.
+          example: senha-segura-1
+    JogadorResponse:
+      type: object
+      title: JogadorResponse
+      description: Jogador autenticado, retornado por register, login e me.
+      required:
+        - id
+        - apelido
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador do Jogador.
+          example: 5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90
+        apelido:
+          type: string
+          description: Apelido público do Jogador.
+          example: ana
+        email:
+          type: string
+          format: email
+          description: Email do Cadastro do Jogador.
+          example: ana@exemplo.com
+    ErroResponse:
+      type: object
+      title: ErroResponse
+      description: |
+        Envelope comum das respostas de erro. Cada item traz a mensagem em
+        pt-BR e, quando o erro é de validação por campo, o nome do `campo`.
+      required:
+        - erros
+      properties:
+        erros:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - mensagem
+            properties:
+              campo:
+                type: string
+                description: Nome do campo reprovado; ausente em erros genéricos (por exemplo, Credenciais inválidas).
+                example: apelido
+              mensagem:
+                type: string
+                description: Mensagem de erro em pt-BR.
+                example: Apelido já está em uso.
