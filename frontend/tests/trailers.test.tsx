@@ -4,6 +4,9 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { trailers } from '../web/src/components/home/placeholders'
 
+const trailerComVideo = trailers.items.find((item) => item.src)
+if (!trailerComVideo) throw new Error('a fixture precisa de um trailer com src')
+
 type IntersectionCallback = (entries: Array<{ isIntersecting: boolean }>) => void
 
 class FakeIntersectionObserver {
@@ -45,7 +48,7 @@ function getTrailerItem(section: HTMLElement, titulo: string) {
 }
 
 function getControlBar(item: HTMLElement) {
-  const bar = item.querySelector('div.bg-linear-to-t')
+  const bar = item.querySelector('[data-testid="trailer-controls"]')
   if (!bar) throw new Error('barra de controles deveria existir')
   return bar as HTMLElement
 }
@@ -98,11 +101,11 @@ describe('seção de trailers', () => {
     const section = renderHome()
     expect(section.querySelector('video')).toBeNull()
 
-    const item = getTrailerItem(section, trailers.items[0]!.titulo)
+    const item = getTrailerItem(section, trailerComVideo.titulo)
     await user.click(within(item).getByRole('button', { name: trailers.labels.play }))
 
     const video = getVideo(section)
-    expect(video.getAttribute('src')).toBe(trailers.items[0]?.src)
+    expect(video.getAttribute('src')).toBe(trailerComVideo.src)
   })
 
   it('controles de reprodução e áudio funcionam por teclado e clique', async () => {
@@ -110,7 +113,7 @@ describe('seção de trailers', () => {
     const section = renderHome()
     act(() => FakeIntersectionObserver.instances[0].trigger(true))
 
-    const item = getTrailerItem(section, trailers.items[0]!.titulo)
+    const item = getTrailerItem(section, trailerComVideo.titulo)
     const video = getVideo(section)
     expect(within(item).getByRole('status')).toHaveTextContent(trailers.mensagens.carregando)
     expect(getControlBar(item)).toHaveClass('opacity-100')
@@ -162,7 +165,8 @@ describe('seção de trailers', () => {
 
     expect(placeholder).toHaveAttribute('aria-label', 'Gameplay em Grupo')
     expect(placeholder).toHaveClass('bg-linear-to-br')
-    const li = placeholder.closest('li')!
+    const li = placeholder.closest('li')
+    if (!li) throw new Error('item de trailer deveria existir')
     expect(li.querySelector('video')).toBeNull()
     expect(within(li).queryByRole('button')).toBeNull()
   })
