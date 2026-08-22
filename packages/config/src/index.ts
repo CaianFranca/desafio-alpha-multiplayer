@@ -3,9 +3,24 @@ import { fileURLToPath } from 'node:url';
 
 export interface Config {
   gameServerPort: number;
+  lobbyServerPort: number;
+  jwtSecret: string;
+  postgres: {
+    host: string;
+    port: number;
+    user: string;
+    password: string;
+    database: string;
+  };
+  redis: {
+    host: string;
+    port: number;
+  };
 }
 
 const DEFAULT_GAME_SERVER_PORT = 3000;
+const DEFAULT_LOBBY_SERVER_PORT = 3001;
+const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
 
 let envLoaded = false;
 
@@ -30,13 +45,41 @@ function loadEnvFile(): void {
   }
 }
 
+function parsePort(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw ?? fallback);
+  if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) {
+    return parsed;
+  }
+  return fallback;
+}
+
 export function getConfig(): Config {
   loadEnvFile();
 
-  const rawPort = Number(process.env.GAME_SERVER_PORT ?? DEFAULT_GAME_SERVER_PORT);
-  const gameServerPort =
-    Number.isInteger(rawPort) && rawPort > 0 && rawPort <= 65535
-      ? rawPort
-      : DEFAULT_GAME_SERVER_PORT;
-  return { gameServerPort };
+  const gameServerPort = parsePort(
+    process.env.GAME_SERVER_PORT as string | undefined,
+    DEFAULT_GAME_SERVER_PORT,
+  );
+
+  const lobbyServerPort = parsePort(
+    process.env.LOBBY_SERVER_PORT as string | undefined,
+    DEFAULT_LOBBY_SERVER_PORT,
+  );
+
+  const jwtSecret = process.env.JWT_SECRET ?? DEFAULT_JWT_SECRET;
+
+  const postgres = {
+    host: process.env.POSTGRES_HOST ?? 'localhost',
+    port: parsePort(process.env.POSTGRES_PORT as string | undefined, 5432),
+    user: process.env.POSTGRES_USER ?? 'flicker',
+    password: process.env.POSTGRES_PASSWORD ?? 'flicker_dev_password',
+    database: process.env.POSTGRES_DB ?? 'flicker',
+  };
+
+  const redis = {
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parsePort(process.env.REDIS_PORT as string | undefined, 6379),
+  };
+
+  return { gameServerPort, lobbyServerPort, jwtSecret, postgres, redis };
 }
