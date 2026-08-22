@@ -6,6 +6,38 @@ export const hero = {
   ctaLogin: 'Entrar',
 } as const
 
+export type Trailer = {
+  titulo: string
+  capa?: string
+  src?: string
+}
+
+export const trailers = {
+  id: 'trailers' as const,
+  title: 'Trailers',
+  description: 'Veja o sanatório por dentro — e decida se ainda quer entrar.',
+  items: [
+    {
+      titulo: 'Trailer de Anúncio',
+      src: '/videos/trailer-anuncio.mp4',
+    },
+    {
+      titulo: 'Gameplay em Grupo',
+    },
+  ] as Trailer[],
+  labels: {
+    play: 'Reproduzir',
+    pause: 'Pausar',
+    som: 'Ativar som',
+    mudo: 'Silenciar',
+  },
+  mensagens: {
+    carregando: 'Carregando trailer…',
+    falha: 'Não foi possível carregar o vídeo agora. Enquanto isso, confira a capa do trailer.',
+    indisponivel: 'Este trailer ainda não está disponível. Volte em breve para conferir.',
+  },
+} as const
+
 export const history = {
   id: 'historia' as const,
   title: 'A História',
