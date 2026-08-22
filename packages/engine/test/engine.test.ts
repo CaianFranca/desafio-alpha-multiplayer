@@ -54,6 +54,10 @@ const confirmar = (salaId = 'sala-1') =>
 const registrarReinicio = (salaId = 'sala-1') =>
   ({ tipo: 'registrar_reinicio_da_sala', salaId } as const);
 
+const comSalaInconsistente = (estado: EstadoDoLobby): EstadoDoLobby => ({
+  salas: [{ ...estado.salas[0], consistente: false }],
+});
+
 function aplicar(estado: EstadoDoLobby, comando: Comando): EstadoDoLobby {
   const resultado = aplicarComando(estado, comando);
   if (!resultado.sucesso) {
@@ -576,9 +580,7 @@ test('sucessão circular pela ordem de entrada quando o vínculo do Anfitrião e
 
 test('Sala inconsistente rejeita mutações com SALA_INCONSISTENTE até confirmação', () => {
   const base = aplicar(estadoDoLobbyVazio(), criar());
-  const estado: EstadoDoLobby = {
-    salas: [{ ...base.salas[0], consistente: false }],
-  };
+  const estado = comSalaInconsistente(base);
 
   const entrada = entrarNaSala(estado, entrar('jogador-2', 'membro-2'));
   assert.equal(entrada.sucesso, false);
@@ -625,9 +627,7 @@ test('confirmar_consistencia_da_sala em Sala inexistente retorna SALA_NAO_ENCONT
 test('expulsar_membro rejeita Sala inconsistente com SALA_INCONSISTENTE', () => {
   let estado = aplicar(estadoDoLobbyVazio(), criar());
   estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
-  const inconsistente: EstadoDoLobby = {
-    salas: [{ ...estado.salas[0], consistente: false }],
-  };
+  const inconsistente = comSalaInconsistente(estado);
 
   const resultado = expulsarMembro(inconsistente, expulsar('membro-1', 'membro-2'));
   assert.equal(resultado.sucesso, false);
@@ -639,9 +639,7 @@ test('autorizar_retorno rejeita Sala inconsistente com SALA_INCONSISTENTE', () =
   let estado = aplicar(estadoDoLobbyVazio(), criar());
   estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
   estado = aplicar(estado, expulsar('membro-1', 'membro-2'));
-  const inconsistente: EstadoDoLobby = {
-    salas: [{ ...estado.salas[0], consistente: false }],
-  };
+  const inconsistente = comSalaInconsistente(estado);
 
   const resultado = autorizarRetorno(inconsistente, autorizar('membro-1', 'jogador-2'));
   assert.equal(resultado.sucesso, false);
@@ -652,14 +650,30 @@ test('autorizar_retorno rejeita Sala inconsistente com SALA_INCONSISTENTE', () =
 test('expirar_reconexao rejeita Sala inconsistente com SALA_INCONSISTENTE', () => {
   let estado = aplicar(estadoDoLobbyVazio(), criar());
   estado = aplicar(estado, desconectar('jogador-1'));
-  const inconsistente: EstadoDoLobby = {
-    salas: [{ ...estado.salas[0], consistente: false }],
-  };
+  const inconsistente = comSalaInconsistente(estado);
 
   const resultado = expirarReconexao(inconsistente, expirar('membro-1'));
   assert.equal(resultado.sucesso, false);
   if (resultado.sucesso) return;
   assert.equal(resultado.erro.codigo, 'SALA_INCONSISTENTE');
+});
+
+test('reconectar_jogador é mutação bloqueada em Sala inconsistente até a confirmação', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, desconectar('jogador-1'));
+  const inconsistente = comSalaInconsistente(estado);
+
+  const resultado = reconectarJogador(inconsistente, reconectar('jogador-1'));
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_INCONSISTENTE');
+
+  // Confirmada a consistência, a reconexão volta a fluir normalmente.
+  const confirmacao = confirmarConsistenciaDaSala(inconsistente, confirmar());
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  const reconexao = reconectarJogador(confirmacao.estado, reconectar('jogador-1'));
+  assert.equal(reconexao.sucesso, true);
 });
 
 test('registrar_reinicio_da_sala torna a Sala inconsistente e membros ativos reaparecem desconectados e não prontos', () => {

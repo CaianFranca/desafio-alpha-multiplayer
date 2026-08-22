@@ -13,6 +13,7 @@ export type {
   EstadoDoLobby,
   EstadoDoVinculo,
   EventoDeDominio,
+  EventoDeVinculo,
   ExpulsarMembroComando,
   ExpirarReconexaoComando,
   Membro,
