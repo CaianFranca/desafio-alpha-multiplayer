@@ -18,11 +18,19 @@ export async function up(knex: Knex): Promise<void> {
     table.uuid('usuario_id').notNullable().references('id').inTable('usuarios').onDelete('CASCADE');
     table.primary(['sala_id', 'usuario_id']);
     table.integer('ordem_de_entrada').notNullable();
-    table.enu('motivo_de_termino', ['saida', 'expulsao', 'expiracao', 'encerramento']).nullable();
+    table.boolean('bloqueado').notNullable().defaultTo(false);
+  });
+
+  await knex.schema.createTable('membros_historico', (table) => {
+    table.uuid('id').primary().defaultTo(knex.raw('gen_random_uuid()'));
+    table.uuid('sala_id').notNullable().references('id').inTable('salas_historico').onDelete('CASCADE');
+    table.uuid('usuario_id').notNullable().references('id').inTable('usuarios').onDelete('CASCADE');
+    table.enu('motivo_de_termino', ['saida', 'expulsao', 'expiracao', 'encerramento']).notNullable();
   });
 }
 
 export async function down(knex: Knex): Promise<void> {
+  await knex.schema.dropTableIfExists('membros_historico');
   await knex.schema.dropTableIfExists('membros');
   await knex.schema.dropTableIfExists('salas_historico');
 }

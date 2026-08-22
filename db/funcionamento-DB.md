@@ -38,16 +38,48 @@ nulos; ambos sao preenchidos somente quando a sala e encerrada.
 
 ### membros
 
-Tabela que absorveu o antigo `registro_usuarios_partida` como vinculo N:N
-historico entre jogadores e salas. Vinculos encerrados sao preservados via
-`motivo_de_termino`, que permanece nulo enquanto o jogador esta ativo na sala.
+Tabela do vinculo ATUAL entre jogador e sala: representa tanto o vinculo
+vivo (jogador ativo na sala) quanto o bloqueio pendente de expulsao
+(jogador expulso que ainda possui linha, impedindo reentrada).
 
-| Coluna             | Tipo                                                  | Constraints                                        | Descricao                                       |
-|--------------------|-------------------------------------------------------|----------------------------------------------------|-------------------------------------------------|
-| sala_id            | uuid                                                  | PK composta, FK -> salas_historico.id, ON DELETE CASCADE | Sala da qual o jogador participa         |
-| usuario_id         | uuid                                                  | PK composta, FK -> usuarios.id, ON DELETE CASCADE  | Jogador participante                            |
-| ordem_de_entrada   | integer                                               | NOT NULL                                           | Posicao de entrada do jogador na sala           |
-| motivo_de_termino  | enum('saida', 'expulsao', 'expiracao', 'encerramento')| NULL enquanto o vinculo esta ativo                 | Como o vinculo do jogador com a sala terminou   |
+| Coluna           | Tipo    | Constraints                                              | Descricao                                       |
+|------------------|---------|----------------------------------------------------------|-------------------------------------------------|
+| sala_id          | uuid    | PK composta, FK -> salas_historico.id, ON DELETE CASCADE | Sala da qual o jogador participa                |
+| usuario_id       | uuid    | PK composta, FK -> usuarios.id, ON DELETE CASCADE        | Jogador participante                            |
+| ordem_de_entrada | integer | NOT NULL                                                 | Posicao de entrada do jogador na sala           |
+| bloqueado        | boolean | NOT NULL, default false                                  | Indica bloqueio por expulsao pendente de remocao |
+
+**Regra de negocio:**
+
+- A entrada na sala insere uma linha com a `ordem_de_entrada` corrente.
+- O termino por `saida`, `expiracao` ou `encerramento` appenda um registro
+  em `membros_historico` e deleta a linha correspondente em `membros`.
+- A expulsao appenda `'expulsao'` no historico e MANTEM a linha em
+  `membros` com `bloqueado = true`; a PK composta impede fisicamente a
+  reentrada do jogador na sala.
+- O desbloqueio deleta a linha; a reentrada passa a ser uma insercao nova,
+  com nova ordem de entrada.
+- Quem esta na sala sao as linhas com `bloqueado = false`.
+- O limite de quatro jogadores por sala e responsabilidade da engine,
+  nao do banco.
+
+### membros_historico
+
+Log apendavel dos terminos de vinculo entre jogadores e salas. Cada linha
+registra um termino; a PK surrogate permite multiplos terminos do mesmo
+par jogador-sala ao longo do tempo (reentradas e novas saidas).
+
+| Coluna             | Tipo                                                        | Constraints                                              | Descricao                                     |
+|--------------------|-------------------------------------------------------------|----------------------------------------------------------|-----------------------------------------------|
+| id                 | uuid                                                        | PK, default gen_random_uuid()                            | Identificador unico do registro de termino    |
+| sala_id            | uuid                                                        | NOT NULL, FK -> salas_historico.id, ON DELETE CASCADE    | Sala a qual o termino pertence                |
+| usuario_id         | uuid                                                        | NOT NULL, FK -> usuarios.id, ON DELETE CASCADE           | Jogador cujo vinculo terminou                 |
+| motivo_de_termino  | enum('saida', 'expulsao', 'expiracao', 'encerramento')      | NOT NULL                                                 | Como o vinculo terminou                       |
+
+Nota: as FKs referenciam as tabelas base (`salas_historico` e `usuarios`),
+nao a tabela `membros`, porque a linha correspondente em `membros` e
+removida no termino do vinculo (exceto na expulsao, em que a linha
+permanece apenas como marcador de bloqueio).
 
 ## Esquema Futuro (implantacao posterior)
 
@@ -122,5 +154,6 @@ via `dotenv`. Fallback para os valores do docker-compose:
   (prontidao, presenca, reconexao)
 - Todas as tabelas usam UUID como PK para compatibilidade com distribuicao
   horizontal (exceto `membros`, cuja PK e composta por `sala_id` +
-  `usuario_id`)
+  `usuario_id`; `membros_historico` usa PK surrogate uuid justamente para
+  permitir multiplos terminos do mesmo par jogador-sala)
 - A migration e a seed estao em TypeScript (.ts), executadas via ts-node
