@@ -22,6 +22,8 @@ export type {
   MotivoDeEncerramento,
   Presenca,
   ReconectarJogadorComando,
+  RegistrarReinicioDaSalaComando,
+  ReinicioRegistradoEvento,
   Resultado,
   RetornoAutorizadoEvento,
   Sala,
@@ -43,5 +45,6 @@ export {
   expulsarMembro,
   estadoDoLobbyVazio,
   reconectarJogador,
+  registrarReinicioDaSala,
   sairDaSala,
 } from './lobby.ts';

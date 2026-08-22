@@ -12,6 +12,7 @@ import {
   expulsarMembro,
   MOTIVOS_DE_ENCERRAMENTO,
   reconectarJogador,
+  registrarReinicioDaSala,
   sairDaSala,
   type Comando,
   type EstadoDoLobby,
@@ -49,6 +50,9 @@ const expirar = (membroId: string, salaId = 'sala-1') =>
 
 const confirmar = (salaId = 'sala-1') =>
   ({ tipo: 'confirmar_consistencia_da_sala', salaId } as const);
+
+const registrarReinicio = (salaId = 'sala-1') =>
+  ({ tipo: 'registrar_reinicio_da_sala', salaId } as const);
 
 function aplicar(estado: EstadoDoLobby, comando: Comando): EstadoDoLobby {
   const resultado = aplicarComando(estado, comando);
@@ -656,4 +660,82 @@ test('expirar_reconexao rejeita Sala inconsistente com SALA_INCONSISTENTE', () =
   assert.equal(resultado.sucesso, false);
   if (resultado.sucesso) return;
   assert.equal(resultado.erro.codigo, 'SALA_INCONSISTENTE');
+});
+
+test('registrar_reinicio_da_sala torna a Sala inconsistente e membros ativos reaparecem desconectados e não prontos', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  const antes = estado;
+
+  const resultado = registrarReinicioDaSala(estado, registrarReinicio());
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+
+  const sala = resultado.estado.salas[0];
+  assert.equal(sala.consistente, false);
+  for (const membro of sala.membros) {
+    assert.equal(membro.estado, 'ativo');
+    assert.equal(membro.presenca, 'em_reconexao');
+    assert.equal(membro.pronto, false);
+    assert.equal(membro.motivoEncerramento, null);
+  }
+  assert.deepEqual(resultado.eventos, [
+    { tipo: 'reinicio_registrado', salaId: 'sala-1' },
+  ]);
+
+  // Membros encerrados permanecem intactos.
+  const comEncerrado = aplicar(antes, sair('jogador-2'));
+  const reinicioComEncerrado = registrarReinicioDaSala(comEncerrado, registrarReinicio());
+  assert.equal(reinicioComEncerrado.sucesso, true);
+  if (!reinicioComEncerrado.sucesso) return;
+  const encerrado = reinicioComEncerrado.estado.salas[0].membros.find(
+    (membro) => membro.jogadorId === 'jogador-2',
+  );
+  assert.ok(encerrado);
+  assert.equal(encerrado.estado, 'encerrado');
+  assert.equal(encerrado.motivoEncerramento, 'saida');
+
+  // Mutações ficam bloqueadas enquanto a Sala estiver inconsistente.
+  const entrada = entrarNaSala(resultado.estado, entrar('jogador-3', 'membro-3'));
+  assert.equal(entrada.sucesso, false);
+  if (entrada.sucesso) return;
+  assert.equal(entrada.erro.codigo, 'SALA_INCONSISTENTE');
+
+  const desconexao = desconectarJogador(resultado.estado, desconectar('jogador-1'));
+  assert.equal(desconexao.sucesso, false);
+  if (desconexao.sucesso) return;
+  assert.equal(desconexao.erro.codigo, 'SALA_INCONSISTENTE');
+
+  // Confirmar consistência restaura as mutações; reconexão volta a funcionar
+  // porque o vínculo ativo existe mas a presença não é observada pós-reinício.
+  const confirmacao = confirmarConsistenciaDaSala(resultado.estado, confirmar());
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.salas[0].consistente, true);
+
+  const reconexao = reconectarJogador(confirmacao.estado, reconectar('jogador-1'));
+  assert.equal(reconexao.sucesso, true);
+  if (!reconexao.sucesso) return;
+  const membroReconectado = reconexao.estado.salas[0].membros[0];
+  assert.equal(membroReconectado.presenca, 'conectado');
+
+  const entradaApos = entrarNaSala(confirmacao.estado, entrar('jogador-3', 'membro-3'));
+  assert.equal(entradaApos.sucesso, true);
+});
+
+test('registrar_reinicio_da_sala é idempotente quando a Sala já está inconsistente', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, registrarReinicio());
+
+  const resultado = registrarReinicioDaSala(estado, registrarReinicio());
+
+  assert.deepEqual(resultado, { sucesso: true, estado, eventos: [] });
+});
+
+test('registrar_reinicio_da_sala em Sala inexistente retorna SALA_NAO_ENCONTRADA', () => {
+  const resultado = registrarReinicioDaSala(estadoDoLobbyVazio(), registrarReinicio('sala-fantasma'));
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_NAO_ENCONTRADA');
 });

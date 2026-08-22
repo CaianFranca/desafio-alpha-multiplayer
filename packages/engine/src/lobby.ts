@@ -95,6 +95,11 @@ export interface ConfirmarConsistenciaDaSalaComando {
   readonly salaId: string;
 }
 
+export interface RegistrarReinicioDaSalaComando {
+  readonly tipo: 'registrar_reinicio_da_sala';
+  readonly salaId: string;
+}
+
 export type Comando =
   | CriarSalaComando
   | EntrarNaSalaComando
@@ -104,7 +109,8 @@ export type Comando =
   | DesconectarJogadorComando
   | ReconectarJogadorComando
   | ExpirarReconexaoComando
-  | ConfirmarConsistenciaDaSalaComando;
+  | ConfirmarConsistenciaDaSalaComando
+  | RegistrarReinicioDaSalaComando;
 
 export interface SalaCriadaEvento {
   readonly tipo: 'sala_criada';
@@ -194,6 +200,11 @@ export interface ConsistenciaConfirmadaEvento {
   readonly salaId: string;
 }
 
+export interface ReinicioRegistradoEvento {
+  readonly tipo: 'reinicio_registrado';
+  readonly salaId: string;
+}
+
 export type EventoDeDominio =
   | SalaCriadaEvento
   | MembroAdmitidoEvento
@@ -206,7 +217,8 @@ export type EventoDeDominio =
   | MembroReconectadoEvento
   | VinculoExpiradoEvento
   | SalaExpiradaEvento
-  | ConsistenciaConfirmadaEvento;
+  | ConsistenciaConfirmadaEvento
+  | ReinicioRegistradoEvento;
 
 export type CodigoDeErro =
   | 'DADOS_INVALIDOS'
@@ -276,6 +288,8 @@ export function aplicarComando(
       return expirarReconexao(estado, comando);
     case 'confirmar_consistencia_da_sala':
       return confirmarConsistenciaDaSala(estado, comando);
+    case 'registrar_reinicio_da_sala':
+      return registrarReinicioDaSala(estado, comando);
     default:
       return rejeitar('DADOS_INVALIDOS', 'O comando de domínio é inválido.');
   }
@@ -881,6 +895,44 @@ export function confirmarConsistenciaDaSala(
   return sucesso(substituirSala(estado, novaSala), [
     {
       tipo: 'consistencia_confirmada',
+      salaId: sala.id,
+    },
+  ]);
+}
+
+export function registrarReinicioDaSala(
+  estado: EstadoDoLobby,
+  comando: RegistrarReinicioDaSalaComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const sala = estado.salas.find((item) => item.id === comando.salaId);
+  if (!sala) {
+    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
+      salaId: comando.salaId,
+    });
+  }
+
+  if (!sala.consistente) {
+    return sucesso(estado, []);
+  }
+
+  const novaSala: Sala = {
+    ...sala,
+    consistente: false,
+    membros: sala.membros.map((membro) =>
+      membro.estado === 'ativo'
+        ? { ...membro, presenca: 'em_reconexao', pronto: false }
+        : membro,
+    ),
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'reinicio_registrado',
       salaId: sala.id,
     },
   ]);
