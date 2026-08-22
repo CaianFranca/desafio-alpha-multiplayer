@@ -6,6 +6,7 @@ const { redis } = getConfig();
 export const redisClient = new Redis({
   host: redis.host,
   port: redis.port,
+  password: redis.password,
   lazyConnect: true,
   maxRetriesPerRequest: null,
 });

@@ -8,7 +8,7 @@ import { redisClient } from './config/redis.ts';
 
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: '10kb' }));
 
 async function verificarPostgres(): Promise<void> {
   await pool.query('SELECT 1');
@@ -33,6 +33,15 @@ app.get('/health', async (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+
+// Handler global para JSON malformado — converte HTML SyntaxError para JSON 400 (A6)
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && (err as { status?: number }).status === 400) {
+    res.status(400).json({ error: 'requisição inválida' });
+    return;
+  }
+  next(err as Error);
+});
 
 const server = http.createServer(app);
 
