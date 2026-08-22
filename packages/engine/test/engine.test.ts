@@ -3,11 +3,15 @@ import test from 'node:test';
 import {
   aplicarComando,
   autorizarRetorno,
+  confirmarConsistenciaDaSala,
   criarSala,
+  desconectarJogador,
   entrarNaSala,
   estadoDoLobbyVazio,
+  expirarReconexao,
   expulsarMembro,
   MOTIVOS_DE_ENCERRAMENTO,
+  reconectarJogador,
   sairDaSala,
   type Comando,
   type EstadoDoLobby,
@@ -34,6 +38,18 @@ const expulsar = (anfitriaoMembroId: string, membroAlvoId: string, salaId = 'sal
 const autorizar = (anfitriaoMembroId: string, jogadorId: string, salaId = 'sala-1') =>
   ({ tipo: 'autorizar_retorno', salaId, anfitriaoMembroId, jogadorId } as const);
 
+const desconectar = (jogadorId: string, salaId = 'sala-1') =>
+  ({ tipo: 'desconectar_jogador', salaId, jogadorId } as const);
+
+const reconectar = (jogadorId: string, salaId = 'sala-1') =>
+  ({ tipo: 'reconectar_jogador', salaId, jogadorId } as const);
+
+const expirar = (membroId: string, salaId = 'sala-1') =>
+  ({ tipo: 'expirar_reconexao', salaId, membroId } as const);
+
+const confirmar = (salaId = 'sala-1') =>
+  ({ tipo: 'confirmar_consistencia_da_sala', salaId } as const);
+
 function aplicar(estado: EstadoDoLobby, comando: Comando): EstadoDoLobby {
   const resultado = aplicarComando(estado, comando);
   if (!resultado.sucesso) {
@@ -57,10 +73,13 @@ test('cria Sala com o criador como primeiro Membro e Anfitrião', () => {
       ordemDeEntrada: 1,
       estado: 'ativo',
       motivoEncerramento: null,
+      presenca: 'conectado',
+      pronto: false,
     }],
     proximaOrdemDeEntrada: 2,
     anfitriaoId: 'membro-1',
     jogadoresBloqueados: [],
+    consistente: true,
   });
   assert.deepEqual(resultado.eventos.map((evento) => evento.tipo), ['sala_criada']);
 });
@@ -155,13 +174,14 @@ test('sucessão circular: Anfitrião com a maior ordem é sucedido pelo de menor
       codigo: 'ABC123',
       estado: 'aberta',
       membros: [
-        { id: 'membro-1', jogadorId: 'jogador-1', ordemDeEntrada: 1, estado: 'encerrado', motivoEncerramento: 'saida' },
-        { id: 'membro-5', jogadorId: 'jogador-5', ordemDeEntrada: 5, estado: 'ativo', motivoEncerramento: null },
-        { id: 'membro-2', jogadorId: 'jogador-2', ordemDeEntrada: 2, estado: 'ativo', motivoEncerramento: null },
+        { id: 'membro-1', jogadorId: 'jogador-1', ordemDeEntrada: 1, estado: 'encerrado', motivoEncerramento: 'saida', presenca: 'conectado', pronto: false },
+        { id: 'membro-5', jogadorId: 'jogador-5', ordemDeEntrada: 5, estado: 'ativo', motivoEncerramento: null, presenca: 'conectado', pronto: false },
+        { id: 'membro-2', jogadorId: 'jogador-2', ordemDeEntrada: 2, estado: 'ativo', motivoEncerramento: null, presenca: 'conectado', pronto: false },
       ],
       proximaOrdemDeEntrada: 6,
       anfitriaoId: 'membro-5',
       jogadoresBloqueados: [],
+      consistente: true,
     }],
   };
   const resultado = sairDaSala(estado, sair('jogador-5'));
@@ -386,4 +406,195 @@ test('rejeita autorizar_retorno para Jogador que não está bloqueado', () => {
   assert.equal(resultado.sucesso, false);
   if (resultado.sucesso) return;
   assert.equal(resultado.erro.codigo, 'JOGADOR_NAO_BLOQUEADO');
+});
+
+test('presença é agregada por Jogador: desconectar e reconectar refletem o vínculo', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, desconectar('jogador-1'));
+
+  const membro = estado.salas[0].membros[0];
+  assert.equal(membro.estado, 'ativo');
+  assert.equal(membro.presenca, 'em_reconexao');
+
+  estado = aplicar(estado, reconectar('jogador-1'));
+  assert.equal(estado.salas[0].membros[0].presenca, 'conectado');
+});
+
+test('perda de conexão entra em reconexão preservando vínculo, vaga, ordem, pronto e papel', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  const antes = structuredClone(estado);
+  const resultado = desconectarJogador(estado, desconectar('jogador-1'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const sala = resultado.estado.salas[0];
+  const anfitriao = sala.membros.find((membro) => membro.id === 'membro-1');
+  assert.ok(anfitriao);
+  assert.equal(anfitriao.estado, 'ativo');
+  assert.equal(anfitriao.presenca, 'em_reconexao');
+  assert.equal(anfitriao.ordemDeEntrada, 1);
+  assert.equal(anfitriao.pronto, false);
+  assert.equal(sala.anfitriaoId, 'membro-1');
+  assert.equal(sala.proximaOrdemDeEntrada, 3);
+  assert.deepEqual(resultado.eventos.map((evento) => evento.tipo), ['membro_desconectado']);
+  const evento = resultado.eventos[0];
+  if (evento.tipo === 'membro_desconectado') {
+    assert.equal(evento.membroId, 'membro-1');
+    assert.equal(evento.jogadorId, 'jogador-1');
+  }
+  assert.notEqual(resultado.estado, estado);
+  assert.notDeepEqual(resultado.estado.salas[0].membros[0], antes.salas[0].membros[0]);
+});
+
+test('desconectar_jogador é idempotente quando o Membro já está em reconexão', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, desconectar('jogador-1'));
+  const resultado = desconectarJogador(estado, desconectar('jogador-1'));
+
+  assert.deepEqual(resultado, { sucesso: true, estado, eventos: [] });
+});
+
+test('reconectar_jogador é idempotente quando o Membro já está conectado', () => {
+  const estado = aplicar(estadoDoLobbyVazio(), criar());
+  const resultado = reconectarJogador(estado, reconectar('jogador-1'));
+
+  assert.deepEqual(resultado, { sucesso: true, estado, eventos: [] });
+});
+
+test('expiração encerra o vínculo com motivo expiracao e libera a vaga para novo Jogador', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, desconectar('jogador-2'));
+  const resultado = expirarReconexao(estado, expirar('membro-2'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const sala = resultado.estado.salas[0];
+  const expirado = sala.membros.find((membro) => membro.id === 'membro-2');
+  assert.equal(expirado?.estado, 'encerrado');
+  assert.equal(expirado?.motivoEncerramento, 'expiracao');
+  assert.deepEqual(
+    resultado.eventos.map((evento) => evento.tipo),
+    ['vinculo_expirado'],
+  );
+
+  const novaEntrada = entrarNaSala(resultado.estado, entrar('jogador-3', 'membro-3'));
+  assert.equal(novaEntrada.sucesso, true);
+  if (!novaEntrada.sucesso) return;
+  const novoMembro = novaEntrada.estado.salas[0].membros.find(
+    (membro) => membro.id === 'membro-3',
+  );
+  assert.equal(novoMembro?.estado, 'ativo');
+  assert.equal(novoMembro?.ordemDeEntrada, 3);
+});
+
+test('expiração exige Membro ativo em janela de reconexão', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  const conectado = expirarReconexao(estado, expirar('membro-1'));
+  assert.equal(conectado.sucesso, false);
+  if (conectado.sucesso) return;
+  assert.equal(conectado.erro.codigo, 'MEMBRO_NAO_ATIVO');
+
+  estado = aplicar(estado, sair('jogador-1'));
+  const encerrado = expirarReconexao(estado, expirar('membro-1'));
+  assert.equal(encerrado.sucesso, false);
+  if (encerrado.sucesso) return;
+  assert.equal(encerrado.erro.codigo, 'MEMBRO_NAO_ATIVO');
+});
+
+test('expulsão continua válida contra Membro em reconexão', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, desconectar('jogador-2'));
+  const resultado = expulsarMembro(estado, expulsar('membro-1', 'membro-2'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const alvo = resultado.estado.salas[0].membros.find(
+    (membro) => membro.id === 'membro-2',
+  );
+  assert.equal(alvo?.estado, 'encerrado');
+  assert.equal(alvo?.motivoEncerramento, 'expulsao');
+});
+
+test('último vínculo terminado por expiração marca a Sala como expirada', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, desconectar('jogador-1'));
+  const resultado = expirarReconexao(estado, expirar('membro-1'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const sala = resultado.estado.salas[0];
+  assert.equal(sala.estado, 'expirada');
+  assert.equal(sala.anfitriaoId, null);
+  assert.deepEqual(resultado.eventos.map((evento) => evento.tipo), [
+    'vinculo_expirado',
+    'sala_expirada',
+  ]);
+
+  const entrada = entrarNaSala(resultado.estado, entrar('jogador-2', 'membro-2'));
+  assert.equal(entrada.sucesso, false);
+  if (entrada.sucesso) return;
+  assert.equal(entrada.erro.codigo, 'SALA_ENCERRADA');
+});
+
+test('sucessão circular pela ordem de entrada quando o vínculo do Anfitrião expira', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-3', 'membro-3'));
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, desconectar('jogador-1'));
+  const resultado = expirarReconexao(estado, expirar('membro-1'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.salas[0].anfitriaoId, 'membro-3');
+  assert.equal(resultado.estado.salas[0].estado, 'aberta');
+  const sucessao = resultado.eventos.find(
+    (evento): evento is Extract<typeof evento, { tipo: 'anfitriao_sucedido' }> =>
+      evento.tipo === 'anfitriao_sucedido',
+  );
+  assert.ok(sucessao);
+  assert.equal(sucessao.anfitriaoAnteriorId, 'membro-1');
+  assert.equal(sucessao.anfitriaoNovoId, 'membro-3');
+});
+
+test('Sala inconsistente rejeita mutações com SALA_INCONSISTENTE até confirmação', () => {
+  const base = aplicar(estadoDoLobbyVazio(), criar());
+  const estado: EstadoDoLobby = {
+    salas: [{ ...base.salas[0], consistente: false }],
+  };
+
+  const entrada = entrarNaSala(estado, entrar('jogador-2', 'membro-2'));
+  assert.equal(entrada.sucesso, false);
+  if (entrada.sucesso) return;
+  assert.equal(entrada.erro.codigo, 'SALA_INCONSISTENTE');
+
+  const saida = sairDaSala(estado, sair('jogador-1'));
+  assert.equal(saida.sucesso, false);
+  if (saida.sucesso) return;
+  assert.equal(saida.erro.codigo, 'SALA_INCONSISTENTE');
+
+  const desconexao = desconectarJogador(estado, desconectar('jogador-1'));
+  assert.equal(desconexao.sucesso, false);
+  if (desconexao.sucesso) return;
+  assert.equal(desconexao.erro.codigo, 'SALA_INCONSISTENTE');
+
+  const confirmacao = confirmarConsistenciaDaSala(estado, confirmar());
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.salas[0].consistente, true);
+  assert.deepEqual(confirmacao.eventos.map((evento) => evento.tipo), [
+    'consistencia_confirmada',
+  ]);
+
+  const entradaApos = entrarNaSala(confirmacao.estado, entrar('jogador-2', 'membro-2'));
+  assert.equal(entradaApos.sucesso, true);
+});
+
+test('confirmar_consistencia_da_sala é idempotente quando a Sala já é consistente', () => {
+  const estado = aplicar(estadoDoLobbyVazio(), criar());
+  const resultado = confirmarConsistenciaDaSala(estado, confirmar());
+
+  assert.deepEqual(resultado, { sucesso: true, estado, eventos: [] });
 });
