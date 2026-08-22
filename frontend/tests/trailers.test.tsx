@@ -71,7 +71,7 @@ describe('seção de trailers', () => {
 
     expect(section.querySelectorAll('video')).toHaveLength(1)
     const video = getVideo(section)
-    expect(video.getAttribute('src')).toBe('/videos/trailer-anuncio.mp4')
+    expect(video.getAttribute('src')).toBe(trailers.items[0]?.src)
     expect(video.autoplay).toBe(true)
     expect(video.muted).toBe(true)
     expect(video.preload).toBe('none')
@@ -88,7 +88,7 @@ describe('seção de trailers', () => {
     await user.click(within(section).getByRole('button', { name: trailers.labels.play }))
 
     const video = getVideo(section)
-    expect(video.getAttribute('src')).toBe('/videos/trailer-anuncio.mp4')
+    expect(video.getAttribute('src')).toBe(trailers.items[0]?.src)
   })
 
   it('controles de reprodução e áudio funcionam por teclado e clique', async () => {

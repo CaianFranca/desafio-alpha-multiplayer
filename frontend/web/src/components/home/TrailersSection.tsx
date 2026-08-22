@@ -67,7 +67,9 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
       video.pause()
       setPlaying(false)
     } else {
-      void video.play()
+      video
+        .play()
+        .catch(() => setPlaying(false))
       setPlaying(true)
     }
   }
@@ -121,7 +123,13 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
             {trailers.mensagens.carregando}
           </p>
         )}
-        <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 px-2 pt-10 pb-2 bg-linear-to-t from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200">
+        <div
+          className={`absolute inset-x-0 bottom-0 flex items-center gap-1 px-2 pt-10 pb-2 bg-linear-to-t from-black/80 via-black/40 to-transparent transition-opacity duration-200 ${
+            !playing || !ready
+              ? 'opacity-100'
+              : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+          }`}
+        >
           <button
             type="button"
             onClick={togglePlay}
