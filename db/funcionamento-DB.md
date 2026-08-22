@@ -21,6 +21,34 @@ Tabela de cadastro de Usuarios (dominio CONTEXT.md).
 | senha       | text         | NOT NULL                     | Hash da senha (bcrypt/argon2)          |
 | criado_em   | timestamptz  | NOT NULL, default now()      | Data de criacao do cadastro            |
 
+### salas_historico
+
+Tabela que cumpre o papel do antigo `registro_partida`: registra cada sala
+disputada. Enquanto a sala esta aberta, `resultado` e `duracao` permanecem
+nulos; ambos sao preenchidos somente quando a sala e encerrada.
+
+| Coluna       | Tipo                                              | Constraints                              | Descricao                                    |
+|--------------|---------------------------------------------------|------------------------------------------|----------------------------------------------|
+| id           | uuid                                              | PK, default gen_random_uuid()            | Identificador unico da sala                  |
+| codigo_sala  | varchar(6)                                        | NOT NULL, UNIQUE, check ^[A-Z0-9]{6}$    | Codigo de convite da sala                    |
+| status       | enum('aberta', 'encaminhada', 'encerrada', 'expirada') | NOT NULL, default 'aberta'          | Estado atual da sala                         |
+| anfitriao_id | uuid                                              | NULL, FK -> usuarios.id                  | Jogador que criou a sala (nulo se saiu)      |
+| resultado    | enum('vitoria', 'derrota')                        | NULL                                     | Desfecho da sala (preenchido ao encerrar)    |
+| duracao      | interval                                          | NULL                                     | Duracao total (preenchida ao encerrar)       |
+
+### membros
+
+Tabela que absorveu o antigo `registro_usuarios_partida` como vinculo N:N
+historico entre jogadores e salas. Vinculos encerrados sao preservados via
+`motivo_de_termino`, que permanece nulo enquanto o jogador esta ativo na sala.
+
+| Coluna             | Tipo                                                  | Constraints                                        | Descricao                                       |
+|--------------------|-------------------------------------------------------|----------------------------------------------------|-------------------------------------------------|
+| sala_id            | uuid                                                  | PK composta, FK -> salas_historico.id, ON DELETE CASCADE | Sala da qual o jogador participa         |
+| usuario_id         | uuid                                                  | PK composta, FK -> usuarios.id, ON DELETE CASCADE  | Jogador participante                            |
+| ordem_de_entrada   | integer                                               | NOT NULL                                           | Posicao de entrada do jogador na sala           |
+| motivo_de_termino  | enum('saida', 'expulsao', 'expiracao', 'encerramento')| NULL enquanto o vinculo esta ativo                 | Como o vinculo do jogador com a sala terminou   |
+
 ## Esquema Futuro (implantacao posterior)
 
 ### lista_amigos
@@ -41,26 +69,6 @@ Quando um jogador envia um pedido de amizade, duas linhas sao criadas:
 - Uma com `usuario_fk` = destinatario, `amigo_id` = remetente, status = 'pendente_recebeu'
 
 Ao aceitar, ambas as linhas sao atualizadas para status = 'aceito'.
-
-### registro_partida
-
-Log de cada partida disputada.
-
-| Coluna                           | Tipo     | Constraints                  | Descricao                    |
-|----------------------------------|----------|------------------------------|------------------------------|
-| id                               | uuid     | PK, default gen_random_uuid()| Identificador da partida     |
-| resultado                        | enum     | NOT NULL                     | 'vitoria' ou 'derrota'       |
-| quantidade_de_geradores_ligado   | integer  | NOT NULL                     | Geradores ativados           |
-| duracao                          | interval | NOT NULL                     | Duracao da partida           |
-
-### registro_usuarios_partida
-
-Tabela N:N entre jogadores e partidas (historico).
-
-| Coluna              | Tipo | Constraints                   | Descricao         |
-|---------------------|------|-------------------------------|--------------------|
-| registro_partida_id | uuid | FK -> registro_partida.id, PK | Partida            |
-| usuario_id          | uuid | FK -> usuarios.id, PK         | Jogador            |
 
 ## Comandos Knex
 
@@ -113,5 +121,6 @@ via `dotenv`. Fallback para os valores do docker-compose:
 - O Redis e volatile no ambiente local e armazena apenas dados temporarios
   (prontidao, presenca, reconexao)
 - Todas as tabelas usam UUID como PK para compatibilidade com distribuicao
-  horizontal
+  horizontal (exceto `membros`, cuja PK e composta por `sala_id` +
+  `usuario_id`)
 - A migration e a seed estao em TypeScript (.ts), executadas via ts-node
