@@ -19,6 +19,7 @@ COPY backend/lobby-server ./backend/lobby-server
 
 WORKDIR /app/backend/lobby-server
 
-EXPOSE 3001
+ARG LOBBY_SERVER_PORT=3001
+EXPOSE ${LOBBY_SERVER_PORT}
 
 CMD ["npm", "run", "dev"]

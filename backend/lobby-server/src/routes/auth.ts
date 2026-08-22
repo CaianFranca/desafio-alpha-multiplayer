@@ -17,13 +17,42 @@ interface LoginBody {
   senha?: string;
 }
 
+function normalizarEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function validarEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 authRouter.post('/register', async (req, res) => {
-  const { apelido, email, senha } = req.body as RegisterBody;
+  let { apelido, email, senha } = req.body as RegisterBody;
+
+  apelido = apelido?.trim();
+  email = email?.trim();
+  // senha não faz trim para preservar espaços intencionais, mas valida vazia
 
   if (!apelido || !email || !senha) {
     res.status(400).json({ error: 'apelido, email e senha são obrigatórios' });
     return;
   }
+
+  if (apelido.length < 3 || apelido.length > 20) {
+    res.status(400).json({ error: 'apelido deve ter entre 3 e 20 caracteres' });
+    return;
+  }
+
+  if (!validarEmail(email)) {
+    res.status(400).json({ error: 'email inválido' });
+    return;
+  }
+
+  if (senha.length < 8) {
+    res.status(400).json({ error: 'senha deve ter no mínimo 8 caracteres' });
+    return;
+  }
+
+  const emailNormalizado = normalizarEmail(email);
 
   try {
     const hash = await bcrypt.hash(senha, 10);
@@ -32,13 +61,14 @@ authRouter.post('/register', async (req, res) => {
       `INSERT INTO usuarios (apelido, email, senha)
        VALUES ($1, $2, $3)
        RETURNING id, apelido, email`,
-      [apelido, email, hash],
+      [apelido, emailNormalizado, hash],
     );
 
     res.status(201).json(result.rows[0]);
   } catch (error: unknown) {
-    const pgError = error as { code?: string };
+    const pgError = error as { code?: string; constraint?: string };
     if (pgError.code === '23505') {
+      // Mensagem genérica mantém compatibilidade com bootstrap; detalhe por campo virá em ST-04
       res.status(409).json({ error: 'apelido ou email já cadastrado' });
       return;
     }
@@ -48,17 +78,21 @@ authRouter.post('/register', async (req, res) => {
 });
 
 authRouter.post('/login', async (req, res) => {
-  const { email, senha } = req.body as LoginBody;
+  let { email, senha } = req.body as LoginBody;
+
+  email = email?.trim();
 
   if (!email || !senha) {
     res.status(400).json({ error: 'email e senha são obrigatórios' });
     return;
   }
 
+  const emailNormalizado = normalizarEmail(email);
+
   try {
     const result = await pool.query(
       `SELECT id, apelido, email, senha FROM usuarios WHERE email = $1 LIMIT 1`,
-      [email],
+      [emailNormalizado],
     );
 
     if (result.rowCount === 0) {

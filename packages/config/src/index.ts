@@ -68,6 +68,10 @@ export function getConfig(): Config {
 
   const jwtSecret = process.env.JWT_SECRET ?? DEFAULT_JWT_SECRET;
 
+  if (process.env.NODE_ENV === 'production' && jwtSecret === DEFAULT_JWT_SECRET) {
+    throw new Error('JWT_SECRET deve ser definido em produção');
+  }
+
   const postgres = {
     host: process.env.POSTGRES_HOST ?? 'localhost',
     port: parsePort(process.env.POSTGRES_PORT as string | undefined, 5432),
