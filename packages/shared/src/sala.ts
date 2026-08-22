@@ -157,18 +157,20 @@ export interface MensagemDeChatEvento {
   enviadoEm: string;
 }
 
-export type CodigoDeErroDaSala =
+export type CodigoDeErroComum =
   | 'DADOS_INVALIDOS'
+  | 'SALA_NAO_ENCONTRADA'
+  | 'SALA_ENCERRADA';
+
+export type CodigoDeErroDaSala =
+  | CodigoDeErroComum
   | 'SALA_JA_EXISTE'
   | 'CODIGO_SALA_JA_EXISTE'
   | 'MEMBRO_ID_JA_EXISTE'
-  | 'SALA_NAO_ENCONTRADA'
-  | 'SALA_ENCERRADA'
   | 'SALA_CHEIA'
   | 'JOGADOR_JA_ASSOCIADO'
   | 'MEMBRO_NAO_ENCONTRADO'
-  | 'MEMBRO_NAO_ATIVO'
-  | (string & {});
+  | 'MEMBRO_NAO_ATIVO';
 
 export interface ErroDaSalaEvento {
   type: 'ERRO_DA_SALA';
