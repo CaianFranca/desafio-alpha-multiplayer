@@ -55,17 +55,11 @@ paths:
             httpOnly.
           headers:
             Set-Cookie:
-              $ref: "#/components/headers/SetCookieAccess"
+              $ref: "#/components/headers/SetCookieSessao"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/JogadorResponse"
-              examples:
-                jogadoraCriada:
-                  value:
-                    id: 5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90
-                    apelido: ana
-                    email: ana@exemplo.com
         "400":
           $ref: "#/components/responses/ErroValidacao"
         "409":
@@ -121,17 +115,11 @@ paths:
             `access_token` e `refresh_token` são entregues como httpOnly.
           headers:
             Set-Cookie:
-              $ref: "#/components/headers/SetCookieAccess"
+              $ref: "#/components/headers/SetCookieSessao"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/JogadorResponse"
-              examples:
-                jogadoraAutenticada:
-                  value:
-                    id: 5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90
-                    apelido: ana
-                    email: ana@exemplo.com
         "400":
           $ref: "#/components/responses/ErroValidacao"
         "401":
@@ -188,12 +176,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/JogadorResponse"
-              examples:
-                jogadoraAutenticada:
-                  value:
-                    id: 5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90
-                    apelido: ana
-                    email: ana@exemplo.com
         "401":
           $ref: "#/components/responses/SessaoInvalida"
 components:
@@ -206,7 +188,7 @@ components:
         JWT de acesso da Sessão, entregue em cookie httpOnly (`access_token`)
         por register e login. A validade da Sessão é revalidada no servidor.
   headers:
-    SetCookieAccess:
+    SetCookieSessao:
       description: |
         Cookies de Sessão entregues como httpOnly. Dois cookies:
         `access_token` (JWT de acesso, expira em 15 minutos) e `refresh_token`
@@ -219,7 +201,7 @@ components:
         access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...;
         Path=/; HttpOnly; SameSite=Strict; Max-Age=900,
         refresh_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...;
-        Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=604800
+        Path=/; HttpOnly; SameSite=Strict; Max-Age=604800
     SetCookieLimpeza:
       description: |
         Limpeza dos cookies de Sessão após o logout, com `Max-Age=0`.
@@ -228,7 +210,7 @@ components:
         type: string
       example: >-
         access_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0,
-        refresh_token=; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=0
+        refresh_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0
   responses:
     ErroValidacao:
       description: |
@@ -348,6 +330,10 @@ components:
           format: email
           description: Email do Cadastro do Jogador.
           example: ana@exemplo.com
+      example:
+        id: 5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90
+        apelido: ana
+        email: ana@exemplo.com
     ErroResponse:
       type: object
       title: ErroResponse
@@ -367,6 +353,10 @@ components:
             properties:
               campo:
                 type: string
+                enum:
+                  - apelido
+                  - email
+                  - senha
                 description: Nome do campo reprovado; ausente em erros genéricos (por exemplo, Credenciais inválidas).
                 example: apelido
               mensagem:
