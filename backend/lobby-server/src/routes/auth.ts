@@ -6,6 +6,10 @@ import { pool } from '../config/pg.ts';
 
 export const authRouter = Router();
 
+// Hash válido usado somente para equalizar o custo do login de email inexistente.
+// O valor não corresponde a nenhuma Credencial da aplicação.
+const DUMMY_BCRYPT_HASH = '$2a$10$PnTpyXXkuhNfHqoKenTO5ONmfuiF4jcfWgX8ShkvfYfLr8Jwg5Zie';
+
 interface RegisterBody {
   apelido?: string;
   email?: string;
@@ -37,8 +41,8 @@ authRouter.post('/register', async (req, res) => {
     return;
   }
 
-  if (apelido.length < 3 || apelido.length > 20) {
-    res.status(400).json({ error: 'apelido deve ter entre 3 e 20 caracteres' });
+  if (apelido.length < 3 || apelido.length > 30) {
+    res.status(400).json({ error: 'apelido deve ter entre 3 e 30 caracteres' });
     return;
   }
 
@@ -98,6 +102,7 @@ authRouter.post('/login', async (req, res) => {
     );
 
     if (result.rowCount === 0) {
+      await bcrypt.compare(senha, DUMMY_BCRYPT_HASH).catch(() => false);
       res.status(401).json({ error: 'credenciais inválidas' });
       return;
     }

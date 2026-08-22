@@ -11,6 +11,7 @@ export interface Config {
     user: string;
     password: string;
     database: string;
+    poolMax: number;
   };
   redis: {
     host: string;
@@ -23,6 +24,8 @@ const DEFAULT_GAME_SERVER_PORT = 3000;
 const DEFAULT_LOBBY_SERVER_PORT = 3001;
 const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
 const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
+const DEFAULT_PG_POOL_MAX = 10;
+const MAX_PG_POOL_MAX = 100;
 
 let envLoaded = false;
 
@@ -55,6 +58,14 @@ function parsePort(raw: string | undefined, fallback: number): number {
   return fallback;
 }
 
+function parsePoolMax(raw: string | undefined): number {
+  const parsed = Number(raw ?? DEFAULT_PG_POOL_MAX);
+  if (Number.isInteger(parsed) && parsed > 0 && parsed <= MAX_PG_POOL_MAX) {
+    return parsed;
+  }
+  return DEFAULT_PG_POOL_MAX;
+}
+
 export function getConfig(): Config {
   loadEnvFile();
 
@@ -69,6 +80,7 @@ export function getConfig(): Config {
   );
 
   const jwtSecret = process.env.JWT_SECRET ?? DEFAULT_JWT_SECRET;
+  const poolMax = parsePoolMax(process.env.PG_POOL_MAX);
 
   const postgres = {
     host: process.env.POSTGRES_HOST ?? 'localhost',
@@ -76,13 +88,14 @@ export function getConfig(): Config {
     user: process.env.POSTGRES_USER ?? 'flicker',
     password: process.env.POSTGRES_PASSWORD ?? DEFAULT_POSTGRES_PASSWORD,
     database: process.env.POSTGRES_DB ?? 'flicker',
+    poolMax,
   };
 
   if (process.env.NODE_ENV === 'production') {
-    if (jwtSecret === DEFAULT_JWT_SECRET) {
+    if (!jwtSecret || jwtSecret === DEFAULT_JWT_SECRET) {
       throw new Error('JWT_SECRET deve ser definido em produção');
     }
-    if (postgres.password === DEFAULT_POSTGRES_PASSWORD) {
+    if (!postgres.password || postgres.password === DEFAULT_POSTGRES_PASSWORD) {
       throw new Error('POSTGRES_PASSWORD deve ser definido em produção');
     }
   }

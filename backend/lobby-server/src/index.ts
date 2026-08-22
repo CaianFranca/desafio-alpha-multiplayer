@@ -34,12 +34,23 @@ app.get('/health', async (_req, res) => {
 
 app.use('/api/auth', authRouter);
 
-// Handler global para JSON malformado — converte HTML SyntaxError para JSON 400 (A6)
+// Handler global para erros de body-parser — evita respostas HTML para a API (A6/A8).
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (err instanceof SyntaxError && (err as { status?: number }).status === 400) {
+  const bodyParserError = err as { status?: number; type?: string };
+
+  if (
+    bodyParserError.type === 'entity.parse.failed'
+    || (err instanceof SyntaxError && bodyParserError.status === 400)
+  ) {
     res.status(400).json({ error: 'requisição inválida' });
     return;
   }
+
+  if (bodyParserError.type === 'entity.too.large') {
+    res.status(413).json({ error: 'requisição muito grande' });
+    return;
+  }
+
   next(err as Error);
 });
 

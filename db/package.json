@@ -9,13 +9,11 @@
     "seed:run": "knex seed:run --knexfile knexfile.ts"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.0",
     "knex": "^3.1.0",
     "pg": "^8.13.0"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.0.0",
     "ts-node": "^10.9.0",
     "typescript": "^5.5.0"

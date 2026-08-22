@@ -9,7 +9,7 @@ export const pool = new Pool({
   user: postgres.user,
   password: postgres.password,
   database: postgres.database,
-  max: Number(process.env.PG_POOL_MAX ?? 10),
+  max: postgres.poolMax,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
 });
