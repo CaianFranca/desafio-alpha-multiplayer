@@ -9,8 +9,9 @@
 //   shared type:'PARTIDA_DISPONIVEL'             <-> engine tipo futuro ('partida_disponivel' / Partida.*)
 //   shared ServerId/PartidaId (string opaca)     <-> engine Partida.id / GameServer.id
 // Ver sala.ts e ADR-0003 para convenção wire (UPPER_SNAKE em type, snake em Presenca, camelCase nos demais campos).
+// Códigos de erro: união fechada via CodigoDeErroComum (sala.ts) — sem (string & {}), evoluir explicitamente.
 
-import type { CodigoDeSala, MembroDaSala } from './sala.ts';
+import type { CodigoDeErroComum, CodigoDeSala, MembroDaSala } from './sala.ts';
 
 // --- Aliases opacos ---
 
@@ -18,14 +19,11 @@ export type ServerId = string;
 export type PartidaId = string;
 
 export type CodigoDeErroDoEncaminhamento =
-  | 'DADOS_INVALIDOS'
-  | 'SALA_NAO_ENCONTRADA'
-  | 'SALA_ENCERRADA'
+  | CodigoDeErroComum
   | 'ROSTER_INVALIDO'
   | 'PARTIDA_NAO_ENCONTRADA'
   | 'ENCAMINHAMENTO_RECUSADO'
-  | 'ENCAMINHAMENTO_FALHOU'
-  | (string & {});
+  | 'ENCAMINHAMENTO_FALHOU';
 
 // --- Payloads HTTP handoff (lobby-server <-> game-server) ---
 
