@@ -1,0 +1,14 @@
+**/.git
+**/node_modules
+**/dist
+**/.env
+.scratch/
+.context7-key
+backend/
+db/
+docs/
+packages/
+frontend/web/media
+**/.opencode/
+**/opencode.json
+**/AGENTS.md

@@ -1,5 +1,6 @@
-export type EstadoDaSala = 'aberta' | 'encerrada';
+export type EstadoDaSala = 'aberta' | 'encerrada' | 'expirada';
 export type EstadoDoVinculo = 'ativo' | 'encerrado';
+export type Presenca = 'conectado' | 'em_reconexao';
 
 export const MOTIVOS_DE_ENCERRAMENTO = [
   'saida',
@@ -16,6 +17,8 @@ export interface Membro {
   readonly ordemDeEntrada: number;
   readonly estado: EstadoDoVinculo;
   readonly motivoEncerramento: MotivoDeEncerramento | null;
+  readonly presenca: Presenca;
+  readonly pronto: boolean;
 }
 
 export interface Sala {
@@ -26,6 +29,9 @@ export interface Sala {
   readonly proximaOrdemDeEntrada: number;
   readonly anfitriaoId: string | null;
   readonly jogadoresBloqueados: readonly string[];
+  // Projeção reconstruída pós-reinício (ADR-0002); mutações bloqueadas até
+  // a consistência ser confirmada.
+  readonly consistente: boolean;
 }
 
 export interface EstadoDoLobby {
@@ -68,12 +74,45 @@ export interface AutorizarRetornoComando {
   readonly jogadorId: string;
 }
 
+export interface DesconectarJogadorComando {
+  readonly tipo: 'desconectar_jogador';
+  readonly salaId: string;
+  readonly jogadorId: string;
+}
+
+export interface ReconectarJogadorComando {
+  readonly tipo: 'reconectar_jogador';
+  readonly salaId: string;
+  readonly jogadorId: string;
+}
+
+export interface ExpirarReconexaoComando {
+  readonly tipo: 'expirar_reconexao';
+  readonly salaId: string;
+  readonly membroId: string;
+}
+
+export interface ConfirmarConsistenciaDaSalaComando {
+  readonly tipo: 'confirmar_consistencia_da_sala';
+  readonly salaId: string;
+}
+
+export interface RegistrarReinicioDaSalaComando {
+  readonly tipo: 'registrar_reinicio_da_sala';
+  readonly salaId: string;
+}
+
 export type Comando =
   | CriarSalaComando
   | EntrarNaSalaComando
   | SairDaSalaComando
   | ExpulsarMembroComando
-  | AutorizarRetornoComando;
+  | AutorizarRetornoComando
+  | DesconectarJogadorComando
+  | ReconectarJogadorComando
+  | ExpirarReconexaoComando
+  | ConfirmarConsistenciaDaSalaComando
+  | RegistrarReinicioDaSalaComando;
 
 export interface SalaCriadaEvento {
   readonly tipo: 'sala_criada';
@@ -129,6 +168,42 @@ export interface RetornoAutorizadoEvento {
   readonly jogadorId: string;
 }
 
+// Campos compartilhados pelos eventos que observam um vínculo específico
+// entre Jogador e Sala.
+export interface EventoDeVinculo {
+  readonly salaId: string;
+  readonly membroId: string;
+  readonly jogadorId: string;
+  readonly ordemDeEntrada: number;
+}
+
+export interface MembroDesconectadoEvento extends EventoDeVinculo {
+  readonly tipo: 'membro_desconectado';
+}
+
+export interface MembroReconectadoEvento extends EventoDeVinculo {
+  readonly tipo: 'membro_reconectado';
+}
+
+export interface VinculoExpiradoEvento extends EventoDeVinculo {
+  readonly tipo: 'vinculo_expirado';
+}
+
+export interface SalaExpiradaEvento {
+  readonly tipo: 'sala_expirada';
+  readonly salaId: string;
+}
+
+export interface ConsistenciaConfirmadaEvento {
+  readonly tipo: 'consistencia_confirmada';
+  readonly salaId: string;
+}
+
+export interface ReinicioRegistradoEvento {
+  readonly tipo: 'reinicio_registrado';
+  readonly salaId: string;
+}
+
 export type EventoDeDominio =
   | SalaCriadaEvento
   | MembroAdmitidoEvento
@@ -136,7 +211,13 @@ export type EventoDeDominio =
   | SalaEncerradaEvento
   | MembroExpulsoEvento
   | AnfitriaoSucedidoEvento
-  | RetornoAutorizadoEvento;
+  | RetornoAutorizadoEvento
+  | MembroDesconectadoEvento
+  | MembroReconectadoEvento
+  | VinculoExpiradoEvento
+  | SalaExpiradaEvento
+  | ConsistenciaConfirmadaEvento
+  | ReinicioRegistradoEvento;
 
 export type CodigoDeErro =
   | 'DADOS_INVALIDOS'
@@ -149,9 +230,11 @@ export type CodigoDeErro =
   | 'JOGADOR_JA_ASSOCIADO'
   | 'MEMBRO_NAO_ENCONTRADO'
   | 'MEMBRO_NAO_ATIVO'
+  | 'MEMBRO_NAO_EM_RECONEXAO'
   | 'APENAS_ANFITRIAO'
   | 'JOGADOR_EXPULSO'
-  | 'JOGADOR_NAO_BLOQUEADO';
+  | 'JOGADOR_NAO_BLOQUEADO'
+  | 'SALA_INCONSISTENTE';
 
 export interface ErroDeDominio {
   readonly tipo: 'erro_de_dominio';
@@ -196,6 +279,16 @@ export function aplicarComando(
       return expulsarMembro(estado, comando);
     case 'autorizar_retorno':
       return autorizarRetorno(estado, comando);
+    case 'desconectar_jogador':
+      return desconectarJogador(estado, comando);
+    case 'reconectar_jogador':
+      return reconectarJogador(estado, comando);
+    case 'expirar_reconexao':
+      return expirarReconexao(estado, comando);
+    case 'confirmar_consistencia_da_sala':
+      return confirmarConsistenciaDaSala(estado, comando);
+    case 'registrar_reinicio_da_sala':
+      return registrarReinicioDaSala(estado, comando);
     default:
       return rejeitar('DADOS_INVALIDOS', 'O comando de domínio é inválido.');
   }
@@ -249,6 +342,7 @@ export function criarSala(
     proximaOrdemDeEntrada: 2,
     anfitriaoId: comando.membroId,
     jogadoresBloqueados: [],
+    consistente: true,
   };
 
   return sucesso(
@@ -270,12 +364,11 @@ export function entrarNaSala(
   estado: EstadoDoLobby,
   comando: EntrarNaSalaComando,
 ): Resultado {
-  const sala = estado.salas.find((item) => item.id === comando.salaId);
-  if (!sala) {
-    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
-      salaId: comando.salaId,
-    });
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
   }
+  const { sala } = salaOuErro;
 
   const dadosInvalidos = validarTexto(
     comando.salaId,
@@ -284,6 +377,11 @@ export function entrarNaSala(
   );
   if (dadosInvalidos) {
     return dadosInvalidos;
+  }
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
   }
 
   if (sala.jogadoresBloqueados.includes(comando.jogadorId)) {
@@ -310,10 +408,14 @@ export function entrarNaSala(
     );
   }
 
-  if (sala.estado === 'encerrada') {
-    return rejeitar('SALA_ENCERRADA', 'A Sala está encerrada.', {
-      salaId: sala.id,
-    });
+  if (sala.estado !== 'aberta') {
+    return rejeitar(
+      'SALA_ENCERRADA',
+      sala.estado === 'expirada'
+        ? 'A Sala expirou e não aceita novas entradas.'
+        : 'A Sala está encerrada.',
+      { salaId: sala.id },
+    );
   }
 
   if (sala.membros.filter((membro) => membro.estado === 'ativo').length >= LIMITE_DE_MEMBROS) {
@@ -368,11 +470,15 @@ export function sairDaSala(
     return dadosInvalidos;
   }
 
-  const sala = estado.salas.find((item) => item.id === comando.salaId);
-  if (!sala) {
-    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
-      salaId: comando.salaId,
-    });
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
   }
 
   const membro = sala.membros.find(
@@ -472,14 +578,16 @@ export function expulsarMembro(
   }
   const { sala, anfitriao } = contexto;
 
-  const alvo = sala.membros.find((item) => item.id === comando.membroAlvoId);
-  if (!alvo || alvo.estado !== 'ativo') {
-    return rejeitar(
-      alvo ? 'MEMBRO_NAO_ATIVO' : 'MEMBRO_NAO_ENCONTRADO',
-      alvo ? 'O vínculo do Membro já está encerrado.' : 'O Membro não pertence à Sala.',
-      { salaId: sala.id, membroId: comando.membroAlvoId },
-    );
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
   }
+
+  const contextoDoAlvo = exigirMembroAtivo(sala, { membroId: comando.membroAlvoId });
+  if (!('membro' in contextoDoAlvo)) {
+    return contextoDoAlvo;
+  }
+  const alvo = contextoDoAlvo.membro;
 
   if (alvo.id === anfitriao.id) {
     return rejeitar(
@@ -538,6 +646,11 @@ export function autorizarRetorno(
   }
   const { sala } = contexto;
 
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
   if (!sala.jogadoresBloqueados.includes(comando.jogadorId)) {
     return rejeitar(
       'JOGADOR_NAO_BLOQUEADO',
@@ -562,6 +675,263 @@ export function autorizarRetorno(
   ]);
 }
 
+export function desconectarJogador(
+  estado: EstadoDoLobby,
+  comando: DesconectarJogadorComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId, comando.jogadorId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const contexto = exigirMembroAtivo(sala, { jogadorId: comando.jogadorId });
+  if (!('membro' in contexto)) {
+    return contexto;
+  }
+  const { membro } = contexto;
+
+  if (membro.presenca === 'em_reconexao') {
+    return sucesso(estado, []);
+  }
+
+  const novaSala: Sala = {
+    ...sala,
+    membros: sala.membros.map((item) =>
+      item.id === membro.id
+        ? { ...item, presenca: 'em_reconexao' as const }
+        : item,
+    ),
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'membro_desconectado',
+      salaId: sala.id,
+      membroId: membro.id,
+      jogadorId: membro.jogadorId,
+      ordemDeEntrada: membro.ordemDeEntrada,
+    },
+  ]);
+}
+
+export function reconectarJogador(
+  estado: EstadoDoLobby,
+  comando: ReconectarJogadorComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId, comando.jogadorId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const contexto = exigirMembroAtivo(sala, { jogadorId: comando.jogadorId });
+  if (!('membro' in contexto)) {
+    return contexto;
+  }
+  const { membro } = contexto;
+
+  if (membro.presenca === 'conectado') {
+    return sucesso(estado, []);
+  }
+
+  const novaSala: Sala = {
+    ...sala,
+    membros: sala.membros.map((item) =>
+      item.id === membro.id
+        ? { ...item, presenca: 'conectado' as const }
+        : item,
+    ),
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'membro_reconectado',
+      salaId: sala.id,
+      membroId: membro.id,
+      jogadorId: membro.jogadorId,
+      ordemDeEntrada: membro.ordemDeEntrada,
+    },
+  ]);
+}
+
+export function expirarReconexao(
+  estado: EstadoDoLobby,
+  comando: ExpirarReconexaoComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId, comando.membroId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const contexto = exigirMembroAtivo(sala, { membroId: comando.membroId });
+  if (!('membro' in contexto)) {
+    return contexto;
+  }
+  const { membro } = contexto;
+
+  if (membro.presenca !== 'em_reconexao') {
+    return rejeitar(
+      'MEMBRO_NAO_EM_RECONEXAO',
+      'O Membro não está em janela de reconexão.',
+      { salaId: sala.id, membroId: comando.membroId },
+    );
+  }
+
+  // O reset de presenca/pronto no vínculo encerrado é deliberado: um vínculo
+  // encerrado não tem presença — preservar 'em_reconexao' implicaria uma
+  // janela de reconexão ainda aberta num tipo de dois valores
+  // (conectado | em_reconexao).
+  const membros = sala.membros.map((item) =>
+    item.id === membro.id
+      ? {
+          ...item,
+          estado: 'encerrado' as const,
+          motivoEncerramento: 'expiracao' as const,
+          presenca: 'conectado' as const,
+          pronto: false,
+        }
+      : item,
+  );
+  const aindaHaMembrosAtivos = membros.some((item) => item.estado === 'ativo');
+  const anfitriaoExpirou = sala.anfitriaoId === membro.id;
+  const anfitriaoNovoId = aindaHaMembrosAtivos
+    ? (anfitriaoExpirou ? sucederAnfitriao(membros, membro) : sala.anfitriaoId)
+    : null;
+  const novaSala: Sala = {
+    ...sala,
+    membros,
+    estado: aindaHaMembrosAtivos ? sala.estado : 'expirada',
+    anfitriaoId: anfitriaoNovoId,
+  };
+
+  const eventos: EventoDeDominio[] = [
+    {
+      tipo: 'vinculo_expirado',
+      salaId: sala.id,
+      membroId: membro.id,
+      jogadorId: membro.jogadorId,
+      ordemDeEntrada: membro.ordemDeEntrada,
+    },
+  ];
+  if (anfitriaoExpirou && anfitriaoNovoId !== null) {
+    eventos.push({
+      tipo: 'anfitriao_sucedido',
+      salaId: sala.id,
+      anfitriaoAnteriorId: membro.id,
+      anfitriaoNovoId,
+    });
+  }
+  if (!aindaHaMembrosAtivos) {
+    eventos.push({ tipo: 'sala_expirada', salaId: sala.id });
+  }
+
+  return sucesso(substituirSala(estado, novaSala), eventos);
+}
+
+export function confirmarConsistenciaDaSala(
+  estado: EstadoDoLobby,
+  comando: ConfirmarConsistenciaDaSalaComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  if (sala.consistente) {
+    return sucesso(estado, []);
+  }
+
+  const novaSala: Sala = { ...sala, consistente: true };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'consistencia_confirmada',
+      salaId: sala.id,
+    },
+  ]);
+}
+
+export function registrarReinicioDaSala(
+  estado: EstadoDoLobby,
+  comando: RegistrarReinicioDaSalaComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  if (!sala.consistente) {
+    return sucesso(estado, []);
+  }
+
+  // O reinício do servidor é tratado como uma desconexão em massa: todos os
+  // membros ativos entram na janela de reconexão — a Presença é binária
+  // (conectado | em_reconexao), então eles reaparecem desconectados e não
+  // prontos, conforme o ADR-0002 ("membros reaparecem desconectados e não
+  // prontos"). A Sala fica inconsistente até a projeção ser reconstruída e
+  // confirmada; por isso este comando NÃO passa pelo gate de consistência.
+  const novaSala: Sala = {
+    ...sala,
+    consistente: false,
+    membros: sala.membros.map((membro) =>
+      membro.estado === 'ativo'
+        ? { ...membro, presenca: 'em_reconexao', pronto: false }
+        : membro,
+    ),
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'reinicio_registrado',
+      salaId: sala.id,
+    },
+  ]);
+}
+
 function membroAtivo(id: string, jogadorId: string, ordemDeEntrada: number): Membro {
   return {
     id,
@@ -569,7 +939,66 @@ function membroAtivo(id: string, jogadorId: string, ordemDeEntrada: number): Mem
     ordemDeEntrada,
     estado: 'ativo',
     motivoEncerramento: null,
+    presenca: 'conectado',
+    pronto: false,
   };
+}
+
+function exigirSala(
+  estado: EstadoDoLobby,
+  salaId: string,
+): { sala: Sala } | OperacaoRejeitada {
+  const sala = estado.salas.find((item) => item.id === salaId);
+  if (!sala) {
+    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
+      salaId,
+    });
+  }
+  return { sala };
+}
+
+function exigirSalaConsistente(
+  sala: Sala,
+): OperacaoRejeitada | undefined {
+  if (sala.consistente) {
+    return undefined;
+  }
+  return rejeitar(
+    'SALA_INCONSISTENTE',
+    'A Sala está inconsistente e não aceita mutações até a consistência ser confirmada.',
+    { salaId: sala.id },
+  );
+}
+
+// Localiza o vínculo ativo por chave (jogadorId ou membroId) e diferencia
+// "vínculo encerrado" (MEMBRO_NAO_ATIVO) de "não pertence à Sala"
+// (MEMBRO_NAO_ENCONTRADO).
+function exigirMembroAtivo(
+  sala: Sala,
+  chave: { readonly jogadorId: string } | { readonly membroId: string },
+): { membro: Membro } | OperacaoRejeitada {
+  const corresponde = (item: Membro) =>
+    'jogadorId' in chave
+      ? item.jogadorId === chave.jogadorId
+      : item.id === chave.membroId;
+
+  const membro = sala.membros.find(
+    (item) => item.estado === 'ativo' && corresponde(item),
+  );
+  if (membro) {
+    return { membro };
+  }
+
+  const vinculo = sala.membros.find(corresponde);
+  return rejeitar(
+    vinculo ? 'MEMBRO_NAO_ATIVO' : 'MEMBRO_NAO_ENCONTRADO',
+    vinculo
+      ? 'O vínculo do Membro já está encerrado.'
+      : 'O Membro não pertence à Sala.',
+    'jogadorId' in chave
+      ? { salaId: sala.id, jogadorId: chave.jogadorId }
+      : { salaId: sala.id, membroId: chave.membroId },
+  );
 }
 
 function exigirAnfitriaoAtual(
@@ -578,12 +1007,11 @@ function exigirAnfitriaoAtual(
   anfitriaoMembroId: string,
   acao: string,
 ): { sala: Sala; anfitriao: Membro } | OperacaoRejeitada {
-  const sala = estado.salas.find((item) => item.id === salaId);
-  if (!sala) {
-    return rejeitar('SALA_NAO_ENCONTRADA', 'A Sala não foi encontrada.', {
-      salaId,
-    });
+  const salaOuErro = exigirSala(estado, salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
   }
+  const { sala } = salaOuErro;
 
   const anfitriao = sala.membros.find(
     (item) => item.id === anfitriaoMembroId && item.estado === 'ativo',

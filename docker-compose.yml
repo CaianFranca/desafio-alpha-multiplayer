@@ -82,5 +82,21 @@ services:
       retries: 10
       start_period: 15s
 
+  nginx:
+    build:
+      context: .
+      dockerfile: infra/nginx/Dockerfile
+    profiles: [nginx, full]
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./frontend/web/media:/usr/share/nginx/html/media:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
 volumes:
   postgres_data:
