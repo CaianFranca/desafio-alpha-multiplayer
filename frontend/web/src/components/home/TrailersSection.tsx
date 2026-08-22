@@ -4,7 +4,40 @@ import { trailers } from './placeholders'
 import type { Trailer } from './placeholders'
 import { ImagePlaceholder } from '../ui/ImagePlaceholder'
 
-const controlButton = 'inline-block border-0 rounded-lg bg-(--color-accent) text-gray-800 cursor-pointer font-sans font-bold px-4 py-2 hover:opacity-90 transition-opacity'
+const controlButton =
+  'inline-flex h-9 w-9 items-center justify-center border-0 rounded-full bg-transparent p-0 text-white cursor-pointer hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors'
+
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  )
+}
+
+function PauseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+      <path d="M6 5h4v14H6zm8 0h4v14h-4z" />
+    </svg>
+  )
+}
+
+function SoundIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1c2.9.9 5 3.6 5 6.7s-2.1 5.8-5 6.7v2.1c4-.9 7-4.5 7-8.8s-3-7.9-7-8.8z" />
+    </svg>
+  )
+}
+
+function MutedIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+      <path d="M16.5 12A4.5 4.5 0 0 0 14 8v2.2l2.5 2.5v-.7zM19 12c0 .9-.2 1.8-.5 2.6l1.5 1.5A9.7 9.7 0 0 0 21 12c0-4.3-3-7.9-7-8.8v2.1c2.9.9 5 3.6 5 6.7zM4.3 3L3 4.3 7.7 9H3v6h4l5 5v-6.7l4.3 4.3c-.7.5-1.4.9-2.3 1.2v2.1c1.4-.3 2.6-1 3.7-1.8l2 2 1.3-1.3-3-2.9L4.3 3zM12 4L9.9 6.1 12 8.2V4z" />
+    </svg>
+  )
+}
 
 function TrailerPlayer({ trailer }: { trailer: Trailer }) {
   const { titulo, capa, src } = trailer
@@ -67,7 +100,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     )
   } else if (shouldLoad && src) {
     media = (
-      <>
+      <div className="relative w-full aspect-video overflow-hidden rounded-xl bg-black group">
         <video
           ref={videoRef}
           src={src}
@@ -76,26 +109,50 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
           muted
           playsInline
           preload="none"
-          className="w-full aspect-video rounded-xl bg-black"
+          onClick={togglePlay}
           onError={() => setFailed(true)}
           onCanPlay={() => setReady(true)}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          className="w-full h-full object-contain"
         />
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button type="button" onClick={togglePlay} className={controlButton}>{playing ? trailers.labels.pause : trailers.labels.play}</button>
-          <button type="button" onClick={toggleMute} className={controlButton}>{muted ? trailers.labels.som : trailers.labels.mudo}</button>
-          {!ready && <p role="status" className="text-(--color-muted) text-sm m-0">{trailers.mensagens.carregando}</p>}
+        {!ready && (
+          <p role="status" className="absolute top-3 left-3 m-0 rounded-md bg-black/70 px-3 py-1 text-white text-sm">
+            {trailers.mensagens.carregando}
+          </p>
+        )}
+        <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 px-2 pt-10 pb-2 bg-linear-to-t from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200">
+          <button
+            type="button"
+            onClick={togglePlay}
+            aria-label={playing ? trailers.labels.pause : trailers.labels.play}
+            className={controlButton}
+          >
+            {playing ? <PauseIcon /> : <PlayIcon />}
+          </button>
+          <button
+            type="button"
+            onClick={toggleMute}
+            aria-label={muted ? trailers.labels.som : trailers.labels.mudo}
+            className={controlButton}
+          >
+            {muted ? <MutedIcon /> : <SoundIcon />}
+          </button>
         </div>
-      </>
+      </div>
     )
   } else {
     media = (
-      <div>
+      <div className="relative overflow-hidden rounded-xl">
         <ImagePlaceholder alt={titulo} src={capa} />
-        <div className="mt-3">
-          <button type="button" onClick={() => setRequested(true)} className={controlButton}>{trailers.labels.play}</button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setRequested(true)}
+          aria-label={trailers.labels.play}
+          className="absolute inset-0 m-auto inline-flex h-16 w-16 items-center justify-center border-0 rounded-full bg-black/60 text-white cursor-pointer hover:bg-(--color-accent) hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors"
+        >
+          <PlayIcon />
+        </button>
       </div>
     )
   }
