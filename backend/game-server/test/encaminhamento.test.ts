@@ -122,16 +122,6 @@ async function postOfertaInvalida(baseUrl: string, corpo: unknown): Promise<Recu
   return recusa;
 }
 
-async function aguardarExpiracaoViaHttp(baseUrl: string, partidaId: string, timeoutMs: number): Promise<boolean> {
-  const inicio = Date.now();
-  while (Date.now() - inicio < timeoutMs) {
-    const resposta = await deletePartida(baseUrl, partidaId);
-    if (resposta.status === 404) return true;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return (await deletePartida(baseUrl, partidaId)).status === 404;
-}
-
 before(async () => {
   try {
     await redis.connect();
@@ -293,9 +283,7 @@ test('partida preparada expira pelo TTL e DELETE posterior responde PARTIDA_NAO_
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaValida());
 
-    const expirou = await aguardarExpiracaoViaHttp(servidor.baseUrl, aceite.partidaId, 5000);
-    assert.ok(expirou, 'DELETE deveria retornar 404 após a expiração do TTL');
-
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     const resposta = await deletePartida(servidor.baseUrl, aceite.partidaId);
     assert.equal(resposta.status, 404);
     const corpo = (await resposta.json()) as RecusaDoEncaminhamento;
