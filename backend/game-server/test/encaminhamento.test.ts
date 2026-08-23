@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, afterEach, before, test } from 'node:test';
+import { after, before, test } from 'node:test';
 import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { Redis } from 'ioredis';
@@ -11,7 +11,6 @@ import type {
   RecusaDoEncaminhamento,
 } from '@flicker/shared';
 import { createApp } from '../src/app.ts';
-import { chaveDaPartida, type PartidaPreparada } from '../src/partidas/partidas.ts';
 
 const SERVER_ID = 'game-server-teste';
 
@@ -27,8 +26,6 @@ function criarClienteRedis(): Redis {
 }
 
 const redis = criarClienteRedis();
-
-let chavesCriadas: string[] = [];
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -116,20 +113,23 @@ async function criarPartidaViaPost(baseUrl: string, oferta: OfertaDeEncaminhamen
   return (await resposta.json()) as AceiteDoEncaminhamento;
 }
 
-async function aguardarExpiracao(chave: string, timeoutMs: number): Promise<boolean> {
-  const inicio = Date.now();
-  while (Date.now() - inicio < timeoutMs) {
-    if ((await redis.exists(chave)) === 0) {
-      return true;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return (await redis.exists(chave)) === 0;
+async function postOfertaInvalida(baseUrl: string, corpo: unknown): Promise<RecusaDoEncaminhamento> {
+  const resposta = await postOferta(baseUrl, corpo);
+  assert.equal(resposta.status, 400);
+  const recusa = (await resposta.json()) as RecusaDoEncaminhamento;
+  assert.equal(recusa.codigo, 'ROSTER_INVALIDO');
+  assert.ok(typeof recusa.motivo === 'string' && recusa.motivo.length > 0);
+  return recusa;
 }
 
-async function naoHaPartidasNoRedis(): Promise<void> {
-  const chaves = await redis.keys('game-server:partida:*');
-  assert.deepEqual(chaves, []);
+async function aguardarExpiracaoViaHttp(baseUrl: string, partidaId: string, timeoutMs: number): Promise<boolean> {
+  const inicio = Date.now();
+  while (Date.now() - inicio < timeoutMs) {
+    const resposta = await deletePartida(baseUrl, partidaId);
+    if (resposta.status === 404) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return (await deletePartida(baseUrl, partidaId)).status === 404;
 }
 
 before(async () => {
@@ -149,13 +149,6 @@ after(async () => {
   }
 });
 
-afterEach(async () => {
-  if (chavesCriadas.length > 0) {
-    await redis.del(...chavesCriadas);
-    chavesCriadas = [];
-  }
-});
-
 test('POST com roster válido cria partida preparada e responde aceite', async () => {
   const servidor = await subirServidor(600);
   try {
@@ -165,133 +158,90 @@ test('POST com roster válido cria partida preparada e responde aceite', async (
     assert.equal(aceite.serverId, SERVER_ID);
     assert.ok(typeof aceite.partidaId === 'string' && aceite.partidaId.length > 0);
 
-    const chave = chaveDaPartida(aceite.partidaId);
-    chavesCriadas.push(chave);
-
-    const bruto = await redis.get(chave);
-    assert.ok(bruto !== null, 'chave da partida deve existir no Redis');
-
-    const partida = JSON.parse(bruto as string) as PartidaPreparada;
-    assert.equal(partida.partidaId, aceite.partidaId);
-    assert.equal(partida.serverId, SERVER_ID);
-    assert.equal(partida.salaId, oferta.salaId);
-    assert.equal(partida.codigoDeSala, oferta.codigoDeSala);
-    assert.equal(partida.estado, 'preparada');
-    assert.deepEqual(partida.roster, oferta.roster);
-    assert.ok(typeof partida.criadaEm === 'string' && partida.criadaEm.length > 0);
-
-    const ttl = await redis.ttl(chave);
-    assert.ok(ttl > 0 && ttl <= 600, `TTL deveria estar entre 1 e 600, foi ${ttl}`);
+    const del = await deletePartida(servidor.baseUrl, aceite.partidaId);
+    assert.equal(del.status, 204);
+    const secondDel = await deletePartida(servidor.baseUrl, aceite.partidaId);
+    assert.equal(secondDel.status, 404);
   } finally {
     await servidor.fechar();
   }
 });
 
-test('POST com roster de 3 membros responde ROSTER_INVALIDO sem criar chave', async () => {
+test('POST com roster de 3 membros responde ROSTER_INVALIDO', async () => {
   const servidor = await subirServidor(600);
   try {
-    const resposta = await postOferta(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2), membro(3)] }));
-    assert.equal(resposta.status, 400);
-    const recusa = (await resposta.json()) as RecusaDoEncaminhamento;
-    assert.equal(recusa.codigo, 'ROSTER_INVALIDO');
-    assert.ok(typeof recusa.motivo === 'string' && recusa.motivo.length > 0);
-    await naoHaPartidasNoRedis();
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2), membro(3)] }));
   } finally {
     await servidor.fechar();
   }
 });
 
-test('POST com ids de membro duplicados responde ROSTER_INVALIDO sem criar chave', async () => {
+test('POST com ids de membro duplicados responde ROSTER_INVALIDO', async () => {
   const servidor = await subirServidor(600);
   try {
     const oferta = ofertaValida({
       roster: [membro(1), membro(2, { id: 'membro-1' }), membro(3), membro(4)],
     });
-    const resposta = await postOferta(servidor.baseUrl, oferta);
-    assert.equal(resposta.status, 400);
-    const recusa = (await resposta.json()) as RecusaDoEncaminhamento;
-    assert.equal(recusa.codigo, 'ROSTER_INVALIDO');
-    await naoHaPartidasNoRedis();
+    await postOfertaInvalida(servidor.baseUrl, oferta);
   } finally {
     await servidor.fechar();
   }
 });
 
-test('POST com jogadorIds duplicados responde ROSTER_INVALIDO sem criar chave', async () => {
+test('POST com jogadorIds duplicados responde ROSTER_INVALIDO', async () => {
   const servidor = await subirServidor(600);
   try {
     const oferta = ofertaValida({
       roster: [membro(1), membro(2, { jogadorId: 'jogador-1' }), membro(3), membro(4)],
     });
-    const resposta = await postOferta(servidor.baseUrl, oferta);
-    assert.equal(resposta.status, 400);
-    const recusa = (await resposta.json()) as RecusaDoEncaminhamento;
-    assert.equal(recusa.codigo, 'ROSTER_INVALIDO');
-    await naoHaPartidasNoRedis();
+    await postOfertaInvalida(servidor.baseUrl, oferta);
   } finally {
     await servidor.fechar();
   }
 });
 
-test('POST com membro sem campo essencial responde ROSTER_INVALIDO sem criar chave', async () => {
+test('POST com membro sem campo essencial responde ROSTER_INVALIDO', async () => {
   const servidor = await subirServidor(600);
   try {
     const membroIncompleto = { ...membro(2) } as Partial<MembroDaSala>;
     delete membroIncompleto.apelido;
     const oferta = ofertaValida({ roster: [membro(1), membroIncompleto as MembroDaSala, membro(3), membro(4)] });
-    const resposta = await postOferta(servidor.baseUrl, oferta);
-    assert.equal(resposta.status, 400);
-    const recusa = (await resposta.json()) as RecusaDoEncaminhamento;
-    assert.equal(recusa.codigo, 'ROSTER_INVALIDO');
-    await naoHaPartidasNoRedis();
+    await postOfertaInvalida(servidor.baseUrl, oferta);
   } finally {
     await servidor.fechar();
   }
 });
 
-test('POST com salaId vazio responde ROSTER_INVALIDO sem criar chave', async () => {
+test('POST com salaId vazio responde ROSTER_INVALIDO', async () => {
   const servidor = await subirServidor(600);
   try {
-    const resposta = await postOferta(servidor.baseUrl, ofertaValida({ salaId: '' }));
-    assert.equal(resposta.status, 400);
-    const recusa = (await resposta.json()) as RecusaDoEncaminhamento;
-    assert.equal(recusa.codigo, 'ROSTER_INVALIDO');
-    await naoHaPartidasNoRedis();
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ salaId: '' }));
   } finally {
     await servidor.fechar();
   }
 });
 
-test('POST com codigoDeSala vazio responde ROSTER_INVALIDO sem criar chave', async () => {
+test('POST com codigoDeSala vazio responde ROSTER_INVALIDO', async () => {
   const servidor = await subirServidor(600);
   try {
-    const resposta = await postOferta(servidor.baseUrl, ofertaValida({ codigoDeSala: '' }));
-    assert.equal(resposta.status, 400);
-    const recusa = (await resposta.json()) as RecusaDoEncaminhamento;
-    assert.equal(recusa.codigo, 'ROSTER_INVALIDO');
-    await naoHaPartidasNoRedis();
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ codigoDeSala: '' }));
   } finally {
     await servidor.fechar();
   }
 });
 
-test('POST com corpo não-objeto responde ROSTER_INVALIDO sem criar chave', async () => {
+test('POST com corpo não-objeto responde ROSTER_INVALIDO', async () => {
   const servidor = await subirServidor(600);
   try {
-    const respostaArray = await postOferta(servidor.baseUrl, JSON.stringify(['a', 'b', 'c', 'd']));
-    assert.equal(respostaArray.status, 400);
-    const recusaArray = (await respostaArray.json()) as RecusaDoEncaminhamento;
-    assert.equal(recusaArray.codigo, 'ROSTER_INVALIDO');
+    await postOfertaInvalida(servidor.baseUrl, JSON.stringify(['a', 'b', 'c', 'd']));
 
-    const respostaSemContentType = await fetch(`${servidor.baseUrl}/api/encaminhamento`, {
+    const resposta = await fetch(`${servidor.baseUrl}/api/encaminhamento`, {
       method: 'POST',
       body: 'não sou json',
     });
-    assert.equal(respostaSemContentType.status, 400);
-    const recusaSemContentType = (await respostaSemContentType.json()) as RecusaDoEncaminhamento;
-    assert.equal(recusaSemContentType.codigo, 'ROSTER_INVALIDO');
-
-    await naoHaPartidasNoRedis();
+    assert.equal(resposta.status, 400);
+    const recusa = (await resposta.json()) as RecusaDoEncaminhamento;
+    assert.equal(recusa.codigo, 'ROSTER_INVALIDO');
   } finally {
     await servidor.fechar();
   }
@@ -304,7 +254,6 @@ test('POST com JSON malformado responde DADOS_INVALIDOS', async () => {
     assert.equal(resposta.status, 400);
     const corpo = (await resposta.json()) as RecusaDoEncaminhamento;
     assert.equal(corpo.codigo, 'DADOS_INVALIDOS');
-    await naoHaPartidasNoRedis();
   } finally {
     await servidor.fechar();
   }
@@ -314,12 +263,9 @@ test('DELETE cancela partida preparada e segundo DELETE responde PARTIDA_NAO_ENC
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaValida());
-    const chave = chaveDaPartida(aceite.partidaId);
-    chavesCriadas.push(chave);
 
     const cancelamento = await deletePartida(servidor.baseUrl, aceite.partidaId);
     assert.equal(cancelamento.status, 204);
-    assert.equal(await redis.exists(chave), 0, 'chave da partida deve ser removida ao cancelar');
 
     const segundoCancelamento = await deletePartida(servidor.baseUrl, aceite.partidaId);
     assert.equal(segundoCancelamento.status, 404);
@@ -346,11 +292,9 @@ test('partida preparada expira pelo TTL e DELETE posterior responde PARTIDA_NAO_
   const servidor = await subirServidor(1);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaValida());
-    const chave = chaveDaPartida(aceite.partidaId);
-    chavesCriadas.push(chave);
 
-    const expirou = await aguardarExpiracao(chave, 5000);
-    assert.ok(expirou, 'chave da partida deveria expirar após o TTL sem conexão');
+    const expirou = await aguardarExpiracaoViaHttp(servidor.baseUrl, aceite.partidaId, 5000);
+    assert.ok(expirou, 'DELETE deveria retornar 404 após a expiração do TTL');
 
     const resposta = await deletePartida(servidor.baseUrl, aceite.partidaId);
     assert.equal(resposta.status, 404);

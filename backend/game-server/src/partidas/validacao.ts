@@ -1,6 +1,6 @@
-import type { MembroDaSala, RecusaDoEncaminhamento } from '@flicker/shared';
+import type { MembroDaSala, Presenca, RecusaDoEncaminhamento } from '@flicker/shared';
 
-const PRESENCAS = ['conectado', 'em_reconexao'];
+const PRESENCAS = ['conectado', 'em_reconexao'] as const satisfies readonly Presenca[];
 
 export function validarOfertaDeEncaminhamento(value: unknown): RecusaDoEncaminhamento | null {
   const recusa = (motivo: string): RecusaDoEncaminhamento => ({ codigo: 'ROSTER_INVALIDO', motivo });
@@ -65,7 +65,7 @@ function problemaNoMembro(value: unknown): string | null {
   if (typeof membro.ordemDeEntrada !== 'number' || !Number.isInteger(membro.ordemDeEntrada)) {
     return 'membro do roster com ordemDeEntrada inválida';
   }
-  if (typeof membro.presenca !== 'string' || !PRESENCAS.includes(membro.presenca)) {
+  if (typeof membro.presenca !== 'string' || !PRESENCAS.includes(membro.presenca as Presenca)) {
     return 'membro do roster com presenca inválida';
   }
   if (typeof membro.prontidao !== 'boolean') {
