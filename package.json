@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "backend/game-server"
+    "backend/game-server",
+    "backend/lobby-server"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
