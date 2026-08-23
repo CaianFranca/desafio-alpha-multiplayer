@@ -5,6 +5,7 @@ export interface Config {
   gameServerPort: number;
   lobbyServerPort: number;
   jwtSecret: string;
+  partidaPreparadaTtlSegundos: number;
   postgres: {
     host: string;
     port: number;
@@ -26,6 +27,7 @@ const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
 const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
 const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
+const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 
 let envLoaded = false;
 
@@ -66,6 +68,14 @@ function parsePoolMax(raw: string | undefined): number {
   return DEFAULT_PG_POOL_MAX;
 }
 
+function parsePartidaPreparadaTtlSegundos(raw: string | undefined): number {
+  const parsed = Number(raw ?? DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS);
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS;
+}
+
 export function getConfig(): Config {
   loadEnvFile();
 
@@ -81,6 +91,9 @@ export function getConfig(): Config {
 
   const jwtSecret = process.env.JWT_SECRET ?? DEFAULT_JWT_SECRET;
   const poolMax = parsePoolMax(process.env.PG_POOL_MAX);
+  const partidaPreparadaTtlSegundos = parsePartidaPreparadaTtlSegundos(
+    process.env.PARTIDA_PREPARADA_TTL_SEGUNDOS as string | undefined,
+  );
 
   const postgres = {
     host: process.env.POSTGRES_HOST ?? 'localhost',
@@ -106,5 +119,5 @@ export function getConfig(): Config {
     password: process.env.REDIS_PASSWORD ?? undefined,
   };
 
-  return { gameServerPort, lobbyServerPort, jwtSecret, postgres, redis };
+  return { gameServerPort, lobbyServerPort, jwtSecret, partidaPreparadaTtlSegundos, postgres, redis };
 }
