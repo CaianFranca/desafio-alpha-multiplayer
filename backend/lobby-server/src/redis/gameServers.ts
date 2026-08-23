@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis';
+import { GAME_SERVERS_PREFIX } from '@flicker/config';
 
-export const GAME_SERVERS_PREFIX = 'game-servers:disponiveis:';
+export { GAME_SERVERS_PREFIX };
 
 export interface GameServerDisponivel {
   serverId: string;
@@ -67,6 +68,5 @@ export async function estaDisponivel(redis: Redis, serverId: string): Promise<bo
   return exists === 1;
 }
 
-// Alias inglês/português para flexibilidade de testes
 export const listarDisponiveis = listarGameServersDisponiveis;
 export const isAvailable = estaDisponivel;

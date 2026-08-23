@@ -2,8 +2,34 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test, { describe } from 'node:test';
 import { Redis } from 'ioredis';
-import { anunciar, iniciarHeartbeat, pararHeartbeat, removerRegistro } from './registro.ts';
-import { listarGameServersDisponiveis, estaDisponivel } from '../../../lobby-server/src/redis/gameServers.ts';
+import { GAME_SERVERS_PREFIX } from '@flicker/config';
+import { anunciar, chaveGameServer, iniciarHeartbeat, pararHeartbeat, removerRegistro } from './registro.ts';
+
+async function listarGameServersDisponiveis(redis: Redis): Promise<{ serverId: string }[]> {
+  const chaves: string[] = [];
+  let cursor = '0';
+  do {
+    const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `${GAME_SERVERS_PREFIX}*`, 'COUNT', 100);
+    cursor = nextCursor;
+    if (keys.length > 0) chaves.push(...keys);
+  } while (cursor !== '0');
+  if (chaves.length === 0) return [];
+  const valores = await redis.mget(...chaves);
+  const out: { serverId: string }[] = [];
+  for (let i = 0; i < valores.length; i++) {
+    const raw = valores[i];
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as { serverId?: string };
+      out.push({ serverId: parsed.serverId ?? chaves[i].slice(GAME_SERVERS_PREFIX.length) });
+    } catch { /* ignora corrompida */ }
+  }
+  return out;
+}
+
+async function estaDisponivel(redis: Redis, serverId: string): Promise<boolean> {
+  return (await redis.exists(chaveGameServer(serverId))) === 1;
+}
 
 function criarRedis(): Redis | null {
   const host = process.env.REDIS_HOST ?? 'localhost';

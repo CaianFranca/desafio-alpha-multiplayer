@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Redis } from 'ioredis';
+import { GAME_SERVERS_PREFIX, sanitizeServerId } from '@flicker/config';
 
-export const GAME_SERVERS_PREFIX = 'game-servers:disponiveis:';
+export { GAME_SERVERS_PREFIX };
 
 export interface GameServerRegistro {
   serverId: string;
@@ -18,7 +19,11 @@ export function chaveGameServer(serverId: string): string {
 
 export function resolverServerId(configId: string | undefined): string {
   if (configId && configId.trim().length > 0) {
-    return configId.trim();
+    const sanitized = sanitizeServerId(configId);
+    if (sanitized.length === 0 || /^[-]+$/.test(sanitized)) {
+      return randomUUID();
+    }
+    return sanitized;
   }
   return randomUUID();
 }
@@ -39,16 +44,10 @@ export async function anunciar(
   await redis.set(chave, payload, 'PX', ttlMs);
 }
 
-// Alias para compatibilidade com testes/nomenclatura alternativa
-export const anunciarRegistro = anunciar;
-
 export async function removerRegistro(redis: Redis, serverId: string): Promise<void> {
   const chave = chaveGameServer(serverId);
   await redis.del(chave);
 }
-
-// Alias
-export const remover = removerRegistro;
 
 export interface HeartbeatHandle {
   stop: () => void;
@@ -79,7 +78,8 @@ export function iniciarHeartbeat(
   });
 
   const timer = setInterval(() => {
-    const currentMeta = getMeta ? getMeta() : { ...meta, atualizadoEm: new Date().toISOString() };
+    const base = getMeta ? getMeta() : { ...meta, atualizadoEm: new Date().toISOString() };
+    const currentMeta = base.serverId ? base : { ...base, serverId };
     void anunciar(redis, serverId, currentMeta, ttlMs).catch((err: unknown) => {
       console.error('[game-server/registro] falha no heartbeat:', (err as Error).message);
     });
@@ -97,13 +97,9 @@ export function iniciarHeartbeat(
   return { stop, timer };
 }
 
-export function pararHeartbeat(handle: HeartbeatHandle | NodeJS.Timeout | undefined): void {
+export function pararHeartbeat(handle: HeartbeatHandle | undefined): void {
   if (!handle) {
     return;
   }
-  if (typeof (handle as HeartbeatHandle).stop === 'function') {
-    (handle as HeartbeatHandle).stop();
-    return;
-  }
-  clearInterval(handle as NodeJS.Timeout);
+  handle.stop();
 }
