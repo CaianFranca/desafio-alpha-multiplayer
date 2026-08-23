@@ -1,8 +1,12 @@
 import { defineConfig, mergeConfig } from 'vitest/config'
 import viteConfig from './vite.config.ts'
 
+// O vite.config virou uma função por causa do `define` dependente de modo;
+// resolvemos com mode 'test' para herdar os plugins e constantes no Vitest.
+const baseConfig = await viteConfig({ command: 'serve', mode: 'test', isSsrBuild: false })
+
 export default mergeConfig(
-  viteConfig,
+  baseConfig,
   defineConfig({
   test: {
     environment: 'jsdom',
