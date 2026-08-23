@@ -20,6 +20,9 @@ export interface Config {
     port: number;
     password?: string;
   };
+  gameServerHeartbeatIntervalMs: number;
+  gameServerHeartbeatTtlMs: number;
+  gameServerId: string | undefined;
 }
 
 // Alinhado com .env.example e docker-compose.yml (1234), como o lobby faz com a 3001.
@@ -30,6 +33,21 @@ const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
 const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
+const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
+const DEFAULT_GAME_SERVER_HEARTBEAT_TTL_MS = 15000;
+
+export const GAME_SERVERS_PREFIX = 'game-servers:disponiveis:';
+
+export function chaveGameServer(serverId: string): string {
+  return `${GAME_SERVERS_PREFIX}${serverId}`;
+}
+
+export function sanitizeServerId(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, '-')
+    .replace(/-+/g, '-');
+}
 
 let envLoaded = false;
 
@@ -78,6 +96,37 @@ function parsePartidaPreparadaTtlSegundos(raw: string | undefined): number {
   return DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS;
 }
 
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+  console.warn(`[config] valor inválido "${raw}" — usando fallback ${fallback}`);
+  return fallback;
+}
+
+export function createRedisClientOptions(redis: Config['redis']): { host: string; port: number; password?: string; lazyConnect: true; maxRetriesPerRequest: null } {
+  return {
+    host: redis.host,
+    port: redis.port,
+    password: redis.password,
+    lazyConnect: true,
+    maxRetriesPerRequest: null,
+  };
+}
+
+export function criarClienteRedis(): Redis {
+  const { redis } = getConfig();
+  const cliente = new Redis(createRedisClientOptions(redis));
+  cliente.on('error', (error: Error) => {
+    console.error('[redis] error:', error.message);
+  });
+  return cliente;
+}
+
 export function getConfig(): Config {
   loadEnvFile();
 
@@ -121,22 +170,35 @@ export function getConfig(): Config {
     password: process.env.REDIS_PASSWORD ?? undefined,
   };
 
-  return { gameServerPort, lobbyServerPort, jwtSecret, partidaPreparadaTtlSegundos, postgres, redis };
-}
+  let gameServerHeartbeatIntervalMs = parsePositiveInt(
+    process.env.GAME_SERVER_HEARTBEAT_INTERVAL_MS as string | undefined,
+    DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS,
+  );
 
-export function criarClienteRedis(): Redis {
-  const { redis } = getConfig();
-  const cliente = new Redis({
-    host: redis.host,
-    port: redis.port,
-    password: redis.password,
-    lazyConnect: true,
-    maxRetriesPerRequest: null,
-  });
+  let gameServerHeartbeatTtlMs = parsePositiveInt(
+    process.env.GAME_SERVER_HEARTBEAT_TTL_MS as string | undefined,
+    DEFAULT_GAME_SERVER_HEARTBEAT_TTL_MS,
+  );
 
-  cliente.on('error', (error: Error) => {
-    console.error('[redis] error:', error.message);
-  });
+  if (gameServerHeartbeatIntervalMs >= gameServerHeartbeatTtlMs) {
+    console.warn(
+      `[config] GAME_SERVER_HEARTBEAT_INTERVAL_MS (${gameServerHeartbeatIntervalMs}) >= TTL (${gameServerHeartbeatTtlMs}) — ajustando TTL para ${gameServerHeartbeatIntervalMs * 3}`,
+    );
+    gameServerHeartbeatTtlMs = gameServerHeartbeatIntervalMs * 3;
+  }
 
-  return cliente;
+  const rawGameServerId = process.env.GAME_SERVER_ID as string | undefined;
+  const gameServerId = rawGameServerId && rawGameServerId.trim().length > 0 ? sanitizeServerId(rawGameServerId) : undefined;
+
+  return {
+    gameServerPort,
+    lobbyServerPort,
+    jwtSecret,
+    partidaPreparadaTtlSegundos,
+    postgres,
+    redis,
+    gameServerHeartbeatIntervalMs,
+    gameServerHeartbeatTtlMs,
+    gameServerId,
+  };
 }
