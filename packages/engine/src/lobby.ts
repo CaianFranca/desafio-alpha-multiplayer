@@ -1,4 +1,4 @@
-export type EstadoDaSala = 'aberta' | 'encerrada' | 'expirada';
+export type EstadoDaSala = 'aberta' | 'encaminhada' | 'encerrada' | 'expirada';
 export type EstadoDoVinculo = 'ativo' | 'encerrado';
 export type Presenca = 'conectado' | 'em_reconexao';
 
@@ -102,6 +102,39 @@ export interface RegistrarReinicioDaSalaComando {
   readonly salaId: string;
 }
 
+export interface AlternarProntidaoComando {
+  readonly tipo: 'alternar_prontidao';
+  readonly salaId: string;
+  readonly jogadorId: string;
+}
+
+export interface EncaminharSalaComando {
+  readonly tipo: 'encaminhar_sala';
+  readonly salaId: string;
+  readonly anfitriaoMembroId: string;
+}
+
+export interface AceitarEncaminhamentoComando {
+  readonly tipo: 'aceitar_encaminhamento';
+  readonly salaId: string;
+}
+
+export interface RecusarEncaminhamentoComando {
+  readonly tipo: 'recusar_encaminhamento';
+  readonly salaId: string;
+}
+
+export interface RegistrarFalhaDoEncaminhamentoComando {
+  readonly tipo: 'registrar_falha_do_encaminhamento';
+  readonly salaId: string;
+}
+
+export interface EncerrarSalaComando {
+  readonly tipo: 'encerrar_sala';
+  readonly salaId: string;
+  readonly anfitriaoMembroId: string;
+}
+
 export type Comando =
   | CriarSalaComando
   | EntrarNaSalaComando
@@ -112,7 +145,13 @@ export type Comando =
   | ReconectarJogadorComando
   | ExpirarReconexaoComando
   | ConfirmarConsistenciaDaSalaComando
-  | RegistrarReinicioDaSalaComando;
+  | RegistrarReinicioDaSalaComando
+  | AlternarProntidaoComando
+  | EncaminharSalaComando
+  | AceitarEncaminhamentoComando
+  | RecusarEncaminhamentoComando
+  | RegistrarFalhaDoEncaminhamentoComando
+  | EncerrarSalaComando;
 
 export interface SalaCriadaEvento {
   readonly tipo: 'sala_criada';
@@ -143,7 +182,7 @@ export interface MembroSaiuEvento {
 export interface SalaEncerradaEvento {
   readonly tipo: 'sala_encerrada';
   readonly salaId: string;
-  readonly motivo: 'saida';
+  readonly motivo: 'saida' | 'encerramento';
 }
 
 export interface MembroExpulsoEvento {
@@ -204,6 +243,31 @@ export interface ReinicioRegistradoEvento {
   readonly salaId: string;
 }
 
+export interface ProntidaoAlteradaEvento extends EventoDeVinculo {
+  readonly tipo: 'prontidao_alterada';
+  readonly pronto: boolean;
+}
+
+export interface EncaminhamentoIniciadoEvento {
+  readonly tipo: 'encaminhamento_iniciado';
+  readonly salaId: string;
+}
+
+export interface SalaEncaminhadaEvento {
+  readonly tipo: 'sala_encaminhada';
+  readonly salaId: string;
+}
+
+export interface EncaminhamentoRecusadoEvento {
+  readonly tipo: 'encaminhamento_recusado';
+  readonly salaId: string;
+}
+
+export interface EncaminhamentoFalhouEvento {
+  readonly tipo: 'encaminhamento_falhou';
+  readonly salaId: string;
+}
+
 export type EventoDeDominio =
   | SalaCriadaEvento
   | MembroAdmitidoEvento
@@ -217,7 +281,12 @@ export type EventoDeDominio =
   | VinculoExpiradoEvento
   | SalaExpiradaEvento
   | ConsistenciaConfirmadaEvento
-  | ReinicioRegistradoEvento;
+  | ReinicioRegistradoEvento
+  | ProntidaoAlteradaEvento
+  | EncaminhamentoIniciadoEvento
+  | SalaEncaminhadaEvento
+  | EncaminhamentoRecusadoEvento
+  | EncaminhamentoFalhouEvento;
 
 export type CodigoDeErro =
   | 'DADOS_INVALIDOS'
@@ -234,7 +303,9 @@ export type CodigoDeErro =
   | 'APENAS_ANFITRIAO'
   | 'JOGADOR_EXPULSO'
   | 'JOGADOR_NAO_BLOQUEADO'
-  | 'SALA_INCONSISTENTE';
+  | 'SALA_INCONSISTENTE'
+  | 'SALA_ENCAMINHADA'
+  | 'ENCAMINHAMENTO_INVALIDO';
 
 export interface ErroDeDominio {
   readonly tipo: 'erro_de_dominio';
@@ -289,6 +360,18 @@ export function aplicarComando(
       return confirmarConsistenciaDaSala(estado, comando);
     case 'registrar_reinicio_da_sala':
       return registrarReinicioDaSala(estado, comando);
+    case 'alternar_prontidao':
+      return alternarProntidao(estado, comando);
+    case 'encaminhar_sala':
+      return encaminharSala(estado, comando);
+    case 'aceitar_encaminhamento':
+      return aceitarEncaminhamento(estado, comando);
+    case 'recusar_encaminhamento':
+      return recusarEncaminhamento(estado, comando);
+    case 'registrar_falha_do_encaminhamento':
+      return registrarFalhaDoEncaminhamento(estado, comando);
+    case 'encerrar_sala':
+      return encerrarSala(estado, comando);
     default:
       return rejeitar('DADOS_INVALIDOS', 'O comando de domínio é inválido.');
   }
@@ -408,6 +491,14 @@ export function entrarNaSala(
     );
   }
 
+  if (sala.estado === 'encaminhada') {
+    return rejeitar(
+      'SALA_ENCAMINHADA',
+      'A Sala está encaminhada e sua composição está congelada.',
+      { salaId: sala.id },
+    );
+  }
+
   if (sala.estado !== 'aberta') {
     return rejeitar(
       'SALA_ENCERRADA',
@@ -479,6 +570,11 @@ export function sairDaSala(
   const salaInconsistente = exigirSalaConsistente(sala);
   if (salaInconsistente) {
     return salaInconsistente;
+  }
+
+  const salaCongelada = exigirSalaNaoEncaminhada(sala);
+  if (salaCongelada) {
+    return salaCongelada;
   }
 
   const membro = sala.membros.find(
@@ -583,6 +679,11 @@ export function expulsarMembro(
     return salaInconsistente;
   }
 
+  const salaCongelada = exigirSalaNaoEncaminhada(sala);
+  if (salaCongelada) {
+    return salaCongelada;
+  }
+
   const contextoDoAlvo = exigirMembroAtivo(sala, { membroId: comando.membroAlvoId });
   if (!('membro' in contextoDoAlvo)) {
     return contextoDoAlvo;
@@ -651,6 +752,11 @@ export function autorizarRetorno(
     return salaInconsistente;
   }
 
+  const salaCongelada = exigirSalaNaoEncaminhada(sala);
+  if (salaCongelada) {
+    return salaCongelada;
+  }
+
   if (!sala.jogadoresBloqueados.includes(comando.jogadorId)) {
     return rejeitar(
       'JOGADOR_NAO_BLOQUEADO',
@@ -693,6 +799,11 @@ export function desconectarJogador(
   const salaInconsistente = exigirSalaConsistente(sala);
   if (salaInconsistente) {
     return salaInconsistente;
+  }
+
+  const salaCongelada = exigirSalaNaoEncaminhada(sala);
+  if (salaCongelada) {
+    return salaCongelada;
   }
 
   const contexto = exigirMembroAtivo(sala, { jogadorId: comando.jogadorId });
@@ -745,6 +856,11 @@ export function reconectarJogador(
     return salaInconsistente;
   }
 
+  const salaCongelada = exigirSalaNaoEncaminhada(sala);
+  if (salaCongelada) {
+    return salaCongelada;
+  }
+
   const contexto = exigirMembroAtivo(sala, { jogadorId: comando.jogadorId });
   if (!('membro' in contexto)) {
     return contexto;
@@ -793,6 +909,11 @@ export function expirarReconexao(
   const salaInconsistente = exigirSalaConsistente(sala);
   if (salaInconsistente) {
     return salaInconsistente;
+  }
+
+  const salaCongelada = exigirSalaNaoEncaminhada(sala);
+  if (salaCongelada) {
+    return salaCongelada;
   }
 
   const contexto = exigirMembroAtivo(sala, { membroId: comando.membroId });
@@ -932,6 +1053,264 @@ export function registrarReinicioDaSala(
   ]);
 }
 
+export function alternarProntidao(
+  estado: EstadoDoLobby,
+  comando: AlternarProntidaoComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId, comando.jogadorId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
+  }
+
+  const contexto = exigirMembroAtivo(sala, { jogadorId: comando.jogadorId });
+  if (!('membro' in contexto)) {
+    return contexto;
+  }
+  const { membro } = contexto;
+
+  // Prontidão é declaração do Jogador; Presença é conectividade. Por isso o
+  // membro em janela de reconexão pode alternar a prontidão — a exigência de
+  // presença 'conectado' vive apenas no encaminhamento da Sala.
+  const pronto = !membro.pronto;
+  const novaSala: Sala = {
+    ...sala,
+    membros: sala.membros.map((item) =>
+      item.id === membro.id ? { ...item, pronto } : item,
+    ),
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'prontidao_alterada',
+      salaId: sala.id,
+      membroId: membro.id,
+      jogadorId: membro.jogadorId,
+      ordemDeEntrada: membro.ordemDeEntrada,
+      pronto,
+    },
+  ]);
+}
+
+export function encaminharSala(
+  estado: EstadoDoLobby,
+  comando: EncaminharSalaComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId, comando.anfitriaoMembroId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const contexto = exigirAnfitriaoAtual(
+    estado,
+    comando.salaId,
+    comando.anfitriaoMembroId,
+    'encaminhar a Sala à Partida',
+  );
+  if (!('sala' in contexto)) {
+    return contexto;
+  }
+  const { sala } = contexto;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
+  }
+
+  const composicaoInvalida = validarComposicaoParaEncaminhamento(sala);
+  if (composicaoInvalida) {
+    return composicaoInvalida;
+  }
+
+  // A oferta não congela a Sala: o estado permanece 'aberta' e mutável
+  // durante a negociação com o game-server. O congelamento acontece apenas
+  // no aceite (aceitarEncaminhamento).
+  return sucesso(estado, [
+    { tipo: 'encaminhamento_iniciado', salaId: sala.id },
+  ]);
+}
+
+export function aceitarEncaminhamento(
+  estado: EstadoDoLobby,
+  comando: AceitarEncaminhamentoComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
+  }
+
+  // Revalidação no commit (ADR-0003): a composição pode ter mudado entre a
+  // oferta e o aceite — a Sala permanece 'aberta' e a aplicação cancela a
+  // partida em andamento (fora do engine).
+  const composicaoInvalida = validarComposicaoParaEncaminhamento(sala);
+  if (composicaoInvalida) {
+    return composicaoInvalida;
+  }
+
+  const novaSala: Sala = { ...sala, estado: 'encaminhada' };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    { tipo: 'sala_encaminhada', salaId: sala.id },
+  ]);
+}
+
+export function recusarEncaminhamento(
+  estado: EstadoDoLobby,
+  comando: RecusarEncaminhamentoComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
+  }
+
+  // A recusa (ou timeout) não afeta a Sala: ela permanece 'aberta', sem
+  // perder membros nem congelar a composição.
+  return sucesso(estado, [
+    { tipo: 'encaminhamento_recusado', salaId: sala.id },
+  ]);
+}
+
+export function registrarFalhaDoEncaminhamento(
+  estado: EstadoDoLobby,
+  comando: RegistrarFalhaDoEncaminhamentoComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
+  }
+
+  // A falha de rede/erro não afeta a Sala: ela permanece 'aberta', sem
+  // perder membros nem congelar a composição.
+  return sucesso(estado, [
+    { tipo: 'encaminhamento_falhou', salaId: sala.id },
+  ]);
+}
+
+export function encerrarSala(
+  estado: EstadoDoLobby,
+  comando: EncerrarSalaComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId, comando.anfitriaoMembroId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const contexto = exigirAnfitriaoAtual(
+    estado,
+    comando.salaId,
+    comando.anfitriaoMembroId,
+    'encerrar a Sala',
+  );
+  if (!('sala' in contexto)) {
+    return contexto;
+  }
+  const { sala } = contexto;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
+  }
+
+  // O reset de presenca/pronto no vínculo encerrado é deliberado: um vínculo
+  // encerrado não tem presença — preservar 'em_reconexao' implicaria uma
+  // janela de reconexão ainda aberta num tipo de dois valores
+  // (conectado | em_reconexao).
+  const membros = sala.membros.map((membro) =>
+    membro.estado === 'ativo'
+      ? {
+          ...membro,
+          estado: 'encerrado' as const,
+          motivoEncerramento: 'encerramento' as const,
+          presenca: 'conectado' as const,
+          pronto: false,
+        }
+      : membro,
+  );
+  const novaSala: Sala = {
+    ...sala,
+    membros,
+    estado: 'encerrada',
+    anfitriaoId: null,
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    { tipo: 'sala_encerrada', salaId: sala.id, motivo: 'encerramento' },
+  ]);
+}
+
 function membroAtivo(id: string, jogadorId: string, ordemDeEntrada: number): Membro {
   return {
     id,
@@ -968,6 +1347,76 @@ function exigirSalaConsistente(
     'A Sala está inconsistente e não aceita mutações até a consistência ser confirmada.',
     { salaId: sala.id },
   );
+}
+
+// Gate de congelamento: uma Sala encaminhada teve a composição congelada
+// para o handoff à Partida — nenhuma mutação de vínculo ou participação é
+// aceita.
+function exigirSalaNaoEncaminhada(
+  sala: Sala,
+): OperacaoRejeitada | undefined {
+  if (sala.estado !== 'encaminhada') {
+    return undefined;
+  }
+  return rejeitar(
+    'SALA_ENCAMINHADA',
+    'A Sala está encaminhada e sua composição está congelada.',
+    { salaId: sala.id },
+  );
+}
+
+// Gate de estado das operações de prontidão/encaminhamento/encerramento:
+// 'encaminhada' congela a composição e qualquer estado terminal rejeita a
+// operação.
+function exigirSalaAberta(
+  sala: Sala,
+): OperacaoRejeitada | undefined {
+  const congelada = exigirSalaNaoEncaminhada(sala);
+  if (congelada) {
+    return congelada;
+  }
+  if (sala.estado !== 'aberta') {
+    return rejeitar(
+      'SALA_ENCERRADA',
+      sala.estado === 'expirada'
+        ? 'A Sala expirou.'
+        : 'A Sala está encerrada.',
+      { salaId: sala.id },
+    );
+  }
+  return undefined;
+}
+
+// Condições de encaminhamento (ST-03): exatamente LIMITE_DE_MEMBROS vínculos
+// ativos, todos conectados e prontos.
+function validarComposicaoParaEncaminhamento(
+  sala: Sala,
+): OperacaoRejeitada | undefined {
+  const ativos = sala.membros.filter((membro) => membro.estado === 'ativo');
+  if (ativos.length !== LIMITE_DE_MEMBROS) {
+    return rejeitar(
+      'ENCAMINHAMENTO_INVALIDO',
+      `O encaminhamento exige exatamente ${LIMITE_DE_MEMBROS} Membros ativos; a Sala possui ${ativos.length}.`,
+      { salaId: sala.id },
+    );
+  }
+  const emReconexao = ativos.find((membro) => membro.presenca !== 'conectado');
+  if (emReconexao) {
+    return rejeitar(
+      'ENCAMINHAMENTO_INVALIDO',
+      'O encaminhamento exige todos os Membros conectados; há Membro em janela de reconexão.',
+      { salaId: sala.id, membroId: emReconexao.id },
+    );
+  }
+  const naoPronto = ativos.find((membro) => !membro.pronto);
+  if (naoPronto) {
+    return rejeitar(
+      'ENCAMINHAMENTO_INVALIDO',
+      'O encaminhamento exige todos os Membros prontos.',
+      { salaId: sala.id, membroId: naoPronto.id },
+    );
+  }
+  return undefined;
 }
 
 // Localiza o vínculo ativo por chave (jogadorId ou membroId) e diferencia
