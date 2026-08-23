@@ -772,6 +772,48 @@ test('registrar_reinicio_da_sala torna a Sala inconsistente e membros ativos rea
   assert.equal(entradaApos.sucesso, true);
 });
 
+test('registrar_reinicio_da_sala é isento do gate SALA_ENCAMINHADA', () => {
+  const encaminhada = aplicar(salaComQuatroProntos(), aceitar());
+  const salaAntesDoReinicio = encaminhada.salas[0];
+  assert.equal(salaAntesDoReinicio.estado, 'encaminhada');
+
+  const resultado = registrarReinicioDaSala(encaminhada, registrarReinicio());
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+
+  const sala = resultado.estado.salas[0];
+  assert.equal(sala.estado, 'encaminhada');
+  assert.equal(sala.consistente, false);
+  assert.equal(sala.anfitriaoId, salaAntesDoReinicio.anfitriaoId);
+  assert.equal(sala.proximaOrdemDeEntrada, salaAntesDoReinicio.proximaOrdemDeEntrada);
+  assert.deepEqual(sala.jogadoresBloqueados, salaAntesDoReinicio.jogadoresBloqueados);
+  assert.deepEqual(
+    sala.membros.map(({ id, jogadorId, ordemDeEntrada, estado, motivoEncerramento }) => ({
+      id,
+      jogadorId,
+      ordemDeEntrada,
+      estado,
+      motivoEncerramento,
+    })),
+    salaAntesDoReinicio.membros.map(({ id, jogadorId, ordemDeEntrada, estado, motivoEncerramento }) => ({
+      id,
+      jogadorId,
+      ordemDeEntrada,
+      estado,
+      motivoEncerramento,
+    })),
+  );
+  for (const membro of sala.membros) {
+    assert.equal(membro.estado, 'ativo');
+    assert.equal(membro.presenca, 'em_reconexao');
+    assert.equal(membro.pronto, false);
+  }
+  assert.deepEqual(resultado.eventos, [
+    { tipo: 'reinicio_registrado', salaId: 'sala-1' },
+  ]);
+});
+
 test('registrar_reinicio_da_sala é idempotente quando a Sala já está inconsistente', () => {
   let estado = aplicar(estadoDoLobbyVazio(), criar());
   estado = aplicar(estado, registrarReinicio());

@@ -491,22 +491,9 @@ export function entrarNaSala(
     );
   }
 
-  if (sala.estado === 'encaminhada') {
-    return rejeitar(
-      'SALA_ENCAMINHADA',
-      'A Sala está encaminhada e sua composição está congelada.',
-      { salaId: sala.id },
-    );
-  }
-
-  if (sala.estado !== 'aberta') {
-    return rejeitar(
-      'SALA_ENCERRADA',
-      sala.estado === 'expirada'
-        ? 'A Sala expirou e não aceita novas entradas.'
-        : 'A Sala está encerrada.',
-      { salaId: sala.id },
-    );
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
   }
 
   if (sala.membros.filter((membro) => membro.estado === 'ativo').length >= LIMITE_DE_MEMBROS) {
@@ -1062,21 +1049,11 @@ export function alternarProntidao(
     return dadosInvalidos;
   }
 
-  const salaOuErro = exigirSala(estado, comando.salaId);
-  if (!('sala' in salaOuErro)) {
-    return salaOuErro;
+  const salaContexto = exigirSalaAbertaPorId(estado, comando.salaId);
+  if (!('sala' in salaContexto)) {
+    return salaContexto;
   }
-  const { sala } = salaOuErro;
-
-  const salaInconsistente = exigirSalaConsistente(sala);
-  if (salaInconsistente) {
-    return salaInconsistente;
-  }
-
-  const salaIndisponivel = exigirSalaAberta(sala);
-  if (salaIndisponivel) {
-    return salaIndisponivel;
-  }
+  const { sala } = salaContexto;
 
   const contexto = exigirMembroAtivo(sala, { jogadorId: comando.jogadorId });
   if (!('membro' in contexto)) {
@@ -1116,7 +1093,7 @@ export function encaminharSala(
     return dadosInvalidos;
   }
 
-  const contexto = exigirAnfitriaoAtual(
+  const contexto = exigirAnfitriaoEmSalaAberta(
     estado,
     comando.salaId,
     comando.anfitriaoMembroId,
@@ -1126,16 +1103,6 @@ export function encaminharSala(
     return contexto;
   }
   const { sala } = contexto;
-
-  const salaInconsistente = exigirSalaConsistente(sala);
-  if (salaInconsistente) {
-    return salaInconsistente;
-  }
-
-  const salaIndisponivel = exigirSalaAberta(sala);
-  if (salaIndisponivel) {
-    return salaIndisponivel;
-  }
 
   const composicaoInvalida = validarComposicaoParaEncaminhamento(sala);
   if (composicaoInvalida) {
@@ -1159,21 +1126,11 @@ export function aceitarEncaminhamento(
     return dadosInvalidos;
   }
 
-  const salaOuErro = exigirSala(estado, comando.salaId);
-  if (!('sala' in salaOuErro)) {
-    return salaOuErro;
+  const contexto = exigirSalaAbertaPorId(estado, comando.salaId);
+  if (!('sala' in contexto)) {
+    return contexto;
   }
-  const { sala } = salaOuErro;
-
-  const salaInconsistente = exigirSalaConsistente(sala);
-  if (salaInconsistente) {
-    return salaInconsistente;
-  }
-
-  const salaIndisponivel = exigirSalaAberta(sala);
-  if (salaIndisponivel) {
-    return salaIndisponivel;
-  }
+  const { sala } = contexto;
 
   // Revalidação no commit (ADR-0003): a composição pode ter mudado entre a
   // oferta e o aceite — a Sala permanece 'aberta' e a aplicação cancela a
@@ -1199,27 +1156,13 @@ export function recusarEncaminhamento(
     return dadosInvalidos;
   }
 
-  const salaOuErro = exigirSala(estado, comando.salaId);
-  if (!('sala' in salaOuErro)) {
-    return salaOuErro;
-  }
-  const { sala } = salaOuErro;
-
-  const salaInconsistente = exigirSalaConsistente(sala);
-  if (salaInconsistente) {
-    return salaInconsistente;
-  }
-
-  const salaIndisponivel = exigirSalaAberta(sala);
-  if (salaIndisponivel) {
-    return salaIndisponivel;
-  }
-
   // A recusa (ou timeout) não afeta a Sala: ela permanece 'aberta', sem
   // perder membros nem congelar a composição.
-  return sucesso(estado, [
-    { tipo: 'encaminhamento_recusado', salaId: sala.id },
-  ]);
+  return registrarResultadoDoEncaminhamento(
+    estado,
+    comando.salaId,
+    'encaminhamento_recusado',
+  );
 }
 
 export function registrarFalhaDoEncaminhamento(
@@ -1231,27 +1174,13 @@ export function registrarFalhaDoEncaminhamento(
     return dadosInvalidos;
   }
 
-  const salaOuErro = exigirSala(estado, comando.salaId);
-  if (!('sala' in salaOuErro)) {
-    return salaOuErro;
-  }
-  const { sala } = salaOuErro;
-
-  const salaInconsistente = exigirSalaConsistente(sala);
-  if (salaInconsistente) {
-    return salaInconsistente;
-  }
-
-  const salaIndisponivel = exigirSalaAberta(sala);
-  if (salaIndisponivel) {
-    return salaIndisponivel;
-  }
-
   // A falha de rede/erro não afeta a Sala: ela permanece 'aberta', sem
   // perder membros nem congelar a composição.
-  return sucesso(estado, [
-    { tipo: 'encaminhamento_falhou', salaId: sala.id },
-  ]);
+  return registrarResultadoDoEncaminhamento(
+    estado,
+    comando.salaId,
+    'encaminhamento_falhou',
+  );
 }
 
 export function encerrarSala(
@@ -1263,7 +1192,7 @@ export function encerrarSala(
     return dadosInvalidos;
   }
 
-  const contexto = exigirAnfitriaoAtual(
+  const contexto = exigirAnfitriaoEmSalaAberta(
     estado,
     comando.salaId,
     comando.anfitriaoMembroId,
@@ -1273,16 +1202,6 @@ export function encerrarSala(
     return contexto;
   }
   const { sala } = contexto;
-
-  const salaInconsistente = exigirSalaConsistente(sala);
-  if (salaInconsistente) {
-    return salaInconsistente;
-  }
-
-  const salaIndisponivel = exigirSalaAberta(sala);
-  if (salaIndisponivel) {
-    return salaIndisponivel;
-  }
 
   // O reset de presenca/pronto no vínculo encerrado é deliberado: um vínculo
   // encerrado não tem presença — preservar 'em_reconexao' implicaria uma
@@ -1349,8 +1268,31 @@ function exigirSalaConsistente(
   );
 }
 
+function exigirSalaAbertaPorId(
+  estado: EstadoDoLobby,
+  salaId: string,
+): { sala: Sala } | OperacaoRejeitada {
+  const salaOuErro = exigirSala(estado, salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
+  }
+
+  return { sala };
+}
+
 // Gate de congelamento: uma Sala encaminhada teve a composição congelada
-// para o handoff à Partida — nenhuma mutação de vínculo ou participação é
+// para o Encaminhamento à Partida — nenhuma mutação de vínculo ou participação é
 // aceita.
 function exigirSalaNaoEncaminhada(
   sala: Sala,
@@ -1474,6 +1416,49 @@ function exigirAnfitriaoAtual(
   }
 
   return { sala, anfitriao };
+}
+
+function exigirAnfitriaoEmSalaAberta(
+  estado: EstadoDoLobby,
+  salaId: string,
+  anfitriaoMembroId: string,
+  acao: string,
+): { sala: Sala; anfitriao: Membro } | OperacaoRejeitada {
+  const contexto = exigirAnfitriaoAtual(
+    estado,
+    salaId,
+    anfitriaoMembroId,
+    acao,
+  );
+  if (!('sala' in contexto)) {
+    return contexto;
+  }
+  const { sala } = contexto;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaIndisponivel = exigirSalaAberta(sala);
+  if (salaIndisponivel) {
+    return salaIndisponivel;
+  }
+
+  return contexto;
+}
+
+function registrarResultadoDoEncaminhamento(
+  estado: EstadoDoLobby,
+  salaId: string,
+  tipo: 'encaminhamento_recusado' | 'encaminhamento_falhou',
+): Resultado {
+  const contexto = exigirSalaAbertaPorId(estado, salaId);
+  if (!('sala' in contexto)) {
+    return contexto;
+  }
+
+  return sucesso(estado, [{ tipo, salaId: contexto.sala.id }]);
 }
 
 function sucederAnfitriao(
