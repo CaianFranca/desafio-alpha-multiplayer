@@ -20,7 +20,8 @@ export interface Config {
   };
 }
 
-const DEFAULT_GAME_SERVER_PORT = 3000;
+// Alinhado com .env.example e docker-compose.yml (1234), como o lobby faz com a 3001.
+const DEFAULT_GAME_SERVER_PORT = 1234;
 const DEFAULT_LOBBY_SERVER_PORT = 3001;
 const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
 const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
