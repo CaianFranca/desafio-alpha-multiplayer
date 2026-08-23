@@ -4,10 +4,13 @@ import type { ServerId } from '@flicker/shared';
 import { createApp } from './app.ts';
 import { createWebSocketServer } from './ws/ws.ts';
 import { redisClient } from './config/redis.ts';
+import type { ContextoDoGameServer } from './contexto.ts';
 
 const serverId: ServerId = process.env.GAME_SERVER_ID ?? crypto.randomUUID();
 
-const app = createApp(redisClient, serverId);
+const { partidaPreparadaTtlSegundos } = getConfig();
+const contexto: ContextoDoGameServer = { redis: redisClient, serverId, partidaPreparadaTtlSegundos };
+const app = createApp(contexto);
 
 const server = http.createServer(app);
 

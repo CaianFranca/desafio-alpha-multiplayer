@@ -1,5 +1,6 @@
 import type { Redis } from 'ioredis';
 import type { MembroDaSala, OfertaDeEncaminhamento, PartidaId, ServerId } from '@flicker/shared';
+import type { ContextoDoGameServer } from '../contexto.ts';
 
 export type EstadoDaPartida = 'preparada';
 
@@ -18,11 +19,10 @@ export function chaveDaPartida(partidaId: PartidaId): string {
 }
 
 export async function criarPartidaPreparada(
-  redis: Redis,
+  contexto: ContextoDoGameServer,
   oferta: OfertaDeEncaminhamento,
-  serverId: ServerId,
-  ttlSegundos: number,
 ): Promise<PartidaPreparada> {
+  const { redis, serverId, partidaPreparadaTtlSegundos } = contexto;
   const partida: PartidaPreparada = {
     partidaId: crypto.randomUUID(),
     serverId,
@@ -33,7 +33,7 @@ export async function criarPartidaPreparada(
     criadaEm: new Date().toISOString(),
   };
 
-  await redis.set(chaveDaPartida(partida.partidaId), JSON.stringify(partida), 'EX', ttlSegundos);
+  await redis.set(chaveDaPartida(partida.partidaId), JSON.stringify(partida), 'EX', partidaPreparadaTtlSegundos);
 
   return partida;
 }

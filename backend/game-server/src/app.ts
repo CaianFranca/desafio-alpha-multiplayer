@@ -1,10 +1,8 @@
 import express, { type Express } from 'express';
-import type { Redis } from 'ioredis';
-import { getConfig } from '@flicker/config';
-import type { ServerId } from '@flicker/shared';
+import type { ContextoDoGameServer } from './contexto.ts';
 import { criarRoteadorDeEncaminhamento } from './routes/encaminhamento.ts';
 
-export function createApp(redis: Redis, serverId: ServerId): Express {
+export function createApp(contexto: ContextoDoGameServer): Express {
   const app = express();
 
   app.use(express.json({ limit: '10kb' }));
@@ -13,8 +11,7 @@ export function createApp(redis: Redis, serverId: ServerId): Express {
     res.status(200).json({ status: 'ok' });
   });
 
-  const { partidaPreparadaTtlSegundos } = getConfig();
-  app.use('/api/encaminhamento', criarRoteadorDeEncaminhamento(redis, serverId, partidaPreparadaTtlSegundos));
+  app.use('/api/encaminhamento', criarRoteadorDeEncaminhamento(contexto));
 
   app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     const bodyParserError = err as { status?: number; type?: string };

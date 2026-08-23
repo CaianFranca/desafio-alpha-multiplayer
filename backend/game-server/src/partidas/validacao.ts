@@ -1,4 +1,9 @@
-import type { MembroDaSala, Presenca, RecusaDoEncaminhamento } from '@flicker/shared';
+import type {
+  CancelamentoDoEncaminhamento,
+  MembroDaSala,
+  Presenca,
+  RecusaDoEncaminhamento,
+} from '@flicker/shared';
 
 const PRESENCAS = ['conectado', 'em_reconexao'] as const satisfies readonly Presenca[];
 
@@ -44,6 +49,39 @@ export function validarOfertaDeEncaminhamento(value: unknown): RecusaDoEncaminha
   }
 
   return null;
+}
+
+export function validarCancelamentoDeEncaminhamento(
+  value: unknown,
+  partidaIdDaUrl: unknown,
+): CancelamentoDoEncaminhamento | RecusaDoEncaminhamento {
+  const recusa = (motivo: string): RecusaDoEncaminhamento => ({ codigo: 'DADOS_INVALIDOS', motivo });
+
+  if (!ehStringNaoVazia(partidaIdDaUrl)) {
+    return recusa('partidaId da URL é obrigatório');
+  }
+
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return recusa('cancelamento deve ser um objeto');
+  }
+
+  const cancelamento = value as Record<string, unknown>;
+  if (!ehStringNaoVazia(cancelamento.partidaId)) {
+    return recusa('partidaId é obrigatório');
+  }
+
+  if (cancelamento.partidaId !== partidaIdDaUrl) {
+    return recusa('partidaId do corpo deve ser igual ao da URL');
+  }
+
+  if (!ehStringNaoVazia(cancelamento.motivo) || cancelamento.motivo.trim().length === 0) {
+    return recusa('motivo é obrigatório');
+  }
+
+  return {
+    partidaId: cancelamento.partidaId,
+    motivo: cancelamento.motivo,
+  };
 }
 
 function problemaNoMembro(value: unknown): string | null {

@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Redis } from 'ioredis';
 
 export interface Config {
   gameServerPort: number;
@@ -120,4 +121,21 @@ export function getConfig(): Config {
   };
 
   return { gameServerPort, lobbyServerPort, jwtSecret, partidaPreparadaTtlSegundos, postgres, redis };
+}
+
+export function criarClienteRedis(): Redis {
+  const { redis } = getConfig();
+  const cliente = new Redis({
+    host: redis.host,
+    port: redis.port,
+    password: redis.password,
+    lazyConnect: true,
+    maxRetriesPerRequest: null,
+  });
+
+  cliente.on('error', (error: Error) => {
+    console.error('[redis] error:', error.message);
+  });
+
+  return cliente;
 }

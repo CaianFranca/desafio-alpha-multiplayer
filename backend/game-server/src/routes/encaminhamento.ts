@@ -1,14 +1,10 @@
 import { Router } from 'express';
-import type { Redis } from 'ioredis';
-import type { OfertaDeEncaminhamento, PartidaId, ServerId } from '@flicker/shared';
+import type { OfertaDeEncaminhamento, PartidaId } from '@flicker/shared';
+import type { ContextoDoGameServer } from '../contexto.ts';
 import { cancelarPartida, criarPartidaPreparada } from '../partidas/partidas.ts';
-import { validarOfertaDeEncaminhamento } from '../partidas/validacao.ts';
+import { validarCancelamentoDeEncaminhamento, validarOfertaDeEncaminhamento } from '../partidas/validacao.ts';
 
-export function criarRoteadorDeEncaminhamento(
-  redis: Redis,
-  serverId: ServerId,
-  ttlSegundos: number,
-): Router {
+export function criarRoteadorDeEncaminhamento(contexto: ContextoDoGameServer): Router {
   const router = Router();
 
   router.post('/', async (req, res) => {
@@ -19,7 +15,7 @@ export function criarRoteadorDeEncaminhamento(
     }
 
     try {
-      const partida = await criarPartidaPreparada(redis, req.body as OfertaDeEncaminhamento, serverId, ttlSegundos);
+      const partida = await criarPartidaPreparada(contexto, req.body as OfertaDeEncaminhamento);
       res.status(200).json({ partidaId: partida.partidaId, serverId: partida.serverId });
     } catch (error) {
       console.error('[encaminhamento] falha ao criar partida:', (error as Error).message);
@@ -28,14 +24,24 @@ export function criarRoteadorDeEncaminhamento(
   });
 
   router.delete('/:partidaId', async (req, res) => {
-    const partidaId = req.params.partidaId as PartidaId;
+    const cancelamento = validarCancelamentoDeEncaminhamento(req.body, req.params.partidaId);
+    if ('codigo' in cancelamento) {
+      res.status(400).json(cancelamento);
+      return;
+    }
+
+    const partidaId = cancelamento.partidaId as PartidaId;
 
     try {
-      const cancelada = await cancelarPartida(redis, partidaId);
+      const cancelada = await cancelarPartida(contexto.redis, partidaId);
       if (!cancelada) {
         res.status(404).json({ codigo: 'PARTIDA_NAO_ENCONTRADA', motivo: `partida ${partidaId} não encontrada` });
         return;
       }
+      console.info('[encaminhamento] partida cancelada', {
+        partidaId,
+        motivo: cancelamento.motivo,
+      });
       res.status(204).send();
     } catch (error) {
       console.error('[encaminhamento] falha ao cancelar partida:', (error as Error).message);
