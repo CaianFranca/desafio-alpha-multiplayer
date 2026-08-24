@@ -3,6 +3,7 @@ import express from 'express';
 import { getConfig } from '@flicker/config';
 import { createWebSocketServer } from './ws/ws.ts';
 import { authRouter } from './routes/auth.ts';
+import { gameServersRouter } from './routes/gameServers.ts';
 import { pool } from './config/pg.ts';
 import { redisClient } from './config/redis.ts';
 
@@ -33,6 +34,7 @@ app.get('/health', async (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/game-servers', gameServersRouter);
 
 // Handler global para erros de body-parser — evita respostas HTML para a API (A6/A8).
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {

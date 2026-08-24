@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Redis } from 'ioredis';
-import { GAME_SERVERS_PREFIX, sanitizeServerId } from '@flicker/config';
+import { GAME_SERVERS_PREFIX, chaveGameServer, sanitizeServerId } from '@flicker/config';
 
-export { GAME_SERVERS_PREFIX };
+export { GAME_SERVERS_PREFIX, chaveGameServer };
 
 export interface GameServerRegistro {
   serverId: string;
@@ -11,10 +11,6 @@ export interface GameServerRegistro {
   port?: number;
   atualizadoEm: string;
   [key: string]: unknown;
-}
-
-export function chaveGameServer(serverId: string): string {
-  return `${GAME_SERVERS_PREFIX}${serverId}`;
 }
 
 export function resolverServerId(configId: string | undefined): string {
@@ -31,14 +27,10 @@ export function resolverServerId(configId: string | undefined): string {
 /**
  * Anuncia o game-server no Redis com TTL (lease).
  * Usa SET com PX para criar/atualizar a chave atomically.
+ * serverId é derivado de meta.serverId — Data Clump removido.
  */
-export async function anunciar(
-  redis: Redis,
-  serverId: string,
-  meta: GameServerRegistro,
-  ttlMs: number,
-): Promise<void> {
-  const chave = chaveGameServer(serverId);
+export async function anunciar(redis: Redis, meta: GameServerRegistro, ttlMs: number): Promise<void> {
+  const chave = chaveGameServer(meta.serverId);
   const payload = JSON.stringify(meta);
   // PX define TTL em ms; SET sobrescreve e renova lease
   await redis.set(chave, payload, 'PX', ttlMs);
@@ -52,12 +44,12 @@ export async function removerRegistro(redis: Redis, serverId: string): Promise<v
 export interface HeartbeatHandle {
   stop: () => void;
   timer: NodeJS.Timeout;
+  getLastError: () => string | undefined;
 }
 
 /**
  * Inicia heartbeat periódico que renova o lease via SET EX.
  * @param redis cliente ioredis (lazyConnect permitido)
- * @param serverId id do servidor (gerado ou via env)
  * @param meta metadados JSON a armazenar (deve incluir serverId e atualizadoEm)
  * @param intervalMs intervalo entre renovações (default 5000)
  * @param ttlMs TTL do lease (default 15000)
@@ -66,22 +58,28 @@ export interface HeartbeatHandle {
  */
 export function iniciarHeartbeat(
   redis: Redis,
-  serverId: string,
   meta: GameServerRegistro,
   intervalMs: number,
   ttlMs: number,
   getMeta?: () => GameServerRegistro,
 ): HeartbeatHandle {
-  // Anúncio imediato (fire-and-forget com log)
-  void anunciar(redis, serverId, meta, ttlMs).catch((err: unknown) => {
-    console.error('[game-server/registro] falha ao anunciar:', (err as Error).message);
+  let lastError: string | undefined;
+
+  // Anúncio imediato fire-and-forget intencional: heartbeat não bloqueia boot,
+  // erro é logado e exposto via getLastError() para observabilidade; próximo tick retenta.
+  void anunciar(redis, meta, ttlMs).catch((err: unknown) => {
+    lastError = (err as Error).message;
+    console.error('[game-server/registro] falha ao anunciar:', lastError);
   });
 
   const timer = setInterval(() => {
     const base = getMeta ? getMeta() : { ...meta, atualizadoEm: new Date().toISOString() };
-    const currentMeta = base.serverId ? base : { ...base, serverId };
-    void anunciar(redis, serverId, currentMeta, ttlMs).catch((err: unknown) => {
-      console.error('[game-server/registro] falha no heartbeat:', (err as Error).message);
+    const currentMeta: GameServerRegistro = base.serverId ? base : { ...base, serverId: meta.serverId };
+    // Garante serverId consistente se factory esqueceu
+    if (!currentMeta.serverId) (currentMeta as GameServerRegistro).serverId = meta.serverId;
+    void anunciar(redis, currentMeta, ttlMs).catch((err: unknown) => {
+      lastError = (err as Error).message;
+      console.error('[game-server/registro] falha no heartbeat:', lastError);
     });
   }, intervalMs);
 
@@ -93,8 +91,9 @@ export function iniciarHeartbeat(
   const stop = (): void => {
     clearInterval(timer);
   };
+  const getLastError = (): string | undefined => lastError;
 
-  return { stop, timer };
+  return { stop, timer, getLastError };
 }
 
 export function pararHeartbeat(handle: HeartbeatHandle | undefined): void {

@@ -8,3 +8,4 @@ export type {
   SalaServerMessage,
   ServerMessage,
 } from './protocol.ts';
+export * from './redis/gameServers.js';

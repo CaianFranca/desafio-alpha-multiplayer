@@ -3,33 +3,8 @@ import { randomUUID } from 'node:crypto';
 import test, { describe } from 'node:test';
 import { Redis } from 'ioredis';
 import { GAME_SERVERS_PREFIX } from '@flicker/config';
-import { anunciar, chaveGameServer, iniciarHeartbeat, pararHeartbeat, removerRegistro } from './registro.ts';
-
-async function listarGameServersDisponiveis(redis: Redis): Promise<{ serverId: string }[]> {
-  const chaves: string[] = [];
-  let cursor = '0';
-  do {
-    const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `${GAME_SERVERS_PREFIX}*`, 'COUNT', 100);
-    cursor = nextCursor;
-    if (keys.length > 0) chaves.push(...keys);
-  } while (cursor !== '0');
-  if (chaves.length === 0) return [];
-  const valores = await redis.mget(...chaves);
-  const out: { serverId: string }[] = [];
-  for (let i = 0; i < valores.length; i++) {
-    const raw = valores[i];
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw) as { serverId?: string };
-      out.push({ serverId: parsed.serverId ?? chaves[i].slice(GAME_SERVERS_PREFIX.length) });
-    } catch { /* ignora corrompida */ }
-  }
-  return out;
-}
-
-async function estaDisponivel(redis: Redis, serverId: string): Promise<boolean> {
-  return (await redis.exists(chaveGameServer(serverId))) === 1;
-}
+import { estaDisponivel, listarGameServersDisponiveis } from '@flicker/shared';
+import { anunciar, iniciarHeartbeat, pararHeartbeat, removerRegistro } from './registro.ts';
 
 function criarRedis(): Redis | null {
   const host = process.env.REDIS_HOST ?? 'localhost';
@@ -53,6 +28,21 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function esperarExpiracao(
+  redis: Redis,
+  serverId: string,
+  ttlMs: number,
+  timeoutMs: number = ttlMs + 5000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const disponivel = await estaDisponivel(redis, serverId);
+    if (!disponivel) return true;
+    await sleep(150);
+  }
+  return false;
+}
+
 describe('registro de game-servers no Redis com heartbeat', () => {
   test('um game-server ativo aparece como disponível no registro do lobby', async (t) => {
     const redis = criarRedis()!;
@@ -66,8 +56,9 @@ describe('registro de game-servers no Redis com heartbeat', () => {
     const ttlMs = 2000;
     const meta = { serverId, url: 'http://game-server:1234', atualizadoEm: new Date().toISOString() };
 
-    await anunciar(redis, serverId, meta, ttlMs);
+    await anunciar(redis, meta, ttlMs);
 
+    // Usa implementação real do lobby (SCAN+MGET) — cobre o critério "o lobby enxerga os disponíveis"
     const disponiveis = await listarGameServersDisponiveis(redis);
     const encontrado = disponiveis.find((g) => g.serverId === serverId);
     assert.ok(encontrado, 'game-server deveria aparecer em listarGameServersDisponiveis');
@@ -94,16 +85,16 @@ describe('registro de game-servers no Redis com heartbeat', () => {
     const intervalMs = 800;
     const meta = { serverId, url: 'http://game-server:1234', atualizadoEm: new Date().toISOString() };
 
-    const handle = iniciarHeartbeat(redis, serverId, meta, intervalMs, ttlMs);
+    const handle = iniciarHeartbeat(redis, meta, intervalMs, ttlMs);
 
     // espera 2 ciclos de heartbeat
     await sleep(intervalMs * 2 + 200);
 
-    const ttl1 = await redis.pttl(`game-servers:disponiveis:${serverId}`);
+    const ttl1 = await redis.pttl(`${GAME_SERVERS_PREFIX}${serverId}`);
     assert.ok(ttl1 > 1000, `TTL deveria ter sido renovado, mas pttl=${ttl1}`);
 
     await sleep(intervalMs + 200);
-    const ttl2 = await redis.pttl(`game-servers:disponiveis:${serverId}`);
+    const ttl2 = await redis.pttl(`${GAME_SERVERS_PREFIX}${serverId}`);
     assert.ok(ttl2 > 1000, `TTL deveria continuar renovado, pttl=${ttl2}`);
 
     const disponiveis = await listarGameServersDisponiveis(redis);
@@ -127,14 +118,15 @@ describe('registro de game-servers no Redis com heartbeat', () => {
     const intervalMs = 700;
     const meta = { serverId, url: 'http://game-server:1234', atualizadoEm: new Date().toISOString() };
 
-    const handle = iniciarHeartbeat(redis, serverId, meta, intervalMs, ttlMs);
+    const handle = iniciarHeartbeat(redis, meta, intervalMs, ttlMs);
 
     await sleep(500);
     assert.equal(await estaDisponivel(redis, serverId), true);
 
-    // para heartbeat e aguarda expiração
+    // para heartbeat e aguarda expiração via polling (evita flaky sleep fixo em CI lento)
     pararHeartbeat(handle);
-    await sleep(ttlMs + 800);
+    const expirou = await esperarExpiracao(redis, serverId, ttlMs);
+    assert.equal(expirou, true, 'deveria ter expirado após parar heartbeat');
 
     const disponivel = await estaDisponivel(redis, serverId);
     assert.equal(disponivel, false, 'deveria ter expirado após parar heartbeat');
