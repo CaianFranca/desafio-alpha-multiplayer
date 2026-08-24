@@ -600,3 +600,74 @@ test('refresh com refresh_token forjado (assinatura inválida): 401', async () =
     assert.equal(res.status, 401);
   });
 });
+
+// --- 23. concorrência em criarSessao mantém apenas 1 sessão por jogador ---
+
+test('concorrência: N logins paralelos mantêm apenas 1 sessão ativa por jogador', async () => {
+  await comServidor(async (servidor) => {
+    const corpo = cadastroValido();
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', corpo);
+    assert.equal(reg.status, 201);
+    const jogador = (await reg.json()) as JogadorResponse;
+
+    const N = 5;
+    const logins = await Promise.all(
+      Array.from({ length: N }, () =>
+        postJson(servidor.baseUrl, '/api/auth/login', {
+          email: corpo.email,
+          senha: corpo.senha,
+        }),
+      ),
+    );
+    const statuses = logins.map((r) => r.status);
+    if (!statuses.every((s) => s === 200)) {
+      const diagnosticBodies = await Promise.all(
+        logins.map(async (r, i) => `idx=${i};status=${r.status};body=${await r.text()}`),
+      );
+      throw new Error(`login concorrente falhou: ${diagnosticBodies.join(' | ')}`);
+    }
+
+    // Verifica no Redis: exatamente 1 chave sessao:* (não mapping) deve
+    // existir, e o mapping jogador→sessao deve apontar para ela. Os5
+    // logins paralelos competem pelo mesmo slot; sem o script Lua atômico
+    // ficariam 5 sessões órfãs (TOCTOU) — a fix cobre isso.
+    const todas = await redis.keys('sessao:*');
+    const chavesSessao = todas.filter(
+      (k) => k.startsWith('sessao:') && !k.startsWith('sessao:jogador:'),
+    );
+    assert.equal(
+      chavesSessao.length,
+      1,
+      `esperava 1 chave sessao:*, encontrei ${chavesSessao.length} (${chavesSessao.join(', ')})`,
+    );
+
+    const mapping = await redis.get(`sessao:jogador:${jogador.id}`);
+    assert.ok(mapping !== null, 'mapping jogador→sessao ausente');
+    assert.ok(
+      chavesSessao.includes(`sessao:${mapping}`),
+      `mapping (${mapping}) não bate com a única sessão restante`,
+    );
+  });
+});
+
+// --- 24. concorrência em rotacionarSessao consome o refresh exatamente uma vez ---
+
+test('concorrência: 2 refreshes paralelos com o mesmo refresh — exatamente 1 sucesso', async () => {
+  await comServidor(async (servidor) => {
+    const corpo = cadastroValido();
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', corpo);
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+
+    const N = 2;
+    const refreshes = await Promise.all(
+      Array.from({ length: N }, () =>
+        postJson(servidor.baseUrl, '/api/auth/refresh', {}, cookies),
+      ),
+    );
+    const sucessos = refreshes.filter((r) => r.status === 200).length;
+    const falhas = refreshes.filter((r) => r.status === 401).length;
+    assert.equal(sucessos, 1, `esperava 1 sucesso, encontrei ${sucessos}`);
+    assert.equal(falhas, N - 1, `esperava ${N - 1} falhas, encontrei ${falhas}`);
+  });
+});
