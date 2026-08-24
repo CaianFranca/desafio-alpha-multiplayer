@@ -78,10 +78,6 @@ export const finalCta = {
   ctaLogin: 'Entrar',
 } as const
 
-export const salaCta = {
-  criarSala: 'Criar Sala',
-} as const
-
 export const footer = {
   brand: 'Flicker of Sanity',
   tagline: 'Um jogo de terror cooperativo online.',

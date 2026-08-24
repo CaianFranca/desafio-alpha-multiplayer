@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../state/useAuth'
-import { salaCta } from '../home/placeholders'
+import { CtaLink } from './CtaLink'
+import { criarSalaLabel } from '../auth/AuthActions'
 
 export function Header() {
   const authState = useAuth()
@@ -21,9 +22,7 @@ export function Header() {
           {authState.status === 'autenticado' && (
             <div className="flex items-center gap-3">
               <span className="text-sm font-bold">{authState.jogador.apelido}</span>
-              <Link to="/salas/criar" className="inline-block border-0 rounded-lg bg-(--color-accent) text-gray-800 cursor-pointer font-sans font-bold px-4 py-2 text-center text-sm hover:opacity-90 transition-opacity">
-                {salaCta.criarSala}
-              </Link>
+              <CtaLink to="/salas/criar" variant="primary" size="sm">{criarSalaLabel}</CtaLink>
             </div>
           )}
         </div>

@@ -1,5 +1,5 @@
 import { hero } from './placeholders'
-import { AuthActions } from './AuthActions'
+import { AuthActions } from '../auth/AuthActions'
 
 export function HeroSection() {
   return (
