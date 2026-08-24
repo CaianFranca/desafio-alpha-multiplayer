@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
+import { estadoAutenticadoMock } from '../web/src/state/mock-auth'
 
 // Replica a composição de main.tsx (AuthProvider envolvendo RouterProvider),
 // permitindo injetar o estado de autenticação via props do provider.
@@ -131,13 +132,14 @@ describe('hero CTAs', () => {
 
 describe('authentication states', () => {
   const visitante: AuthState = { status: 'visitante' }
-  const autenticado: AuthState = { status: 'autenticado', jogador: { apelido: 'JogadorTeste' } }
+  const autenticado = estadoAutenticadoMock
+  const apelidoMock = estadoAutenticadoMock.jogador.apelido
 
   it('visitor header shows no nickname and no Criar Sala action', () => {
     renderWithRouter(['/'], visitante)
 
     const header = screen.getByRole('banner')
-    expect(within(header).queryByText('JogadorTeste')).not.toBeInTheDocument()
+    expect(within(header).queryByText(apelidoMock)).not.toBeInTheDocument()
     expect(within(header).queryByRole('link', { name: /criar sala/i })).not.toBeInTheDocument()
 
     const heroSection = document.getElementById('hero')!
@@ -149,7 +151,7 @@ describe('authentication states', () => {
     renderWithRouter(['/'], autenticado)
 
     const header = screen.getByRole('banner')
-    expect(within(header).getByText('JogadorTeste')).toBeInTheDocument()
+    expect(within(header).getByText(apelidoMock)).toBeInTheDocument()
     expect(within(header).getByRole('link', { name: /criar sala/i })).toHaveAttribute('href', '/salas/criar')
 
     const heroSection = document.getElementById('hero')!

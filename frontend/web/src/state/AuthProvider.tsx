@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { AuthContext, visitorState, type AuthState } from './auth-context'
+import { estadoAutenticadoMock } from './mock-auth'
 
 export type { AuthState }
 
@@ -23,7 +24,7 @@ interface AuthProviderProps {
  */
 function resolveInitialState(): AuthState {
   if (__MOCK_AUTH__ && import.meta.env.VITE_AUTH_MOCK === 'true') {
-    return { status: 'autenticado', jogador: { apelido: 'JogadorTeste' } }
+    return estadoAutenticadoMock
   }
   return visitorState
 }
