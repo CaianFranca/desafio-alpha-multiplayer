@@ -3,10 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
+import { visitorState } from '../web/src/state/auth-context'
 
 // Replica a composição de main.tsx (AuthProvider envolvendo RouterProvider),
 // permitindo injetar o estado de autenticação via props do provider.
-function renderWithRouter(initialEntries: string[] = ['/'], authState?: AuthState) {
+// O default explícito garante testes determinísticos, independentes do .env.
+function renderWithRouter(initialEntries: string[] = ['/'], authState: AuthState = visitorState) {
   const router = createMemoryRouter(routes, { initialEntries })
   return render(
     <AuthProvider initialState={authState}>

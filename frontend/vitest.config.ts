@@ -13,6 +13,10 @@ export default mergeConfig(
     setupFiles: './tests/setup.ts',
     globals: true,
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+    // Determinismo: nenhum teste deve depender do .env local para resolver o mock.
+    env: {
+      VITE_AUTH_MOCK: 'false',
+    },
   },
 })
 )
