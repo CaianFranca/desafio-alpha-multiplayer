@@ -18,6 +18,7 @@ describe('homepage structure', () => {
     renderWithRouter()
 
     expect(screen.getByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Trailers' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /a história/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /características do jogo/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /objetivos/i })).toBeInTheDocument()
@@ -34,6 +35,7 @@ describe('homepage structure', () => {
 
     const nav = screen.getByRole('navigation', { name: /navegação principal/i })
     expect(nav).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
     expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
     expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '#caracteristicas')
     expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '#objetivos')
@@ -130,6 +132,7 @@ describe('responsive sections', () => {
     renderWithRouter()
 
     expect(screen.getByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Trailers' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /a história/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /características do jogo/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /objetivos/i })).toBeInTheDocument()
