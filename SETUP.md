@@ -53,8 +53,11 @@ desafio-alpha-multiplayer/
 O Compose da raiz é a entrada do ambiente de desenvolvimento local. A produção
 está fora do escopo desta configuração. O NGINX já tem Dockerfile e contrato
 de execução: ele serve o build estático do frontend e os arquivos de
-`frontend/web/media`. O perfil `backend` também sobe o `lobby-server`, com
-PostgreSQL, Redis e `db-migrate` como dependências.
+`frontend/web/media`. O perfil `backend` também sobe o `lobby-server` e o
+`game-server`, com PostgreSQL, Redis e `db-migrate` como dependências.
+Os serviços de aplicação e dados não publicam portas no host: a entrada
+externa única chega pelo NGINX (issue #9) e, até lá, as validações HTTP são
+feitas de dentro da rede via `docker compose exec`.
 
 Crie o arquivo local de ambiente e suba o perfil completo:
 
@@ -80,10 +83,10 @@ frontend existirem. Até lá, não há serviço nesse perfil.
 | Perfil | Serviços disponíveis agora | Serviços futuros previstos |
 | --- | --- | --- |
 | `db` | PostgreSQL, Redis, db-migrate | — |
-| `backend` | PostgreSQL, Redis, db-migrate, lobby-server | game-server |
+| `backend` | PostgreSQL, Redis, db-migrate, lobby-server, game-server | — |
 | `frontend` | — | frontend |
-| `nginx` | PostgreSQL, Redis, db-migrate, lobby-server, NGINX | frontend, game-server |
-| `full` | PostgreSQL, Redis, db-migrate, lobby-server, NGINX | frontend, game-server |
+| `nginx` | PostgreSQL, Redis, db-migrate, lobby-server, game-server, NGINX | frontend |
+| `full` | PostgreSQL, Redis, db-migrate, lobby-server, game-server, NGINX | frontend |
 
 Comandos úteis:
 
@@ -93,11 +96,14 @@ docker compose config
 docker compose down
 ```
 
-Para validar o bootstrap do lobby-server isoladamente, use:
+Para validar o bootstrap do lobby-server e do game-server isoladamente, use:
 
 ```sh
 docker compose --profile backend up -d --build
-curl http://localhost:3001/health
+docker compose --profile backend exec lobby-server \
+  node -e "fetch('http://localhost:'+process.env.LOBBY_SERVER_PORT+'/health').then(r=>r.text()).then(console.log)"
+docker compose --profile backend exec game-server \
+  node -e "fetch('http://localhost:'+process.env.GAME_SERVER_PORT+'/health').then(r=>r.text()).then(console.log)"
 ```
 
 O serviço usa `NODE_ENV=development` por padrão no Compose, `PG_POOL_MAX=10` e
@@ -112,15 +118,14 @@ O seed atual (`teste@flicker.local`) existe apenas para popular o banco e grava
 a senha em texto puro. O login do lobby-server usa exclusivamente
 `bcrypt.compare`, portanto esse registro não é uma Credencial compatível com o
 login. Para o smoke, registre um novo Jogador via `/api/auth/register` e faça
-login com o mesmo email e senha:
+login com o mesmo email e senha. Até a issue #9, não há entrada HTTP do host,
+então as chamadas rodam de dentro da rede via `exec`:
 
 ```sh
-curl -X POST http://localhost:3001/api/auth/register \
-  -H 'content-type: application/json' \
-  -d '{"apelido":"Smoke","email":"smoke@example.local","senha":"senha_development_123"}'
-curl -X POST http://localhost:3001/api/auth/login \
-  -H 'content-type: application/json' \
-  -d '{"email":"smoke@example.local","senha":"senha_development_123"}'
+docker compose --profile backend exec lobby-server \
+  node -e "fetch('http://localhost:'+process.env.LOBBY_SERVER_PORT+'/api/auth/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apelido:'Smoke',email:'smoke@example.local',senha:'senha_development_123'})}).then(r=>r.text()).then(console.log)"
+docker compose --profile backend exec lobby-server \
+  node -e "fetch('http://localhost:'+process.env.LOBBY_SERVER_PORT+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:'smoke@example.local',senha:'senha_development_123'})}).then(r=>r.text()).then(console.log)"
 ```
 
 O tratamento definitivo da incompatibilidade do seed fica como dívida para a
