@@ -108,15 +108,21 @@ docker compose --profile backend exec game-server \
   node -e "fetch('http://localhost:'+process.env.GAME_SERVER_PORT+'/health').then(r=>r.text()).then(console.log)"
 ```
 
-Com o perfil `nginx`/`full`, a mesma validação pode ser feita pelo host via
-NGINX (porta `8080`):
+Com o perfil `nginx`/`full`, a validação pelo host via NGINX (porta `8080`)
+pode ser feita por um endpoint real existente (falhável quando o proxy não
+alcança o lobby-server):
 
 ```sh
-curl http://localhost:8080/api/health 2>/dev/null || curl http://localhost:8080/health
-# SPA e fallback
+curl -i -X POST http://localhost:8080/api/auth/register -H 'content-type: application/json' -d '{}'
+# esperado: HTTP/1.1 400 + content-type: application/json + X-Powered-By: Express
+# quando o NGINX está no ar e proxyando; com serviços fora do ar a conexão falha
+# SPA e fallback (via NGINX)
 curl -i http://localhost:8080/ | head -n 20
 curl -i http://localhost:8080/media/inexistente.png
 ```
+
+A validação `GET /health` permanece interna via `docker compose --profile backend exec`
+(ver bloco acima) e não é exposta pela entrada única do NGINX.
 
 O serviço usa `NODE_ENV=development` por padrão no Compose, `PG_POOL_MAX=10` e
 a porta definida por `LOBBY_SERVER_PORT`. Em produção, configure explicitamente
@@ -146,8 +152,7 @@ docker compose --profile backend exec lobby-server \
   node -e "fetch('http://localhost:'+process.env.LOBBY_SERVER_PORT+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:'smoke@example.local',senha:'senha_development_123'})}).then(r=>r.text()).then(console.log)"
 ```
 
-Validação dos WebSockets pelo NGINX (espera `101 Switching Protocols` quando
-autenticado/token válido):
+Validação dos WebSockets pelo NGINX (espera `101 Switching Protocols` — atualmente sem validação de token no upgrade; dívida futura):
 
 ```sh
 # /ws/lobby → lobby-server
