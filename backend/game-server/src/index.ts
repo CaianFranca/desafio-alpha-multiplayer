@@ -40,8 +40,12 @@ function criarMeta(): GameServerRegistro {
 async function iniciarRegistro(): Promise<void> {
   if (encerrando) return;
   try {
-    if (redisClient.status === 'wait') {
-      await redisClient.connect();
+    if (redisClient.status !== 'ready') {
+      try {
+        await redisClient.connect();
+      } catch {
+        // connect falhou (close/end/reconnecting) — ping retry abaixo vai tratar
+      }
     }
     await redisClient.ping();
     console.log('[game-server] redis conectado');

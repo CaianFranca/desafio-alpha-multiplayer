@@ -1,11 +1,13 @@
 import { Router } from 'express';
+import jwt from 'jsonwebtoken';
+import { getConfig } from '@flicker/config';
 import { redisClient } from '../config/redis.ts';
 import { listarGameServersDisponiveis } from '../redis/gameServers.ts';
 
 export const gameServersRouter = Router();
 
-// Guard simples: endpoint é interno/operacional; exige Authorization quando em produção
-// Mantém compatibilidade com health checks sem token em dev.
+// Guard: exige JWT válido em produção; em dev/next mantém compat sem token.
+// Valida qualquer token assinado com JWT_SECRET — não expõe lista sem auth em prod.
 function requireAuth(
   req: import('express').Request,
   res: import('express').Response,
@@ -15,7 +17,16 @@ function requireAuth(
     next();
     return;
   }
-  if (!req.headers.authorization) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'não autorizado' });
+    return;
+  }
+  const token = header.slice(7);
+  try {
+    const { jwtSecret } = getConfig();
+    jwt.verify(token, jwtSecret);
+  } catch {
     res.status(401).json({ error: 'não autorizado' });
     return;
   }

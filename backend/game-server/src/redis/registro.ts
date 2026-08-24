@@ -43,7 +43,6 @@ export async function removerRegistro(redis: Redis, serverId: string): Promise<v
 
 export interface HeartbeatHandle {
   stop: () => void;
-  timer: NodeJS.Timeout;
   getLastError: () => string | undefined;
 }
 
@@ -68,17 +67,18 @@ export function iniciarHeartbeat(
   // Anúncio imediato fire-and-forget intencional: heartbeat não bloqueia boot,
   // erro é logado e exposto via getLastError() para observabilidade; próximo tick retenta.
   void anunciar(redis, meta, ttlMs).catch((err: unknown) => {
-    lastError = (err as Error).message;
+    lastError = err instanceof Error ? err.message : String(err);
     console.error('[game-server/registro] falha ao anunciar:', lastError);
   });
 
   const timer = setInterval(() => {
     const base = getMeta ? getMeta() : { ...meta, atualizadoEm: new Date().toISOString() };
-    const currentMeta: GameServerRegistro = base.serverId ? base : { ...base, serverId: meta.serverId };
-    // Garante serverId consistente se factory esqueceu
-    if (!currentMeta.serverId) (currentMeta as GameServerRegistro).serverId = meta.serverId;
+    const currentMeta: GameServerRegistro = {
+      ...base,
+      serverId: base.serverId ?? meta.serverId,
+    };
     void anunciar(redis, currentMeta, ttlMs).catch((err: unknown) => {
-      lastError = (err as Error).message;
+      lastError = err instanceof Error ? err.message : String(err);
       console.error('[game-server/registro] falha no heartbeat:', lastError);
     });
   }, intervalMs);
@@ -93,7 +93,7 @@ export function iniciarHeartbeat(
   };
   const getLastError = (): string | undefined => lastError;
 
-  return { stop, timer, getLastError };
+  return { stop, getLastError };
 }
 
 export function pararHeartbeat(handle: HeartbeatHandle | undefined): void {
