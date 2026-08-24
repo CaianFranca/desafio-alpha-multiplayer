@@ -15,7 +15,7 @@ import {
 } from '../cookies.ts';
 import { assinarAccess, assinarRefresh, verificarRefresh } from '../jwt.ts';
 import { requireSessao } from '../middleware/auth.ts';
-import { criarSessao, obterSessao, revogarSessao, rotacionarSessao } from '../sessoes.ts';
+import { criarSessao, obterSessao, revogarSessao, rotacionarSessao, SessaoInvalidaError } from '../sessoes.ts';
 
 export const authRouter = Router();
 
@@ -361,6 +361,12 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
     emitirCookiesDeSessao(res, jogador, rotacionada.sessaoId);
     res.status(200).json(jogador);
   } catch (error) {
+    if (error instanceof SessaoInvalidaError) {
+      // TOCTOU entre obterSessao e a rotação (refresh concorrente) ou reuso
+      // de refresh já rotacionado — o script Lua detectou e sinalizou.
+      res.status(401).json({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] });
+      return;
+    }
     console.error('[auth/refresh] error:', error);
     res.status(500).json({ erros: [{ mensagem: 'Erro interno do servidor.' }] });
   }

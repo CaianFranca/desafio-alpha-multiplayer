@@ -2,9 +2,18 @@
 // Estrutura:
 //   sessao:<sessaoId>          -> JSON { jogadorId, criadoEm }    (TTL: sessionRefreshTtlSeconds)
 //   sessao:jogador:<jogadorId> -> sessaoId                       (sem TTL — refresh controla)
+//
+// A criação e a rotação usam scripts Lua executados atomicamente no servidor
+// Redis. Sem atomicidade, dois logins ou refreshes concorrentes podiam
+// manter duas Sessões vivas para o mesmo Jogador, violando o invariante do
+// glossário ("no máximo uma ativa por Jogador"). Os comandos get/del/set em
+// sequência tinham TOCTOU: ambos os requests liam a mesma sessão antiga
+// antes de qualquer escrita; cada um revogava uma (já inexistente) e criava
+// a sua, sobrando uma sessão órfã que autenticava por mais 7 dias.
 
 import { randomUUID } from 'node:crypto';
 import { getConfig } from '@flicker/config';
+import type { Redis } from 'ioredis';
 import { redisClient } from './config/redis.ts';
 
 export interface SessaoDaStore {
@@ -28,31 +37,125 @@ function chaveSessaoPorJogador(jogadorId: string): string {
   return `${PREFIXO_SESSAO_POR_JOGADOR}${jogadorId}`;
 }
 
-export async function criarSessao(jogadorId: string): Promise<SessaoCriada> {
-  const { sessionRefreshTtlSeconds } = getConfig();
+// Cria uma nova sessão para `jogadorId`, revogando qualquer sessão anterior.
+// KEYS[1] = sessao:jogador:<jogadorId>
+// KEYS[2] = sessao:<novaId>
+// ARGV[1] = TTL em segundos
+// ARGV[2] = payload JSON da nova sessão
+// ARGV[3] = novaId (gravado no mapping, sem prefixo)
+// Retorna ARGV[3] em caso de sucesso.
+const SCRIPT_CRIAR_SESSAO = `
+local antigaId = redis.call('GET', KEYS[1])
+if antigaId then
+  redis.call('DEL', 'sessao:' .. antigaId)
+end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', tonumber(ARGV[1]))
+redis.call('SET', KEYS[1], ARGV[3])
+return ARGV[3]
+`.trim();
 
-  // Sessão única: novo login revoga a anterior.
-  const sessaoAntiga = await redisClient.get(chaveSessaoPorJogador(jogadorId));
-  if (sessaoAntiga) {
-    await redisClient.del(chaveSessao(sessaoAntiga));
+// Valida que a sessão antiga existe, pertence ao jogadorId e o mapping
+// jogador→sessao aponta para ela; revoga e cria a nova atomicamente.
+// Detecta reuso de refresh token já rotacionado (mapping != antigaId) e
+// sessão revogada entre obterSessao e a rotação (sessao inexistente).
+// KEYS[1] = sessao:<antigaId>
+// KEYS[2] = sessao:jogador:<jogadorId>
+// KEYS[3] = sessao:<novaId>
+// ARGV[1] = TTL em segundos
+// ARGV[2] = payload JSON da nova sessão
+// ARGV[3] = novaId (gravado no mapping)
+// ARGV[4] = jogadorId esperado (validação de ownership)
+// ARGV[5] = antigaId esperado no mapping (validação de reuso)
+// Retorna ARGV[3] em caso de sucesso; nil se qualquer validação falhar.
+const SCRIPT_ROTACIONAR_SESSAO = `
+local payload = redis.call('GET', KEYS[1])
+if not payload then
+  return nil
+end
+local ok, parsed = pcall(cjson.decode, payload)
+if not ok or parsed.jogadorId ~= ARGV[4] then
+  return nil
+end
+local mapping = redis.call('GET', KEYS[2])
+if mapping ~= ARGV[5] then
+  return nil
+end
+redis.call('DEL', KEYS[1])
+redis.call('SET', KEYS[3], ARGV[2], 'EX', tonumber(ARGV[1]))
+redis.call('SET', KEYS[2], ARGV[3])
+return ARGV[3]
+`.trim();
+
+// Erro lançado por rotacionarSessao quando o script Lua detecta sessão
+// inválida, reuso de refresh token ou ownership divergente. O caller
+// (auth.ts /refresh) traduz para 401.
+export class SessaoInvalidaError extends Error {
+  constructor(motivo: string) {
+    super(motivo);
+    this.name = 'SessaoInvalidaError';
   }
+}
+
+declare module 'ioredis' {
+  // Augmentação dos métodos registrados via `defineCommand`. ioredis adiciona
+  // esses métodos dinamicamente, mas o TypeScript só os conhece se forem
+  // declarados aqui.
+  interface Redis {
+    criarSessaoAtomica(
+      jogadorKey: string,
+      novaSessaoKey: string,
+      ttlSegundos: number,
+      payloadJson: string,
+      novaId: string,
+    ): Promise<string>;
+    rotacionarSessaoAtomica(
+      antigaSessaoKey: string,
+      jogadorKey: string,
+      novaSessaoKey: string,
+      ttlSegundos: number,
+      payloadJson: string,
+      novaId: string,
+      jogadorId: string,
+      antigaId: string,
+    ): Promise<string | null>;
+  }
+}
+
+let scriptsRegistrados = false;
+
+function registrarScripts(): void {
+  if (scriptsRegistrados) {
+    return;
+  }
+  scriptsRegistrados = true;
+  redisClient.defineCommand('criarSessaoAtomica', {
+    numberOfKeys: 2,
+    lua: SCRIPT_CRIAR_SESSAO,
+  });
+  redisClient.defineCommand('rotacionarSessaoAtomica', {
+    numberOfKeys: 3,
+    lua: SCRIPT_ROTACIONAR_SESSAO,
+  });
+}
+
+export async function criarSessao(jogadorId: string): Promise<SessaoCriada> {
+  registrarScripts();
+  const { sessionRefreshTtlSeconds } = getConfig();
 
   const novaId = randomUUID();
   const criadoEm = new Date().toISOString();
   const payload: SessaoDaStore = { jogadorId, criadoEm };
 
-  await redisClient.set(
+  const sessaoId = await redisClient.criarSessaoAtomica(
+    chaveSessaoPorJogador(jogadorId),
     chaveSessao(novaId),
-    JSON.stringify(payload),
-    'EX',
     sessionRefreshTtlSeconds,
+    JSON.stringify(payload),
+    novaId,
   );
-  // Mapeamento jogador -> sessão atual não tem TTL: a revogação é explícita
-  // (logout / novo login / rotação), e o TTL da sessão em si é o que expira.
-  await redisClient.set(chaveSessaoPorJogador(jogadorId), novaId);
 
   const expiraEm = new Date(Date.now() + sessionRefreshTtlSeconds * 1000);
-  return { sessaoId: novaId, expiraEm };
+  return { sessaoId, expiraEm };
 }
 
 export async function obterSessao(sessaoId: string): Promise<{ jogadorId: string } | null> {
@@ -90,9 +193,29 @@ export async function rotacionarSessao(
   sessaoAntigaId: string,
   jogadorId: string,
 ): Promise<{ sessaoId: string }> {
-  // Revoga a antiga (sem remover o mapeamento jogador -> ainda apontando para a antiga
-  // será substituído pelo criarSessao).
-  await redisClient.del(chaveSessao(sessaoAntigaId));
-  const criada = await criarSessao(jogadorId);
-  return { sessaoId: criada.sessaoId };
+  registrarScripts();
+  const { sessionRefreshTtlSeconds } = getConfig();
+
+  const novaId = randomUUID();
+  const criadoEm = new Date().toISOString();
+  const payload: SessaoDaStore = { jogadorId, criadoEm };
+
+  const sessaoId = await redisClient.rotacionarSessaoAtomica(
+    chaveSessao(sessaoAntigaId),
+    chaveSessaoPorJogador(jogadorId),
+    chaveSessao(novaId),
+    sessionRefreshTtlSeconds,
+    JSON.stringify(payload),
+    novaId,
+    jogadorId,
+    sessaoAntigaId,
+  );
+
+  if (sessaoId === null) {
+    // TOCTOU entre obterSessao (no caller) e a rotação, ou reuso de refresh
+    // já rotacionado. auth.ts /refresh traduz para 401.
+    throw new SessaoInvalidaError('Sessão inválida ou revogada');
+  }
+
+  return { sessaoId };
 }
