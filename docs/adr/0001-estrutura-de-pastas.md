@@ -34,10 +34,12 @@ desafio-alpha-multiplayer/
 │   │       └── config/
 │   └── game-server/          # Express + WS (regras, turnos)
 │       └── src/
-│           ├── rooms/        # sala → estado no Redis
-│           ├── handlers/     # COLOCAR_PECA, MOVER_PEAO...
-│           ├── minigames/
-│           └── redis/        # Pub/Sub entre instâncias
+│           ├── config/       # configurações e clientes de infraestrutura
+│           ├── partidas/     # estado e validação da Partida
+│           ├── routes/       # endpoints HTTP do game-server
+│           ├── ws/           # conexão e handlers do game-server WS
+│           ├── handlers/     # futuro: comandos de gameplay
+│           └── minigames/    # futuro: minijogos
 ├── packages/
 │   ├── engine/               # regras puras do jogo (sem I/O)
 │   ├── shared/               # protocolo WS (DTOs tipados)
