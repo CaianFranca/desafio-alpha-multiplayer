@@ -190,27 +190,27 @@ components:
   headers:
     SetCookieSessao:
       description: |
-        Cookies de Sessão entregues como httpOnly. Dois cookies:
-        `access_token` (JWT de acesso, expira em 15 minutos) e `refresh_token`
-        (JWT de renovação, expira em 7 dias e é rotacionado a cada uso).
-        Ambos usam HttpOnly e SameSite=Strict; nunca ficam no localStorage.
-      required: false
+        Dois headers `Set-Cookie` distintos enviados na resposta (um por
+        cookie), ambos httpOnly: `access_token` (JWT de acesso, expira em
+        15 minutos) e `refresh_token` (JWT de renovação, expira em 7 dias e é
+        rotacionado a cada uso). Ambos usam HttpOnly e SameSite=Strict; nunca
+        ficam no localStorage.
+      required: true
       schema:
         type: string
-      example: >-
-        access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...;
-        Path=/; HttpOnly; SameSite=Strict; Max-Age=900,
-        refresh_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...;
-        Path=/; HttpOnly; SameSite=Strict; Max-Age=604800
+      example:
+        - access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; Path=/; HttpOnly; SameSite=Strict; Max-Age=900
+        - refresh_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800
     SetCookieLimpeza:
       description: |
-        Limpeza dos cookies de Sessão após o logout, com `Max-Age=0`.
-      required: false
+        Dois headers `Set-Cookie` distintos enviados na resposta para limpar
+        os cookies de Sessão após o logout, com `Max-Age=0`.
+      required: true
       schema:
         type: string
-      example: >-
-        access_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0,
-        refresh_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0
+      example:
+        - access_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0
+        - refresh_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0
   responses:
     ErroValidacao:
       description: |
