@@ -8,4 +8,12 @@ export type {
   SalaServerMessage,
   ServerMessage,
 } from './protocol.ts';
+export type {
+  Jogador,
+  CampoDeErroDeAutenticacao,
+  ErroAuthItem,
+  ErroAuth,
+  CadastroPayload,
+  LoginPayload,
+} from './autenticacao.ts';
 export * from './redis/gameServers.js';
