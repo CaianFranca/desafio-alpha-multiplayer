@@ -56,8 +56,10 @@ de execução: ele serve o build estático do frontend e os arquivos de
 `frontend/web/media`. O perfil `backend` também sobe o `lobby-server` e o
 `game-server`, com PostgreSQL, Redis e `db-migrate` como dependências.
 Os serviços de aplicação e dados não publicam portas no host: a entrada
-externa única chega pelo NGINX (issue #9) e, até lá, as validações HTTP são
-feitas de dentro da rede via `docker compose exec`.
+externa única chega pelo NGINX em `http://localhost:8080` (`NGINX_PORT`, issue
+#9) e as validações HTTP podem ser feitas pelo host. O Compose mantém a porta
+interna `80` dentro da rede; o host usa `8080` por padrão (`NGINX_PORT` em
+`.env.example`).
 
 Crie o arquivo local de ambiente e suba o perfil completo:
 
@@ -106,6 +108,16 @@ docker compose --profile backend exec game-server \
   node -e "fetch('http://localhost:'+process.env.GAME_SERVER_PORT+'/health').then(r=>r.text()).then(console.log)"
 ```
 
+Com o perfil `nginx`/`full`, a mesma validação pode ser feita pelo host via
+NGINX (porta `8080`):
+
+```sh
+curl http://localhost:8080/api/health 2>/dev/null || curl http://localhost:8080/health
+# SPA e fallback
+curl -i http://localhost:8080/ | head -n 20
+curl -i http://localhost:8080/media/inexistente.png
+```
+
 O serviço usa `NODE_ENV=development` por padrão no Compose, `PG_POOL_MAX=10` e
 a porta definida por `LOBBY_SERVER_PORT`. Em produção, configure explicitamente
 `NODE_ENV=production`, um `JWT_SECRET` próprio e um `POSTGRES_PASSWORD` próprio;
@@ -118,14 +130,31 @@ O seed atual (`teste@flicker.local`) existe apenas para popular o banco e grava
 a senha em texto puro. O login do lobby-server usa exclusivamente
 `bcrypt.compare`, portanto esse registro não é uma Credencial compatível com o
 login. Para o smoke, registre um novo Jogador via `/api/auth/register` e faça
-login com o mesmo email e senha. Até a issue #9, não há entrada HTTP do host,
-então as chamadas rodam de dentro da rede via `exec`:
+login com o mesmo email e senha. Com o NGINX (issue #9) prefira validar pelo
+host em `http://localhost:8080`; a alternativa via `exec` permanece para debug
+interno:
 
 ```sh
+# Via NGINX no host (recomendado)
+curl -X POST http://localhost:8080/api/auth/register -H 'content-type: application/json' -d '{"apelido":"Smoke","email":"smoke@example.local","senha":"senha_development_123"}'
+curl -X POST http://localhost:8080/api/auth/login -H 'content-type: application/json' -d '{"email":"smoke@example.local","senha":"senha_development_123"}'
+
+# Alternativa interna via exec (rede do Compose)
 docker compose --profile backend exec lobby-server \
   node -e "fetch('http://localhost:'+process.env.LOBBY_SERVER_PORT+'/api/auth/register',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apelido:'Smoke',email:'smoke@example.local',senha:'senha_development_123'})}).then(r=>r.text()).then(console.log)"
 docker compose --profile backend exec lobby-server \
   node -e "fetch('http://localhost:'+process.env.LOBBY_SERVER_PORT+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:'smoke@example.local',senha:'senha_development_123'})}).then(r=>r.text()).then(console.log)"
+```
+
+Validação dos WebSockets pelo NGINX (espera `101 Switching Protocols` quando
+autenticado/token válido):
+
+```sh
+# /ws/lobby → lobby-server
+# /ws/game/<server-id> → game-server (upstream game_servers, ver infra/nginx/nginx.conf)
+# Exemplo com websocat ou wscat:
+# wscat -c ws://localhost:8080/ws/lobby
+# wscat -c ws://localhost:8080/ws/game/<uuid>
 ```
 
 O tratamento definitivo da incompatibilidade do seed fica como dívida para a

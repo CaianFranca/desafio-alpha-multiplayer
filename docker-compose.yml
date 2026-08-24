@@ -128,7 +128,12 @@ services:
       dockerfile: infra/nginx/Dockerfile
     profiles: [nginx, full]
     ports:
-      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_PORT:-8080}:80"
+    depends_on:
+      lobby-server:
+        condition: service_healthy
+      game-server:
+        condition: service_healthy
     volumes:
       - ./frontend/web/media:/usr/share/nginx/html/media:ro
     healthcheck:
