@@ -86,12 +86,12 @@ estático gerado em `infra/nginx/Dockerfile` e monta `frontend/web/media:ro`
 em `/usr/share/nginx/html/media` (ver `docker-compose.yml` e
 `infra/nginx/Dockerfile`).
 
-| Perfil | Serviços disponíveis |
-| --- | --- |
-| `db` | PostgreSQL, Redis, db-migrate |
-| `backend` | PostgreSQL, Redis, db-migrate, lobby-server, game-server |
-| `nginx` | PostgreSQL, Redis, db-migrate, lobby-server, game-server, NGINX |
-| `full` | PostgreSQL, Redis, db-migrate, lobby-server, game-server, NGINX |
+| Perfil    | Serviços disponíveis                                            |
+| --------- | --------------------------------------------------------------- |
+| `db`      | PostgreSQL, Redis, db-migrate                                   |
+| `backend` | PostgreSQL, Redis, db-migrate, lobby-server, game-server        |
+| `nginx`   | PostgreSQL, Redis, db-migrate, lobby-server, game-server, NGINX |
+| `full`    | PostgreSQL, Redis, db-migrate, lobby-server, game-server, NGINX |
 
 Comandos úteis:
 
@@ -125,29 +125,25 @@ ambiente.
 Portas — apenas o NGINX publica porta no host; os demais serviços são
 acessíveis só pela rede interna do Compose (sem `ports:`).
 
-| Host (`env`) | Container | Serviço | Observação |
-| --- | --- | --- | --- |
-| `8080` (`NGINX_PORT`) | `80` | NGINX | entrada única do ambiente |
-| — | `3001` (`LOBBY_SERVER_PORT`) | lobby-server | interno, sem `ports:` |
-| — | `1234` (`GAME_SERVER_PORT`) | game-server | interno, sem `ports:` (legado documentado como 1234) |
-| — | `5432` | postgres | interno, volume `postgres_data` |
-| — | `6379` | redis | interno, volátil (`--save "" --appendonly no`) |
+| Host (`env`)          | Container                    | Serviço      | Observação                                           |
+| --------------------- | ---------------------------- | ------------ | ---------------------------------------------------- |
+| `8080` (`NGINX_PORT`) | `80`                         | NGINX        | entrada única do ambiente                            |
+| —                     | `3001` (`LOBBY_SERVER_PORT`) | lobby-server | interno, sem `ports:`                                |
+| —                     | `1234` (`GAME_SERVER_PORT`)  | game-server  | interno, sem `ports:` (legado documentado como 1234) |
+| —                     | `5432`                       | postgres     | interno, volume `postgres_data`                      |
+| —                     | `6379`                       | redis        | interno, volátil (`--save "" --appendonly no`)       |
 
 Rotas via NGINX (`infra/nginx/nginx.conf`):
 
-| Rota no host (`http://localhost:8080`) | Destino | Descrição |
-| --- | --- | --- |
-| `/` | `root /usr/share/nginx/html` | SPA — `try_files $uri $uri/ /index.html` (fallback) |
-| `/media/` | `alias /usr/share/nginx/html/media/` | arquivos estáticos de `frontend/web/media:ro` |
-| `/api/` | `lobby_server:3001` (`proxy_pass http://lobby_server`) | REST do lobby-server (`/api/auth/*`) |
-| `/ws/lobby` | `lobby_server:3001` (`proxy_http_version 1.1`, `Upgrade`/`Connection`) | WebSocket do lobby |
-| `~ ^/ws/game/` | `game_servers:1234` (`upstream game_servers`) | WebSocket do game-server; `GAME_SERVER_PORT` é `1234` |
+| Rota no host (`http://localhost:8080`) | Destino                                                                | Descrição                                             |
+| -------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
+| `/`                                    | `root /usr/share/nginx/html`                                           | SPA — `try_files $uri $uri/ /index.html` (fallback)   |
+| `/media/`                              | `alias /usr/share/nginx/html/media/`                                   | arquivos estáticos de `frontend/web/media:ro`         |
+| `/api/`                                | `lobby_server:3001` (`proxy_pass http://lobby_server`)                 | REST do lobby-server (`/api/auth/*`)                  |
+| `/ws/lobby`                            | `lobby_server:3001` (`proxy_http_version 1.1`, `Upgrade`/`Connection`) | WebSocket do lobby                                    |
+| `~ ^/ws/game/`                         | `game_servers:1234` (`upstream game_servers`)                          | WebSocket do game-server; `GAME_SERVER_PORT` é `1234` |
 
-Credenciais de desenvolvimento ficam em `.env.example` na raiz (não movido
-para `infra/`): `POSTGRES_*`, `REDIS_*`, `LOBBY_SERVER_PORT=3001`,
-`GAME_SERVER_PORT=1234`, `NGINX_PORT=8080`, `JWT_SECRET`,
-`JWT_REFRESH_SECRET`, `COOKIE_SECURE`, `SESSION_*_TTL_SECONDS`,
-`NODE_ENV=development`, `PG_POOL_MAX=10`. Copie para `.env` antes do `up`.
+Credenciais de desenvolvimento ficam em `.env.example`. Copie para `.env` antes do `up`.
 
 ### 2.2 Logs
 
