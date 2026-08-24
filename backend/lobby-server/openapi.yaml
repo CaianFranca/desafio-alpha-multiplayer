@@ -178,6 +178,33 @@ paths:
                 $ref: "#/components/schemas/JogadorResponse"
         "401":
           $ref: "#/components/responses/SessaoInvalida"
+  /api/auth/refresh:
+    post:
+      tags:
+        - Autenticação
+      operationId: rotacionarSessao
+      summary: Rotaciona a Sessão usando o refresh token
+      security:
+        - SessaoCookieRefresh: []
+      description: |
+        Recebe o `refresh_token` em cookie httpOnly, valida a Sessão no Redis e
+        emite um novo par de cookies (`access_token` + `refresh_token`),
+        revogando o par anterior. Aceitar um refresh revogado responde 401.
+      responses:
+        "200":
+          description: |
+            Sessão rotacionada. O corpo retorna o Jogador e os cookies
+            `access_token` e `refresh_token` são entregues como httpOnly
+            (substituem os anteriores).
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SetCookieSessao"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JogadorResponse"
+        "401":
+          $ref: "#/components/responses/SessaoInvalida"
 components:
   securitySchemes:
     SessaoCookie:
@@ -187,6 +214,14 @@ components:
       description: |
         JWT de acesso da Sessão, entregue em cookie httpOnly (`access_token`)
         por register e login. A validade da Sessão é revalidada no servidor.
+    SessaoCookieRefresh:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: |
+        JWT de refresh da Sessão, entregue em cookie httpOnly
+        (`refresh_token`) por register, login e refresh. Usado para
+        rotacionar a Sessão sem novo login.
   headers:
     SetCookieSessao:
       description: |
