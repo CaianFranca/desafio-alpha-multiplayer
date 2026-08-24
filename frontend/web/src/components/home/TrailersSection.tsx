@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import { trailers } from './placeholders'
 import type { Trailer } from './placeholders'
 import { ImagePlaceholder } from '../ui/ImagePlaceholder'
@@ -39,6 +39,18 @@ function MutedIcon() {
   )
 }
 
+function TrailerCover({ titulo, children }: { titulo: string; children?: ReactNode }) {
+  return (
+    <div
+      className="flex w-full aspect-video items-center justify-center rounded-xl border border-dashed border-(--color-muted) bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
+      role="img"
+      aria-label={titulo}
+    >
+      {children}
+    </div>
+  )
+}
+
 function TrailerPlayer({ trailer }: { trailer: Trailer }) {
   const { titulo, capa, src } = trailer
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -54,53 +66,63 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     const node = containerRef.current
     if (!node || typeof IntersectionObserver === 'undefined') return
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) setInView(true)
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setInView(true)
+        observer.unobserve(node)
+      }
     })
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.muted = muted
+  }, [muted])
 
   const togglePlay = () => {
     const video = videoRef.current
     if (!video) return
     if (playing) {
       video.pause()
-      setPlaying(false)
     } else {
       video
         .play()
+        .then(() => setPlaying(true))
         .catch(() => setPlaying(false))
-      setPlaying(true)
     }
   }
 
   const toggleMute = () => {
-    const next = !muted
-    setMuted(next)
-    if (videoRef.current) videoRef.current.muted = next
+    setMuted((prev) => !prev)
+  }
+
+  const handleVideoKeyDown = (event: KeyboardEvent<HTMLVideoElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      togglePlay()
+    }
   }
 
   const shouldLoad = Boolean(src) && (inView || requested)
+  const playPauseLabel = playing ? trailers.labels.pause : trailers.labels.play
 
   let media: ReactNode
   if (!src) {
     media = (
-      <div
-        className="flex w-full aspect-video items-center justify-center rounded-xl border border-dashed border-(--color-muted) bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
-        role="img"
-        aria-label={titulo}
-      >
+      <TrailerCover titulo={titulo}>
         <span className="text-(--color-muted) text-sm italic px-6 text-center">{trailers.mensagens.indisponivel}</span>
-      </div>
+      </TrailerCover>
     )
   } else if (failed) {
     media = (
       <div>
-        <ImagePlaceholder alt={titulo} src={capa} />
+        <TrailerCover titulo={titulo}>
+          {capa ? <img src={capa} alt="" className="w-full h-full object-cover rounded-xl" /> : null}
+        </TrailerCover>
         <p role="status" className="mt-3 text-(--color-muted) text-sm">{trailers.mensagens.falha}</p>
       </div>
     )
-  } else if (shouldLoad && src) {
+  } else if (shouldLoad) {
     media = (
       <div className="relative w-full aspect-video overflow-hidden rounded-xl bg-black group">
         <video
@@ -108,15 +130,19 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
           src={src}
           poster={capa}
           autoPlay
-          muted
+          muted={muted}
           playsInline
           preload="none"
+          role="button"
+          tabIndex={0}
+          aria-label={playPauseLabel}
           onClick={togglePlay}
+          onKeyDown={handleVideoKeyDown}
           onError={() => setFailed(true)}
           onCanPlay={() => setReady(true)}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          className="w-full h-full object-contain"
+          className="w-full h-full object-contain cursor-pointer"
         />
         {!ready && (
           <p role="status" className="absolute top-3 left-3 m-0 rounded-md bg-black/70 px-3 py-1 text-white text-sm">
@@ -134,7 +160,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
           <button
             type="button"
             onClick={togglePlay}
-            aria-label={playing ? trailers.labels.pause : trailers.labels.play}
+            aria-label={playPauseLabel}
             className={controlButton}
           >
             {playing ? <PauseIcon /> : <PlayIcon />}

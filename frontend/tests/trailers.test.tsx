@@ -56,8 +56,13 @@ function getControlBar(item: HTMLElement) {
 beforeEach(() => {
   FakeIntersectionObserver.instances = []
   vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
-  vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
-  vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+  vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+    this.dispatchEvent(new Event('play'))
+    return Promise.resolve()
+  })
+  vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+    this.dispatchEvent(new Event('pause'))
+  })
 })
 
 afterEach(() => {
@@ -86,6 +91,7 @@ describe('seção de trailers', () => {
     act(() => FakeIntersectionObserver.instances[0].trigger(true))
 
     expect(section.querySelectorAll('video')).toHaveLength(1)
+    expect(FakeIntersectionObserver.instances[0].unobserve).toHaveBeenCalled()
     const video = getVideo(section)
     expect(video.getAttribute('src')).toBe(trailers.items[0]?.src)
     expect(video.autoplay).toBe(true)
@@ -104,7 +110,7 @@ describe('seção de trailers', () => {
     const item = getTrailerItem(section, trailerComVideo.titulo)
     await user.click(within(item).getByRole('button', { name: trailers.labels.play }))
 
-    const video = getVideo(section)
+    const video = getVideo(item)
     expect(video.getAttribute('src')).toBe(trailerComVideo.src)
   })
 
@@ -114,7 +120,8 @@ describe('seção de trailers', () => {
     act(() => FakeIntersectionObserver.instances[0].trigger(true))
 
     const item = getTrailerItem(section, trailerComVideo.titulo)
-    const video = getVideo(section)
+    const video = getVideo(item)
+    const controls = within(getControlBar(item))
     expect(within(item).getByRole('status')).toHaveTextContent(trailers.mensagens.carregando)
     expect(getControlBar(item)).toHaveClass('opacity-100')
 
@@ -124,22 +131,43 @@ describe('seção de trailers', () => {
     act(() => video.dispatchEvent(new Event('play')))
     expect(getControlBar(item)).toHaveClass('opacity-0')
 
-    const botaoPausar = within(item).getByRole('button', { name: trailers.labels.pause })
+    const botaoPausar = controls.getByRole('button', { name: trailers.labels.pause })
     botaoPausar.focus()
     await user.keyboard('{Enter}')
     expect(botaoPausar).toHaveAccessibleName(trailers.labels.play)
     expect(getControlBar(item)).toHaveClass('opacity-100')
     expect(window.HTMLMediaElement.prototype.pause).toHaveBeenCalled()
 
-    await user.click(within(item).getByRole('button', { name: trailers.labels.play }))
+    await user.click(controls.getByRole('button', { name: trailers.labels.play }))
     expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled()
-    expect(within(item).getByRole('button', { name: trailers.labels.pause })).toBeInTheDocument()
+    expect(controls.getByRole('button', { name: trailers.labels.pause })).toBeInTheDocument()
 
     expect(video.muted).toBe(true)
-    await user.click(within(item).getByRole('button', { name: trailers.labels.som }))
+    await user.click(controls.getByRole('button', { name: trailers.labels.som }))
     expect(video.muted).toBe(false)
-    await user.click(within(item).getByRole('button', { name: trailers.labels.mudo }))
+    await user.click(controls.getByRole('button', { name: trailers.labels.mudo }))
     expect(video.muted).toBe(true)
+  })
+
+  it('vídeo clicável tem semântica de botão e é operável por teclado', async () => {
+    const user = userEvent.setup()
+    const section = renderHome()
+    act(() => FakeIntersectionObserver.instances[0].trigger(true))
+
+    const item = getTrailerItem(section, trailerComVideo.titulo)
+    const video = getVideo(item)
+    expect(video).toHaveAttribute('role', 'button')
+    expect(video).toHaveAttribute('tabindex', '0')
+    expect(video).toHaveAccessibleName(trailers.labels.play)
+
+    video.focus()
+    await user.keyboard('{Enter}')
+    expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled()
+
+    expect(video).toHaveAccessibleName(trailers.labels.pause)
+
+    await user.keyboard(' ')
+    expect(window.HTMLMediaElement.prototype.pause).toHaveBeenCalled()
   })
 
   it('em caso de falha de carregamento mostra capa com mensagem alternativa', async () => {
