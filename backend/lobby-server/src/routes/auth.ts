@@ -6,11 +6,7 @@
 import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { getConfig } from '@flicker/config';
-import type {
-  ErroAuthItem,
-  Jogador,
-  Jogador as JogadorDto,
-} from '@flicker/shared';
+import type { ErroAuthItem, Jogador } from '@flicker/shared';
 import { pool } from '../config/pg.ts';
 import {
   NOME_ACCESS_COOKIE,
@@ -116,12 +112,7 @@ function responderErroNaoAutorizado(res: Response): void {
 
 // --- helpers de cookies de sessão ---
 
-interface CookiesDeSessao {
-  access: string;
-  refresh: string;
-}
-
-function emitirCookiesDeSessao(res: Response, jogador: Jogador, sessaoId: string): CookiesDeSessao {
+function emitirCookiesDeSessao(res: Response, jogador: Jogador, sessaoId: string): void {
   const { cookieSecure, sessionAccessTtlSeconds, sessionRefreshTtlSeconds } = getConfig();
   const access = assinarAccess(jogador, sessaoId);
   const refresh = assinarRefresh(jogador, sessaoId);
@@ -142,8 +133,6 @@ function emitirCookiesDeSessao(res: Response, jogador: Jogador, sessaoId: string
       path: '/',
     }),
   ]);
-
-  return { access, refresh };
 }
 
 function limparCookiesDeSessao(res: Response): void {
@@ -219,7 +208,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
       [apelidoBruto, emailNormalizado, hash],
     );
 
-    const jogador: JogadorDto = result.rows[0];
+    const jogador: Jogador = result.rows[0];
     const { sessaoId } = await criarSessao(jogador.id);
     emitirCookiesDeSessao(res, jogador, sessaoId);
     res.status(201).json(jogador);
@@ -287,7 +276,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const jogador: JogadorDto = { id: row.id, apelido: row.apelido, email: row.email };
+    const jogador: Jogador = { id: row.id, apelido: row.apelido, email: row.email };
     // criarSessao já revoga a sessão anterior (Sessão única por Jogador).
     const { sessaoId } = await criarSessao(jogador.id);
     emitirCookiesDeSessao(res, jogador, sessaoId);
@@ -367,7 +356,7 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const jogador: JogadorDto = result.rows[0];
+    const jogador: Jogador = result.rows[0];
     const rotacionada = await rotacionarSessao(payload.sessaoId, jogador.id);
     emitirCookiesDeSessao(res, jogador, rotacionada.sessaoId);
     res.status(200).json(jogador);
