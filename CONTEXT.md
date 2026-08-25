@@ -96,6 +96,14 @@ _Avoid_: hospital, asilo
 Estado mental dos personagens, degradado pela escuridão e pelos monstros ao longo da partida.
 _Avoid_: saúde mental, lucidez
 
+**Ambiente de Jogo**:
+Cena visual da partida — background, mesa, iluminação e câmera — exibida em tela cheia sob a moldura.
+_Avoid_: cena, tela de jogo
+
+**Mesa**:
+Plataforma do Ambiente de Jogo que serve de base de apoio ao tabuleiro e aos demais componentes do jogo; superfície lisa e sem textura.
+_Avoid_: plataforma, base, mesa de jogo
+
 ## Objetivos da Partida
 
 **Gerador**:
