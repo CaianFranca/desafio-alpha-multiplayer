@@ -3,6 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import type { ClientMessage, ServerMessage } from '@flicker/shared';
 import { NOME_ACCESS_COOKIE } from '../cookies.ts';
+import { parseCookies } from '../middleware/cookie.ts';
 import { verificarAccess } from '../jwt.ts';
 import { obterSessao } from '../sessoes.ts';
 
@@ -20,36 +21,6 @@ export interface WsDeps {
   obterSessao?: typeof obterSessao;
 }
 
-function parseCookies(header: string | undefined): Record<string, string> {
-  const cookies: Record<string, string> = {};
-  if (typeof header !== 'string' || header.length === 0) {
-    return cookies;
-  }
-  for (const par of header.split(';')) {
-    const trimmed = par.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) {
-      continue;
-    }
-    const nome = trimmed.slice(0, eq).trim();
-    const valor = trimmed.slice(eq + 1).trim();
-    if (nome.length === 0) {
-      continue;
-    }
-    if (!(nome in cookies)) {
-      try {
-        cookies[nome] = decodeURIComponent(valor);
-      } catch {
-        cookies[nome] = valor;
-      }
-    }
-  }
-  return cookies;
-}
-
 async function autenticarRequest(
   request: IncomingMessage,
   deps: Required<WsDeps>,
@@ -63,7 +34,12 @@ async function autenticarRequest(
   if (payload === null) {
     return null;
   }
-  const sessao = await deps.obterSessao(payload.sessaoId);
+  let sessao: Awaited<ReturnType<typeof deps.obterSessao>> | null;
+  try {
+    sessao = await deps.obterSessao(payload.sessaoId);
+  } catch {
+    return null;
+  }
   if (sessao === null || sessao.jogadorId !== payload.jogadorId) {
     return null;
   }
@@ -84,38 +60,52 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
   const wss = new WebSocketServer({ server });
 
   wss.on('connection', (socket, request) => {
-    void (async () => {
-      const auth = await autenticarRequest(request as IncomingMessage, depsResolvidas);
-      if (auth === null) {
-        console.log(`[ws] reject: ${request.socket.remoteAddress} (sessão inválida)`);
+    (async () => {
+      try {
+        const auth = await autenticarRequest(request as IncomingMessage, depsResolvidas);
+        if (auth === null) {
+          console.log(`[ws] reject: ${request.socket.remoteAddress} (sessão inválida)`);
+          try {
+            socket.close(4401, 'Unauthorized');
+          } catch {
+            socket.terminate();
+          }
+          return;
+        }
+
+        (socket as AuthenticatedWebSocket).data = auth;
+        console.log(`[ws] auth: ${auth.jogadorId} (${auth.apelido})`);
+
+        console.log(`[ws] connect: ${request.socket.remoteAddress} jogador=${auth.jogadorId}`);
+
+        socket.on('error', (error) => {
+          console.error('[ws] error:', error.message);
+        });
+
+        socket.on('message', (data) => {
+          const reply = handleMessage(data);
+          if (reply) {
+            socket.send(JSON.stringify(reply));
+          }
+        });
+
+        socket.on('close', () => {
+          console.log('[ws] disconnect');
+        });
+      } catch {
         try {
-          socket.close(4401, 'Unauthorized');
+          socket.close(1011, 'Internal error');
         } catch {
-          socket.terminate();
+          try {
+            socket.terminate();
+          } catch {}
         }
-        return;
       }
-
-      (socket as AuthenticatedWebSocket).data = auth;
-      console.log(`[ws] auth: ${auth.jogadorId} (${auth.apelido})`);
-
-      console.log(`[ws] connect: ${request.socket.remoteAddress} jogador=${auth.jogadorId}`);
-
-      socket.on('error', (error) => {
-        console.error('[ws] error:', error.message);
-      });
-
-      socket.on('message', (data) => {
-        const reply = handleMessage(data);
-        if (reply) {
-          socket.send(JSON.stringify(reply));
-        }
-      });
-
-      socket.on('close', () => {
-        console.log('[ws] disconnect');
-      });
-    })();
+    })().catch(() => {
+      try {
+        socket.terminate();
+      } catch {}
+    });
   });
 
   return wss;
