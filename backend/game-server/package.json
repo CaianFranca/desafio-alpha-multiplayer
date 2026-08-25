@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@flicker/config": "*",
@@ -17,10 +18,14 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.5.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "tsx": "^4.23.12",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.67.0"
   }
 }

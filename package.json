@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "dev": "npm run dev --workspace=@flicker/game-server"
+    "dev": "npm run dev --workspace=@flicker/game-server",
+    "lint": "npm run lint --workspaces --if-present"
   }
 }

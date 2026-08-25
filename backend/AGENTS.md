@@ -1,5 +1,7 @@
 # Backend — Flicker of Sanity
 
+Padrões de código desta área: [`CODING_STANDARDS.md`](./CODING_STANDARDS.md).
+
 ## Docs atuais via Context7
 
 Quando o código depende de uma API de dependência que sua memória pode ter

@@ -7,11 +7,16 @@
   "types": "src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/engine.test.ts"
+    "test": "tsx --test test/engine.test.ts",
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.0.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "tsx": "^4.23.12",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.67.0"
   }
 }

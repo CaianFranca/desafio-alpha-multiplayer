@@ -6,7 +6,8 @@
     "migrate:make": "knex migrate:make --knexfile knexfile.ts",
     "migrate:latest": "knex migrate:latest --knexfile knexfile.ts",
     "migrate:rollback": "knex migrate:rollback --knexfile knexfile.ts",
-    "seed:run": "knex seed:run --knexfile knexfile.ts"
+    "seed:run": "knex seed:run --knexfile knexfile.ts",
+    "lint": "eslint ."
   },
   "dependencies": {
     "dotenv": "^16.4.0",
@@ -14,8 +15,12 @@
     "pg": "^8.13.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "ts-node": "^10.9.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.67.0"
   }
 }

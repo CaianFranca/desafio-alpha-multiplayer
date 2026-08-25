@@ -6,13 +6,18 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
     "ioredis": "^5.6.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.0.0",
-    "typescript": "^5.8.0"
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.67.0"
   }
 }

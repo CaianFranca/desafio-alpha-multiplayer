@@ -1,3 +1,11 @@
+## Padrões de código
+
+Cada área do monorepo tem seu `CODING_STANDARDS.md` — leia o da área antes
+de escrever código: [`frontend/`](frontend/CODING_STANDARDS.md) ·
+[`backend/`](backend/CODING_STANDARDS.md) · [`packages/`](packages/CODING_STANDARDS.md)
+· [`db/`](db/CODING_STANDARDS.md) · [`infra/`](infra/CODING_STANDARDS.md).
+Violações pré-existentes estão registradas como "Legado" em cada doc.
+
 ## Agent skills
 
 ### Issue tracker
