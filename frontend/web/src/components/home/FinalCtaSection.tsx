@@ -1,5 +1,5 @@
 import { finalCta } from './placeholders'
-import { AuthActions } from './AuthActions'
+import { AuthActions } from '../auth/AuthActions'
 
 export function FinalCtaSection() {
   return (
