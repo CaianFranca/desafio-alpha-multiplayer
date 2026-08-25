@@ -154,9 +154,6 @@ after(async () => {
     redis.disconnect();
   }
   await pool.end().catch(() => undefined);
-  // Garante saída limpa: ioredis/pg podem deixar handles ativos mesmo após
-  // quit/end bem-sucedidos em ambiente com tsx + watch de handles.
-  setImmediate(() => process.exit(0));
 });
 
 beforeEach(async () => {
