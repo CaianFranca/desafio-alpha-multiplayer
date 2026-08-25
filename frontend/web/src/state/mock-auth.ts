@@ -10,5 +10,9 @@ export type EstadoAutenticado = Extract<AuthState, { status: 'autenticado' }>
  */
 export const estadoAutenticadoMock: EstadoAutenticado = {
   status: 'autenticado',
-  jogador: { apelido: 'JogadorTeste' },
+  jogador: {
+    id: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+    apelido: 'JogadorTeste',
+    email: 'jogador.teste@exemplo.com',
+  },
 }

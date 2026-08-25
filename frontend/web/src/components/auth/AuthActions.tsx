@@ -9,9 +9,9 @@ interface AuthActionsProps {
 }
 
 export function AuthActions({ className }: AuthActionsProps) {
-  const authState = useAuth()
+  const { estado } = useAuth()
 
-  if (authState.status === 'autenticado') {
+  if (estado.status === 'autenticado') {
     return (
       <div className={className}>
         <CtaLink to="/salas/criar" variant="primary">{criarSalaLabel}</CtaLink>
