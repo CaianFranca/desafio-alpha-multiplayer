@@ -4,11 +4,13 @@ import { createWebSocketServer } from './ws/ws.ts';
 import { createApp } from './app.ts';
 import { pool } from './config/pg.ts';
 import { redisClient } from './config/redis.ts';
+import { verificarAccess } from './jwt.ts';
+import { obterSessao } from './sessoes.ts';
 
 const app = createApp();
 const server = http.createServer(app);
 
-createWebSocketServer(server);
+createWebSocketServer(server, { verificarAccess, obterSessao });
 
 const { lobbyServerPort } = getConfig();
 
