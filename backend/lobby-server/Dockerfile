@@ -15,6 +15,7 @@ RUN npm ci
 # Copia código necessário para dev (bind-mount sobrescreve no compose)
 COPY packages/config ./packages/config
 COPY packages/shared ./packages/shared
+COPY packages/engine ./packages/engine
 COPY backend/lobby-server ./backend/lobby-server
 
 WORKDIR /app/backend/lobby-server

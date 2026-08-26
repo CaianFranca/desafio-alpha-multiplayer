@@ -6,36 +6,48 @@ import { pool } from './config/pg.ts';
 import { redisClient } from './config/redis.ts';
 import { verificarAccess } from './jwt.ts';
 import { obterSessao } from './sessoes.ts';
+import { criarContextoDasSalas } from './salas/index.ts';
 
 const app = createApp();
 const server = http.createServer(app);
 
-createWebSocketServer(server, { verificarAccess, obterSessao });
+const contextoSalas = criarContextoDasSalas();
+
+createWebSocketServer(server, { verificarAccess, obterSessao, contextoSalas });
 
 const { lobbyServerPort } = getConfig();
 
-// Validação assíncrona de PG/Redis no boot — loga mas não impede listen (compose depends_on já garante ordem)
-async function validarDependencias(): Promise<void> {
-  try {
-    await pool.query('SELECT 1');
-    console.log('[lobby-server] postgres conectado');
-  } catch (error) {
-    console.warn('[lobby-server] postgres ainda não disponível:', (error as Error).message);
+// O servidor só aceita WebSocket depois de PG, Redis e o estado de Salas
+// estarem prontos. Assim uma mutação nunca é calculada sobre estado vazio
+// durante a reconstrução do write-model (ADR-0002).
+async function inicializarDependencias(): Promise<void> {
+  await pool.query('SELECT 1');
+  console.log('[lobby-server] postgres conectado');
+
+  if (redisClient.status === 'wait') {
+    await redisClient.connect();
   }
-  try {
-    if (redisClient.status === 'wait') {
-      await redisClient.connect();
-    }
-    await redisClient.ping();
-    console.log('[lobby-server] redis conectado');
-  } catch (error) {
-    console.warn('[lobby-server] redis ainda não disponível:', (error as Error).message);
-  }
+  await redisClient.ping();
+  console.log('[lobby-server] redis conectado');
+
+  await contextoSalas.estado.carregar(contextoSalas.repo, contextoSalas.projecao);
+  console.log('[lobby-server] salas carregadas do PG');
 }
 
-server.listen(lobbyServerPort, () => {
+async function iniciar(): Promise<void> {
+  await inicializarDependencias();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(lobbyServerPort, () => resolve());
+  });
   console.log(`[lobby-server] listening on http://localhost:${lobbyServerPort}`);
-  void validarDependencias();
+}
+
+void iniciar().catch(async (error: unknown) => {
+  console.error('[lobby-server] falha na inicialização:', (error as Error).message);
+  await pool.end().catch(() => undefined);
+  await redisClient.quit().catch(() => undefined);
+  process.exitCode = 1;
 });
 
 // Graceful shutdown

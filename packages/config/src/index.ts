@@ -5,6 +5,8 @@ import { Redis } from 'ioredis';
 export interface Config {
   gameServerPort: number;
   lobbyServerPort: number;
+  /** URL pública usada nos links compartilháveis emitidos pelo lobby. */
+  lobbyPublicUrl: string;
   jwtSecret: string;
   jwtRefreshSecret: string;
   cookieSecure: boolean;
@@ -109,6 +111,21 @@ function parseCookieSecure(raw: string | undefined, isProduction: boolean): bool
   return raw.toLowerCase() === 'true';
 }
 
+function parseLobbyPublicUrl(raw: string | undefined, fallback: string): string {
+  if (raw === undefined) {
+    return fallback;
+  }
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('protocolo não suportado');
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    throw new Error('LOBBY_PUBLIC_URL deve ser uma URL HTTP(S) válida');
+  }
+}
+
 export function getConfig(): Config {
   loadEnvFile();
 
@@ -120,6 +137,10 @@ export function getConfig(): Config {
   const lobbyServerPort = parsePort(
     process.env.LOBBY_SERVER_PORT as string | undefined,
     DEFAULT_LOBBY_SERVER_PORT,
+  );
+  const lobbyPublicUrl = parseLobbyPublicUrl(
+    process.env.LOBBY_PUBLIC_URL as string | undefined,
+    `http://localhost:${lobbyServerPort}`,
   );
 
   const jwtSecret = process.env.JWT_SECRET ?? DEFAULT_JWT_SECRET;
@@ -156,6 +177,9 @@ export function getConfig(): Config {
     if (!postgres.password || postgres.password === DEFAULT_POSTGRES_PASSWORD) {
       throw new Error('POSTGRES_PASSWORD deve ser definido em produção');
     }
+    if (process.env.LOBBY_PUBLIC_URL === undefined) {
+      throw new Error('LOBBY_PUBLIC_URL deve ser definido em produção');
+    }
   }
 
   const redis = {
@@ -167,6 +191,7 @@ export function getConfig(): Config {
   return {
     gameServerPort,
     lobbyServerPort,
+    lobbyPublicUrl,
     jwtSecret,
     jwtRefreshSecret,
     cookieSecure,
