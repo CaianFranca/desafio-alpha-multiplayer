@@ -2,10 +2,20 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
+import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
+import { visitorState } from '../web/src/state/auth-context'
+import { estadoAutenticadoMock } from '../web/src/state/mock-auth'
 
-function renderWithRouter(initialEntries: string[] = ['/']) {
+// Replica a composição de main.tsx (AuthProvider envolvendo RouterProvider),
+// permitindo injetar o estado de autenticação via props do provider.
+// O default explícito garante testes determinísticos, independentes do .env.
+function renderWithRouter(initialEntries: string[] = ['/'], authState: AuthState = visitorState) {
   const router = createMemoryRouter(routes, { initialEntries })
-  return render(<RouterProvider router={router} />)
+  return render(
+    <AuthProvider initialState={authState}>
+      <RouterProvider router={router} />
+    </AuthProvider>,
+  )
 }
 
 function setViewport(width: number) {
@@ -119,6 +129,74 @@ describe('hero CTAs', () => {
     await user.click(heroLogin)
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
+  })
+})
+
+describe('authentication states', () => {
+  const visitante: AuthState = { status: 'visitante' }
+  const autenticado = estadoAutenticadoMock
+  const apelidoMock = estadoAutenticadoMock.jogador.apelido
+
+  it('visitor header shows no nickname and no Criar Sala action', () => {
+    renderWithRouter(['/'], visitante)
+
+    const header = screen.getByRole('banner')
+    expect(within(header).queryByText(apelidoMock)).not.toBeInTheDocument()
+    expect(within(header).queryByRole('link', { name: /criar sala/i })).not.toBeInTheDocument()
+
+    const heroSection = document.getElementById('hero')!
+    expect(within(heroSection).getByRole('link', { name: /criar conta/i })).toBeInTheDocument()
+    expect(within(heroSection).getByRole('link', { name: /^entrar$/i })).toBeInTheDocument()
+  })
+
+  it('authenticated header shows nickname and Criar Sala link', () => {
+    renderWithRouter(['/'], autenticado)
+
+    const header = screen.getByRole('banner')
+    expect(within(header).getByText(apelidoMock)).toBeInTheDocument()
+    expect(within(header).getByRole('link', { name: /criar sala/i })).toHaveAttribute('href', '/salas/criar')
+
+    const heroSection = document.getElementById('hero')!
+    expect(within(heroSection).getByRole('link', { name: /criar sala/i })).toBeInTheDocument()
+    expect(within(heroSection).queryByRole('link', { name: /criar conta/i })).not.toBeInTheDocument()
+  })
+
+  it('final call to action mirrors the current auth state', () => {
+    const { unmount } = renderWithRouter(['/'], visitante)
+
+    const finalCtaRegion = screen.getByRole('region', { name: /pronto para enfrentar o sanatório/i })
+    expect(within(finalCtaRegion).getByRole('link', { name: /criar conta/i })).toBeInTheDocument()
+    expect(within(finalCtaRegion).queryByRole('link', { name: /criar sala/i })).not.toBeInTheDocument()
+    unmount()
+
+    renderWithRouter(['/'], autenticado)
+    const authenticatedFinalCta = screen.getByRole('region', { name: /pronto para enfrentar o sanatório/i })
+    expect(within(authenticatedFinalCta).getByRole('link', { name: /criar sala/i })).toBeInTheDocument()
+    expect(within(authenticatedFinalCta).queryByRole('link', { name: /criar conta/i })).not.toBeInTheDocument()
+  })
+
+  it('redirects visitor trying to open create room page to login', () => {
+    renderWithRouter(['/salas/criar'], visitante)
+
+    expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
+    expect(screen.getAllByText(/em construção/i).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('heading', { name: /criar sala/i })).not.toBeInTheDocument()
+  })
+
+  it('lets authenticated player open the create room page', () => {
+    renderWithRouter(['/salas/criar'], autenticado)
+
+    expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
+    expect(screen.getAllByText(/em construção/i).length).toBeGreaterThan(0)
+  })
+
+  it('authenticated header Criar Sala action navigates to the create room page', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/'], autenticado)
+
+    await user.click(within(screen.getByRole('banner')).getByRole('link', { name: /criar sala/i }))
+
+    expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
   })
 })
 

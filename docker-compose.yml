@@ -71,6 +71,7 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       LOBBY_SERVER_PORT: ${LOBBY_SERVER_PORT:-3001}
+      LOBBY_PUBLIC_URL: ${LOBBY_PUBLIC_URL:-http://localhost:${NGINX_PORT:-8080}}
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_jwt_refresh_change_me}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
