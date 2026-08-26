@@ -2,12 +2,16 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// Mesma env var respeitada por getConfig() em packages/config
+// (DEFAULT_LOBBY_SERVER_PORT = 3001 lá).
+const lobbyServerPort = process.env.LOBBY_SERVER_PORT ?? '3001'
+
 export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
-  // Proxy dev para o lobby-server (DEFAULT_LOBBY_SERVER_PORT em packages/config).
+  // Proxy dev para o lobby-server.
   server: {
     proxy: {
-      '/api': 'http://localhost:3001',
+      '/api': `http://localhost:${lobbyServerPort}`,
     },
   },
   // Constante de compilação para a dupla trava do mock de autenticação:

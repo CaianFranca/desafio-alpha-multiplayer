@@ -3,6 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider } from '../web/src/state/AuthProvider'
+import { apiFetch } from '../web/src/api/client'
+
+afterEach(() => vi.unstubAllGlobals())
 
 const jogador = {
   id: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
@@ -10,32 +13,32 @@ const jogador = {
   email: 'ana@exemplo.com',
 }
 
-function respostaJson(corpo: unknown, status = 200) {
-  return new Response(JSON.stringify(corpo), {
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
 }
 
-interface RotaSimulada {
+interface MockRoute {
   url: string
-  metodo?: string
-  resposta: () => Response | Promise<Response>
+  method?: string
+  response: () => Response | Promise<Response>
 }
 
-function simularApi(rotas: RotaSimulada[]) {
-  const chamadas: string[] = []
+function mockApi(routes: MockRoute[]) {
+  const calls: string[] = []
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      const metodo = (init?.method ?? 'GET').toUpperCase()
-      chamadas.push(`${metodo} ${url}`)
-      const rota = rotas.find((r) => url.includes(r.url) && (r.metodo ?? 'GET').toUpperCase() === metodo)
-      return rota ? rota.resposta() : new Response(null, { status: 404 })
+      const method = (init?.method ?? 'GET').toUpperCase()
+      calls.push(`${method} ${url}`)
+      const route = routes.find((r) => url.includes(r.url) && (r.method ?? 'GET').toUpperCase() === method)
+      return route ? route.response() : new Response(null, { status: 404 })
     }),
   )
-  return chamadas
+  return calls
 }
 
 function renderApp(initialEntries: string[] = ['/']) {
@@ -48,10 +51,8 @@ function renderApp(initialEntries: string[] = ['/']) {
 }
 
 describe('reidratação da sessão', () => {
-  afterEach(() => vi.unstubAllGlobals())
-
   it('reidrata o Jogador via /api/auth/me e exibe o apelido no cabeçalho', async () => {
-    simularApi([{ url: '/api/auth/me', resposta: () => respostaJson(jogador) }])
+    mockApi([{ url: '/api/auth/me', response: () => jsonResponse(jogador) }])
     renderApp()
 
     expect(await screen.findByText('Ana')).toBeInTheDocument()
@@ -59,21 +60,30 @@ describe('reidratação da sessão', () => {
   })
 
   it('sessão expirada (401 no /me) mantém o estado de Visitante', async () => {
-    simularApi([
-      { url: '/api/auth/me', resposta: () => respostaJson({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] }, 401) },
+    mockApi([
+      { url: '/api/auth/me', response: () => jsonResponse({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] }, 401) },
     ])
     renderApp()
 
     expect(await screen.findAllByRole('link', { name: /criar conta/i })).not.toHaveLength(0)
     expect(screen.queryByText('Ana')).not.toBeInTheDocument()
   })
+
+  it('corpo malformado no /me resolve para Visitante em vez de travar carregando', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('não é json', { status: 200, headers: { 'Content-Type': 'application/json' } })),
+    )
+    renderApp(['/salas/criar'])
+
+    expect(await screen.findByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/entre para acessar esta funcionalidade/i)
+  })
 })
 
 describe('rotas protegidas', () => {
-  afterEach(() => vi.unstubAllGlobals())
-
   it('redireciona visitante para /login com mensagem orientativa', async () => {
-    simularApi([{ url: '/api/auth/me', resposta: () => respostaJson({}, 401) }])
+    mockApi([{ url: '/api/auth/me', response: () => jsonResponse({}, 401) }])
     renderApp(['/salas/criar'])
 
     expect(await screen.findByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
@@ -82,34 +92,49 @@ describe('rotas protegidas', () => {
   })
 
   it('não redireciona enquanto a sessão está sendo reidratada', async () => {
-    let resolver!: (resposta: Response) => void
-    const mePendente = new Promise<Response>((resolve) => {
-      resolver = resolve
+    let resolveMe!: (response: Response) => void
+    const pendingMe = new Promise<Response>((resolve) => {
+      resolveMe = resolve
     })
-    simularApi([{ url: '/api/auth/me', resposta: () => mePendente }])
+    mockApi([{ url: '/api/auth/me', response: () => pendingMe }])
     renderApp(['/salas/criar'])
 
     expect(screen.queryByRole('heading', { name: /^entrar$/i })).not.toBeInTheDocument()
 
-    resolver(respostaJson(jogador))
+    resolveMe(jsonResponse(jogador))
     expect(await screen.findByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
   })
 })
 
-describe('logout', () => {
-  afterEach(() => vi.unstubAllGlobals())
+describe('sessão expirada durante o uso', () => {
+  it('401 em chamada de API devolve o Jogador ao estado de Visitante', async () => {
+    mockApi([
+      { url: '/api/auth/me', response: () => jsonResponse(jogador) },
+      { url: '/api/salas', response: () => jsonResponse({}, 401) },
+    ])
+    renderApp()
 
+    expect(await screen.findByText('Ana')).toBeInTheDocument()
+
+    await apiFetch('/api/salas')
+
+    expect(await screen.findAllByRole('link', { name: /criar conta/i })).not.toHaveLength(0)
+    expect(screen.queryByText('Ana')).not.toBeInTheDocument()
+  })
+})
+
+describe('logout', () => {
   it('Sair encerra a sessão e volta à página principal como Visitante', async () => {
-    const chamadas = simularApi([
-      { url: '/api/auth/me', resposta: () => respostaJson(jogador) },
-      { url: '/api/auth/logout', metodo: 'POST', resposta: () => new Response(null, { status: 204 }) },
+    const calls = mockApi([
+      { url: '/api/auth/me', response: () => jsonResponse(jogador) },
+      { url: '/api/auth/logout', method: 'POST', response: () => new Response(null, { status: 204 }) },
     ])
     const user = userEvent.setup()
     renderApp()
 
     await user.click(await screen.findByRole('button', { name: /sair/i }))
 
-    expect(chamadas).toContain('POST /api/auth/logout')
+    expect(calls).toContain('POST /api/auth/logout')
     expect(screen.queryByText('Ana')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: /criar conta/i })).not.toHaveLength(0)

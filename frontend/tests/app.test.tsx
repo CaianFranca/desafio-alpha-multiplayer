@@ -4,7 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
-import { estadoAutenticadoMock } from '../web/src/state/mock-auth'
+import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 
 // Replica a composição de main.tsx (AuthProvider envolvendo RouterProvider),
 // permitindo injetar o estado de autenticação via props do provider.
@@ -133,9 +133,9 @@ describe('hero CTAs', () => {
 })
 
 describe('authentication states', () => {
-  const visitante: AuthState = { status: 'visitante' }
-  const autenticado = estadoAutenticadoMock
-  const apelidoMock = estadoAutenticadoMock.jogador.apelido
+  const visitante: AuthState = { status: 'visitor' }
+  const autenticado = mockAuthenticatedState
+  const apelidoMock = mockAuthenticatedState.jogador.apelido
 
   it('visitor header shows no nickname and no Criar Sala action', () => {
     renderWithRouter(['/'], visitante)

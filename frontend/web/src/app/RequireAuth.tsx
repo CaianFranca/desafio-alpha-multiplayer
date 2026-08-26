@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../state/useAuth'
 
 /** Mensagem orientativa exibida na página de login após o redirecionamento. */
-export const mensagemRotaProtegida = 'Entre para acessar esta funcionalidade.'
+export const protectedRouteMessage = 'Entre para acessar esta funcionalidade.'
 
 interface RequireAuthProps {
   children: ReactNode
@@ -11,12 +11,12 @@ interface RequireAuthProps {
 
 /** Redireciona visitante para o login ao tentar acessar rotas protegidas. */
 export function RequireAuth({ children }: RequireAuthProps) {
-  const { estado } = useAuth()
+  const { authState } = useAuth()
 
-  if (estado.status === 'carregando') return null
+  if (authState.status === 'loading') return null
 
-  if (estado.status === 'visitante') {
-    return <Navigate to="/login" replace state={{ motivo: mensagemRotaProtegida }} />
+  if (authState.status === 'visitor') {
+    return <Navigate to="/login" replace state={{ reason: protectedRouteMessage }} />
   }
 
   return <>{children}</>

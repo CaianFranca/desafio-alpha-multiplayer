@@ -4,13 +4,13 @@ import { CtaLink } from './CtaLink'
 import { criarSalaLabel } from '../auth/AuthActions'
 
 export function Header() {
-  const { estado, sair } = useAuth()
+  const { authState, logout } = useAuth()
   const navigate = useNavigate()
 
   // A navegação pós-logout fica aqui porque o AuthProvider está acima do
   // RouterProvider em main.tsx (o provider não tem acesso ao navigate).
-  async function aoSair() {
-    await sair()
+  async function handleLogout() {
+    await logout()
     navigate('/')
   }
 
@@ -28,13 +28,13 @@ export function Header() {
             <a href="#caracteristicas" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Características</a>
             <a href="#objetivos" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Objetivos</a>
           </nav>
-          {estado.status === 'autenticado' && (
+          {authState.status === 'authenticated' && (
             <div className="flex items-center gap-3">
-              <span className="text-sm font-bold">{estado.jogador.apelido}</span>
+              <span className="text-sm font-bold">{authState.jogador.apelido}</span>
               <CtaLink to="/salas/criar" variant="primary" size="sm">{criarSalaLabel}</CtaLink>
               <button
                 type="button"
-                onClick={() => void aoSair()}
+                onClick={() => void handleLogout()}
                 className="text-sm text-(--color-muted) hover:text-white transition-colors"
               >
                 Sair
