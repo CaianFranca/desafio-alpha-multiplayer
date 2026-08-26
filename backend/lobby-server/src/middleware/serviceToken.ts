@@ -8,8 +8,9 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { getConfig } from '@flicker/config';
+import { SERVICE_TOKEN_AUDIENCE } from '../jwt.ts';
 
-export const SERVICE_TOKEN_AUDIENCE = 'flicker-service';
+export { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../jwt.ts';
 
 export function requireServiceToken(req: Request, res: Response, next: NextFunction): void {
   if (process.env.NODE_ENV !== 'production') {

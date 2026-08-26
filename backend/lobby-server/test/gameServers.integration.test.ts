@@ -10,7 +10,7 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@flicker/config';
 import { GAME_SERVERS_PREFIX } from '@flicker/shared';
 import { createApp } from '../src/app.ts';
-import { SERVICE_TOKEN_AUDIENCE } from '../src/middleware/serviceToken.ts';
+import { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../src/middleware/serviceToken.ts';
 import { Redis } from 'ioredis';
 
 interface ServidorEfemero {
@@ -235,12 +235,8 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
       });
       assert.equal(res.status, 401);
 
-      // service token válido (aud de serviço) → 200
-      const tokenServico = jwt.sign(
-        { sub: 'lobby', role: 'service' },
-        jwtSecret,
-        { expiresIn: '1h', audience: SERVICE_TOKEN_AUDIENCE },
-      );
+      // service token válido (aud de serviço, emitido por assinarServiceToken) → 200
+      const tokenServico = assinarServiceToken();
       res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
         headers: { authorization: `Bearer ${tokenServico}` },
       });
