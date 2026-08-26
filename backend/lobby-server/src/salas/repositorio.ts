@@ -161,6 +161,40 @@ export class SalasRepo {
   }
 
   /**
+   * Resolve a Sala aberta pelo Código diretamente no write-model. Fallback
+   * quando a chave `lobby:sala:codigo:<codigo>` expira no Redis (TTL) —
+   * o ADR-0002 garante que `salas_historico` é a fonte da verdade.
+   */
+  async obterSalaAbertaPorCodigo(codigo: string): Promise<string | null> {
+    const resultado = await this.pool.query<{ id: string }>(
+      `SELECT id FROM salas_historico
+       WHERE codigo_sala = $1 AND status = 'aberta'
+       LIMIT 1`,
+      [codigo],
+    );
+    return resultado.rows[0]?.id ?? null;
+  }
+
+  /**
+   * Resolve a Sala aberta em que o Jogador tem vínculo ativo, pelo
+   * write-model. Fallback quando a chave `lobby:jogador:<id>:sala` expira.
+   * O domínio garante no máximo uma Sala ativa por Jogador; a ordenação
+   * por ordem de entrada é defensiva.
+   */
+  async obterSalaAbertaDoJogador(jogadorId: string): Promise<string | null> {
+    const resultado = await this.pool.query<{ salaId: string }>(
+      `SELECT m.sala_id AS "salaId"
+       FROM membros m
+       JOIN salas_historico s ON s.id = m.sala_id
+       WHERE m.usuario_id = $1 AND s.status = 'aberta'
+       ORDER BY m.ordem_de_entrada ASC
+       LIMIT 1`,
+      [jogadorId],
+    );
+    return resultado.rows[0]?.salaId ?? null;
+  }
+
+  /**
    * Apelido de um jogador, para preencher o campo `MembroDaSala.apelido`
    * do wire (o engine só conhece `jogadorId`). Usado na reconstrução para
    * hidratar o cache de apelidos; em runtime os apelidos chegam via

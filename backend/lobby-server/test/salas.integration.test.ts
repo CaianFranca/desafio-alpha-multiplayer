@@ -37,6 +37,7 @@ import {
   SalasRepo,
   type CriarContextoOpcoes,
 } from '../src/salas/index.ts';
+import { chaveJogadorSala, chaveSalaCodigo } from '../src/salas/projecao.ts';
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -1027,5 +1028,75 @@ test('Geração: 30 salas geradas produzem Códigos válidos e únicos', async (
       ws.close();
     }
     await Promise.all(sockets.map((ws) => esperarClose(ws).catch(() => undefined)));
+  });
+});
+
+// --- 13. Projeção Redis expira → fallback ao write-model com cura de cache ---
+
+test('ENTRAR_NA_SALA recorre ao PostgreSQL quando a chave do Código expira', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    // Simula a expiração do TTL da projeção quente (ADR-0002: reconstruível).
+    assert.equal(await redisClient.del(chaveSalaCodigo(codigo)), 1);
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    const eventosB = await coletarEventos(wsB, 2);
+    assert.equal(eventosB[0]?.type, 'MEMBRO_ENTROU');
+    assert.equal(eventosB[1]?.type, 'SALA_ATUALIZADA');
+    const salaB = (eventosB[1] as SalaAtualizadaEvento).sala;
+    assert.equal(membroDaSala(salaB, b.id).ordemDeEntrada, 2);
+
+    // Cura: a chave de código volta a existir após o fallback.
+    const salaIdCurado = await redisClient.get(chaveSalaCodigo(codigo));
+    assert.ok(typeof salaIdCurado === 'string' && salaIdCurado.length > 0);
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+  });
+});
+
+test('SAIR_DA_SALA recorre ao PostgreSQL quando a associação do Jogador expira', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    // Expira a associação jogador→sala; o vínculo ativo segue no PG.
+    assert.equal(await redisClient.del(chaveJogadorSala(b.id)), 1);
+
+    enviar(wsB, { type: 'SAIR_DA_SALA' });
+    const eventosB = await coletarEventos(wsB, 2);
+    assert.equal(eventosB[0]?.type, 'MEMBRO_SAIU');
+    assert.equal(eventosB[1]?.type, 'SALA_ATUALIZADA');
+
+    const eventosA = await coletarEventos(wsA, 2);
+    assert.equal(eventosA[0]?.type, 'MEMBRO_SAIU');
+    assert.equal(eventosA[1]?.type, 'SALA_ATUALIZADA');
+
+    // A associação é curada pelo fallback e então removida pela saída.
+    const associacaoPosSaida = await redisClient.get(chaveJogadorSala(b.id));
+    assert.equal(associacaoPosSaida, null);
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
   });
 });

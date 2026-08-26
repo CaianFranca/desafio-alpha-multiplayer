@@ -45,11 +45,12 @@ function chaveSalaEstado(salaId: string): string {
   return `${PREFIXO_SALA}${salaId}${SUFIXO_ESTADO}`;
 }
 
-function chaveSalaCodigo(codigo: string): string {
+/** Exportadas para os testes simularem a expiração do TTL por chave. */
+export function chaveSalaCodigo(codigo: string): string {
   return `${PREFIXO_CODIGO}${codigo}`;
 }
 
-function chaveJogadorSala(jogadorId: string): string {
+export function chaveJogadorSala(jogadorId: string): string {
   return `${PREFIXO_JOGADOR_SALA}${jogadorId}${SUFIXO_SALA}`;
 }
 

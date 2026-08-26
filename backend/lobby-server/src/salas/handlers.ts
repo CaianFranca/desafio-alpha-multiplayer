@@ -297,7 +297,17 @@ export class SalasHandlers {
       return;
     }
 
-    const salaId = await this.projecao.obterSalaIdPorCodigo(codigoDeSala);
+    let salaId = await this.projecao.obterSalaIdPorCodigo(codigoDeSala);
+    if (salaId === null) {
+      // A projeção é TTL e pode expirar para Salas abertas sem mutações.
+      // O write-model (ADR-0002) é a fonte da verdade: consulta o PG e,
+      // encontrado, cura a chave de código no Redis.
+      const recuperado = await this.repo.obterSalaAbertaPorCodigo(codigoDeSala);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirCodigo(codigoDeSala, recuperado);
+      }
+    }
     if (salaId === null) {
       this.enviarErro(
         socket,
@@ -348,7 +358,18 @@ export class SalasHandlers {
     socket: AuthenticatedWebSocket,
     jogadorId: string,
   ): Promise<void> {
-    const salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      // Mesmo fallback do ENTRAR_NA_SALA: a associação vive em chave com
+      // TTL, mas o vínculo ativo persiste no PG enquanto a Sala estiver
+      // aberta. Sem isso, o Jogador ficaria impossibilitado de sair após
+      // a expiração da projeção.
+      const recuperado = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
     if (salaId === null) {
       this.enviarErro(
         socket,
