@@ -1,17 +1,18 @@
-// Handlers WS de Sala (issue #36, ST-06).
+// Handlers WS de Sala (issues #36 e #39).
 //
 // Roteamento entre o protocolo Sala (`@flicker/shared`) e o engine
 // (`@flicker/engine`). Persistência e projeção vivem em `SalasRepo` e
 // `SalasProjecao`; a tradução engine→wire vive em `traduzirEventos`.
 //
-// Comandos no escopo do #36:
-//   CRIAR_SALA       -> criarSala(engine)
-//   ENTRAR_NA_SALA   -> entrarNaSala(engine), com codigoDeSala → salaId via Redis
-//   SAIR_DA_SALA     -> sairDaSala(engine), com salaId via Redis
+// Comandos no escopo:
+//   CRIAR_SALA         -> criarSala(engine)
+//   ENTRAR_NA_SALA     -> entrarNaSala(engine), com codigoDeSala → salaId via Redis
+//   SAIR_DA_SALA       -> sairDaSala(engine), com salaId via Redis
+//   EXPULSAR_MEMBRO    -> expulsarMembro(engine), com membroId via Redis
+//   DESBLOQUEAR_JOGADOR -> autorizarRetorno(engine), com jogadorId via Redis
 //
-// Os outros 6 comandos (`ALTERNAR_PRONTIDAO`, `ENVIAR_MENSAGEM_DE_CHAT`,
-// `EXPULSAR_MEMBRO`, `DESBLOQUEAR_JOGADOR`, `ENCERRAR_SALA`,
-// `INICIAR_PARTIDA`) respondem `ERRO_DA_SALA` com
+// Os outros 4 comandos (`ALTERNAR_PRONTIDAO`, `ENVIAR_MENSAGEM_DE_CHAT`,
+// `ENCERRAR_SALA`, `INICIAR_PARTIDA`) respondem `ERRO_DA_SALA` com
 // `codigo: 'DADOS_INVALIDOS'` ao originador — fora do escopo deste servidor.
 //
 // Erros do engine são roteados ao originador (não broadcast) com o mesmo
@@ -53,6 +54,9 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
   'JOGADOR_JA_ASSOCIADO',
   'MEMBRO_NAO_ENCONTRADO',
   'MEMBRO_NAO_ATIVO',
+  'APENAS_ANFITRIAO',
+  'JOGADOR_EXPULSO',
+  'JOGADOR_NAO_BLOQUEADO',
 ]);
 
 /**
@@ -88,9 +92,9 @@ export function ehSalaComando(value: unknown): value is SalaComandoDoCliente {
 /**
  * Mapeia o código de erro do engine para o conjunto fechado de
  * `CodigoDeErroDaSala` exposto no wire. Códigos do engine que não estão
- * no wire (ex.: `MEMBRO_NAO_EM_RECONEXAO`, `APENAS_ANFITRIAO`,
- * `SALA_INCONSISTENTE`) são inalcançáveis a partir dos 3 comandos no
- * escopo (#36) — caem em `DADOS_INVALIDOS` defensivo.
+ * no wire (ex.: `MEMBRO_NAO_EM_RECONEXAO`, `SALA_INCONSISTENTE`) são
+ * inalcançáveis a partir dos 5 comandos no escopo — caem em
+ * `DADOS_INVALIDOS` defensivo.
  */
 function paraCodigoDeErroDaSala(
   codigo: CodigoDeErro,
@@ -182,6 +186,12 @@ export class SalasHandlers {
             return;
           case 'SAIR_DA_SALA':
             await this.handleSairDaSala(socket, jogadorId);
+            return;
+          case 'EXPULSAR_MEMBRO':
+            await this.handleExpulsarMembro(socket, jogadorId, mensagem.membroId);
+            return;
+          case 'DESBLOQUEAR_JOGADOR':
+            await this.handleDesbloquearJogador(socket, jogadorId, mensagem.jogadorId);
             return;
           default:
             this.enviarErro(
@@ -453,6 +463,163 @@ export class SalasHandlers {
     // também receba o `MEMBRO_SAIU`. A função abaixo trata idem-potência
     // para múltiplas conexões.
     this.broadcast.removerSocket(socket);
+  }
+
+  private async handleExpulsarMembro(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+    membroId: string,
+  ): Promise<void> {
+    if (typeof membroId !== 'string' || membroId.length === 0) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'membroId é obrigatório.',
+      );
+      return;
+    }
+
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      const recuperado = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
+    if (salaId === null) {
+      this.enviarErro(
+        socket,
+        'MEMBRO_NAO_ENCONTRADO',
+        'O Jogador não está associado a nenhuma Sala.',
+      );
+      return;
+    }
+
+    // Resolver o membroId do anfitrião no estado do engine.
+    const salaInfo = this.estado.abertas.get(salaId);
+    if (salaInfo === undefined) {
+      this.enviarErro(
+        socket,
+        'SALA_NAO_ENCONTRADA',
+        'Sala não encontrada no servidor.',
+      );
+      return;
+    }
+    const anfitriaoMembroId = salaInfo.sala.anfitriaoId;
+    if (anfitriaoMembroId === null) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'Sala sem Anfitrião definido.',
+      );
+      return;
+    }
+
+    const resultado = this.estado.aplicar({
+      tipo: 'expulsar_membro',
+      salaId,
+      anfitriaoMembroId,
+      membroAlvoId: membroId,
+    });
+
+    if (!resultado.sucesso) {
+      this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
+      return;
+    }
+
+    // Extrair jogadorId alvo do evento de domínio para persistir a expulsão.
+    const eventoExpulsao = resultado.eventos.find(
+      (e) => e.tipo === 'membro_expulsado',
+    );
+    if (eventoExpulsao?.tipo === 'membro_expulsado') {
+      await this.repo.expulsarMembroAtomico(salaId, eventoExpulsao.jogadorId);
+    }
+
+    this.estado.substituirEstado(resultado.estado);
+
+    const eventos = traduzirEventos(
+      resultado.eventos,
+      resultado.estado,
+      this.estado.apelidoPorJogadorId,
+      this.linkBase,
+    );
+    this.difundir(eventos, salaId);
+  }
+
+  private async handleDesbloquearJogador(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+    jogadorAlvoId: string,
+  ): Promise<void> {
+    if (typeof jogadorAlvoId !== 'string' || jogadorAlvoId.length === 0) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'jogadorId é obrigatório.',
+      );
+      return;
+    }
+
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      const recuperado = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
+    if (salaId === null) {
+      this.enviarErro(
+        socket,
+        'MEMBRO_NAO_ENCONTRADO',
+        'O Jogador não está associado a nenhuma Sala.',
+      );
+      return;
+    }
+
+    const salaInfo = this.estado.abertas.get(salaId);
+    if (salaInfo === undefined) {
+      this.enviarErro(
+        socket,
+        'SALA_NAO_ENCONTRADA',
+        'Sala não encontrada no servidor.',
+      );
+      return;
+    }
+    const anfitriaoMembroId = salaInfo.sala.anfitriaoId;
+    if (anfitriaoMembroId === null) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'Sala sem Anfitrião definido.',
+      );
+      return;
+    }
+
+    const resultado = this.estado.aplicar({
+      tipo: 'autorizar_retorno',
+      salaId,
+      anfitriaoMembroId,
+      jogadorId: jogadorAlvoId,
+    });
+
+    if (!resultado.sucesso) {
+      this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
+      return;
+    }
+
+    await this.repo.desbloquearMembro(salaId, jogadorAlvoId);
+
+    this.estado.substituirEstado(resultado.estado);
+
+    const eventos = traduzirEventos(
+      resultado.eventos,
+      resultado.estado,
+      this.estado.apelidoPorJogadorId,
+      this.linkBase,
+    );
+    this.difundir(eventos, salaId);
   }
 
   /**

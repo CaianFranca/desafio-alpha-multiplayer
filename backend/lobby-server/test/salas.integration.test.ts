@@ -1,8 +1,8 @@
-// Testes de integração das Salas no lobby-server (issue #36, ST-06).
-// Cobre o contrato WS de Sala (CRIAR_SALA, ENTRAR_NA_SALA, SAIR_DA_SALA),
-// a persistência em PG (write-model, ADR-0002) e a projeção quente em
-// Redis. Estilo: node:test + assert/strict; espelha
-// `ws-auth.integration.test.ts`.
+// Testes de integração das Salas no lobby-server (issues #36 e #39).
+// Cobre o contrato WS de Sala (CRIAR_SALA, ENTRAR_NA_SALA, SAIR_DA_SALA,
+// EXPULSAR_MEMBRO, DESBLOQUEAR_JOGADOR), a persistência em PG (write-model,
+// ADR-0002) e a projeção quente em Redis. Estilo: node:test + assert/strict;
+// espelha `ws-auth.integration.test.ts`.
 //
 // Pré-condições: Postgres e Redis acessíveis via `getConfig()` (profile
 // `backend` do compose). TRUNCATE+FLUSHDB entre testes, com cuidado
@@ -25,6 +25,7 @@ import type {
   CodigoDeErroDaSala,
   ErroDaSalaEvento,
   MembroDaSala,
+  MembroExpulsoEvento,
   Sala,
   SalaAtualizadaEvento,
   SalaEventoDoServidor,
@@ -80,7 +81,7 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
   const server = http.createServer(app);
   const contexto = criarContextoDasSalas(opcoesDeSalas);
   await contexto.estado.carregar(contexto.repo, contexto.projecao);
-  createWebSocketServer(server, { contextoSalas: contexto });
+  const wss = createWebSocketServer(server, { contextoSalas: contexto });
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -90,10 +91,20 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
   return {
     baseUrl: `http://127.0.0.1:${endereco.port}`,
     wsUrl: `ws://127.0.0.1:${endereco.port}`,
-    fechar: () =>
-      new Promise<void>((resolve, reject) => {
+    fechar: async () => {
+      // Fechar WSS primeiro para encerrar sockets WebSocket antes de fechar
+      // o HTTP server — sem isso, `server.close()` fica aguardando as
+      // conexões de upgrade que nunca fecham sozinhas.
+      for (const client of wss.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolve, reject) => {
+        wss.close((err) => (err ? reject(err) : resolve()));
+      });
+      await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
-      }),
+      });
+    },
   };
 }
 
@@ -1241,5 +1252,403 @@ test('ENTRAR_NA_SALA com Código inexistente recebe SALA_NAO_ENCONTRADA', async 
 
     wsA.close();
     await esperarClose(wsA).catch(() => undefined);
+  });
+});
+
+// --- 17. Anfitrião expulsa Membro → MEMBRO_EXPULSO + SALA_ATUALIZADA ---
+
+test('EXPULSAR_MEMBRO: Anfitrião expulsa B → todos recebem MEMBRO_EXPULSO + SALA_ATUALIZADA', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    const eventosAEntrada = await coletarEventos(wsA, 2);
+
+    // Extrair membroId de B do evento SALA_ATUALIZADA (o engine gera UUIDs, não determinísticos).
+    const salaAposEntrada = (eventosAEntrada[1] as SalaAtualizadaEvento).sala;
+    const membroIdB = membroDaSala(salaAposEntrada, b.id).id;
+
+    // Anfitrião (A) expulsa B.
+    enviar(wsA, { type: 'EXPULSAR_MEMBRO', membroId: membroIdB });
+
+    // A recebe MEMBRO_EXPULSO + SALA_ATUALIZADA.
+    const eventosA = await coletarEventos(wsA, 2);
+    assert.equal(eventosA[0]?.type, 'MEMBRO_EXPULSO');
+    const expulso = eventosA[0] as MembroExpulsoEvento;
+    assert.equal(expulso.membroId, membroIdB);
+    assert.equal(expulso.jogadorId, b.id);
+    assert.equal(eventosA[1]?.type, 'SALA_ATUALIZADA');
+
+    // B também recebe MEMBRO_EXPULSO + SALA_ATUALIZADA.
+    const eventosB = await coletarEventos(wsB, 2);
+    assert.equal(eventosB[0]?.type, 'MEMBRO_EXPULSO');
+    assert.equal(eventosB[1]?.type, 'SALA_ATUALIZADA');
+
+    // B não está mais nos membros da sala.
+    const salaFinal = (eventosA[1] as SalaAtualizadaEvento).sala;
+    assert.equal(salaFinal.membros.length, 1);
+    assert.equal(salaFinal.membros.find((m) => m.jogadorId === b.id), undefined);
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+  });
+});
+
+// --- 18. Jogador expulso impedido de reentrar ---
+
+test('ENTRAR_NA_SALA: jogador expulso recebe JOGADOR_EXPULSO ao tentar reentrar', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    const eventosAEntrada = await coletarEventos(wsA, 2);
+
+    const salaAposEntrada = (eventosAEntrada[1] as SalaAtualizadaEvento).sala;
+    const membroIdB = membroDaSala(salaAposEntrada, b.id).id;
+
+    // A expulsa B.
+    enviar(wsA, { type: 'EXPULSAR_MEMBRO', membroId: membroIdB });
+    await coletarEventos(wsA, 2);
+    await coletarEventos(wsB, 2);
+
+    // B fecha e tenta reentrar.
+    wsB.close();
+    await esperarClose(wsB).catch(() => undefined);
+    const wsB2 = await conectarWs(servidor.wsUrl, b.cookies);
+    enviar(wsB2, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await esperarErro(wsB2, 'JOGADOR_EXPULSO');
+
+    wsA.close();
+    wsB2.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB2).catch(() => undefined)]);
+  });
+});
+
+// --- 19. Desbloqueio permite reentrada ---
+
+test('DESBLOQUEAR_JOGADOR + reentrada: desbloqueio permite que B volte à Sala', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    const eventosAEntrada = await coletarEventos(wsA, 2);
+
+    const salaAposEntrada = (eventosAEntrada[1] as SalaAtualizadaEvento).sala;
+    const membroIdB = membroDaSala(salaAposEntrada, b.id).id;
+
+    // A expulsa B.
+    enviar(wsA, { type: 'EXPULSAR_MEMBRO', membroId: membroIdB });
+    await coletarEventos(wsA, 2);
+    await coletarEventos(wsB, 2);
+
+    // B tenta reentrar — bloqueado.
+    wsB.close();
+    await esperarClose(wsB).catch(() => undefined);
+    const wsB2 = await conectarWs(servidor.wsUrl, b.cookies);
+    enviar(wsB2, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await esperarErro(wsB2, 'JOGADOR_EXPULSO');
+    wsB2.close();
+    await esperarClose(wsB2).catch(() => undefined);
+
+    // A desbloqueia B.
+    enviar(wsA, { type: 'DESBLOQUEAR_JOGADOR', jogadorId: b.id });
+    const eventosDesbloqueio = await coletarEventos(wsA, 1);
+    assert.equal(eventosDesbloqueio[0]?.type, 'SALA_ATUALIZADA');
+
+    // B reentra com sucesso — nova ordem de entrada.
+    const wsB3 = await conectarWs(servidor.wsUrl, b.cookies);
+    enviar(wsB3, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    const eventosReentrada = await coletarEventos(wsB3, 2);
+    assert.equal(eventosReentrada[0]?.type, 'MEMBRO_ENTROU');
+    assert.equal(eventosReentrada[1]?.type, 'SALA_ATUALIZADA');
+    const salaReentrada = (eventosReentrada[1] as SalaAtualizadaEvento).sala;
+    const membroBReentrada = membroDaSala(salaReentrada, b.id);
+    assert.ok(membroBReentrada.ordemDeEntrada > 2, 'ordem deve ser > 2 após reentrada');
+
+    wsA.close();
+    wsB3.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB3).catch(() => undefined)]);
+  });
+});
+
+// --- 20. Não-Anfitrião tenta expulsar → APENAS_ANFITRIAO ---
+
+test('EXPULSAR_MEMBRO: membro comum recebe APENAS_ANFITRIAO ao tentar expulsar', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+    const membroIdA = criacao.sala.membros[0]?.id ?? '';
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    // B (não-Anfitrião) tenta expulsar A.
+    enviar(wsB, { type: 'EXPULSAR_MEMBRO', membroId: membroIdA });
+    await esperarErro(wsB, 'APENAS_ANFITRIAO');
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+  });
+});
+
+// --- 21. Anfitrião tenta expulsar a si mesmo → APENAS_ANFITRIAO ---
+
+test('EXPULSAR_MEMBRO: anfitrião recebe APENAS_ANFITRIAO ao tentar expulsar a si mesmo', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+    const membroIdA = criacao.sala.membros[0]?.id ?? '';
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    // A (Anfitrião) tenta expulsar a si mesmo.
+    enviar(wsA, { type: 'EXPULSAR_MEMBRO', membroId: membroIdA });
+    await esperarErro(wsA, 'APENAS_ANFITRIAO');
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+  });
+});
+
+// --- 22. Sucessão circular via SAIR_DA_SALA do Anfitrião (3 membros) ---
+
+test('Sucessão circular: A (Anfitrião) sai, B herda o Anfitriato', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const c = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+    const wsC = await conectarWs(servidor.wsUrl, c.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const membroAnfitriaoOriginal = criacao.sala.membros[0]?.id ?? '';
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsC, 2);
+    await coletarEventos(wsA, 2);
+    await coletarEventos(wsB, 2);
+
+    // A (Anfitrião) sai: sucessão circular → B herda.
+    enviar(wsA, { type: 'SAIR_DA_SALA' });
+
+    // A recebe: MEMBRO_SAIU + SALA_ATUALIZADA + ANFITRIAO_SUBSTITUIDO + SALA_ATUALIZADA.
+    const eventosA = await coletarEventos(wsA, 4);
+    assert.equal(eventosA[0]?.type, 'MEMBRO_SAIU');
+    assert.equal(eventosA[1]?.type, 'SALA_ATUALIZADA');
+    assert.equal(eventosA[2]?.type, 'ANFITRIAO_SUBSTITUIDO');
+    assert.equal(eventosA[3]?.type, 'SALA_ATUALIZADA');
+
+    const substituicao = eventosA[2] as AnfitriaoSubstituidoEvento;
+    assert.equal(substituicao.anfitriaoAnteriorId, membroAnfitriaoOriginal);
+    const salaFinal = (eventosA[3] as SalaAtualizadaEvento).sala;
+    assert.equal(salaFinal.anfitriaoId, membroDaSala(salaFinal, b.id).id);
+
+    // B e C também recebem os 4 eventos.
+    const eventosB = await coletarEventos(wsB, 4);
+    assert.equal(eventosB[2]?.type, 'ANFITRIAO_SUBSTITUIDO');
+    const eventosC = await coletarEventos(wsC, 4);
+    assert.equal(eventosC[2]?.type, 'ANFITRIAO_SUBSTITUIDO');
+
+    for (const ws of [wsA, wsB, wsC]) {
+      ws.close();
+    }
+    await Promise.all(
+      [wsA, wsB, wsC].map((ws) => esperarClose(ws).catch(() => undefined)),
+    );
+  });
+});
+
+// --- 23. Último membro sai por expulsão → sala encerrada ---
+
+test('EXPULSAR_MEMBRO: último membro ativo é expulso → sala encerrada', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    const eventosAEntrada = await coletarEventos(wsA, 2);
+
+    const salaAposEntrada = (eventosAEntrada[1] as SalaAtualizadaEvento).sala;
+    const membroIdB = membroDaSala(salaAposEntrada, b.id).id;
+
+    // A expulsa B — B é o único outro membro, mas A ainda está.
+    // A Sala não deve encerrar (A continua ativa).
+    enviar(wsA, { type: 'EXPULSAR_MEMBRO', membroId: membroIdB });
+    const eventosAposExpulsao = await coletarEventos(wsA, 2);
+    assert.equal(eventosAposExpulsao[0]?.type, 'MEMBRO_EXPULSO');
+    const salaAposExpulsao = (eventosAposExpulsao[1] as SalaAtualizadaEvento).sala;
+    assert.equal(salaAposExpulsao.estado, 'aberta');
+    assert.equal(salaAposExpulsao.membros.length, 1);
+
+    // Agora A sai — Sala ficou sem membros → encerrada.
+    enviar(wsA, { type: 'SAIR_DA_SALA' });
+    const eventosSaida = await coletarEventos(wsA, 2);
+    const salaEncerrada = (eventosSaida[1] as SalaAtualizadaEvento).sala;
+    assert.equal(salaEncerrada.estado, 'encerrada');
+    assert.deepEqual(salaEncerrada.membros, []);
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+  });
+});
+
+// --- 24. Desbloquear jogador não bloqueado → JOGADOR_NAO_BLOQUEADO ---
+
+test('DESBLOQUEAR_JOGADOR: desbloquear membro não bloqueado recebe JOGADOR_NAO_BLOQUEADO', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    // A tenta desbloquear B que não foi expulso.
+    enviar(wsA, { type: 'DESBLOQUEAR_JOGADOR', jogadorId: b.id });
+    await esperarErro(wsA, 'JOGADOR_NAO_BLOQUEADO');
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+  });
+});
+
+// --- 25. Expulsão sobrevive ao restart (reconstrução com jogadoresBloqueados) ---
+
+test('Expulsão sobrevive ao restart: reconstrução hidrata jogadoresBloqueados', async () => {
+  const codigo = { valor: '' };
+  let jogadorA: { id: string; cookies: Cookies } = { id: '', cookies: {} };
+  let jogadorB: { id: string; cookies: Cookies } = { id: '', cookies: {} };
+
+  {
+    const servidor = await subirServidor();
+    try {
+      const a = await registrarJogador(servidor.baseUrl);
+      const b = await registrarJogador(servidor.baseUrl);
+      jogadorA = { id: a.id, cookies: a.cookies };
+      jogadorB = { id: b.id, cookies: b.cookies };
+      const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+      const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+      enviar(wsA, { type: 'CRIAR_SALA' });
+      const criacao = await esperarSalaAtualizada(wsA);
+      codigo.valor = criacao.sala.codigoDeSala;
+
+      enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo.valor });
+      await coletarEventos(wsB, 2);
+      const eventosAEntrada = await coletarEventos(wsA, 2);
+
+      const salaAposEntrada = (eventosAEntrada[1] as SalaAtualizadaEvento).sala;
+      const membroIdB = membroDaSala(salaAposEntrada, b.id).id;
+
+      // A expulsa B.
+      enviar(wsA, { type: 'EXPULSAR_MEMBRO', membroId: membroIdB });
+      await coletarEventos(wsA, 2);
+      await coletarEventos(wsB, 2);
+
+      // Verificar que B está bloqueado no PG.
+      const salaIdRes = await pool.query<{ id: string }>(
+        `SELECT id FROM salas_historico WHERE codigo_sala = $1 AND status = 'aberta'`,
+        [codigo.valor],
+      );
+      const salaId = salaIdRes.rows[0]?.id;
+      assert.ok(salaId, 'salaId não encontrado');
+      const bloqueado = await pool.query<{ bloqueado: boolean }>(
+        `SELECT bloqueado FROM membros WHERE sala_id = $1 AND usuario_id = $2`,
+        [salaId, b.id],
+      );
+      assert.equal(bloqueado.rows[0]?.bloqueado, true, 'B deve estar bloqueado no PG');
+
+      wsA.close();
+      wsB.close();
+      await Promise.all([
+        esperarClose(wsA).catch(() => undefined),
+        esperarClose(wsB).catch(() => undefined),
+      ]);
+    } finally {
+      await servidor.fechar();
+    }
+  }
+
+  // Nova instância reconstrói: B não deve aparecer como membro ativo.
+  await comServidor(async (servidor) => {
+    const c = await registrarJogador(servidor.baseUrl);
+    const wsC = await conectarWs(servidor.wsUrl, c.cookies);
+
+    enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo.valor });
+    const eventosC = await coletarEventos(wsC, 2);
+    const salaC = (eventosC[1] as SalaAtualizadaEvento).sala;
+    // A (host original) + C = 2 membros ativos; B (expulso/bloqueado) não deve aparecer.
+    assert.equal(salaC.membros.length, 2, 'A e C devem estar ativos; B não');
+    const jogadoresAtivos = salaC.membros.map((m) => m.jogadorId);
+    assert.ok(jogadoresAtivos.includes(jogadorA.id), 'A deve estar presente');
+    assert.ok(jogadoresAtivos.includes(c.id), 'C deve estar presente');
+    assert.ok(!jogadoresAtivos.includes(jogadorB.id), 'B (expulso) não deve estar na lista');
+
+    wsC.close();
+    await esperarClose(wsC).catch(() => undefined);
   });
 });

@@ -23,6 +23,7 @@ export interface SalaAberta {
 export interface MembroPersistido {
   readonly jogadorId: string;
   readonly ordem: number;
+  readonly bloqueado: boolean;
 }
 
 interface PgError23505 {
@@ -160,13 +161,72 @@ export class SalasRepo {
    */
   async listarMembrosDaSala(salaId: string): Promise<MembroPersistido[]> {
     const resultado = await this.pool.query<QueryResultRow & MembroPersistido>(
-      `SELECT usuario_id AS "jogadorId", ordem_de_entrada AS ordem
+      `SELECT usuario_id AS "jogadorId", ordem_de_entrada AS ordem, bloqueado
        FROM membros
        WHERE sala_id = $1
        ORDER BY ordem_de_entrada ASC`,
       [salaId],
     );
     return resultado.rows;
+  }
+
+  /**
+   * Persiste a expulsão em uma única transação. A linha de `membros` é
+   * marcada como `bloqueado=true` (não deletada) — a PK composta impede
+   * reentrada. Um registro é inserido em `membros_historico` com motivo
+   * `expulsao`.
+   */
+  async expulsarMembroAtomico(
+    salaId: string,
+    jogadorId: string,
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const atualizacao = await client.query(
+        `UPDATE membros SET bloqueado = true
+         WHERE sala_id = $1 AND usuario_id = $2 AND bloqueado = false`,
+        [salaId, jogadorId],
+      );
+      if (atualizacao.rowCount !== 1) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw new Error(
+          'Vínculo ativo não encontrado ou já bloqueado ao persistir expulsão.',
+        );
+      }
+      await client.query(
+        `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
+         VALUES ($1, $2, 'expulsao')`,
+        [salaId, jogadorId],
+      );
+      await client.query('COMMIT');
+    } catch (erro) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw erro;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Desbloqueia um membro removendo sua linha da tabela `membros`. A
+   * remoção física desfaz o bloqueio — o jogador pode reentrar com uma
+   * nova PK composta.
+   */
+  async desbloquearMembro(
+    salaId: string,
+    jogadorId: string,
+  ): Promise<void> {
+    const resultado = await this.pool.query(
+      `DELETE FROM membros
+       WHERE sala_id = $1 AND usuario_id = $2 AND bloqueado = true`,
+      [salaId, jogadorId],
+    );
+    if (resultado.rowCount !== 1) {
+      throw new Error(
+        'Membro bloqueado não encontrado ao desbloquear.',
+      );
+    }
   }
 
   /**

@@ -101,8 +101,12 @@ class SalasStateImpl implements SalasState {
     // confirmada, como determina o ADR-0002.
     let novoEstado: EstadoDoLobby = estadoDoLobbyVazio();
     for (const sala of salasAbertas) {
-      const membros = membrosPorSala.get(sala.id) ?? [];
-      const membrosDominio: MembroDominio[] = membros.map((m, idx) => ({
+      const todosMembros = membrosPorSala.get(sala.id) ?? [];
+      const membrosAtivos = todosMembros.filter((m) => !m.bloqueado);
+      const jogadoresBloqueados = todosMembros
+        .filter((m) => m.bloqueado)
+        .map((m) => m.jogadorId);
+      const membrosDominio: MembroDominio[] = membrosAtivos.map((m, idx) => ({
         id: `${sala.id}-m${m.ordem}`, // membroId determinístico na reconstrução
         jogadorId: m.jogadorId,
         ordemDeEntrada: m.ordem,
@@ -112,7 +116,9 @@ class SalasStateImpl implements SalasState {
         pronto: false,
       }));
       const proximaOrdemDeEntrada =
-        membros.length > 0 ? Math.max(...membros.map((m) => m.ordem)) + 1 : 1;
+        membrosAtivos.length > 0
+          ? Math.max(...membrosAtivos.map((m) => m.ordem)) + 1
+          : 1;
       // O Anfitrião vem do write-model — pode ter sido sucedido antes do
       // reinício. A menor ordem é apenas fallback defensivo quando
       // `anfitriao_id` está ausente ou sem vínculo ativo.
@@ -136,7 +142,7 @@ class SalasStateImpl implements SalasState {
         membros: membrosDominio,
         proximaOrdemDeEntrada,
         anfitriaoId: anfitriaoMembroId,
-        jogadoresBloqueados: [],
+        jogadoresBloqueados,
         consistente: true,
       };
       novoEstado = { salas: [...novoEstado.salas, salaDominio] };

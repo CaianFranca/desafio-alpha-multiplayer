@@ -25,6 +25,7 @@ import type {
   SalaEventoDoServidor,
   MembroEntrouEvento,
   MembroSaiuEvento,
+  MembroExpulsoEvento,
   AnfitriaoSubstituidoEvento,
 } from '@flicker/shared';
 
@@ -184,6 +185,23 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoAnfitriao);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'membro_expulsado': {
+        const eventoExpulso: MembroExpulsoEvento = {
+          type: 'MEMBRO_EXPULSO',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          sala: salaWire,
+        };
+        saida.push(eventoExpulso);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'retorno_autorizado': {
         saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
         break;
       }
