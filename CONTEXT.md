@@ -154,6 +154,28 @@ _Avoid_: ajuste, edição
 Evento que encerra a manipulação de uma peça: nova seleção, novo posicionamento ou clique na própria peça posicionada.
 _Avoid_: confirmação, travar
 
+## Peões e Conexões
+
+**Peão**:
+Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão; move-se entre peças conectadas; não é uma Peça.
+_Avoid_: pawn, token, boneco
+
+**Conexão**:
+Relação entre duas peças vizinhas cujas bordas abertas estão voltadas uma para a outra; condição da movimentação do peão.
+_Avoid_: ligação, elo
+
+**Recebimento**:
+Retirada de peças de caminho da reserva, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; ocorre no início da sequência do peão.
+_Avoid_: sorteio, ganho
+
+**Movimentação**:
+Ação de deslocar o peão para uma peça vizinha conectada; encerra a sequência do peão.
+_Avoid_: mover, andar
+
+**Permanência**:
+Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento.
+_Avoid_: ficar, pular
+
 ## Objetivos da Partida
 
 **Gerador**:
