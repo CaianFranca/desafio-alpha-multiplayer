@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@flicker/config';
 import { GAME_SERVERS_PREFIX } from '@flicker/shared';
 import { createApp } from '../src/app.ts';
+import { SERVICE_TOKEN_AUDIENCE } from '../src/middleware/serviceToken.ts';
 import { Redis } from 'ioredis';
 
 interface ServidorEfemero {
@@ -99,8 +100,9 @@ after(async () => {
   } else {
     redis.disconnect();
   }
-  // pool não é encerrado aqui — auth.integration.test.ts já faz pool.end + process.exit
-  // Evita double close quando ambos os arquivos rodam juntos via `test/*.test.ts`
+  // pool não é encerrado aqui — auth.integration.test.ts faz pool.end() no seu `after`.
+  // Este arquivo fecha o cliente redis (redis.quit). Evita double close quando ambos
+  // rodam juntos via `test/*.test.ts` (sem process.exit desde #47).
 });
 
 beforeEach(async () => {
@@ -183,7 +185,7 @@ test('GET /api/game-servers não lista após DEL (expirado)', async (t) => {
 
 // --- 4. guard JWT em produção ---
 
-test('GET /api/game-servers guard JWT em produção: sem token / lixo / expirado → 401, válido → 200', async (t) => {
+test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret errado / expirado / JWT de jogador → 401, service token → 200', async (t) => {
   if (!(await redisDisponivel())) {
     t.skip('Redis não disponível — pule integração');
     return;
@@ -225,10 +227,22 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / expirado
       });
       assert.equal(res.status, 401);
 
-      // válido → 200
-      const tokenValido = jwt.sign({ sub: 'x' }, jwtSecret, { expiresIn: '1h' });
+      // JWT válido de Jogador (sem audience de serviço) → 401
+      // R1: assinatura válida não basta — só token de serviço com aud correto passa.
+      const tokenJogador = jwt.sign({ sub: 'x' }, jwtSecret, { expiresIn: '1h' });
       res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
-        headers: { authorization: `Bearer ${tokenValido}` },
+        headers: { authorization: `Bearer ${tokenJogador}` },
+      });
+      assert.equal(res.status, 401);
+
+      // service token válido (aud de serviço) → 200
+      const tokenServico = jwt.sign(
+        { sub: 'lobby', role: 'service' },
+        jwtSecret,
+        { expiresIn: '1h', audience: SERVICE_TOKEN_AUDIENCE },
+      );
+      res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+        headers: { authorization: `Bearer ${tokenServico}` },
       });
       assert.equal(res.status, 200);
     });
