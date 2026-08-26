@@ -114,14 +114,29 @@ class SalasStateImpl implements SalasState {
       }));
       const proximaOrdemDeEntrada =
         membros.length > 0 ? Math.max(...membros.map((m) => m.ordem)) + 1 : 1;
-      const anfitriao = membros[0]?.jogadorId ?? null;
+      // O Anfitrião vem do write-model — pode ter sido sucedido antes do
+      // reinício. A menor ordem é apenas fallback defensivo quando
+      // `anfitriao_id` está ausente ou sem vínculo ativo.
+      let anfitriaoMembroId: string | null = null;
+      const anfitriaoPersistido =
+        sala.anfitriaoId !== null
+          ? membrosDominio.find((m) => m.jogadorId === sala.anfitriaoId)
+          : undefined;
+      if (anfitriaoPersistido !== undefined) {
+        anfitriaoMembroId = anfitriaoPersistido.id;
+      } else if (membrosDominio.length > 0) {
+        console.warn(
+          `[salas] anfitriao_id ausente ou sem vínculo ativo na Sala ${sala.id}; usando menor ordem`,
+        );
+        anfitriaoMembroId = membrosDominio[0]!.id;
+      }
       const salaDominio: SalaDominio = {
         id: sala.id,
         codigo: sala.codigo,
         estado: 'aberta' as const,
         membros: membrosDominio,
         proximaOrdemDeEntrada,
-        anfitriaoId: anfitriao !== null ? membrosDominio[0]!.id : null,
+        anfitriaoId: anfitriaoMembroId,
         jogadoresBloqueados: [],
         consistente: true,
       };

@@ -400,7 +400,28 @@ export class SalasHandlers {
     const salaEncerrada = resultado.eventos.some(
       (e) => e.tipo === 'sala_encerrada',
     );
-    await this.repo.sairMembroAtomico(salaId, jogadorId, 'saida', salaEncerrada);
+    // A sucessão do Anfitrião é gravada no mesmo commit da saída para que a
+    // reconstrução do boot (ADR-0002) não restaure um Anfitrião já sucedido.
+    let novoAnfitriaoJogadorId: string | undefined;
+    const sucessao = resultado.eventos.find(
+      (e) => e.tipo === 'anfitriao_sucedido',
+    );
+    if (sucessao?.tipo === 'anfitriao_sucedido') {
+      const salaNova = resultado.estado.salas.find((s) => s.id === salaId);
+      const membroNovo = salaNova?.membros.find(
+        (m) => m.id === sucessao.anfitriaoNovoId,
+      );
+      if (membroNovo !== undefined) {
+        novoAnfitriaoJogadorId = membroNovo.jogadorId;
+      }
+    }
+    await this.repo.sairMembroAtomico(
+      salaId,
+      jogadorId,
+      'saida',
+      salaEncerrada,
+      novoAnfitriaoJogadorId,
+    );
     this.estado.substituirEstado(resultado.estado);
 
     // Se a Sala ficou sem membros ativos, a transação já a marcou como

@@ -1100,3 +1100,76 @@ test('SAIR_DA_SALA recorre ao PostgreSQL quando a associação do Jogador expira
     await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
   });
 });
+
+// --- 14. Sucessão do Anfitrião sobrevive ao reinício via write-model ---
+
+test('Sucessão do Anfitrião é persistida e restaurada na reconstrução', async () => {
+  const codigo = { valor: '' };
+  let cookiesB: Cookies | undefined;
+  let jogadorIdB = '';
+
+  {
+    const servidor = await subirServidor();
+    try {
+      const a = await registrarJogador(servidor.baseUrl);
+      const b = await registrarJogador(servidor.baseUrl);
+      cookiesB = b.cookies;
+      jogadorIdB = b.id;
+      const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+      const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+      enviar(wsA, { type: 'CRIAR_SALA' });
+      const criacao = await esperarSalaAtualizada(wsA);
+      codigo.valor = criacao.sala.codigoDeSala;
+
+      enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo.valor });
+      await coletarEventos(wsB, 2);
+      await coletarEventos(wsA, 2);
+
+      // A (Anfitrião) sai: sucessão circular escolhe B (ordem seguinte).
+      enviar(wsA, { type: 'SAIR_DA_SALA' });
+      // MEMBRO_SAIU + SALA_ATUALIZADA + ANFITRIAO_SUBSTITUIDO + SALA_ATUALIZADA.
+      await coletarEventos(wsA, 4);
+      await coletarEventos(wsB, 4);
+
+      // Contrato novo: o write-model reflete a sucessão no mesmo commit.
+      const linha = await pool.query<{ anfitriaoId: string }>(
+        `SELECT anfitriao_id AS "anfitriaoId"
+         FROM salas_historico
+         WHERE codigo_sala = $1 AND status = 'aberta'`,
+        [codigo.valor],
+      );
+      assert.equal(linha.rows[0]?.anfitriaoId, b.id);
+
+      wsA.close();
+      wsB.close();
+      await Promise.all([
+        esperarClose(wsA).catch(() => undefined),
+        esperarClose(wsB).catch(() => undefined),
+      ]);
+    } finally {
+      await servidor.fechar();
+    }
+  }
+
+  // Nova instância reconstrói do PostgreSQL: B permanece Anfitrião.
+  await comServidor(async (servidor) => {
+    assert.ok(cookiesB !== undefined, 'cookies de B ausentes');
+    const c = await registrarJogador(servidor.baseUrl);
+    const wsB = await conectarWs(servidor.wsUrl, cookiesB!);
+    const wsC = await conectarWs(servidor.wsUrl, c.cookies);
+
+    enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo.valor });
+    const eventosC = await coletarEventos(wsC, 2);
+    const salaC = (eventosC[1] as SalaAtualizadaEvento).sala;
+    assert.equal(salaC.membros.length, 2);
+    assert.equal(salaC.anfitriaoId, membroDaSala(salaC, jogadorIdB).id);
+
+    wsB.close();
+    wsC.close();
+    await Promise.all([
+      esperarClose(wsB).catch(() => undefined),
+      esperarClose(wsC).catch(() => undefined),
+    ]);
+  });
+});

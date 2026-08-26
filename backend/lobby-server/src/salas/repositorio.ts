@@ -91,13 +91,16 @@ export class SalasRepo {
   /**
    * Persiste a saída em uma única transação. Quando o engine concluiu que
    * era o último vínculo ativo, a mudança para `encerrada` é confirmada no
-   * mesmo commit do DELETE e do histórico.
+   * mesmo commit do DELETE e do histórico. Quando houve sucessão, o novo
+   * Anfitrião é gravado no mesmo commit — sem isso, a reconstrução do boot
+   * restauraria um Anfitrião já sucedido (ADR-0002).
    */
   async sairMembroAtomico(
     salaId: string,
     jogadorId: string,
     motivo: MotivoDeTermino,
     encerrarSala: boolean,
+    novoAnfitriaoJogadorId?: string | null,
   ): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -116,8 +119,14 @@ export class SalasRepo {
       );
       if (encerrarSala) {
         await client.query(
-          `UPDATE salas_historico SET status = 'encerrada' WHERE id = $1`,
+          `UPDATE salas_historico SET status = 'encerrada', anfitriao_id = NULL
+           WHERE id = $1`,
           [salaId],
+        );
+      } else if (novoAnfitriaoJogadorId != null) {
+        await client.query(
+          `UPDATE salas_historico SET anfitriao_id = $2 WHERE id = $1`,
+          [salaId, novoAnfitriaoJogadorId],
         );
       }
       await client.query('COMMIT');
