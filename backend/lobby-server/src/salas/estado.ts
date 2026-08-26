@@ -22,12 +22,8 @@ import {
   type Membro as MembroDominio,
   type Sala as SalaDominio,
 } from '@flicker/engine';
-import type { SalasRepo } from './repositorio.ts';
-import type {
-  SalasProjecao,
-  SalaEstadoProjecao,
-  MembroEstadoProjecao,
-} from './projecao.ts';
+import type { SalasRepo, MembroPersistido } from './repositorio.ts';
+import { serializarSala, type SalasProjecao } from './projecao.ts';
 
 interface SalaStateInterna {
   readonly sala: SalaDominio;
@@ -82,10 +78,13 @@ class SalasStateImpl implements SalasState {
   async carregar(repo: SalasRepo, projecao: SalasProjecao): Promise<void> {
     const salasAbertas = await repo.listarSalasAbertas();
 
-    // Hidratar cache de apelidos em uma única query para todas as salas.
+    // Uma única leitura de membros por sala; reaproveitada na hidratação
+    // dos apelidos e na reconstrução do engine.
+    const membrosPorSala = new Map<string, MembroPersistido[]>();
     const jogadorIds = new Set<string>();
     for (const sala of salasAbertas) {
       const membros = await repo.listarMembrosDaSala(sala.id);
+      membrosPorSala.set(sala.id, membros);
       for (const m of membros) {
         jogadorIds.add(m.jogadorId);
       }
@@ -102,7 +101,7 @@ class SalasStateImpl implements SalasState {
     // confirmada, como determina o ADR-0002.
     let novoEstado: EstadoDoLobby = estadoDoLobbyVazio();
     for (const sala of salasAbertas) {
-      const membros = await repo.listarMembrosDaSala(sala.id);
+      const membros = membrosPorSala.get(sala.id) ?? [];
       const membrosDominio: MembroDominio[] = membros.map((m, idx) => ({
         id: `${sala.id}-m${m.ordem}`, // membroId determinístico na reconstrução
         jogadorId: m.jogadorId,
@@ -219,28 +218,6 @@ class SalasStateImpl implements SalasState {
       this._abertas.set(k, v);
     }
   }
-}
-
-function serializarSala(sala: SalaDominio): SalaEstadoProjecao {
-  const membros: MembroEstadoProjecao[] = sala.membros
-    .filter((m) => m.estado === 'ativo')
-    .map((m) => ({
-      id: m.id,
-      jogadorId: m.jogadorId,
-      ordemDeEntrada: m.ordemDeEntrada,
-      pronto: m.pronto,
-      presenca: m.presenca,
-      anfitriao: sala.anfitriaoId === m.id,
-    }));
-  return {
-    id: sala.id,
-    codigo: sala.codigo,
-    estado: sala.estado,
-    anfitriaoId: sala.anfitriaoId,
-    proximaOrdemDeEntrada: sala.proximaOrdemDeEntrada,
-    consistente: sala.consistente,
-    membros,
-  };
 }
 
 export function criarSalasState(): SalasState {

@@ -18,9 +18,7 @@
 // `codigo` do domínio.
 
 import { randomUUID } from 'node:crypto';
-import {
-  type CodigoDeErro,
-} from '@flicker/engine';
+import { type CodigoDeErro, type EstadoDoLobby } from '@flicker/engine';
 import type {
   SalaComandoDoCliente,
   SalaEventoDoServidor,
@@ -34,7 +32,7 @@ import {
   gerarCodigoDeSala,
 } from './codigo.ts';
 import { SalasRepo } from './repositorio.ts';
-import { SalasProjecao } from './projecao.ts';
+import { SalasProjecao, serializarSala } from './projecao.ts';
 import { SalasBroadcaster } from './broadcast.ts';
 import { SalasState } from './estado.ts';
 import {
@@ -474,32 +472,14 @@ export class SalasHandlers {
   }
 
   private async atualizarProjecaoEstado(
-    estado: import('@flicker/engine').EstadoDoLobby,
+    estado: EstadoDoLobby,
     salaId: string,
   ): Promise<void> {
     const sala = estado.salas.find((s) => s.id === salaId);
     if (sala === undefined) {
       return;
     }
-    const projecao = {
-      id: sala.id,
-      codigo: sala.codigo,
-      estado: sala.estado,
-      anfitriaoId: sala.anfitriaoId,
-      proximaOrdemDeEntrada: sala.proximaOrdemDeEntrada,
-      consistente: sala.consistente,
-      membros: sala.membros
-        .filter((m) => m.estado === 'ativo')
-        .map((m) => ({
-          id: m.id,
-          jogadorId: m.jogadorId,
-          ordemDeEntrada: m.ordemDeEntrada,
-          pronto: m.pronto,
-          presenca: m.presenca,
-          anfitriao: sala.anfitriaoId === m.id,
-        })),
-    };
-    await this.projecao.definirEstadoSala(salaId, projecao);
+    await this.projecao.definirEstadoSala(salaId, serializarSala(sala));
   }
 
   private difundir(eventos: readonly SalaEventoDoServidor[], salaId: string): void {

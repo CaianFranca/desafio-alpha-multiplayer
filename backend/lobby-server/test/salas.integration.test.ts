@@ -21,6 +21,7 @@ import type { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import { criarClienteRedis } from '@flicker/config';
 import type {
+  AnfitriaoSubstituidoEvento,
   CodigoDeErroDaSala,
   ErroDaSalaEvento,
   MembroDaSala,
@@ -1171,5 +1172,74 @@ test('Sucessão do Anfitrião é persistida e restaurada na reconstrução', asy
       esperarClose(wsB).catch(() => undefined),
       esperarClose(wsC).catch(() => undefined),
     ]);
+  });
+});
+
+// --- 15. Saída do Anfitrião anuncia a sucessão no broadcast ---
+
+test('SAIR_DA_SALA do Anfitrião anuncia ANFITRIAO_SUBSTITUIDO com o sucessor', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const c = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+    const wsC = await conectarWs(servidor.wsUrl, c.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const membroAnfitriaoOriginal = criacao.sala.membros[0]?.id ?? '';
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsC, 2);
+    await coletarEventos(wsA, 2);
+    await coletarEventos(wsB, 2);
+
+    // A (Anfitrião) sai: sucessão circular escolhe B (ordem seguinte).
+    enviar(wsA, { type: 'SAIR_DA_SALA' });
+
+    const eventosB = await coletarEventos(wsB, 4);
+    assert.equal(eventosB[0]?.type, 'MEMBRO_SAIU');
+    assert.equal(eventosB[1]?.type, 'SALA_ATUALIZADA');
+    assert.equal(eventosB[2]?.type, 'ANFITRIAO_SUBSTITUIDO');
+    assert.equal(eventosB[3]?.type, 'SALA_ATUALIZADA');
+
+    const sucessao = eventosB[2] as AnfitriaoSubstituidoEvento;
+    assert.equal(sucessao.anfitriaoAnteriorId, membroAnfitriaoOriginal);
+    const salaFinal = (eventosB[3] as SalaAtualizadaEvento).sala;
+    assert.equal(salaFinal.anfitriaoId, membroDaSala(salaFinal, b.id).id);
+
+    // A e C recebem os mesmos 4 eventos.
+    await coletarEventos(wsC, 4);
+    const eventosA = await coletarEventos(wsA, 4);
+    assert.equal(eventosA[2]?.type, 'ANFITRIAO_SUBSTITUIDO');
+
+    for (const ws of [wsA, wsB, wsC]) {
+      ws.close();
+    }
+    await Promise.all(
+      [wsA, wsB, wsC].map((ws) => esperarClose(ws).catch(() => undefined)),
+    );
+  });
+});
+
+// --- 16. Código inexistente é recusado sem tocar o write-model ---
+
+test('ENTRAR_NA_SALA com Código inexistente recebe SALA_NAO_ENCONTRADA', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+
+    enviar(wsA, { type: 'ENTRAR_NA_SALA', codigoDeSala: 'ZZZZZZ' });
+    const erro = await esperarErro(wsA, 'SALA_NAO_ENCONTRADA');
+    assert.ok(erro.mensagem.length > 0);
+
+    wsA.close();
+    await esperarClose(wsA).catch(() => undefined);
   });
 });

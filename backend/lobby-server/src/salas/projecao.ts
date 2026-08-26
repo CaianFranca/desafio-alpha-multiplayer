@@ -13,6 +13,7 @@
 // (reconstruída no boot).
 
 import type { Redis } from 'ioredis';
+import type { Sala as SalaDominio } from '@flicker/engine';
 import { redisClient as defaultRedis } from '../config/redis.ts';
 
 const PROJECAO_TTL_SEGUNDOS = 3600;
@@ -52,6 +53,33 @@ export function chaveSalaCodigo(codigo: string): string {
 
 export function chaveJogadorSala(jogadorId: string): string {
   return `${PREFIXO_JOGADOR_SALA}${jogadorId}${SUFIXO_SALA}`;
+}
+
+/**
+ * Converte a Sala do domínio para a forma da projeção quente no Redis.
+ * Único ponto de tradução engine→projeção; usado pela reconstrução do boot
+ * (`SalasState.carregar`) e pelas mutações (`SalasHandlers`).
+ */
+export function serializarSala(sala: SalaDominio): SalaEstadoProjecao {
+  const membros: MembroEstadoProjecao[] = sala.membros
+    .filter((m) => m.estado === 'ativo')
+    .map((m) => ({
+      id: m.id,
+      jogadorId: m.jogadorId,
+      ordemDeEntrada: m.ordemDeEntrada,
+      pronto: m.pronto,
+      presenca: m.presenca,
+      anfitriao: sala.anfitriaoId === m.id,
+    }));
+  return {
+    id: sala.id,
+    codigo: sala.codigo,
+    estado: sala.estado,
+    anfitriaoId: sala.anfitriaoId,
+    proximaOrdemDeEntrada: sala.proximaOrdemDeEntrada,
+    consistente: sala.consistente,
+    membros,
+  };
 }
 
 export class SalasProjecao {
