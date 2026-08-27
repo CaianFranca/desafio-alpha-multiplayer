@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { AuthContext, visitorState, type AuthContextValue, type AuthState } from './auth-context'
-import { fetchCurrentPlayer, logout as logoutRequest } from '../api/auth'
+import {
+  fetchCurrentPlayer,
+  login as loginRequest,
+  logout as logoutRequest,
+  register as registerRequest,
+} from '../api/auth'
+import type { AuthActionResult, CadastroPayload, LoginPayload } from '../api/auth'
 import { onSessionExpired } from '../api/client'
 import { mockAuthenticatedState } from './mock-auth'
 
@@ -59,6 +65,25 @@ export function AuthProvider({ initialState, children }: AuthProviderProps) {
     setState(visitorState)
   }, [])
 
-  const value = useMemo<AuthContextValue>(() => ({ authState: state, logout }), [state, logout])
+  const register = useCallback(async (payload: CadastroPayload): Promise<AuthActionResult> => {
+    const result = await registerRequest(payload)
+    if (result.ok) {
+      setState({ status: 'authenticated', jogador: result.jogador })
+    }
+    return result
+  }, [])
+
+  const login = useCallback(async (payload: LoginPayload): Promise<AuthActionResult> => {
+    const result = await loginRequest(payload)
+    if (result.ok) {
+      setState({ status: 'authenticated', jogador: result.jogador })
+    }
+    return result
+  }, [])
+
+  const value = useMemo<AuthContextValue>(
+    () => ({ authState: state, logout, register, login }),
+    [state, logout, register, login],
+  )
   return <AuthContext value={value}>{children}</AuthContext>
 }

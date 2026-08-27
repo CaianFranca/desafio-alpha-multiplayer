@@ -2,9 +2,10 @@ import { createBrowserRouter } from 'react-router-dom'
 import { App } from './App'
 import { RequireAuth } from './RequireAuth'
 import { HomePage } from '../pages/HomePage'
-import { CadastroPage } from '../pages/stubs/CadastroPage'
-import { LoginPage } from '../pages/stubs/LoginPage'
+import { CadastroPage } from '../pages/CadastroPage'
+import { LoginPage } from '../pages/LoginPage'
 import { SalasCriarPage } from '../pages/stubs/SalasCriarPage'
+
 export const routes = [
   {
     path: '/',
