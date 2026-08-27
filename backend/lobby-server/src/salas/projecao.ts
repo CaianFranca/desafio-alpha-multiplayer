@@ -14,6 +14,7 @@
 
 import type { Redis } from 'ioredis';
 import type { Sala as SalaDominio } from '@flicker/engine';
+import type { MensagemDeChatEvento } from '@flicker/shared';
 import { redisClient as defaultRedis } from '../config/redis.ts';
 
 const PROJECAO_TTL_SEGUNDOS = 3600;
@@ -22,6 +23,7 @@ const PREFIXO_CODIGO = 'lobby:sala:codigo:';
 const PREFIXO_JOGADOR_SALA = 'lobby:jogador:';
 const SUFIXO_ESTADO = ':estado';
 const SUFIXO_SALA = ':sala';
+const SUFIXO_CHAT = ':chat';
 
 export interface MembroEstadoProjecao {
   readonly id: string;
@@ -49,6 +51,11 @@ function chaveSalaEstado(salaId: string): string {
 /** Exportadas para os testes simularem a expiração do TTL por chave. */
 export function chaveSalaCodigo(codigo: string): string {
   return `${PREFIXO_CODIGO}${codigo}`;
+}
+
+/** Chave da lista de histórico de chat da sala (issue #34). */
+export function chaveSalaChat(salaId: string): string {
+  return `${PREFIXO_SALA}${salaId}${SUFIXO_CHAT}`;
 }
 
 export function chaveJogadorSala(jogadorId: string): string {
@@ -160,9 +167,48 @@ export class SalasProjecao {
     // simetria da API documentada no plano.
   }
 
-  /** Limpa toda a projeção referente a uma sala (estado + codigo). */
+  /**
+   * Adiciona uma mensagem de chat ao histórico da sala (issue #34). O
+   * histórico vive SÓ na projeção Redis (ADR-0002) — não há persistência
+   * em PostgreSQL. Cada mensagem é um JSON de `MensagemDeChatEvento`
+   * empilhado via RPUSH; o TTL segue `PROJECAO_TTL_SEGUNDOS`.
+   */
+  async adicionarMensagemDeChat(
+    salaId: string,
+    msg: MensagemDeChatEvento,
+  ): Promise<void> {
+    const chave = chaveSalaChat(salaId);
+    await this.redis.rpush(chave, JSON.stringify(msg));
+    await this.redis.expire(chave, PROJECAO_TTL_SEGUNDOS);
+  }
+
+  /**
+   * Lê o histórico de chat da sala em ordem de envio. Entradas corrompidas
+   * (JSON inválido) são ignoradas individualmente para não quebrar o replay.
+   * Devolve `MensagemDeChatEvento[]` (incluindo `type`).
+   */
+  async obterHistoricoDeChat(salaId: string): Promise<MensagemDeChatEvento[]> {
+    const raws = await this.redis.lrange(chaveSalaChat(salaId), 0, -1);
+    const eventos: MensagemDeChatEvento[] = [];
+    for (const raw of raws) {
+      try {
+        eventos.push(JSON.parse(raw) as MensagemDeChatEvento);
+      } catch {
+        // ignora entrada corrompida
+      }
+    }
+    return eventos;
+  }
+
+  /** Remove o histórico de chat da sala (issue #34). */
+  async limparChat(salaId: string): Promise<void> {
+    await this.redis.del(chaveSalaChat(salaId));
+  }
+
+  /** Limpa toda a projeção referente a uma sala (estado + codigo + chat). */
   async limparSala(salaId: string, codigo: string): Promise<void> {
     await this.redis.del(chaveSalaEstado(salaId));
     await this.redis.del(chaveSalaCodigo(codigo));
+    await this.limparChat(salaId);
   }
 }
