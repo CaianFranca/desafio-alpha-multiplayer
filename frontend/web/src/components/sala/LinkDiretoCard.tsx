@@ -1,21 +1,11 @@
-import { useState } from 'react'
+import { useCopiar } from '../../hooks/useCopiar'
 
 interface Props {
   link: string
 }
 
 export function LinkDiretoCard({ link }: Props) {
-  const [copiado, setCopiado] = useState(false)
-
-  async function copiar() {
-    try {
-      await navigator.clipboard.writeText(link)
-      setCopiado(true)
-      window.setTimeout(() => setCopiado(false), 2000)
-    } catch {
-      // ignora
-    }
-  }
+  const { copiado, copiar } = useCopiar()
 
   // Exibe truncado como no mock .../sala/ABC123
   const exibicao = (() => {
@@ -36,7 +26,7 @@ export function LinkDiretoCard({ link }: Props) {
         </p>
         <button
           type="button"
-          onClick={() => void copiar()}
+          onClick={() => void copiar(link)}
           aria-label="Copiar Link Direto"
           className="border border-white/20 w-8 h-8 flex items-center justify-center text-white/70 hover:text-white hover:border-white/40 transition-colors shrink-0"
         >

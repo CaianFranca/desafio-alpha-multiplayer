@@ -1,21 +1,11 @@
-import { useState } from 'react'
+import { useCopiar } from '../../hooks/useCopiar'
 
 interface Props {
   codigoDeSala: string
 }
 
 export function CodigoDeAcessoCard({ codigoDeSala }: Props) {
-  const [copiado, setCopiado] = useState(false)
-
-  async function copiar() {
-    try {
-      await navigator.clipboard.writeText(codigoDeSala)
-      setCopiado(true)
-      window.setTimeout(() => setCopiado(false), 2000)
-    } catch {
-      // ignora falha de clipboard
-    }
-  }
+  const { copiado, copiar } = useCopiar()
 
   return (
     <div className="border border-white/10 bg-[#1e1e1e] p-5 flex flex-col gap-2">
@@ -26,7 +16,7 @@ export function CodigoDeAcessoCard({ codigoDeSala }: Props) {
         </p>
         <button
           type="button"
-          onClick={() => void copiar()}
+          onClick={() => void copiar(codigoDeSala)}
           aria-label="Copiar Código de Acesso"
           className="border border-white/20 w-8 h-8 flex items-center justify-center text-white/70 hover:text-white hover:border-white/40 transition-colors"
         >

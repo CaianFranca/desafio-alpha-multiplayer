@@ -68,9 +68,8 @@ if (typeof MessageEvent === 'undefined') {
   }
 }
 
-// Mock clipboard - usa defineProperty para garantir escrita em jsdom
+// Mock clipboard - jsdom defineProperty precisa ser configurável
 const clipboardWriteTextMock = vi.fn().mockResolvedValue(undefined)
-// @ts-expect-error jsdom clipboard may be readonly
 Object.defineProperty(navigator, 'clipboard', {
   value: { writeText: clipboardWriteTextMock },
   configurable: true,
@@ -78,7 +77,6 @@ Object.defineProperty(navigator, 'clipboard', {
 })
 // Garante também em window.navigator (jsdom pode ter getter distinto)
 try {
-  // @ts-expect-error assign window
   Object.defineProperty(window.navigator, 'clipboard', {
     value: { writeText: clipboardWriteTextMock },
     configurable: true,
@@ -86,8 +84,7 @@ try {
   })
 } catch {
   // fallback direto
-  // @ts-expect-error overwrite
-  window.navigator.clipboard.writeText = clipboardWriteTextMock
+  window.navigator.clipboard.writeText = clipboardWriteTextMock as unknown as typeof window.navigator.clipboard.writeText
 }
 
 function renderWithRouter(initialEntries: string[] = ['/salas/criar'], authState: AuthState = mockAuthenticatedState) {
