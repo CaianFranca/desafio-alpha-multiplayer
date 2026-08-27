@@ -180,7 +180,7 @@ export function CadastroPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full bg-[var(--color-accent)] text-slate-900 font-bold uppercase tracking-wide py-3 rounded-md hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full bg-[var(--color-accent)] text-slate-900 font-bold uppercase tracking-wide py-3 rounded-md hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
           >
             {isSubmitting ? 'Enviando...' : 'CADASTRAR-SE'}
           </button>
@@ -188,7 +188,7 @@ export function CadastroPage() {
 
         <p className="text-sm text-center text-[var(--color-muted)] mt-6">
           Já tem uma conta?{' '}
-          <Link to="/login" className="text-[var(--color-accent)] hover:underline font-medium">
+          <Link to="/login" className="!text-amber-400">
             Faça login
           </Link>
         </p>

@@ -149,7 +149,7 @@ export function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full bg-[var(--color-accent)] text-slate-900 font-bold uppercase tracking-wide py-3 rounded-md hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full bg-[var(--color-accent)] text-slate-900 font-bold uppercase tracking-wide py-3 rounded-md hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
           >
             {isSubmitting ? 'Enviando...' : 'ENTRAR'}
           </button>
@@ -157,8 +157,8 @@ export function LoginPage() {
 
         <p className="text-sm text-center text-[var(--color-muted)] mt-6">
           Ainda não possui uma conta?{' '}
-          <Link to="/cadastro" className="text-[var(--color-accent)] hover:underline font-medium">
-            Crie uma
+          <Link to="/cadastro" className="!text-amber-400">
+            Crie uma conta
           </Link>
         </p>
       </div>
