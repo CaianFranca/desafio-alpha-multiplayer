@@ -153,7 +153,9 @@ after(async () => {
   } else {
     redis.disconnect();
   }
-  await pool.end().catch(() => undefined);
+  // pool NÃO é encerrado aqui: arquivos rodam concorrentemente e fechar o
+  // pool compartilhado prematuramente quebraria outros testes. O encerramento
+  // do pool fica em ws-auth.integration.test.ts (último arquivo do glob).
 });
 
 beforeEach(async () => {

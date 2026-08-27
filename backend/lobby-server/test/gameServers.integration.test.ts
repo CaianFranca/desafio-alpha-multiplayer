@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@flicker/config';
 import { GAME_SERVERS_PREFIX } from '@flicker/shared';
 import { createApp } from '../src/app.ts';
+import { redisClient } from '../src/config/redis.ts';
 import { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../src/middleware/serviceToken.ts';
 import { Redis } from 'ioredis';
 
@@ -94,15 +95,28 @@ async function redisDisponivel(): Promise<boolean> {
   }
 }
 
+// Em CI, ausência de Redis deve falhar explicitamente (não pular em silêncio),
+// senão o critério "testes de integração" da issue #47 passa vazio.
+async function exigeRedis(t: import('node:test').TestContext): Promise<boolean> {
+  if (await redisDisponivel()) return true;
+  if (process.env.CI) {
+    throw new Error('Redis obrigatório em CI — testes de integração não podem pular');
+  }
+  t.skip('Redis não disponível — pule integração');
+  return false;
+}
+
 after(async () => {
   if (redis.status === 'ready') {
     await redis.quit().catch(() => redis.disconnect());
   } else {
     redis.disconnect();
   }
-  // pool não é encerrado aqui — auth.integration.test.ts faz pool.end() no seu `after`.
-  // Este arquivo fecha o cliente redis (redis.quit). Evita double close quando ambos
-  // rodam juntos via `test/*.test.ts` (sem process.exit desde #47).
+  // Encerra o singleton redisClient usado pelo router (routes/gameServers.ts:10),
+  // que o app abre durante os testes e ninguém fechava → travava o CI (event loop
+  // não esvaziava). O `pool` é encerrado uma única vez no último arquivo
+  // (ws-auth.integration.test.ts) para não depender da ordem do glob.
+  await redisClient.quit().catch(() => undefined);
 });
 
 beforeEach(async () => {
@@ -123,10 +137,7 @@ test('wiring: createApp monta /api/game-servers (router com GET /)', () => {
 });
 
 test('GET /api/game-servers wiring: 200 [] quando nenhum game-server registrado (dev)', async (t) => {
-  if (!(await redisDisponivel())) {
-    t.skip('Redis não disponível — pule integração');
-    return;
-  }
+  if (!(await exigeRedis(t))) return;
   await comServidor(async (servidor) => {
     const res = await fetch(`${servidor.baseUrl}/api/game-servers`);
     assert.equal(res.status, 200, `esperava 200, veio ${res.status} body=${await res.clone().text()}`);
@@ -139,10 +150,7 @@ test('GET /api/game-servers wiring: 200 [] quando nenhum game-server registrado 
 // --- 2. lista o que foi anunciado via SET PX (SCAN+MGET canônico) ---
 
 test('GET /api/game-servers lista game-server anunciado via SET PX', async (t) => {
-  if (!(await redisDisponivel())) {
-    t.skip('Redis não disponível — pule integração');
-    return;
-  }
+  if (!(await exigeRedis(t))) return;
   await comServidor(async (servidor) => {
     const serverId = `test-${Date.now()}-a`;
     const payload = JSON.stringify({ serverId, url: 'http://game-server:1234', atualizadoEm: new Date().toISOString() });
@@ -162,10 +170,7 @@ test('GET /api/game-servers lista game-server anunciado via SET PX', async (t) =
 // --- 3. não lista expirado / removido ---
 
 test('GET /api/game-servers não lista após DEL (expirado)', async (t) => {
-  if (!(await redisDisponivel())) {
-    t.skip('Redis não disponível — pule integração');
-    return;
-  }
+  if (!(await exigeRedis(t))) return;
   await comServidor(async (servidor) => {
     const serverId = `test-${Date.now()}-b`;
     const payload = JSON.stringify({ serverId, url: 'http://game-server:1234', atualizadoEm: new Date().toISOString() });
@@ -186,14 +191,19 @@ test('GET /api/game-servers não lista após DEL (expirado)', async (t) => {
 // --- 4. guard JWT em produção ---
 
 test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret errado / expirado / JWT de jogador → 401, service token → 200', async (t) => {
-  if (!(await redisDisponivel())) {
-    t.skip('Redis não disponível — pule integração');
-    return;
-  }
+  if (!(await exigeRedis(t))) return;
   const secretOrig = process.env.JWT_SECRET;
   const nodeEnvOrig = process.env.NODE_ENV;
-  // Usa secret temporário para não depender do .env do dev
+  const refreshOrig = process.env.JWT_REFRESH_SECRET;
+  const pgOrig = process.env.POSTGRES_PASSWORD;
+  const lobbyOrig = process.env.LOBBY_PUBLIC_URL;
+  // Usa secrets temporários para não depender do .env do dev. Em produção,
+  // getConfig() valida JWT_REFRESH_SECRET / POSTGRES_PASSWORD / LOBBY_PUBLIC_URL
+  // (packages/config/src/index.ts:219-232); sem eles o teste falha em checkout limpo.
   process.env.JWT_SECRET = `test-secret-${Date.now()}`;
+  process.env.JWT_REFRESH_SECRET = `test-refresh-${Date.now()}`;
+  process.env.POSTGRES_PASSWORD = `test-pg-${Date.now()}`;
+  process.env.LOBBY_PUBLIC_URL = 'http://localhost:3000';
   process.env.NODE_ENV = 'production';
   // força recriação do app com novo NODE_ENV
   appServidor = createApp();
@@ -246,6 +256,12 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
     // restaura env e recria app em modo dev para próximos testes
     if (secretOrig === undefined) delete process.env.JWT_SECRET;
     else process.env.JWT_SECRET = secretOrig;
+    if (refreshOrig === undefined) delete process.env.JWT_REFRESH_SECRET;
+    else process.env.JWT_REFRESH_SECRET = refreshOrig;
+    if (pgOrig === undefined) delete process.env.POSTGRES_PASSWORD;
+    else process.env.POSTGRES_PASSWORD = pgOrig;
+    if (lobbyOrig === undefined) delete process.env.LOBBY_PUBLIC_URL;
+    else process.env.LOBBY_PUBLIC_URL = lobbyOrig;
     if (nodeEnvOrig === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = nodeEnvOrig;
     appServidor = createApp();
