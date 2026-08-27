@@ -10,6 +10,27 @@ export function useAuthForm() {
     setFieldErrors((prev) => ({ ...prev, [campo]: undefined }))
   }
 
+  async function submit(
+    validate: () => AuthFieldErrors | null,
+    action: () => Promise<{ ok: boolean; fieldErrors?: AuthFieldErrors; generalError?: string }>,
+  ): Promise<boolean> {
+    const erros = validate()
+    if (erros && Object.keys(erros).length > 0) {
+      setFieldErrors(erros)
+      setGeneralError(null)
+      return false
+    }
+    setIsSubmitting(true)
+    setFieldErrors({})
+    setGeneralError(null)
+    const result = await action()
+    setIsSubmitting(false)
+    if (result.ok) return true
+    setFieldErrors(result.fieldErrors ?? {})
+    if (result.generalError) setGeneralError(result.generalError)
+    return false
+  }
+
   return {
     fieldErrors,
     setFieldErrors,
@@ -18,5 +39,6 @@ export function useAuthForm() {
     isSubmitting,
     setIsSubmitting,
     clearFieldError,
+    submit,
   }
 }

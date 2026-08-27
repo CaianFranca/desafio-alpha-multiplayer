@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { apiFetch } from './client'
 
 export interface Jogador {
@@ -39,9 +40,8 @@ export type AuthActionResult =
   | { ok: true; jogador: Jogador }
   | { ok: false; fieldErrors: AuthFieldErrors; generalError?: string; status: number }
 
-export function isValidEmail(valor: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim())
-}
+/** @deprecated import from utils/validacaoCredenciais */
+export { isValidEmail } from '../utils/validacaoCredenciais'
 
 /** GET /api/auth/me — reidrata o Jogador da Sessão ativa (contrato OpenAPI). */
 export async function fetchCurrentPlayer(): Promise<PlayerResult> {
@@ -70,7 +70,29 @@ export async function logout(): Promise<void> {
   }
 }
 
+const authErrorSchema = z.object({
+  erros: z.array(
+    z.object({
+      campo: z.enum(['apelido', 'email', 'senha']).optional(),
+      mensagem: z.string(),
+    }),
+  ),
+})
+
 function parseAuthErrors(body: unknown): { fieldErrors: AuthFieldErrors; generalError?: string } {
+  const parsed = authErrorSchema.safeParse(body)
+  if (parsed.success) {
+    const fieldErrors: AuthFieldErrors = {}
+    let generalError: string | undefined
+    for (const item of parsed.data.erros) {
+      if (item.campo === 'apelido' || item.campo === 'email' || item.campo === 'senha') {
+        if (!fieldErrors[item.campo]) fieldErrors[item.campo] = item.mensagem
+      } else if (item.mensagem) {
+        if (!generalError) generalError = item.mensagem
+      }
+    }
+    return { fieldErrors, generalError }
+  }
   if (body !== null && typeof body === 'object' && 'erros' in body) {
     const raw = (body as AuthErrorResponse).erros
     if (Array.isArray(raw)) {
@@ -83,42 +105,55 @@ function parseAuthErrors(body: unknown): { fieldErrors: AuthFieldErrors; general
           if (!generalError) generalError = item.mensagem
         }
       }
-      return { fieldErrors, generalError }
+      if (Object.keys(fieldErrors).length > 0 || generalError) return { fieldErrors, generalError }
     }
   }
   return { fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.' }
 }
 
-async function authRequest(
+async function parseJsonSafe<T>(response: Response): Promise<T | null> {
+  try {
+    return (await response.json()) as T
+  } catch {
+    return null
+  }
+}
+
+async function rawAuthPost(
   path: '/api/auth/register' | '/api/auth/login',
   payload: CadastroPayload | CredenciaisPayload,
-): Promise<AuthActionResult> {
-  let response: Response
+): Promise<Response | null> {
   try {
-    response = await fetch(path, {
+    return await fetch(path, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
   } catch {
+    return null
+  }
+}
+
+async function authRequest(
+  path: '/api/auth/register' | '/api/auth/login',
+  payload: CadastroPayload | CredenciaisPayload,
+): Promise<AuthActionResult> {
+  const response = await rawAuthPost(path, payload)
+  if (!response) {
     return { ok: false, fieldErrors: {}, generalError: 'Erro de conexão. Tente novamente.', status: 0 }
   }
   if (response.ok) {
-    try {
-      const jogador = (await response.json()) as Jogador
-      return { ok: true, jogador }
-    } catch {
-      return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: response.status }
-    }
-  }
-  try {
-    const body = (await response.json()) as unknown
-    const parsed = parseAuthErrors(body)
-    return { ok: false, ...parsed, status: response.status }
-  } catch {
+    const jogador = await parseJsonSafe<Jogador>(response)
+    if (jogador) return { ok: true, jogador }
     return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: response.status }
   }
+  const body = await parseJsonSafe<unknown>(response)
+  if (body !== null) {
+    const parsed = parseAuthErrors(body)
+    return { ok: false, ...parsed, status: response.status }
+  }
+  return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: response.status }
 }
 
 /** POST /api/auth/register — usa fetch bruto para não disparar onSessionExpired em 401/409. */

@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../state/useAuth'
-import type { AuthFieldErrors } from '../api/auth'
 import { AuthCard } from '../components/auth/AuthCard'
 import { AuthField } from '../components/auth/AuthField'
 import { useAuthForm } from '../hooks/useAuthForm'
@@ -13,36 +12,24 @@ export function CadastroPage() {
   const [apelido, setApelido] = useState('')
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
-  const { fieldErrors, setFieldErrors, generalError, setGeneralError, isSubmitting, setIsSubmitting, clearFieldError } =
-    useAuthForm()
+  const { fieldErrors, generalError, isSubmitting, clearFieldError, submit } = useAuthForm()
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const erros: AuthFieldErrors = {}
-    const erroApelido = validarApelido(apelido)
-    if (erroApelido) erros.apelido = erroApelido
-    const erroEmail = validarEmailCadastro(email)
-    if (erroEmail) erros.email = erroEmail
-    const erroSenha = validarSenhaCadastro(senha)
-    if (erroSenha) erros.senha = erroSenha
-
-    if (Object.keys(erros).length > 0) {
-      setFieldErrors(erros)
-      setGeneralError(null)
-      return
-    }
-
-    setIsSubmitting(true)
-    setFieldErrors({})
-    setGeneralError(null)
-    const result = await register({ apelido: apelido.trim(), email: email.trim(), senha })
-    setIsSubmitting(false)
-    if (result.ok) {
-      navigate('/')
-      return
-    }
-    setFieldErrors(result.fieldErrors)
-    if (result.generalError) setGeneralError(result.generalError)
+    const ok = await submit(
+      () => {
+        const erros: Record<string, string> = {}
+        const e1 = validarApelido(apelido)
+        if (e1) erros.apelido = e1
+        const e2 = validarEmailCadastro(email)
+        if (e2) erros.email = e2
+        const e3 = validarSenhaCadastro(senha)
+        if (e3) erros.senha = e3
+        return Object.keys(erros).length > 0 ? (erros as never) : null
+      },
+      () => register({ apelido: apelido.trim(), email: email.trim(), senha }),
+    )
+    if (ok) navigate('/')
   }
 
   return (

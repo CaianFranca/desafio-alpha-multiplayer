@@ -51,18 +51,30 @@ export function AuthProvider({ initialState, children }: AuthProviderProps) {
 
   const register = useCallback(async (payload: CadastroPayload): Promise<AuthActionResult> => {
     const result = await registerRequest(payload)
-    if (result.ok) {
-      setState({ status: 'authenticated', jogador: result.jogador })
+    if (!result.ok) return result
+    const me = await fetchCurrentPlayer()
+    if (me.ok) {
+      setState({ status: 'authenticated', jogador: me.jogador })
+      return { ok: true, jogador: me.jogador }
     }
-    return result
+    if (me.reason === 'invalid-session') {
+      return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: 401 }
+    }
+    return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: 0 }
   }, [])
 
   const entrarComCredenciais = useCallback(async (payload: CredenciaisPayload): Promise<AuthActionResult> => {
     const result = await entrarRequest(payload)
-    if (result.ok) {
-      setState({ status: 'authenticated', jogador: result.jogador })
+    if (!result.ok) return result
+    const me = await fetchCurrentPlayer()
+    if (me.ok) {
+      setState({ status: 'authenticated', jogador: me.jogador })
+      return { ok: true, jogador: me.jogador }
     }
-    return result
+    if (me.reason === 'invalid-session') {
+      return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: 401 }
+    }
+    return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: 0 }
   }, [])
 
   const value = useMemo<AuthContextValue>(

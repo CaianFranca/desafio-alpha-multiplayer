@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../state/useAuth'
-import type { AuthFieldErrors } from '../api/auth'
 import { AuthCard } from '../components/auth/AuthCard'
 import { AuthField } from '../components/auth/AuthField'
 import { useAuthForm } from '../hooks/useAuthForm'
@@ -19,34 +18,22 @@ export function EntrarPage() {
 
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
-  const { fieldErrors, setFieldErrors, generalError, setGeneralError, isSubmitting, setIsSubmitting, clearFieldError } =
-    useAuthForm()
+  const { fieldErrors, generalError, isSubmitting, clearFieldError, submit } = useAuthForm()
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const erros: AuthFieldErrors = {}
-    const erroEmail = validarEmailCredenciais(email)
-    if (erroEmail) erros.email = erroEmail
-    const erroSenha = validarSenhaCredenciais(senha)
-    if (erroSenha) erros.senha = erroSenha
-
-    if (Object.keys(erros).length > 0) {
-      setFieldErrors(erros)
-      setGeneralError(null)
-      return
-    }
-
-    setIsSubmitting(true)
-    setFieldErrors({})
-    setGeneralError(null)
-    const result = await entrarComCredenciais({ email: email.trim(), senha })
-    setIsSubmitting(false)
-    if (result.ok) {
-      navigate('/')
-      return
-    }
-    setFieldErrors(result.fieldErrors)
-    if (result.generalError) setGeneralError(result.generalError)
+    const ok = await submit(
+      () => {
+        const erros: Record<string, string> = {}
+        const e1 = validarEmailCredenciais(email)
+        if (e1) erros.email = e1
+        const e2 = validarSenhaCredenciais(senha)
+        if (e2) erros.senha = e2
+        return Object.keys(erros).length > 0 ? (erros as never) : null
+      },
+      () => entrarComCredenciais({ email: email.trim(), senha }),
+    )
+    if (ok) navigate('/')
   }
 
   return (

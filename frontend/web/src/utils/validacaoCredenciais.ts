@@ -1,4 +1,13 @@
-import { isValidEmail } from '../api/auth'
+export function isValidEmail(valor: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim())
+}
+
+function validarEmail(valor: string): string | null {
+  const trimmed = valor.trim()
+  if (trimmed.length === 0) return 'Informe o email.'
+  if (!isValidEmail(trimmed)) return 'Informe um email válido.'
+  return null
+}
 
 export function validarApelido(valor: string): string | null {
   const trimmed = valor.trim()
@@ -8,17 +17,11 @@ export function validarApelido(valor: string): string | null {
 }
 
 export function validarEmailCadastro(valor: string): string | null {
-  const trimmed = valor.trim()
-  if (trimmed.length === 0) return 'Informe o email.'
-  if (!isValidEmail(trimmed)) return 'Informe um email válido.'
-  return null
+  return validarEmail(valor)
 }
 
 export function validarEmailCredenciais(valor: string): string | null {
-  const trimmed = valor.trim()
-  if (trimmed.length === 0) return 'Informe o email.'
-  if (!isValidEmail(trimmed)) return 'Informe um email válido.'
-  return null
+  return validarEmail(valor)
 }
 
 export function validarSenhaCadastro(valor: string): string | null {

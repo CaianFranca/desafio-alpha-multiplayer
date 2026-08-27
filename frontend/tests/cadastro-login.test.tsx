@@ -4,15 +4,9 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
+import { jsonResponse, stubAuthFetch } from './helpers/authFetchMock'
 
 afterEach(() => vi.unstubAllGlobals())
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
 
 function renderWithRouter(initialEntries: string[] = ['/'], authState: AuthState = visitorState) {
   const router = createMemoryRouter(routes, { initialEntries })
@@ -76,6 +70,37 @@ describe('CadastroPage', () => {
     expect(await screen.findByText('O apelido deve ter entre 3 e 20 caracteres.')).toBeInTheDocument()
   })
 
+  it('validação client-side: apelido com mais de 20 caracteres.', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/cadastro'])
+
+    await user.type(screen.getByLabelText(/^apelido$/i), 'a'.repeat(21))
+    await user.type(screen.getByLabelText(/^email$/i), 'a@exemplo.com')
+    await user.type(screen.getByLabelText(/^senha$/i), 'senha-segura-1')
+    await user.click(screen.getByRole('button', { name: /cadastrar-se/i }))
+
+    expect(await screen.findByText('O apelido deve ter entre 3 e 20 caracteres.')).toBeInTheDocument()
+  })
+
+  it('validação client-side: apelido com 20 caracteres é válido (boundary).', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal(
+      'fetch',
+      stubAuthFetch({
+        register: async () => jsonResponse({ erros: [{ campo: 'email', mensagem: 'Email já está em uso.' }] }, 409),
+      }),
+    )
+    renderWithRouter(['/cadastro'])
+
+    await user.type(screen.getByLabelText(/^apelido$/i), 'a'.repeat(20))
+    await user.type(screen.getByLabelText(/^email$/i), 'usado@exemplo.com')
+    await user.type(screen.getByLabelText(/^senha$/i), 'senha-segura-1')
+    await user.click(screen.getByRole('button', { name: /cadastrar-se/i }))
+
+    expect(await screen.findByText('Email já está em uso.')).toBeInTheDocument()
+    expect(screen.queryByText('O apelido deve ter entre 3 e 20 caracteres.')).not.toBeInTheDocument()
+  })
+
   it('validação client-side: Informe um email válido. e Informe a senha.', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/cadastro'])
@@ -114,11 +139,11 @@ describe('CadastroPage', () => {
   it('erro 409 Apelido já está em uso. vindo do servidor', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).includes('/api/auth/register') && (init?.method ?? 'GET') === 'POST') {
-          return jsonResponse({ erros: [{ campo: 'apelido', mensagem: 'Apelido já está em uso.' }] }, 409)
-        }
-        return new Response(null, { status: 404 })
+      stubAuthFetch({
+        register: async (input, init) =>
+          (init?.method ?? 'GET') === 'POST'
+            ? jsonResponse({ erros: [{ campo: 'apelido', mensagem: 'Apelido já está em uso.' }] }, 409)
+            : new Response(null, { status: 404 }),
       }),
     )
     const user = userEvent.setup()
@@ -136,11 +161,8 @@ describe('CadastroPage', () => {
   it('erro 409 Email já está em uso. vindo do servidor', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes('/api/auth/register')) {
-          return jsonResponse({ erros: [{ campo: 'email', mensagem: 'Email já está em uso.' }] }, 409)
-        }
-        return new Response(null, { status: 404 })
+      stubAuthFetch({
+        register: async () => jsonResponse({ erros: [{ campo: 'email', mensagem: 'Email já está em uso.' }] }, 409),
       }),
     )
     const user = userEvent.setup()
@@ -157,7 +179,9 @@ describe('CadastroPage', () => {
   it('erro 400 por campo vindo do servidor', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse({ erros: [{ campo: 'apelido', mensagem: 'Informe o apelido.' }] }, 400)),
+      stubAuthFetch({
+        register: async () => jsonResponse({ erros: [{ campo: 'apelido', mensagem: 'Informe o apelido.' }] }, 400),
+      }),
     )
     const user = userEvent.setup()
     renderWithRouter(['/cadastro'])
@@ -174,11 +198,12 @@ describe('CadastroPage', () => {
   it('cadastro sucesso auto-login mostra apelido no header e navega para /', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).includes('/api/auth/register') && (init?.method ?? 'POST')?.toUpperCase() === 'POST') {
-          return jsonResponse(jogadorCadastro, 201)
-        }
-        return new Response(null, { status: 404 })
+      stubAuthFetch({
+        register: async (input, init) =>
+          (init?.method ?? 'POST')?.toUpperCase() === 'POST'
+            ? jsonResponse(jogadorCadastro, 201)
+            : new Response(null, { status: 404 }),
+        me: async () => jsonResponse(jogadorCadastro, 200),
       }),
     )
     const user = userEvent.setup()
@@ -234,11 +259,8 @@ describe('LoginPage', () => {
   it('erro 401 genérico Credenciais inválidas. sem expor campo', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes('/api/auth/login')) {
-          return jsonResponse({ erros: [{ mensagem: 'Credenciais inválidas.' }] }, 401)
-        }
-        return new Response(null, { status: 404 })
+      stubAuthFetch({
+        login: async () => jsonResponse({ erros: [{ mensagem: 'Credenciais inválidas.' }] }, 401),
       }),
     )
     const user = userEvent.setup()
@@ -258,11 +280,9 @@ describe('LoginPage', () => {
   it('login sucesso auto-login mostra apelido no header', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes('/api/auth/login')) {
-          return jsonResponse(jogadorLogin, 200)
-        }
-        return new Response(null, { status: 404 })
+      stubAuthFetch({
+        login: async () => jsonResponse(jogadorLogin, 200),
+        me: async () => jsonResponse(jogadorLogin, 200),
       }),
     )
     const user = userEvent.setup()
@@ -282,6 +302,26 @@ describe('LoginPage', () => {
     })
     render(
       <AuthProvider initialState={visitorState}>
+        <RouterProvider router={router} />
+      </AuthProvider>,
+    )
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/entre para acessar esta funcionalidade/i)
+    expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
+  })
+
+  it('RequireAuth redireciona visitante para /login com mensagem orientativa (provider real)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stubAuthFetch({
+        me: async () => new Response(null, { status: 401 }),
+      }),
+    )
+    const router = createMemoryRouter(routes, {
+      initialEntries: ['/salas/criar'],
+    })
+    render(
+      <AuthProvider>
         <RouterProvider router={router} />
       </AuthProvider>,
     )
