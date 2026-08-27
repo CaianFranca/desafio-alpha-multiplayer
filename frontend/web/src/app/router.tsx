@@ -5,6 +5,7 @@ import { HomePage } from '../pages/HomePage'
 import { CadastroPage } from '../pages/stubs/CadastroPage'
 import { LoginPage } from '../pages/stubs/LoginPage'
 import { SalasCriarPage } from '../pages/stubs/SalasCriarPage'
+import { PartidaPage } from '../pages/PartidaPage'
 export const routes = [
   {
     path: '/',
@@ -18,6 +19,14 @@ export const routes = [
         element: (
           <RequireAuth>
             <SalasCriarPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'partida',
+        element: (
+          <RequireAuth>
+            <PartidaPage />
           </RequireAuth>
         ),
       },
