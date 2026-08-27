@@ -10,9 +10,11 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@flicker/config';
 import { GAME_SERVERS_PREFIX } from '@flicker/shared';
 import { createApp } from '../src/app.ts';
-import { redisClient } from '../src/config/redis.ts';
 import { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../src/middleware/serviceToken.ts';
 import { Redis } from 'ioredis';
+import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
+
+registrarArquivoDeTeste();
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -112,11 +114,9 @@ after(async () => {
   } else {
     redis.disconnect();
   }
-  // Encerra o singleton redisClient usado pelo router (routes/gameServers.ts:10),
-  // que o app abre durante os testes e ninguém fechava → travava o CI (event loop
-  // não esvaziava). O `pool` é encerrado uma única vez no último arquivo
-  // (ws-auth.integration.test.ts) para não depender da ordem do glob.
-  await redisClient.quit().catch(() => undefined);
+  // redisClient (singleton) e pool são encerrados uma única vez via ./teardown.ts
+  // quando o último arquivo de teste terminar.
+  await finalizarArquivoDeTeste();
 });
 
 beforeEach(async () => {

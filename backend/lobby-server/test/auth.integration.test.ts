@@ -13,6 +13,9 @@ import { type AddressInfo } from 'node:net';
 import { criarClienteRedis } from '@flicker/config';
 import { createApp } from '../src/app.ts';
 import { pool } from '../src/config/pg.ts';
+import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
+
+registrarArquivoDeTeste();
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -153,9 +156,9 @@ after(async () => {
   } else {
     redis.disconnect();
   }
-  // pool NÃO é encerrado aqui: arquivos rodam concorrentemente e fechar o
-  // pool compartilhado prematuramente quebraria outros testes. O encerramento
-  // do pool fica em ws-auth.integration.test.ts (último arquivo do glob).
+  // redisClient (singleton) e pool são encerrados uma única vez via ./teardown.ts
+  // quando o último arquivo de teste terminar.
+  await finalizarArquivoDeTeste();
 });
 
 beforeEach(async () => {
