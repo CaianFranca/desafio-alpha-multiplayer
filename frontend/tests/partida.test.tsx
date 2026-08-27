@@ -21,7 +21,7 @@ function setViewport(width: number) {
 }
 
 describe('partida route', () => {
-  const visitante: AuthState = { status: 'visitante' }
+  const visitante: AuthState = { status: 'visitor' }
   const autenticado = estadoAutenticadoMock
 
   it('autenticado ve moldura e canvas ao acessar /partida diretamente', () => {

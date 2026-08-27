@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../state/useAuth'
 import { CtaLink } from './CtaLink'
 import { criarSalaLabel } from '../auth/AuthActions'
@@ -6,6 +6,8 @@ import { criarSalaLabel } from '../auth/AuthActions'
 export function Header() {
   const { authState, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const emLobby = location.pathname.startsWith('/salas') || location.pathname.startsWith('/sala')
 
   // A navegação pós-logout fica aqui porque o AuthProvider está acima do
   // RouterProvider em main.tsx (o provider não tem acesso ao navigate).
@@ -31,14 +33,26 @@ export function Header() {
           {authState.status === 'authenticated' && (
             <div className="flex items-center gap-3">
               <span className="text-sm font-bold">{authState.jogador.apelido}</span>
-              <CtaLink to="/salas/criar" variant="primary" size="sm">{criarSalaLabel}</CtaLink>
-              <button
-                type="button"
-                onClick={() => void handleLogout()}
-                className="text-sm text-(--color-muted) hover:text-white transition-colors"
-              >
-                Sair
-              </button>
+              {emLobby ? (
+                <button
+                  type="button"
+                  onClick={() => void handleLogout()}
+                  className="border border-white/20 px-4 py-2 text-xs tracking-wider font-bold uppercase text-white hover:bg-white hover:text-black transition-colors"
+                >
+                  Sair da Sala
+                </button>
+              ) : (
+                <>
+                  <CtaLink to="/salas/criar" variant="primary" size="sm">{criarSalaLabel}</CtaLink>
+                  <button
+                    type="button"
+                    onClick={() => void handleLogout()}
+                    className="text-sm text-(--color-muted) hover:text-white transition-colors"
+                  >
+                    Sair
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

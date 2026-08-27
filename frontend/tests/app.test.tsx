@@ -187,7 +187,9 @@ describe('authentication states', () => {
     renderWithRouter(['/salas/criar'], autenticado)
 
     expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
-    expect(screen.getAllByText(/em construção/i).length).toBeGreaterThan(0)
+    // Stub substituído por lobby real (issue #32): verifica layout bipartido
+    expect(screen.getByText(/ponto de encontro/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /iniciar sessão/i })).toBeInTheDocument()
   })
 
   it('authenticated header Criar Sala action navigates to the create room page', async () => {
