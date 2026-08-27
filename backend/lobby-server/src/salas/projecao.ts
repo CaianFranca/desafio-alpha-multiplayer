@@ -179,7 +179,9 @@ export class SalasProjecao {
   ): Promise<void> {
     const chave = chaveSalaChat(salaId);
     await this.redis.rpush(chave, JSON.stringify(msg));
-    await this.redis.expire(chave, PROJECAO_TTL_SEGUNDOS);
+    // Sem TTL: o ciclo de vida do histórico é o da Sala. A chave é removida
+    // por `limparSala` no encerramento. Um TTL aqui faria o histórico sumir
+    // antes da Sala em salas silenciosas >1h, quebrando o critério #34.
   }
 
   /**

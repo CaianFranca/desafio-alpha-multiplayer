@@ -476,10 +476,11 @@ export class SalasHandlers {
   }
 
   /**
-   * Chat da Sala (issue #34). Roteia fora da `cadeiaDeMutacoes` — não toca
-   * o engine (o chat é exclusivo do lobby-server). Persiste o histórico na
-   * projeção Redis e faz broadcast a todos os Membros. Mensagens vazias ou
-   * acima de 500 chars são recusadas com `ERRO_DA_SALA { DADOS_INVALIDOS }`
+   * Chat da Sala (issue #34). Roteia pela `cadeiaDeMutacoes` como os demais
+   * comandos (serialização mononodo), mas não toca o engine — o chat é
+   * exclusivo do lobby-server. Persiste o histórico na projeção Redis e faz
+   * broadcast a todos os Membros. Mensagens vazias (ou só-espaços, sem trim)
+   * ou acima de 500 chars são recusadas com `ERRO_DA_SALA { DADOS_INVALIDOS }`
    * ao originador, sem broadcast. Remetente sem Sala associada recebe
    * `MEMBRO_NAO_ENCONTRADO`.
    */

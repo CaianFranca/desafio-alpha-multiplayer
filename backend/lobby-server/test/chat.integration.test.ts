@@ -176,7 +176,45 @@ test('ENVIAR_MENSAGEM_DE_CHAT: mensagem com 501 caracteres é recusada sem broad
   });
 });
 
-// --- 5. Histórico some ao encerrar a Sala ---
+// --- 5. Mensagem com 500 caracteres exatos é aceita e broadcast ---
+
+test('ENVIAR_MENSAGEM_DE_CHAT: mensagem com 500 caracteres é aceita e entregue a todos os Membros', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    const conteudo500 = 'x'.repeat(500);
+    enviar(wsA, { type: 'ENVIAR_MENSAGEM_DE_CHAT', conteudo: conteudo500 });
+
+    const rawA = await esperarMensagem(wsA);
+    const msgA = JSON.parse(rawA) as MensagemDeChatEvento;
+    assert.equal(msgA.type, 'MENSAGEM_DE_CHAT');
+    assert.equal(msgA.conteudo, conteudo500);
+    assert.equal(msgA.conteudo.length, 500);
+
+    const rawB = await esperarMensagem(wsB);
+    const msgB = JSON.parse(rawB) as MensagemDeChatEvento;
+    assert.equal(msgB.type, 'MENSAGEM_DE_CHAT');
+    assert.equal(msgB.conteudo, conteudo500);
+    assert.equal(msgB.enviadoEm, msgA.enviadoEm);
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+  });
+});
+
+// --- 6. Histórico some ao encerrar a Sala ---
 
 test('ENVIAR_MENSAGEM_DE_CHAT: histórico é destruído quando a Sala encerra', async () => {
   await comServidor(async (servidor) => {
