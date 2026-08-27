@@ -5,7 +5,13 @@ import { Redis } from 'ioredis';
 export interface Config {
   gameServerPort: number;
   lobbyServerPort: number;
+  /** URL pública usada nos links compartilháveis emitidos pelo lobby. */
+  lobbyPublicUrl: string;
   jwtSecret: string;
+  jwtRefreshSecret: string;
+  cookieSecure: boolean;
+  sessionAccessTtlSeconds: number;
+  sessionRefreshTtlSeconds: number;
   partidaPreparadaTtlSegundos: number;
   postgres: {
     host: string;
@@ -22,13 +28,17 @@ export interface Config {
   };
 }
 
-const DEFAULT_GAME_SERVER_PORT = 3000;
+// Alinhado com .env.example e docker-compose.yml (1234), como o lobby faz com a 3001.
+const DEFAULT_GAME_SERVER_PORT = 1234;
 const DEFAULT_LOBBY_SERVER_PORT = 3001;
 const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
+const DEFAULT_JWT_REFRESH_SECRET = 'dev_jwt_refresh_change_me';
 const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
 const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
+const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
+const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 
 let envLoaded = false;
 
@@ -77,6 +87,45 @@ function parsePartidaPreparadaTtlSegundos(raw: string | undefined): number {
   return DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS;
 }
 
+function parseSessionAccessTtlSeconds(raw: string | undefined): number {
+  const parsed = Number(raw ?? DEFAULT_SESSION_ACCESS_TTL_SECONDS);
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return DEFAULT_SESSION_ACCESS_TTL_SECONDS;
+}
+
+function parseSessionRefreshTtlSeconds(raw: string | undefined): number {
+  const parsed = Number(raw ?? DEFAULT_SESSION_REFRESH_TTL_SECONDS);
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return DEFAULT_SESSION_REFRESH_TTL_SECONDS;
+}
+
+function parseCookieSecure(raw: string | undefined, isProduction: boolean): boolean {
+  if (raw === undefined) {
+    // Default: true em produção, false em desenvolvimento.
+    return isProduction;
+  }
+  return raw.toLowerCase() === 'true';
+}
+
+function parseLobbyPublicUrl(raw: string | undefined, fallback: string): string {
+  if (raw === undefined) {
+    return fallback;
+  }
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('protocolo não suportado');
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    throw new Error('LOBBY_PUBLIC_URL deve ser uma URL HTTP(S) válida');
+  }
+}
+
 export function getConfig(): Config {
   loadEnvFile();
 
@@ -89,8 +138,21 @@ export function getConfig(): Config {
     process.env.LOBBY_SERVER_PORT as string | undefined,
     DEFAULT_LOBBY_SERVER_PORT,
   );
+  const lobbyPublicUrl = parseLobbyPublicUrl(
+    process.env.LOBBY_PUBLIC_URL as string | undefined,
+    `http://localhost:${lobbyServerPort}`,
+  );
 
   const jwtSecret = process.env.JWT_SECRET ?? DEFAULT_JWT_SECRET;
+  const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET ?? DEFAULT_JWT_REFRESH_SECRET;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const cookieSecure = parseCookieSecure(process.env.COOKIE_SECURE as string | undefined, isProduction);
+  const sessionAccessTtlSeconds = parseSessionAccessTtlSeconds(
+    process.env.SESSION_ACCESS_TTL_SECONDS as string | undefined,
+  );
+  const sessionRefreshTtlSeconds = parseSessionRefreshTtlSeconds(
+    process.env.SESSION_REFRESH_TTL_SECONDS as string | undefined,
+  );
   const poolMax = parsePoolMax(process.env.PG_POOL_MAX);
   const partidaPreparadaTtlSegundos = parsePartidaPreparadaTtlSegundos(
     process.env.PARTIDA_PREPARADA_TTL_SEGUNDOS as string | undefined,
@@ -105,12 +167,18 @@ export function getConfig(): Config {
     poolMax,
   };
 
-  if (process.env.NODE_ENV === 'production') {
+  if (isProduction) {
     if (!jwtSecret || jwtSecret === DEFAULT_JWT_SECRET) {
       throw new Error('JWT_SECRET deve ser definido em produção');
     }
+    if (!jwtRefreshSecret || jwtRefreshSecret === DEFAULT_JWT_REFRESH_SECRET) {
+      throw new Error('JWT_REFRESH_SECRET deve ser definido em produção');
+    }
     if (!postgres.password || postgres.password === DEFAULT_POSTGRES_PASSWORD) {
       throw new Error('POSTGRES_PASSWORD deve ser definido em produção');
+    }
+    if (process.env.LOBBY_PUBLIC_URL === undefined) {
+      throw new Error('LOBBY_PUBLIC_URL deve ser definido em produção');
     }
   }
 
@@ -120,7 +188,19 @@ export function getConfig(): Config {
     password: process.env.REDIS_PASSWORD ?? undefined,
   };
 
-  return { gameServerPort, lobbyServerPort, jwtSecret, partidaPreparadaTtlSegundos, postgres, redis };
+  return {
+    gameServerPort,
+    lobbyServerPort,
+    lobbyPublicUrl,
+    jwtSecret,
+    jwtRefreshSecret,
+    cookieSecure,
+    sessionAccessTtlSeconds,
+    sessionRefreshTtlSeconds,
+    partidaPreparadaTtlSegundos,
+    postgres,
+    redis,
+  };
 }
 
 export function criarClienteRedis(): Redis {

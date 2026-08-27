@@ -96,6 +96,86 @@ _Avoid_: hospital, asilo
 Estado mental dos personagens, degradado pela escuridão e pelos monstros ao longo da partida.
 _Avoid_: saúde mental, lucidez
 
+**Ambiente de Jogo**:
+Cena visual da partida — background, mesa, iluminação e câmera — exibida em tela cheia sob a moldura.
+_Avoid_: cena, tela de jogo
+
+**Mesa**:
+Plataforma do Ambiente de Jogo que serve de base de apoio ao tabuleiro e aos demais componentes do jogo; superfície lisa e sem textura.
+_Avoid_: plataforma, base, mesa de jogo
+
+## Tabuleiro e Peças
+
+**Tabuleiro**:
+Componente central da partida, posicionado sobre a mesa; controla a grade de células, a vizinhança, a ocupação das células e valida as ações.
+_Avoid_: board, mapa
+
+**Célula**:
+Unidade da grade do tabuleiro; pode estar vazia ou ocupada por uma peça.
+_Avoid_: casa, quadrado, slot
+
+**Vizinhança**:
+Relação entre células que compartilham uma borda; células diagonais não são vizinhas.
+_Avoid_: adjacência
+
+**Borda Aberta**:
+Lado de uma peça com conexão externa aberta, definido pelo tipo e pela orientação da peça.
+_Avoid_: lado aberto, saída
+
+**Orientação**:
+Estado de rotação de uma peça em passos discretos de 90 graus, determinando quais bordas ficam abertas.
+_Avoid_: rotação, ângulo
+
+**Peça Inicial**:
+Tipo de peça com duas bordas adjacentes abertas.
+_Avoid_: peça de começo
+
+**Peça de Caminho**:
+Categoria de peça que reconstrói os caminhos do sanatório: reta (duas bordas opostas abertas), T (três bordas abertas) e cruz (quatro bordas abertas).
+_Avoid_: tile de caminho
+
+**Reserva**:
+Conjunto de peças disponíveis sobre a mesa, ao lado do tabuleiro; o posicionamento consome peças da reserva.
+_Avoid_: pilha, estoque, banco
+
+**Posicionamento**:
+Ação de encaixar uma peça em uma célula vazia do tabuleiro.
+_Avoid_: colocar, instalar
+
+**Encaixe**:
+Resultado do posicionamento: a peça assentada na célula, sem física ou colisão.
+_Avoid_: snap, encaixe físico
+
+**Manipulação**:
+Janela após o encaixe em que a peça ainda pode ser girada na célula.
+_Avoid_: ajuste, edição
+
+**Finalização**:
+Evento que encerra a manipulação de uma peça: nova seleção, novo posicionamento ou clique na própria peça posicionada.
+_Avoid_: confirmação, travar
+
+## Peões e Conexões
+
+**Peão**:
+Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão; move-se entre peças conectadas; não é uma Peça.
+_Avoid_: pawn, token, boneco
+
+**Conexão**:
+Relação entre duas peças vizinhas cujas bordas abertas estão voltadas uma para a outra; condição da movimentação do peão.
+_Avoid_: ligação, elo
+
+**Recebimento**:
+Retirada de peças de caminho da reserva, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; ocorre no início da sequência do peão.
+_Avoid_: sorteio, ganho
+
+**Movimentação**:
+Ação de deslocar o peão para uma peça vizinha conectada; encerra a sequência do peão.
+_Avoid_: mover, andar
+
+**Permanência**:
+Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento.
+_Avoid_: ficar, pular
+
 ## Objetivos da Partida
 
 **Gerador**:

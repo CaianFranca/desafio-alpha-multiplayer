@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  aceitarEncaminhamento,
   aplicarComando,
+  alternarProntidao,
   autorizarRetorno,
   confirmarConsistenciaDaSala,
   criarSala,
   desconectarJogador,
+  encaminharSala,
+  encerrarSala,
   entrarNaSala,
   estadoDoLobbyVazio,
   expirarReconexao,
   expulsarMembro,
   MOTIVOS_DE_ENCERRAMENTO,
+  recusarEncaminhamento,
   reconectarJogador,
+  registrarFalhaDoEncaminhamento,
   registrarReinicioDaSala,
   sairDaSala,
   type Comando,
@@ -54,6 +60,24 @@ const confirmar = (salaId = 'sala-1') =>
 const registrarReinicio = (salaId = 'sala-1') =>
   ({ tipo: 'registrar_reinicio_da_sala', salaId } as const);
 
+const alternar = (jogadorId: string, salaId = 'sala-1') =>
+  ({ tipo: 'alternar_prontidao', salaId, jogadorId } as const);
+
+const encaminhar = (anfitriaoMembroId = 'membro-1', salaId = 'sala-1') =>
+  ({ tipo: 'encaminhar_sala', salaId, anfitriaoMembroId } as const);
+
+const aceitar = (salaId = 'sala-1') =>
+  ({ tipo: 'aceitar_encaminhamento', salaId } as const);
+
+const recusar = (salaId = 'sala-1') =>
+  ({ tipo: 'recusar_encaminhamento', salaId } as const);
+
+const registrarFalha = (salaId = 'sala-1') =>
+  ({ tipo: 'registrar_falha_do_encaminhamento', salaId } as const);
+
+const encerrar = (anfitriaoMembroId = 'membro-1', salaId = 'sala-1') =>
+  ({ tipo: 'encerrar_sala', salaId, anfitriaoMembroId } as const);
+
 const comSalaInconsistente = (estado: EstadoDoLobby): EstadoDoLobby => ({
   salas: [{ ...estado.salas[0], consistente: false }],
 });
@@ -64,6 +88,17 @@ function aplicar(estado: EstadoDoLobby, comando: Comando): EstadoDoLobby {
     throw new Error(resultado.erro.mensagem);
   }
   return resultado.estado;
+}
+
+function salaComQuatroProntos(): EstadoDoLobby {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, entrar('jogador-3', 'membro-3'));
+  estado = aplicar(estado, entrar('jogador-4', 'membro-4'));
+  estado = aplicar(estado, alternar('jogador-1'));
+  estado = aplicar(estado, alternar('jogador-2'));
+  estado = aplicar(estado, alternar('jogador-3'));
+  return aplicar(estado, alternar('jogador-4'));
 }
 
 test('cria Sala com o criador como primeiro Membro e Anfitrião', () => {
@@ -737,6 +772,48 @@ test('registrar_reinicio_da_sala torna a Sala inconsistente e membros ativos rea
   assert.equal(entradaApos.sucesso, true);
 });
 
+test('registrar_reinicio_da_sala é isento do gate SALA_ENCAMINHADA', () => {
+  const encaminhada = aplicar(salaComQuatroProntos(), aceitar());
+  const salaAntesDoReinicio = encaminhada.salas[0];
+  assert.equal(salaAntesDoReinicio.estado, 'encaminhada');
+
+  const resultado = registrarReinicioDaSala(encaminhada, registrarReinicio());
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+
+  const sala = resultado.estado.salas[0];
+  assert.equal(sala.estado, 'encaminhada');
+  assert.equal(sala.consistente, false);
+  assert.equal(sala.anfitriaoId, salaAntesDoReinicio.anfitriaoId);
+  assert.equal(sala.proximaOrdemDeEntrada, salaAntesDoReinicio.proximaOrdemDeEntrada);
+  assert.deepEqual(sala.jogadoresBloqueados, salaAntesDoReinicio.jogadoresBloqueados);
+  assert.deepEqual(
+    sala.membros.map(({ id, jogadorId, ordemDeEntrada, estado, motivoEncerramento }) => ({
+      id,
+      jogadorId,
+      ordemDeEntrada,
+      estado,
+      motivoEncerramento,
+    })),
+    salaAntesDoReinicio.membros.map(({ id, jogadorId, ordemDeEntrada, estado, motivoEncerramento }) => ({
+      id,
+      jogadorId,
+      ordemDeEntrada,
+      estado,
+      motivoEncerramento,
+    })),
+  );
+  for (const membro of sala.membros) {
+    assert.equal(membro.estado, 'ativo');
+    assert.equal(membro.presenca, 'em_reconexao');
+    assert.equal(membro.pronto, false);
+  }
+  assert.deepEqual(resultado.eventos, [
+    { tipo: 'reinicio_registrado', salaId: 'sala-1' },
+  ]);
+});
+
 test('registrar_reinicio_da_sala é idempotente quando a Sala já está inconsistente', () => {
   let estado = aplicar(estadoDoLobbyVazio(), criar());
   estado = aplicar(estado, registrarReinicio());
@@ -752,4 +829,379 @@ test('registrar_reinicio_da_sala em Sala inexistente retorna SALA_NAO_ENCONTRADA
   assert.equal(resultado.sucesso, false);
   if (resultado.sucesso) return;
   assert.equal(resultado.erro.codigo, 'SALA_NAO_ENCONTRADA');
+});
+
+test('novo Membro nasce não pronto e a entrada preserva a prontidão dos demais', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, alternar('jogador-1'));
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+
+  const sala = estado.salas[0];
+  assert.equal(sala.membros[0].pronto, true);
+  assert.equal(sala.membros[1].pronto, false);
+});
+
+test('alternar_prontidao alterna a prontidão e emite prontidao_alterada com o novo valor', () => {
+  const estado = aplicar(estadoDoLobbyVazio(), criar());
+
+  const ida = alternarProntidao(estado, alternar('jogador-1'));
+  assert.equal(ida.sucesso, true);
+  if (!ida.sucesso) return;
+  assert.equal(ida.estado.salas[0].membros[0].pronto, true);
+  assert.deepEqual(ida.eventos.map((evento) => evento.tipo), ['prontidao_alterada']);
+  const eventoIda = ida.eventos[0];
+  if (eventoIda.tipo === 'prontidao_alterada') {
+    assert.equal(eventoIda.salaId, 'sala-1');
+    assert.equal(eventoIda.membroId, 'membro-1');
+    assert.equal(eventoIda.jogadorId, 'jogador-1');
+    assert.equal(eventoIda.ordemDeEntrada, 1);
+    assert.equal(eventoIda.pronto, true);
+  }
+
+  const volta = alternarProntidao(ida.estado, alternar('jogador-1'));
+  assert.equal(volta.sucesso, true);
+  if (!volta.sucesso) return;
+  assert.equal(volta.estado.salas[0].membros[0].pronto, false);
+  const eventoVolta = volta.eventos[0];
+  if (eventoVolta.tipo === 'prontidao_alterada') {
+    assert.equal(eventoVolta.pronto, false);
+  }
+});
+
+test('alternar_prontidao rejeita Jogador fora da Sala e vínculo encerrado', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, sair('jogador-2'));
+
+  const fora = alternarProntidao(estado, alternar('jogador-3'));
+  assert.equal(fora.sucesso, false);
+  if (fora.sucesso) return;
+  assert.equal(fora.erro.codigo, 'MEMBRO_NAO_ENCONTRADO');
+
+  const encerrado = alternarProntidao(estado, alternar('jogador-2'));
+  assert.equal(encerrado.sucesso, false);
+  if (encerrado.sucesso) return;
+  assert.equal(encerrado.erro.codigo, 'MEMBRO_NAO_ATIVO');
+});
+
+test('alternar_prontidao rejeita Sala encerrada e Sala inconsistente', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, sair('jogador-1'));
+  const encerrada = alternarProntidao(estado, alternar('jogador-1'));
+  assert.equal(encerrada.sucesso, false);
+  if (encerrada.sucesso) return;
+  assert.equal(encerrada.erro.codigo, 'SALA_ENCERRADA');
+
+  const inconsistente = comSalaInconsistente(aplicar(estadoDoLobbyVazio(), criar()));
+  const resultado = alternarProntidao(inconsistente, alternar('jogador-1'));
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_INCONSISTENTE');
+});
+
+test('Membro em janela de reconexão pode alternar a prontidão', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, desconectar('jogador-1'));
+  const resultado = alternarProntidao(estado, alternar('jogador-1'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const membro = resultado.estado.salas[0].membros[0];
+  assert.equal(membro.presenca, 'em_reconexao');
+  assert.equal(membro.pronto, true);
+});
+
+test('alternar_prontidao é determinístico e não muta o estado recebido', () => {
+  const original = aplicar(estadoDoLobbyVazio(), criar());
+  const snapshot = structuredClone(original);
+  const primeira = alternarProntidao(original, alternar('jogador-1'));
+  const segunda = alternarProntidao(original, alternar('jogador-1'));
+
+  assert.deepEqual(original, snapshot);
+  assert.deepEqual(primeira, segunda);
+});
+
+test('encaminhar_sala é ação exclusiva do Anfitrião atual', () => {
+  const estado = salaComQuatroProntos();
+  const resultado = encaminharSala(estado, encaminhar('membro-2'));
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'APENAS_ANFITRIAO');
+});
+
+test('encaminhar_sala exige exatamente quatro Membros ativos', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, entrar('jogador-3', 'membro-3'));
+  estado = aplicar(estado, alternar('jogador-1'));
+  estado = aplicar(estado, alternar('jogador-2'));
+  estado = aplicar(estado, alternar('jogador-3'));
+
+  const resultado = encaminharSala(estado, encaminhar('membro-1'));
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+});
+
+test('encaminhar_sala exige todos os Membros conectados', () => {
+  const estado = aplicar(salaComQuatroProntos(), desconectar('jogador-2'));
+  const resultado = encaminharSala(estado, encaminhar('membro-1'));
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+});
+
+test('encaminhar_sala exige todos os Membros prontos', () => {
+  const estado = aplicar(salaComQuatroProntos(), alternar('jogador-2'));
+  const resultado = encaminharSala(estado, encaminhar('membro-1'));
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+});
+
+test('encaminhar_sala bem-sucedido emite encaminhamento_iniciado sem congelar a Sala', () => {
+  const estado = salaComQuatroProntos();
+  const resultado = encaminharSala(estado, encaminhar('membro-1'));
+
+  assert.deepEqual(resultado, {
+    sucesso: true,
+    estado,
+    eventos: [{ tipo: 'encaminhamento_iniciado', salaId: 'sala-1' }],
+  });
+});
+
+test('após encaminhamento iniciado, a Sala segue mutável', () => {
+  const estado = salaComQuatroProntos();
+  const iniciado = encaminharSala(estado, encaminhar('membro-1'));
+  assert.equal(iniciado.sucesso, true);
+  if (!iniciado.sucesso) return;
+
+  const resultado = alternarProntidao(iniciado.estado, alternar('jogador-4'));
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.salas[0].estado, 'aberta');
+  assert.equal(
+    resultado.estado.salas[0].membros.find((membro) => membro.id === 'membro-4')?.pronto,
+    false,
+  );
+});
+
+test('aceitar_encaminhamento congela a Sala como encaminhada preservando a composição', () => {
+  const estado = salaComQuatroProntos();
+  const resultado = aceitarEncaminhamento(estado, aceitar());
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const sala = resultado.estado.salas[0];
+  assert.equal(sala.estado, 'encaminhada');
+  assert.equal(sala.anfitriaoId, 'membro-1');
+  assert.equal(sala.proximaOrdemDeEntrada, 5);
+  assert.deepEqual(sala.membros, estado.salas[0].membros);
+  assert.deepEqual(sala.jogadoresBloqueados, []);
+  assert.deepEqual(resultado.eventos, [
+    { tipo: 'sala_encaminhada', salaId: 'sala-1' },
+  ]);
+});
+
+test('aceitar_encaminhamento revalida a composição entre a oferta e o aceite', () => {
+  const base = salaComQuatroProntos();
+  encaminharSala(base, encaminhar('membro-1'));
+
+  const aposSaida = aplicar(base, sair('jogador-4'));
+  const comSaida = aceitarEncaminhamento(aposSaida, aceitar());
+  assert.equal(comSaida.sucesso, false);
+  if (comSaida.sucesso) return;
+  assert.equal(comSaida.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.equal(aposSaida.salas[0].estado, 'aberta');
+
+  const aposDesconexao = aplicar(base, desconectar('jogador-4'));
+  const comDesconexao = aceitarEncaminhamento(aposDesconexao, aceitar());
+  assert.equal(comDesconexao.sucesso, false);
+  if (comDesconexao.sucesso) return;
+  assert.equal(comDesconexao.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.equal(aposDesconexao.salas[0].estado, 'aberta');
+
+  const aposToggle = aplicar(base, alternar('jogador-4'));
+  const semPronto = aceitarEncaminhamento(aposToggle, aceitar());
+  assert.equal(semPronto.sucesso, false);
+  if (semPronto.sucesso) return;
+  assert.equal(semPronto.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.equal(aposToggle.salas[0].estado, 'aberta');
+});
+
+test('aceitar_encaminhamento em Sala já encaminhada retorna SALA_ENCAMINHADA', () => {
+  const estado = aplicar(salaComQuatroProntos(), aceitar());
+  const resultado = aceitarEncaminhamento(estado, aceitar());
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_ENCAMINHADA');
+});
+
+test('aceitar_encaminhamento em Sala encerrada retorna SALA_ENCERRADA', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, sair('jogador-1'));
+  const resultado = aceitarEncaminhamento(estado, aceitar());
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_ENCERRADA');
+});
+
+test('aceitar_encaminhamento em Sala inconsistente retorna SALA_INCONSISTENTE', () => {
+  const estado = comSalaInconsistente(salaComQuatroProntos());
+  const resultado = aceitarEncaminhamento(estado, aceitar());
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_INCONSISTENTE');
+});
+
+test('Sala encaminhada rejeita todas as mutações com SALA_ENCAMINHADA', () => {
+  const encaminhada = aplicar(salaComQuatroProntos(), aceitar());
+
+  const comandos: readonly Comando[] = [
+    entrar('jogador-5', 'membro-5'),
+    sair('jogador-1'),
+    expulsar('membro-1', 'membro-2'),
+    autorizar('membro-1', 'jogador-2'),
+    desconectar('jogador-1'),
+    reconectar('jogador-1'),
+    expirar('membro-1'),
+    alternar('jogador-1'),
+    encaminhar('membro-1'),
+    encerrar('membro-1'),
+    aceitar(),
+    recusar(),
+    registrarFalha(),
+  ];
+
+  for (const comando of comandos) {
+    const resultado = aplicarComando(encaminhada, comando);
+    assert.equal(resultado.sucesso, false, `comando ${comando.tipo}`);
+    if (resultado.sucesso) return;
+    assert.equal(resultado.erro.codigo, 'SALA_ENCAMINHADA', `comando ${comando.tipo}`);
+  }
+
+  const confirmacao = confirmarConsistenciaDaSala(encaminhada, confirmar());
+  assert.deepEqual(confirmacao, { sucesso: true, estado: encaminhada, eventos: [] });
+});
+
+test('recusar_encaminhamento mantém a Sala aberta e mutável', () => {
+  const estado = salaComQuatroProntos();
+  const resultado = recusarEncaminhamento(estado, recusar());
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.salas[0].estado, 'aberta');
+  assert.deepEqual(resultado.estado.salas[0].membros, estado.salas[0].membros);
+  assert.deepEqual(resultado.eventos, [
+    { tipo: 'encaminhamento_recusado', salaId: 'sala-1' },
+  ]);
+
+  const saida = sairDaSala(resultado.estado, sair('jogador-4'));
+  assert.equal(saida.sucesso, true);
+});
+
+test('recusar_encaminhamento em Sala encaminhada retorna SALA_ENCAMINHADA', () => {
+  const estado = aplicar(salaComQuatroProntos(), aceitar());
+  const resultado = recusarEncaminhamento(estado, recusar());
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_ENCAMINHADA');
+});
+
+test('registrar_falha_do_encaminhamento mantém a Sala aberta sem perder Membros', () => {
+  const estado = salaComQuatroProntos();
+  const resultado = registrarFalhaDoEncaminhamento(estado, registrarFalha());
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.deepEqual(resultado.estado, estado);
+  assert.deepEqual(resultado.eventos, [
+    { tipo: 'encaminhamento_falhou', salaId: 'sala-1' },
+  ]);
+});
+
+test('registrar_falha_do_encaminhamento em Sala encaminhada retorna SALA_ENCAMINHADA', () => {
+  const estado = aplicar(salaComQuatroProntos(), aceitar());
+  const resultado = registrarFalhaDoEncaminhamento(estado, registrarFalha());
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_ENCAMINHADA');
+});
+
+test('encerrar_sala encerra todos os vínculos ativos com motivo encerramento', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  const resultado = encerrarSala(estado, encerrar('membro-1'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const sala = resultado.estado.salas[0];
+  assert.equal(sala.estado, 'encerrada');
+  assert.equal(sala.anfitriaoId, null);
+  for (const membro of sala.membros) {
+    assert.equal(membro.estado, 'encerrado');
+    assert.equal(membro.motivoEncerramento, 'encerramento');
+    assert.equal(membro.presenca, 'conectado');
+    assert.equal(membro.pronto, false);
+  }
+  assert.deepEqual(resultado.eventos, [
+    { tipo: 'sala_encerrada', salaId: 'sala-1', motivo: 'encerramento' },
+  ]);
+
+  const entrada = entrarNaSala(resultado.estado, entrar('jogador-3', 'membro-3'));
+  assert.equal(entrada.sucesso, false);
+  if (entrada.sucesso) return;
+  assert.equal(entrada.erro.codigo, 'SALA_ENCERRADA');
+});
+
+test('encerrar_sala rejeita por Membro que não é o Anfitrião atual', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  const resultado = encerrarSala(estado, encerrar('membro-2'));
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'APENAS_ANFITRIAO');
+});
+
+test('encerrar_sala em Sala encaminhada retorna SALA_ENCAMINHADA', () => {
+  const estado = aplicar(salaComQuatroProntos(), aceitar());
+  const resultado = encerrarSala(estado, encerrar('membro-1'));
+
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'SALA_ENCAMINHADA');
+});
+
+test('encerrar_sala também encerra Membro em reconexão e preserva vínculos já encerrados', () => {
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, sair('jogador-2'));
+  estado = aplicar(estado, entrar('jogador-3', 'membro-3'));
+  estado = aplicar(estado, desconectar('jogador-3'));
+  const resultado = encerrarSala(estado, encerrar('membro-1'));
+
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const sala = resultado.estado.salas[0];
+
+  const antigo = sala.membros.find((membro) => membro.id === 'membro-2');
+  assert.ok(antigo);
+  assert.equal(antigo.estado, 'encerrado');
+  assert.equal(antigo.motivoEncerramento, 'saida');
+
+  const emReconexao = sala.membros.find((membro) => membro.id === 'membro-3');
+  assert.ok(emReconexao);
+  assert.equal(emReconexao.estado, 'encerrado');
+  assert.equal(emReconexao.motivoEncerramento, 'encerramento');
+  assert.equal(emReconexao.presenca, 'conectado');
+  assert.equal(emReconexao.pronto, false);
 });

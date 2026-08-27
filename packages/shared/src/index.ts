@@ -12,3 +12,11 @@ export type {
   AdmissaoEventoDoServidor,
   CodigoDeErroDeAdmissao,
 } from './protocol.ts';
+export type {
+  Jogador,
+  CampoDeErroDeAutenticacao,
+  ErroAuthItem,
+  ErroAuth,
+  CadastroPayload,
+  LoginPayload,
+} from './autenticacao.ts';
