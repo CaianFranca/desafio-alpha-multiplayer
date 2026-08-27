@@ -1,28 +1,17 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../state/useAuth'
-import { isValidEmail } from '../api/auth'
 import type { AuthFieldErrors } from '../api/auth'
 import { AuthCard } from '../components/auth/AuthCard'
 import { AuthField } from '../components/auth/AuthField'
-
-function validarEmailCredenciais(valor: string): string | null {
-  const trimmed = valor.trim()
-  if (trimmed.length === 0) return 'Informe o email.'
-  if (!isValidEmail(trimmed)) return 'Informe um email válido.'
-  return null
-}
-
-function validarSenhaCredenciais(valor: string): string | null {
-  if (valor.length === 0) return 'Informe a senha.'
-  return null
-}
+import { useAuthForm } from '../hooks/useAuthForm'
+import { validarEmailCredenciais, validarSenhaCredenciais } from '../utils/validacaoCredenciais'
 
 interface CredenciaisLocationState {
   reason?: string
 }
 
-export function LoginPage() {
+export function EntrarPage() {
   const { entrarComCredenciais } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -30,9 +19,8 @@ export function LoginPage() {
 
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({})
-  const [generalError, setGeneralError] = useState<string | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { fieldErrors, setFieldErrors, generalError, setGeneralError, isSubmitting, setIsSubmitting, clearFieldError } =
+    useAuthForm()
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -84,7 +72,7 @@ export function LoginPage() {
           value={email}
           error={fieldErrors.email}
           onChange={setEmail}
-          onClearError={() => setFieldErrors((prev) => ({ ...prev, email: undefined }))}
+          onClearError={() => clearFieldError('email')}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
@@ -102,7 +90,7 @@ export function LoginPage() {
           value={senha}
           error={fieldErrors.senha}
           onChange={setSenha}
-          onClearError={() => setFieldErrors((prev) => ({ ...prev, senha: undefined }))}
+          onClearError={() => clearFieldError('senha')}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="11" width="18" height="11" rx="2" />
@@ -129,3 +117,6 @@ export function LoginPage() {
     </AuthCard>
   )
 }
+
+/** @deprecated use EntrarPage — arquivo LoginPage removido, alias para compatibilidade */
+export const LoginPage = EntrarPage

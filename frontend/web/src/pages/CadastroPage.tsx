@@ -1,30 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../state/useAuth'
-import { isValidEmail } from '../api/auth'
 import type { AuthFieldErrors } from '../api/auth'
 import { AuthCard } from '../components/auth/AuthCard'
 import { AuthField } from '../components/auth/AuthField'
-
-function validarApelido(valor: string): string | null {
-  const trimmed = valor.trim()
-  if (trimmed.length === 0) return 'Informe o apelido.'
-  if (trimmed.length < 3 || trimmed.length > 20) return 'O apelido deve ter entre 3 e 20 caracteres.'
-  return null
-}
-
-function validarEmailCadastro(valor: string): string | null {
-  const trimmed = valor.trim()
-  if (trimmed.length === 0) return 'Informe o email.'
-  if (!isValidEmail(trimmed)) return 'Informe um email válido.'
-  return null
-}
-
-function validarSenha(valor: string): string | null {
-  if (valor.length === 0) return 'Informe a senha.'
-  if (valor.length < 8) return 'A senha deve ter no mínimo 8 caracteres.'
-  return null
-}
+import { useAuthForm } from '../hooks/useAuthForm'
+import { validarApelido, validarEmailCadastro, validarSenhaCadastro } from '../utils/validacaoCredenciais'
 
 export function CadastroPage() {
   const { register } = useAuth()
@@ -32,9 +13,8 @@ export function CadastroPage() {
   const [apelido, setApelido] = useState('')
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
-  const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({})
-  const [generalError, setGeneralError] = useState<string | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { fieldErrors, setFieldErrors, generalError, setGeneralError, isSubmitting, setIsSubmitting, clearFieldError } =
+    useAuthForm()
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -43,7 +23,7 @@ export function CadastroPage() {
     if (erroApelido) erros.apelido = erroApelido
     const erroEmail = validarEmailCadastro(email)
     if (erroEmail) erros.email = erroEmail
-    const erroSenha = validarSenha(senha)
+    const erroSenha = validarSenhaCadastro(senha)
     if (erroSenha) erros.senha = erroSenha
 
     if (Object.keys(erros).length > 0) {
@@ -82,7 +62,7 @@ export function CadastroPage() {
           value={apelido}
           error={fieldErrors.apelido}
           onChange={setApelido}
-          onClearError={() => setFieldErrors((prev) => ({ ...prev, apelido: undefined }))}
+          onClearError={() => clearFieldError('apelido')}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -99,7 +79,7 @@ export function CadastroPage() {
           value={email}
           error={fieldErrors.email}
           onChange={setEmail}
-          onClearError={() => setFieldErrors((prev) => ({ ...prev, email: undefined }))}
+          onClearError={() => clearFieldError('email')}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
@@ -117,7 +97,7 @@ export function CadastroPage() {
           value={senha}
           error={fieldErrors.senha}
           onChange={setSenha}
-          onClearError={() => setFieldErrors((prev) => ({ ...prev, senha: undefined }))}
+          onClearError={() => clearFieldError('senha')}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="11" width="18" height="11" rx="2" />

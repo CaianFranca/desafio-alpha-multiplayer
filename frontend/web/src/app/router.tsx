@@ -3,7 +3,7 @@ import { App } from './App'
 import { RequireAuth } from './RequireAuth'
 import { HomePage } from '../pages/HomePage'
 import { CadastroPage } from '../pages/CadastroPage'
-import { LoginPage } from '../pages/LoginPage'
+import { EntrarPage } from '../pages/EntrarPage'
 import { SalasCriarPage } from '../pages/stubs/SalasCriarPage'
 
 export const routes = [
@@ -13,7 +13,7 @@ export const routes = [
     children: [
       { index: true, element: <HomePage /> },
       { path: 'cadastro', element: <CadastroPage /> },
-      { path: 'login', element: <LoginPage /> },
+      { path: 'login', element: <EntrarPage /> },
       {
         path: 'salas/criar',
         element: (
