@@ -1719,3 +1719,118 @@ test('EXPULSAR_MEMBRO atualiza a projeção Redis: expulso some do estado e perd
     ]);
   });
 });
+
+// --- 27. Autorização: apenas o Anfitrião substituto e desbloqueia ---
+
+test('EXPULSAR_MEMBRO: membro comum recebe APENAS_ANFITRIAO ao tentar expulsar outro membro', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const c = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+    const wsC = await conectarWs(servidor.wsUrl, c.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsC, 2);
+    await coletarEventos(wsA, 2);
+    const eventosBEntradaC = await coletarEventos(wsB, 2);
+    const salaCompleta = (eventosBEntradaC[1] as SalaAtualizadaEvento).sala;
+    const membroIdC = membroDaSala(salaCompleta, c.id).id;
+
+    // B (não-Anfitrião) tenta expulsar C — rejeitado sem efeito colateral.
+    enviar(wsB, { type: 'EXPULSAR_MEMBRO', membroId: membroIdC });
+    await esperarErro(wsB, 'APENAS_ANFITRIAO');
+
+    const salaIdRes = await pool.query<{ id: string }>(
+      `SELECT id FROM salas_historico WHERE codigo_sala = $1 AND status = 'aberta'`,
+      [codigo],
+    );
+    const salaId = salaIdRes.rows[0]?.id;
+    assert.ok(salaId, 'salaId não encontrado');
+    const linhas = await pool.query<{ bloqueado: boolean }>(
+      `SELECT bloqueado FROM membros WHERE sala_id = $1`,
+      [salaId],
+    );
+    assert.equal(linhas.rows.length, 3, 'A, B e C continuam vínculos');
+    assert.deepEqual(
+      linhas.rows.map((r) => r.bloqueado),
+      [false, false, false],
+      'nenhum membro deve ficar bloqueado',
+    );
+
+    wsA.close();
+    wsB.close();
+    wsC.close();
+    await Promise.all([
+      esperarClose(wsA).catch(() => undefined),
+      esperarClose(wsB).catch(() => undefined),
+      esperarClose(wsC).catch(() => undefined),
+    ]);
+  });
+});
+
+test('DESBLOQUEAR_JOGADOR: membro comum recebe APENAS_ANFITRIAO ao tentar desbloquear', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const c = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+    const wsC = await conectarWs(servidor.wsUrl, c.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsC, 2);
+    await coletarEventos(wsA, 2);
+    const eventosBEntradaC = await coletarEventos(wsB, 2);
+    const salaCompleta = (eventosBEntradaC[1] as SalaAtualizadaEvento).sala;
+    const membroIdC = membroDaSala(salaCompleta, c.id).id;
+
+    // A (Anfitrião) expulsa C — C fica bloqueado.
+    enviar(wsA, { type: 'EXPULSAR_MEMBRO', membroId: membroIdC });
+    await coletarEventos(wsA, 2);
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsC, 2);
+
+    // B (não-Anfitrião) tenta desbloquear C — rejeitado.
+    enviar(wsB, { type: 'DESBLOQUEAR_JOGADOR', jogadorId: c.id });
+    await esperarErro(wsB, 'APENAS_ANFITRIAO');
+
+    const salaIdRes = await pool.query<{ id: string }>(
+      `SELECT id FROM salas_historico WHERE codigo_sala = $1 AND status = 'aberta'`,
+      [codigo],
+    );
+    const salaId = salaIdRes.rows[0]?.id;
+    assert.ok(salaId, 'salaId não encontrado');
+    const linhaC = await pool.query<{ bloqueado: boolean }>(
+      `SELECT bloqueado FROM membros WHERE sala_id = $1 AND usuario_id = $2`,
+      [salaId, c.id],
+    );
+    assert.equal(linhaC.rows[0]?.bloqueado, true, 'C deve seguir bloqueado no PG');
+
+    wsA.close();
+    wsB.close();
+    wsC.close();
+    await Promise.all([
+      esperarClose(wsA).catch(() => undefined),
+      esperarClose(wsB).catch(() => undefined),
+      esperarClose(wsC).catch(() => undefined),
+    ]);
+  });
+});

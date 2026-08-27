@@ -19,7 +19,11 @@
 // `codigo` do domínio.
 
 import { randomUUID } from 'node:crypto';
-import { type CodigoDeErro, type EstadoDoLobby } from '@flicker/engine';
+import {
+  type CodigoDeErro,
+  type EstadoDoLobby,
+  type Sala as SalaDominio,
+} from '@flicker/engine';
 import type {
   SalaComandoDoCliente,
   SalaEventoDoServidor,
@@ -516,6 +520,13 @@ export class SalasHandlers {
       return;
     }
 
+    // Autorização: o emissor no WebSocket deve ser o Anfitrião atual. O
+    // engine só valida que o `anfitriaoMembroId` recebido é o host — quem
+    // fala é responsabilidade deste handler (edge).
+    if (!this.anfitriaoEstaAutorizando(socket, jogadorId, salaInfo.sala)) {
+      return;
+    }
+
     const resultado = this.estado.aplicar({
       tipo: 'expulsar_membro',
       salaId,
@@ -604,6 +615,13 @@ export class SalasHandlers {
       return;
     }
 
+    // Autorização: o emissor no WebSocket deve ser o Anfitrião atual. O
+    // engine só valida que o `anfitriaoMembroId` recebido é o host — quem
+    // fala é responsabilidade deste handler (edge).
+    if (!this.anfitriaoEstaAutorizando(socket, jogadorId, salaInfo.sala)) {
+      return;
+    }
+
     const resultado = this.estado.aplicar({
       tipo: 'autorizar_retorno',
       salaId,
@@ -640,6 +658,33 @@ export class SalasHandlers {
     // Presença e reconexão pertencem à #38. Nesta issue o close apenas
     // remove a conexão do fan-out para evitar referências órfãs.
     this.broadcast.removerSocket(socket);
+  }
+
+  /**
+   * Garante que o Jogador por trás do WebSocket é o Anfitrião atual da Sala.
+   * O engine valida que o `anfitriaoMembroId` do comando é o host, mas não
+   * sabe quem enviou o WS — a autorização de "quem fala" é do handler (edge).
+   */
+  private anfitriaoEstaAutorizando(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+    sala: SalaDominio,
+  ): boolean {
+    const membroDoChamador = sala.membros.find(
+      (m) => m.jogadorId === jogadorId && m.estado === 'ativo',
+    );
+    if (
+      membroDoChamador === undefined ||
+      membroDoChamador.id !== sala.anfitriaoId
+    ) {
+      this.enviarErro(
+        socket,
+        'APENAS_ANFITRIAO',
+        'Apenas o Anfitrião atual da Sala pode fazer isso.',
+      );
+      return false;
+    }
+    return true;
   }
 
   private atualizarApelidoSeConhecido(jogadorId: string, apelido: string): void {
