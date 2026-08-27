@@ -24,14 +24,15 @@ npm autônomo (fora dos workspaces da raiz) — rodar comandos dentro de
 
 ```
 web/src/
-├── app/          # App.tsx (layout raiz) e router.tsx (única fonte das rotas)
+├── app/          # App.tsx (layout raiz), router.tsx (única fonte das rotas) e RequireAuth
 ├── pages/        # telas, sufixo Page (stubs/ para páginas em construção)
 ├── components/
-│   ├── ui/       # genéricos reutilizáveis (Header, BackLink)
+│   ├── ui/       # genéricos reutilizáveis (Header, BackLink, CtaLink)
+│   ├── auth/     # componentes de autenticação (AuthActions)
 │   └── home/     # seções da landing, sufixo Section/Card/Boundary
 ├── hooks/        # hooks customizados useXxx (reservado — ainda vazio)
 ├── api/          # cliente REST auth+JWT (reservado — ainda vazio)
-├── state/        # estado global (reservado — ainda vazio)
+├── state/        # estado global e auth: AuthProvider, auth-context, useAuth, mock-auth
 ├── types/        # tipos compartilhados (reservado — ainda vazio)
 ├── game/         # render/animação do tabuleiro (assets/entities/scenes/systems/utils)
 └── styles/       # global.css (@import "tailwindcss" + CSS custom properties)
@@ -104,19 +105,6 @@ tests/            # testes na pasta própria, não colocados junto ao código
 - `placeholders.ts` como arquivo-curinga: fixtures de marketing, labels de
   UI e dados de teste não crescem juntos; separar por responsabilidade.
 - Suspense sem lazy loading correspondente.
-
-### Legado registrado (baseline do lint em 2026-08-24)
-
-Violações existentes, pendentes de tickets de correção futura:
-
-| Regra | Total |
-|---|---|
-| `@typescript-eslint/no-confusing-void-expression` | 12 |
-| `@typescript-eslint/no-non-null-assertion` | 5 |
-| `@typescript-eslint/unbound-method` | 4 |
-| `@typescript-eslint/no-floating-promises` | 2 |
-| outras (type-assertion, require-await, restrict-template-expressions) | 3 |
-| **Total** | **26** |
 
 ## 10. Referências
 

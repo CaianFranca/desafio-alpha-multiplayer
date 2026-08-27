@@ -100,10 +100,6 @@ db/
 - SQL cru onde o builder resolve; `knex.raw` restrito a defaults e checks.
 - Novos defaults hardcoded fora do padrão env+fallback já estabelecido.
 
-### Legado registrado (baseline do lint em 2026-08-24)
-
-Limpo: **0 violações**. Manter assim.
-
 ## 10. Referências
 
 - `db/funcionamento-DB.md` — esquema completo e regras de negócio das tabelas.

@@ -133,22 +133,6 @@ test/           # testes de integração (*.integration.test.ts)
 - Duplicar handlers de body-parser entre apps ao editar — os dois existem
   hoje quase idênticos; extrair apenas quando tocar neles (legado aceito).
 
-### Legado registrado (baseline do lint em 2026-08-24)
-
-Violações existentes, pendentes de tickets de correção futura:
-
-| Regra | lobby-server | game-server |
-|---|---|---|
-| `@typescript-eslint/no-floating-promises` | 24 | 15 |
-| `@typescript-eslint/restrict-template-expressions` | 14 | 6 |
-| `@typescript-eslint/no-non-null-assertion` | 11 | 0 |
-| `@typescript-eslint/no-unnecessary-type-assertion` | 9 | 1 |
-| `@typescript-eslint/no-confusing-void-expression` | 6 | 5 |
-| `no-unsafe-*` (assignment/member-access) | 4 | 0 |
-| `preserve-caught-error` | 2 | 1 |
-| `no-unused-vars` / `no-base-to-string` | 1 + 1 | 0 + 1 |
-| **Total** | **72** | **29** |
-
 ## 10. Referências
 
 - `CONTEXT.md` — glossário canônico de domínio.

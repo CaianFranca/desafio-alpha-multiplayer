@@ -100,19 +100,6 @@ Dentro de cada pacote: `npm run typecheck`, `npm run lint`,
 - Dois nomes públicos para a mesma função (legado:
   `admitirMembro = entrarNaSala`).
 - Arquivo novo monolítico no engine — fatie por conceito.
-- Callback async passado a `test()` sem `await` interno (gera
-  `no-floating-promises`).
-
-### Legado registrado (baseline do lint em 2026-08-24)
-
-Violações existentes, pendentes de tickets de correção futura:
-
-| Pacote | Total | Detalhe |
-|---|---|---|
-| `engine` (test/) | 158 | 69 `no-floating-promises` (callbacks async em `test()`), 89 `no-unnecessary-condition` (padrão assert + narrowing que o ESLint não enxerga) |
-| `engine` (src/) | 2 | `restrict-template-expressions` (template com `number`) |
-| `config` | 8 | `no-unnecessary-type-assertion` (`process.env.X as string \| undefined`) |
-| `shared` | 0 | limpo |
 
 ## 10. Referências
 

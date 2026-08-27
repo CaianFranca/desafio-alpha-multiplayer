@@ -96,15 +96,6 @@ ambiente. Não cobre código TypeScript — ver os CODING_STANDARDS das áreas.
 - `latest` como tag de imagem — bases são pinadas por versão.
 - Duplicar headers/timeouts por location quando valem para todas.
 
-### Legado registrado
-
-Sem lint aplicável (não-TS). Pendências conhecidas, para tickets futuros:
-
-- Nenhum Dockerfile roda usuário não-root (sem `USER`).
-- `REDIS_PASSWORD` ausente do `.env.example`.
-- Upstream `game_servers` estático, aguardando ADR-0003.
-- Perfil `frontend` reservado no SETUP.md ainda sem serviço.
-
 ## 10. Referências
 
 - `SETUP.md` — perfis, portas e fluxo de subida.
