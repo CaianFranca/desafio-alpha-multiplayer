@@ -1507,9 +1507,9 @@ test('Sucessão circular: A (Anfitrião) sai, B herda o Anfitriato', async () =>
   });
 });
 
-// --- 23. Último membro sai por expulsão → sala encerrada ---
+// --- 23. Expulsão seguida de saída do último membro → sala encerrada ---
 
-test('EXPULSAR_MEMBRO: último membro ativo é expulso → sala encerrada', async () => {
+test('EXPULSAR_MEMBRO: expulsão seguida de saída do último membro → sala encerrada', async () => {
   await comServidor(async (servidor) => {
     const a = await registrarJogador(servidor.baseUrl);
     const b = await registrarJogador(servidor.baseUrl);
@@ -1648,7 +1648,74 @@ test('Expulsão sobrevive ao restart: reconstrução hidrata jogadoresBloqueados
     assert.ok(jogadoresAtivos.includes(c.id), 'C deve estar presente');
     assert.ok(!jogadoresAtivos.includes(jogadorB.id), 'B (expulso) não deve estar na lista');
 
+    // B (expulso) retém a ordem 2 no PG. O contador de ordem é monotônico
+    // no engine e nunca reutiliza ordens; no boot ele não pode regredir,
+    // então C recebe a ordem 3 (não 2).
+    assert.equal(membroDaSala(salaC, c.id).ordemDeEntrada, 3);
+
     wsC.close();
     await esperarClose(wsC).catch(() => undefined);
+  });
+});
+
+// --- 26. Projeção Redis é atualizada após EXPULSAR_MEMBRO (R2) ---
+
+test('EXPULSAR_MEMBRO atualiza a projeção Redis: expulso some do estado e perde a associação', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    const eventosAEntrada = await coletarEventos(wsA, 2);
+    const salaAposEntrada = (eventosAEntrada[1] as SalaAtualizadaEvento).sala;
+    const membroIdB = membroDaSala(salaAposEntrada, b.id).id;
+
+    const salaIdRes = await pool.query<{ id: string }>(
+      `SELECT id FROM salas_historico WHERE codigo_sala = $1 AND status = 'aberta'`,
+      [codigo],
+    );
+    const salaId = salaIdRes.rows[0]?.id;
+    assert.ok(salaId, 'salaId não encontrado');
+
+    const chaveEstado = `lobby:sala:${salaId}:estado`;
+    const antes = JSON.parse(
+      (await redisClient.get(chaveEstado)) ?? '',
+    ) as { membros: Array<{ jogadorId: string }> };
+    assert.ok(
+      antes.membros.some((m) => m.jogadorId === b.id),
+      'B deve estar na projeção antes da expulsão',
+    );
+
+    enviar(wsA, { type: 'EXPULSAR_MEMBRO', membroId: membroIdB });
+    await coletarEventos(wsA, 2);
+    await coletarEventos(wsB, 2);
+
+    const depois = JSON.parse(
+      (await redisClient.get(chaveEstado)) ?? '',
+    ) as { membros: Array<{ jogadorId: string }> };
+    assert.equal(depois.membros.length, 1, 'projeção deve listar apenas A após a expulsão');
+    assert.ok(
+      !depois.membros.some((m) => m.jogadorId === b.id),
+      'B não deve constar na projeção pós-expulsão',
+    );
+    assert.equal(
+      await redisClient.get(chaveJogadorSala(b.id)),
+      null,
+      'a associação jogador→sala de B deve ser removida',
+    );
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([
+      esperarClose(wsA).catch(() => undefined),
+      esperarClose(wsB).catch(() => undefined),
+    ]);
   });
 });

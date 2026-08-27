@@ -1,4 +1,4 @@
-// Tradução pura engine → wire dos eventos da Sala (issue #36).
+// Tradução pura engine → wire dos eventos da Sala (issues #36 e #39).
 // Função sem side-effects: dado o estado pós-engine e os eventos emitidos,
 // devolve os `SalaEventoDoServidor` correspondentes. O cache de apelidos é
 // injetado pelo chamador (handler) — esta função não toca DB/Redis.
@@ -7,6 +7,8 @@
 //   sala_criada         -> SALA_ATUALIZADA
 //   membro_admitido     -> MEMBRO_ENTROU + SALA_ATUALIZADA
 //   membro_saiu         -> MEMBRO_SAIU  + SALA_ATUALIZADA
+//   membro_expulsado    -> MEMBRO_EXPULSO + SALA_ATUALIZADA
+//   retorno_autorizado  -> SALA_ATUALIZADA
 //   sala_encerrada      -> SALA_ATUALIZADA (estado='encerrada')
 //   anfitriao_sucedido  -> ANFITRIAO_SUBSTITUIDO + SALA_ATUALIZADA
 //

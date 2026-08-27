@@ -255,7 +255,7 @@ export class SalasRepo {
       `SELECT m.sala_id AS "salaId"
        FROM membros m
        JOIN salas_historico s ON s.id = m.sala_id
-       WHERE m.usuario_id = $1 AND s.status = 'aberta'
+       WHERE m.usuario_id = $1 AND m.bloqueado = false AND s.status = 'aberta'
        ORDER BY m.ordem_de_entrada ASC
        LIMIT 1`,
       [jogadorId],

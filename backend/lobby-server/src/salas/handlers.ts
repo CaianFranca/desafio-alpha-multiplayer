@@ -538,6 +538,13 @@ export class SalasHandlers {
 
     this.estado.substituirEstado(resultado.estado);
 
+    // Atualiza a projeção quente: o expulso não pode continuar listado como
+    // membro ativo nem manter a associação jogador→sala no Redis.
+    await this.atualizarProjecaoEstado(resultado.estado, salaId);
+    if (eventoExpulsao?.tipo === 'membro_expulsado') {
+      await this.projecao.limparAssociacaoJogador(eventoExpulsao.jogadorId);
+    }
+
     const eventos = traduzirEventos(
       resultado.eventos,
       resultado.estado,
@@ -612,6 +619,9 @@ export class SalasHandlers {
     await this.repo.desbloquearMembro(salaId, jogadorAlvoId);
 
     this.estado.substituirEstado(resultado.estado);
+
+    // Atualiza a projeção quente para refletir a remoção do bloqueio.
+    await this.atualizarProjecaoEstado(resultado.estado, salaId);
 
     const eventos = traduzirEventos(
       resultado.eventos,

@@ -115,9 +115,12 @@ class SalasStateImpl implements SalasState {
         presenca: 'conectado' as const,
         pronto: false,
       }));
+      // O contador é monotônico e nunca reutiliza ordens (contrato do
+      // engine). Membros bloqueados permanecem no PG com a ordem original —
+      // devem entrar no cálculo para não regredir o contador pós-restart.
       const proximaOrdemDeEntrada =
-        membrosAtivos.length > 0
-          ? Math.max(...membrosAtivos.map((m) => m.ordem)) + 1
+        todosMembros.length > 0
+          ? Math.max(...todosMembros.map((m) => m.ordem)) + 1
           : 1;
       // O Anfitrião vem do write-model — pode ter sido sucedido antes do
       // reinício. A menor ordem é apenas fallback defensivo quando
