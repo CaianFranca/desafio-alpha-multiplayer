@@ -1,10 +1,18 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../state/useAuth'
 import { CtaLink } from './CtaLink'
 import { criarSalaLabel } from '../auth/AuthActions'
 
 export function Header() {
-  const authState = useAuth()
+  const { authState, logout } = useAuth()
+  const navigate = useNavigate()
+
+  // A navegação pós-logout fica aqui porque o AuthProvider está acima do
+  // RouterProvider em main.tsx (o provider não tem acesso ao navigate).
+  async function handleLogout() {
+    await logout()
+    navigate('/')
+  }
 
   return (
     <header className="py-6 px-[clamp(1.5rem,5vw,5rem)]">
@@ -20,10 +28,17 @@ export function Header() {
             <a href="#caracteristicas" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Características</a>
             <a href="#objetivos" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Objetivos</a>
           </nav>
-          {authState.status === 'autenticado' && (
+          {authState.status === 'authenticated' && (
             <div className="flex items-center gap-3">
               <span className="text-sm font-bold">{authState.jogador.apelido}</span>
               <CtaLink to="/salas/criar" variant="primary" size="sm">{criarSalaLabel}</CtaLink>
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                className="text-sm text-(--color-muted) hover:text-white transition-colors"
+              >
+                Sair
+              </button>
             </div>
           )}
         </div>
