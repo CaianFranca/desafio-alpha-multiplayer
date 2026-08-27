@@ -27,14 +27,14 @@ describe('partida route', () => {
   it('autenticado ve moldura e canvas ao acessar /partida diretamente', () => {
     renderWithRouter(['/partida'], autenticado)
 
-    expect(screen.getByTestId('game-canvas')).toBeInTheDocument()
+    expect(screen.getByTestId('ambiente-de-jogo')).toBeInTheDocument()
     expect(screen.getByTestId('partida-moldura')).toBeInTheDocument()
   })
 
   it('canvas ocupa tela cheia sob moldura overlay', () => {
     renderWithRouter(['/partida'], autenticado)
 
-    const canvas = screen.getByTestId('game-canvas')
+    const canvas = screen.getByTestId('ambiente-de-jogo')
     const moldura = screen.getByTestId('partida-moldura')
 
     expect(canvas).toHaveClass('absolute')
@@ -52,7 +52,7 @@ describe('partida route', () => {
     renderWithRouter(['/partida'], visitante)
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
-    expect(screen.queryByTestId('game-canvas')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ambiente-de-jogo')).not.toBeInTheDocument()
     expect(screen.queryByTestId('partida-moldura')).not.toBeInTheDocument()
   })
 
@@ -80,11 +80,11 @@ describe('partida route', () => {
       </AuthProvider>,
     )
 
-    expect(screen.queryByTestId('game-canvas')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ambiente-de-jogo')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('link', { name: /ir para partida/i }))
 
-    expect(screen.getByTestId('game-canvas')).toBeInTheDocument()
+    expect(screen.getByTestId('ambiente-de-jogo')).toBeInTheDocument()
     expect(screen.getByTestId('partida-moldura')).toBeInTheDocument()
   })
 
@@ -96,9 +96,9 @@ describe('partida route', () => {
     setViewport(width)
     renderWithRouter(['/partida'], autenticado)
 
-    expect(screen.getByTestId('game-canvas')).toBeInTheDocument()
+    expect(screen.getByTestId('ambiente-de-jogo')).toBeInTheDocument()
     expect(screen.getByTestId('partida-moldura')).toBeInTheDocument()
-    expect(screen.getByTestId('game-canvas')).toHaveClass('absolute')
+    expect(screen.getByTestId('ambiente-de-jogo')).toHaveClass('absolute')
     expect(screen.getByTestId('partida-moldura')).toHaveClass('pointer-events-none')
   })
 
@@ -130,7 +130,7 @@ describe('partida route', () => {
     setViewport(1280)
     await user.click(screen.getByRole('link', { name: /ir para partida/i }))
 
-    expect(screen.getByTestId('game-canvas')).toBeInTheDocument()
+    expect(screen.getByTestId('ambiente-de-jogo')).toBeInTheDocument()
     expect(screen.getByTestId('partida-moldura')).toBeInTheDocument()
   })
 })
