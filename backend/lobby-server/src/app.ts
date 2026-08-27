@@ -1,5 +1,6 @@
 import express, { type Express } from 'express';
 import { authRouter } from './routes/auth.ts';
+import { gameServersRouter } from './routes/gameServers.ts';
 import { cookieMiddleware } from './middleware/cookie.ts';
 import { pool } from './config/pg.ts';
 import { redisClient } from './config/redis.ts';
@@ -22,6 +23,7 @@ export function createApp(): Express {
   });
 
   app.use('/api/auth', authRouter);
+  app.use('/api/game-servers', gameServersRouter);
 
   // Handler global para erros de body-parser — evita respostas HTML para a API (A6/A8).
   app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {

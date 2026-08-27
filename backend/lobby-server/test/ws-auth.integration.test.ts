@@ -13,7 +13,9 @@ import { criarClienteRedis } from '@flicker/config';
 import { createApp } from '../src/app.ts';
 import { createWebSocketServer } from '../src/ws/ws.ts';
 import { pool } from '../src/config/pg.ts';
-import { redisClient } from '../src/config/redis.ts';
+import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
+
+registrarArquivoDeTeste();
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -217,18 +219,9 @@ after(async () => {
       redis.disconnect();
     } catch {}
   }
-  try {
-    await redisClient.quit().catch(() => {
-      try {
-        redisClient.disconnect();
-      } catch {}
-    });
-  } catch {
-    try {
-      redisClient.disconnect();
-    } catch {}
-  }
-  await pool.end().catch(() => undefined);
+  // redisClient (singleton) e pool são encerrados uma única vez via ./teardown.ts
+  // quando o último arquivo de teste terminar.
+  await finalizarArquivoDeTeste();
 });
 
 beforeEach(async () => {

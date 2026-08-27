@@ -82,3 +82,17 @@ export function verificarRefresh(token: string): PayloadRefresh | null {
     return null;
   }
 }
+
+export const SERVICE_TOKEN_AUDIENCE = 'flicker-service';
+
+// Token de serviço para chamadas server-to-server (ADR-0003), ex.: o lobby
+// descobrindo game-servers disponíveis. Carrega `aud`/`role` de serviço para
+// que requireServiceToken o aceite e rejeite JWTs de Jogador.
+export function assinarServiceToken(): string {
+  const { jwtSecret } = getConfig();
+  return jwt.sign(
+    { sub: 'flicker-service', role: 'service' },
+    jwtSecret,
+    { algorithm: 'HS256', audience: SERVICE_TOKEN_AUDIENCE, expiresIn: '1h' },
+  );
+}

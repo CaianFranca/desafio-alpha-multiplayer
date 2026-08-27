@@ -16,3 +16,4 @@ export type {
   CadastroPayload,
   LoginPayload,
 } from './autenticacao.ts';
+export * from './redis/gameServers.js';

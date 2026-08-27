@@ -5,10 +5,17 @@ import { createApp } from './app.ts';
 import { createWebSocketServer } from './ws/ws.ts';
 import { redisClient } from './config/redis.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
+import {
+  iniciarHeartbeat,
+  pararHeartbeat,
+  removerRegistro,
+  resolverServerId,
+  type GameServerRegistro,
+  type HeartbeatHandle,
+} from './redis/registro.ts';
 
-const serverId: ServerId = process.env.GAME_SERVER_ID ?? crypto.randomUUID();
-
-const { partidaPreparadaTtlSegundos } = getConfig();
+const { gameServerPort, partidaPreparadaTtlSegundos, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, gameServerId: configServerId } = getConfig();
+const serverId: ServerId = resolverServerId(configServerId) as ServerId;
 const contexto: ContextoDoGameServer = { redis: redisClient, serverId, partidaPreparadaTtlSegundos };
 const app = createApp(contexto);
 
@@ -16,18 +23,89 @@ const server = http.createServer(app);
 
 createWebSocketServer(server);
 
-const { gameServerPort } = getConfig();
+let heartbeatHandle: HeartbeatHandle | undefined;
+let registroRetry: NodeJS.Timeout | undefined;
+let encerrando = false;
+
+function criarMeta(): GameServerRegistro {
+  return {
+    serverId,
+    url: `http://game-server:${gameServerPort}`,
+    host: 'game-server',
+    port: gameServerPort,
+    atualizadoEm: new Date().toISOString(),
+  };
+}
+
+async function iniciarRegistro(): Promise<void> {
+  if (encerrando) return;
+  try {
+    if (redisClient.status !== 'ready') {
+      try {
+        await redisClient.connect();
+      } catch {
+        // connect falhou (close/end/reconnecting) — ping retry abaixo vai tratar
+      }
+    }
+    await redisClient.ping();
+    console.log('[game-server] redis conectado');
+    if (registroRetry) {
+      clearTimeout(registroRetry);
+      registroRetry = undefined;
+    }
+  } catch (error) {
+    console.warn('[game-server] redis ainda não disponível:', (error as Error).message);
+    if (!encerrando) {
+      if (registroRetry) clearTimeout(registroRetry);
+      registroRetry = setTimeout(() => void iniciarRegistro(), 2000);
+      registroRetry.unref?.();
+    }
+    return;
+  }
+
+  const meta = criarMeta();
+  heartbeatHandle = iniciarHeartbeat(redisClient, meta, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, criarMeta);
+  console.log(`[game-server] heartbeat iniciado interval=${gameServerHeartbeatIntervalMs}ms`);
+}
 
 server.listen(gameServerPort, () => {
   console.log(`[game-server] serverId: ${serverId}`);
-  console.log(`[game-server] listening on http://localhost:${gameServerPort}`);
+  console.log(`[game-server] listening on http://localhost:${gameServerPort} id=${serverId}`);
+  void iniciarRegistro();
 });
 
 function encerrar(signal: string): void {
+  if (encerrando) return;
+  encerrando = true;
   console.log(`[game-server] ${signal} recebido, encerrando...`);
-  server.close(() => {
-    void redisClient.quit().finally(() => process.exit(0));
-  });
+  if (registroRetry) {
+    clearTimeout(registroRetry);
+    registroRetry = undefined;
+  }
+  if (heartbeatHandle) {
+    pararHeartbeat(heartbeatHandle);
+    heartbeatHandle = undefined;
+  }
+  let finalizado = false;
+  const finalizar = (): void => {
+    if (finalizado) return;
+    finalizado = true;
+    if (server.listening) {
+      server.close(() => {
+        void redisClient.quit().finally(() => process.exit(0));
+      });
+    } else {
+      void redisClient.quit().finally(() => process.exit(0));
+    }
+  };
+  void removerRegistro(redisClient, serverId)
+    .catch((err: unknown) => {
+      console.warn('[game-server] falha ao remover registro:', (err as Error).message);
+    })
+    .finally(finalizar);
+
+  // Fallback: força encerramento se removerRegistro travar
+  setTimeout(finalizar, 2000).unref();
 }
 
 process.on('SIGTERM', () => encerrar('SIGTERM'));

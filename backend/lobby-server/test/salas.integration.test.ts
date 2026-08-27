@@ -20,6 +20,9 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import { criarClienteRedis } from '@flicker/config';
+import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
+
+registrarArquivoDeTeste();
 import type {
   AnfitriaoSubstituidoEvento,
   CodigoDeErroDaSala,
@@ -406,18 +409,9 @@ after(async () => {
       redis.disconnect();
     } catch {}
   }
-  try {
-    await redisClient.quit().catch(() => {
-      try {
-        redisClient.disconnect();
-      } catch {}
-    });
-  } catch {
-    try {
-      redisClient.disconnect();
-    } catch {}
-  }
-  await pool.end().catch(() => undefined);
+  // redisClient (singleton) e pool são encerrados uma única vez via ./teardown.ts
+  // quando o último arquivo de teste terminar.
+  await finalizarArquivoDeTeste();
 });
 
 beforeEach(async () => {
