@@ -44,6 +44,33 @@ export type {
   VinculoExpiradoEvento,
 } from './lobby.ts';
 
+export type {
+  BordaCardinal,
+  Celula,
+  CodigoDeErroDeTabuleiro,
+  ComandoDeTabuleiro,
+  ErroDeDominioDoTabuleiro,
+  EstadoDoTabuleiro,
+  EventoDoTabuleiro,
+  FinalizarManipulacaoComando,
+  GirarPecaComando,
+  ManipulacaoFinalizadaEvento,
+  OperacaoBemSucedidaDoTabuleiro,
+  OperacaoRejeitadaDoTabuleiro,
+  Orientacao,
+  PecaDaReserva,
+  PecaDeselecionadaEvento,
+  PecaGiradaEvento,
+  PecaPosicionada,
+  PecaPosicionadaEvento,
+  PecaSelecionadaEvento,
+  PosicionarPecaComando,
+  ResultadoDoTabuleiro,
+  SelecionarPecaComando,
+  SentidoDeRotacao,
+  TipoDaPeca,
+} from './tabuleiro.ts';
+
 export {
   MOTIVOS_DE_ENCERRAMENTO,
   aceitarEncaminhamento,
@@ -66,3 +93,11 @@ export {
   registrarReinicioDaSala,
   sairDaSala,
 } from './lobby.ts';
+
+export {
+  LADO_DA_GRADE,
+  aplicarComandoDeTabuleiro,
+  bordasAbertas,
+  estadoInicialDoTabuleiro,
+  vizinhos,
+} from './tabuleiro.ts';
