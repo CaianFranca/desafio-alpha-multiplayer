@@ -1,5 +1,5 @@
 import { createContext } from 'react'
-import type { AuthActionResult, CadastroPayload, Jogador, LoginPayload } from '../api/auth'
+import type { AuthActionResult, CadastroPayload, CredenciaisPayload, Jogador } from '../api/auth'
 
 export type AuthState =
   | { status: 'loading' }
@@ -12,12 +12,15 @@ export interface AuthContextValue {
   authState: AuthState
   logout: () => Promise<void>
   register: (payload: CadastroPayload) => Promise<AuthActionResult>
-  login: (payload: LoginPayload) => Promise<AuthActionResult>
+  entrarComCredenciais: (payload: CredenciaisPayload) => Promise<AuthActionResult>
+  /** @deprecated use entrarComCredenciais */
+  login: (payload: CredenciaisPayload) => Promise<AuthActionResult>
 }
 
 export const AuthContext = createContext<AuthContextValue>({
   authState: visitorState,
   logout: async () => {},
   register: async () => ({ ok: false, fieldErrors: {}, status: 0 }),
+  entrarComCredenciais: async () => ({ ok: false, fieldErrors: {}, status: 0 }),
   login: async () => ({ ok: false, fieldErrors: {}, status: 0 }),
 })

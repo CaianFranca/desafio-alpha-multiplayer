@@ -10,16 +10,17 @@ export type PlayerResult =
   | { ok: true; jogador: Jogador }
   | { ok: false; reason: 'invalid-session' | 'unknown-failure' }
 
-export interface CadastroPayload {
-  apelido: string
+export interface Credenciais {
   email: string
   senha: string
 }
 
-export interface LoginPayload {
-  email: string
-  senha: string
-}
+export type CredenciaisPayload = Credenciais
+
+export type CadastroPayload = { apelido: string } & Credenciais
+
+/** @deprecated use CredenciaisPayload */
+export type LoginPayload = CredenciaisPayload
 
 export type AuthField = 'apelido' | 'email' | 'senha'
 
@@ -37,6 +38,10 @@ export type AuthFieldErrors = Partial<Record<AuthField, string>>
 export type AuthActionResult =
   | { ok: true; jogador: Jogador }
   | { ok: false; fieldErrors: AuthFieldErrors; generalError?: string; status: number }
+
+export function isValidEmail(valor: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim())
+}
 
 /** GET /api/auth/me — reidrata o Jogador da Sessão ativa (contrato OpenAPI). */
 export async function fetchCurrentPlayer(): Promise<PlayerResult> {
@@ -73,10 +78,8 @@ function parseAuthErrors(body: unknown): { fieldErrors: AuthFieldErrors; general
       let generalError: string | undefined
       for (const item of raw as AuthErrorItem[]) {
         if (item.campo === 'apelido' || item.campo === 'email' || item.campo === 'senha') {
-          // mantém o primeiro erro por campo
           if (!fieldErrors[item.campo]) fieldErrors[item.campo] = item.mensagem
         } else if (item.mensagem) {
-          // erro genérico (sem campo) — ex: Credenciais inválidas.
           if (!generalError) generalError = item.mensagem
         }
       }
@@ -86,11 +89,13 @@ function parseAuthErrors(body: unknown): { fieldErrors: AuthFieldErrors; general
   return { fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.' }
 }
 
-/** POST /api/auth/register — usa fetch bruto para não disparar onSessionExpired em 401/409. */
-export async function register(payload: CadastroPayload): Promise<AuthActionResult> {
+async function authRequest(
+  path: '/api/auth/register' | '/api/auth/login',
+  payload: CadastroPayload | CredenciaisPayload,
+): Promise<AuthActionResult> {
   let response: Response
   try {
-    response = await fetch('/api/auth/register', {
+    response = await fetch(path, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -116,32 +121,15 @@ export async function register(payload: CadastroPayload): Promise<AuthActionResu
   }
 }
 
-/** POST /api/auth/login — usa fetch bruto para não disparar onSessionExpired em 401. */
-export async function login(payload: LoginPayload): Promise<AuthActionResult> {
-  let response: Response
-  try {
-    response = await fetch('/api/auth/login', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-  } catch {
-    return { ok: false, fieldErrors: {}, generalError: 'Erro de conexão. Tente novamente.', status: 0 }
-  }
-  if (response.ok) {
-    try {
-      const jogador = (await response.json()) as Jogador
-      return { ok: true, jogador }
-    } catch {
-      return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: response.status }
-    }
-  }
-  try {
-    const body = (await response.json()) as unknown
-    const parsed = parseAuthErrors(body)
-    return { ok: false, ...parsed, status: response.status }
-  } catch {
-    return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: response.status }
-  }
+/** POST /api/auth/register — usa fetch bruto para não disparar onSessionExpired em 401/409. */
+export async function register(payload: CadastroPayload): Promise<AuthActionResult> {
+  return authRequest('/api/auth/register', payload)
 }
+
+/** POST /api/auth/login — usa fetch bruto para não disparar onSessionExpired em 401. */
+export async function entrarComCredenciais(payload: CredenciaisPayload): Promise<AuthActionResult> {
+  return authRequest('/api/auth/login', payload)
+}
+
+/** @deprecated use entrarComCredenciais */
+export const login = entrarComCredenciais

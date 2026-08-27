@@ -83,9 +83,9 @@ describe('auth pages', () => {
   it('renders cadastro page with card styling and CTA', () => {
     renderWithRouter(['/cadastro'])
 
-    expect(screen.getByRole('heading', { name: /crie sua conta/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /crie seu cadastro/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cadastrar-se/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /faça login/i })).toHaveAttribute('href', '/login')
+    expect(screen.getByRole('link', { name: /entre/i })).toHaveAttribute('href', '/login')
   })
 
   it('renders login page with Entrar CTA', () => {
@@ -93,14 +93,14 @@ describe('auth pages', () => {
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^entrar$/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /crie uma/i })).toHaveAttribute('href', '/cadastro')
+    expect(screen.getByRole('link', { name: /crie seu cadastro/i })).toHaveAttribute('href', '/cadastro')
   })
 
   it('cadastro footer link navigates to login', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/cadastro'])
 
-    await user.click(screen.getByRole('link', { name: /faça login/i }))
+    await user.click(screen.getByRole('link', { name: /entre/i }))
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
   })
@@ -115,7 +115,7 @@ describe('hero CTAs', () => {
     const heroSignup = within(heroSection).getByRole('link', { name: /criar conta/i })
     await user.click(heroSignup)
 
-    expect(screen.getByRole('heading', { name: /crie sua conta/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /crie seu cadastro/i })).toBeInTheDocument()
   })
 
   it('hero login link navigates to login', async () => {

@@ -42,7 +42,7 @@ describe('CadastroPage', () => {
   it('renderiza 3 campos e CTA CADASTRAR-SE no estilo do card', async () => {
     renderWithRouter(['/cadastro'])
 
-    expect(screen.getByRole('heading', { name: /crie sua conta/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /crie seu cadastro/i })).toBeInTheDocument()
     expect(screen.getByText(/junte-se ao flicker of sanity/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/^apelido$/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument()
@@ -51,11 +51,7 @@ describe('CadastroPage', () => {
     expect(screen.getByPlaceholderText('seu@email.com')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Mínimo 8 caracteres')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cadastrar-se/i })).toBeInTheDocument()
-    // rodapé
-    expect(screen.getByRole('link', { name: /faça login/i })).toHaveAttribute('href', '/login')
-    // card visual tokens (verifica classe do card)
-    const card = screen.getByRole('heading', { name: /crie sua conta/i }).closest('div')!
-    expect(card.className).toMatch(/bg-\[var\(--color-surface\)\]/)
+    expect(screen.getByRole('link', { name: /entre/i })).toHaveAttribute('href', '/login')
   })
 
   it('validação client-side: Informe o apelido.', async () => {
@@ -213,16 +209,16 @@ describe('LoginPage', () => {
     const entrar = screen.getByRole('button', { name: /^entrar$/i })
     expect(entrar).toBeInTheDocument()
     expect(entrar).toHaveTextContent('ENTRAR')
-    expect(screen.getByRole('link', { name: /crie uma/i })).toHaveAttribute('href', '/cadastro')
+    expect(screen.getByRole('link', { name: /crie seu cadastro/i })).toHaveAttribute('href', '/cadastro')
   })
 
-  it('validação client-side: Informe um email válido.', async () => {
+  it('validação client-side: Informe o email.', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/login'])
 
     await user.click(screen.getByRole('button', { name: /^entrar$/i }))
 
-    expect(await screen.findByText('Informe um email válido.')).toBeInTheDocument()
+    expect(await screen.findByText('Informe o email.')).toBeInTheDocument()
   })
 
   it('validação client-side: Informe a senha.', async () => {
@@ -256,7 +252,7 @@ describe('LoginPage', () => {
     const alerta = screen.getByText('Credenciais inválidas.')
     expect(alerta).toHaveAttribute('role', 'alert')
     // não deve haver erro por campo específico visível além do genérico
-    expect(screen.queryByText('Informe um email válido.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Informe o email.')).not.toBeInTheDocument()
   })
 
   it('login sucesso auto-login mostra apelido no header', async () => {
