@@ -14,9 +14,10 @@ interface PartidaPageProps {
 export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const [searchParams] = useSearchParams()
   const param = searchParams.get('partidaEstado')
-  // ?partidaEstado é initialOnly — lido só no mount; após isso, estado interno (toolbar/retry) governa.
-  // Prioridade: URL > prop > default do hook. Define initialOnce para permitir toolbar alterar depois.
-  const estadoViaUrl = isEstadoDaTela(param) ? (param as EstadoDaTela) : null
+  // ?partidaEstado é initialOnly e exclusivo de DEV — lido só no mount; após isso, estado interno (toolbar/retry) governa.
+  // Prioridade: URL (DEV) > prop > default do hook. Gate DEV evita vazamento para produção (B2).
+  const estadoViaUrl =
+    import.meta.env.DEV && isEstadoDaTela(param) ? (param as EstadoDaTela) : null
   const estadoInicialEfetivo = estadoViaUrl ?? estadoInicial
   const { estado, tentarNovamente, forcarEstado } = usePartidaTela({
     estadoInicial: estadoInicialEfetivo,
@@ -29,7 +30,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       <AmbienteDeJogo />
       <PartidaOverlays estado={estado} onRetry={tentarNovamente} />
       <PartidaMoldura />
-      {import.meta.env.DEV && <PartidaDevToolbar onForcar={forcarEstado} />}
+      <PartidaDevToolbar onForcar={forcarEstado} />
     </div>
   )
 }
