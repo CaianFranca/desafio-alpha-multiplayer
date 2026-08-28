@@ -1,12 +1,35 @@
-// Domínio puro do Tabuleiro (ST-09 / issue #82).
+// Domínio puro do Tabuleiro (ST-09 / issue #82 e ST-10 / issue #89).
 //
 // Seam único das regras de tabuleiro: grade fixa 7x7 (ADR-0004), Reserva,
-// Seleção única e janela de Manipulação, expostos por um aplicarComando que
-// produz eventos de domínio e rejeições com códigos fechados — no mesmo padrão
-// do domínio do lobby (lobby.ts). Nenhum contrato wire, Redis ou Express vive
-// aqui: este módulo é domínio puro e imutável.
+// Seleção única e janela de Manipulação (ST-09), e os tipos do ciclo de Peões
+// com o dispatch aplicarComandoDeTabuleiro (ST-10) — que produz eventos de
+// domínio e rejeições com códigos fechados, no mesmo padrão do domínio do
+// lobby (lobby.ts). Os handlers de Peões, conexões, Recebimento e ciclo, e a
+// camada base compartilhada (resultado, validação, grade, rotação, bordas),
+// vivem em peoes.ts — a dependência em runtime é única: tabuleiro.ts →
+// peoes.ts. Nenhum contrato wire, Redis ou Express vive aqui: este módulo é
+// domínio puro e imutável.
 
-export const LADO_DA_GRADE = 7;
+import {
+  exigirCelulaNoAlcance,
+  escolherTipoDaPecaRecebida,
+  estaDentroDaGrade,
+  encontrarPosicionada,
+  encontrarPosicionadaPorCelula,
+  encontrarRecebidaPorPeca,
+  girarRecebida,
+  moverPeao,
+  permanecer,
+  posicionarPeao,
+  posicionarRecebida,
+  rejeitar,
+  rotacionar,
+  selecionarPeao,
+  sucesso,
+  validarTexto,
+} from './peoes.ts';
+
+export { LADO_DA_GRADE, bordasAbertas, vizinhasConectadas } from './peoes.ts';
 
 export type TipoDaPeca = 'inicial' | 'reta' | 'T' | 'cruz';
 export type Orientacao = 0 | 90 | 180 | 270;
@@ -31,7 +54,34 @@ export interface PecaPosicionada {
   readonly celula: Celula;
 }
 
-// `pecaSelecionadaId` aponta para uma peça da Reserva (Seleção única).
+export type CorDoPeao = 'branco' | 'vermelho' | 'azul' | 'amarelo';
+
+// Peças de caminho (reta, T, cruz) — a Peça Inicial nunca é Recebida.
+export type TipoDePecaDeCaminho = Exclude<TipoDaPeca, 'inicial'>;
+
+// O Peão é um elemento simples: cor e posição — sobre a Mesa (pecaId null) ou
+// sobre exatamente uma Peça posicionada (uma Peça aceita no máximo um Peão).
+export interface Peao {
+  readonly peaoId: string;
+  readonly cor: CorDoPeao;
+  readonly pecaId: string | null;
+}
+
+// Slot do Recebimento (ST-10): criado ao selecionar um Peão posicionado, um
+// para cada borda aberta com célula vizinha vazia. Não contém Peça até a
+// escolha do tipo (escolher_tipo_da_peca_recebida), que atribui pecaId e tipo
+// a partir da Reserva.
+export interface PecaRecebida {
+  readonly recebidaId: string;
+  readonly bordaGeradora: BordaCardinal;
+  readonly celulaAlvo: Celula;
+  readonly pecaId: string | null;
+  readonly tipo: TipoDePecaDeCaminho | null;
+  readonly orientacao: Orientacao;
+}
+
+// `pecaSelecionadaId` aponta para uma peça da Reserva (Seleção única) ou, no
+// ciclo do Peão, para a Peça atribuída à Recebida escolhida mais recentemente.
 // `pecaEmManipulacaoId` aponta para a última peça posicionada enquanto sua
 // janela de Manipulação está aberta; Finalização (nova seleção, novo
 // posicionamento ou clique na própria peça posicionada) fecha a janela.
@@ -40,6 +90,10 @@ export interface EstadoDoTabuleiro {
   readonly posicionadas: readonly PecaPosicionada[];
   readonly pecaSelecionadaId: string | null;
   readonly pecaEmManipulacaoId: string | null;
+  // ST-10: Peões, o Peão em sequência e as pendências do Recebimento.
+  readonly peoes: readonly Peao[];
+  readonly peaoSelecionadoId: string | null;
+  readonly recebidas: readonly PecaRecebida[];
 }
 
 export interface SelecionarPecaComando {
@@ -63,11 +117,46 @@ export interface FinalizarManipulacaoComando {
   readonly tipo: 'finalizar_manipulacao';
 }
 
+export interface SelecionarPeaoComando {
+  readonly tipo: 'selecionar_peao';
+  readonly peaoId: string;
+}
+
+export interface PosicionarPeaoComando {
+  readonly tipo: 'posicionar_peao';
+  readonly peaoId: string;
+  readonly celula: Celula;
+}
+
+export interface EscolherTipoDaPecaRecebidaComando {
+  readonly tipo: 'escolher_tipo_da_peca_recebida';
+  readonly recebidaId: string;
+  // O discriminador da união ocupa o nome "tipo"; o tipo da Peça de caminho
+  // escolhido na Reserva vem em "tipoDaPeca".
+  readonly tipoDaPeca: TipoDePecaDeCaminho;
+}
+
+export interface MoverPeaoComando {
+  readonly tipo: 'mover_peao';
+  readonly peaoId: string;
+  readonly celula: Celula;
+}
+
+export interface PermanecerComando {
+  readonly tipo: 'permanecer';
+  readonly peaoId: string;
+}
+
 export type ComandoDeTabuleiro =
   | SelecionarPecaComando
   | GirarPecaComando
   | PosicionarPecaComando
-  | FinalizarManipulacaoComando;
+  | FinalizarManipulacaoComando
+  | SelecionarPeaoComando
+  | PosicionarPeaoComando
+  | EscolherTipoDaPecaRecebidaComando
+  | MoverPeaoComando
+  | PermanecerComando;
 
 export interface PecaSelecionadaEvento {
   readonly tipo: 'peca_selecionada';
@@ -99,12 +188,64 @@ export interface ManipulacaoFinalizadaEvento {
   readonly pecaId: string;
 }
 
+export interface PeaoSelecionadoEvento {
+  readonly tipo: 'peao_selecionado';
+  readonly peaoId: string;
+}
+
+// Pendências geradas pelo Recebimento: um slot por borda aberta com célula
+// vizinha vazia, com a célula-alvo já fixada.
+export interface PendenciaDeRecebimento {
+  readonly recebidaId: string;
+  readonly bordaGeradora: BordaCardinal;
+  readonly celulaAlvo: Celula;
+}
+
+export interface RecebimentoGeradoEvento {
+  readonly tipo: 'recebimento_gerado';
+  readonly recebidas: readonly PendenciaDeRecebimento[];
+}
+
+export interface PeaoPosicionadoEvento {
+  readonly tipo: 'peao_posicionado';
+  readonly peaoId: string;
+  readonly pecaId: string;
+  readonly celula: Celula;
+}
+
+export interface TipoDaPecaRecebidaEscolhidoEvento {
+  readonly tipo: 'tipo_da_peca_recebida_escolhido';
+  readonly recebidaId: string;
+  readonly pecaId: string;
+  readonly tipoDaPeca: TipoDePecaDeCaminho;
+}
+
+export interface PeaoMovidoEvento {
+  readonly tipo: 'peao_movido';
+  readonly peaoId: string;
+  readonly pecaIdDe: string;
+  readonly pecaIdPara: string;
+  readonly celula: Celula;
+}
+
+export interface PeaoPermaneceuEvento {
+  readonly tipo: 'peao_permaneceu';
+  readonly peaoId: string;
+  readonly pecaId: string;
+}
+
 export type EventoDoTabuleiro =
   | PecaSelecionadaEvento
   | PecaDeselecionadaEvento
   | PecaGiradaEvento
   | PecaPosicionadaEvento
-  | ManipulacaoFinalizadaEvento;
+  | ManipulacaoFinalizadaEvento
+  | PeaoSelecionadoEvento
+  | RecebimentoGeradoEvento
+  | PeaoPosicionadoEvento
+  | TipoDaPecaRecebidaEscolhidoEvento
+  | PeaoMovidoEvento
+  | PeaoPermaneceuEvento;
 
 export type CodigoDeErroDeTabuleiro =
   | 'DADOS_INVALIDOS'
@@ -114,7 +255,18 @@ export type CodigoDeErroDeTabuleiro =
   | 'CELULA_NAO_ENCONTRADA'
   | 'CELULA_JA_OCUPADA'
   | 'PECA_JA_POSICIONADA'
-  | 'MANIPULACAO_ENCERRADA';
+  | 'MANIPULACAO_ENCERRADA'
+  | 'PEAO_NAO_ENCONTRADO'
+  | 'PEAO_JA_POSICIONADO'
+  | 'PEAO_NAO_SELECIONADO'
+  | 'PECA_INICIAL_EXIGIDA'
+  | 'CELULA_SEM_PECA'
+  | 'PECA_JA_TEM_PEAO'
+  | 'PENDENCIA_NAO_RESOLVIDA'
+  | 'MOVIMENTO_NAO_CONECTADO'
+  | 'PECA_NAO_RECEBIDA'
+  | 'PECA_FORA_DO_ALVO'
+  | 'RECEBIDA_NAO_ENCONTRADA';
 
 export interface ErroDeDominioDoTabuleiro {
   readonly tipo: 'erro_de_dominio';
@@ -137,28 +289,13 @@ export type ResultadoDoTabuleiro =
   | OperacaoBemSucedidaDoTabuleiro
   | OperacaoRejeitadaDoTabuleiro;
 
-// Bordas abertas da Orientação base (0°), por tipo: Inicial norte+leste
-// (adjacentes), Reta norte+sul (opostas), T norte+leste+oeste, Cruz todas.
-const BORDAS_BASE: Record<TipoDaPeca, readonly BordaCardinal[]> = {
-  inicial: ['norte', 'leste'],
-  reta: ['norte', 'sul'],
-  T: ['norte', 'leste', 'oeste'],
-  cruz: ['norte', 'leste', 'sul', 'oeste'],
-};
-
-const ORDEM_CANONICA_DAS_BORDAS: readonly BordaCardinal[] = [
-  'norte',
-  'leste',
-  'sul',
-  'oeste',
+// Cores canônicas (placeholder) dos 4 Peões; ids determinísticos por cor.
+const CORES_DOS_PEOES: readonly CorDoPeao[] = [
+  'branco',
+  'vermelho',
+  'azul',
+  'amarelo',
 ];
-
-const ROTACAO_HORARIA_DA_BORDA: Record<BordaCardinal, BordaCardinal> = {
-  norte: 'leste',
-  leste: 'sul',
-  sul: 'oeste',
-  oeste: 'norte',
-};
 
 const COMPOSICAO_INICIAL_DA_RESERVA: readonly {
   readonly tipo: TipoDaPeca;
@@ -188,6 +325,14 @@ export function estadoInicialDoTabuleiro(): EstadoDoTabuleiro {
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
+    // Os 4 Peões começam sobre a Mesa, sem Peça.
+    peoes: CORES_DOS_PEOES.map((cor) => ({
+      peaoId: `peao-${cor}`,
+      cor,
+      pecaId: null,
+    })),
+    peaoSelecionadoId: null,
+    recebidas: [],
   };
 }
 
@@ -206,19 +351,6 @@ export function vizinhos(celula: Celula): Celula[] {
   );
 }
 
-// Bordas abertas derivadas do tipo e da Orientação: parte-se da base do tipo
-// e aplica-se a rotação horária correspondente aos passos de 90° da
-// Orientação. Resultado em ordem canônica para determinismo.
-export function bordasAbertas(
-  peca: Pick<PecaDaReserva, 'tipo' | 'orientacao'>,
-): BordaCardinal[] {
-  let bordas = BORDAS_BASE[peca.tipo];
-  for (let passos = peca.orientacao / 90; passos > 0; passos--) {
-    bordas = bordas.map((borda) => ROTACAO_HORARIA_DA_BORDA[borda]);
-  }
-  return ORDEM_CANONICA_DAS_BORDAS.filter((borda) => bordas.includes(borda));
-}
-
 export function aplicarComandoDeTabuleiro(
   estado: EstadoDoTabuleiro,
   comando: ComandoDeTabuleiro,
@@ -232,6 +364,16 @@ export function aplicarComandoDeTabuleiro(
       return posicionarPeca(estado, comando);
     case 'finalizar_manipulacao':
       return finalizarManipulacao(estado);
+    case 'selecionar_peao':
+      return selecionarPeao(estado, comando);
+    case 'posicionar_peao':
+      return posicionarPeao(estado, comando);
+    case 'escolher_tipo_da_peca_recebida':
+      return escolherTipoDaPecaRecebida(estado, comando);
+    case 'mover_peao':
+      return moverPeao(estado, comando);
+    case 'permanecer':
+      return permanecer(estado, comando);
     default: {
       // Exaustividade: um novo ComandoDeTabuleiro sem case próprio falha a
       // compilação aqui; em runtime, entrada externa pode bypassar tipos.
@@ -321,7 +463,21 @@ function girarPeca(
         'Há uma Manipulação em andamento; finalize-a antes de selecionar outra Peça.',
       );
     }
-  } else if (estado.pecaSelecionadaId === comando.pecaId) {
+  }
+
+  // Peça Recebida segue o mesmo padrão da Reserva: só a selecionada gira.
+  const recebida = encontrarRecebidaPorPeca(estado, comando.pecaId);
+  if (recebida) {
+    if (estado.pecaSelecionadaId !== comando.pecaId) {
+      return rejeitar(
+        'PECA_NAO_SELECIONADA',
+        'A Peça Recebida indicada não é a selecionada.',
+      );
+    }
+    return girarRecebida(estado, recebida, comando);
+  }
+
+  if (estado.pecaSelecionadaId === comando.pecaId) {
     // Seleção ativa de peça da Reserva: gira nos dois sentidos.
     return girarDaReserva(estado, comando);
   }
@@ -357,11 +513,18 @@ function posicionarPeca(
     return celulaInvalida;
   }
 
+  // Peças Recebidas têm fluxo próprio: célula-alvo fixa da borda geradora.
+  const recebida = encontrarRecebidaPorPeca(estado, comando.pecaId);
+  if (recebida) {
+    return posicionarRecebida(estado, recebida, comando);
+  }
+
   if (estado.reserva.length === 0) {
     return rejeitar('RESERVA_ESGOTADA', 'A Reserva não possui mais Peças.');
   }
 
-  if (!encontrarNaReserva(estado, comando.pecaId)) {
+  const pecaNaReserva = encontrarNaReserva(estado, comando.pecaId);
+  if (!pecaNaReserva) {
     if (encontrarPosicionada(estado, comando.pecaId)) {
       return rejeitar(
         'PECA_JA_POSICIONADA',
@@ -369,6 +532,15 @@ function posicionarPeca(
       );
     }
     return rejeitar('PECA_NAO_ENCONTRADA', 'A Peça não foi encontrada.');
+  }
+
+  // ST-10: Peças de caminho só entram pelo Recebimento; apenas a Peça Inicial
+  // é posicionável diretamente, em qualquer célula vazia.
+  if (pecaNaReserva.tipo !== 'inicial') {
+    return rejeitar(
+      'PECA_NAO_RECEBIDA',
+      'Peças de caminho só podem entrar pelo Recebimento.',
+    );
   }
 
   if (estado.pecaSelecionadaId !== comando.pecaId) {
@@ -385,14 +557,14 @@ function posicionarPeca(
     );
   }
 
-  const peca = encontrarNaReserva(estado, comando.pecaId)!;
   const posicionada: PecaPosicionada = {
-    pecaId: peca.pecaId,
-    tipo: peca.tipo,
-    orientacao: peca.orientacao,
+    pecaId: pecaNaReserva.pecaId,
+    tipo: pecaNaReserva.tipo,
+    orientacao: pecaNaReserva.orientacao,
     celula: comando.celula,
   };
   const novoEstado: EstadoDoTabuleiro = {
+    ...estado,
     reserva: estado.reserva.filter((item) => item.pecaId !== comando.pecaId),
     posicionadas: [...estado.posicionadas, posicionada],
     pecaSelecionadaId: null,
@@ -497,87 +669,9 @@ function girarPosicionada(
   ]);
 }
 
-// Rotação em passos discretos de 90° com wrap-around (270° +90 volta a 0°).
-function rotacionar(
-  orientacao: Orientacao,
-  sentido: SentidoDeRotacao,
-): Orientacao {
-  const passo = sentido === 'horario' ? 90 : 270;
-  return ((orientacao + passo) % 360) as Orientacao;
-}
-
-function estaDentroDaGrade(valor: number): boolean {
-  return Number.isInteger(valor) && valor >= 0 && valor < LADO_DA_GRADE;
-}
-
-function exigirCelulaNoAlcance(
-  celula: Celula,
-): OperacaoRejeitadaDoTabuleiro | undefined {
-  if (!Number.isInteger(celula.linha) || !Number.isInteger(celula.coluna)) {
-    return rejeitar(
-      'DADOS_INVALIDOS',
-      'Linha e coluna da Célula devem ser números inteiros.',
-    );
-  }
-  if (!estaDentroDaGrade(celula.linha) || !estaDentroDaGrade(celula.coluna)) {
-    return rejeitar(
-      'CELULA_NAO_ENCONTRADA',
-      'A Célula está fora da grade 7x7 do Tabuleiro.',
-    );
-  }
-  return undefined;
-}
-
 function encontrarNaReserva(
   estado: EstadoDoTabuleiro,
   pecaId: string,
 ): PecaDaReserva | undefined {
   return estado.reserva.find((peca) => peca.pecaId === pecaId);
-}
-
-function encontrarPosicionada(
-  estado: EstadoDoTabuleiro,
-  pecaId: string,
-): PecaPosicionada | undefined {
-  return estado.posicionadas.find((peca) => peca.pecaId === pecaId);
-}
-
-function encontrarPosicionadaPorCelula(
-  estado: EstadoDoTabuleiro,
-  celula: Celula,
-): PecaPosicionada | undefined {
-  return estado.posicionadas.find(
-    (peca) =>
-      peca.celula.linha === celula.linha &&
-      peca.celula.coluna === celula.coluna,
-  );
-}
-
-function validarTexto(
-  ...valores: readonly string[]
-): OperacaoRejeitadaDoTabuleiro | undefined {
-  if (valores.every((valor) => typeof valor === 'string' && valor.trim().length > 0)) {
-    return undefined;
-  }
-  return rejeitar(
-    'DADOS_INVALIDOS',
-    'O identificador da Peça é obrigatório.',
-  );
-}
-
-function sucesso(
-  estado: EstadoDoTabuleiro,
-  eventos: readonly EventoDoTabuleiro[],
-): OperacaoBemSucedidaDoTabuleiro {
-  return { sucesso: true, estado, eventos };
-}
-
-function rejeitar(
-  codigo: CodigoDeErroDeTabuleiro,
-  mensagem: string,
-): OperacaoRejeitadaDoTabuleiro {
-  return {
-    sucesso: false,
-    erro: { tipo: 'erro_de_dominio', codigo, mensagem },
-  };
 }
