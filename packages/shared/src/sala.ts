@@ -170,7 +170,10 @@ export type CodigoDeErroDaSala =
   | 'SALA_CHEIA'
   | 'JOGADOR_JA_ASSOCIADO'
   | 'MEMBRO_NAO_ENCONTRADO'
-  | 'MEMBRO_NAO_ATIVO';
+  | 'MEMBRO_NAO_ATIVO'
+  | 'APENAS_ANFITRIAO'
+  | 'JOGADOR_EXPULSO'
+  | 'JOGADOR_NAO_BLOQUEADO';
 
 export interface ErroDaSalaEvento {
   type: 'ERRO_DA_SALA';
