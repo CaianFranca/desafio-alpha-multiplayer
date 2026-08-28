@@ -19,6 +19,9 @@ export function AmbienteDeJogo() {
     >
       <Canvas
         camera={{ fov: FOV_CAMERA, position: cameraFixa.posicao }}
+        // Alpha desativado: o canvas é opaco e o vazio vem do clear do fundo.
+        // Com alpha ativo, o alpha da textura vaza para o compositor (issue #75).
+        gl={{ alpha: false }}
         onCreated={({ camera }) => camera.lookAt(0, 0, 0)}
         fallback={
           <div
