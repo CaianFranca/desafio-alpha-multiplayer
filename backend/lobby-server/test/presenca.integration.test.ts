@@ -33,8 +33,6 @@ import {
   type CriarContextoOpcoes,
 } from '../src/salas/index.ts';
 import { chaveReconexao } from '../src/salas/reconexao.ts';
-import { chaveJogadorSala } from '../src/salas/projecao.ts';
-import { serializarSala } from '../src/salas/projecao.ts';
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -65,7 +63,11 @@ const caixasDeMensagens = new WeakMap<WebSocket, CaixaDeMensagens>();
 let appServidor: ReturnType<typeof createApp> | null = null;
 let contador = 0;
 
-async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<ServidorEfemero> {
+type OpcoesDeServidor = CriarContextoOpcoes & { rearmarAposRestart?: boolean };
+
+async function subirServidor(
+  { rearmarAposRestart = true, ...opcoesDeSalas }: OpcoesDeServidor = {},
+): Promise<ServidorEfemero> {
   if (appServidor === null) {
     appServidor = createApp();
   }
@@ -73,6 +75,11 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
   const server = http.createServer(app);
   const contexto = criarContextoDasSalas(opcoesDeSalas);
   await contexto.estado.carregar(contexto.repo, contexto.projecao);
+  // Espelha o boot de produção (`index.ts`): rearmar timers a partir do TTL
+  // do Redis e confirmar a consistência das Salas reconstruídas.
+  if (rearmarAposRestart) {
+    await contexto.handlers.rearmarAposRestart();
+  }
   const wss = createWebSocketServer(server, { contextoSalas: contexto });
 
   await new Promise<void>((resolve, reject) => {
@@ -100,13 +107,23 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
+      // Os closes forçados acima podem enfileirar handleFechamento depois da
+      // primeira limpeza; drenar a cadeia e remover timers novamente evita que
+      // um timer de servidor fechado dispare após o teardown e expire vínculos
+      // no PG sob o teste seguinte.
+      try {
+        await contexto.handlers.aguardarMutacoesPendentes();
+      } catch {}
+      try {
+        contexto.handlers.limparTodosTimers();
+      } catch {}
     },
   };
 }
 
 async function comServidor<T>(
   executar: (servidor: ServidorEfemero) => Promise<T>,
-  opcoesDeSalas: CriarContextoOpcoes = {},
+  opcoesDeSalas: OpcoesDeServidor = {},
 ): Promise<T> {
   const servidor = await subirServidor(opcoesDeSalas);
   try {
@@ -642,12 +659,62 @@ test('presenca: multiplas conexoes do mesmo Jogador contam como uma so presenca'
   }, { janelaReconexaoMs: 800 });
 });
 
-// 6 — Após reinício, membros reaparecem desconectados e não prontos, mutações bloqueadas
-test('presenca: apos reinicio membros em reconexao e mutacoes bloqueadas ate consistencia', async () => {
+// 6 — Após reinício sem rearmamento, mutações recebem SALA_INCONSISTENTE (wire)
+test('presenca: apos reinicio sem rearmamento mutacoes recebem SALA_INCONSISTENTE', async () => {
   // Primeiro servidor: cria sala com A e B
-  const baseHolder: { baseUrl: string; codigo: string; salaId: string } = { baseUrl: '', codigo: '', salaId: '' };
+  const baseHolder: { codigo: string; salaId: string } = { codigo: '', salaId: '' };
+  {
+    const servidor = await subirServidor({ janelaReconexaoMs: 60000 });
+    try {
+      const a = await registrarJogador(servidor.baseUrl);
+      const b = await registrarJogador(servidor.baseUrl);
+      const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+      const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+      enviar(wsA, { type: 'CRIAR_SALA' });
+      const criacao = await esperarSalaAtualizada(wsA);
+      baseHolder.codigo = criacao.sala.codigoDeSala;
+      baseHolder.salaId = criacao.sala.id;
+
+      enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: baseHolder.codigo });
+      await coletarEventos(wsB, 2);
+      await coletarEventos(wsA, 2);
+
+      wsA.close();
+      wsB.close();
+      await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+      await delay(250);
+      await servidor.contexto.handlers.aguardarMutacoesPendentes();
+      const linha = await pool.query<{ status: string }>(
+        `SELECT status FROM salas_historico WHERE id=$1`,
+        [baseHolder.salaId],
+      );
+      assert.equal(linha.rows[0]?.status, 'aberta');
+    } finally {
+      await servidor.fechar();
+    }
+  }
+
+  // Segundo servidor sem rearmamento: sala inconsistente, mutações bloqueadas via wire
+  const servidor2 = await subirServidor({ rearmarAposRestart: false, janelaReconexaoMs: 60000 });
+  try {
+    const c = await registrarJogador(servidor2.baseUrl);
+    const wsC = await conectarWs(servidor2.wsUrl, c.cookies);
+    enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: baseHolder.codigo });
+    await esperarErro(wsC, 'SALA_INCONSISTENTE');
+
+    wsC.close();
+    await esperarClose(wsC).catch(() => undefined);
+  } finally {
+    await servidor2.fechar();
+  }
+});
+
+// 6b — Reinício com boot de produção (carregar + rearmarAposRestart):
+// consistência confirmada no boot e reconexão dentro da janela reentra
+test('presenca: reinicio com rearmamento confirma consistencia e reconecta dentro da janela', async () => {
+  const baseHolder: { codigo: string; salaId: string } = { codigo: '', salaId: '' };
   let cookiesA: Cookies | undefined;
-  let cookiesB: Cookies | undefined;
   let idA = '';
   let idB = '';
   {
@@ -656,7 +723,6 @@ test('presenca: apos reinicio membros em reconexao e mutacoes bloqueadas ate con
       const a = await registrarJogador(servidor.baseUrl);
       const b = await registrarJogador(servidor.baseUrl);
       cookiesA = a.cookies;
-      cookiesB = b.cookies;
       idA = a.id;
       idB = b.id;
       const wsA = await conectarWs(servidor.wsUrl, a.cookies);
@@ -674,56 +740,205 @@ test('presenca: apos reinicio membros em reconexao e mutacoes bloqueadas ate con
       wsA.close();
       wsB.close();
       await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
-      // Guardar PG: sala ainda aberta
-      const linha = await pool.query<{ status: string }>(
-        `SELECT status FROM salas_historico WHERE id=$1`,
-        [baseHolder.salaId],
-      );
-      assert.equal(linha.rows[0]?.status, 'aberta');
+      await delay(250);
+      await servidor.contexto.handlers.aguardarMutacoesPendentes();
     } finally {
       await servidor.fechar();
     }
   }
 
-  // Segundo servidor: carrega do PG — sala inconsistente, mutações bloqueadas via wire
   const servidor2 = await subirServidor({ janelaReconexaoMs: 60000 });
   try {
-    const contexto = servidor2.contexto;
-
-    // Tentar mutação: C tenta entrar — deve receber SALA_INCONSISTENTE (wire)
+    // Consistência confirmada no boot: C entra normalmente (wire)
     const c = await registrarJogador(servidor2.baseUrl);
     const wsC = await conectarWs(servidor2.wsUrl, c.cookies);
     enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: baseHolder.codigo });
-    await esperarErro(wsC, 'SALA_INCONSISTENTE');
-    wsC.close();
-    await esperarClose(wsC).catch(() => undefined);
+    const evC = await coletarEventos(wsC, 2);
+    assert.equal(evC[0]?.type, 'MEMBRO_ENTROU');
+    assert.equal(evC[1]?.type, 'SALA_ATUALIZADA');
 
-    // Confirmar consistência
-    const res = contexto.estado.confirmarConsistenciaDaSala(baseHolder.salaId);
-    assert.equal(res.sucesso, true);
-    // Atualizar projeção manualmente (estado já substituiu, mas projeção precisa curar)
-    const salaAtual = contexto.estado.abertas.get(baseHolder.salaId)!.sala;
-    await contexto.projecao.definirEstadoSala(baseHolder.salaId, serializarSala(salaAtual));
-
-    // Reconexão de A deve funcionar agora (wire)
+    // A reconecta dentro da janela: reentra automaticamente, desconectado e não pronto
     const wsA2 = await conectarWs(servidor2.wsUrl, cookiesA!);
     const eventosA2 = await coletarEventos(wsA2, 2);
     assert.equal(eventosA2[0]?.type, 'MEMBRO_RECONECTADO');
     assert.equal((eventosA2[0] as MembroReconectadoEvento).presenca, 'conectado');
     assert.equal(eventosA2[1]?.type, 'SALA_ATUALIZADA');
     const salaAposRec = (eventosA2[1] as SalaAtualizadaEvento).sala;
-    assert.equal(membroDaSala(salaAposRec, idA).presenca, 'conectado');
-    assert.equal(membroDaSala(salaAposRec, idA).prontidao, false, 'prontidão false após reinício');
+    const membroA = membroDaSala(salaAposRec, idA);
+    assert.equal(membroA.presenca, 'conectado');
+    assert.equal(membroA.prontidao, false, 'prontidão false após reinício');
+    assert.equal(membroA.ordemDeEntrada, 1, 'ordem de entrada preservada');
+    assert.equal(salaAposRec.anfitriaoId, membroA.id, 'papel do Anfitrião preservado');
+    assert.ok(membroDaSala(salaAposRec, idB), 'vínculo de B preservado');
 
-    // Agora C pode entrar (wire)
-    const wsC2 = await conectarWs(servidor2.wsUrl, c.cookies);
-    enviar(wsC2, { type: 'ENTRAR_NA_SALA', codigoDeSala: baseHolder.codigo });
-    const evC2 = await coletarEventos(wsC2, 2);
-    assert.equal(evC2[0]?.type, 'MEMBRO_ENTROU');
+    // C também recebe a reconexão de A
+    const evC2 = await coletarEventos(wsC, 2);
+    assert.equal(evC2[0]?.type, 'MEMBRO_RECONECTADO');
 
     wsA2.close();
-    wsC2.close();
-    await Promise.all([wsA2, wsC2].map((ws) => esperarClose(ws).catch(() => undefined)));
+    wsC.close();
+    await Promise.all([wsA2, wsC].map((ws) => esperarClose(ws).catch(() => undefined)));
+  } finally {
+    await servidor2.fechar();
+  }
+});
+
+// 6c — Reinício com rearmamento: janela expirada no Redis expira o vínculo;
+// último vínculo por expiração encerra a Sala como expirada
+test('presenca: reinicio com rearmamento expira fora da janela e encerra sala como expirada', async () => {
+  const baseHolder: { salaId: string; idA: string; idB: string } = { salaId: '', idA: '', idB: '' };
+  {
+    const servidor = await subirServidor({ janelaReconexaoMs: 800 });
+    try {
+      const a = await registrarJogador(servidor.baseUrl);
+      const b = await registrarJogador(servidor.baseUrl);
+      baseHolder.idA = a.id;
+      baseHolder.idB = b.id;
+      const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+      const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+      enviar(wsA, { type: 'CRIAR_SALA' });
+      const criacao = await esperarSalaAtualizada(wsA);
+      baseHolder.salaId = criacao.sala.id;
+
+      enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: criacao.sala.codigoDeSala });
+      await coletarEventos(wsB, 2);
+      await coletarEventos(wsA, 2);
+
+      wsA.close();
+      wsB.close();
+      await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+      await delay(250);
+      await servidor.contexto.handlers.aguardarMutacoesPendentes();
+    } finally {
+      await servidor.fechar(); // limpa timers — sem expiração no servidor 1
+    }
+  }
+
+  // Aguarda as chaves Redis expirarem (EX=1s) sem servidor vivo
+  await delay(1300);
+
+  // Segundo servidor com rearmamento: ttl=-2 → expiração imediata dos dois membros
+  const servidor2 = await subirServidor({ janelaReconexaoMs: 800 });
+  try {
+    await servidor2.contexto.handlers.aguardarMutacoesPendentes();
+
+    const sala = await pool.query<{ status: string }>(
+      `SELECT status FROM salas_historico WHERE id=$1`,
+      [baseHolder.salaId],
+    );
+    assert.equal(sala.rows[0]?.status, 'expirada', 'último vínculo por expiração → sala expirada');
+
+    const membrosRestantes = await pool.query<{ total: string }>(
+      `SELECT count(*)::text AS total FROM membros WHERE sala_id=$1`,
+      [baseHolder.salaId],
+    );
+    assert.equal(membrosRestantes.rows[0]?.total, '0');
+
+    const historico = await pool.query<{ motivo: string }>(
+      `SELECT motivo_de_termino AS motivo FROM membros_historico WHERE sala_id=$1 ORDER BY usuario_id`,
+      [baseHolder.salaId],
+    );
+    assert.equal(historico.rows.length, 2);
+    for (const linha of historico.rows) {
+      assert.equal(linha.motivo, 'expiracao');
+    }
+
+    assert.equal(await redis.ttl(chaveReconexao(baseHolder.salaId, baseHolder.idA)), -2);
+    assert.equal(await redis.ttl(chaveReconexao(baseHolder.salaId, baseHolder.idB)), -2);
+  } finally {
+    await servidor2.fechar();
+  }
+});
+
+// 6d — Reinício com rearmamento: expiração do Anfitrião pós-restart aciona a sucessão
+test('presenca: reinicio com rearmamento expira Anfitriao e aciona sucessao', async () => {
+  const baseHolder: { codigo: string; salaId: string; idA: string; idB: string } = {
+    codigo: '',
+    salaId: '',
+    idA: '',
+    idB: '',
+  };
+  let cookiesB: Cookies | undefined;
+  {
+    const servidor = await subirServidor({ janelaReconexaoMs: 1500 });
+    try {
+      const a = await registrarJogador(servidor.baseUrl);
+      const b = await registrarJogador(servidor.baseUrl);
+      baseHolder.idA = a.id;
+      baseHolder.idB = b.id;
+      cookiesB = b.cookies;
+      const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+      const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+      enviar(wsA, { type: 'CRIAR_SALA' });
+      const criacao = await esperarSalaAtualizada(wsA);
+      baseHolder.codigo = criacao.sala.codigoDeSala;
+      baseHolder.salaId = criacao.sala.id;
+
+      enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: baseHolder.codigo });
+      await coletarEventos(wsB, 2);
+      await coletarEventos(wsA, 2);
+
+      wsA.close();
+      wsB.close();
+      await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+      await delay(250);
+      await servidor.contexto.handlers.aguardarMutacoesPendentes();
+    } finally {
+      await servidor.fechar(); // limpa timers — sem expiração no servidor 1
+    }
+  }
+
+  // Segundo servidor com rearmamento: timers rearmados a partir do TTL restante
+  const servidor2 = await subirServidor({ janelaReconexaoMs: 1500 });
+  try {
+    // B reconecta dentro da janela
+    const wsB2 = await conectarWs(servidor2.wsUrl, cookiesB!);
+    const evB = await coletarEventos(wsB2, 2);
+    assert.equal(evB[0]?.type, 'MEMBRO_RECONECTADO');
+    const salaReconectada = (evB[1] as SalaAtualizadaEvento).sala;
+    const anfitriaoAposReinicio = salaReconectada.anfitriaoId;
+    assert.equal(
+      membroDaSala(salaReconectada, baseHolder.idA).presenca,
+      'em_reconexao',
+      'A segue em reconexão após o reinício',
+    );
+
+    // Timer rearmado de A dispara: vínculo termina com sucessão para B
+    const eventos = await coletarEventos(wsB2, 4, 6000);
+    assert.equal(eventos[0]?.type, 'MEMBRO_SAIU');
+    assert.equal(eventos[1]?.type, 'SALA_ATUALIZADA');
+    assert.equal(eventos[2]?.type, 'ANFITRIAO_SUBSTITUIDO');
+    const sucessao = eventos[2] as AnfitriaoSubstituidoEvento;
+    assert.equal(sucessao.anfitriaoAnteriorId, anfitriaoAposReinicio);
+    assert.equal(eventos[3]?.type, 'SALA_ATUALIZADA');
+    const salaFinal = (eventos[3] as SalaAtualizadaEvento).sala;
+    const membroB = membroDaSala(salaFinal, baseHolder.idB);
+    assert.equal(salaFinal.anfitriaoId, membroB.id);
+
+    await servidor2.contexto.handlers.aguardarMutacoesPendentes();
+    const sala = await pool.query<{ anfitriao_id: string | null; status: string }>(
+      `SELECT anfitriao_id, status FROM salas_historico WHERE id=$1`,
+      [baseHolder.salaId],
+    );
+    assert.equal(sala.rows[0]?.anfitriao_id, baseHolder.idB);
+    assert.equal(sala.rows[0]?.status, 'aberta');
+
+    const vinculoA = await pool.query<{ total: string }>(
+      `SELECT count(*)::text AS total FROM membros WHERE sala_id=$1 AND usuario_id=$2`,
+      [baseHolder.salaId, baseHolder.idA],
+    );
+    assert.equal(vinculoA.rows[0]?.total, '0');
+
+    const historico = await pool.query<{ motivo: string }>(
+      `SELECT motivo_de_termino AS motivo FROM membros_historico WHERE sala_id=$1 AND usuario_id=$2`,
+      [baseHolder.salaId, baseHolder.idA],
+    );
+    assert.equal(historico.rows[0]?.motivo, 'expiracao');
+
+    wsB2.close();
+    await esperarClose(wsB2).catch(() => undefined);
   } finally {
     await servidor2.fechar();
   }

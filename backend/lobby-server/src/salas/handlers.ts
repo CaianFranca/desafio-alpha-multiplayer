@@ -687,6 +687,7 @@ export class SalasHandlers {
    * Ao final confirma todas as salas idempotente (B1).
    */
   async rearmarAposRestart(): Promise<void> {
+    const expiracoesImediatas: Array<{ salaId: string; membroId: string }> = [];
     for (const [salaId, info] of this.estado.abertas) {
       if (info.sala.consistente) {
         continue;
@@ -699,7 +700,7 @@ export class SalasHandlers {
         if (ttl >= 0) {
           this.agendarExpiracao(salaId, membro.id, ttl * 1000);
         } else if (ttl === -2) {
-          void this.handleExpirar(salaId, membro.id);
+          expiracoesImediatas.push({ salaId, membroId: membro.id });
         } else if (ttl === -1) {
           await this.reconexao.definirJanela(salaId, membro.jogadorId);
           this.agendarExpiracao(salaId, membro.id, this.janelaReconexaoMs);
@@ -709,6 +710,12 @@ export class SalasHandlers {
     this.estado.confirmarTodasSalas();
     for (const [salaId, info] of this.estado.abertas) {
       await this.atualizarProjecaoEstado(this.estado.estado, salaId);
+    }
+    // Expirações imediatas somente após a confirmação de consistência: o engine
+    // rejeita `expirar_reconexao` em Sala inconsistente (SALA_INCONSISTENTE) e o
+    // caminho de falha limparia a janela sem encerrar o vínculo.
+    for (const { salaId, membroId } of expiracoesImediatas) {
+      void this.handleExpirar(salaId, membroId);
     }
   }
 
@@ -871,7 +878,6 @@ export class SalasHandlers {
         this.limparTimer(salaId, membroId);
         return;
       }
-      this.estado.substituirEstado(resultado.estado);
       const expirado = resultado.eventos.find((e) => e.tipo === 'vinculo_expirado');
       const jogadorId = expirado !== undefined && 'jogadorId' in expirado
         ? (expirado as { jogadorId: string }).jogadorId
@@ -897,10 +903,14 @@ export class SalasHandlers {
             novoAnfitriaoJogadorId,
           );
         } catch (erro) {
+          // R1b: persistir antes de `substituirEstado` — na falha do write-model,
+          // engine, PG e projeção permanecem coerentes em `em_reconexao` (a janela
+          // Redis e a associação ficam preservadas; o restart cura para o PG).
           console.error('[salas] falha ao persistir expiracao:', erro);
           return;
         }
       }
+      this.estado.substituirEstado(resultado.estado);
       if (jogadorId !== null) {
         await this.reconexao.limparJanela(salaId, jogadorId).catch(() => undefined);
       } else {
