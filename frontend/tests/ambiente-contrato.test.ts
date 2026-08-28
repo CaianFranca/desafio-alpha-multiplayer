@@ -1,4 +1,5 @@
 import {
+  MARGEM_ENQUADRAMENTO,
   COR_FUNDO,
   COR_LATERAIS_MESA,
   ESPESSURA_MESA,
@@ -34,12 +35,14 @@ describe('contrato do ambiente de jogo', () => {
     expect(elevacao).toBeCloseTo(Math.PI / 4, 10)
   })
 
-  it('câmera enquadra a maior dimensão da Mesa conforme o FOV', () => {
+  it('câmera enquadra a margem da maior dimensão da Mesa conforme o FOV', () => {
     const { posicao } = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
     const [, altura, z] = posicao
     const distancia = Math.hypot(altura, z)
     const meiaAlturaVisivel = Math.tan((FOV_CAMERA * Math.PI) / 360) * distancia
-    expect(meiaAlturaVisivel).toBeGreaterThanOrEqual(LARGURA_MESA / 2)
+    // A câmera cobre MARGEM_ENQUADRAMENTO da maior dimensão: margem < 1
+    // aproxima o enquadramento e corta a borda escura da textura fora da tela.
+    expect(meiaAlturaVisivel).toBeCloseTo((LARGURA_MESA / 2) * MARGEM_ENQUADRAMENTO, 6)
   })
 
   it('exporta cores do tema: fundo quase-preto e laterais escuras', () => {

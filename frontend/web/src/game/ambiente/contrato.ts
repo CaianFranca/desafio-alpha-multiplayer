@@ -24,15 +24,16 @@ export const FOV_CAMERA = 50
 
 /**
  * Margem de enquadramento: fração da maior dimensão da Mesa que deve caber
- * no frustum vertical (1.0 = encostado; > 1 = folga para a borda da Mesa).
+ * no frustum vertical (1.0 = encostado; < 1 aproxima a câmera e corta a
+ * borda escura da textura fora da tela, ampliando o centro iluminado).
  */
-export const MARGEM_ENQUADRAMENTO = 1.15
+export const MARGEM_ENQUADRAMENTO = 0.8
 
 /**
- * Cor do fundo/vazio: quase-preto amostrado das bordas da textura
- * (mesa_topo.png tem bordas escuras que se fundem nesse tom).
+ * Cor do fundo/vazio: o preto ao redor da Mesa na textura (mesa_topo.png),
+ * de modo que o vazio funda com a borda da textura sem costura visível.
  */
-export const COR_FUNDO = '#0a0a0c'
+export const COR_FUNDO = '#010101'
 
 /** Cor sólida das laterais/base da Mesa (tom escuro coerente com o vazio). */
 export const COR_LATERAIS_MESA = '#141112'
