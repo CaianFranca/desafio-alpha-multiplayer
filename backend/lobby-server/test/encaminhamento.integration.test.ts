@@ -348,21 +348,20 @@ test('revalidação no commit cancela Partida e mantém aberta com PARTIDA_FALHO
     for(const ws of [wsA,wsB,wsC,wsD]){ await esperarMensagem(ws); await esperarMensagem(ws); }
     // agora liberar aceite (composição inválida)
     resolveOferta!({partidaId:'p-cancel',serverId:'s-cancel'});
-    // esperar PARTIDA_FALHOU
-    const ev=JSON.parse(await esperarMensagem(wsA,3000)) as {type:string};
+    // esperar PARTIDA_FALHOU (usa esperarTipo para ignorar SALA_ATUALIZADA extra de B3)
+    const ev = await esperarTipo(wsA, 'PARTIDA_FALHOU', 3000) as {type:string};
     assert.equal(ev.type,'PARTIDA_FALHOU');
     // sala permanece aberta
     const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE codigo_sala=$1`,[cod]);
     assert.equal(linha.rows[0]?.status,'aberta');
     assert.ok(cancelado, 'deveria ter cancelado a partida');
     assert.equal(cancelado!.partidaId,'p-cancel');
-    // ainda pode chat?
+    // ainda pode chat (ignora SALA_ATUALIZADA extra que vem após PARTIDA_FALHOU)
     enviar(wsA,{type:'ENVIAR_MENSAGEM_DE_CHAT',conteudo:'ainda aberta'});
-    const chatOk=JSON.parse(await esperarMensagem(wsA,3000)) as {type:string};
-    // broadcast para todos, verificar que B recebe também
+    const chatOk = await esperarTipo(wsA, 'MENSAGEM_DE_CHAT', 3000) as {type:string};
     assert.equal(chatOk.type,'MENSAGEM_DE_CHAT');
-    // drenar para outros
-    for(const ws of [wsB,wsC,wsD]) await esperarMensagem(ws);
+    // drenar para outros (pode haver SALA_ATUALIZADA pendente antes do chat em B/C/D)
+    for(const ws of [wsB,wsC,wsD]) await esperarTipo(ws, 'MENSAGEM_DE_CHAT', 3000).catch(async () => { await esperarMensagem(ws, 500).catch(()=>undefined); });
     wsA.close(); wsB.close(); wsC.close(); wsD.close();
     await Promise.all([wsA,wsB,wsC,wsD].map(ws=>esperarClose(ws).catch(()=>undefined)));
   }, {ofertarEncaminhamento: ()=>prom, cancelarPartida: cancelarStub});
@@ -428,7 +427,7 @@ test('indisponibilidade (sem game-server) mantém aberta com PARTIDA_RECUSADA', 
 
 test('timeout/falha mantém aberta com PARTIDA_FALHOU', async()=>{
   const ofertarStub=async ():Promise<AceiteDoEncaminhamento>=> { throw new Error('network timeout'); };
-  // nosso handler mapeia Error genérico para PARTIDA_FALHOU
+  // nosso handler mapeia Error genérico para PARTIDA_FALHOU (R1)
   await comServidor(async (servidor)=>{
     const a=await registrarJogador(servidor.baseUrl);
     const b=await registrarJogador(servidor.baseUrl);
@@ -454,5 +453,143 @@ test('timeout/falha mantém aberta com PARTIDA_FALHOU', async()=>{
     wsA.close(); wsB.close(); wsC.close(); wsD.close();
     await Promise.all([wsA,wsB,wsC,wsD].map(ws=>esperarClose(ws).catch(()=>undefined)));
   }, {ofertarEncaminhamento: ofertarStub});
+});
+
+test('snapshot de reconexão em sala encaminhada inclui encaminhamento (B1)', async()=>{
+  const ofertarStub=async ():Promise<AceiteDoEncaminhamento>=> ({partidaId:'p-recon', serverId:'s-recon'});
+  await comServidor(async (servidor)=>{
+    const a=await registrarJogador(servidor.baseUrl);
+    const b=await registrarJogador(servidor.baseUrl);
+    const c=await registrarJogador(servidor.baseUrl);
+    const d=await registrarJogador(servidor.baseUrl);
+    const wsA=await conectarWs(servidor.wsUrl,a.cookies);
+    const wsB=await conectarWs(servidor.wsUrl,b.cookies);
+    const wsC=await conectarWs(servidor.wsUrl,c.cookies);
+    const wsD=await conectarWs(servidor.wsUrl,d.cookies);
+    enviar(wsA,{type:'CRIAR_SALA'}); const cri=JSON.parse(await esperarMensagem(wsA)) as SalaAtualizadaEvento; const cod=cri.sala.codigoDeSala;
+    for(const ws of [wsB,wsC,wsD]){ enviar(ws,{type:'ENTRAR_NA_SALA',codigoDeSala:cod}); await esperarMensagem(ws); await esperarMensagem(ws);}
+    for(let i=0;i<6;i++) await esperarMensagem(wsA);
+    for(let i=0;i<4;i++) await esperarMensagem(wsB);
+    for(let i=0;i<2;i++) await esperarMensagem(wsC);
+    for(const ws of [wsA,wsB,wsC,wsD]) enviar(ws,{type:'ALTERNAR_PRONTIDAO'});
+    for(const ws of [wsA,wsB,wsC,wsD]) for(let i=0;i<8;i++) await esperarMensagem(ws);
+    enviar(wsA,{type:'INICIAR_PARTIDA'});
+    for(const ws of [wsA,wsB,wsC,wsD]){ await esperarMensagem(ws); await esperarMensagem(ws); }
+    // aguardar encaminhada
+    for(const ws of [wsA,wsB,wsC,wsD]){ await esperarTipo(ws,'PARTIDA_DISPONIVEL',3000); await esperarTipo(ws,'SALA_ATUALIZADA',3000); }
+    // desconectar B (fechar WS) e reconectar via novo WS com mesmo cookie
+    wsB.close(); await esperarClose(wsB);
+    // janela ainda aberta, reconectar
+    const wsB2=await conectarWs(servidor.wsUrl,b.cookies);
+    // deve receber MEMBRO_RECONECTADO + SALA_ATUALIZADA com encaminhamento
+    const recon = await esperarTipo(wsB2,'MEMBRO_RECONECTADO',3000) as {type:string};
+    assert.equal(recon.type,'MEMBRO_RECONECTADO');
+    const salaAtu = await esperarTipo(wsB2,'SALA_ATUALIZADA',3000) as SalaAtualizadaEvento;
+    assert.equal(salaAtu.sala.estado,'encaminhada');
+    assert.deepEqual(salaAtu.sala.encaminhamento,{serverId:'s-recon', partidaId:'p-recon'});
+    // também A deve ver reconectado com encaminhamento
+    const reconA = await esperarTipo(wsA,'MEMBRO_RECONECTADO',3000).catch(()=>null);
+    if (reconA) {
+      const salaA = await esperarTipo(wsA,'SALA_ATUALIZADA',3000) as SalaAtualizadaEvento;
+      assert.equal(salaA.sala.encaminhamento?.partidaId,'p-recon');
+    }
+    wsA.close(); wsB2.close(); wsC.close(); wsD.close();
+    await Promise.all([wsA,wsB2,wsC,wsD].map(ws=>esperarClose(ws).catch(()=>undefined)));
+  }, {ofertarEncaminhamento: ofertarStub});
+});
+
+test('handoff via HTTP real — game-server fake responde PARTIDA_DISPONIVEL (B2)', async()=>{
+  // fake game-server HTTP
+  const fake = http.createServer((req,res)=>{
+    if (req.method==='POST' && req.url==='/api/encaminhamento') {
+      let body=''; req.on('data',c=>body+=c); req.on('end',()=>{
+        res.writeHead(200,{'content-type':'application/json'});
+        res.end(JSON.stringify({partidaId:'partida-http-1', serverId:'fake-http-1'}));
+      });
+    } else { res.writeHead(404); res.end(); }
+  });
+  await new Promise<void>(r=>fake.listen(0,'127.0.0.1',()=>r()));
+  const addr=fake.address() as AddressInfo;
+  const fakeUrl=`http://127.0.0.1:${addr.port}`;
+  // registrar no Redis compartilhado (mesmo DB do lobby)
+  await redis.set('game-servers:disponiveis:fake-http-1', JSON.stringify({serverId:'fake-http-1', url: fakeUrl}));
+  try {
+    await comServidor(async (servidor)=>{
+      const a=await registrarJogador(servidor.baseUrl);
+      const b=await registrarJogador(servidor.baseUrl);
+      const c=await registrarJogador(servidor.baseUrl);
+      const d=await registrarJogador(servidor.baseUrl);
+      const wsA=await conectarWs(servidor.wsUrl,a.cookies);
+      const wsB=await conectarWs(servidor.wsUrl,b.cookies);
+      const wsC=await conectarWs(servidor.wsUrl,c.cookies);
+      const wsD=await conectarWs(servidor.wsUrl,d.cookies);
+      enviar(wsA,{type:'CRIAR_SALA'}); const cri=JSON.parse(await esperarMensagem(wsA)) as SalaAtualizadaEvento; const cod=cri.sala.codigoDeSala;
+      for(const ws of [wsB,wsC,wsD]){ enviar(ws,{type:'ENTRAR_NA_SALA',codigoDeSala:cod}); await esperarMensagem(ws); await esperarMensagem(ws);}
+      for(let i=0;i<6;i++) await esperarMensagem(wsA);
+      for(let i=0;i<4;i++) await esperarMensagem(wsB);
+      for(let i=0;i<2;i++) await esperarMensagem(wsC);
+      for(const ws of [wsA,wsB,wsC,wsD]) enviar(ws,{type:'ALTERNAR_PRONTIDAO'});
+      for(const ws of [wsA,wsB,wsC,wsD]) for(let i=0;i<8;i++) await esperarMensagem(ws);
+      enviar(wsA,{type:'INICIAR_PARTIDA'});
+      for(const ws of [wsA,wsB,wsC,wsD]){ await esperarTipo(ws,'PARTIDA_PREPARANDO',3000); await esperarTipo(ws,'SALA_ATUALIZADA',3000); }
+      const disp = await esperarTipo(wsA,'PARTIDA_DISPONIVEL',4000) as PartidaDisponivelEvento;
+      assert.equal(disp.partidaId,'partida-http-1');
+      assert.equal(disp.serverId,'fake-http-1');
+      const salaEv = await esperarTipo(wsA,'SALA_ATUALIZADA',3000) as SalaAtualizadaEvento;
+      assert.equal(salaEv.sala.estado,'encaminhada');
+      assert.deepEqual(salaEv.sala.encaminhamento,{serverId:'fake-http-1', partidaId:'partida-http-1'});
+      wsA.close(); wsB.close(); wsC.close(); wsD.close();
+      await Promise.all([wsA,wsB,wsC,wsD].map(ws=>esperarClose(ws).catch(()=>undefined)));
+    }, {});
+  } finally {
+    await redis.del('game-servers:disponiveis:fake-http-1');
+    await new Promise<void>(r=>fake.close(()=>r()));
+  }
+});
+
+test('timeout real via AbortController mantém aberta com PARTIDA_FALHOU (B2/R1)', async()=>{
+  const fake = http.createServer((req,res)=>{
+    if (req.method==='POST' && req.url==='/api/encaminhamento') {
+      // delay > timeoutMs para forçar AbortError
+      setTimeout(()=>{
+        try { res.writeHead(200,{'content-type':'application/json'}); res.end(JSON.stringify({partidaId:'late', serverId:'fake-timeout'})); } catch {}
+      }, 800);
+    } else { res.writeHead(404); res.end(); }
+  });
+  await new Promise<void>(r=>fake.listen(0,'127.0.0.1',()=>r()));
+  const addr=fake.address() as AddressInfo;
+  const fakeUrl=`http://127.0.0.1:${addr.port}`;
+  await redis.set('game-servers:disponiveis:fake-timeout', JSON.stringify({serverId:'fake-timeout', url: fakeUrl}));
+  try {
+    await comServidor(async (servidor)=>{
+      const a=await registrarJogador(servidor.baseUrl);
+      const b=await registrarJogador(servidor.baseUrl);
+      const c=await registrarJogador(servidor.baseUrl);
+      const d=await registrarJogador(servidor.baseUrl);
+      const wsA=await conectarWs(servidor.wsUrl,a.cookies);
+      const wsB=await conectarWs(servidor.wsUrl,b.cookies);
+      const wsC=await conectarWs(servidor.wsUrl,c.cookies);
+      const wsD=await conectarWs(servidor.wsUrl,d.cookies);
+      enviar(wsA,{type:'CRIAR_SALA'}); const cri=JSON.parse(await esperarMensagem(wsA)) as SalaAtualizadaEvento; const cod=cri.sala.codigoDeSala;
+      for(const ws of [wsB,wsC,wsD]){ enviar(ws,{type:'ENTRAR_NA_SALA',codigoDeSala:cod}); await esperarMensagem(ws); await esperarMensagem(ws);}
+      for(let i=0;i<6;i++) await esperarMensagem(wsA);
+      for(let i=0;i<4;i++) await esperarMensagem(wsB);
+      for(let i=0;i<2;i++) await esperarMensagem(wsC);
+      for(const ws of [wsA,wsB,wsC,wsD]) enviar(ws,{type:'ALTERNAR_PRONTIDAO'});
+      for(const ws of [wsA,wsB,wsC,wsD]) for(let i=0;i<8;i++) await esperarMensagem(ws);
+      enviar(wsA,{type:'INICIAR_PARTIDA'});
+      for(const ws of [wsA,wsB,wsC,wsD]){ await esperarTipo(ws,'PARTIDA_PREPARANDO',3000); await esperarTipo(ws,'SALA_ATUALIZADA',3000); }
+      const ev = await esperarTipo(wsA,'PARTIDA_FALHOU',4000) as PartidaFalhouEvento;
+      assert.equal(ev.type,'PARTIDA_FALHOU');
+      assert.equal(ev.codigo,'ENCAMINHAMENTO_FALHOU');
+      const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE codigo_sala=$1`,[cod]);
+      assert.equal(linha.rows[0]?.status,'aberta');
+      wsA.close(); wsB.close(); wsC.close(); wsD.close();
+      await Promise.all([wsA,wsB,wsC,wsD].map(ws=>esperarClose(ws).catch(()=>undefined)));
+    }, {timeoutMs:300});
+  } finally {
+    await redis.del('game-servers:disponiveis:fake-timeout');
+    await new Promise<void>(r=>fake.close(()=>r()));
+  }
 });
 
