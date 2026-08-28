@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import type { AuthFieldErrors } from '../api/auth'
 import { useAuth } from '../state/useAuth'
 import { AuthCard } from '../components/auth/AuthCard'
 import { AuthField } from '../components/auth/AuthField'
@@ -18,14 +19,14 @@ export function CadastroPage() {
     event.preventDefault()
     const ok = await submit(
       () => {
-        const erros: Record<string, string> = {}
+        const erros: AuthFieldErrors = {}
         const e1 = validarApelido(apelido)
         if (e1) erros.apelido = e1
         const e2 = validarEmailCadastro(email)
         if (e2) erros.email = e2
         const e3 = validarSenhaCadastro(senha)
         if (e3) erros.senha = e3
-        return Object.keys(erros).length > 0 ? (erros as never) : null
+        return Object.keys(erros).length > 0 ? erros : null
       },
       () => register({ apelido: apelido.trim(), email: email.trim(), senha }),
     )

@@ -23,12 +23,15 @@ export function useAuthForm() {
     setIsSubmitting(true)
     setFieldErrors({})
     setGeneralError(null)
-    const result = await action()
-    setIsSubmitting(false)
-    if (result.ok) return true
-    setFieldErrors(result.fieldErrors ?? {})
-    if (result.generalError) setGeneralError(result.generalError)
-    return false
+    try {
+      const result = await action()
+      if (result.ok) return true
+      setFieldErrors(result.fieldErrors ?? {})
+      if (result.generalError) setGeneralError(result.generalError)
+      return false
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return {

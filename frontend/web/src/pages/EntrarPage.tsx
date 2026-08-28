@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import type { AuthFieldErrors } from '../api/auth'
 import { useAuth } from '../state/useAuth'
 import { AuthCard } from '../components/auth/AuthCard'
 import { AuthField } from '../components/auth/AuthField'
@@ -24,12 +25,12 @@ export function EntrarPage() {
     event.preventDefault()
     const ok = await submit(
       () => {
-        const erros: Record<string, string> = {}
+        const erros: AuthFieldErrors = {}
         const e1 = validarEmailCredenciais(email)
         if (e1) erros.email = e1
         const e2 = validarSenhaCredenciais(senha)
         if (e2) erros.senha = e2
-        return Object.keys(erros).length > 0 ? (erros as never) : null
+        return Object.keys(erros).length > 0 ? erros : null
       },
       () => entrarComCredenciais({ email: email.trim(), senha }),
     )

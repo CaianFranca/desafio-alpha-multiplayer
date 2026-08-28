@@ -91,7 +91,8 @@ function parseAuthErrors(body: unknown): { fieldErrors: AuthFieldErrors; general
         if (!generalError) generalError = item.mensagem
       }
     }
-    return { fieldErrors, generalError }
+    if (Object.keys(fieldErrors).length > 0 || generalError) return { fieldErrors, generalError }
+    return { fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.' }
   }
   if (body !== null && typeof body === 'object' && 'erros' in body) {
     const raw = (body as AuthErrorResponse).erros
