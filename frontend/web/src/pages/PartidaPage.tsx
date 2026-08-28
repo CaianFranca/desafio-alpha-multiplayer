@@ -12,17 +12,22 @@ interface PartidaPageProps {
 }
 
 export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
-  const { estado, tentarNovamente, forcarEstado } = usePartidaTela({ estadoInicial, loader })
   const [searchParams] = useSearchParams()
   const param = searchParams.get('partidaEstado')
-  const estadoDev = isEstadoDaTela(param) ? param : null
-  const estadoEfetivo = estadoDev ?? estado
+  // ?partidaEstado é initialOnly — lido só no mount; após isso, estado interno (toolbar/retry) governa.
+  // Prioridade: URL > prop > default do hook. Define initialOnce para permitir toolbar alterar depois.
+  const estadoViaUrl = isEstadoDaTela(param) ? (param as EstadoDaTela) : null
+  const estadoInicialEfetivo = estadoViaUrl ?? estadoInicial
+  const { estado, tentarNovamente, forcarEstado } = usePartidaTela({
+    estadoInicial: estadoInicialEfetivo,
+    loader,
+  })
 
   // Acoplado ao header de App.tsx (5rem); remover/trocar por h-screen quando Partida deixar de ser filha de App
   return (
     <div className="relative min-h-[calc(100vh-5rem)] w-full overflow-hidden">
       <AmbienteDeJogo />
-      <PartidaOverlays estado={estadoEfetivo} onRetry={tentarNovamente} />
+      <PartidaOverlays estado={estado} onRetry={tentarNovamente} />
       <PartidaMoldura />
       {import.meta.env.DEV && <PartidaDevToolbar onForcar={forcarEstado} />}
     </div>
