@@ -30,6 +30,10 @@ export interface CriarContextoOpcoes {
   readonly revalidarSessao?: (sessaoId: string, jogadorId: string) => Promise<boolean>;
   readonly gerarCodigo?: () => string;
   readonly janelaReconexaoMs?: number;
+  readonly ofertarEncaminhamento?: (oferta: import('@flicker/shared').OfertaDeEncaminhamento) => Promise<import('@flicker/shared').AceiteDoEncaminhamento>;
+  readonly cancelarPartida?: (serverId: string, partidaId: string, motivo: string, serverUrl?: string) => Promise<void>;
+  readonly redis?: import('ioredis').Redis;
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -62,6 +66,10 @@ export function criarContextoDasSalas(
     revalidarSessao,
     gerarCodigo: opcoes.gerarCodigo,
     janelaReconexaoMs: opcoes.janelaReconexaoMs,
+    ofertarEncaminhamento: opcoes.ofertarEncaminhamento,
+    cancelarPartida: opcoes.cancelarPartida,
+    redis: opcoes.redis,
+    timeoutMs: opcoes.timeoutMs,
   });
 
   return { estado, projecao, broadcast, handlers, repo, reconexao };

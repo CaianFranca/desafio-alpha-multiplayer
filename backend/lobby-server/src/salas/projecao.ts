@@ -44,6 +44,7 @@ export interface SalaEstadoProjecao {
   readonly proximaOrdemDeEntrada: number;
   readonly consistente: boolean;
   readonly membros: readonly MembroEstadoProjecao[];
+  readonly encaminhamento?: { serverId: string; partidaId: string };
 }
 
 function chaveSalaEstado(salaId: string): string {
@@ -69,7 +70,10 @@ export function chaveJogadorSala(jogadorId: string): string {
  * Único ponto de tradução engine→projeção; usado pela reconstrução do boot
  * (`SalasState.carregar`) e pelas mutações (`SalasHandlers`).
  */
-export function serializarSala(sala: SalaDominio): SalaEstadoProjecao {
+export function serializarSala(
+  sala: SalaDominio,
+  encaminhamento?: { serverId: string; partidaId: string },
+): SalaEstadoProjecao {
   const membros: MembroEstadoProjecao[] = sala.membros
     .filter((m) => m.estado === 'ativo')
     .map((m) => ({
@@ -80,7 +84,7 @@ export function serializarSala(sala: SalaDominio): SalaEstadoProjecao {
       presenca: m.presenca,
       anfitriao: sala.anfitriaoId === m.id,
     }));
-  return {
+  const base: SalaEstadoProjecao = {
     id: sala.id,
     codigo: sala.codigo,
     estado: sala.estado,
@@ -89,6 +93,22 @@ export function serializarSala(sala: SalaDominio): SalaEstadoProjecao {
     consistente: sala.consistente,
     membros,
   };
+  if (encaminhamento) {
+    return { ...base, encaminhamento };
+  }
+  return base;
+}
+
+export async function definirEncaminhamentoNaProjecao(
+  projecao: SalasProjecao,
+  salaId: string,
+  serverId: string,
+  partidaId: string,
+): Promise<void> {
+  const atual = await projecao.obterEstadoSala(salaId);
+  if (atual) {
+    await projecao.definirEstadoSala(salaId, { ...atual, estado: 'encaminhada', encaminhamento: { serverId, partidaId } });
+  }
 }
 
 export class SalasProjecao {

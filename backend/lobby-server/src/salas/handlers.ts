@@ -35,6 +35,13 @@ import type {
   ErroDaSalaEvento,
   CodigoDeErroDaSala,
   MensagemDeChatEvento,
+  OfertaDeEncaminhamento,
+  AceiteDoEncaminhamento,
+  PartidaPreparandoEvento,
+  PartidaDisponivelEvento,
+  PartidaRecusadaEvento,
+  PartidaFalhouEvento,
+  MembroDaSala,
 } from '@flicker/shared';
 import {
   CodigoDeSalaIndisponivelError,
@@ -47,12 +54,16 @@ import { SalasProjecao, serializarSala } from './projecao.ts';
 import { SalasBroadcaster } from './broadcast.ts';
 import { SalasState } from './estado.ts';
 import {
+  mapearSala,
   traduzirEventos,
   type ApelidoPorJogadorId,
 } from './eventos.ts';
 import { SalasReconexao, JANELA_RECONEXAO_SEGUNDOS } from './reconexao.ts';
 import { getConfig } from '@flicker/config';
 import type { AuthenticatedWebSocket } from '../ws/ws.ts';
+import { listarGameServersDisponiveis as listarGameServersShared } from '@flicker/shared';
+import type { Redis } from 'ioredis';
+import { redisClient as defaultRedis } from '../config/redis.ts';
 
 const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
   'DADOS_INVALIDOS',
@@ -69,6 +80,8 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
   'JOGADOR_EXPULSO',
   'JOGADOR_NAO_BLOQUEADO',
   'SALA_INCONSISTENTE',
+  'SALA_ENCAMINHADA',
+  'ENCAMINHAMENTO_INVALIDO',
 ]);
 
 /** Tamanho máximo de uma mensagem de chat (issue #34). Sem trim. */
@@ -134,6 +147,11 @@ export interface SalasHandlersDeps {
   readonly gerarCodigo?: () => string;
   /** Janela de reconexão em ms — injetável para testes (default 60000). */
   readonly janelaReconexaoMs?: number;
+  /** Injetável para handoff — nos testes substitui o fetch real. */
+  readonly ofertarEncaminhamento?: (oferta: OfertaDeEncaminhamento) => Promise<AceiteDoEncaminhamento>;
+  readonly cancelarPartida?: (serverId: string, partidaId: string, motivo: string, serverUrl?: string) => Promise<void>;
+  readonly redis?: Redis;
+  readonly timeoutMs?: number;
 }
 
 export class SalasHandlers {
@@ -146,6 +164,11 @@ export class SalasHandlers {
   private readonly revalidarSessao: (sessaoId: string, jogadorId: string) => Promise<boolean>;
   private readonly gerarCodigo: () => string;
   private readonly janelaReconexaoMs: number;
+  private readonly ofertarEncaminhamentoInjetado?: (oferta: OfertaDeEncaminhamento) => Promise<AceiteDoEncaminhamento>;
+  private readonly cancelarPartidaInjetado?: (serverId: string, partidaId: string, motivo: string, serverUrl?: string) => Promise<void>;
+  private readonly redis: Redis;
+  private readonly timeoutMs: number;
+  private readonly encaminhamentosEmVoo: Set<string> = new Set();
   // O lobby da #36 é mononodo. Serializar as mutações evita que dois awaits
   // de persistência confirmem candidatos calculados sobre o mesmo estado.
   private cadeiaDeMutacoes: Promise<void> = Promise.resolve();
@@ -161,6 +184,10 @@ export class SalasHandlers {
     this.revalidarSessao = deps.revalidarSessao;
     this.gerarCodigo = deps.gerarCodigo ?? gerarCodigoDeSala;
     this.janelaReconexaoMs = deps.janelaReconexaoMs ?? JANELA_RECONEXAO_SEGUNDOS * 1000;
+    this.ofertarEncaminhamentoInjetado = deps.ofertarEncaminhamento;
+    this.cancelarPartidaInjetado = deps.cancelarPartida;
+    this.redis = deps.redis ?? defaultRedis;
+    this.timeoutMs = deps.timeoutMs ?? 5000;
   }
 
 /**
@@ -224,6 +251,9 @@ export class SalasHandlers {
             return;
           case 'ENCERRAR_SALA':
             await this.handleEncerrarSala(socket, jogadorId);
+            return;
+          case 'INICIAR_PARTIDA':
+            await this.handleIniciarPartida(socket, jogadorId);
             return;
           default:
             this.enviarErro(
@@ -726,6 +756,10 @@ export class SalasHandlers {
       );
       return;
     }
+    if (this.salaEstaEncaminhada(salaId)) {
+      this.enviarErro(socket, 'SALA_ENCERRADA', 'A Sala está encaminhada e sua composição está congelada.');
+      return;
+    }
 
     const resultado = this.estado.aplicar({
       tipo: 'alternar_prontidao',
@@ -836,6 +870,263 @@ export class SalasHandlers {
     this.broadcast.removerPorSala(salaId);
   }
 
+  // --- Encaminhamento (issue #48) ---
+
+  private async handleIniciarPartida(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+  ): Promise<void> {
+    // Resolver sala do anfitrião
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      salaId = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (salaId !== null) await this.projecao.definirAssociacaoJogador(jogadorId, salaId);
+      // fallback para ativa (encaminhada) para mensagem de erro correta
+      if (salaId === null && typeof (this.repo as unknown as { obterSalaAtivaDoJogador?: (id: string) => Promise<string | null> }).obterSalaAtivaDoJogador === 'function') {
+        salaId = await (this.repo as unknown as { obterSalaAtivaDoJogador: (id: string) => Promise<string | null> }).obterSalaAtivaDoJogador(jogadorId);
+        if (salaId !== null) await this.projecao.definirAssociacaoJogador(jogadorId, salaId);
+      }
+    }
+    if (salaId === null) {
+      this.enviarErro(socket, 'MEMBRO_NAO_ENCONTRADO', 'O Jogador não está associado a nenhuma Sala.');
+      return;
+    }
+
+    const salaInfo = this.estado.abertas.get(salaId);
+    if (salaInfo === undefined) {
+      this.enviarErro(socket, 'SALA_NAO_ENCONTRADA', 'Sala não encontrada no servidor.');
+      return;
+    }
+
+    // Trava em voo
+    if (this.encaminhamentosEmVoo.has(salaId)) {
+      this.enviarErro(socket, 'DADOS_INVALIDOS', 'Já existe um encaminhamento em andamento para esta Sala.');
+      return;
+    }
+
+    // Bloqueio se já encaminhada
+    if (salaInfo.sala.estado === 'encaminhada') {
+      this.enviarErro(socket, 'SALA_ENCERRADA', 'A Sala já foi encaminhada.');
+      return;
+    }
+
+    const anfitriaoMembroId = salaInfo.sala.anfitriaoId;
+    if (anfitriaoMembroId === null) {
+      this.enviarErro(socket, 'DADOS_INVALIDOS', 'Sala sem Anfitrião definido.');
+      return;
+    }
+    if (!this.anfitriaoEstaAutorizando(socket, jogadorId, salaInfo.sala)) {
+      return;
+    }
+
+    const resultado = this.estado.aplicar({
+      tipo: 'encaminhar_sala',
+      salaId,
+      anfitriaoMembroId,
+    } as never);
+
+    if (!resultado.sucesso) {
+      this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
+      return;
+    }
+
+    // engine encaminhar_sala não altera estado, apenas emite encaminhamento_iniciado
+    this.estado.substituirEstado(resultado.estado);
+    await this.atualizarProjecaoEstado(resultado.estado, salaId);
+
+    // Broadcast PARTIDA_PREPARANDO para todos
+    const preparando: PartidaPreparandoEvento = { type: 'PARTIDA_PREPARANDO' };
+    (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, preparando);
+    // Também traduzir eventos do engine (inclui SALA_ATUALIZADA)
+    const evs = traduzirEventos(resultado.eventos, resultado.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+    // filtrar duplicado de PARTIDA_PREPARANDO vindo do traduzir (já enviamos)
+    for (const ev of evs) {
+      if ((ev as { type: string }).type !== 'PARTIDA_PREPARANDO') {
+        (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, ev);
+      }
+    }
+
+    this.encaminhamentosEmVoo.add(salaId);
+
+    // Construir roster para handoff — ordenar por ordemDeEntrada
+    const sala = this.estado.abertas.get(salaId)?.sala ?? salaInfo.sala;
+    const membrosAtivosOrdenados = [...sala.membros]
+      .filter((m) => m.estado === 'ativo')
+      .sort((a, b) => a.ordemDeEntrada - b.ordemDeEntrada);
+
+    const roster: [MembroDaSala, MembroDaSala, MembroDaSala, MembroDaSala] = membrosAtivosOrdenados.slice(0, 4).map((m) => ({
+      id: m.id,
+      jogadorId: m.jogadorId,
+      apelido: this.estado.apelidoPorJogadorId.get(m.jogadorId) ?? '',
+      ordemDeEntrada: m.ordemDeEntrada,
+      presenca: m.presenca,
+      prontidao: m.pronto,
+    })) as unknown as [MembroDaSala, MembroDaSala, MembroDaSala, MembroDaSala];
+
+    const oferta: OfertaDeEncaminhamento = {
+      salaId,
+      codigoDeSala: sala.codigo,
+      roster,
+    };
+
+    // Handoff assíncrono fora da cadeiaDeMutacoes (protegido pela trava em voo)
+    void this.executarHandoff(salaId, oferta);
+  }
+
+  private async executarHandoff(salaId: string, oferta: OfertaDeEncaminhamento): Promise<void> {
+    let aceite: AceiteDoEncaminhamento | null = null;
+    let gameServerUrl: string | undefined;
+    let gameServerId: string | undefined;
+    let erroKind: 'recusa' | 'falhou' | null = null;
+    let erroMotivo = '';
+    let erroCodigo: string = 'ENCAMINHAMENTO_RECUSADO';
+    try {
+      if (this.ofertarEncaminhamentoInjetado) {
+        aceite = await this.ofertarEncaminhamentoInjetado(oferta);
+        gameServerId = aceite.serverId;
+      } else {
+        const disponiveis = await listarGameServersShared(this.redis);
+        if (disponiveis.length === 0) {
+          erroKind = 'recusa';
+          erroMotivo = 'Nenhum game-server disponível';
+          erroCodigo = 'ENCAMINHAMENTO_RECUSADO';
+        } else {
+          const escolhido = disponiveis[Math.floor(Math.random() * disponiveis.length)]!;
+          gameServerId = escolhido.serverId;
+          const baseUrl = (escolhido.url as string | undefined) ?? (escolhido.host && escolhido.port ? `http://${escolhido.host}:${escolhido.port}` : undefined);
+          if (!baseUrl) {
+            erroKind = 'recusa';
+            erroMotivo = 'Game-server sem URL';
+          } else {
+            gameServerUrl = baseUrl;
+            const url = `${baseUrl.replace(/\/$/, '')}/api/encaminhamento`;
+            const controller = new AbortController();
+            const t = setTimeout(() => controller.abort(), this.timeoutMs);
+            try {
+              const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(oferta),
+                signal: controller.signal,
+              });
+              if (resp.ok) {
+                const body = (await resp.json()) as { partidaId: string; serverId: string };
+                aceite = { partidaId: body.partidaId, serverId: body.serverId };
+                gameServerId = body.serverId;
+                gameServerUrl = baseUrl;
+              } else if (resp.status === 409 || resp.status === 400) {
+                erroKind = 'recusa';
+                try {
+                  const body = (await resp.json()) as { codigo?: string; motivo?: string };
+                  erroMotivo = body.motivo ?? `recusa ${resp.status}`;
+                  erroCodigo = body.codigo ?? 'ENCAMINHAMENTO_RECUSADO';
+                } catch {
+                  erroMotivo = `recusa ${resp.status}`;
+                }
+              } else {
+                erroKind = 'falhou';
+                erroMotivo = `game-server respondeu ${resp.status}`;
+                erroCodigo = 'ENCAMINHAMENTO_FALHOU';
+              }
+            } catch (e) {
+              const isAbort = (e as Error).name === 'AbortError';
+              erroKind = 'falhou';
+              erroMotivo = isAbort ? 'timeout ao contatar game-server' : (e as Error).message;
+              erroCodigo = 'ENCAMINHAMENTO_FALHOU';
+            } finally {
+              clearTimeout(t);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      const rec = e as { codigo?: string; motivo?: string; message?: string };
+      if (rec?.codigo === 'ENCAMINHAMENTO_RECUSADO' || rec?.codigo === 'ROSTER_INVALIDO') {
+        erroKind = 'recusa';
+        erroMotivo = rec.motivo ?? rec.message ?? 'encaminhamento recusado';
+        erroCodigo = rec.codigo;
+      } else {
+        erroKind = 'falhou';
+        erroMotivo = (e as Error).message;
+        erroCodigo = 'ENCAMINHAMENTO_FALHOU';
+      }
+    }
+
+    // Finalizar dentro da cadeiaDeMutacoes
+    await this.enfileirarMutacao(async () => {
+      try {
+        if (aceite) {
+          const resAceite = this.estado.aplicar({ tipo: 'aceitar_encaminhamento', salaId } as never);
+          if (resAceite.sucesso) {
+            await this.repo.persistirEncaminhamento(salaId, aceite.serverId, aceite.partidaId);
+            this.estado.substituirEstado(resAceite.estado);
+            // atualizar projeção com encaminhamento
+            const salaDomain = resAceite.estado.salas.find((s) => s.id === salaId);
+            if (salaDomain) {
+              await this.projecao.definirEstadoSala(salaId, serializarSala(salaDomain, { serverId: aceite.serverId, partidaId: aceite.partidaId }));
+            }
+            const disponivel: PartidaDisponivelEvento = { type: 'PARTIDA_DISPONIVEL', partidaId: aceite.partidaId, serverId: aceite.serverId };
+            (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, disponivel);
+            // SALA_ATUALIZADA com snapshot encaminhada
+            const salaAtual = this.estado.abertas.get(salaId)?.sala;
+            if (salaAtual) {
+              const salaWire = mapearSala(salaAtual, this.estado.apelidoPorJogadorId, this.linkBase, { serverId: aceite.serverId, partidaId: aceite.partidaId });
+              (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaWire });
+            } else {
+              const evs2 = traduzirEventos(resAceite.eventos, resAceite.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+              for (const ev of evs2) (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, ev);
+            }
+          } else {
+            // Revalidação falhou — composição mudou, cancelar partida
+            try {
+              if (this.cancelarPartidaInjetado) {
+                await this.cancelarPartidaInjetado(aceite.serverId, aceite.partidaId, 'composicao alterada', gameServerUrl);
+              } else if (gameServerUrl) {
+                const url = `${gameServerUrl.replace(/\/$/, '')}/api/encaminhamento/${aceite.partidaId}`;
+                await fetch(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ partidaId: aceite.partidaId, motivo: 'composicao alterada' }) }).catch(() => undefined);
+              }
+            } catch {}
+            // registrar falha no engine para emitir evento correspondente? mantemos aberta com PARTIDA_FALHOU
+            const resFalha = this.estado.aplicar({ tipo: 'registrar_falha_do_encaminhamento', salaId } as never);
+            if (resFalha.sucesso) {
+              this.estado.substituirEstado(resFalha.estado);
+              await this.atualizarProjecaoEstado(resFalha.estado, salaId);
+            }
+            const falhou: PartidaFalhouEvento = { type: 'PARTIDA_FALHOU', codigo: 'ENCAMINHAMENTO_FALHOU', motivo: resAceite.erro?.mensagem ?? 'composicao alterada — partida cancelada' };
+            (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, falhou);
+            const evs3 = traduzirEventos(resFalha.sucesso ? resFalha.eventos : [], resFalha.sucesso ? resFalha.estado : this.estado.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+            for (const ev of evs3) {
+              if ((ev as { type: string }).type !== 'PARTIDA_FALHOU') (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, ev);
+            }
+          }
+        } else if (erroKind === 'recusa') {
+          const resRecusa = this.estado.aplicar({ tipo: 'recusar_encaminhamento', salaId } as never);
+          if (resRecusa.sucesso) {
+            this.estado.substituirEstado(resRecusa.estado);
+            await this.atualizarProjecaoEstado(resRecusa.estado, salaId);
+          }
+          const recusada: PartidaRecusadaEvento = { type: 'PARTIDA_RECUSADA', codigo: erroCodigo as never, motivo: erroMotivo || 'encaminhamento recusado' };
+          (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, recusada);
+        } else {
+          const resFalha = this.estado.aplicar({ tipo: 'registrar_falha_do_encaminhamento', salaId } as never);
+          if (resFalha.sucesso) {
+            this.estado.substituirEstado(resFalha.estado);
+            await this.atualizarProjecaoEstado(resFalha.estado, salaId);
+          }
+          const falhou: PartidaFalhouEvento = { type: 'PARTIDA_FALHOU', codigo: erroCodigo as never, motivo: erroMotivo || 'falha ao encaminhar' };
+          (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, falhou);
+        }
+      } finally {
+        this.encaminhamentosEmVoo.delete(salaId);
+      }
+    });
+  }
+
+  private salaEstaEncaminhada(salaId: string): boolean {
+    const info = this.estado.abertas.get(salaId);
+    return info?.sala.estado === 'encaminhada';
+  }
+
   /**
    * Chat da Sala (issue #34). Roteia pela `cadeiaDeMutacoes` como os demais
    * comandos (serialização mononodo), mas não toca o engine — o chat é
@@ -882,6 +1173,10 @@ export class SalasHandlers {
     }
 
     const infoSala = this.estado.abertas.get(salaId);
+    if (infoSala?.sala.estado === 'encaminhada') {
+      this.enviarErro(socket, 'SALA_ENCERRADA', 'A Sala está encaminhada e não aceita mais mensagens.');
+      return;
+    }
     const membro = infoSala?.sala.membros.find((m) => m.jogadorId === jogadorId);
     if (membro === undefined) {
       this.enviarErro(
@@ -901,7 +1196,7 @@ export class SalasHandlers {
     };
 
     await this.projecao.adicionarMensagemDeChat(salaId, evento);
-    this.broadcast.enviar(salaId, evento);
+    this.broadcast.enviar(salaId, evento as unknown as SalaEventoDoServidor);
   }
 
   /**
@@ -1235,12 +1530,18 @@ export class SalasHandlers {
     if (sala === undefined) {
       return;
     }
-    await this.projecao.definirEstadoSala(salaId, serializarSala(sala));
+    // Preservar encaminhamento já armazenado na projeção (se a sala já foi encaminhada)
+    const atual = await this.projecao.obterEstadoSala(salaId);
+    if (atual?.encaminhamento && sala.estado === 'encaminhada') {
+      await this.projecao.definirEstadoSala(salaId, serializarSala(sala, atual.encaminhamento));
+    } else {
+      await this.projecao.definirEstadoSala(salaId, serializarSala(sala));
+    }
   }
 
-  private difundir(eventos: readonly SalaEventoDoServidor[], salaId: string): void {
+  private difundir(eventos: readonly unknown[], salaId: string): void {
     for (const evento of eventos) {
-      this.broadcast.enviar(salaId, evento);
+      (this.broadcast as unknown as { enviar: (id: string, ev: unknown) => void }).enviar(salaId, evento);
     }
   }
 
