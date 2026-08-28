@@ -1,0 +1,114 @@
+// Protocolo WS do Tabuleiro — DTOs tipados compartilhados via @flicker/shared.
+// Vocabulário canônico: Tabuleiro, Célula, Peça, Orientação, Sentido de Rotação, Reserva, Manipulação, Finalização.
+// Apenas type/interface, sem runtime, sem validação, sem dependência de @flicker/engine.
+//
+// Fronteira shared (DTO de transporte) vs engine (domínio): propositalmente
+// divergem para desacoplar wire do modelo interno. Sync manual quando engine evolui.
+//   shared type:'SELECIONAR_PECA'       <-> engine tipo:'selecionar_peca' (UPPER_SNAKE no wire, snake no domínio)
+//   shared type:'GIRAR_PECA'            <-> engine tipo:'girar_peca'
+//   shared type:'POSICIONAR_PECA'       <-> engine tipo:'posicionar_peca'
+//   shared type:'FINALIZAR_MANIPULACAO' <-> engine tipo:'finalizar_manipulacao'
+//   shared Celula{linha,coluna} (0-6)    <-> engine Celula{linha,coluna}
+//   shared Orientacao 0|90|180|270       <-> engine Orientacao idem
+//   shared SentidoDeRotacao 'horario'|'anti_horario' <-> engine SentidoDeRotacao idem
+//   shared PecaId string opaca           <-> engine PecaDaReserva.pecaId / PecaPosicionada.pecaId
+//   shared client camelCase (pecaId, celula, sentido) vs engine snake (pecaId, celula.linha)
+// Ver ADR-0004 para grade 7x7 e vizinhança ortogonal.
+
+// --- Tipos base ---
+
+export type Orientacao = 0 | 90 | 180 | 270;
+
+export type SentidoDeRotacao = 'horario' | 'anti_horario';
+
+export interface Celula {
+  readonly linha: number;
+  readonly coluna: number;
+}
+
+export type PecaId = string;
+
+// --- Comandos cliente → servidor (4) ---
+
+export interface SelecionarPecaComando {
+  readonly type: 'SELECIONAR_PECA';
+  readonly pecaId: PecaId;
+}
+
+export interface GirarPecaComando {
+  readonly type: 'GIRAR_PECA';
+  readonly pecaId: PecaId;
+  readonly sentido: SentidoDeRotacao;
+}
+
+export interface PosicionarPecaComando {
+  readonly type: 'POSICIONAR_PECA';
+  readonly pecaId: PecaId;
+  readonly celula: Celula;
+}
+
+export interface FinalizarManipulacaoComando {
+  readonly type: 'FINALIZAR_MANIPULACAO';
+}
+
+export type TabuleiroComandoDoCliente =
+  | SelecionarPecaComando
+  | GirarPecaComando
+  | PosicionarPecaComando
+  | FinalizarManipulacaoComando;
+
+// --- Eventos servidor → cliente (5 + erro) ---
+
+export interface PecaSelecionadaEvento {
+  readonly type: 'PECA_SELECIONADA';
+  readonly pecaId: PecaId;
+}
+
+export interface PecaDeselecionadaEvento {
+  readonly type: 'PECA_DESELECIONADA';
+  readonly pecaId: PecaId;
+}
+
+export interface PecaGiradaEvento {
+  readonly type: 'PECA_GIRADA';
+  readonly pecaId: PecaId;
+  readonly orientacaoAnterior: Orientacao;
+  readonly orientacao: Orientacao;
+  readonly sentido: SentidoDeRotacao;
+}
+
+export interface PecaPosicionadaEvento {
+  readonly type: 'PECA_POSICIONADA';
+  readonly pecaId: PecaId;
+  readonly celula: Celula;
+  readonly orientacao: Orientacao;
+}
+
+export interface ManipulacaoFinalizadaEvento {
+  readonly type: 'MANIPULACAO_FINALIZADA';
+  readonly pecaId: PecaId;
+}
+
+export type CodigoDeErroDoTabuleiro =
+  | 'DADOS_INVALIDOS'
+  | 'PECA_NAO_ENCONTRADA'
+  | 'PECA_NAO_SELECIONADA'
+  | 'RESERVA_ESGOTADA'
+  | 'CELULA_NAO_ENCONTRADA'
+  | 'CELULA_JA_OCUPADA'
+  | 'PECA_JA_POSICIONADA'
+  | 'MANIPULACAO_ENCERRADA';
+
+export interface ErroDoTabuleiroEvento {
+  readonly type: 'ERRO_DO_TABULEIRO';
+  readonly codigo: CodigoDeErroDoTabuleiro;
+  readonly mensagem: string;
+}
+
+export type TabuleiroEventoDoServidor =
+  | PecaSelecionadaEvento
+  | PecaDeselecionadaEvento
+  | PecaGiradaEvento
+  | PecaPosicionadaEvento
+  | ManipulacaoFinalizadaEvento
+  | ErroDoTabuleiroEvento;
