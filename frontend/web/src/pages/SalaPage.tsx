@@ -12,10 +12,11 @@ export function SalaPage() {
   const navigate = useNavigate()
   const { authState } = useContext(AuthContext)
   const jogadorId = authState.status === 'authenticated' ? authState.jogador.id : undefined
-  const { sala, avisos, erro, criarSala, entrarNaSala, alternarProntidao, sairDaSala } =
+  const { sala, avisos, conectado, erro, criarSala, entrarNaSala, alternarProntidao, sairDaSala } =
     useSalaWebSocket(jogadorId)
   const [codigoInput, setCodigoInput] = useState('')
   const conviteEnviadoRef = useRef<string | null>(null)
+  const conectando = !conectado && !sala
 
   // Entrada por rota de Convite /sala/:codigoDeSala — envia apenas uma vez
   // por código, para não reentrar após sair da sala.
@@ -61,7 +62,8 @@ export function SalaPage() {
                   <button
                     type="button"
                     onClick={criarSala}
-                    className="w-fit border border-white/20 px-8 py-3 text-sm tracking-[0.18em] uppercase text-white hover:bg-white hover:text-black transition-colors"
+                    disabled={conectando}
+                    className="w-fit border border-white/20 px-8 py-3 text-sm tracking-[0.18em] uppercase text-white hover:bg-white hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white"
                   >
                     Iniciar Sessão →
                   </button>
@@ -84,7 +86,8 @@ export function SalaPage() {
                         onClick={() => {
                           if (codigoInput.trim().length === 6) entrarNaSala(codigoInput)
                         }}
-                        className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-xs font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors"
+                        disabled={conectando}
+                        className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-xs font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#c9a86a]"
                       >
                         Entrar na Sala
                       </button>
@@ -133,9 +136,15 @@ export function SalaPage() {
             {/* Cabeçalho ponto de encontro */}
             <div className="flex items-end justify-between border-b border-white/15 pb-3">
               <h2 className="text-2xl font-light tracking-[0.2em] uppercase text-white">Ponto de Encontro</h2>
-              <span className="flex items-center gap-2 text-[10px] tracking-widest uppercase text-green-400">
-                <span className="w-2 h-2 rounded-full bg-green-400" aria-hidden /> Ativo
-              </span>
+              {conectando ? (
+                <span className="flex items-center gap-2 text-[10px] tracking-widest uppercase text-yellow-400">
+                  <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" aria-hidden /> Conectando...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 text-[10px] tracking-widest uppercase text-green-400">
+                  <span className="w-2 h-2 rounded-full bg-green-400" aria-hidden /> Ativo
+                </span>
+              )}
             </div>
 
             {possuiSala ? (

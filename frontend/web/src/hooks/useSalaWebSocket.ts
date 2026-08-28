@@ -52,8 +52,14 @@ function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null
   switch (evento.type) {
     case 'MEMBRO_ENTROU':
       return `${evento.membro.apelido} entrou na sala`
-    case 'MEMBRO_SAIU':
-      return `Membro saiu da sala`
+    case 'MEMBRO_SAIU': {
+      const apelido = salaAnterior?.membros.find((m) => m.id === evento.membroId)?.apelido ?? 'Membro'
+      return `${apelido} saiu da sala`
+    }
+    case 'MEMBRO_EXPULSO': {
+      const apelido = salaAnterior?.membros.find((m) => m.id === evento.membroId)?.apelido ?? 'Membro'
+      return `${apelido} foi expulso`
+    }
     case 'MEMBRO_DESCONECTADO': {
       const apelido = salaAnterior?.membros.find((m) => m.id === evento.membroId)?.apelido ?? 'Membro'
       return `${apelido} desconectado (${evento.presenca})`
@@ -83,6 +89,8 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const salaRef = useRef<Sala | null>(null)
+  // Comandos enfileirados quando o WebSocket ainda não está aberto (handshake).
+  const comandosPendentesRef = useRef<SalaComandoDoCliente[]>([])
 
   // Ao trocar de sala (código diferente), descarta avisos da sala anterior.
   useEffect(() => {
@@ -112,6 +120,12 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     ws.onopen = () => {
       setConectado(true)
       setErro(null)
+      // Drena comandos enfileirados enquanto o socket estava conectando.
+      const pendentes = comandosPendentesRef.current
+      comandosPendentesRef.current = []
+      for (const comando of pendentes) {
+        ws.send(JSON.stringify(comando))
+      }
     }
 
     ws.onclose = () => {
@@ -185,7 +199,10 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           break
         case 'MEMBRO_EXPULSO':
           setSala(evento.sala)
-          adicionarAviso('Membro expulso', evento.type)
+          {
+            const msg = mensagemDeAviso(evento, salaRef.current)
+            if (msg) adicionarAviso(msg, evento.type)
+          }
           break
         case 'MENSAGEM_DE_CHAT':
           // fora de escopo deste issue, mas preserva compatibilidade
@@ -222,9 +239,9 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(comando))
     } else {
-      // Enfileira otimista: tenta enviar quando conectar (buffer simples não necessário para testes)
-      // Para testes com mock, o send é síncrono; se não conectado, registra erro
-      setErro('Conexão não disponível')
+      // Socket ainda conectando (handshake/reconexão): enfileira para enviar
+      // no próximo open, evitando perder o comando silenciosamente.
+      comandosPendentesRef.current = [...comandosPendentesRef.current, comando]
     }
   }, [])
 
@@ -265,6 +282,8 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     enviar({ type: 'SAIR_DA_SALA' })
     // Limpeza otimista após comando
     setSala(null)
+    // Descarta comandos pendentes de contexto anterior
+    comandosPendentesRef.current = []
   }, [enviar])
 
   return { sala, avisos, conectado, erro, enviar, criarSala, entrarNaSala, alternarProntidao, sairDaSala }

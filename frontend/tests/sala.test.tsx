@@ -13,8 +13,11 @@ class MockWebSocket {
   static OPEN = 1
   static CLOSING = 2
   static CLOSED = 3
+  // Simula o handshake real: o próximo socket nasce CONNECTING e só abre
+  // quando o teste chamar simulateOpen(). Exige o teste de retry do Bug 1.
+  static forceNoAutoOpen = false
   url: string
-  readyState = 1
+  readyState = 0
   onopen: ((ev: Event) => void) | null = null
   onclose: ((ev: CloseEvent) => void) | null = null
   onmessage: ((ev: MessageEvent) => void) | null = null
@@ -23,8 +26,19 @@ class MockWebSocket {
 
   constructor(url: string) {
     this.url = url
+    if (MockWebSocket.forceNoAutoOpen) {
+      // Recomeça CONNECTING; simulateOpen() será chamado pelo teste.
+      this.readyState = MockWebSocket.CONNECTING
+    } else {
+      this.readyState = MockWebSocket.OPEN
+      queueMicrotask(() => this.onopen?.(new Event('open')))
+    }
     MockWebSocket.instances.push(this)
-    queueMicrotask(() => this.onopen?.(new Event('open')))
+  }
+
+  simulateOpen() {
+    this.readyState = MockWebSocket.OPEN
+    this.onopen?.(new Event('open'))
   }
 
   send(data: string) {
@@ -137,6 +151,7 @@ function criarSala(overrides: Partial<{
 describe('lobby - página do lobby', () => {
   beforeEach(() => {
     MockWebSocket.clean()
+    MockWebSocket.forceNoAutoOpen = false
     vi.clearAllMocks()
     // Mock clipboard estável via prototype getter (jsdom retorna instância nova a cada acesso)
     const mockWriteText = vi.fn().mockResolvedValue(undefined)
@@ -363,7 +378,7 @@ describe('lobby - página do lobby', () => {
     // MEMBRO_SAIU
     const salaAposSaida = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 })], anfitriaoId: 'm1' })
     ws.simulateMessage({ type: 'MEMBRO_SAIU', membroId: 'm2', jogadorId: 'j2', sala: salaAposSaida })
-    expect(await screen.findByText(/membro saiu/i)).toBeInTheDocument()
+    expect(await screen.findByText(/ana saiu da sala/i)).toBeInTheDocument()
 
     // MEMBRO_DESCONECTADO
     ws.simulateMessage({ type: 'MEMBRO_DESCONECTADO', membroId: 'm1', jogadorId: 'j1', presenca: 'em_reconexao', sala: salaAposSaida })
@@ -411,5 +426,77 @@ describe('lobby - página do lobby', () => {
     expect(envio.type).toBe('SAIR_DA_SALA')
     // Após sair, a UI volta a mostrar estado vazio
     await waitFor(() => expect(screen.queryByText('A3K9M2')).not.toBeInTheDocument())
+  })
+
+  it('entrada por convite durante o handshake é reenviada quando o socket abre (Bug 1)', async () => {
+    MockWebSocket.clean()
+    MockWebSocket.forceNoAutoOpen = true
+    renderWithRouter(['/sala/C9X1Z2'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    expect(ws.readyState).toBe(MockWebSocket.CONNECTING)
+
+    // Auto-entrada por convite enfileirada; nada enviado ainda
+    expect(ws.sentMessages).toHaveLength(0)
+
+    // Socket abre: drena ENTRAR_NA_SALA do convite
+    ws.simulateOpen()
+    await waitFor(() =>
+      expect(ws.sentMessages.some((m) => {
+        try {
+          const parsed = JSON.parse(m as string)
+          return parsed.type === 'ENTRAR_NA_SALA' && parsed.codigoDeSala === 'C9X1Z2'
+        } catch {
+          return false
+        }
+      })).toBe(true),
+    )
+  })
+
+  it('botões de ação são desabilitados enquanto o socket está conectando e aparece indicador', async () => {
+    MockWebSocket.clean()
+    MockWebSocket.forceNoAutoOpen = true
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    expect(ws.readyState).toBe(MockWebSocket.CONNECTING)
+
+    // Indicador de conexão aparece
+    expect(screen.getByText(/conectando/i)).toBeInTheDocument()
+    // Botões desabilitados enquanto não há conexão
+    expect(screen.getByRole('button', { name: /iniciar sessão/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /entrar na sala/i })).toBeDisabled()
+
+    // Ao abrir, o indicador some e os botões ficam habilitados
+    ws.simulateOpen()
+    expect(await screen.findByText('Ativo')).toBeInTheDocument()
+    expect(screen.queryByText(/conectando/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /iniciar sessão/i })).toBeEnabled()
+  })
+
+  it('saída identifica o Membro pelo apelido', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+
+    const salaInicial = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 })], anfitriaoId: 'm1' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaInicial })
+    await screen.findByText('LucasGomes')
+
+    // MEMBRO_SAIU identifica pelo apelido (lido da sala anterior, ainda com o membro)
+    const salaAposSaida = criarSala({ codigoDeSala: 'A3K9M2', membros: [], anfitriaoId: 'm1' })
+    ws.simulateMessage({ type: 'MEMBRO_SAIU', membroId: 'm1', jogadorId: 'j1', sala: salaAposSaida })
+    expect(await screen.findByText(/lucasgomes saiu da sala/i)).toBeInTheDocument()
+  })
+
+  it('expulsão identifica o Membro pelo apelido', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+
+    const salaInicial = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 })], anfitriaoId: 'm1' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaInicial })
+    await screen.findByText('LucasGomes')
+
+    // MEMBRO_EXPULSO identifica pelo apelido (lido da sala anterior, ainda com o membro)
+    const salaAposExpulsao = criarSala({ codigoDeSala: 'A3K9M2', membros: [], anfitriaoId: 'm1' })
+    ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm1', jogadorId: 'j1', sala: salaAposExpulsao })
+    expect(await screen.findByText(/lucasgomes foi expulso/i)).toBeInTheDocument()
   })
 })
