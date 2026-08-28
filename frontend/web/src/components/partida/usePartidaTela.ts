@@ -19,9 +19,6 @@ export interface UsePartidaTelaReturn {
   falhar: () => void
   tentarNovamente: () => void
   forcarEstado: (estado: EstadoDaTela) => void
-  // aliases exigidos pelo plano
-  aguardar: () => void
-  disponibilizar: () => void
 }
 
 function reducer(estado: EstadoDaTela, evento: EventoDaTela): EstadoDaTela {
@@ -56,7 +53,5 @@ export function usePartidaTela(opts?: UsePartidaTelaOptions): UsePartidaTelaRetu
     falhar,
     tentarNovamente,
     forcarEstado,
-    aguardar: partidaPreparada,
-    disponibilizar: partidaEmAndamento,
   }
 }
