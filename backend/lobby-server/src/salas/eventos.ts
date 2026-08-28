@@ -1,4 +1,4 @@
-// Tradução pura engine → wire dos eventos da Sala (issues #36 e #39).
+// Tradução pura engine → wire dos eventos da Sala (issues #36, #38 e #39).
 // Função sem side-effects: dado o estado pós-engine e os eventos emitidos,
 // devolve os `SalaEventoDoServidor` correspondentes. O cache de apelidos é
 // injetado pelo chamador (handler) — esta função não toca DB/Redis.
@@ -11,6 +11,11 @@
 //   retorno_autorizado  -> SALA_ATUALIZADA
 //   sala_encerrada      -> SALA_ATUALIZADA (estado='encerrada')
 //   anfitriao_sucedido  -> ANFITRIAO_SUBSTITUIDO + SALA_ATUALIZADA
+//   membro_desconectado -> MEMBRO_DESCONECTADO + SALA_ATUALIZADA
+//   membro_reconectado  -> MEMBRO_RECONECTADO + SALA_ATUALIZADA
+//   vinculo_expirado    -> MEMBRO_SAIU + SALA_ATUALIZADA
+//   sala_expirada       -> SALA_ATUALIZADA (estado='expirada')
+//   reinicio_registrado / consistencia_confirmada -> SALA_ATUALIZADA
 //
 import type {
   EstadoDoLobby,
@@ -29,6 +34,7 @@ import type {
   MembroSaiuEvento,
   MembroExpulsoEvento,
   MembroDesconectadoEvento,
+  MembroReconectadoEvento,
   AnfitriaoSubstituidoEvento,
 } from '@flicker/shared';
 
@@ -223,8 +229,8 @@ export function traduzirEventos(
       }
 
       case 'membro_reconectado': {
-        const eventoReconectado: MembroDesconectadoEvento = {
-          type: 'MEMBRO_DESCONECTADO',
+        const eventoReconectado: MembroReconectadoEvento = {
+          type: 'MEMBRO_RECONECTADO',
           membroId: evento.membroId,
           jogadorId: evento.jogadorId,
           presenca: 'conectado',

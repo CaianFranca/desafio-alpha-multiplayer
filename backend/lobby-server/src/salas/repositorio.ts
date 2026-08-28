@@ -89,18 +89,11 @@ export class SalasRepo {
     );
   }
 
-  /**
-   * Persiste a saída em uma única transação. Quando o engine concluiu que
-   * era o último vínculo ativo, a mudança para `encerrada` é confirmada no
-   * mesmo commit do DELETE e do histórico. Quando houve sucessão, o novo
-   * Anfitrião é gravado no mesmo commit — sem isso, a reconstrução do boot
-   * restauraria um Anfitrião já sucedido (ADR-0002).
-   */
-  async sairMembroAtomico(
+  private async terminarVinculoAtomico(
     salaId: string,
     jogadorId: string,
     motivo: MotivoDeTermino,
-    encerrarSala: boolean,
+    statusEncerramento: StatusDaSala | null,
     novoAnfitriaoJogadorId?: string | null,
   ): Promise<void> {
     const client = await this.pool.connect();
@@ -111,18 +104,17 @@ export class SalasRepo {
         [salaId, jogadorId],
       );
       if (exclusao.rowCount !== 1) {
-        throw new Error('Vínculo ativo não encontrado ao persistir saída da Sala.');
+        throw new Error(`Vínculo ativo não encontrado ao persistir ${motivo} da Sala.`);
       }
       await client.query(
         `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
          VALUES ($1, $2, $3)`,
         [salaId, jogadorId, motivo],
       );
-      if (encerrarSala) {
+      if (statusEncerramento !== null) {
         await client.query(
-          `UPDATE salas_historico SET status = 'encerrada', anfitriao_id = NULL
-           WHERE id = $1`,
-          [salaId],
+          `UPDATE salas_historico SET status = $2, anfitriao_id = NULL WHERE id = $1`,
+          [salaId, statusEncerramento],
         );
       } else if (novoAnfitriaoJogadorId != null) {
         await client.query(
@@ -137,6 +129,29 @@ export class SalasRepo {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Persiste a saída em uma única transação. Quando o engine concluiu que
+   * era o último vínculo ativo, a mudança para `encerrada` é confirmada no
+   * mesmo commit do DELETE e do histórico. Quando houve sucessão, o novo
+   * Anfitrião é gravado no mesmo commit — sem isso, a reconstrução do boot
+   * restauraria um Anfitrião já sucedido (ADR-0002).
+   */
+  async sairMembroAtomico(
+    salaId: string,
+    jogadorId: string,
+    motivo: MotivoDeTermino,
+    encerrarSala: boolean,
+    novoAnfitriaoJogadorId?: string | null,
+  ): Promise<void> {
+    await this.terminarVinculoAtomico(
+      salaId,
+      jogadorId,
+      motivo,
+      encerrarSala ? 'encerrada' : null,
+      novoAnfitriaoJogadorId,
+    );
   }
 
   /**
@@ -152,46 +167,12 @@ export class SalasRepo {
     encerrarSala: boolean,
     novoAnfitriaoJogadorId?: string | null,
   ): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const exclusao = await client.query(
-        `DELETE FROM membros WHERE sala_id = $1 AND usuario_id = $2`,
-        [salaId, jogadorId],
-      );
-      if (exclusao.rowCount !== 1) {
-        throw new Error('Vínculo ativo não encontrado ao persistir expiração da Sala.');
-      }
-      await client.query(
-        `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
-         VALUES ($1, $2, 'expiracao')`,
-        [salaId, jogadorId],
-      );
-      if (encerrarSala) {
-        await client.query(
-          `UPDATE salas_historico SET status = 'expirada', anfitriao_id = NULL
-           WHERE id = $1`,
-          [salaId],
-        );
-      } else if (novoAnfitriaoJogadorId != null) {
-        await client.query(
-          `UPDATE salas_historico SET anfitriao_id = $2 WHERE id = $1`,
-          [salaId, novoAnfitriaoJogadorId],
-        );
-      }
-      await client.query('COMMIT');
-    } catch (erro) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw erro;
-    } finally {
-      client.release();
-    }
-  }
-
-  async atualizarStatusExpirada(salaId: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE salas_historico SET status = 'expirada', anfitriao_id = NULL WHERE id = $1`,
-      [salaId],
+    await this.terminarVinculoAtomico(
+      salaId,
+      jogadorId,
+      'expiracao',
+      encerrarSala ? 'expirada' : null,
+      novoAnfitriaoJogadorId,
     );
   }
 

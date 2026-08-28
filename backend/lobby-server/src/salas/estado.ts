@@ -1,4 +1,4 @@
-// Estado do lobby no servidor (issue #36): wrapper sobre `EstadoDoLobby` do
+// Estado do lobby no servidor (issues #36, #38): wrapper sobre `EstadoDoLobby` do
 // engine que conhece (a) o pool PG para a reconstrução do boot e (b) a
 // projeção Redis para hidratar as chaves no mesmo passo.
 //
@@ -63,6 +63,12 @@ export interface SalasState {
    * índice interno `abertas` e substitui o estado.
    */
   confirmarConsistenciaDaSala(salaId: string): ReturnType<typeof aplicarComando>;
+
+  /**
+   * Confirma todas as Salas inconsistentes de forma idempotente (issue #38).
+   * Usado após o rearmamento das janelas de reconexão pós-restart (B1).
+   */
+  confirmarTodasSalas(): void;
 }
 
 class SalasStateImpl implements SalasState {
@@ -233,6 +239,12 @@ class SalasStateImpl implements SalasState {
       this.substituirEstado(resultado.estado);
     }
     return resultado;
+  }
+
+  confirmarTodasSalas(): void {
+    for (const salaId of [...this._abertas.keys()]) {
+      this.confirmarConsistenciaDaSala(salaId);
+    }
   }
 }
 

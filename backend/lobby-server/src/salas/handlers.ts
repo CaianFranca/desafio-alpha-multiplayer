@@ -1,4 +1,4 @@
-// Handlers WS de Sala (issues #36 e #39).
+// Handlers WS de Sala (issues #36, #38, #39).
 //
 // Roteamento entre o protocolo Sala (`@flicker/shared`) e o engine
 // (`@flicker/engine`). Persistência e projeção vivem em `SalasRepo` e
@@ -565,7 +565,7 @@ export class SalasHandlers {
     if (eventoExpulsao?.tipo === 'membro_expulsado') {
       await this.projecao.limparAssociacaoJogador(eventoExpulsao.jogadorId);
       // Se o alvo estava em janela de reconexão, cancelar o timer e a chave Redis.
-      await this.reconexao.limparJanela(salaId, membroId).catch(() => undefined);
+      await this.reconexao.limparJanela(salaId, eventoExpulsao.jogadorId).catch(() => undefined);
       this.limparTimer(salaId, membroId);
     }
 
@@ -663,6 +663,55 @@ export class SalasHandlers {
     this.difundir(eventos, salaId);
   }
 
+  private agendarExpiracao(salaId: string, membroId: string, delayMs: number): void {
+    const chave = this.chaveTimer(salaId, membroId);
+    const existente = this.timersDeReconexao.get(chave);
+    if (existente !== undefined) {
+      clearTimeout(existente);
+    }
+    const timer = setTimeout(() => {
+      void this.handleExpirar(salaId, membroId);
+    }, delayMs);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+    this.timersDeReconexao.set(chave, timer);
+  }
+
+  /**
+   * Rearma timers de reconexão após restart, lendo TTL do Redis (B2).
+   * Para cada sala inconsistente e membro em_reconexao:
+   *   ttl>=0 → agenda com ttl*1000
+   *   ttl==-2 → enfileira expiração imediata
+   *   ttl==-1 → define janela nova e agenda
+   * Ao final confirma todas as salas idempotente (B1).
+   */
+  async rearmarAposRestart(): Promise<void> {
+    for (const [salaId, info] of this.estado.abertas) {
+      if (info.sala.consistente) {
+        continue;
+      }
+      for (const membro of info.sala.membros) {
+        if (membro.estado !== 'ativo' || membro.presenca !== 'em_reconexao') {
+          continue;
+        }
+        const ttl = await this.reconexao.obterJanela(salaId, membro.jogadorId);
+        if (ttl >= 0) {
+          this.agendarExpiracao(salaId, membro.id, ttl * 1000);
+        } else if (ttl === -2) {
+          void this.handleExpirar(salaId, membro.id);
+        } else if (ttl === -1) {
+          await this.reconexao.definirJanela(salaId, membro.jogadorId);
+          this.agendarExpiracao(salaId, membro.id, this.janelaReconexaoMs);
+        }
+      }
+    }
+    this.estado.confirmarTodasSalas();
+    for (const [salaId, info] of this.estado.abertas) {
+      await this.atualizarProjecaoEstado(this.estado.estado, salaId);
+    }
+  }
+
   /**
    * Remove o socket do fan-out quando a conexão fecha. Presença por Jogador:
    * só inicia a janela de reconexão quando o último socket do Jogador fecha.
@@ -703,20 +752,8 @@ export class SalasHandlers {
       await this.atualizarProjecaoEstado(resultado.estado, salaId);
       // A associação jogador→sala permanece durante a janela para permitir
       // a reconexão automática; a janela expira via timer.
-      await this.reconexao.definirJanela(salaId, membro.id);
-      const chave = this.chaveTimer(salaId, membro.id);
-      const existente = this.timersDeReconexao.get(chave);
-      if (existente !== undefined) {
-        clearTimeout(existente);
-      }
-      const timer = setTimeout(() => {
-        void this.handleExpirar(salaId, membro.id);
-      }, this.janelaReconexaoMs);
-      // Evitar que o timer mantenha o processo vivo em testes.
-      if (typeof timer.unref === 'function') {
-        timer.unref();
-      }
-      this.timersDeReconexao.set(chave, timer);
+      await this.reconexao.definirJanela(salaId, jogadorId);
+      this.agendarExpiracao(salaId, membro.id, this.janelaReconexaoMs);
       const eventos = traduzirEventos(
         resultado.eventos,
         resultado.estado,
@@ -781,6 +818,13 @@ export class SalasHandlers {
         this.broadcast.registrarSocket(jogadorId, salaId!, socket);
         return;
       }
+      // B3: reconexão só dentro da janela Redis; fora dela, expirar (pós-restart).
+      const janelaExiste = await this.reconexao.existeJanela(salaId!, membroAtual.jogadorId);
+      if (!janelaExiste) {
+        void this.handleExpirar(salaId!, membroAtual.id);
+        this.broadcast.registrarSocket(jogadorId, salaId!, socket);
+        return;
+      }
       const resultado = this.estado.aplicar({
         tipo: 'reconectar_jogador',
         salaId: salaId!,
@@ -795,7 +839,7 @@ export class SalasHandlers {
       this.estado.substituirEstado(resultado.estado);
       await this.atualizarProjecaoEstado(resultado.estado, salaId!);
       await this.projecao.definirAssociacaoJogador(jogadorId, salaId!);
-      await this.reconexao.limparJanela(salaId!, membroAtual.id).catch(() => undefined);
+      await this.reconexao.limparJanela(salaId!, membroAtual.jogadorId).catch(() => undefined);
       this.limparTimer(salaId!, membroAtual.id);
       this.broadcast.registrarSocket(jogadorId, salaId!, socket);
       const eventos = traduzirEventos(
@@ -810,13 +854,20 @@ export class SalasHandlers {
 
   private async handleExpirar(salaId: string, membroId: string): Promise<void> {
     await this.enfileirarMutacao(async () => {
+      const salaPre = this.estado.abertas.get(salaId);
+      const membroPre = salaPre?.sala.membros.find((m) => m.id === membroId);
+      const jogadorIdPre = membroPre?.jogadorId ?? null;
       const resultado = this.estado.aplicar({
         tipo: 'expirar_reconexao',
         salaId,
         membroId,
       });
       if (!resultado.sucesso) {
-        await this.reconexao.limparJanela(salaId, membroId).catch(() => undefined);
+        const alvo = jogadorIdPre ?? membroId;
+        await this.reconexao.limparJanela(salaId, alvo).catch(() => undefined);
+        if (alvo !== membroId) {
+          await this.reconexao.limparJanela(salaId, membroId).catch(() => undefined);
+        }
         this.limparTimer(salaId, membroId);
         return;
       }
@@ -847,9 +898,14 @@ export class SalasHandlers {
           );
         } catch (erro) {
           console.error('[salas] falha ao persistir expiracao:', erro);
+          return;
         }
       }
-      await this.reconexao.limparJanela(salaId, membroId).catch(() => undefined);
+      if (jogadorId !== null) {
+        await this.reconexao.limparJanela(salaId, jogadorId).catch(() => undefined);
+      } else {
+        await this.reconexao.limparJanela(salaId, membroId).catch(() => undefined);
+      }
       this.limparTimer(salaId, membroId);
       if (jogadorId !== null) {
         await this.projecao.limparAssociacaoJogador(jogadorId);

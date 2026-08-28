@@ -45,7 +45,7 @@ export function criarContextoDasSalas(
   const projecao = opcoes.projecao ?? new SalasProjecao();
   const broadcast = opcoes.broadcast ?? new SalasBroadcaster();
   const estado = opcoes.estado ?? criarSalasState();
-  const reconexao = opcoes.reconexao ?? new SalasReconexao();
+  const reconexao = opcoes.reconexao ?? new SalasReconexao(undefined, opcoes.janelaReconexaoMs);
   const linkBase = opcoes.linkBase ?? obterLinkBase();
   const revalidarSessao = opcoes.revalidarSessao ?? (async (sessaoId, jogadorId) => {
     const sessao = await obterSessao(sessaoId);

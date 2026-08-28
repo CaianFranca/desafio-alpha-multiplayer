@@ -128,6 +128,14 @@ export interface MembroDesconectadoEvento {
   sala: Sala;
 }
 
+export interface MembroReconectadoEvento {
+  type: 'MEMBRO_RECONECTADO';
+  membroId: string;
+  jogadorId: string;
+  presenca: 'conectado';
+  sala: Sala;
+}
+
 export interface MembroExpulsoEvento {
   type: 'MEMBRO_EXPULSO';
   membroId: string;
@@ -187,6 +195,7 @@ export type SalaEventoDoServidor =
   | MembroEntrouEvento
   | MembroSaiuEvento
   | MembroDesconectadoEvento
+  | MembroReconectadoEvento
   | MembroExpulsoEvento
   | AnfitriaoSubstituidoEvento
   | ProntidaoAtualizadaEvento

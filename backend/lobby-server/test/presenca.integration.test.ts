@@ -17,6 +17,7 @@ import type {
   ErroDaSalaEvento,
   MembroDaSala,
   MembroDesconectadoEvento,
+  MembroReconectadoEvento,
   MembroSaiuEvento,
   Sala,
   SalaAtualizadaEvento,
@@ -385,13 +386,15 @@ test('presenca: desconexao preserva vinculo e vaga por 60s (SALA_CHEIA mantida)'
     const membroB = membroDaSala(salaAposDesconexao, b.id);
     assert.equal(membroB.presenca, 'em_reconexao');
     assert.equal(membroB.ordemDeEntrada, 2);
+    assert.equal(membroB.prontidao, false, 'prontidão preservada');
+    assert.equal(salaAposDesconexao.anfitriaoId, criacao.sala.anfitriaoId, 'papel Anfitrião preservado');
     // Vaga não liberada: E tenta entrar e recebe SALA_CHEIA
     enviar(wsE, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
     await esperarErro(wsE, 'SALA_CHEIA');
 
     // Verifica chave Redis de reconexão existe
     const salaId = salaAposDesconexao.id;
-    const ttl = await redis.ttl(chaveReconexao(salaId, membroB.id));
+    const ttl = await redis.ttl(chaveReconexao(salaId, b.id));
     assert.ok(ttl > 0 && ttl <= 60, `ttl esperado 1..60, recebido ${ttl}`);
 
     for (const ws of [wsA, wsC, wsD, wsE]) ws.close();
@@ -425,18 +428,18 @@ test('presenca: reconexao automatica dentro da janela restaura presenca conectad
 
     // B reconecta com novo WS dentro da janela
     const wsB2 = await conectarWs(servidor.wsUrl, b.cookies);
-    // A deve receber MEMBRO_DESCONECTADO com presenca conectado + SALA_ATUALIZADA
+    // A deve receber MEMBRO_RECONECTADO + SALA_ATUALIZADA
     const eventosA = await coletarEventos(wsA, 2);
-    assert.equal(eventosA[0]?.type, 'MEMBRO_DESCONECTADO');
-    assert.equal((eventosA[0] as MembroDesconectadoEvento).presenca, 'conectado');
+    assert.equal(eventosA[0]?.type, 'MEMBRO_RECONECTADO');
+    assert.equal((eventosA[0] as MembroReconectadoEvento).presenca, 'conectado');
     assert.equal(eventosA[1]?.type, 'SALA_ATUALIZADA');
     const salaReconectada = (eventosA[1] as SalaAtualizadaEvento).sala;
     assert.equal(membroDaSala(salaReconectada, b.id).presenca, 'conectado');
 
     // B2 também recebe os mesmos eventos (está registrado no broadcast)
     const eventosB2 = await coletarEventos(wsB2, 2);
-    assert.equal(eventosB2[0]?.type, 'MEMBRO_DESCONECTADO');
-    assert.equal((eventosB2[0] as MembroDesconectadoEvento).presenca, 'conectado');
+    assert.equal(eventosB2[0]?.type, 'MEMBRO_RECONECTADO');
+    assert.equal((eventosB2[0] as MembroReconectadoEvento).presenca, 'conectado');
 
     wsA.close();
     wsB2.close();
@@ -488,7 +491,7 @@ test('presenca: expiracao libera vaga e permite reentrada com ordem monotônica'
     assert.equal(hist.rows[0]?.motivo, 'expiracao');
 
     // Janela Redis limpa
-    assert.equal(await redis.ttl(chaveReconexao(salaId, membroBId)), -2);
+    assert.equal(await redis.ttl(chaveReconexao(salaId, b.id)), -2);
 
     // Vaga liberada: E entra
     enviar(wsE, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
@@ -528,16 +531,15 @@ test('presenca: expiracao do Anfitriao suse de sucessor', async () => {
 
     await delay(500);
     const eventos = await coletarEventos(wsB, 4);
-    // Ordem: MEMBRO_SAIU (vinculo_expirado), SALA_ATUALIZADA, ANFITRIAO_SUBSTITUIDO, SALA_ATUALIZADA
-    // Mas nosso handler emite vinculo_expirado -> MEMBRO_SAIU + SALA_ATUALIZADA, e se houver sucessão emite ANFITRIAO_SUBSTITUIDO + SALA_ATUALIZADA?
-    // O engine emite vinculo_expirado + anfitriao_sucedido (se host) . Nossa tradução faz 2 blocos separados, total 4 eventos?
-    // Verificar que há ANFITRIAO_SUBSTITUIDO
-    const tipos = eventos.map((e) => e.type);
-    assert.ok(tipos.includes('ANFITRIAO_SUBSTITUIDO'), `esperava ANFITRIAO_SUBSTITUIDO, recebeu ${tipos.join(',')}`);
-    const salaFinal = (eventos[eventos.length - 1] as SalaAtualizadaEvento).sala;
+    assert.equal(eventos.length, 4);
+    assert.equal(eventos[0]?.type, 'MEMBRO_SAIU');
+    assert.equal(eventos[1]?.type, 'SALA_ATUALIZADA');
+    assert.equal(eventos[2]?.type, 'ANFITRIAO_SUBSTITUIDO');
+    assert.equal(eventos[3]?.type, 'SALA_ATUALIZADA');
+    const salaFinal = (eventos[3] as SalaAtualizadaEvento).sala;
     const membroB = membroDaSala(salaFinal, b.id);
     assert.equal(salaFinal.anfitriaoId, membroB.id);
-    const sucessao = eventos.find((e) => e.type === 'ANFITRIAO_SUBSTITUIDO') as AnfitriaoSubstituidoEvento;
+    const sucessao = eventos[2] as AnfitriaoSubstituidoEvento;
     assert.equal(sucessao.anfitriaoAnteriorId, anfitriaoOriginal);
 
     wsB.close();
@@ -631,8 +633,8 @@ test('presenca: multiplas conexoes do mesmo Jogador contam como uma so presenca'
     // Reconexão com nova conexão deve restaurar
     const wsB3 = await conectarWs(servidor.wsUrl, b.cookies);
     const ev2 = await coletarEventos(wsA, 2);
-    assert.equal(ev2[0]?.type, 'MEMBRO_DESCONECTADO');
-    assert.equal((ev2[0] as MembroDesconectadoEvento).presenca, 'conectado');
+    assert.equal(ev2[0]?.type, 'MEMBRO_RECONECTADO');
+    assert.equal((ev2[0] as MembroReconectadoEvento).presenca, 'conectado');
 
     wsA.close();
     wsB3.close();
@@ -683,29 +685,12 @@ test('presenca: apos reinicio membros em reconexao e mutacoes bloqueadas ate con
     }
   }
 
-  // Segundo servidor: carrega do PG — membros devem estar em_reconexao e sala inconsistente
+  // Segundo servidor: carrega do PG — sala inconsistente, mutações bloqueadas via wire
   const servidor2 = await subirServidor({ janelaReconexaoMs: 60000 });
   try {
     const contexto = servidor2.contexto;
-    const sala = contexto.estado.abertas.get(baseHolder.salaId);
-    assert.ok(sala, 'sala deve estar no estado apos carregar');
-    assert.equal(sala!.sala.consistente, false, 'sala deve estar inconsistente após reinício');
-    for (const m of sala!.sala.membros) {
-      if (m.estado === 'ativo') {
-        assert.equal(m.presenca, 'em_reconexao', `membro ${m.id} deve estar em_reconexao`);
-        assert.equal(m.pronto, false, 'prontidão deve ser false após reinício');
-      }
-    }
-    // Projeção também reflete em_reconexao
-    const estadoProj = await redisClient.get(`lobby:sala:${baseHolder.salaId}:estado`);
-    assert.ok(estadoProj, 'projecao deve existir');
-    const proj = JSON.parse(estadoProj!);
-    for (const m of proj.membros as unknown as Array<{ presenca: string; pronto: boolean }>) {
-      assert.equal(m.presenca, 'em_reconexao');
-      assert.equal(m.pronto, false);
-    }
 
-    // Tentar mutação: C tenta entrar — deve receber SALA_INCONSISTENTE
+    // Tentar mutação: C tenta entrar — deve receber SALA_INCONSISTENTE (wire)
     const c = await registrarJogador(servidor2.baseUrl);
     const wsC = await conectarWs(servidor2.wsUrl, c.cookies);
     enviar(wsC, { type: 'ENTRAR_NA_SALA', codigoDeSala: baseHolder.codigo });
@@ -720,17 +705,17 @@ test('presenca: apos reinicio membros em reconexao e mutacoes bloqueadas ate con
     const salaAtual = contexto.estado.abertas.get(baseHolder.salaId)!.sala;
     await contexto.projecao.definirEstadoSala(baseHolder.salaId, serializarSala(salaAtual));
 
-    // Reconexão de A deve funcionar agora
+    // Reconexão de A deve funcionar agora (wire)
     const wsA2 = await conectarWs(servidor2.wsUrl, cookiesA!);
-    // A estava em_reconexao, ao conectar deve receber reconexão (conectado)
-    // O wsA2 já foi registrado via tratarReconexao; verificar que A está conectado
-    await delay(200);
-    // A deve ter sido reconectado: verificar via estado
-    const salaAposRec = contexto.estado.abertas.get(baseHolder.salaId)!.sala;
-    const memA = salaAposRec.membros.find((m) => m.jogadorId === idA);
-    assert.equal(memA?.presenca, 'conectado');
+    const eventosA2 = await coletarEventos(wsA2, 2);
+    assert.equal(eventosA2[0]?.type, 'MEMBRO_RECONECTADO');
+    assert.equal((eventosA2[0] as MembroReconectadoEvento).presenca, 'conectado');
+    assert.equal(eventosA2[1]?.type, 'SALA_ATUALIZADA');
+    const salaAposRec = (eventosA2[1] as SalaAtualizadaEvento).sala;
+    assert.equal(membroDaSala(salaAposRec, idA).presenca, 'conectado');
+    assert.equal(membroDaSala(salaAposRec, idA).prontidao, false, 'prontidão false após reinício');
 
-    // Agora C pode entrar
+    // Agora C pode entrar (wire)
     const wsC2 = await conectarWs(servidor2.wsUrl, c.cookies);
     enviar(wsC2, { type: 'ENTRAR_NA_SALA', codigoDeSala: baseHolder.codigo });
     const evC2 = await coletarEventos(wsC2, 2);
