@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
   pull-requests: read
   checks: read
   repository-projects: read
@@ -19,14 +18,13 @@ jobs:
 
     steps:
       - name: Gerar relatório de Kanban e PRs
+        id: gerar_relatorio
         uses: actions/github-script@v7
         env:
           PROJECT_TITLE_CONTAINS: Kanban
           STATUS_FIELD_NAME: Status
           SPRINT_ATUAL_VALUE: Sprint Atual
           EM_PROGRESSO_VALUE: Em Progresso
-          REPORT_ISSUE_TITLE: "📊 Relatório automático de PRs e Kanban"
-          ENABLE_ISSUE_NOTIFICATION: "true"
         with:
           script: |
             const owner = context.repo.owner;
@@ -37,9 +35,6 @@ jobs:
             const statusFieldName = process.env.STATUS_FIELD_NAME || 'Status';
             const sprintAtualValue = process.env.SPRINT_ATUAL_VALUE || 'Sprint Atual';
             const emProgressoValue = process.env.EM_PROGRESSO_VALUE || 'Em Progresso';
-            const reportIssueTitle = process.env.REPORT_ISSUE_TITLE || '📊 Relatório automático de PRs e Kanban';
-            const enableIssueNotification = String(process.env.ENABLE_ISSUE_NOTIFICATION || 'true').toLowerCase() === 'true';
-
             const normalize = (value) => (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
             const safe = (value) => String(value || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
@@ -371,33 +366,19 @@ jobs:
               .addHeading('Relatório de PRs e Kanban')
               .addRaw(reportBody)
               .write();
-
-            if (enableIssueNotification) {
-              const openIssues = await github.paginate(github.rest.issues.listForRepo, {
-                owner,
-                repo,
-                state: 'open',
-                per_page: 100,
-              });
-
-              let reportIssue = openIssues.find((issue) => !issue.pull_request && issue.title === reportIssueTitle);
-
-              if (!reportIssue) {
-                const created = await github.rest.issues.create({
-                  owner,
-                  repo,
-                  title: reportIssueTitle,
-                  body: 'Issue usada para comentários automáticos do monitoramento de PRs e Kanban.',
-                });
-                reportIssue = created.data;
-              }
-
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: reportIssue.number,
-                body: reportBody,
-              });
-            }
+            core.setOutput('report_body', reportBody);
 
             core.info('Relatório gerado com sucesso.');
+
+      - name: Enviar relatório por e-mail
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          secure: ${{ secrets.SMTP_SECURE }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          from: ${{ secrets.SMTP_FROM }}
+          to: gianluccas54@gmail.com
+          subject: "Relatório automático de PRs e Kanban - ${{ github.repository }}"
+          body: ${{ steps.gerar_relatorio.outputs.report_body }}
