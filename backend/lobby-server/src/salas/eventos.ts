@@ -28,6 +28,7 @@ import type {
   MembroEntrouEvento,
   MembroSaiuEvento,
   MembroExpulsoEvento,
+  MembroDesconectadoEvento,
   AnfitriaoSubstituidoEvento,
 } from '@flicker/shared';
 
@@ -204,6 +205,55 @@ export function traduzirEventos(
       }
 
       case 'retorno_autorizado': {
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'membro_desconectado': {
+        const eventoDesconectado: MembroDesconectadoEvento = {
+          type: 'MEMBRO_DESCONECTADO',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          presenca: 'em_reconexao',
+          sala: salaWire,
+        };
+        saida.push(eventoDesconectado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'membro_reconectado': {
+        const eventoReconectado: MembroDesconectadoEvento = {
+          type: 'MEMBRO_DESCONECTADO',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          presenca: 'conectado',
+          sala: salaWire,
+        };
+        saida.push(eventoReconectado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'vinculo_expirado': {
+        const eventoExpirado: MembroSaiuEvento = {
+          type: 'MEMBRO_SAIU',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          sala: salaWire,
+        };
+        saida.push(eventoExpirado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'sala_expirada': {
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'reinicio_registrado':
+      case 'consistencia_confirmada': {
         saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
         break;
       }

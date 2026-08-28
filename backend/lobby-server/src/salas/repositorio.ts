@@ -139,6 +139,62 @@ export class SalasRepo {
     }
   }
 
+  /**
+   * Persiste a expiração da janela de reconexão (issue #38).
+   * Similar a `sairMembroAtomico`, mas com motivo='expiracao' e status
+   * 'expirada' quando o último vínculo ativo expira. Mantém a mesma
+   * atomicidade: DELETE + histórico + eventual atualização de anfitrião/status
+   * no mesmo commit.
+   */
+  async expirarMembroAtomico(
+    salaId: string,
+    jogadorId: string,
+    encerrarSala: boolean,
+    novoAnfitriaoJogadorId?: string | null,
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const exclusao = await client.query(
+        `DELETE FROM membros WHERE sala_id = $1 AND usuario_id = $2`,
+        [salaId, jogadorId],
+      );
+      if (exclusao.rowCount !== 1) {
+        throw new Error('Vínculo ativo não encontrado ao persistir expiração da Sala.');
+      }
+      await client.query(
+        `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
+         VALUES ($1, $2, 'expiracao')`,
+        [salaId, jogadorId],
+      );
+      if (encerrarSala) {
+        await client.query(
+          `UPDATE salas_historico SET status = 'expirada', anfitriao_id = NULL
+           WHERE id = $1`,
+          [salaId],
+        );
+      } else if (novoAnfitriaoJogadorId != null) {
+        await client.query(
+          `UPDATE salas_historico SET anfitriao_id = $2 WHERE id = $1`,
+          [salaId, novoAnfitriaoJogadorId],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (erro) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw erro;
+    } finally {
+      client.release();
+    }
+  }
+
+  async atualizarStatusExpirada(salaId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE salas_historico SET status = 'expirada', anfitriao_id = NULL WHERE id = $1`,
+      [salaId],
+    );
+  }
+
   /** Lista as salas com `status='aberta'` para reconstrução no boot. */
   async listarSalasAbertas(): Promise<SalaAberta[]> {
     const resultado = await this.pool.query<QueryResultRow & SalaAberta>(

@@ -44,6 +44,7 @@ import {
   traduzirEventos,
   type ApelidoPorJogadorId,
 } from './eventos.ts';
+import { SalasReconexao, JANELA_RECONEXAO_SEGUNDOS } from './reconexao.ts';
 import { getConfig } from '@flicker/config';
 import type { AuthenticatedWebSocket } from '../ws/ws.ts';
 
@@ -61,6 +62,7 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
   'APENAS_ANFITRIAO',
   'JOGADOR_EXPULSO',
   'JOGADOR_NAO_BLOQUEADO',
+  'SALA_INCONSISTENTE',
 ]);
 
 /**
@@ -114,12 +116,15 @@ export interface SalasHandlersDeps {
   readonly projecao: SalasProjecao;
   readonly broadcast: SalasBroadcaster;
   readonly estado: SalasState;
+  readonly reconexao: SalasReconexao;
   /** URL base para montar o link do convite (ex.: `http://localhost:3001/convite`). */
   readonly linkBase: string;
   /** Confere no Redis que a Sessão ainda pertence ao Jogador. */
   readonly revalidarSessao: (sessaoId: string, jogadorId: string) => Promise<boolean>;
   /** Injetável para tornar o retry de colisão determinístico nos testes. */
   readonly gerarCodigo?: () => string;
+  /** Janela de reconexão em ms — injetável para testes (default 60000). */
+  readonly janelaReconexaoMs?: number;
 }
 
 export class SalasHandlers {
@@ -127,21 +132,26 @@ export class SalasHandlers {
   private readonly projecao: SalasProjecao;
   private readonly broadcast: SalasBroadcaster;
   private readonly estado: SalasState;
+  private readonly reconexao: SalasReconexao;
   private readonly linkBase: string;
   private readonly revalidarSessao: (sessaoId: string, jogadorId: string) => Promise<boolean>;
   private readonly gerarCodigo: () => string;
+  private readonly janelaReconexaoMs: number;
   // O lobby da #36 é mononodo. Serializar as mutações evita que dois awaits
   // de persistência confirmem candidatos calculados sobre o mesmo estado.
   private cadeiaDeMutacoes: Promise<void> = Promise.resolve();
+  private readonly timersDeReconexao: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(deps: SalasHandlersDeps) {
     this.repo = deps.repo;
     this.projecao = deps.projecao;
     this.broadcast = deps.broadcast;
     this.estado = deps.estado;
+    this.reconexao = deps.reconexao;
     this.linkBase = deps.linkBase;
     this.revalidarSessao = deps.revalidarSessao;
     this.gerarCodigo = deps.gerarCodigo ?? gerarCodigoDeSala;
+    this.janelaReconexaoMs = deps.janelaReconexaoMs ?? JANELA_RECONEXAO_SEGUNDOS * 1000;
   }
 
 /**
@@ -554,6 +564,9 @@ export class SalasHandlers {
     await this.atualizarProjecaoEstado(resultado.estado, salaId);
     if (eventoExpulsao?.tipo === 'membro_expulsado') {
       await this.projecao.limparAssociacaoJogador(eventoExpulsao.jogadorId);
+      // Se o alvo estava em janela de reconexão, cancelar o timer e a chave Redis.
+      await this.reconexao.limparJanela(salaId, membroId).catch(() => undefined);
+      this.limparTimer(salaId, membroId);
     }
 
     const eventos = traduzirEventos(
@@ -651,13 +664,242 @@ export class SalasHandlers {
   }
 
   /**
-   * Remove o socket do fan-out quando a conexão fecha. Presença e reconexão
-   * não fazem parte da #36.
+   * Remove o socket do fan-out quando a conexão fecha. Presença por Jogador:
+   * só inicia a janela de reconexão quando o último socket do Jogador fecha.
    */
   handleFechamento(socket: AuthenticatedWebSocket): void {
-    // Presença e reconexão pertencem à #38. Nesta issue o close apenas
-    // remove a conexão do fan-out para evitar referências órfãs.
-    this.broadcast.removerSocket(socket);
+    const { salaId, jogadorId, restantes } = this.broadcast.removerSocket(socket);
+    if (salaId === null || jogadorId === null) {
+      return;
+    }
+    // Múltiplas conexões do mesmo Jogador contam como uma única presença.
+    if (restantes !== 0) {
+      return;
+    }
+    void this.enfileirarMutacao(async () => {
+      const salaInfo = this.estado.abertas.get(salaId);
+      if (salaInfo === undefined) {
+        // Fallback: tentar via projeção ou PG já removida? Nada a fazer.
+        return;
+      }
+      const membro = salaInfo.sala.membros.find(
+        (m) => m.jogadorId === jogadorId && m.estado === 'ativo',
+      );
+      if (membro === undefined) {
+        return;
+      }
+      if (membro.presenca === 'em_reconexao') {
+        return;
+      }
+      const resultado = this.estado.aplicar({
+        tipo: 'desconectar_jogador',
+        salaId,
+        jogadorId,
+      });
+      if (!resultado.sucesso) {
+        return;
+      }
+      this.estado.substituirEstado(resultado.estado);
+      await this.atualizarProjecaoEstado(resultado.estado, salaId);
+      // A associação jogador→sala permanece durante a janela para permitir
+      // a reconexão automática; a janela expira via timer.
+      await this.reconexao.definirJanela(salaId, membro.id);
+      const chave = this.chaveTimer(salaId, membro.id);
+      const existente = this.timersDeReconexao.get(chave);
+      if (existente !== undefined) {
+        clearTimeout(existente);
+      }
+      const timer = setTimeout(() => {
+        void this.handleExpirar(salaId, membro.id);
+      }, this.janelaReconexaoMs);
+      // Evitar que o timer mantenha o processo vivo em testes.
+      if (typeof timer.unref === 'function') {
+        timer.unref();
+      }
+      this.timersDeReconexao.set(chave, timer);
+      const eventos = traduzirEventos(
+        resultado.eventos,
+        resultado.estado,
+        this.estado.apelidoPorJogadorId,
+        this.linkBase,
+      );
+      this.difundir(eventos, salaId);
+    });
+  }
+
+  /**
+   * Tenta a reconexão automática quando um novo WS autentica. Chamado por
+   * `ws.ts` após preencher `socket.data`. Verifica se o Jogador tem vínculo
+   * ativo em `em_reconexao` (via projeção + estado + PG fallback) e, em caso
+   * positivo, aplica `reconectar_jogador`, limpa a janela/timer e reassocia
+   * o socket ao broadcast.
+   *
+   * Segunda conexão simultânea: se já há um socket ativo (presença
+   * `conectado`), não dispara `reconectar_jogador`, apenas registra o novo
+   * socket.
+   */
+  async tratarReconexaoSeNecessario(socket: AuthenticatedWebSocket): Promise<void> {
+    const jogadorId = socket.data.jogadorId;
+    // Resolver salaId via projeção quente, com fallback ao PG.
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      const recuperado = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
+    if (salaId === null) {
+      return;
+    }
+    const salaInfo = this.estado.abertas.get(salaId);
+    if (salaInfo === undefined) {
+      return;
+    }
+    const membro = salaInfo.sala.membros.find(
+      (m) => m.jogadorId === jogadorId && m.estado === 'ativo',
+    );
+    if (membro === undefined) {
+      return;
+    }
+    // Atualizar cache de apelido antes do broadcast.
+    this.atualizarApelidoSeConhecido(jogadorId, socket.data.apelido);
+    // Se já está conectado, apenas registrar o novo socket (segunda aba).
+    if (membro.presenca === 'conectado') {
+      this.broadcast.registrarSocket(jogadorId, salaId, socket);
+      return;
+    }
+    // Está em reconexão — tentar reconectar via engine.
+    await this.enfileirarMutacao(async () => {
+      // Revalidar dentro da cadeia (evitar condição de corrida com expiração).
+      const salaAtual = this.estado.abertas.get(salaId!);
+      const membroAtual = salaAtual?.sala.membros.find(
+        (m) => m.jogadorId === jogadorId && m.estado === 'ativo',
+      );
+      if (membroAtual === undefined || membroAtual.presenca !== 'em_reconexao') {
+        // Já reconectado/expirado entre o check e a mutação — apenas registrar.
+        this.broadcast.registrarSocket(jogadorId, salaId!, socket);
+        return;
+      }
+      const resultado = this.estado.aplicar({
+        tipo: 'reconectar_jogador',
+        salaId: salaId!,
+        jogadorId,
+      });
+      if (!resultado.sucesso) {
+        // Se a sala está inconsistente ou outro erro, ainda registrar o socket
+        // para não perder a conexão, mas não limpar a janela.
+        this.broadcast.registrarSocket(jogadorId, salaId!, socket);
+        return;
+      }
+      this.estado.substituirEstado(resultado.estado);
+      await this.atualizarProjecaoEstado(resultado.estado, salaId!);
+      await this.projecao.definirAssociacaoJogador(jogadorId, salaId!);
+      await this.reconexao.limparJanela(salaId!, membroAtual.id).catch(() => undefined);
+      this.limparTimer(salaId!, membroAtual.id);
+      this.broadcast.registrarSocket(jogadorId, salaId!, socket);
+      const eventos = traduzirEventos(
+        resultado.eventos,
+        resultado.estado,
+        this.estado.apelidoPorJogadorId,
+        this.linkBase,
+      );
+      this.difundir(eventos, salaId!);
+    });
+  }
+
+  private async handleExpirar(salaId: string, membroId: string): Promise<void> {
+    await this.enfileirarMutacao(async () => {
+      const resultado = this.estado.aplicar({
+        tipo: 'expirar_reconexao',
+        salaId,
+        membroId,
+      });
+      if (!resultado.sucesso) {
+        await this.reconexao.limparJanela(salaId, membroId).catch(() => undefined);
+        this.limparTimer(salaId, membroId);
+        return;
+      }
+      this.estado.substituirEstado(resultado.estado);
+      const expirado = resultado.eventos.find((e) => e.tipo === 'vinculo_expirado');
+      const jogadorId = expirado !== undefined && 'jogadorId' in expirado
+        ? (expirado as { jogadorId: string }).jogadorId
+        : null;
+      const salaExpirada = resultado.eventos.some((e) => e.tipo === 'sala_expirada');
+      const sucessao = resultado.eventos.find((e) => e.tipo === 'anfitriao_sucedido');
+      let novoAnfitriaoJogadorId: string | undefined;
+      if (sucessao !== undefined && 'anfitriaoNovoId' in sucessao) {
+        const salaNova = resultado.estado.salas.find((s) => s.id === salaId);
+        const membroNovo = salaNova?.membros.find(
+          (m) => m.id === (sucessao as { anfitriaoNovoId: string }).anfitriaoNovoId,
+        );
+        if (membroNovo !== undefined) {
+          novoAnfitriaoJogadorId = membroNovo.jogadorId;
+        }
+      }
+      if (jogadorId !== null) {
+        try {
+          await this.repo.expirarMembroAtomico(
+            salaId,
+            jogadorId,
+            salaExpirada,
+            novoAnfitriaoJogadorId,
+          );
+        } catch (erro) {
+          console.error('[salas] falha ao persistir expiracao:', erro);
+        }
+      }
+      await this.reconexao.limparJanela(salaId, membroId).catch(() => undefined);
+      this.limparTimer(salaId, membroId);
+      if (jogadorId !== null) {
+        await this.projecao.limparAssociacaoJogador(jogadorId);
+      }
+      if (salaExpirada) {
+        const info = this.estado.abertas.get(salaId);
+        const codigo = info?.codigo
+          ?? (await this.projecao.obterEstadoSala(salaId))?.codigo
+          ?? null;
+        if (codigo !== null) {
+          await this.projecao.limparSala(salaId, codigo);
+        }
+        this.estado.abertas.delete(salaId);
+      } else {
+        await this.atualizarProjecaoEstado(resultado.estado, salaId);
+      }
+      const eventos = traduzirEventos(
+        resultado.eventos,
+        resultado.estado,
+        this.estado.apelidoPorJogadorId,
+        this.linkBase,
+      );
+      this.difundir(eventos, salaId);
+    });
+  }
+
+  private chaveTimer(salaId: string, membroId: string): string {
+    return `${salaId}:${membroId}`;
+  }
+
+  private limparTimer(salaId: string, membroId: string): void {
+    const chave = this.chaveTimer(salaId, membroId);
+    const t = this.timersDeReconexao.get(chave);
+    if (t !== undefined) {
+      clearTimeout(t);
+      this.timersDeReconexao.delete(chave);
+    }
+  }
+
+  /** Limpa todos os timers pendentes — usado nos testes para evitar vazamento de 60s. */
+  limparTodosTimers(): void {
+    for (const t of this.timersDeReconexao.values()) {
+      clearTimeout(t);
+    }
+    this.timersDeReconexao.clear();
+  }
+
+  /** Aguarda a cadeia de mutações pendentes — usado nos testes para evitar corrida com TRUNCATE. */
+  async aguardarMutacoesPendentes(): Promise<void> {
+    await this.cadeiaDeMutacoes;
   }
 
   /**

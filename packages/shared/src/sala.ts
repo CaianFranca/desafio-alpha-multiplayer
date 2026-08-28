@@ -173,7 +173,8 @@ export type CodigoDeErroDaSala =
   | 'MEMBRO_NAO_ATIVO'
   | 'APENAS_ANFITRIAO'
   | 'JOGADOR_EXPULSO'
-  | 'JOGADOR_NAO_BLOQUEADO';
+  | 'JOGADOR_NAO_BLOQUEADO'
+  | 'SALA_INCONSISTENTE';
 
 export interface ErroDaSalaEvento {
   type: 'ERRO_DA_SALA';

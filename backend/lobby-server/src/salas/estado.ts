@@ -56,6 +56,13 @@ export interface SalasState {
    * engine). Usado pelo handler após `aplicar` retornar sucesso.
    */
   substituirEstado(novo: EstadoDoLobby): void;
+
+  /**
+   * Confirma a consistência da Sala após reconstrução (ADR-0002). Aplica
+   * `confirmar_consistencia_da_sala` no engine e, em sucesso, atualiza o
+   * índice interno `abertas` e substitui o estado.
+   */
+  confirmarConsistenciaDaSala(salaId: string): ReturnType<typeof aplicarComando>;
 }
 
 class SalasStateImpl implements SalasState {
@@ -153,9 +160,8 @@ class SalasStateImpl implements SalasState {
     }
 
     // O reinício preserva a semântica do ADR-0002: membros reaparecem em
-    // reconexão e não prontos. A confirmação acontece imediatamente após a
-    // reconstrução completa desta projeção local, para que a #36 não deixe
-    // Salas permanentemente bloqueadas à espera dos fluxos da #38.
+    // reconexão e não prontos. A Sala permanece inconsistente até a
+    // confirmação explícita (issue #38) — não confirmar automaticamente.
     for (const salaId of [...this._abertas.keys()]) {
       const resultado = aplicarComando(novoEstado, {
         tipo: 'registrar_reinicio_da_sala',
@@ -170,16 +176,6 @@ class SalasStateImpl implements SalasState {
             codigo: this._abertas.get(salaId)!.codigo,
           });
         }
-      }
-    }
-
-    for (const salaId of [...this._abertas.keys()]) {
-      const resultado = aplicarComando(novoEstado, {
-        tipo: 'confirmar_consistencia_da_sala',
-        salaId,
-      });
-      if (resultado.sucesso) {
-        novoEstado = resultado.estado;
       }
     }
 
@@ -226,6 +222,17 @@ class SalasStateImpl implements SalasState {
     for (const [k, v] of novoMap) {
       this._abertas.set(k, v);
     }
+  }
+
+  confirmarConsistenciaDaSala(salaId: string): ReturnType<typeof aplicarComando> {
+    const resultado = aplicarComando(this._estado, {
+      tipo: 'confirmar_consistencia_da_sala',
+      salaId,
+    });
+    if (resultado.sucesso) {
+      this.substituirEstado(resultado.estado);
+    }
+    return resultado;
   }
 }
 

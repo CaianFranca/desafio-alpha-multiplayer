@@ -42,11 +42,12 @@ import {
   SalasRepo,
   type CriarContextoOpcoes,
 } from '../src/salas/index.ts';
-import { chaveJogadorSala, chaveSalaCodigo } from '../src/salas/projecao.ts';
+import { chaveJogadorSala, chaveSalaCodigo, serializarSala } from '../src/salas/projecao.ts';
 
 interface ServidorEfemero {
   baseUrl: string;
   wsUrl: string;
+  contexto: ReturnType<typeof criarContextoDasSalas>;
   fechar(): Promise<void>;
 }
 
@@ -94,7 +95,14 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
   return {
     baseUrl: `http://127.0.0.1:${endereco.port}`,
     wsUrl: `ws://127.0.0.1:${endereco.port}`,
+    contexto,
     fechar: async () => {
+      try {
+        await contexto.handlers.aguardarMutacoesPendentes();
+      } catch {}
+      try {
+        contexto.handlers.limparTodosTimers();
+      } catch {}
       // Fechar WSS primeiro para encerrar sockets WebSocket antes de fechar
       // o HTTP server — sem isso, `server.close()` fica aguardando as
       // conexões de upgrade que nunca fecham sozinhas.
@@ -1160,6 +1168,12 @@ test('Sucessão do Anfitrião é persistida e restaurada na reconstrução', asy
 
   // Nova instância reconstrói do PostgreSQL: B permanece Anfitrião.
   await comServidor(async (servidor) => {
+    for (const salaId of [...servidor.contexto.estado.abertas.keys()]) {
+      const res = servidor.contexto.estado.confirmarConsistenciaDaSala(salaId);
+      assert.ok(res.sucesso, `confirmar falhou para ${salaId}`);
+      const sala = servidor.contexto.estado.abertas.get(salaId)!.sala;
+      await servidor.contexto.projecao.definirEstadoSala(salaId, serializarSala(sala));
+    }
     assert.ok(cookiesB !== undefined, 'cookies de B ausentes');
     const c = await registrarJogador(servidor.baseUrl);
     const wsB = await conectarWs(servidor.wsUrl, cookiesB!);
@@ -1629,6 +1643,12 @@ test('Expulsão sobrevive ao restart: reconstrução hidrata jogadoresBloqueados
 
   // Nova instância reconstrói: B não deve aparecer como membro ativo.
   await comServidor(async (servidor) => {
+    for (const salaId of [...servidor.contexto.estado.abertas.keys()]) {
+      const res = servidor.contexto.estado.confirmarConsistenciaDaSala(salaId);
+      assert.ok(res.sucesso, `confirmar falhou para ${salaId}`);
+      const sala = servidor.contexto.estado.abertas.get(salaId)!.sala;
+      await servidor.contexto.projecao.definirEstadoSala(salaId, serializarSala(sala));
+    }
     const c = await registrarJogador(servidor.baseUrl);
     const wsC = await conectarWs(servidor.wsUrl, c.cookies);
 
