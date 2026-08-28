@@ -15,6 +15,8 @@
 //   shared client camelCase (pecaId, celula, sentido) vs engine snake (pecaId, celula.linha)
 // Ver ADR-0004 para grade 7x7 e vizinhança ortogonal.
 
+import type { CodigoDeErroComum } from './sala.ts';
+
 // --- Tipos base ---
 
 export type Orientacao = 0 | 90 | 180 | 270;
@@ -90,7 +92,7 @@ export interface ManipulacaoFinalizadaEvento {
 }
 
 export type CodigoDeErroDoTabuleiro =
-  | 'DADOS_INVALIDOS'
+  | CodigoDeErroComum
   | 'PECA_NAO_ENCONTRADA'
   | 'PECA_NAO_SELECIONADA'
   | 'RESERVA_ESGOTADA'
