@@ -232,8 +232,12 @@ export function aplicarComandoDeTabuleiro(
       return posicionarPeca(estado, comando);
     case 'finalizar_manipulacao':
       return finalizarManipulacao(estado);
-    default:
+    default: {
+      // Exaustividade: um novo ComandoDeTabuleiro sem case próprio falha a
+      // compilação aqui; em runtime, entrada externa pode bypassar tipos.
+      const _comandoExaustivo: never = comando;
       return rejeitar('DADOS_INVALIDOS', 'O comando de domínio é inválido.');
+    }
   }
 }
 
