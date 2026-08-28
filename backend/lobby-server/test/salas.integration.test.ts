@@ -13,16 +13,13 @@
 // `ALTERNAR_PRONTIDAO`, `ENVIAR_MENSAGEM_DE_CHAT`, etc.) são respondidos
 // com `ERRO_DA_SALA { codigo: 'DADOS_INVALIDOS' }` — não há teste
 // dedicado porque o handler é uma só ramificação `default` do switch.
+//
+// O harness (servidor efêmero, registro de jogador, conexão WS, esperas e
+// hooks de infra) vive em `./helpers/salas-ws.ts` para ser reutilizado por
+// `chat.integration.test.ts` (issue #34) sem duplicação.
 
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, test } from 'node:test';
-import http from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { WebSocket } from 'ws';
-import { criarClienteRedis } from '@flicker/config';
-import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
-
-registrarArquivoDeTeste();
+import { test } from 'node:test';
 import type {
   AnfitriaoSubstituidoEvento,
   CodigoDeErroDaSala,
@@ -33,20 +30,29 @@ import type {
   SalaAtualizadaEvento,
   SalaEventoDoServidor,
 } from '@flicker/shared';
-import { createApp } from '../src/app.ts';
-import { createWebSocketServer } from '../src/ws/ws.ts';
-import { pool } from '../src/config/pg.ts';
-import { redisClient } from '../src/config/redis.ts';
+import {
+  configurarHooks,
+  redisClient,
+  pool,
+} from './helpers/salas-ws.ts';
+
+configurarHooks();
 import {
   criarContextoDasSalas,
   SalasRepo,
   type CriarContextoOpcoes,
 } from '../src/salas/index.ts';
 import { chaveJogadorSala, chaveSalaCodigo } from '../src/salas/projecao.ts';
+import { createApp } from '../src/app.ts';
+import { createWebSocketServer } from '../src/ws/ws.ts';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { WebSocket } from 'ws';
 
 interface ServidorEfemero {
   baseUrl: string;
   wsUrl: string;
+  contexto: ReturnType<typeof criarContextoDasSalas>;
   fechar(): Promise<void>;
 }
 
@@ -71,7 +77,6 @@ interface CaixaDeMensagens {
   readonly esperas: EsperaDeMensagem[];
 }
 
-const redis = criarClienteRedis();
 const caixasDeMensagens = new WeakMap<WebSocket, CaixaDeMensagens>();
 let appServidor: ReturnType<typeof createApp> | null = null;
 let contador = 0;
@@ -84,6 +89,10 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
   const server = http.createServer(app);
   const contexto = criarContextoDasSalas(opcoesDeSalas);
   await contexto.estado.carregar(contexto.repo, contexto.projecao);
+  // Espelha o boot de produção (`index.ts`): rearmar timers a partir do TTL
+  // do Redis e confirmar a consistência das Salas reconstruídas — sem isso,
+  // testes cross-restart ficariam com Salas inconsistentes para sempre.
+  await contexto.handlers.rearmarAposRestart();
   const wss = createWebSocketServer(server, { contextoSalas: contexto });
 
   await new Promise<void>((resolve, reject) => {
@@ -94,7 +103,14 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
   return {
     baseUrl: `http://127.0.0.1:${endereco.port}`,
     wsUrl: `ws://127.0.0.1:${endereco.port}`,
+    contexto,
     fechar: async () => {
+      try {
+        await contexto.handlers.aguardarMutacoesPendentes();
+      } catch {}
+      try {
+        contexto.handlers.limparTodosTimers();
+      } catch {}
       // Fechar WSS primeiro para encerrar sockets WebSocket antes de fechar
       // o HTTP server — sem isso, `server.close()` fica aguardando as
       // conexões de upgrade que nunca fecham sozinhas.
@@ -107,6 +123,16 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
+      // Os closes forçados acima podem enfileirar handleFechamento depois da
+      // primeira limpeza; drenar a cadeia e remover timers novamente evita que
+      // um timer de servidor fechado dispare após o teardown e expire vínculos
+      // no PG sob o teste seguinte.
+      try {
+        await contexto.handlers.aguardarMutacoesPendentes();
+      } catch {}
+      try {
+        contexto.handlers.limparTodosTimers();
+      } catch {}
     },
   };
 }
@@ -394,48 +420,7 @@ function membroDaSala(sala: Sala, jogadorId: string): MembroDaSala {
   return membro;
 }
 
-before(async () => {
-  try {
-    await pool.query('SELECT 1');
-  } catch (error) {
-    throw new Error(`Postgres indisponível para testes de salas: ${(error as Error).message}`);
-  }
-  try {
-    await redis.connect();
-    await redis.ping();
-  } catch (error) {
-    throw new Error(`Redis indisponível para testes de salas: ${(error as Error).message}`);
-  }
-});
 
-after(async () => {
-  try {
-    await redis.quit().catch(() => {
-      try {
-        redis.disconnect();
-      } catch {}
-    });
-  } catch {
-    try {
-      redis.disconnect();
-    } catch {}
-  }
-  // redisClient (singleton) e pool são encerrados uma única vez via ./teardown.ts
-  // quando o último arquivo de teste terminar.
-  await finalizarArquivoDeTeste();
-});
-
-beforeEach(async () => {
-  // TRUNCATE em uma única declaração é atômico e respeita FKs via
-  // CASCADE — substitui o DELETE sequencial anterior que sofria race
-  // condition entre workers paralelos de `--test`. Sem o CASCADE, o
-  // `DELETE FROM usuarios` falhava com FK violation quando outro
-  // worker ainda tinha uma `salas_historico` apontando para o usuário.
-  await pool.query(
-    `TRUNCATE TABLE membros_historico, membros, salas_historico, usuarios RESTART IDENTITY CASCADE`,
-  );
-  await redis.flushdb();
-});
 
 // --- 1. CRIAR_SALA por jogador A → SALA_ATUALIZADA com A em ordem 1 ---
 
@@ -1159,6 +1144,7 @@ test('Sucessão do Anfitrião é persistida e restaurada na reconstrução', asy
   }
 
   // Nova instância reconstrói do PostgreSQL: B permanece Anfitrião.
+  // (o boot — carregar + rearmarAposRestart — já confirma a consistência)
   await comServidor(async (servidor) => {
     assert.ok(cookiesB !== undefined, 'cookies de B ausentes');
     const c = await registrarJogador(servidor.baseUrl);
@@ -1628,6 +1614,7 @@ test('Expulsão sobrevive ao restart: reconstrução hidrata jogadoresBloqueados
   }
 
   // Nova instância reconstrói: B não deve aparecer como membro ativo.
+  // (o boot — carregar + rearmarAposRestart — já confirma a consistência)
   await comServidor(async (servidor) => {
     const c = await registrarJogador(servidor.baseUrl);
     const wsC = await conectarWs(servidor.wsUrl, c.cookies);

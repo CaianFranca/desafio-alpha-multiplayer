@@ -31,6 +31,7 @@ async function inicializarDependencias(): Promise<void> {
   console.log('[lobby-server] redis conectado');
 
   await contextoSalas.estado.carregar(contextoSalas.repo, contextoSalas.projecao);
+  await contextoSalas.handlers.rearmarAposRestart();
   console.log('[lobby-server] salas carregadas do PG');
 }
 
