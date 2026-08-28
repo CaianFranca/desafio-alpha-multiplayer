@@ -1,19 +1,21 @@
-// Handlers WS de Sala (issue #36, ST-06).
+// Handlers WS de Sala (issues #36 e #39).
 //
 // Roteamento entre o protocolo Sala (`@flicker/shared`) e o engine
 // (`@flicker/engine`). Persistência e projeção vivem em `SalasRepo` e
 // `SalasProjecao`; a tradução engine→wire vive em `traduzirEventos`.
 //
-// Comandos no escopo do #36:
-//   CRIAR_SALA       -> criarSala(engine)
-//   ENTRAR_NA_SALA   -> entrarNaSala(engine), com codigoDeSala → salaId via Redis
-//   SAIR_DA_SALA     -> sairDaSala(engine), com salaId via Redis
+// Comandos no escopo:
+//   CRIAR_SALA         -> criarSala(engine)
+//   ENTRAR_NA_SALA     -> entrarNaSala(engine), com codigoDeSala → salaId via Redis
+//   SAIR_DA_SALA       -> sairDaSala(engine), com salaId via Redis
+//   EXPULSAR_MEMBRO    -> expulsarMembro(engine), com membroId via Redis
+//   DESBLOQUEAR_JOGADOR -> autorizarRetorno(engine), com jogadorId via Redis
 //
 // Chat da Sala (issue #34):
 //   ENVIAR_MENSAGEM_DE_CHAT -> broadcast MENSAGEM_DE_CHAT + histórico em Redis
 //
-// Os outros 5 comandos (`ALTERNAR_PRONTIDAO`, `EXPULSAR_MEMBRO`,
-// `DESBLOQUEAR_JOGADOR`, `ENCERRAR_SALA`, `INICIAR_PARTIDA`) respondem
+// Os outros 6 comandos (`ALTERNAR_PRONTIDAO`, `EXPULSAR_MEMBRO`,
+// `DESBLOQUEAR_JOGADOR`, `ENCERRAR_SALA`, `INICIAR_PARTIDA`, `ENVIAR_MENSAGEM_DE_CHAT`) respondem
 // `ERRO_DA_SALA` com `codigo: 'DADOS_INVALIDOS'` ao originador — fora do
 // escopo deste servidor.
 //
@@ -21,7 +23,11 @@
 // `codigo` do domínio.
 
 import { randomUUID } from 'node:crypto';
-import { type CodigoDeErro, type EstadoDoLobby } from '@flicker/engine';
+import {
+  type CodigoDeErro,
+  type EstadoDoLobby,
+  type Sala as SalaDominio,
+} from '@flicker/engine';
 import type {
   SalaComandoDoCliente,
   SalaEventoDoServidor,
@@ -57,6 +63,9 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
   'JOGADOR_JA_ASSOCIADO',
   'MEMBRO_NAO_ENCONTRADO',
   'MEMBRO_NAO_ATIVO',
+  'APENAS_ANFITRIAO',
+  'JOGADOR_EXPULSO',
+  'JOGADOR_NAO_BLOQUEADO',
 ]);
 
 /** Tamanho máximo de uma mensagem de chat (issue #34). Sem trim. */
@@ -95,9 +104,9 @@ export function ehSalaComando(value: unknown): value is SalaComandoDoCliente {
 /**
  * Mapeia o código de erro do engine para o conjunto fechado de
  * `CodigoDeErroDaSala` exposto no wire. Códigos do engine que não estão
- * no wire (ex.: `MEMBRO_NAO_EM_RECONEXAO`, `APENAS_ANFITRIAO`,
- * `SALA_INCONSISTENTE`) são inalcançáveis a partir dos 3 comandos no
- * escopo (#36) — caem em `DADOS_INVALIDOS` defensivo.
+ * no wire (ex.: `MEMBRO_NAO_EM_RECONEXAO`, `SALA_INCONSISTENTE`) são
+ * inalcançáveis a partir dos 5 comandos no escopo — caem em
+ * `DADOS_INVALIDOS` defensivo.
  */
 function paraCodigoDeErroDaSala(
   codigo: CodigoDeErro,
@@ -192,6 +201,11 @@ export class SalasHandlers {
             return;
           case 'ENVIAR_MENSAGEM_DE_CHAT':
             await this.handleEnviarMensagemDeChat(socket, jogadorId, mensagem.conteudo);
+          case 'EXPULSAR_MEMBRO':
+            await this.handleExpulsarMembro(socket, jogadorId, mensagem.membroId);
+            return;
+          case 'DESBLOQUEAR_JOGADOR':
+            await this.handleDesbloquearJogador(socket, jogadorId, mensagem.jogadorId);
             return;
           default:
             this.enviarErro(
@@ -475,6 +489,187 @@ export class SalasHandlers {
     this.broadcast.removerSocket(socket);
   }
 
+  private async handleExpulsarMembro(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+    membroId: string,
+  ): Promise<void> {
+    if (typeof membroId !== 'string' || membroId.length === 0) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'membroId é obrigatório.',
+      );
+      return;
+    }
+
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      const recuperado = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
+    if (salaId === null) {
+      this.enviarErro(
+        socket,
+        'MEMBRO_NAO_ENCONTRADO',
+        'O Jogador não está associado a nenhuma Sala.',
+      );
+      return;
+    }
+
+    // Resolver o membroId do anfitrião no estado do engine.
+    const salaInfo = this.estado.abertas.get(salaId);
+    if (salaInfo === undefined) {
+      this.enviarErro(
+        socket,
+        'SALA_NAO_ENCONTRADA',
+        'Sala não encontrada no servidor.',
+      );
+      return;
+    }
+    const anfitriaoMembroId = salaInfo.sala.anfitriaoId;
+    if (anfitriaoMembroId === null) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'Sala sem Anfitrião definido.',
+      );
+      return;
+    }
+
+    // Autorização: o emissor no WebSocket deve ser o Anfitrião atual. O
+    // engine só valida que o `anfitriaoMembroId` recebido é o host — quem
+    // fala é responsabilidade deste handler (edge).
+    if (!this.anfitriaoEstaAutorizando(socket, jogadorId, salaInfo.sala)) {
+      return;
+    }
+
+    const resultado = this.estado.aplicar({
+      tipo: 'expulsar_membro',
+      salaId,
+      anfitriaoMembroId,
+      membroAlvoId: membroId,
+    });
+
+    if (!resultado.sucesso) {
+      this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
+      return;
+    }
+
+    // Extrair jogadorId alvo do evento de domínio para persistir a expulsão.
+    const eventoExpulsao = resultado.eventos.find(
+      (e) => e.tipo === 'membro_expulsado',
+    );
+    if (eventoExpulsao?.tipo === 'membro_expulsado') {
+      await this.repo.expulsarMembroAtomico(salaId, eventoExpulsao.jogadorId);
+    }
+
+    this.estado.substituirEstado(resultado.estado);
+
+    // Atualiza a projeção quente: o expulso não pode continuar listado como
+    // membro ativo nem manter a associação jogador→sala no Redis.
+    await this.atualizarProjecaoEstado(resultado.estado, salaId);
+    if (eventoExpulsao?.tipo === 'membro_expulsado') {
+      await this.projecao.limparAssociacaoJogador(eventoExpulsao.jogadorId);
+    }
+
+    const eventos = traduzirEventos(
+      resultado.eventos,
+      resultado.estado,
+      this.estado.apelidoPorJogadorId,
+      this.linkBase,
+    );
+    this.difundir(eventos, salaId);
+  }
+
+  private async handleDesbloquearJogador(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+    jogadorAlvoId: string,
+  ): Promise<void> {
+    if (typeof jogadorAlvoId !== 'string' || jogadorAlvoId.length === 0) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'jogadorId é obrigatório.',
+      );
+      return;
+    }
+
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      const recuperado = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
+    if (salaId === null) {
+      this.enviarErro(
+        socket,
+        'MEMBRO_NAO_ENCONTRADO',
+        'O Jogador não está associado a nenhuma Sala.',
+      );
+      return;
+    }
+
+    const salaInfo = this.estado.abertas.get(salaId);
+    if (salaInfo === undefined) {
+      this.enviarErro(
+        socket,
+        'SALA_NAO_ENCONTRADA',
+        'Sala não encontrada no servidor.',
+      );
+      return;
+    }
+    const anfitriaoMembroId = salaInfo.sala.anfitriaoId;
+    if (anfitriaoMembroId === null) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'Sala sem Anfitrião definido.',
+      );
+      return;
+    }
+
+    // Autorização: o emissor no WebSocket deve ser o Anfitrião atual. O
+    // engine só valida que o `anfitriaoMembroId` recebido é o host — quem
+    // fala é responsabilidade deste handler (edge).
+    if (!this.anfitriaoEstaAutorizando(socket, jogadorId, salaInfo.sala)) {
+      return;
+    }
+
+    const resultado = this.estado.aplicar({
+      tipo: 'autorizar_retorno',
+      salaId,
+      anfitriaoMembroId,
+      jogadorId: jogadorAlvoId,
+    });
+
+    if (!resultado.sucesso) {
+      this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
+      return;
+    }
+
+    await this.repo.desbloquearMembro(salaId, jogadorAlvoId);
+
+    this.estado.substituirEstado(resultado.estado);
+
+    // Atualiza a projeção quente para refletir a remoção do bloqueio.
+    await this.atualizarProjecaoEstado(resultado.estado, salaId);
+
+    const eventos = traduzirEventos(
+      resultado.eventos,
+      resultado.estado,
+      this.estado.apelidoPorJogadorId,
+      this.linkBase,
+    );
+    this.difundir(eventos, salaId);
+  }
+
   /**
    * Chat da Sala (issue #34). Roteia pela `cadeiaDeMutacoes` como os demais
    * comandos (serialização mononodo), mas não toca o engine — o chat é
@@ -551,6 +746,33 @@ export class SalasHandlers {
     // Presença e reconexão pertencem à #38. Nesta issue o close apenas
     // remove a conexão do fan-out para evitar referências órfãs.
     this.broadcast.removerSocket(socket);
+  }
+
+  /**
+   * Garante que o Jogador por trás do WebSocket é o Anfitrião atual da Sala.
+   * O engine valida que o `anfitriaoMembroId` do comando é o host, mas não
+   * sabe quem enviou o WS — a autorização de "quem fala" é do handler (edge).
+   */
+  private anfitriaoEstaAutorizando(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+    sala: SalaDominio,
+  ): boolean {
+    const membroDoChamador = sala.membros.find(
+      (m) => m.jogadorId === jogadorId && m.estado === 'ativo',
+    );
+    if (
+      membroDoChamador === undefined ||
+      membroDoChamador.id !== sala.anfitriaoId
+    ) {
+      this.enviarErro(
+        socket,
+        'APENAS_ANFITRIAO',
+        'Apenas o Anfitrião atual da Sala pode fazer isso.',
+      );
+      return false;
+    }
+    return true;
   }
 
   private atualizarApelidoSeConhecido(jogadorId: string, apelido: string): void {
