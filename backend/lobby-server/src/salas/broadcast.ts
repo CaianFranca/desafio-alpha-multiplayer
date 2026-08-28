@@ -143,4 +143,30 @@ export class SalasBroadcaster {
       }
     }
   }
+
+  /**
+   * Remove todos os sockets associados a uma sala (usado no encerramento
+   * explícito para evitar vazamento de fan-out).
+   */
+  removerPorSala(salaId: string): void {
+    const sockets = this.salaParaSockets.get(salaId);
+    if (sockets === undefined) {
+      return;
+    }
+    const jogadores = new Set<string>();
+    for (const socket of sockets) {
+      const j = this.socketParaJogador.get(socket);
+      if (j !== undefined) jogadores.add(j);
+    }
+    for (const socket of sockets) {
+      this.socketParaSala.delete(socket);
+      this.socketParaJogador.delete(socket);
+    }
+    this.salaParaSockets.delete(salaId);
+    for (const j of jogadores) {
+      if (this.contarConexoesDoJogador(j) === 0) {
+        this.jogadorParaSala.delete(j);
+      }
+    }
+  }
 }
