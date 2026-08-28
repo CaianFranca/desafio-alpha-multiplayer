@@ -1,4 +1,4 @@
-// Handlers WS de Sala (issues #36 e #39).
+// Handlers WS de Sala (issues #36, #39, #31).
 //
 // Roteamento entre o protocolo Sala (`@flicker/shared`) e o engine
 // (`@flicker/engine`). Persistência e projeção vivem em `SalasRepo` e
@@ -10,10 +10,12 @@
 //   SAIR_DA_SALA       -> sairDaSala(engine), com salaId via Redis
 //   EXPULSAR_MEMBRO    -> expulsarMembro(engine), com membroId via Redis
 //   DESBLOQUEAR_JOGADOR -> autorizarRetorno(engine), com jogadorId via Redis
+//   ALTERNAR_PRONTIDAO -> alternarProntidao(engine), toggle individual
+//   ENCERRAR_SALA      -> encerrarSala(engine), Só Anfitrião, sala aberta
 //
-// Os outros 4 comandos (`ALTERNAR_PRONTIDAO`, `ENVIAR_MENSAGEM_DE_CHAT`,
-// `ENCERRAR_SALA`, `INICIAR_PARTIDA`) respondem `ERRO_DA_SALA` com
-// `codigo: 'DADOS_INVALIDOS'` ao originador — fora do escopo deste servidor.
+// Os outros 2 comandos (`ENVIAR_MENSAGEM_DE_CHAT`, `INICIAR_PARTIDA`)
+// respondem `ERRO_DA_SALA` com `codigo: 'DADOS_INVALIDOS'` ao originador
+// — fora do escopo deste servidor.
 //
 // Erros do engine são roteados ao originador (não broadcast) com o mesmo
 // `codigo` do domínio.
@@ -196,6 +198,12 @@ export class SalasHandlers {
             return;
           case 'DESBLOQUEAR_JOGADOR':
             await this.handleDesbloquearJogador(socket, jogadorId, mensagem.jogadorId);
+            return;
+          case 'ALTERNAR_PRONTIDAO':
+            await this.handleAlternarProntidao(socket, jogadorId);
+            return;
+          case 'ENCERRAR_SALA':
+            await this.handleEncerrarSala(socket, jogadorId);
             return;
           default:
             this.enviarErro(
@@ -648,6 +656,136 @@ export class SalasHandlers {
       this.linkBase,
     );
     this.difundir(eventos, salaId);
+  }
+
+  private async handleAlternarProntidao(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+  ): Promise<void> {
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      const recuperado = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
+    if (salaId === null) {
+      this.enviarErro(
+        socket,
+        'MEMBRO_NAO_ENCONTRADO',
+        'O Jogador não está associado a nenhuma Sala.',
+      );
+      return;
+    }
+
+    const resultado = this.estado.aplicar({
+      tipo: 'alternar_prontidao',
+      salaId,
+      jogadorId,
+    });
+
+    if (!resultado.sucesso) {
+      this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
+      return;
+    }
+
+    // Prontidão vive só na projeção Redis (ADR-0002) via estado serializado.
+    this.estado.substituirEstado(resultado.estado);
+    await this.atualizarProjecaoEstado(resultado.estado, salaId);
+
+    const eventos = traduzirEventos(
+      resultado.eventos,
+      resultado.estado,
+      this.estado.apelidoPorJogadorId,
+      this.linkBase,
+    );
+    this.difundir(eventos, salaId);
+  }
+
+  private async handleEncerrarSala(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+  ): Promise<void> {
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      const recuperado = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
+    if (salaId === null) {
+      this.enviarErro(
+        socket,
+        'MEMBRO_NAO_ENCONTRADO',
+        'O Jogador não está associado a nenhuma Sala.',
+      );
+      return;
+    }
+
+    const salaInfo = this.estado.abertas.get(salaId);
+    if (salaInfo === undefined) {
+      this.enviarErro(
+        socket,
+        'SALA_NAO_ENCONTRADA',
+        'Sala não encontrada no servidor.',
+      );
+      return;
+    }
+    const anfitriaoMembroId = salaInfo.sala.anfitriaoId;
+    if (anfitriaoMembroId === null) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'Sala sem Anfitrião definido.',
+      );
+      return;
+    }
+
+    if (!this.anfitriaoEstaAutorizando(socket, jogadorId, salaInfo.sala)) {
+      return;
+    }
+
+    // Captura dados antes do engine para limpar projeção após broadcast.
+    const codigoSala = salaInfo.sala.codigo;
+    const jogadoresDaSala = salaInfo.sala.membros
+      .filter((m) => m.estado === 'ativo')
+      .map((m) => m.jogadorId);
+
+    const resultado = this.estado.aplicar({
+      tipo: 'encerrar_sala',
+      salaId,
+      anfitriaoMembroId,
+    });
+
+    if (!resultado.sucesso) {
+      this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
+      return;
+    }
+
+    await this.repo.encerrarSalaAtomico(salaId);
+
+    this.estado.substituirEstado(resultado.estado);
+
+    // Broadcast ANTES de limpar — todos os sockets ainda estão registrados.
+    const eventos = traduzirEventos(
+      resultado.eventos,
+      resultado.estado,
+      this.estado.apelidoPorJogadorId,
+      this.linkBase,
+    );
+    this.difundir(eventos, salaId);
+
+    // Limpeza da projeção quente: estado + codigo + cada jogador→sala.
+    await this.projecao.limparSala(salaId, codigoSala);
+    for (const jid of jogadoresDaSala) {
+      await this.projecao.limparAssociacaoJogador(jid);
+    }
+    this.estado.abertas.delete(salaId);
+
+    // Remover sockets do fan-out da sala encerrada (evita vazamento).
+    this.broadcast.removerPorSala(salaId);
   }
 
   /**
