@@ -176,6 +176,33 @@ test('ENVIAR_MENSAGEM_DE_CHAT: mensagem com 501 caracteres é recusada sem broad
   });
 });
 
+// --- 4b. Mensagem só-espaços recusada (sem broadcast) ---
+
+test('ENVIAR_MENSAGEM_DE_CHAT: mensagem só-espaços é recusada sem broadcast', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB, 2);
+    await coletarEventos(wsA, 2);
+
+    enviar(wsA, { type: 'ENVIAR_MENSAGEM_DE_CHAT', conteudo: '   ' });
+    await esperarErro(wsA, 'DADOS_INVALIDOS');
+    await esperarSilencio(wsB);
+
+    wsA.close();
+    wsB.close();
+    await Promise.all([esperarClose(wsA).catch(() => undefined), esperarClose(wsB).catch(() => undefined)]);
+  });
+});
+
 // --- 5. Mensagem com 500 caracteres exatos é aceita e broadcast ---
 
 test('ENVIAR_MENSAGEM_DE_CHAT: mensagem com 500 caracteres é aceita e entregue a todos os Membros', async () => {

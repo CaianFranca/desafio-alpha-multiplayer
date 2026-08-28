@@ -14,10 +14,9 @@
 // Chat da Sala (issue #34):
 //   ENVIAR_MENSAGEM_DE_CHAT -> broadcast MENSAGEM_DE_CHAT + histórico em Redis
 //
-// Os outros 6 comandos (`ALTERNAR_PRONTIDAO`, `EXPULSAR_MEMBRO`,
-// `DESBLOQUEAR_JOGADOR`, `ENCERRAR_SALA`, `INICIAR_PARTIDA`, `ENVIAR_MENSAGEM_DE_CHAT`) respondem
-// `ERRO_DA_SALA` com `codigo: 'DADOS_INVALIDOS'` ao originador — fora do
-// escopo deste servidor.
+// Os comandos ainda fora do escopo deste servidor
+// (`ALTERNAR_PRONTIDAO`, `ENCERRAR_SALA`, `INICIAR_PARTIDA`) respondem
+// `ERRO_DA_SALA` com `codigo: 'DADOS_INVALIDOS'` ao originador.
 //
 // Erros do engine são roteados ao originador (não broadcast) com o mesmo
 // `codigo` do domínio.
@@ -201,6 +200,7 @@ export class SalasHandlers {
             return;
           case 'ENVIAR_MENSAGEM_DE_CHAT':
             await this.handleEnviarMensagemDeChat(socket, jogadorId, mensagem.conteudo);
+            return;
           case 'EXPULSAR_MEMBRO':
             await this.handleExpulsarMembro(socket, jogadorId, mensagem.membroId);
             return;
@@ -674,8 +674,8 @@ export class SalasHandlers {
    * Chat da Sala (issue #34). Roteia pela `cadeiaDeMutacoes` como os demais
    * comandos (serialização mononodo), mas não toca o engine — o chat é
    * exclusivo do lobby-server. Persiste o histórico na projeção Redis e faz
-   * broadcast a todos os Membros. Mensagens vazias (ou só-espaços, sem trim)
-   * ou acima de 500 chars são recusadas com `ERRO_DA_SALA { DADOS_INVALIDOS }`
+   * broadcast a todos os Membros. Mensagens vazias (incluindo só-espaços, com
+   * trim) ou acima de 500 chars são recusadas com `ERRO_DA_SALA { DADOS_INVALIDOS }`
    * ao originador, sem broadcast. Remetente sem Sala associada recebe
    * `MEMBRO_NAO_ENCONTRADO`.
    */
@@ -701,16 +701,16 @@ export class SalasHandlers {
       return;
     }
 
-    // Validação: string crua, 1..500 caracteres (sem trim).
+    // Validação: string crua, 1..500 caracteres; só-espaços recusadas (trim).
     if (
       typeof conteudo !== 'string'
-      || conteudo.length < 1
+      || conteudo.trim().length < 1
       || conteudo.length > TAMANHO_MAXIMO_MENSAGEM
     ) {
       this.enviarErro(
         socket,
         'DADOS_INVALIDOS',
-        'Mensagem de chat inválida (vazia ou acima de 500 caracteres).',
+        'Mensagem de chat inválida (vazia, só-espaços ou acima de 500 caracteres).',
       );
       return;
     }

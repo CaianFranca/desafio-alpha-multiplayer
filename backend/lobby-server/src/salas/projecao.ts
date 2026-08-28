@@ -18,6 +18,8 @@ import type { MensagemDeChatEvento } from '@flicker/shared';
 import { redisClient as defaultRedis } from '../config/redis.ts';
 
 const PROJECAO_TTL_SEGUNDOS = 3600;
+const CHAT_TTL_SEGUNDOS = 604800;
+const LIMITE_HISTORICO_CHAT = 200;
 const PREFIXO_SALA = 'lobby:sala:';
 const PREFIXO_CODIGO = 'lobby:sala:codigo:';
 const PREFIXO_JOGADOR_SALA = 'lobby:jogador:';
@@ -171,7 +173,12 @@ export class SalasProjecao {
    * Adiciona uma mensagem de chat ao histórico da sala (issue #34). O
    * histórico vive SÓ na projeção Redis (ADR-0002) — não há persistência
    * em PostgreSQL. Cada mensagem é um JSON de `MensagemDeChatEvento`
-   * empilhado via RPUSH; o TTL segue `PROJECAO_TTL_SEGUNDOS`.
+   * empilhado via RPUSH e limitado a `LIMITE_HISTORICO_CHAT` entradas
+   * (LTRIM) para evitar crescimento ilimitado. TTL de 7d
+   * (`CHAT_TTL_SEGUNDOS`) serve de backstop: janela muito acima do ciclo
+   * real de uma Sala, mata chaves órfãs caso ocorra crash entre o
+   * encerramento no PG (sairMembroAtomico) e o `limparSala` (Redis DEL). A
+   * chave também é removida por `limparSala` no encerramento normal.
    */
   async adicionarMensagemDeChat(
     salaId: string,
@@ -179,9 +186,8 @@ export class SalasProjecao {
   ): Promise<void> {
     const chave = chaveSalaChat(salaId);
     await this.redis.rpush(chave, JSON.stringify(msg));
-    // Sem TTL: o ciclo de vida do histórico é o da Sala. A chave é removida
-    // por `limparSala` no encerramento. Um TTL aqui faria o histórico sumir
-    // antes da Sala em salas silenciosas >1h, quebrando o critério #34.
+    await this.redis.ltrim(chave, -LIMITE_HISTORICO_CHAT, -1);
+    await this.redis.expire(chave, CHAT_TTL_SEGUNDOS);
   }
 
   /**
