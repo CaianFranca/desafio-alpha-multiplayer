@@ -1,4 +1,4 @@
-// Tradução pura engine → wire dos eventos da Sala (issues #36, #38 e #39).
+// Tradução pura engine → wire dos eventos da Sala (issues #36, #38, #39 e #31).
 // Função sem side-effects: dado o estado pós-engine e os eventos emitidos,
 // devolve os `SalaEventoDoServidor` correspondentes. O cache de apelidos é
 // injetado pelo chamador (handler) — esta função não toca DB/Redis.
@@ -11,6 +11,7 @@
 //   retorno_autorizado  -> SALA_ATUALIZADA
 //   sala_encerrada      -> SALA_ATUALIZADA (estado='encerrada')
 //   anfitriao_sucedido  -> ANFITRIAO_SUBSTITUIDO + SALA_ATUALIZADA
+//   prontidao_alterada  -> PRONTIDAO_ATUALIZADA + SALA_ATUALIZADA
 //   membro_desconectado -> MEMBRO_DESCONECTADO + SALA_ATUALIZADA
 //   membro_reconectado  -> MEMBRO_RECONECTADO + SALA_ATUALIZADA
 //   vinculo_expirado    -> MEMBRO_SAIU + SALA_ATUALIZADA
@@ -36,6 +37,7 @@ import type {
   MembroDesconectadoEvento,
   MembroReconectadoEvento,
   AnfitriaoSubstituidoEvento,
+  ProntidaoAtualizadaEvento,
 } from '@flicker/shared';
 
 export type ApelidoPorJogadorId = ReadonlyMap<string, string>;
@@ -215,6 +217,18 @@ export function traduzirEventos(
         break;
       }
 
+      case 'prontidao_alterada': {
+        const eventoProntidao: ProntidaoAtualizadaEvento = {
+          type: 'PRONTIDAO_ATUALIZADA',
+          membroId: evento.membroId,
+          prontidao: evento.pronto,
+          sala: salaWire,
+        };
+        saida.push(eventoProntidao);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
       case 'membro_desconectado': {
         const eventoDesconectado: MembroDesconectadoEvento = {
           type: 'MEMBRO_DESCONECTADO',
@@ -265,7 +279,7 @@ export function traduzirEventos(
       }
 
       // Demais eventos do engine não são emitidos no escopo deste handler
-      // (pertence a outros comandos fora do #36). Ignorados explicitamente
+      // (encaminhamento pertence a ST-07). Ignorados explicitamente
       // para não acionar o `default` do switch.
       default:
         break;

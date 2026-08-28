@@ -246,6 +246,41 @@ export class SalasRepo {
   }
 
   /**
+   * Persiste o encerramento explícito da Sala pelo Anfitrião. Todos os
+   * vínculos ativos viram histórico com motivo `encerramento` e a Sala
+   * passa para `encerrada` com `anfitriao_id = NULL`.
+   * Atomicamente: SELECT ativos → DELETE ativos → INSERT histórico → UPDATE status.
+   */
+  async encerrarSalaAtomico(salaId: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const membros = await client.query<{ usuario_id: string }>(
+        `SELECT usuario_id FROM membros WHERE sala_id = $1 AND bloqueado = false FOR UPDATE`,
+        [salaId],
+      );
+      for (const linha of membros.rows) {
+        await client.query(
+          `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
+           VALUES ($1, $2, 'encerramento')`,
+          [salaId, linha.usuario_id],
+        );
+      }
+      await client.query(`DELETE FROM membros WHERE sala_id = $1 AND bloqueado = false`, [salaId]);
+      await client.query(
+        `UPDATE salas_historico SET status = 'encerrada', anfitriao_id = NULL WHERE id = $1`,
+        [salaId],
+      );
+      await client.query('COMMIT');
+    } catch (erro) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw erro;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Desbloqueia um membro removendo sua linha da tabela `membros`. A
    * remoção física desfaz o bloqueio — o jogador pode reentrar com uma
    * nova PK composta.
