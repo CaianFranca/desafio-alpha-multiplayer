@@ -13,9 +13,12 @@
 //   ALTERNAR_PRONTIDAO -> alternarProntidao(engine), toggle individual
 //   ENCERRAR_SALA      -> encerrarSala(engine), Só Anfitrião, sala aberta
 //
-// Os outros 2 comandos (`ENVIAR_MENSAGEM_DE_CHAT`, `INICIAR_PARTIDA`)
-// respondem `ERRO_DA_SALA` com `codigo: 'DADOS_INVALIDOS'` ao originador
-// — fora do escopo deste servidor.
+// Chat da Sala (issue #34):
+//   ENVIAR_MENSAGEM_DE_CHAT -> broadcast MENSAGEM_DE_CHAT + histórico em Redis
+//
+// Os comandos ainda fora do escopo deste servidor
+// (`ALTERNAR_PRONTIDAO`, `ENCERRAR_SALA`, `INICIAR_PARTIDA`) respondem
+// `ERRO_DA_SALA` com `codigo: 'DADOS_INVALIDOS'` ao originador.
 //
 // Erros do engine são roteados ao originador (não broadcast) com o mesmo
 // `codigo` do domínio.
@@ -31,6 +34,7 @@ import type {
   SalaEventoDoServidor,
   ErroDaSalaEvento,
   CodigoDeErroDaSala,
+  MensagemDeChatEvento,
 } from '@flicker/shared';
 import {
   CodigoDeSalaIndisponivelError,
@@ -64,6 +68,9 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
   'JOGADOR_EXPULSO',
   'JOGADOR_NAO_BLOQUEADO',
 ]);
+
+/** Tamanho máximo de uma mensagem de chat (issue #34). Sem trim. */
+const TAMANHO_MAXIMO_MENSAGEM = 500;
 
 /**
  * Conjunto fechado dos `type` aceitos em `SalaComandoDoCliente`. Usado por
@@ -192,6 +199,9 @@ export class SalasHandlers {
             return;
           case 'SAIR_DA_SALA':
             await this.handleSairDaSala(socket, jogadorId);
+            return;
+          case 'ENVIAR_MENSAGEM_DE_CHAT':
+            await this.handleEnviarMensagemDeChat(socket, jogadorId, mensagem.conteudo);
             return;
           case 'EXPULSAR_MEMBRO':
             await this.handleExpulsarMembro(socket, jogadorId, mensagem.membroId);
@@ -372,6 +382,16 @@ export class SalasHandlers {
       this.linkBase,
     );
     this.difundir(eventos, salaId);
+
+    // Replay do histórico de chat (issue #34): só na entrada nova
+    // (`membro_admitido`). Quem já estava na sala (reenvio idempotente)
+    // não recebe o histórico de novo.
+    if (eventoAdmissao?.tipo === 'membro_admitido') {
+      const historico = await this.projecao.obterHistoricoDeChat(salaId);
+      for (const item of historico) {
+        this.broadcast.enviarParaSocket(socket, item);
+      }
+    }
   }
 
   private async handleSairDaSala(
@@ -786,6 +806,74 @@ export class SalasHandlers {
 
     // Remover sockets do fan-out da sala encerrada (evita vazamento).
     this.broadcast.removerPorSala(salaId);
+  }
+
+  /**
+   * Chat da Sala (issue #34). Roteia pela `cadeiaDeMutacoes` como os demais
+   * comandos (serialização mononodo), mas não toca o engine — o chat é
+   * exclusivo do lobby-server. Persiste o histórico na projeção Redis e faz
+   * broadcast a todos os Membros. Mensagens vazias (incluindo só-espaços, com
+   * trim) ou acima de 500 chars são recusadas com `ERRO_DA_SALA { DADOS_INVALIDOS }`
+   * ao originador, sem broadcast. Remetente sem Sala associada recebe
+   * `MEMBRO_NAO_ENCONTRADO`.
+   */
+  private async handleEnviarMensagemDeChat(
+    socket: AuthenticatedWebSocket,
+    jogadorId: string,
+    conteudo: unknown,
+  ): Promise<void> {
+    // Resolver a Sala do jogador: projeção primeiro, fallback ao PG.
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      salaId = await this.repo.obterSalaAbertaDoJogador(jogadorId);
+      if (salaId !== null) {
+        await this.projecao.definirAssociacaoJogador(jogadorId, salaId);
+      }
+    }
+    if (salaId === null) {
+      this.enviarErro(
+        socket,
+        'MEMBRO_NAO_ENCONTRADO',
+        'O Jogador não está associado a nenhuma Sala.',
+      );
+      return;
+    }
+
+    // Validação: string crua, 1..500 caracteres; só-espaços recusadas (trim).
+    if (
+      typeof conteudo !== 'string'
+      || conteudo.trim().length < 1
+      || conteudo.length > TAMANHO_MAXIMO_MENSAGEM
+    ) {
+      this.enviarErro(
+        socket,
+        'DADOS_INVALIDOS',
+        'Mensagem de chat inválida (vazia, só-espaços ou acima de 500 caracteres).',
+      );
+      return;
+    }
+
+    const infoSala = this.estado.abertas.get(salaId);
+    const membro = infoSala?.sala.membros.find((m) => m.jogadorId === jogadorId);
+    if (membro === undefined) {
+      this.enviarErro(
+        socket,
+        'MEMBRO_NAO_ENCONTRADO',
+        'Membro não encontrado na Sala.',
+      );
+      return;
+    }
+
+    const evento: MensagemDeChatEvento = {
+      type: 'MENSAGEM_DE_CHAT',
+      membroId: membro.id,
+      apelido: socket.data.apelido,
+      conteudo,
+      enviadoEm: new Date().toISOString(),
+    };
+
+    await this.projecao.adicionarMensagemDeChat(salaId, evento);
+    this.broadcast.enviar(salaId, evento);
   }
 
   /**

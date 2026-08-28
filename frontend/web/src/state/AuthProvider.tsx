@@ -1,33 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { AuthContext, visitorState, type AuthContextValue, type AuthState } from './auth-context'
-import { fetchCurrentPlayer, logout as logoutRequest } from '../api/auth'
+import {
+  entrarComCredenciais as entrarRequest,
+  fetchCurrentPlayer,
+  logout as logoutRequest,
+  register as registerRequest,
+} from '../api/auth'
+import type { AuthActionResult, CadastroPayload, CredenciaisPayload } from '../api/auth'
 import { onSessionExpired } from '../api/client'
 import { mockAuthenticatedState } from './mock-auth'
 
 export type { AuthState }
 
 interface AuthProviderProps {
-  /**
-   * Injeção de estado para testes: com initialState o provider opera em modo
-   * estático, sem reidratação nem chamadas de rede.
-   */
   initialState?: AuthState
   children: ReactNode
 }
 
-/**
- * Implementação real de autenticação (issue #27).
- *
- * Dupla trava do mock preservada (issue #5):
- * 1. `__MOCK_AUTH__` é constante de compilação (vite.config.ts), literal
- *    `false` no build de produção — o mock é eliminado pelo minificador.
- * 2. `VITE_AUTH_MOCK=true` ativa o mock em desenvolvimento.
- *
- * Sem mock, o estado inicial é `loading` e a reidratação acontece via
- * GET /api/auth/me. Sessão expirada ou revogada (401 em qualquer chamada de
- * API) devolve o usuário ao estado de Visitante.
- */
 function resolveInitialState(): AuthState {
   if (__MOCK_AUTH__ && import.meta.env.VITE_AUTH_MOCK === 'true') {
     return mockAuthenticatedState
@@ -59,6 +49,37 @@ export function AuthProvider({ initialState, children }: AuthProviderProps) {
     setState(visitorState)
   }, [])
 
-  const value = useMemo<AuthContextValue>(() => ({ authState: state, logout }), [state, logout])
+  const register = useCallback(async (payload: CadastroPayload): Promise<AuthActionResult> => {
+    const result = await registerRequest(payload)
+    if (!result.ok) return result
+    const me = await fetchCurrentPlayer()
+    if (me.ok) {
+      setState({ status: 'authenticated', jogador: me.jogador })
+      return { ok: true, jogador: me.jogador }
+    }
+    if (me.reason === 'invalid-session') {
+      return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: 401 }
+    }
+    return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: 0 }
+  }, [])
+
+  const entrarComCredenciais = useCallback(async (payload: CredenciaisPayload): Promise<AuthActionResult> => {
+    const result = await entrarRequest(payload)
+    if (!result.ok) return result
+    const me = await fetchCurrentPlayer()
+    if (me.ok) {
+      setState({ status: 'authenticated', jogador: me.jogador })
+      return { ok: true, jogador: me.jogador }
+    }
+    if (me.reason === 'invalid-session') {
+      return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: 401 }
+    }
+    return { ok: false, fieldErrors: {}, generalError: 'Erro inesperado. Tente novamente.', status: 0 }
+  }, [])
+
+  const value = useMemo<AuthContextValue>(
+    () => ({ authState: state, logout, register, entrarComCredenciais, login: entrarComCredenciais }),
+    [state, logout, register, entrarComCredenciais],
+  )
   return <AuthContext value={value}>{children}</AuthContext>
 }
