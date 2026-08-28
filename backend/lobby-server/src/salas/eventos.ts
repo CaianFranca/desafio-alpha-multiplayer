@@ -297,7 +297,7 @@ export function traduzirEventos(
 
       case 'encaminhamento_iniciado': {
         const ev: PartidaPreparandoEvento = { type: 'PARTIDA_PREPARANDO' };
-        saida.push(ev as unknown as SalaEventoDoServidor);
+        saida.push(ev);
         saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
         break;
       }
@@ -316,7 +316,7 @@ export function traduzirEventos(
           codigo: 'ENCAMINHAMENTO_RECUSADO',
           motivo: 'Encaminhamento recusado pelo game-server',
         };
-        saida.push(ev as unknown as SalaEventoDoServidor);
+        saida.push(ev);
         saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
         break;
       }
@@ -327,7 +327,7 @@ export function traduzirEventos(
           codigo: 'ENCAMINHAMENTO_FALHOU',
           motivo: 'Falha ao encaminhar para o game-server',
         };
-        saida.push(ev as unknown as SalaEventoDoServidor);
+        saida.push(ev);
         saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
         break;
       }

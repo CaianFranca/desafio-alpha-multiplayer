@@ -225,10 +225,13 @@ export class SalasRepo {
    * Usado no aceite do handoff após revalidação do engine.
    */
   async persistirEncaminhamento(salaId: string, serverId: string, partidaId: string): Promise<void> {
-    await this.pool.query(
+    const resultado = await this.pool.query(
       `UPDATE salas_historico SET status = 'encaminhada', server_id = $2, partida_id = $3 WHERE id = $1`,
       [salaId, serverId, partidaId],
     );
+    if (resultado.rowCount !== 1) {
+      throw new Error(`Sala não encontrada ao persistir encaminhamento ${salaId}`);
+    }
   }
 
   /** Obtém server/partida de uma sala encaminhada (null se não encaminhada). */

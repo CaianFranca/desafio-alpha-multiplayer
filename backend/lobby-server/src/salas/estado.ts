@@ -90,15 +90,7 @@ class SalasStateImpl implements SalasState {
 
   async carregar(repo: SalasRepo, projecao: SalasProjecao): Promise<void> {
     // Carrega tanto abertas quanto encaminhadas (encaminhada mantém snapshot redirect)
-    type SalaAtivaRow = { id: string; codigo: string; anfitriaoId: string | null; status: string; serverId: string | null; partidaId: string | null };
-    const salasAtivas: SalaAtivaRow[] = await (async () => {
-      const r = repo as unknown as { listarSalasAtivas?: () => Promise<SalaAtivaRow[]> };
-      if (typeof r.listarSalasAtivas === 'function') {
-        return await r.listarSalasAtivas();
-      }
-      const abertas = await repo.listarSalasAbertas();
-      return abertas.map((s) => ({ ...s, status: 'aberta', serverId: null, partidaId: null }));
-    })();
+    const salasAtivas = await repo.listarSalasAtivas();
 
     // Uma única leitura de membros por sala; reaproveitada na hidratação
     // dos apelidos e na reconstrução do engine.
