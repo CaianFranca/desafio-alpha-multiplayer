@@ -29,7 +29,8 @@ function reducer(estado: EstadoDaTela, evento: EventoDaTela): EstadoDaTela {
 }
 
 export function usePartidaTela(opts?: UsePartidaTelaOptions): UsePartidaTelaReturn {
-  const [estado, dispatch] = useReducer(reducer, opts?.estadoInicial ?? estadoInicialDefault)
+  const { estadoInicial: estadoInicialOpt = estadoInicialDefault, loader } = opts ?? {}
+  const [estado, dispatch] = useReducer(reducer, estadoInicialOpt)
 
   const carregar = useCallback(() => dispatch({ type: 'carregar' }), [])
   const partidaPreparada = useCallback(() => dispatch({ type: 'partidaPreparada' }), [])
@@ -38,10 +39,10 @@ export function usePartidaTela(opts?: UsePartidaTelaOptions): UsePartidaTelaRetu
 
   const tentarNovamente = useCallback(() => {
     dispatch({ type: 'tentarNovamente' })
-    if (opts?.loader) {
-      void opts.loader().catch(() => dispatch({ type: 'falhar' }))
+    if (loader) {
+      void loader().catch(() => dispatch({ type: 'falhar' }))
     }
-  }, [opts])
+  }, [loader])
 
   const forcarEstado = useCallback((novoEstado: EstadoDaTela) => {
     dispatch({ type: 'forcar', estado: novoEstado })
