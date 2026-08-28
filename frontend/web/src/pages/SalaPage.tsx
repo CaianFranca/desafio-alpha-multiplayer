@@ -1,22 +1,29 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useSalaWebSocket } from '../hooks/useSalaWebSocket'
 import { CodigoDeAcessoCard } from '../components/sala/CodigoDeAcessoCard'
 import { LinkDiretoCard } from '../components/sala/LinkDiretoCard'
 import { ListaDeMembros } from '../components/sala/ListaDeMembros'
 import { AvisosDoLobby } from '../components/sala/AvisosDoLobby'
+import { AuthContext } from '../state/auth-context'
 
 export function SalaPage() {
   const { codigoDeSala: codigoParam } = useParams<{ codigoDeSala: string }>()
   const navigate = useNavigate()
-  const { sala, avisos, erro, criarSala, entrarNaSala, alternarProntidao, sairDaSala } = useSalaWebSocket()
+  const { authState } = useContext(AuthContext)
+  const jogadorId = authState.status === 'authenticated' ? authState.jogador.id : undefined
+  const { sala, avisos, erro, criarSala, entrarNaSala, alternarProntidao, sairDaSala } =
+    useSalaWebSocket(jogadorId)
   const [codigoInput, setCodigoInput] = useState('')
+  const conviteEnviadoRef = useRef<string | null>(null)
 
-  // Entrada por rota de Convite /sala/:codigoDeSala
+  // Entrada por rota de Convite /sala/:codigoDeSala — envia apenas uma vez
+  // por código, para não reentrar após sair da sala.
   useEffect(() => {
-    if (codigoParam && !sala) {
+    if (codigoParam && !sala && conviteEnviadoRef.current !== codigoParam) {
       const codigo = codigoParam.trim().toUpperCase()
       if (codigo.length === 6) {
+        conviteEnviadoRef.current = codigoParam
         entrarNaSala(codigo)
       }
     }

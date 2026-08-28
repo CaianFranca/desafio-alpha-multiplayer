@@ -15,7 +15,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "paths": {
+      "@flicker/shared/*": ["../packages/shared/*"]
+    }
   },
   "include": ["web/src"]
 }

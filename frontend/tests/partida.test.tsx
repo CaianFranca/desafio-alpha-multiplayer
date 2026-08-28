@@ -22,7 +22,7 @@ function setViewport(width: number) {
 
 describe('partida route', () => {
   const visitante: AuthState = { status: 'visitor' }
-  const autenticado = estadoAutenticadoMock
+  const autenticado = mockAuthenticatedState
 
   it('autenticado ve moldura e canvas ao acessar /partida diretamente', () => {
     renderWithRouter(['/partida'], autenticado)

@@ -322,6 +322,30 @@ describe('lobby - página do lobby', () => {
     expect(await screen.findByText(/ana.*pronto/i)).toBeInTheDocument()
   })
 
+  it('prontidão alterna otimisticamente antes da reconciliação do servidor', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+
+    const ws = MockWebSocket.last()!
+    const euJogadorId = mockAuthenticatedState.jogador.id
+    const eu = criarMembro({ id: 'm-eu', jogadorId: euJogadorId, apelido: 'LucasGomes', ordemDeEntrada: 0, prontidao: false })
+    const salaInicial = criarSala({ codigoDeSala: 'A3K9M2', membros: [eu], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaInicial })
+    await screen.findByText('LucasGomes')
+
+    // Inicialmente ninguém pronto
+    expect(screen.queryByLabelText('Membro pronto')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /alternar prontidão/i }))
+
+    // Otimista: o membro atual já aparece pronto sem aguardar resposta do servidor
+    expect(await screen.findByLabelText('Membro pronto')).toBeInTheDocument()
+
+    // E o comando ainda é enviado para reconciliação
+    const envio = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1] as string)
+    expect(envio.type).toBe('ALTERNAR_PRONTIDAO')
+  })
+
   it('avisos de entrada, saída, desconexão e substituição de Anfitrião aparecem em tempo real', async () => {
     renderWithRouter(['/salas/criar'], mockAuthenticatedState)
     const ws = MockWebSocket.last()!

@@ -1,4 +1,5 @@
-import type { Sala } from '../../../../../packages/shared/src/sala'
+import { useMemo } from 'react'
+import type { Sala } from '@flicker/shared/src/sala'
 
 interface Props {
   sala: Sala | null
@@ -10,9 +11,9 @@ function ordenarMembros(sala: Sala | null) {
 }
 
 export function ListaDeMembros({ sala }: Props) {
-  const membrosOrdenados = ordenarMembros(sala)
+  const membrosOrdenados = useMemo(() => ordenarMembros(sala), [sala])
   const total = 4
-  const vagas = Array.from({ length: total }, (_, i) => membrosOrdenados[i] ?? null)
+  const vagas = useMemo(() => Array.from({ length: total }, (_, i) => membrosOrdenados[i] ?? null), [membrosOrdenados])
   const ocupados = membrosOrdenados.length
 
   return (
@@ -34,7 +35,10 @@ export function ListaDeMembros({ sala }: Props) {
                 className={`flex items-center gap-4 p-4 bg-[#1e1e1e] border ${ehAnfitriao ? 'border-l-2 border-l-[#c9a86a] border-y-white/10 border-r-white/10' : 'border-white/10'}`}
               >
                 <div className="w-8 h-8 border border-[#c9a86a] flex items-center justify-center text-[#c9a86a] shrink-0" aria-hidden>
-                  <span className="text-sm">👤</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm font-medium truncate">{membro.apelido}</p>
@@ -61,7 +65,12 @@ export function ListaDeMembros({ sala }: Props) {
               className="flex items-center gap-4 p-4 bg-[#1a1a1a] border border-dashed border-white/15"
             >
               <div className="w-8 h-8 border border-dashed border-white/20 flex items-center justify-center text-white/30 shrink-0" aria-hidden>
-                <span className="text-sm">👥</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
               </div>
               <div className="flex-1">
                 <p className="text-white/60 text-sm">Aguardando Conexão...</p>

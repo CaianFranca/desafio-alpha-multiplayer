@@ -4,7 +4,7 @@ import type {
   Sala,
   SalaEventoDoServidor,
   SalaComandoDoCliente,
-} from '../../../../packages/shared/src/sala'
+} from '@flicker/shared/src/sala'
 
 export interface AvisoDoLobby {
   id: string
@@ -31,6 +31,10 @@ function proximoAvisoId(): string {
   return `aviso-${avisoContador}-${Date.now()}`
 }
 
+// Mantém apenas os avisos mais recentes para não crescer infinitamente
+// e quebrar o layout (janela deslizante).
+const AVISOS_MAX = 20
+
 function resolverWsUrl(): string {
   if (typeof window === 'undefined') return 'ws://localhost:3001'
   const envUrl = (import.meta.env as Record<string, string | undefined>).VITE_WS_URL
@@ -50,8 +54,10 @@ function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null
       return `${evento.membro.apelido} entrou na sala`
     case 'MEMBRO_SAIU':
       return `Membro saiu da sala`
-    case 'MEMBRO_DESCONECTADO':
-      return `Membro ${evento.membroId.slice(0, 8)} desconectado (${evento.presenca})`
+    case 'MEMBRO_DESCONECTADO': {
+      const apelido = salaAnterior?.membros.find((m) => m.id === evento.membroId)?.apelido ?? 'Membro'
+      return `${apelido} desconectado (${evento.presenca})`
+    }
     case 'ANFITRIAO_SUBSTITUIDO': {
       const anterior = salaAnterior?.membros.find((m) => m.id === evento.anfitriaoAnteriorId)
       const atual = evento.sala.membros.find((m) => m.id === evento.anfitriaoId)
@@ -69,7 +75,7 @@ function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null
   }
 }
 
-export function useSalaWebSocket(): UseSalaWebSocketReturn {
+export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const [sala, setSala] = useState<Sala | null>(null)
   const [avisos, setAvisos] = useState<AvisoDoLobby[]>([])
   const [conectado, setConectado] = useState(false)
@@ -78,12 +84,18 @@ export function useSalaWebSocket(): UseSalaWebSocketReturn {
   const reconnectTimerRef = useRef<number | null>(null)
   const salaRef = useRef<Sala | null>(null)
 
+  // Ao trocar de sala (código diferente), descarta avisos da sala anterior.
   useEffect(() => {
+    const atual = sala?.codigoDeSala ?? null
+    const anterior = salaRef.current?.codigoDeSala ?? null
+    if (atual !== anterior) {
+      setAvisos([])
+    }
     salaRef.current = sala
   }, [sala])
 
   const adicionarAviso = useCallback((mensagem: string, tipo: string) => {
-    setAvisos((prev) => [...prev, { id: proximoAvisoId(), mensagem, tipo }])
+    setAvisos((prev) => [...prev, { id: proximoAvisoId(), mensagem, tipo }].slice(-AVISOS_MAX))
   }, [])
 
   const conectar = useCallback(() => {
@@ -235,16 +247,19 @@ export function useSalaWebSocket(): UseSalaWebSocketReturn {
   )
 
   const alternarProntidao = useCallback(() => {
-    // otimista: inverte localmente antes do servidor reconciliar
-    setSala((prev) => {
-      if (!prev) return prev
-      // encontra o membro atual pela primeira posição? sem jogadorId disponível,
-      // apenas inverte para o primeiro membro (será reconciliado pelo servidor)
-      // Mantém imutável para teste de otimista.
-      return prev
-    })
+    // Otimista: inverte localmente a prontidão do membro atual antes de o
+    // servidor reconciliar (feedback imediato ao usuário).
+    if (jogadorId) {
+      setSala((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          membros: prev.membros.map((m) => (m.jogadorId === jogadorId ? { ...m, prontidao: !m.prontidao } : m)),
+        }
+      })
+    }
     enviar({ type: 'ALTERNAR_PRONTIDAO' })
-  }, [enviar])
+  }, [enviar, jogadorId])
 
   const sairDaSala = useCallback(() => {
     enviar({ type: 'SAIR_DA_SALA' })

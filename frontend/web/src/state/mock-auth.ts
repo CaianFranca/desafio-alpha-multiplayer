@@ -16,6 +16,3 @@ export const mockAuthenticatedState: AuthenticatedState = {
     email: 'jogador.teste@exemplo.com',
   },
 }
-
-// Alias em português para compatibilidade com testes legados (partida.test)
-export const estadoAutenticadoMock = mockAuthenticatedState
