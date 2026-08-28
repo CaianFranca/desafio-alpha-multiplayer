@@ -1,6 +1,8 @@
 // Testes de integração — Prontidão e encerramento no lobby-server (issue #31).
 // Cobre o seam WS com PG+Redis reais do compose, verificando apenas
-// comportamento externo (protocolo WS). Critérios de #31:
+// comportamento externo (protocolo WS) — asserts PG marcados como
+// white-box complementares da transação encerrarSalaAtomico (não fazem
+// parte dos critérios da issue). Critérios de #31:
 // 1) pronto alterna individualmente; entrada de novo Membro não limpa prontidão
 // 2) mudanças de prontidão são broadcast aos Membros
 // 3) encerrar por não-Anfitrião é recusado
@@ -28,7 +30,6 @@ import type {
 import { createApp } from '../src/app.ts';
 import { createWebSocketServer } from '../src/ws/ws.ts';
 import { pool } from '../src/config/pg.ts';
-import { redisClient } from '../src/config/redis.ts';
 import { criarContextoDasSalas, type CriarContextoOpcoes } from '../src/salas/index.ts';
 
 interface ServidorEfemero {
