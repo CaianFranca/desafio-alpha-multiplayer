@@ -7,6 +7,8 @@
 // domínio do lobby (lobby.ts). Nenhum contrato wire, Redis ou Express vive
 // aqui: este módulo é domínio puro e imutável.
 
+import assert from 'node:assert/strict';
+
 export const LADO_DA_GRADE = 7;
 
 export type TipoDaPeca = 'inicial' | 'reta' | 'T' | 'cruz';
@@ -935,7 +937,10 @@ function escolherTipoDaPecaRecebida(
       reserva: estado.reserva.filter((item) => item.pecaId !== peca.pecaId),
       recebidas: estado.recebidas.map((item) =>
         item.recebidaId === recebida.recebidaId
-          ? { ...item, pecaId: peca.pecaId, tipo: comando.tipoDaPeca, orientacao: peca.orientacao }
+          ? // A Recebida nasce na Orientação base (0°): a orientação da Peça
+            // consumida da Reserva pode estar stale (girada via seleção) e o
+            // giro deliberado da Recebida fica em girar_peca.
+            { ...item, pecaId: peca.pecaId, tipo: comando.tipoDaPeca, orientacao: 0 }
           : item,
       ),
       pecaSelecionadaId: peca.pecaId,
@@ -1069,9 +1074,9 @@ function permanecer(
 // Encaixe de Peça Recebida: a célula é fixa (a célula-alvo fixada no
 // Recebimento), com Orientação livre e SEM exigência de conexão com a Peça
 // geradora (ST-10). A Recebida sai da lista de pendências e a janela de
-// Manipulação da ST-09 abre como em qualquer Encaixe. A seleção permanece na
-// Recebida escolhida mais recentemente — a próxima escolha de tipo a renova —
-// para que girar_peca siga funcionando nas pendências restantes.
+// Manipulação da ST-09 abre como em qualquer Encaixe — girar a peça
+// posicionada vai pela janela, sem consultar a seleção. A seleção é limpa no
+// encaixe; a próxima escolha de tipo seleciona a próxima Recebida.
 function posicionarRecebida(
   estado: EstadoDoTabuleiro,
   recebida: PecaRecebida,
@@ -1085,14 +1090,12 @@ function posicionarRecebida(
     );
   }
 
-  if (!recebida.pecaId || !recebida.tipo) {
-    // Inalcançável pelos comandos: o tipo é escolhido antes de haver pecaId
-    // para referenciar; guarda defensiva.
-    return rejeitar(
-      'RECEBIDA_NAO_ENCONTRADA',
-      'A Peça Recebida ainda não tem o tipo escolhido.',
-    );
-  }
+  // Invariante do roteamento: encontrarRecebidaPorPeca só alcança Recebidas
+  // com o tipo já escolhido; o assert estreita os tipos sem rejeição morta.
+  assert.ok(
+    recebida.pecaId !== null && recebida.tipo !== null,
+    'Recebida sem tipo escolhido alcançou o encaixe.',
+  );
 
   if (
     comando.celula.linha !== recebida.celulaAlvo.linha ||
@@ -1123,6 +1126,7 @@ function posicionarRecebida(
       (item) => item.recebidaId !== recebida.recebidaId,
     ),
     posicionadas: [...estado.posicionadas, posicionada],
+    pecaSelecionadaId: null,
     pecaEmManipulacaoId: posicionada.pecaId,
   };
   return sucesso(novoEstado, [

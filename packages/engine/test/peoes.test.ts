@@ -385,6 +385,47 @@ test('girar recebida segue o padrão da seleção única', () => {
   ), true);
 });
 
+test('recebida nasce com orientação 0 mesmo com a peça da Reserva girada antes da escolha', () => {
+  let estado = estadoComRecebidasPendentes();
+
+  // Girar a futura peça consumida na Reserva é permitido (só o encaixe direto
+  // é barrado); a orientação stale não pode vazar para a Recebida.
+  estado = aplicar(estado, selecionar('reta-1'));
+  estado = aplicar(estado, girar('reta-1'));
+  assert.equal(estado.reserva.find((peca) => peca.pecaId === 'reta-1')?.orientacao, 90);
+
+  estado = aplicar(estado, escolherTipo('recebida-inicial-1-norte', 'reta'));
+  assert.equal(estado.recebidas[0].pecaId, 'reta-1');
+  assert.equal(estado.recebidas[0].orientacao, 0);
+});
+
+test('girar recebida posicionada vai pela janela de Manipulação, sem seleção', () => {
+  let estado = estadoComRecebidasPendentes();
+  estado = aplicar(estado, escolherTipo('recebida-inicial-1-norte', 'reta'));
+  estado = aplicar(estado, posicionar('reta-1', 2, 3));
+
+  // O encaixe limpa a seleção e abre a Manipulação em reta-1; girar continua
+  // funcionando pela janela, sem depender de pecaSelecionadaId.
+  assert.equal(estado.pecaSelecionadaId, null);
+  assert.equal(estado.pecaEmManipulacaoId, 'reta-1');
+
+  const giro = aplicarComandoDeTabuleiro(estado, girar('reta-1'));
+  assert.equal(giro.sucesso, true);
+  if (!giro.sucesso) return;
+  assert.deepEqual(giro.eventos, [
+    {
+      tipo: 'peca_girada',
+      pecaId: 'reta-1',
+      orientacaoAnterior: 0,
+      orientacao: 90,
+      sentido: 'horario',
+    },
+  ]);
+  assert.equal(giro.estado.posicionadas.some(
+    (peca) => peca.pecaId === 'reta-1' && peca.orientacao === 90,
+  ), true);
+});
+
 test('pendências bloqueiam mover, permanecer e selecionar outro peão', () => {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 3, 3));
