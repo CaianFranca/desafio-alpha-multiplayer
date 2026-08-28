@@ -52,6 +52,7 @@ import { WebSocket } from 'ws';
 interface ServidorEfemero {
   baseUrl: string;
   wsUrl: string;
+  contexto: ReturnType<typeof criarContextoDasSalas>;
   fechar(): Promise<void>;
 }
 
@@ -88,6 +89,10 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
   const server = http.createServer(app);
   const contexto = criarContextoDasSalas(opcoesDeSalas);
   await contexto.estado.carregar(contexto.repo, contexto.projecao);
+  // Espelha o boot de produção (`index.ts`): rearmar timers a partir do TTL
+  // do Redis e confirmar a consistência das Salas reconstruídas — sem isso,
+  // testes cross-restart ficariam com Salas inconsistentes para sempre.
+  await contexto.handlers.rearmarAposRestart();
   const wss = createWebSocketServer(server, { contextoSalas: contexto });
 
   await new Promise<void>((resolve, reject) => {
@@ -98,7 +103,14 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
   return {
     baseUrl: `http://127.0.0.1:${endereco.port}`,
     wsUrl: `ws://127.0.0.1:${endereco.port}`,
+    contexto,
     fechar: async () => {
+      try {
+        await contexto.handlers.aguardarMutacoesPendentes();
+      } catch {}
+      try {
+        contexto.handlers.limparTodosTimers();
+      } catch {}
       // Fechar WSS primeiro para encerrar sockets WebSocket antes de fechar
       // o HTTP server — sem isso, `server.close()` fica aguardando as
       // conexões de upgrade que nunca fecham sozinhas.
@@ -111,6 +123,16 @@ async function subirServidor(opcoesDeSalas: CriarContextoOpcoes = {}): Promise<S
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
+      // Os closes forçados acima podem enfileirar handleFechamento depois da
+      // primeira limpeza; drenar a cadeia e remover timers novamente evita que
+      // um timer de servidor fechado dispare após o teardown e expire vínculos
+      // no PG sob o teste seguinte.
+      try {
+        await contexto.handlers.aguardarMutacoesPendentes();
+      } catch {}
+      try {
+        contexto.handlers.limparTodosTimers();
+      } catch {}
     },
   };
 }
@@ -1122,6 +1144,7 @@ test('Sucessão do Anfitrião é persistida e restaurada na reconstrução', asy
   }
 
   // Nova instância reconstrói do PostgreSQL: B permanece Anfitrião.
+  // (o boot — carregar + rearmarAposRestart — já confirma a consistência)
   await comServidor(async (servidor) => {
     assert.ok(cookiesB !== undefined, 'cookies de B ausentes');
     const c = await registrarJogador(servidor.baseUrl);
@@ -1591,6 +1614,7 @@ test('Expulsão sobrevive ao restart: reconstrução hidrata jogadoresBloqueados
   }
 
   // Nova instância reconstrói: B não deve aparecer como membro ativo.
+  // (o boot — carregar + rearmarAposRestart — já confirma a consistência)
   await comServidor(async (servidor) => {
     const c = await registrarJogador(servidor.baseUrl);
     const wsC = await conectarWs(servidor.wsUrl, c.cookies);

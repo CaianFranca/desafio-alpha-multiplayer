@@ -89,18 +89,11 @@ export class SalasRepo {
     );
   }
 
-  /**
-   * Persiste a saída em uma única transação. Quando o engine concluiu que
-   * era o último vínculo ativo, a mudança para `encerrada` é confirmada no
-   * mesmo commit do DELETE e do histórico. Quando houve sucessão, o novo
-   * Anfitrião é gravado no mesmo commit — sem isso, a reconstrução do boot
-   * restauraria um Anfitrião já sucedido (ADR-0002).
-   */
-  async sairMembroAtomico(
+  private async terminarVinculoAtomico(
     salaId: string,
     jogadorId: string,
     motivo: MotivoDeTermino,
-    encerrarSala: boolean,
+    statusEncerramento: StatusDaSala | null,
     novoAnfitriaoJogadorId?: string | null,
   ): Promise<void> {
     const client = await this.pool.connect();
@@ -111,18 +104,17 @@ export class SalasRepo {
         [salaId, jogadorId],
       );
       if (exclusao.rowCount !== 1) {
-        throw new Error('Vínculo ativo não encontrado ao persistir saída da Sala.');
+        throw new Error(`Vínculo ativo não encontrado ao persistir ${motivo} da Sala.`);
       }
       await client.query(
         `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
          VALUES ($1, $2, $3)`,
         [salaId, jogadorId, motivo],
       );
-      if (encerrarSala) {
+      if (statusEncerramento !== null) {
         await client.query(
-          `UPDATE salas_historico SET status = 'encerrada', anfitriao_id = NULL
-           WHERE id = $1`,
-          [salaId],
+          `UPDATE salas_historico SET status = $2, anfitriao_id = NULL WHERE id = $1`,
+          [salaId, statusEncerramento],
         );
       } else if (novoAnfitriaoJogadorId != null) {
         await client.query(
@@ -137,6 +129,51 @@ export class SalasRepo {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Persiste a saída em uma única transação. Quando o engine concluiu que
+   * era o último vínculo ativo, a mudança para `encerrada` é confirmada no
+   * mesmo commit do DELETE e do histórico. Quando houve sucessão, o novo
+   * Anfitrião é gravado no mesmo commit — sem isso, a reconstrução do boot
+   * restauraria um Anfitrião já sucedido (ADR-0002).
+   */
+  async sairMembroAtomico(
+    salaId: string,
+    jogadorId: string,
+    motivo: MotivoDeTermino,
+    encerrarSala: boolean,
+    novoAnfitriaoJogadorId?: string | null,
+  ): Promise<void> {
+    await this.terminarVinculoAtomico(
+      salaId,
+      jogadorId,
+      motivo,
+      encerrarSala ? 'encerrada' : null,
+      novoAnfitriaoJogadorId,
+    );
+  }
+
+  /**
+   * Persiste a expiração da janela de reconexão (issue #38).
+   * Similar a `sairMembroAtomico`, mas com motivo='expiracao' e status
+   * 'expirada' quando o último vínculo ativo expira. Mantém a mesma
+   * atomicidade: DELETE + histórico + eventual atualização de anfitrião/status
+   * no mesmo commit.
+   */
+  async expirarMembroAtomico(
+    salaId: string,
+    jogadorId: string,
+    encerrarSala: boolean,
+    novoAnfitriaoJogadorId?: string | null,
+  ): Promise<void> {
+    await this.terminarVinculoAtomico(
+      salaId,
+      jogadorId,
+      'expiracao',
+      encerrarSala ? 'expirada' : null,
+      novoAnfitriaoJogadorId,
+    );
   }
 
   /** Lista as salas com `status='aberta'` para reconstrução no boot. */

@@ -225,9 +225,9 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await pool.query('DELETE FROM usuarios');
-  // Redis de teste usa DB dedicado (via getConfig) — flushdb isolado é seguro.
-  // Alternativa escopada: del por prefixo sessao:*, mas flushdb garante limpeza total sem leak entre suítes.
+  await pool.query(
+    `TRUNCATE TABLE membros_historico, membros, salas_historico, usuarios RESTART IDENTITY CASCADE`,
+  );
   await redis.flushdb();
 });
 

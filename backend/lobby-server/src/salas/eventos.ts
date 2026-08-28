@@ -1,4 +1,4 @@
-// Tradução pura engine → wire dos eventos da Sala (issues #36, #39, #31).
+// Tradução pura engine → wire dos eventos da Sala (issues #36, #38, #39 e #31).
 // Função sem side-effects: dado o estado pós-engine e os eventos emitidos,
 // devolve os `SalaEventoDoServidor` correspondentes. O cache de apelidos é
 // injetado pelo chamador (handler) — esta função não toca DB/Redis.
@@ -12,6 +12,11 @@
 //   sala_encerrada      -> SALA_ATUALIZADA (estado='encerrada')
 //   anfitriao_sucedido  -> ANFITRIAO_SUBSTITUIDO + SALA_ATUALIZADA
 //   prontidao_alterada  -> PRONTIDAO_ATUALIZADA + SALA_ATUALIZADA
+//   membro_desconectado -> MEMBRO_DESCONECTADO + SALA_ATUALIZADA
+//   membro_reconectado  -> MEMBRO_RECONECTADO + SALA_ATUALIZADA
+//   vinculo_expirado    -> MEMBRO_SAIU + SALA_ATUALIZADA
+//   sala_expirada       -> SALA_ATUALIZADA (estado='expirada')
+//   reinicio_registrado / consistencia_confirmada -> SALA_ATUALIZADA
 //
 import type {
   EstadoDoLobby,
@@ -29,6 +34,8 @@ import type {
   MembroEntrouEvento,
   MembroSaiuEvento,
   MembroExpulsoEvento,
+  MembroDesconectadoEvento,
+  MembroReconectadoEvento,
   AnfitriaoSubstituidoEvento,
   ProntidaoAtualizadaEvento,
 } from '@flicker/shared';
@@ -218,6 +225,55 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoProntidao);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'membro_desconectado': {
+        const eventoDesconectado: MembroDesconectadoEvento = {
+          type: 'MEMBRO_DESCONECTADO',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          presenca: 'em_reconexao',
+          sala: salaWire,
+        };
+        saida.push(eventoDesconectado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'membro_reconectado': {
+        const eventoReconectado: MembroReconectadoEvento = {
+          type: 'MEMBRO_RECONECTADO',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          presenca: 'conectado',
+          sala: salaWire,
+        };
+        saida.push(eventoReconectado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'vinculo_expirado': {
+        const eventoExpirado: MembroSaiuEvento = {
+          type: 'MEMBRO_SAIU',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          sala: salaWire,
+        };
+        saida.push(eventoExpirado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'sala_expirada': {
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'reinicio_registrado':
+      case 'consistencia_confirmada': {
         saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
         break;
       }
