@@ -35,6 +35,8 @@ Uma situação inicial que gera trabalho e então se junta ao fluxo principal.
 
   Triagem é só para issues **que você não criou** — bug reports, pedidos de feature recebidos, qualquer coisa que chega crua. Tickets que `/transformar-em-tickets` produziu já estão prontas para agentes, então **não passe triagem nelas**.
 
+- **PR parada com request changes e autor indisponível** → **`/contribuir-pr`**. Assume a PR de outro dev: pega a branch, implementa o bloqueante do review, devolve os commits à PR original e assina a contribuição (trailer nos commits + comentário assinado + assignee).
+
 ## Fronteiras de fase
 
 Uma **fase** é um pedaço de trabalho dentro de uma sessão — a entrevista, a especificação, as tickets. Na **fronteira** entre duas delas você tem cinco opções, e escolher entre elas é a decisão mais nebulosa de todo este mapa:
