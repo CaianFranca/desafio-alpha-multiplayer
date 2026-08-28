@@ -36,11 +36,8 @@ export function useAuthForm() {
 
   return {
     fieldErrors,
-    setFieldErrors,
     generalError,
-    setGeneralError,
     isSubmitting,
-    setIsSubmitting,
     clearFieldError,
     submit,
   }
