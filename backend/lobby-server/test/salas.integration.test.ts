@@ -31,27 +31,9 @@ import type {
   SalaEventoDoServidor,
 } from '@flicker/shared';
 import {
-  comServidor,
-  subirServidor,
-  registrarJogador,
-  conectarWs,
-  enviar,
-  esperarMensagem,
-  esperarSalaAtualizada,
-  esperarErro,
-  coletarEventos,
-  esperarSilencio,
-  esperarClose,
-  postJson,
   configurarHooks,
-  membroDaSala,
-  RepositorioComFalhaNaSaida,
-  RepositorioComCriacaoPausada,
-  chaveJogadorSala,
-  chaveSalaCodigo,
   redisClient,
   pool,
-  type Cookies,
 } from './helpers/salas-ws.ts';
 
 configurarHooks();
@@ -61,6 +43,11 @@ import {
   type CriarContextoOpcoes,
 } from '../src/salas/index.ts';
 import { chaveJogadorSala, chaveSalaCodigo } from '../src/salas/projecao.ts';
+import { createApp } from '../src/app.ts';
+import { createWebSocketServer } from '../src/ws/ws.ts';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { WebSocket } from 'ws';
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -89,7 +76,6 @@ interface CaixaDeMensagens {
   readonly esperas: EsperaDeMensagem[];
 }
 
-const redis = criarClienteRedis();
 const caixasDeMensagens = new WeakMap<WebSocket, CaixaDeMensagens>();
 let appServidor: ReturnType<typeof createApp> | null = null;
 let contador = 0;
@@ -412,48 +398,7 @@ function membroDaSala(sala: Sala, jogadorId: string): MembroDaSala {
   return membro;
 }
 
-before(async () => {
-  try {
-    await pool.query('SELECT 1');
-  } catch (error) {
-    throw new Error(`Postgres indisponível para testes de salas: ${(error as Error).message}`);
-  }
-  try {
-    await redis.connect();
-    await redis.ping();
-  } catch (error) {
-    throw new Error(`Redis indisponível para testes de salas: ${(error as Error).message}`);
-  }
-});
 
-after(async () => {
-  try {
-    await redis.quit().catch(() => {
-      try {
-        redis.disconnect();
-      } catch {}
-    });
-  } catch {
-    try {
-      redis.disconnect();
-    } catch {}
-  }
-  // redisClient (singleton) e pool são encerrados uma única vez via ./teardown.ts
-  // quando o último arquivo de teste terminar.
-  await finalizarArquivoDeTeste();
-});
-
-beforeEach(async () => {
-  // TRUNCATE em uma única declaração é atômico e respeita FKs via
-  // CASCADE — substitui o DELETE sequencial anterior que sofria race
-  // condition entre workers paralelos de `--test`. Sem o CASCADE, o
-  // `DELETE FROM usuarios` falhava com FK violation quando outro
-  // worker ainda tinha uma `salas_historico` apontando para o usuário.
-  await pool.query(
-    `TRUNCATE TABLE membros_historico, membros, salas_historico, usuarios RESTART IDENTITY CASCADE`,
-  );
-  await redis.flushdb();
-});
 
 // --- 1. CRIAR_SALA por jogador A → SALA_ATUALIZADA com A em ordem 1 ---
 
