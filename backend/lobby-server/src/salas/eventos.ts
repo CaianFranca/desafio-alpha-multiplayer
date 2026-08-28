@@ -1,4 +1,4 @@
-// Tradução pura engine → wire dos eventos da Sala (issue #36).
+// Tradução pura engine → wire dos eventos da Sala (issues #36, #38, #39 e #31).
 // Função sem side-effects: dado o estado pós-engine e os eventos emitidos,
 // devolve os `SalaEventoDoServidor` correspondentes. O cache de apelidos é
 // injetado pelo chamador (handler) — esta função não toca DB/Redis.
@@ -7,8 +7,16 @@
 //   sala_criada         -> SALA_ATUALIZADA
 //   membro_admitido     -> MEMBRO_ENTROU + SALA_ATUALIZADA
 //   membro_saiu         -> MEMBRO_SAIU  + SALA_ATUALIZADA
+//   membro_expulsado    -> MEMBRO_EXPULSO + SALA_ATUALIZADA
+//   retorno_autorizado  -> SALA_ATUALIZADA
 //   sala_encerrada      -> SALA_ATUALIZADA (estado='encerrada')
 //   anfitriao_sucedido  -> ANFITRIAO_SUBSTITUIDO + SALA_ATUALIZADA
+//   prontidao_alterada  -> PRONTIDAO_ATUALIZADA + SALA_ATUALIZADA
+//   membro_desconectado -> MEMBRO_DESCONECTADO + SALA_ATUALIZADA
+//   membro_reconectado  -> MEMBRO_RECONECTADO + SALA_ATUALIZADA
+//   vinculo_expirado    -> MEMBRO_SAIU + SALA_ATUALIZADA
+//   sala_expirada       -> SALA_ATUALIZADA (estado='expirada')
+//   reinicio_registrado / consistencia_confirmada -> SALA_ATUALIZADA
 //
 import type {
   EstadoDoLobby,
@@ -25,7 +33,11 @@ import type {
   SalaEventoDoServidor,
   MembroEntrouEvento,
   MembroSaiuEvento,
+  MembroExpulsoEvento,
+  MembroDesconectadoEvento,
+  MembroReconectadoEvento,
   AnfitriaoSubstituidoEvento,
+  ProntidaoAtualizadaEvento,
 } from '@flicker/shared';
 
 export type ApelidoPorJogadorId = ReadonlyMap<string, string>;
@@ -188,8 +200,86 @@ export function traduzirEventos(
         break;
       }
 
+      case 'membro_expulsado': {
+        const eventoExpulso: MembroExpulsoEvento = {
+          type: 'MEMBRO_EXPULSO',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          sala: salaWire,
+        };
+        saida.push(eventoExpulso);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'retorno_autorizado': {
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'prontidao_alterada': {
+        const eventoProntidao: ProntidaoAtualizadaEvento = {
+          type: 'PRONTIDAO_ATUALIZADA',
+          membroId: evento.membroId,
+          prontidao: evento.pronto,
+          sala: salaWire,
+        };
+        saida.push(eventoProntidao);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'membro_desconectado': {
+        const eventoDesconectado: MembroDesconectadoEvento = {
+          type: 'MEMBRO_DESCONECTADO',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          presenca: 'em_reconexao',
+          sala: salaWire,
+        };
+        saida.push(eventoDesconectado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'membro_reconectado': {
+        const eventoReconectado: MembroReconectadoEvento = {
+          type: 'MEMBRO_RECONECTADO',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          presenca: 'conectado',
+          sala: salaWire,
+        };
+        saida.push(eventoReconectado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'vinculo_expirado': {
+        const eventoExpirado: MembroSaiuEvento = {
+          type: 'MEMBRO_SAIU',
+          membroId: evento.membroId,
+          jogadorId: evento.jogadorId,
+          sala: salaWire,
+        };
+        saida.push(eventoExpirado);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'sala_expirada': {
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
+      case 'reinicio_registrado':
+      case 'consistencia_confirmada': {
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        break;
+      }
+
       // Demais eventos do engine não são emitidos no escopo deste handler
-      // (pertence a outros comandos fora do #36). Ignorados explicitamente
+      // (encaminhamento pertence a ST-07). Ignorados explicitamente
       // para não acionar o `default` do switch.
       default:
         break;

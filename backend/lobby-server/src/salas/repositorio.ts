@@ -23,6 +23,7 @@ export interface SalaAberta {
 export interface MembroPersistido {
   readonly jogadorId: string;
   readonly ordem: number;
+  readonly bloqueado: boolean;
 }
 
 interface PgError23505 {
@@ -88,18 +89,11 @@ export class SalasRepo {
     );
   }
 
-  /**
-   * Persiste a saída em uma única transação. Quando o engine concluiu que
-   * era o último vínculo ativo, a mudança para `encerrada` é confirmada no
-   * mesmo commit do DELETE e do histórico. Quando houve sucessão, o novo
-   * Anfitrião é gravado no mesmo commit — sem isso, a reconstrução do boot
-   * restauraria um Anfitrião já sucedido (ADR-0002).
-   */
-  async sairMembroAtomico(
+  private async terminarVinculoAtomico(
     salaId: string,
     jogadorId: string,
     motivo: MotivoDeTermino,
-    encerrarSala: boolean,
+    statusEncerramento: StatusDaSala | null,
     novoAnfitriaoJogadorId?: string | null,
   ): Promise<void> {
     const client = await this.pool.connect();
@@ -110,18 +104,17 @@ export class SalasRepo {
         [salaId, jogadorId],
       );
       if (exclusao.rowCount !== 1) {
-        throw new Error('Vínculo ativo não encontrado ao persistir saída da Sala.');
+        throw new Error(`Vínculo ativo não encontrado ao persistir ${motivo} da Sala.`);
       }
       await client.query(
         `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
          VALUES ($1, $2, $3)`,
         [salaId, jogadorId, motivo],
       );
-      if (encerrarSala) {
+      if (statusEncerramento !== null) {
         await client.query(
-          `UPDATE salas_historico SET status = 'encerrada', anfitriao_id = NULL
-           WHERE id = $1`,
-          [salaId],
+          `UPDATE salas_historico SET status = $2, anfitriao_id = NULL WHERE id = $1`,
+          [salaId, statusEncerramento],
         );
       } else if (novoAnfitriaoJogadorId != null) {
         await client.query(
@@ -136,6 +129,51 @@ export class SalasRepo {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Persiste a saída em uma única transação. Quando o engine concluiu que
+   * era o último vínculo ativo, a mudança para `encerrada` é confirmada no
+   * mesmo commit do DELETE e do histórico. Quando houve sucessão, o novo
+   * Anfitrião é gravado no mesmo commit — sem isso, a reconstrução do boot
+   * restauraria um Anfitrião já sucedido (ADR-0002).
+   */
+  async sairMembroAtomico(
+    salaId: string,
+    jogadorId: string,
+    motivo: MotivoDeTermino,
+    encerrarSala: boolean,
+    novoAnfitriaoJogadorId?: string | null,
+  ): Promise<void> {
+    await this.terminarVinculoAtomico(
+      salaId,
+      jogadorId,
+      motivo,
+      encerrarSala ? 'encerrada' : null,
+      novoAnfitriaoJogadorId,
+    );
+  }
+
+  /**
+   * Persiste a expiração da janela de reconexão (issue #38).
+   * Similar a `sairMembroAtomico`, mas com motivo='expiracao' e status
+   * 'expirada' quando o último vínculo ativo expira. Mantém a mesma
+   * atomicidade: DELETE + histórico + eventual atualização de anfitrião/status
+   * no mesmo commit.
+   */
+  async expirarMembroAtomico(
+    salaId: string,
+    jogadorId: string,
+    encerrarSala: boolean,
+    novoAnfitriaoJogadorId?: string | null,
+  ): Promise<void> {
+    await this.terminarVinculoAtomico(
+      salaId,
+      jogadorId,
+      'expiracao',
+      encerrarSala ? 'expirada' : null,
+      novoAnfitriaoJogadorId,
+    );
   }
 
   /** Lista as salas com `status='aberta'` para reconstrução no boot. */
@@ -160,13 +198,107 @@ export class SalasRepo {
    */
   async listarMembrosDaSala(salaId: string): Promise<MembroPersistido[]> {
     const resultado = await this.pool.query<QueryResultRow & MembroPersistido>(
-      `SELECT usuario_id AS "jogadorId", ordem_de_entrada AS ordem
+      `SELECT usuario_id AS "jogadorId", ordem_de_entrada AS ordem, bloqueado
        FROM membros
        WHERE sala_id = $1
        ORDER BY ordem_de_entrada ASC`,
       [salaId],
     );
     return resultado.rows;
+  }
+
+  /**
+   * Persiste a expulsão em uma única transação. A linha de `membros` é
+   * marcada como `bloqueado=true` (não deletada) — a PK composta impede
+   * reentrada. Um registro é inserido em `membros_historico` com motivo
+   * `expulsao`.
+   */
+  async expulsarMembroAtomico(
+    salaId: string,
+    jogadorId: string,
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const atualizacao = await client.query(
+        `UPDATE membros SET bloqueado = true
+         WHERE sala_id = $1 AND usuario_id = $2 AND bloqueado = false`,
+        [salaId, jogadorId],
+      );
+      if (atualizacao.rowCount !== 1) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw new Error(
+          'Vínculo ativo não encontrado ou já bloqueado ao persistir expulsão.',
+        );
+      }
+      await client.query(
+        `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
+         VALUES ($1, $2, 'expulsao')`,
+        [salaId, jogadorId],
+      );
+      await client.query('COMMIT');
+    } catch (erro) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw erro;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Persiste o encerramento explícito da Sala pelo Anfitrião. Todos os
+   * vínculos ativos viram histórico com motivo `encerramento` e a Sala
+   * passa para `encerrada` com `anfitriao_id = NULL`.
+   * Atomicamente: SELECT ativos → DELETE ativos → INSERT histórico → UPDATE status.
+   */
+  async encerrarSalaAtomico(salaId: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const membros = await client.query<{ usuario_id: string }>(
+        `SELECT usuario_id FROM membros WHERE sala_id = $1 AND bloqueado = false FOR UPDATE`,
+        [salaId],
+      );
+      for (const linha of membros.rows) {
+        await client.query(
+          `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino)
+           VALUES ($1, $2, 'encerramento')`,
+          [salaId, linha.usuario_id],
+        );
+      }
+      await client.query(`DELETE FROM membros WHERE sala_id = $1 AND bloqueado = false`, [salaId]);
+      await client.query(
+        `UPDATE salas_historico SET status = 'encerrada', anfitriao_id = NULL WHERE id = $1`,
+        [salaId],
+      );
+      await client.query('COMMIT');
+    } catch (erro) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw erro;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Desbloqueia um membro removendo sua linha da tabela `membros`. A
+   * remoção física desfaz o bloqueio — o jogador pode reentrar com uma
+   * nova PK composta.
+   */
+  async desbloquearMembro(
+    salaId: string,
+    jogadorId: string,
+  ): Promise<void> {
+    const resultado = await this.pool.query(
+      `DELETE FROM membros
+       WHERE sala_id = $1 AND usuario_id = $2 AND bloqueado = true`,
+      [salaId, jogadorId],
+    );
+    if (resultado.rowCount !== 1) {
+      throw new Error(
+        'Membro bloqueado não encontrado ao desbloquear.',
+      );
+    }
   }
 
   /**
@@ -195,7 +327,7 @@ export class SalasRepo {
       `SELECT m.sala_id AS "salaId"
        FROM membros m
        JOIN salas_historico s ON s.id = m.sala_id
-       WHERE m.usuario_id = $1 AND s.status = 'aberta'
+       WHERE m.usuario_id = $1 AND m.bloqueado = false AND s.status = 'aberta'
        ORDER BY m.ordem_de_entrada ASC
        LIMIT 1`,
       [jogadorId],

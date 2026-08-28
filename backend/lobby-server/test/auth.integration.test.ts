@@ -13,6 +13,9 @@ import { type AddressInfo } from 'node:net';
 import { criarClienteRedis } from '@flicker/config';
 import { createApp } from '../src/app.ts';
 import { pool } from '../src/config/pg.ts';
+import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
+
+registrarArquivoDeTeste();
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -153,10 +156,9 @@ after(async () => {
   } else {
     redis.disconnect();
   }
-  await pool.end().catch(() => undefined);
-  // Garante saída limpa: ioredis/pg podem deixar handles ativos mesmo após
-  // quit/end bem-sucedidos em ambiente com tsx + watch de handles.
-  setImmediate(() => process.exit(0));
+  // redisClient (singleton) e pool são encerrados uma única vez via ./teardown.ts
+  // quando o último arquivo de teste terminar.
+  await finalizarArquivoDeTeste();
 });
 
 beforeEach(async () => {

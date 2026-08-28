@@ -128,6 +128,14 @@ export interface MembroDesconectadoEvento {
   sala: Sala;
 }
 
+export interface MembroReconectadoEvento {
+  type: 'MEMBRO_RECONECTADO';
+  membroId: string;
+  jogadorId: string;
+  presenca: 'conectado';
+  sala: Sala;
+}
+
 export interface MembroExpulsoEvento {
   type: 'MEMBRO_EXPULSO';
   membroId: string;
@@ -170,7 +178,11 @@ export type CodigoDeErroDaSala =
   | 'SALA_CHEIA'
   | 'JOGADOR_JA_ASSOCIADO'
   | 'MEMBRO_NAO_ENCONTRADO'
-  | 'MEMBRO_NAO_ATIVO';
+  | 'MEMBRO_NAO_ATIVO'
+  | 'APENAS_ANFITRIAO'
+  | 'JOGADOR_EXPULSO'
+  | 'JOGADOR_NAO_BLOQUEADO'
+  | 'SALA_INCONSISTENTE';
 
 export interface ErroDaSalaEvento {
   type: 'ERRO_DA_SALA';
@@ -183,6 +195,7 @@ export type SalaEventoDoServidor =
   | MembroEntrouEvento
   | MembroSaiuEvento
   | MembroDesconectadoEvento
+  | MembroReconectadoEvento
   | MembroExpulsoEvento
   | AnfitriaoSubstituidoEvento
   | ProntidaoAtualizadaEvento

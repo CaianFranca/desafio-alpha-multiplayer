@@ -1,4 +1,4 @@
-// Estado do lobby no servidor (issue #36): wrapper sobre `EstadoDoLobby` do
+// Estado do lobby no servidor (issues #36, #38): wrapper sobre `EstadoDoLobby` do
 // engine que conhece (a) o pool PG para a reconstrução do boot e (b) a
 // projeção Redis para hidratar as chaves no mesmo passo.
 //
@@ -56,6 +56,19 @@ export interface SalasState {
    * engine). Usado pelo handler após `aplicar` retornar sucesso.
    */
   substituirEstado(novo: EstadoDoLobby): void;
+
+  /**
+   * Confirma a consistência da Sala após reconstrução (ADR-0002). Aplica
+   * `confirmar_consistencia_da_sala` no engine e, em sucesso, atualiza o
+   * índice interno `abertas` e substitui o estado.
+   */
+  confirmarConsistenciaDaSala(salaId: string): ReturnType<typeof aplicarComando>;
+
+  /**
+   * Confirma todas as Salas inconsistentes de forma idempotente (issue #38).
+   * Usado após o rearmamento das janelas de reconexão pós-restart (B1).
+   */
+  confirmarTodasSalas(): void;
 }
 
 class SalasStateImpl implements SalasState {
@@ -101,8 +114,12 @@ class SalasStateImpl implements SalasState {
     // confirmada, como determina o ADR-0002.
     let novoEstado: EstadoDoLobby = estadoDoLobbyVazio();
     for (const sala of salasAbertas) {
-      const membros = membrosPorSala.get(sala.id) ?? [];
-      const membrosDominio: MembroDominio[] = membros.map((m, idx) => ({
+      const todosMembros = membrosPorSala.get(sala.id) ?? [];
+      const membrosAtivos = todosMembros.filter((m) => !m.bloqueado);
+      const jogadoresBloqueados = todosMembros
+        .filter((m) => m.bloqueado)
+        .map((m) => m.jogadorId);
+      const membrosDominio: MembroDominio[] = membrosAtivos.map((m, idx) => ({
         id: `${sala.id}-m${m.ordem}`, // membroId determinístico na reconstrução
         jogadorId: m.jogadorId,
         ordemDeEntrada: m.ordem,
@@ -111,8 +128,13 @@ class SalasStateImpl implements SalasState {
         presenca: 'conectado' as const,
         pronto: false,
       }));
+      // O contador é monotônico e nunca reutiliza ordens (contrato do
+      // engine). Membros bloqueados permanecem no PG com a ordem original —
+      // devem entrar no cálculo para não regredir o contador pós-restart.
       const proximaOrdemDeEntrada =
-        membros.length > 0 ? Math.max(...membros.map((m) => m.ordem)) + 1 : 1;
+        todosMembros.length > 0
+          ? Math.max(...todosMembros.map((m) => m.ordem)) + 1
+          : 1;
       // O Anfitrião vem do write-model — pode ter sido sucedido antes do
       // reinício. A menor ordem é apenas fallback defensivo quando
       // `anfitriao_id` está ausente ou sem vínculo ativo.
@@ -136,7 +158,7 @@ class SalasStateImpl implements SalasState {
         membros: membrosDominio,
         proximaOrdemDeEntrada,
         anfitriaoId: anfitriaoMembroId,
-        jogadoresBloqueados: [],
+        jogadoresBloqueados,
         consistente: true,
       };
       novoEstado = { salas: [...novoEstado.salas, salaDominio] };
@@ -144,9 +166,8 @@ class SalasStateImpl implements SalasState {
     }
 
     // O reinício preserva a semântica do ADR-0002: membros reaparecem em
-    // reconexão e não prontos. A confirmação acontece imediatamente após a
-    // reconstrução completa desta projeção local, para que a #36 não deixe
-    // Salas permanentemente bloqueadas à espera dos fluxos da #38.
+    // reconexão e não prontos. A Sala permanece inconsistente até a
+    // confirmação explícita (issue #38) — não confirmar automaticamente.
     for (const salaId of [...this._abertas.keys()]) {
       const resultado = aplicarComando(novoEstado, {
         tipo: 'registrar_reinicio_da_sala',
@@ -161,16 +182,6 @@ class SalasStateImpl implements SalasState {
             codigo: this._abertas.get(salaId)!.codigo,
           });
         }
-      }
-    }
-
-    for (const salaId of [...this._abertas.keys()]) {
-      const resultado = aplicarComando(novoEstado, {
-        tipo: 'confirmar_consistencia_da_sala',
-        salaId,
-      });
-      if (resultado.sucesso) {
-        novoEstado = resultado.estado;
       }
     }
 
@@ -216,6 +227,23 @@ class SalasStateImpl implements SalasState {
     this._abertas.clear();
     for (const [k, v] of novoMap) {
       this._abertas.set(k, v);
+    }
+  }
+
+  confirmarConsistenciaDaSala(salaId: string): ReturnType<typeof aplicarComando> {
+    const resultado = aplicarComando(this._estado, {
+      tipo: 'confirmar_consistencia_da_sala',
+      salaId,
+    });
+    if (resultado.sucesso) {
+      this.substituirEstado(resultado.estado);
+    }
+    return resultado;
+  }
+
+  confirmarTodasSalas(): void {
+    for (const salaId of [...this._abertas.keys()]) {
+      this.confirmarConsistenciaDaSala(salaId);
     }
   }
 }

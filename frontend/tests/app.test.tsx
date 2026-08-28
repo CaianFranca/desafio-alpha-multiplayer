@@ -4,7 +4,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
-import { estadoAutenticadoMock } from '../web/src/state/mock-auth'
+import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 
 // Replica a composição de main.tsx (AuthProvider envolvendo RouterProvider),
 // permitindo injetar o estado de autenticação via props do provider.
@@ -79,32 +79,30 @@ describe('homepage structure', () => {
   })
 })
 
-describe('stub pages', () => {
-  it('renders cadastro stub page directly', () => {
+describe('auth pages', () => {
+  it('renders cadastro page with card styling and CTA', () => {
     renderWithRouter(['/cadastro'])
 
-    expect(screen.getByRole('heading', { name: /cadastro/i })).toBeInTheDocument()
-    const section = screen.getByRole('heading', { name: /cadastro/i }).closest('section')!
-    expect(section).toHaveTextContent(/em construção/i)
-    expect(screen.getByRole('link', { name: /voltar ao início/i })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('heading', { name: /crie seu cadastro/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /cadastrar-se/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /entre/i })).toHaveAttribute('href', '/login')
   })
 
-  it('renders login stub page directly', () => {
+  it('renders login page with Entrar CTA', () => {
     renderWithRouter(['/login'])
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
-    const section = screen.getByRole('heading', { name: /^entrar$/i }).closest('section')!
-    expect(section).toHaveTextContent(/em construção/i)
-    expect(screen.getByRole('link', { name: /voltar ao início/i })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('button', { name: /^entrar$/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /crie seu cadastro/i })).toHaveAttribute('href', '/cadastro')
   })
 
-  it('back link navigates to homepage', async () => {
+  it('cadastro footer link navigates to login', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/cadastro'])
 
-    await user.click(screen.getByRole('link', { name: /voltar ao início/i }))
+    await user.click(screen.getByRole('link', { name: /entre/i }))
 
-    expect(screen.getByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
   })
 })
 
@@ -117,7 +115,7 @@ describe('hero CTAs', () => {
     const heroSignup = within(heroSection).getByRole('link', { name: /criar conta/i })
     await user.click(heroSignup)
 
-    expect(screen.getByRole('heading', { name: /cadastro/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /crie seu cadastro/i })).toBeInTheDocument()
   })
 
   it('hero login link navigates to login', async () => {
@@ -133,9 +131,9 @@ describe('hero CTAs', () => {
 })
 
 describe('authentication states', () => {
-  const visitante: AuthState = { status: 'visitante' }
-  const autenticado = estadoAutenticadoMock
-  const apelidoMock = estadoAutenticadoMock.jogador.apelido
+  const visitante: AuthState = { status: 'visitor' }
+  const autenticado = mockAuthenticatedState
+  const apelidoMock = mockAuthenticatedState.jogador.apelido
 
   it('visitor header shows no nickname and no Criar Sala action', () => {
     renderWithRouter(['/'], visitante)
@@ -179,7 +177,7 @@ describe('authentication states', () => {
     renderWithRouter(['/salas/criar'], visitante)
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
-    expect(screen.getAllByText(/em construção/i).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /^entrar$/i })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /criar sala/i })).not.toBeInTheDocument()
   })
 

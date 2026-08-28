@@ -13,7 +13,9 @@ import { criarClienteRedis } from '@flicker/config';
 import { createApp } from '../src/app.ts';
 import { createWebSocketServer } from '../src/ws/ws.ts';
 import { pool } from '../src/config/pg.ts';
-import { redisClient } from '../src/config/redis.ts';
+import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
+
+registrarArquivoDeTeste();
 
 interface ServidorEfemero {
   baseUrl: string;
@@ -217,24 +219,15 @@ after(async () => {
       redis.disconnect();
     } catch {}
   }
-  try {
-    await redisClient.quit().catch(() => {
-      try {
-        redisClient.disconnect();
-      } catch {}
-    });
-  } catch {
-    try {
-      redisClient.disconnect();
-    } catch {}
-  }
-  await pool.end().catch(() => undefined);
+  // redisClient (singleton) e pool são encerrados uma única vez via ./teardown.ts
+  // quando o último arquivo de teste terminar.
+  await finalizarArquivoDeTeste();
 });
 
 beforeEach(async () => {
-  await pool.query('DELETE FROM usuarios');
-  // Redis de teste usa DB dedicado (via getConfig) — flushdb isolado é seguro.
-  // Alternativa escopada: del por prefixo sessao:*, mas flushdb garante limpeza total sem leak entre suítes.
+  await pool.query(
+    `TRUNCATE TABLE membros_historico, membros, salas_historico, usuarios RESTART IDENTITY CASCADE`,
+  );
   await redis.flushdb();
 });
 

@@ -121,6 +121,16 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
         console.log(`[ws] auth: ${auth.jogadorId} (${auth.apelido})`);
         console.log(`[ws] connect: ${request.socket.remoteAddress} jogador=${auth.jogadorId}`);
 
+        // Reconexão automática (issue #38): se o Jogador tem vínculo em
+        // `em_reconexao`, reentra automaticamente na Sala com janela de 60s.
+        if (contextoSalas !== undefined) {
+          try {
+            await contextoSalas.handlers.tratarReconexaoSeNecessario(authSocket);
+          } catch (erro) {
+            console.error('[ws] falha na reconexao automatica:', erro);
+          }
+        }
+
         // Drena o buffer de mensagens que chegaram antes da autenticação.
         for (const data of mensagensAguardandoAuth.splice(0)) {
           void handleMessage(data, authSocket, contextoSalas);
