@@ -226,14 +226,13 @@ test('posicionar em célula ocupada é rejeitado com código fechado', () => {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 3, 3));
 
-  estado = aplicar(estado, selecionar('reta-1'));
-  estado = aplicar(estado, girar('reta-1'));
-  estado = aplicar(estado, posicionar('reta-1', 4, 3));
+  estado = aplicar(estado, selecionar('inicial-2'));
+  estado = aplicar(estado, posicionar('inicial-2', 4, 3));
 
-  estado = aplicar(estado, selecionar('reta-2'));
-  assert.equal(codigoDaRejeicao(estado, posicionar('reta-2', 3, 3)), 'CELULA_JA_OCUPADA');
+  estado = aplicar(estado, selecionar('inicial-3'));
+  assert.equal(codigoDaRejeicao(estado, posicionar('inicial-3', 3, 3)), 'CELULA_JA_OCUPADA');
   // A rejeição preserva o estado sem consumir nada.
-  assert.equal(estado.reserva.some((peca) => peca.pecaId === 'reta-2'), true);
+  assert.equal(estado.reserva.some((peca) => peca.pecaId === 'inicial-3'), true);
 });
 
 test('após o encaixe, girar a peça posicionada é permitido até a Finalização', () => {
@@ -327,8 +326,13 @@ test('comandos inválidos são rejeitados com códigos fechados', () => {
   // Sem seleção ativa.
   assert.equal(codigoDaRejeicao(estado, girar('reta-1')), 'PECA_NAO_SELECIONADA');
   assert.equal(
-    codigoDaRejeicao(estado, posicionar('reta-1', 3, 3)),
+    codigoDaRejeicao(estado, posicionar('inicial-1', 3, 3)),
     'PECA_NAO_SELECIONADA',
+  );
+  // Peça de caminho não pode ser posicionada diretamente (só via Recebimento).
+  assert.equal(
+    codigoDaRejeicao(estado, posicionar('reta-1', 3, 3)),
+    'PECA_NAO_RECEBIDA',
   );
 
   // Peça inexistente.
@@ -348,6 +352,9 @@ test('reserva esgotada rejeita o posicionamento com código fechado', () => {
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
+    peoes: [],
+    peaoSelecionadoId: null,
+    recebidas: [],
   };
   assert.equal(
     codigoDaRejeicao(esgotado, posicionar('reta-1', 3, 3)),
