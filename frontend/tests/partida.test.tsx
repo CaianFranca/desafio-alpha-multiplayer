@@ -4,7 +4,7 @@ import { createMemoryRouter, RouterProvider, Link, Outlet } from 'react-router-d
 import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
-import { estadoAutenticadoMock } from '../web/src/state/mock-auth'
+import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 
 function renderWithRouter(initialEntries: string[] = ['/'], authState: AuthState = visitorState) {
   const router = createMemoryRouter(routes, { initialEntries })
@@ -21,8 +21,8 @@ function setViewport(width: number) {
 }
 
 describe('partida route', () => {
-  const visitante: AuthState = { status: 'visitante' }
-  const autenticado = estadoAutenticadoMock
+  const visitante: AuthState = { status: 'visitor' }
+  const autenticado = mockAuthenticatedState
 
   it('autenticado ve moldura e canvas ao acessar /partida diretamente', () => {
     renderWithRouter(['/partida'], autenticado)

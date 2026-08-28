@@ -12,3 +12,13 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; font-family: var(--font-body); color: var(--color-text); background: var(--color-background); }
 a { color: inherit; text-decoration: none; }
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #111827 inset;
+  -webkit-text-fill-color: #f9fafb;
+  caret-color: #f9fafb;
+  transition: background-color 5000s ease-in-out 0s;
+}
