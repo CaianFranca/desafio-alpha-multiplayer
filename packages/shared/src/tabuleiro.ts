@@ -12,7 +12,7 @@
 //   shared Orientacao 0|90|180|270       <-> engine Orientacao idem
 //   shared SentidoDeRotacao 'horario'|'anti_horario' <-> engine SentidoDeRotacao idem
 //   shared PecaId string opaca           <-> engine PecaDaReserva.pecaId / PecaPosicionada.pecaId
-//   shared client camelCase (pecaId, celula, sentido) vs engine snake (pecaId, celula.linha)
+//   shared type:UPPER_SNAKE ('SELECIONAR_PECA') vs engine tipo:snake ('selecionar_peca'); campos em camelCase nos dois lados
 // Ver ADR-0004 para grade 7x7 e vizinhança ortogonal.
 
 import type { CodigoDeErroComum } from './sala.ts';
