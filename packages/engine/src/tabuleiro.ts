@@ -797,6 +797,19 @@ function posicionarPeao(
     return rejeitar('PEAO_NAO_ENCONTRADO', 'O Peão não foi encontrado.');
   }
 
+  // O encaixe pertence à sequência do Peão: só o Peão selecionado se encaixa,
+  // e sem pendências em aberto — comando fora de ordem não pode órfanar as
+  // pendências de outro Peão (mesmo padrão de mover/permanecer).
+  if (estado.peaoSelecionadoId !== peao.peaoId) {
+    return rejeitar('PEAO_NAO_SELECIONADO', 'O Peão indicado não é o selecionado.');
+  }
+  if (estado.recebidas.length > 0) {
+    return rejeitar(
+      'PENDENCIA_NAO_RESOLVIDA',
+      'Há Peças Recebidas pendentes; resolva-as antes de posicionar o Peão.',
+    );
+  }
+
   // O primeiro posicionamento é a entrada do Peão no ciclo; depois, a posição
   // muda apenas por movimentação entre Peças conectadas.
   if (peao.pecaId !== null) {
@@ -858,6 +871,15 @@ function escolherTipoDaPecaRecebida(
     return rejeitar(
       'DADOS_INVALIDOS',
       'O tipo da Peça Recebida deve ser "reta", "T" ou "cruz".',
+    );
+  }
+
+  // A escolha do tipo pertence à sequência do Peão selecionado: todo sub-fluxo
+  // do Recebimento exige um Peão em sequência.
+  if (estado.peaoSelecionadoId === null) {
+    return rejeitar(
+      'PEAO_NAO_SELECIONADO',
+      'Nenhum Peão está selecionado; o Recebimento pertence à sequência dele.',
     );
   }
 
@@ -1055,6 +1077,14 @@ function posicionarRecebida(
   recebida: PecaRecebida,
   comando: PosicionarPecaComando,
 ): ResultadoDoTabuleiro {
+  // O encaixe da Recebida pertence à sequência do Peão selecionado.
+  if (estado.peaoSelecionadoId === null) {
+    return rejeitar(
+      'PEAO_NAO_SELECIONADO',
+      'Nenhum Peão está selecionado; o Recebimento pertence à sequência dele.',
+    );
+  }
+
   if (!recebida.pecaId || !recebida.tipo) {
     // Inalcançável pelos comandos: o tipo é escolhido antes de haver pecaId
     // para referenciar; guarda defensiva.

@@ -57,16 +57,22 @@ function codigoDaRejeicao(
   return resultado.erro.codigo;
 }
 
-// Peão branco posicionado sobre a Peça Inicial em (3,3), com as duas
-// recebidas da primeira sequência já resolvidas: reta-1 em (2,3) (norte,
-// orientação 0, conectada) e t-1 em (3,4) (leste, orientação 0, conectada).
-// O peão ainda está sobre a Peça Inicial, pronto para mover ou permanecer.
-function estadoComPendenciasResolvidas(): EstadoDoTabuleiro {
+// Peão branco selecionado sobre a Peça Inicial em (3,3), com as recebidas da
+// primeira sequência ainda pendentes (norte e leste vazias).
+function estadoComRecebidasPendentes(): EstadoDoTabuleiro {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 3, 3));
   estado = aplicar(estado, selecionarPeao('peao-branco'));
   estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
+  return aplicar(estado, selecionarPeao('peao-branco'));
+}
+
+// Peão branco selecionado sobre a Peça Inicial em (3,3), com as duas
+// recebidas da primeira sequência já resolvidas: reta-1 em (2,3) (norte,
+// orientação 0, conectada) e t-1 em (3,4) (leste, orientação 0, conectada).
+// O peão ainda está sobre a Peça Inicial, pronto para mover ou permanecer.
+function estadoComPendenciasResolvidas(): EstadoDoTabuleiro {
+  let estado = estadoComRecebidasPendentes();
   estado = aplicar(estado, escolherTipo('recebida-inicial-1-norte', 'reta'));
   estado = aplicar(estado, posicionar('reta-1', 2, 3));
   estado = aplicar(estado, escolherTipo('recebida-inicial-1-leste', 'T'));
@@ -88,29 +94,42 @@ test('estado inicial tem 4 peões com cores canônicas sobre a Mesa', () => {
 });
 
 test('primeiro posicionamento do peão só é aceito sobre a Peça Inicial', () => {
+  // Vizinhas norte e leste da inicial em (3,3) ocupadas: re-selecionar o peão
+  // posicionado não gera recebimento, isolando a guarda de já posicionado.
   const estadoComCaminho: EstadoDoTabuleiro = {
     ...estadoInicialDoTabuleiro(),
     posicionadas: [
       { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+      { pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0, celula: { linha: 2, coluna: 3 } },
+      { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 4 } },
       { pecaId: 'cruz-1', tipo: 'cruz', orientacao: 0, celula: { linha: 0, coluna: 0 } },
     ],
   };
 
+  // Sem peão selecionado, o encaixe nem começa a ser avaliado.
+  assert.equal(
+    codigoDaRejeicao(estadoComCaminho, posicionarPeao('peao-branco', 3, 3)),
+    'PEAO_NAO_SELECIONADO',
+  );
+
+  const selecionado = aplicar(estadoComCaminho, selecionarPeao('peao-branco'));
+
   // Célula vazia.
   assert.equal(
-    codigoDaRejeicao(estadoComCaminho, posicionarPeao('peao-branco', 5, 5)),
+    codigoDaRejeicao(selecionado, posicionarPeao('peao-branco', 5, 5)),
     'CELULA_SEM_PECA',
   );
   // Peça de caminho não serve de entrada no ciclo.
   assert.equal(
-    codigoDaRejeicao(estadoComCaminho, posicionarPeao('peao-branco', 0, 0)),
+    codigoDaRejeicao(selecionado, posicionarPeao('peao-branco', 0, 0)),
     'PECA_INICIAL_EXIGIDA',
   );
-
-  let estado = aplicar(estadoComCaminho, posicionarPeao('peao-branco', 3, 3));
+  let estado = aplicar(selecionado, posicionarPeao('peao-branco', 3, 3));
   assert.equal(estado.peoes[0].pecaId, 'inicial-1');
 
-  // Depois de posicionado, o peão só muda de lugar por movimentação.
+  // Depois de posicionado, o peão só muda de lugar por movimentação; o encaixe
+  // deseleciona o peão, então a nova tentativa exige selecioná-lo de novo.
+  estado = aplicar(estado, selecionarPeao('peao-branco'));
   assert.equal(
     codigoDaRejeicao(estado, posicionarPeao('peao-branco', 0, 0)),
     'PEAO_JA_POSICIONADO',
@@ -124,8 +143,12 @@ test('uma peça aceita no máximo um peão', () => {
       { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
     ],
   };
-  let estado = aplicar(estadoComCaminho, posicionarPeao('peao-branco', 3, 3));
+  let estado = aplicar(estadoComCaminho, selecionarPeao('peao-branco'));
+  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3));
 
+  // O encaixe deseleciona o peão branco; o vermelho precisa ser selecionado
+  // antes de tentar se encaixar na mesma peça.
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'));
   assert.equal(
     codigoDaRejeicao(estado, posicionarPeao('peao-vermelho', 3, 3)),
     'PECA_JA_TEM_PEAO',
@@ -380,6 +403,42 @@ test('pendências bloqueiam mover, permanecer e selecionar outro peão', () => {
   assert.equal(
     codigoDaRejeicao(estado, selecionarPeao('peao-vermelho')),
     'PENDENCIA_NAO_RESOLVIDA',
+  );
+});
+
+test('sub-fluxo do recebimento fora de ordem é rejeitado sem órfar pendências', () => {
+  const pendentes = estadoComRecebidasPendentes();
+
+  // Encaixe do próprio peão com pendências abertas.
+  assert.equal(
+    codigoDaRejeicao(pendentes, posicionarPeao('peao-branco', 5, 5)),
+    'PENDENCIA_NAO_RESOLVIDA',
+  );
+  // Encaixe de outro peão, sem seleção: bloqueado antes de zerar a seleção e
+  // órfar as pendências do peão em sequência.
+  assert.equal(
+    codigoDaRejeicao(pendentes, posicionarPeao('peao-vermelho', 3, 3)),
+    'PEAO_NAO_SELECIONADO',
+  );
+  // As pendências seguem intactas após as rejeições.
+  assert.equal(pendentes.recebidas.length, 2);
+  assert.equal(pendentes.peaoSelecionadoId, 'peao-branco');
+
+  // Escolha de tipo sem peão selecionado: estado construído diretamente — a
+  // fronteira pode receber comandos fora de ordem e o domínio defende a
+  // sequência mesmo assim.
+  const semSequencia: EstadoDoTabuleiro = { ...pendentes, peaoSelecionadoId: null };
+  assert.equal(
+    codigoDaRejeicao(semSequencia, escolherTipo('recebida-inicial-1-norte', 'reta')),
+    'PEAO_NAO_SELECIONADO',
+  );
+
+  // Encaixe de recebida com tipo já escolhido, mas sem peão selecionado.
+  const comTipo = aplicar(pendentes, escolherTipo('recebida-inicial-1-norte', 'reta'));
+  const comTipoSemSequencia: EstadoDoTabuleiro = { ...comTipo, peaoSelecionadoId: null };
+  assert.equal(
+    codigoDaRejeicao(comTipoSemSequencia, posicionar('reta-1', 2, 3)),
+    'PEAO_NAO_SELECIONADO',
   );
 });
 
