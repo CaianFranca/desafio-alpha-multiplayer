@@ -1105,16 +1105,7 @@ export class SalasHandlers {
             } catch (e) {
               console.error(`[salas] falha ao persistir encaminhamento sala=${salaId} partida=${aceite.partidaId}`, e);
               // Rollback: cancelar partida órfã e manter sala aberta (A2)
-              try {
-                if (this.cancelarPartidaInjetado) {
-                  await this.cancelarPartidaInjetado(aceite.serverId, aceite.partidaId, 'falha ao persistir', gameServerUrl);
-                } else if (gameServerUrl) {
-                  const url = `${gameServerUrl.replace(/\/$/, '')}/api/encaminhamento/${aceite.partidaId}`;
-                  await fetch(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ partidaId: aceite.partidaId, motivo: 'falha ao persistir' }) }).catch(() => undefined);
-                }
-              } catch (cancelErr) {
-                console.error(`[salas] falha ao cancelar partida órfã ${aceite.partidaId}`, cancelErr);
-              }
+              await this.cancelarPartidaRemota(aceite.serverId, aceite.partidaId, 'falha ao persistir', gameServerUrl);
               const resFalhaPersist = this.estado.aplicar({ tipo: 'registrar_falha_do_encaminhamento', salaId } satisfies Comando);
               if (resFalhaPersist.sucesso) {
                 this.estado.substituirEstado(resFalhaPersist.estado);
@@ -1125,16 +1116,7 @@ export class SalasHandlers {
             }
             } else {
             // Revalidação falhou — composição mudou, cancelar partida
-            try {
-              if (this.cancelarPartidaInjetado) {
-                await this.cancelarPartidaInjetado(aceite.serverId, aceite.partidaId, 'composicao alterada', gameServerUrl);
-              } else if (gameServerUrl) {
-                const url = `${gameServerUrl.replace(/\/$/, '')}/api/encaminhamento/${aceite.partidaId}`;
-                await fetch(url, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ partidaId: aceite.partidaId, motivo: 'composicao alterada' }) }).catch(() => undefined);
-              }
-            } catch (e) {
-              console.error(`[salas] falha ao cancelar partida ${aceite.partidaId}`, e);
-            }
+            await this.cancelarPartidaRemota(aceite.serverId, aceite.partidaId, 'composicao alterada', gameServerUrl);
             // registrar falha no engine para emitir evento correspondente? mantemos aberta com PARTIDA_FALHOU
             const resFalha = this.estado.aplicar({ tipo: 'registrar_falha_do_encaminhamento', salaId } satisfies Comando);
             if (resFalha.sucesso) {
@@ -1172,6 +1154,28 @@ export class SalasHandlers {
         this.encaminhamentosEmVoo.delete(salaId);
       }
     });
+  }
+
+  private async cancelarPartidaRemota(
+    serverId: string,
+    partidaId: string,
+    motivo: string,
+    gameServerUrl?: string,
+  ): Promise<void> {
+    try {
+      if (this.cancelarPartidaInjetado) {
+        await this.cancelarPartidaInjetado(serverId, partidaId, motivo, gameServerUrl);
+      } else if (gameServerUrl) {
+        const url = `${gameServerUrl.replace(/\/$/, '')}/api/encaminhamento/${partidaId}`;
+        await fetch(url, {
+          method: 'DELETE',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ partidaId, motivo }),
+        }).catch(() => undefined);
+      }
+    } catch (e) {
+      console.error(`[salas] falha ao cancelar partida ${partidaId}`, e);
+    }
   }
 
   private salaEstaEncaminhada(salaId: string): boolean {
