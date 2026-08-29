@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   aplicarComandoDeTabuleiro,
   estadoInicialDoTabuleiro,
+  gerarRecebidas,
   vizinhasConectadas,
   type ComandoDeTabuleiro,
   type CodigoDeErroDeTabuleiro,
@@ -58,13 +59,36 @@ function codigoDaRejeicao(
 }
 
 // Peão branco selecionado sobre a Peça Inicial em (3,3), com as recebidas da
-// primeira sequência ainda pendentes (norte e leste vazias).
+// primeira sequência ainda pendentes (norte e leste vazias). O Recebimento é
+// montado via literal do estado: desde a ST-11, a seleção não gera mais
+// Recebimento — a geração das pendências pertence à camada da Partida.
 function estadoComRecebidasPendentes(): EstadoDoTabuleiro {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 3, 3));
   estado = aplicar(estado, selecionarPeao('peao-branco'));
   estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3));
-  return aplicar(estado, selecionarPeao('peao-branco'));
+  return {
+    ...estado,
+    peaoSelecionadoId: 'peao-branco',
+    recebidas: [
+      {
+        recebidaId: 'recebida-inicial-1-norte',
+        bordaGeradora: 'norte',
+        celulaAlvo: { linha: 2, coluna: 3 },
+        pecaId: null,
+        tipo: null,
+        orientacao: 0,
+      },
+      {
+        recebidaId: 'recebida-inicial-1-leste',
+        bordaGeradora: 'leste',
+        celulaAlvo: { linha: 3, coluna: 4 },
+        pecaId: null,
+        tipo: null,
+        orientacao: 0,
+      },
+    ],
+  };
 }
 
 // Peão branco selecionado sobre a Peça Inicial em (3,3), com as duas
@@ -216,53 +240,41 @@ test('selecionar peão sobre a Mesa não gera recebimento', () => {
   assert.deepEqual(resultado.estado.recebidas, []);
 });
 
-test('selecionar peão posicionado dispara o recebimento das bordas com vizinha vazia', () => {
+test('selecionar peão posicionado não gera recebimento (ST-11)', () => {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 3, 3));
   estado = aplicar(estado, selecionarPeao('peao-branco'));
   estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3));
 
-  // Peça Inicial em (3,3), orientação 0: bordas norte e leste abertas, as duas
-  // com vizinhas vazias. A Manipulação já foi encerrada pela seleção do Peão
-  // sobre a Mesa no passo anterior.
-  const sequencia = aplicarComandoDeTabuleiro(estado, selecionarPeao('peao-branco'));
-  assert.equal(sequencia.sucesso, true);
-  if (!sequencia.sucesso) return;
-  assert.deepEqual(sequencia.eventos, [
+  // Peça Inicial em (3,3), orientação 0: bordas norte e leste abertas com
+  // vizinhas vazias — mesmo assim a seleção não emite recebimento_gerado nem
+  // cria recebidas.
+  const selecao = aplicarComandoDeTabuleiro(estado, selecionarPeao('peao-branco'));
+  assert.equal(selecao.sucesso, true);
+  if (!selecao.sucesso) return;
+  assert.deepEqual(selecao.eventos, [
     { tipo: 'peao_selecionado', peaoId: 'peao-branco' },
-    {
-      tipo: 'recebimento_gerado',
-      recebidas: [
-        { recebidaId: 'recebida-inicial-1-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
-        { recebidaId: 'recebida-inicial-1-leste', bordaGeradora: 'leste', celulaAlvo: { linha: 3, coluna: 4 } },
-      ],
-    },
   ]);
-  assert.equal(sequencia.estado.recebidas.length, 2);
-  assert.equal(sequencia.estado.recebidas[0].pecaId, null);
+  assert.deepEqual(selecao.estado.recebidas, []);
+  assert.equal(selecao.estado.peaoSelecionadoId, 'peao-branco');
 });
 
-test('recebimento considera apenas células dentro da grade', () => {
+test('gerarRecebidas considera apenas células dentro da grade', () => {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 0, 0));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
-  estado = aplicar(estado, posicionarPeao('peao-branco', 0, 0));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
 
   // A borda norte cai fora da grade; só o leste vazio gera pendência.
+  const peca = estado.posicionadas.find((item) => item.pecaId === 'inicial-1');
+  assert.ok(peca);
   assert.deepEqual(
-    estado.recebidas.map((recebida) => recebida.recebidaId),
+    gerarRecebidas(estado, peca).map((recebida) => recebida.recebidaId),
     ['recebida-inicial-1-leste'],
   );
-  assert.deepEqual(estado.recebidas[0].celulaAlvo, { linha: 0, coluna: 1 });
+  assert.deepEqual(gerarRecebidas(estado, peca)[0].celulaAlvo, { linha: 0, coluna: 1 });
 });
 
 test('tipo da recebida é livre e consome a Reserva; peça inicial nunca é recebida', () => {
-  let parcial = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
-  parcial = aplicar(parcial, posicionar('inicial-1', 3, 3));
-  parcial = aplicar(parcial, selecionarPeao('peao-branco'));
-  parcial = aplicar(parcial, posicionarPeao('peao-branco', 3, 3));
-  parcial = aplicar(parcial, selecionarPeao('peao-branco'));
+  let parcial = estadoComRecebidasPendentes();
 
   const escolha = aplicarComandoDeTabuleiro(
     parcial,
@@ -295,15 +307,11 @@ test('tipo da recebida é livre e consome a Reserva; peça inicial nunca é rece
 });
 
 test('reserva sem peças do tipo rejeita a escolha com RESERVA_ESGOTADA', () => {
-  const semT: EstadoDoTabuleiro = {
-    ...estadoInicialDoTabuleiro(),
-    reserva: estadoInicialDoTabuleiro().reserva.filter((peca) => peca.tipo !== 'T'),
+  let estado = estadoComRecebidasPendentes();
+  estado = {
+    ...estado,
+    reserva: estado.reserva.filter((peca) => peca.tipo !== 'T'),
   };
-  let estado = aplicar(semT, selecionar('inicial-1'));
-  estado = aplicar(estado, posicionar('inicial-1', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
-  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
 
   assert.equal(
     codigoDaRejeicao(estado, escolherTipo('recebida-inicial-1-norte', 'T')),
@@ -312,11 +320,7 @@ test('reserva sem peças do tipo rejeita a escolha com RESERVA_ESGOTADA', () => 
 });
 
 test('recebida só posiciona na célula-alvo, com orientação livre e sem exigência de conexão', () => {
-  let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
-  estado = aplicar(estado, posicionar('inicial-1', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
-  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
+  let estado = estadoComRecebidasPendentes();
 
   // T escolhida e mantida na orientação 0 (bordas norte+leste+oeste): a borda
   // sul, voltada à Peça geradora, está fechada — sem conexão, e mesmo assim o
@@ -353,11 +357,7 @@ test('recebida só posiciona na célula-alvo, com orientação livre e sem exig�
 
 test('girar recebida segue o padrão da seleção única', () => {
   let estado = estadoComPendenciasResolvidas();
-  let parcial = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
-  parcial = aplicar(parcial, posicionar('inicial-1', 3, 3));
-  parcial = aplicar(parcial, selecionarPeao('peao-branco'));
-  parcial = aplicar(parcial, posicionarPeao('peao-branco', 3, 3));
-  parcial = aplicar(parcial, selecionarPeao('peao-branco'));
+  let parcial = estadoComRecebidasPendentes();
   parcial = aplicar(parcial, escolherTipo('recebida-inicial-1-norte', 'reta'));
 
   const giro = aplicarComandoDeTabuleiro(parcial, girar('reta-1'));
@@ -427,11 +427,7 @@ test('girar recebida posicionada vai pela janela de Manipulação, sem seleção
 });
 
 test('pendências bloqueiam mover, permanecer e selecionar outro peão', () => {
-  let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
-  estado = aplicar(estado, posicionar('inicial-1', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
-  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
+  const estado = estadoComRecebidasPendentes();
 
   assert.equal(
     codigoDaRejeicao(estado, moverPeao('peao-branco', 2, 3)),
@@ -484,11 +480,7 @@ test('sub-fluxo do recebimento fora de ordem é rejeitado sem órfar pendências
 });
 
 test('re-seleção do mesmo peão é idempotente, sem novo recebimento', () => {
-  let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
-  estado = aplicar(estado, posicionar('inicial-1', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
-  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3));
-  estado = aplicar(estado, selecionarPeao('peao-branco'));
+  const estado = estadoComRecebidasPendentes();
 
   const reSelecao = aplicarComandoDeTabuleiro(estado, selecionarPeao('peao-branco'));
   assert.equal(reSelecao.sucesso, true);
@@ -532,14 +524,24 @@ test('mover para peça ocupada por outro peão é rejeitado; destino conectado v
   estado = aplicar(estado, girar('inicial-2'));
   estado = aplicar(estado, selecionarPeao('peao-vermelho'));
   estado = aplicar(estado, posicionarPeao('peao-vermelho', 1, 3));
-  estado = aplicar(estado, selecionarPeao('peao-vermelho'));
 
-  // Recebimento de inicial-2 (180°: bordas sul+oeste): o sul aponta para a
-  // reta-1 ocupada e não gera pendência; o oeste gera.
-  assert.deepEqual(
-    estado.recebidas.map((recebida) => recebida.recebidaId),
-    ['recebida-inicial-2-oeste'],
-  );
+  // Recebimento de inicial-2 (180°: bordas sul+oeste) montado via literal
+  // (ST-11): o sul aponta para a reta-1 ocupada e não vira pendência; o oeste
+  // tem célula vazia e fica pendente.
+  estado = {
+    ...estado,
+    peaoSelecionadoId: 'peao-vermelho',
+    recebidas: [
+      {
+        recebidaId: 'recebida-inicial-2-oeste',
+        bordaGeradora: 'oeste',
+        celulaAlvo: { linha: 1, coluna: 2 },
+        pecaId: null,
+        tipo: null,
+        orientacao: 0,
+      },
+    ],
+  };
   estado = aplicar(estado, escolherTipo('recebida-inicial-2-oeste', 'cruz'));
   estado = aplicar(estado, posicionar('cruz-1', 1, 2));
 
@@ -588,28 +590,6 @@ test('permanecer é aceito quando não há pendências e encerra a sequência', 
   ]);
   assert.equal(permanencia.estado.peaoSelecionadoId, null);
   assert.equal(permanencia.estado.peoes[0].pecaId, 'inicial-1');
-});
-
-test('recebimento da peça recém-ocupada ocorre no início da próxima sequência', () => {
-  let estado = aplicar(estadoComPendenciasResolvidas(), moverPeao('peao-branco', 2, 3));
-
-  const proxima = aplicarComandoDeTabuleiro(estado, selecionarPeao('peao-branco'));
-  assert.equal(proxima.sucesso, true);
-  if (!proxima.sucesso) return;
-  // Reta-1 em (2,3), orientação 0: bordas norte e sul; o sul aponta para a
-  // Peça Inicial ocupada, o norte para célula vazia. A Manipulação da t-1
-  // (aberta no encaixe anterior) é encerrada pela nova seleção.
-  assert.deepEqual(proxima.eventos, [
-    { tipo: 'manipulacao_finalizada', pecaId: 't-1' },
-    { tipo: 'peao_selecionado', peaoId: 'peao-branco' },
-    {
-      tipo: 'recebimento_gerado',
-      recebidas: [
-        { recebidaId: 'recebida-reta-1-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 1, coluna: 3 } },
-      ],
-    },
-  ]);
-  assert.equal(proxima.estado.recebidas.length, 1);
 });
 
 test('peça inicial pode ser posicionada em qualquer célula vazia com peças e peões presentes', () => {

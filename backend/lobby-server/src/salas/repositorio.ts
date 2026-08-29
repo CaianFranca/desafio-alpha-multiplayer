@@ -9,6 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
+import type { EncaminhamentoDaSala } from '@flicker/shared';
 import { pool as defaultPool } from '../config/pg.ts';
 
 export type MotivoDeTermino = 'saida' | 'expulsao' | 'expiracao' | 'encerramento';
@@ -19,6 +20,14 @@ export interface SalaAberta {
   readonly codigo: string;
   readonly anfitriaoId: string | null;
 }
+
+export interface SalaAtiva extends SalaAberta {
+  readonly status: StatusDaSala;
+  readonly serverId: string | null;
+  readonly partidaId: string | null;
+}
+
+export type EncaminhamentoPersistido = EncaminhamentoDaSala;
 
 export interface MembroPersistido {
   readonly jogadorId: string;
@@ -189,6 +198,63 @@ export class SalasRepo {
       codigo: linha.codigo,
       anfitriaoId: linha.anfitriaoId,
     }));
+  }
+
+  /** Lista salas ativas (aberta + encaminhada) com server/partida para boot. */
+  async listarSalasAtivas(): Promise<SalaAtiva[]> {
+    const resultado = await this.pool.query<QueryResultRow & SalaAtiva>(
+      `SELECT id, codigo_sala AS codigo, anfitriao_id AS "anfitriaoId", status, server_id AS "serverId", partida_id AS "partidaId"
+       FROM salas_historico
+       WHERE status IN ('aberta', 'encaminhada')
+       ORDER BY id`,
+    );
+    return resultado.rows.map((linha) => ({
+      id: linha.id,
+      codigo: linha.codigo,
+      anfitriaoId: linha.anfitriaoId,
+      status: linha.status as StatusDaSala,
+      serverId: (linha.serverId as string | null) ?? null,
+      partidaId: (linha.partidaId as string | null) ?? null,
+    }));
+  }
+
+  /**
+   * Persiste o encaminhamento: marca a sala como encaminhada com server/partida.
+   * Usado no aceite do handoff após revalidação do engine.
+   */
+  async persistirEncaminhamento(salaId: string, serverId: string, partidaId: string): Promise<void> {
+    const resultado = await this.pool.query(
+      `UPDATE salas_historico SET status = 'encaminhada', server_id = $2, partida_id = $3 WHERE id = $1`,
+      [salaId, serverId, partidaId],
+    );
+    if (resultado.rowCount !== 1) {
+      throw new Error(`Sala não encontrada ao persistir encaminhamento ${salaId}`);
+    }
+  }
+
+  /** Obtém server/partida de uma sala encaminhada (null se não encaminhada). */
+  async obterEncaminhamento(salaId: string): Promise<EncaminhamentoPersistido | null> {
+    const resultado = await this.pool.query<{ server_id: string | null; partida_id: string | null }>(
+      `SELECT server_id, partida_id FROM salas_historico WHERE id = $1 AND status = 'encaminhada' LIMIT 1`,
+      [salaId],
+    );
+    const linha = resultado.rows[0];
+    if (!linha || !linha.server_id || !linha.partida_id) return null;
+    return { serverId: linha.server_id, partidaId: linha.partida_id };
+  }
+
+  /** Resolve sala ativa (aberta ou encaminhada) do jogador — inclui encaminhada para snapshot. */
+  async obterSalaAtivaDoJogador(jogadorId: string): Promise<string | null> {
+    const resultado = await this.pool.query<{ salaId: string }>(
+      `SELECT m.sala_id AS "salaId"
+       FROM membros m
+       JOIN salas_historico s ON s.id = m.sala_id
+       WHERE m.usuario_id = $1 AND m.bloqueado = false AND s.status IN ('aberta', 'encaminhada')
+       ORDER BY m.ordem_de_entrada ASC
+       LIMIT 1`,
+      [jogadorId],
+    );
+    return resultado.rows[0]?.salaId ?? null;
   }
 
   /**

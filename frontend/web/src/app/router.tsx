@@ -23,6 +23,14 @@ export const routes = [
         ),
       },
       {
+        path: 'sala/:codigoDeSala',
+        element: (
+          <RequireAuth>
+            <SalasCriarPage />
+          </RequireAuth>
+        ),
+      },
+      {
         path: 'partida',
         element: (
           <RequireAuth>

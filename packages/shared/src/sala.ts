@@ -12,7 +12,8 @@
 
 // --- Tipos base ---
 
-export type CodigoDeSala = string; // seis caracteres alfanuméricos maiúsculos
+export const CODIGO_DE_SALA_TAMANHO = 6
+export type CodigoDeSala = string; // seis caracteres alfanuméricos maiúsculos (ver CODIGO_DE_SALA_TAMANHO)
 
 /**
  * Presença do Membro no wire. Usa snake_case para literal composto ('em_reconexao'),
@@ -22,7 +23,7 @@ export type CodigoDeSala = string; // seis caracteres alfanuméricos maiúsculos
  */
 export type Presenca = 'conectado' | 'em_reconexao';
 
-export type EstadoDaSala = 'aberta' | 'encerrada';
+export type EstadoDaSala = 'aberta' | 'encaminhada' | 'encerrada' | 'expirada';
 
 export interface Convite {
   codigoDeSala: CodigoDeSala;
@@ -38,6 +39,11 @@ export interface MembroDaSala {
   prontidao: boolean;
 }
 
+export interface EncaminhamentoDaSala {
+  serverId: string;
+  partidaId: string;
+}
+
 export interface Sala {
   id: string;
   codigoDeSala: CodigoDeSala;
@@ -45,6 +51,7 @@ export interface Sala {
   anfitriaoId: string | null;
   membros: readonly MembroDaSala[];
   convite: Convite;
+  encaminhamento?: EncaminhamentoDaSala;
 }
 
 // --- Comandos cliente → servidor (9) ---
@@ -182,7 +189,9 @@ export type CodigoDeErroDaSala =
   | 'APENAS_ANFITRIAO'
   | 'JOGADOR_EXPULSO'
   | 'JOGADOR_NAO_BLOQUEADO'
-  | 'SALA_INCONSISTENTE';
+  | 'SALA_INCONSISTENTE'
+  | 'SALA_ENCAMINHADA'
+  | 'ENCAMINHAMENTO_INVALIDO';
 
 export interface ErroDaSalaEvento {
   type: 'ERRO_DA_SALA';

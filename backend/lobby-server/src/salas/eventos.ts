@@ -39,15 +39,19 @@ import type {
   AnfitriaoSubstituidoEvento,
   ProntidaoAtualizadaEvento,
 } from '@flicker/shared';
+import type {
+  EncaminhamentoDaSala,
+  EncaminhamentoEventoDoServidor,
+  PartidaPreparandoEvento,
+  PartidaDisponivelEvento,
+  PartidaRecusadaEvento,
+  PartidaFalhouEvento,
+} from '@flicker/shared';
 
 export type ApelidoPorJogadorId = ReadonlyMap<string, string>;
 
 function mapearEstado(engine: SalaDominio['estado']): EstadoDaSala {
-  // O wire `EstadoDaSala` é binário: 'aberta' | 'encerrada'. 'encaminhada'
-  // continua sendo 'aberta' para o cliente (o estado de encaminhamento é
-  // decidido pelo server na transição de aceite, fora do escopo deste
-  // handler). 'expirada' mapeia para 'encerrada' — o cliente não distingue.
-  return engine === 'aberta' || engine === 'encaminhada' ? 'aberta' : 'encerrada';
+  return engine as EstadoDaSala;
 }
 
 function mapearPresenca(engine: MembroDominio['presenca']): Presenca {
@@ -84,12 +88,13 @@ function membrosAtivos(
     );
 }
 
-function mapearSala(
+export function mapearSala(
   sala: SalaDominio,
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
+  encaminhamento?: EncaminhamentoDaSala,
 ): Sala {
-  return {
+  const base: Sala = {
     id: sala.id,
     codigoDeSala: sala.codigo,
     estado: mapearEstado(sala.estado),
@@ -100,6 +105,10 @@ function mapearSala(
       link: `${linkBase}/${sala.codigo}`,
     },
   };
+  if (encaminhamento) {
+    return { ...base, encaminhamento };
+  }
+  return base;
 }
 
 function encontrarSala(
@@ -109,12 +118,13 @@ function encontrarSala(
   return estado.salas.find((sala) => sala.id === salaId) ?? null;
 }
 
-function salaAtualizada(
+export function salaAtualizada(
   sala: SalaDominio,
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
+  encaminhamento?: EncaminhamentoDaSala,
 ): SalaAtualizadaEvento {
-  return { type: 'SALA_ATUALIZADA', sala: mapearSala(sala, apelidoPorJogadorId, linkBase) };
+  return { type: 'SALA_ATUALIZADA', sala: mapearSala(sala, apelidoPorJogadorId, linkBase, encaminhamento) };
 }
 
 /**
@@ -133,21 +143,21 @@ export function traduzirEventos(
   estado: EstadoDoLobby,
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
-): readonly SalaEventoDoServidor[] {
-  const saida: SalaEventoDoServidor[] = [];
+  encaminhamentoPorSalaId?: ReadonlyMap<string, EncaminhamentoDaSala>,
+): readonly (SalaEventoDoServidor | EncaminhamentoEventoDoServidor)[] {
+  const saida: (SalaEventoDoServidor | EncaminhamentoEventoDoServidor)[] = [];
 
   for (const evento of eventos) {
     const sala = encontrarSala(estado, evento.salaId);
     if (sala === null) {
-      // Sala removida (não pode acontecer com o escopo atual, mas defensivo):
-      // nada a emitir.
       continue;
     }
-    const salaWire = mapearSala(sala, apelidoPorJogadorId, linkBase);
+    const enc = encaminhamentoPorSalaId?.get(sala.id);
+    const salaWire = mapearSala(sala, apelidoPorJogadorId, linkBase, enc);
 
     switch (evento.tipo) {
       case 'sala_criada': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
@@ -167,7 +177,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoMembro);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
@@ -179,12 +189,12 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoMembro);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
       case 'sala_encerrada': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
@@ -196,7 +206,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoAnfitriao);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
@@ -208,12 +218,12 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoExpulso);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
       case 'retorno_autorizado': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
@@ -225,7 +235,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoProntidao);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
@@ -238,7 +248,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoDesconectado);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
@@ -251,7 +261,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoReconectado);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
@@ -263,24 +273,58 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoExpirado);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
       case 'sala_expirada': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
       case 'reinicio_registrado':
       case 'consistencia_confirmada': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
         break;
       }
 
-      // Demais eventos do engine não são emitidos no escopo deste handler
-      // (encaminhamento pertence a ST-07). Ignorados explicitamente
-      // para não acionar o `default` do switch.
+      case 'encaminhamento_iniciado': {
+        const ev: PartidaPreparandoEvento = { type: 'PARTIDA_PREPARANDO' };
+        saida.push(ev);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        break;
+      }
+
+      case 'sala_encaminhada': {
+        // PARTIDA_DISPONIVEL precisa de serverId/partidaId — não há no domínio,
+        // será emitido diretamente pelo handler com dados do game-server.
+        // Aqui emitimos só SALA_ATUALIZADA para manter compatibilidade se chamado via engine.
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        break;
+      }
+
+      case 'encaminhamento_recusado': {
+        const ev: PartidaRecusadaEvento = {
+          type: 'PARTIDA_RECUSADA',
+          codigo: 'ENCAMINHAMENTO_RECUSADO',
+          motivo: 'Encaminhamento recusado pelo game-server',
+        };
+        saida.push(ev);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        break;
+      }
+
+      case 'encaminhamento_falhou': {
+        const ev: PartidaFalhouEvento = {
+          type: 'PARTIDA_FALHOU',
+          codigo: 'ENCAMINHAMENTO_FALHOU',
+          motivo: 'Falha ao encaminhar para o game-server',
+        };
+        saida.push(ev);
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        break;
+      }
+
       default:
         break;
     }

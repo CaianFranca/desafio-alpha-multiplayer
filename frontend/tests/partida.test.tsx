@@ -31,6 +31,7 @@ describe('partida route', () => {
 
     expect(screen.getByTestId('ambiente-de-jogo')).toBeInTheDocument()
     expect(screen.getByTestId('partida-moldura')).toBeInTheDocument()
+    expect(screen.getByTestId('ambiente-canvas-fallback')).toBeInTheDocument()
   })
 
   it('canvas ocupa tela cheia sob moldura overlay', () => {
@@ -55,6 +56,7 @@ describe('partida route', () => {
 
     expect(screen.getByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
     expect(screen.queryByTestId('ambiente-de-jogo')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ambiente-canvas-fallback')).not.toBeInTheDocument()
     expect(screen.queryByTestId('partida-moldura')).not.toBeInTheDocument()
   })
 

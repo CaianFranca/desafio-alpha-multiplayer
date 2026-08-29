@@ -45,6 +45,23 @@ export type {
 } from './lobby.ts';
 
 export type {
+  CodigoDeErroDaPartida,
+  ComandoDePartida,
+  ConfirmarPosicaoDoPeaoComando,
+  EncerrarTurnoComando,
+  ErroDeDominioDaPartida,
+  EstadoDaPartida,
+  EventoDaPartida,
+  JogadorDaPartida,
+  OperacaoBemSucedidaDaPartida,
+  OperacaoRejeitadaDaPartida,
+  PosicaoConfirmadaEvento,
+  ResultadoDaPartida,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
+} from './partida.ts';
+
+export type {
   BordaCardinal,
   Celula,
   CodigoDeErroDeTabuleiro,
@@ -111,10 +128,16 @@ export {
 } from './lobby.ts';
 
 export {
+  aplicarComandoDePartida,
+  estadoInicialDaPartida,
+} from './partida.ts';
+
+export {
   LADO_DA_GRADE,
   aplicarComandoDeTabuleiro,
   bordasAbertas,
   estadoInicialDoTabuleiro,
+  gerarRecebidas,
   vizinhasConectadas,
   vizinhos,
 } from './tabuleiro.ts';

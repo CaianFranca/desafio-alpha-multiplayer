@@ -1,5 +1,7 @@
 // Domínio puro dos Peões, conexões, Recebimento e ciclo da sequência
-// (ST-10 / issue #89).
+// (ST-10 / issue #89), refinado pela ST-11 (issue #114): a seleção do Peão
+// deixa de gerar Recebimento — o Recebimento do Peão já posicionado passou a
+// pertencer à camada da Partida (partida.ts), via gerarRecebidas exportada.
 //
 // Handlers do ciclo do Peão, extraídos de tabuleiro.ts (W2 da review #107):
 // o estado, os tipos de comando/evento/erro e o dispatch
@@ -172,44 +174,21 @@ export function selecionarPeao(
   }
   eventos.push({ tipo: 'peao_selecionado', peaoId: comando.peaoId });
 
-  // Peão sobre a Mesa: a seleção não gera Recebimento.
-  if (peao.pecaId === null) {
-    return sucesso(
-      { ...estado, peaoSelecionadoId: comando.peaoId, pecaEmManipulacaoId },
-      eventos,
-    );
-  }
-
-  const peca = encontrarPosicionada(estado, peao.pecaId);
-  if (!peca) {
-    // Estado inconsistente: o Peão aponta para uma Peça fora do Tabuleiro.
-    return rejeitar('PEAO_NAO_ENCONTRADO', 'A Peça do Peão não foi encontrada.');
-  }
-
-  const recebidas = gerarRecebidas(estado, peca);
-  // O evento de Recebimento só é emitido quando há pendências para resolver,
-  // e carrega apenas a projeção da pendência (recebidaId, bordaGeradora e
-  // celulaAlvo), sem os campos internos do slot.
-  if (recebidas.length > 0) {
-    eventos.push({
-      tipo: 'recebimento_gerado',
-      recebidas: recebidas.map(({ recebidaId, bordaGeradora, celulaAlvo }) => ({
-        recebidaId,
-        bordaGeradora,
-        celulaAlvo,
-      })),
-    });
-  }
+  // ST-11: a seleção nunca gera Recebimento — nem sobre a Mesa, nem sobre
+  // Peça. Re-selecionar o próprio Peão posicionado reentra na sequência sem
+  // novo Recebimento; a geração das pendências cabe à camada da Partida
+  // (posicionar_peao do Primeiro Turno e confirmar_posicao_do_peao).
   return sucesso(
-    { ...estado, peaoSelecionadoId: comando.peaoId, pecaEmManipulacaoId, recebidas },
+    { ...estado, peaoSelecionadoId: comando.peaoId, pecaEmManipulacaoId },
     eventos,
   );
 }
 
 // Recebimento (ST-10): um slot para cada borda aberta da Peça sob o Peão cuja
 // célula vizinha está vazia (dentro da grade). A célula-alvo é fixada na
-// criação; o tipo só é escolhido depois, consumindo a Reserva.
-function gerarRecebidas(
+// criação; o tipo só é escolhido depois, consumindo a Reserva. Exportada para
+// a camada da Partida (ST-11), que decide quando o Recebimento acontece.
+export function gerarRecebidas(
   estado: EstadoDoTabuleiro,
   peca: PecaPosicionada,
 ): PecaRecebida[] {
@@ -292,8 +271,8 @@ export function posicionarPeao(
   const peoes = estado.peoes.map((item) =>
     item.peaoId === peao.peaoId ? { ...item, pecaId: peca.pecaId } : item,
   );
-  // O encaixe deseleciona o Peão: a sequência (e o Recebimento) só começa
-  // quando o Peão já posicionado é selecionado.
+  // O encaixe deseleciona o Peão: a sequência só começa quando o Peão já
+  // posicionado é re-selecionado (sem Recebimento na seleção, ST-11).
   return sucesso(
     { ...estado, peoes, peaoSelecionadoId: null },
     [
@@ -468,7 +447,8 @@ export function moverPeao(
     item.peaoId === peao.peaoId ? { ...item, pecaId: alvo.pecaId } : item,
   );
   // Mover encerra a sequência implicitamente e deseleciona o Peão; o
-  // Recebimento da Peça recém-ocupada ocorre no início da próxima sequência.
+  // Recebimento da Peça recém-ocupada (quando houve mudança de Peça) cabe à
+  // camada da Partida, na Confirmação de Posição (ST-11).
   return sucesso(
     { ...estado, peoes, peaoSelecionadoId: null },
     [

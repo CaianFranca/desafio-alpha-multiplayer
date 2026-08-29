@@ -1,13 +1,49 @@
-import type { Server, IncomingMessage } from 'node:http';
+// Servidor WebSocket do game-server (issues #46 e #80).
+//
+// Assinatura: `criarWebSocketServer(server, contexto, deps?)`. Todo upgrade
+// passa pelo fluxo de admissão (issue #46) em `/ws/game/<serverId>` com
+// `?partida-id=&token=`: o token de sessão (JWT → `jogadorId` + `apelido`) é
+// validado junto ao Redis, a partida precisa existir no estado `preparada` e
+// o `jogadorId` precisa constar no roster. Só então o upgrade é aceito com
+// `ADMISSAO_ACEITA`; rejeições chegam como resposta HTTP com
+// `ADMISSAO_REJEITADA` (400/401/403/404/500). O `jogadorId` é sempre o do
+// JWT — o cliente não se autodeclara.
+//
+// Com `deps.tabuleiro` (issue #80), o socket admitido entra no canal da
+// partida: registra no `TabuleiroBroadcaster` e roteia comandos válidos ao
+// `TabuleiroHandlers`. Como a admissão é toda pré-upgrade, não há comando a
+// bufferizar: quando os listeners anexam, a partida já está validada. PING/
+// PONG responde sempre. Sem `deps`, o servidor opera apenas em PING/PONG.
+
+import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { WebSocketServer, type RawData } from 'ws';
-import type { ClientMessage, ServerMessage, PartidaId, ServerId, MembroDaSala, CodigoDeErroDeAdmissao, AdmissaoRejeitadaEvento } from '@flicker/shared';
+import { WebSocketServer, type RawData, type WebSocket } from 'ws';
+import type {
+  ServerMessage,
+  PartidaId,
+  ServerId,
+  CodigoDeErroDeAdmissao,
+  AdmissaoRejeitadaEvento,
+} from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
 import { obterPartida, atualizarPresencaAtomica } from '../partidas/partidas.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
 import { adicionarConexao, removerConexao, type ConexaoDoJogador } from './conexao.ts';
+import { TabuleiroBroadcaster } from '../tabuleiro/broadcast.ts';
+import { TabuleiroHandlers } from '../tabuleiro/handlers.ts';
+import { ehComandoDoTabuleiro } from '../tabuleiro/validacao.ts';
 
 const WS_PATH_RE = /^\/ws\/game\/([^/]+)$/;
+
+export interface TabuleiroWsDeps {
+  readonly redis: import('ioredis').Redis;
+  readonly broadcaster: TabuleiroBroadcaster;
+  readonly handlers: TabuleiroHandlers;
+}
+
+export interface WebSocketServerDeps {
+  readonly tabuleiro?: TabuleiroWsDeps;
+}
 
 interface UpgradeResultado {
   readonly permitido: true;
@@ -91,35 +127,29 @@ const STATUS_PHRASES: Record<number, string> = {
   500: 'Internal Server Error',
 };
 
-function handleMessage(data: RawData): ServerMessage | null {
-  let parsed: unknown;
+function parsearMensagem(data: RawData): unknown {
   try {
-    parsed = JSON.parse(data.toString());
+    return JSON.parse(data.toString());
   } catch {
     return null;
   }
-  if (!isClientMessage(parsed)) {
-    return null;
-  }
-
-  switch (parsed.type) {
-    case 'PING':
-      return { type: 'PONG' };
-    default:
-      return null;
-  }
 }
 
-function isClientMessage(value: unknown): value is ClientMessage {
+function isPing(value: unknown): boolean {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { type?: unknown }).type === 'PING'
+    typeof value === 'object'
+    && value !== null
+    && (value as { type?: unknown }).type === 'PING'
   );
 }
 
-export function criarWebSocketServer(server: Server, contexto: ContextoDoGameServer): WebSocketServer {
+export function criarWebSocketServer(
+  server: Server,
+  contexto: ContextoDoGameServer,
+  deps?: WebSocketServerDeps,
+): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true });
+  const tabuleiro = deps?.tabuleiro;
 
   server.on('upgrade', (request, socket, head) => {
     const resultado = parsearUpgrade(request, contexto.serverId);
@@ -137,7 +167,7 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
       return;
     }
 
-    (async () => {
+    void (async () => {
       const sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
       if (!sessaoValida) {
         enviarErroNoSocket(socket, 401, erroRejeitada('SESSAO_INVALIDA', 'sessão revogada ou inexistente'));
@@ -155,7 +185,7 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
         return;
       }
 
-      const membro = partida.roster.find((m: MembroDaSala) => m.jogadorId === sessao.jogadorId);
+      const membro = partida.roster.find((m) => m.jogadorId === sessao.jogadorId);
       if (membro === undefined) {
         enviarErroNoSocket(socket, 403, erroRejeitada('JOGADOR_FORA_DO_ROSTER', 'jogador não faz parte do roster desta partida'));
         return;
@@ -163,7 +193,7 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
 
       await atualizarPresencaAtomica(contexto.redis, partidaId, sessao.jogadorId);
 
-      wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
         ws.send(JSON.stringify({
           type: 'ADMISSAO_ACEITA',
           jogadorId: sessao.jogadorId,
@@ -179,6 +209,13 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
         };
         adicionarConexao(conexao);
 
+        // Admissão pré-upgrade concluída: a partida já é conhecida e validada.
+        // Com o canal de tabuleiro ativo, o socket entra no broadcaster da
+        // partida e comandos válidos vão direto aos handlers (issue #80).
+        if (tabuleiro !== undefined) {
+          tabuleiro.broadcaster.registrar(partidaId, ws);
+        }
+
         console.info('[ws] jogador admitido', {
           jogadorId: sessao.jogadorId,
           apelido: sessao.apelido,
@@ -189,10 +226,24 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
           console.error('[ws] socket error:', error.message);
         });
 
-        ws.on('message', (data) => {
-          const reply = handleMessage(data);
-          if (reply) {
-            ws.send(JSON.stringify(reply));
+        ws.on('message', (data: RawData) => {
+          const parsed = parsearMensagem(data);
+          if (parsed === null) {
+            return;
+          }
+
+          // PING/PONG responde sempre, mesmo com o canal de tabuleiro ativo.
+          if (isPing(parsed)) {
+            ws.send(JSON.stringify({ type: 'PONG' } satisfies ServerMessage));
+            return;
+          }
+
+          if (tabuleiro === undefined) {
+            return;
+          }
+
+          if (ehComandoDoTabuleiro(parsed)) {
+            void tabuleiro.handlers.aplicarMensagem(ws, partidaId, parsed);
           }
         });
 
@@ -202,6 +253,9 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
             partidaId,
           });
           removerConexao(conexao);
+          if (tabuleiro !== undefined) {
+            tabuleiro.broadcaster.remover(ws);
+          }
         });
       });
     })().catch((error) => {
