@@ -65,9 +65,11 @@ export class TabuleiroHandlers {
     await this.enfileirarMutacao(partidaId, async () => {
       const estado = await obterEstadoDoTabuleiro(this.redis, partidaId);
       if (estado === null) {
+        // Partida expirada/cancelada (falha de ciclo de vida) — distinto de
+        // dado do cliente inválido. Código próprio, não DADOS_INVALIDOS.
         this.broadcaster.enviarParaSocket(socket, {
           type: 'ERRO_DO_TABULEIRO',
-          codigo: 'DADOS_INVALIDOS',
+          codigo: 'ESTADO_INDISPONIVEL',
           mensagem: 'Estado do tabuleiro não encontrado para a partida.',
         });
         return;
@@ -146,6 +148,7 @@ function mapearComando(comando: TabuleiroComandoDoCliente): ComandoDeTabuleiro {
 // nunca vazar um código fora do contrato.
 const CODIGOS_DO_TABULEIRO_WIRE: ReadonlySet<string> = new Set([
   'DADOS_INVALIDOS',
+  'ESTADO_INDISPONIVEL',
   'PECA_NAO_ENCONTRADA',
   'PECA_NAO_SELECIONADA',
   'RESERVA_ESGOTADA',

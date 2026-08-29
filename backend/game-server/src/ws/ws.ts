@@ -40,6 +40,9 @@ export function createWebSocketServer(
     // para não perdê-los (issue #80 — evita o drop do primeiro comando).
     let partidaId: string | null = null;
     let jogadorId: string | null = null;
+    // Teto anti-DoS espelhado do lobby: o buffer pré-validação não cresce sem
+    // limite. Fora do teto, o comando é descartado silenciosamente.
+    const LIMITE_BUFFER_PRE_VALIDACAO = 32;
     const pendentes: unknown[] = [];
 
     socket.on('error', (error) => {
@@ -72,7 +75,10 @@ export function createWebSocketServer(
       }
 
       // Validação pendente: bufferiza o comando (não-PING) para reenvio após OK.
-      pendentes.push(parsed);
+      if (pendentes.length < LIMITE_BUFFER_PRE_VALIDACAO) {
+        pendentes.push(parsed);
+      }
+      // Fora do limite: descarta silenciosamente (anti-DoS).
     });
 
     socket.on('close', () => {
@@ -124,6 +130,11 @@ export function createWebSocketServer(
             }
           }
         })();
+      } else if (socket.readyState === socket.OPEN) {
+        // Query sem os dois parâmetros obrigatórios (?partidaId=&jogadorId=):
+        // encerra a conexão em vez de acumular comandos em `pendentes` até o
+        // fim da conexão sem nunca validar.
+        socket.close(4400, 'bad request');
       }
     }
   });

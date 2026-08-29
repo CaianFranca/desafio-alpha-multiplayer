@@ -19,7 +19,12 @@ import { createApp } from '../src/app.ts';
 import { createWebSocketServer } from '../src/ws/ws.ts';
 import { TabuleiroBroadcaster } from '../src/tabuleiro/broadcast.ts';
 import { TabuleiroHandlers } from '../src/tabuleiro/handlers.ts';
-import { obterEstadoDoTabuleiro } from '../src/partidas/tabuleiro.ts';
+import {
+  obterEstadoDoTabuleiro,
+  removerEstadoDoTabuleiro,
+  salvarEstadoDoTabuleiro,
+} from '../src/partidas/tabuleiro.ts';
+import { estadoInicialDoTabuleiro, type EstadoDoTabuleiro } from '@flicker/engine';
 
 const SERVER_ID = 'game-server-teste-tabuleiro';
 
@@ -287,6 +292,88 @@ test('rejeição: jogadorId fora do roster tem a conexão WS encerrada (4403)', 
 
     assert.equal(codigo, 4403);
     ws.close();
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('rejeição: posicionar sem selecionar responde ERRO_DO_TABULEIRO PECA_NAO_SELECIONADA', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    try {
+      // Tenta posicionar sem ter selecionado a peça antes.
+      enviar(ws, { type: 'POSICIONAR_PECA', pecaId: 'inicial-1', celula: { linha: 0, coluna: 0 } });
+      const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.codigo, 'PECA_NAO_SELECIONADA');
+      assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
+    } finally {
+      ws.close();
+    }
+
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('rejeição: posicionar com reserva vazia responde ERRO_DO_TABULEIRO RESERVA_ESGOTADA', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+    // Esvazia a reserva diretamente no estado persistido (ciclo de vida
+    // sintético) para exercitar o caminho RESERVA_ESGOTADA do domínio.
+    const estadoVazio: EstadoDoTabuleiro = { ...estadoInicialDoTabuleiro(), reserva: [] };
+    await salvarEstadoDoTabuleiro(redis, aceite.partidaId, estadoVazio);
+
+    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    try {
+      enviar(ws, { type: 'POSICIONAR_PECA', pecaId: 'inicial-1', celula: { linha: 0, coluna: 0 } });
+      const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.codigo, 'RESERVA_ESGOTADA');
+      assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
+    } finally {
+      ws.close();
+    }
+
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('rejeição: estado do tabuleiro ausente responde ERRO_DO_TABULEIRO ESTADO_INDISPONIVEL', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+    // Remove o estado do tabuleiro mas mantém a partida (ciclo de vida
+    // incoerente) — o cliente não deve receber DADOS_INVALIDOS.
+    await removerEstadoDoTabuleiro(redis, aceite.partidaId);
+
+    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    try {
+      enviar(ws, { type: 'SELECIONAR_PECA', pecaId: 'inicial-1' });
+      const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.codigo, 'ESTADO_INDISPONIVEL');
+      assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
+    } finally {
+      ws.close();
+    }
+
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
   } finally {
     await servidor.fechar();
   }

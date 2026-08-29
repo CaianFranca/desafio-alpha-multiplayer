@@ -40,7 +40,15 @@ export async function criarPartidaPreparada(
   await redis.set(chaveDaPartida(partida.partidaId), JSON.stringify(partida), 'EX', partidaPreparadaTtlSegundos);
 
   // Estado do tabuleiro nasce junto com a partida, com o mesmo TTL (issue #80).
-  await inicializarEstadoDoTabuleiro(redis, partida.partidaId, partidaPreparadaTtlSegundos);
+  // Rollback barato: se a inicialização do tabuleiro falhar, remove a partida
+  // recém-criada para não deixar partida órfã sem tabuleiro (que responderia
+  // ESTADO_INDISPONIVEL para sempre).
+  try {
+    await inicializarEstadoDoTabuleiro(redis, partida.partidaId, partidaPreparadaTtlSegundos);
+  } catch (erro) {
+    await redis.del(chaveDaPartida(partida.partidaId));
+    throw erro;
+  }
 
   return partida;
 }
