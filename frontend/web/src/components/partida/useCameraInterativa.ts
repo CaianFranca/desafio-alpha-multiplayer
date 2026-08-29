@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import {
@@ -60,6 +60,25 @@ export function useCameraInterativa(): void {
     invalidate()
   }
 
+  const distanciaMinInicial = calcularDistanciaMin()
+  const distanciaMinRef = useRef(distanciaMinInicial)
+  const distanciaMaxTeoricaRef = useRef(calcularDistanciaMax(distanciaMinInicial))
+
+  useLayoutEffect(() => {
+    const nextMin = calcularDistanciaMin(getAspectVis())
+    const nextMax = calcularDistanciaMax(nextMin)
+    distanciaMinRef.current = nextMin
+    distanciaMaxTeoricaRef.current = nextMax
+    const clampedDist = clampDistancia(distanciaRef.current, nextMin, nextMax)
+    if (clampedDist !== distanciaRef.current) distanciaRef.current = clampedDist
+    const reClamped = clampAlvo(alvoRef.current, clampedDist, FOV_CAMERA, getAspectVis())
+    if (reClamped.x !== alvoRef.current.x || reClamped.z !== alvoRef.current.z) {
+      alvoRef.current = reClamped
+      invalidate()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width, height, invalidate])
+
   /* eslint-disable react-hooks/immutability -- mutação de câmera R3F é intencional */
   useFrame(() => {
     const persp = camera as THREE.PerspectiveCamera
@@ -84,11 +103,12 @@ export function useCameraInterativa(): void {
     const canvas = gl.domElement
     const alvoEl = (canvas.parentElement ?? canvas) as HTMLElement
 
-    const distanciaMin = calcularDistanciaMin(getAspectVis())
-    const distanciaMaxTeorica = calcularDistanciaMax(distanciaMin)
-
     function aplicarZoom(novaDistancia: number): void {
-      const clamped = clampDistancia(novaDistancia, distanciaMin, distanciaMaxTeorica)
+      const clamped = clampDistancia(
+        novaDistancia,
+        distanciaMinRef.current,
+        distanciaMaxTeoricaRef.current,
+      )
       if (clamped === distanciaRef.current) return
       distanciaRef.current = clamped
       aplicarAlvoClampado(alvoRef.current, clamped)
@@ -138,7 +158,11 @@ export function useCameraInterativa(): void {
         const distAtual = distanciaPinch(ponteirosRef.current) || 1
         const fator = calcularFatorPinch(pinchRef.current.distInicial, distAtual)
         const novaDist = pinchRef.current.distanciaInicial * fator
-        const clamped = clampDistancia(novaDist, distanciaMin, distanciaMaxTeorica)
+        const clamped = clampDistancia(
+          novaDist,
+          distanciaMinRef.current,
+          distanciaMaxTeoricaRef.current,
+        )
         distanciaRef.current = clamped
         aplicarAlvoClampado(alvoRef.current, clamped)
         return
