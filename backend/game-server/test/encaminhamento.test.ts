@@ -12,6 +12,7 @@ import type {
 import { createApp } from '../src/app.ts';
 
 const SERVER_ID = 'game-server-teste';
+const JWT_SECRET = 'test_secret_para_admissao';
 
 const redis = criarClienteRedis();
 
@@ -21,7 +22,7 @@ interface ServidorEfemero {
 }
 
 async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
-  const app = createApp({ redis, serverId: SERVER_ID, partidaPreparadaTtlSegundos: ttlSegundos });
+  const app = createApp({ redis, serverId: SERVER_ID, jwtSecret: JWT_SECRET, partidaPreparadaTtlSegundos: ttlSegundos });
   const server = http.createServer(app);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

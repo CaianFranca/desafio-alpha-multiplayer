@@ -1,14 +1,24 @@
 // Teste de integração do Tabuleiro no game-server (issue #80).
 //
 // Sobe app+WS efêmeros com Redis real (localhost:6379) e exercita o fluxo
-// feliz (selecionar → posicionar → estado persiste) e a rejeição
-// (célula já ocupada → ERRO_DO_TABULEIRO com código fechado).
+// feliz (selecionar → posicionar → estado persiste) e as rejeições do
+// domínio (códigos fechados do contrato wire).
+//
+// As conexões passam pelo fluxo de admissão (issue #46): JWT de sessão +
+// sessão no Redis + roster da partida; o primeiro evento recebido é sempre
+// ADMISSAO_ACEITA (o `jogadorId` vem do token, nunca autodeclarado).
+//
+// Detalhe de timing que define o formato de `conectarPartida`: o servidor
+// envia ADMISSAO_ACEITA logo no `handleUpgrade`, então o frame pode chegar
+// no mesmo pacote do handshake — o listener de mensagens precisa estar
+// anexado ANTES de aguardar o `open`, senão o evento se perde.
 
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
+import jwt from 'jsonwebtoken';
 import { criarClienteRedis } from '@flicker/config';
 import type {
   AceiteDoEncaminhamento,
@@ -16,7 +26,7 @@ import type {
   OfertaDeEncaminhamento,
 } from '@flicker/shared';
 import { createApp } from '../src/app.ts';
-import { createWebSocketServer } from '../src/ws/ws.ts';
+import { criarWebSocketServer } from '../src/ws/ws.ts';
 import { TabuleiroBroadcaster } from '../src/tabuleiro/broadcast.ts';
 import { TabuleiroHandlers } from '../src/tabuleiro/handlers.ts';
 import {
@@ -27,23 +37,27 @@ import {
 import { estadoInicialDoTabuleiro, type EstadoDoTabuleiro } from '@flicker/engine';
 
 const SERVER_ID = 'game-server-teste-tabuleiro';
+const JWT_SECRET = 'test_secret_para_tabuleiro';
 
 const redis = criarClienteRedis();
 
 interface ServidorEfemero {
   readonly baseUrl: string;
-  readonly wsUrl: (partidaId: string, jogadorId?: string) => string;
+  readonly port: number;
+  readonly wsUrl: (partidaId: string, token: string) => string;
   readonly fechar: () => Promise<void>;
 }
 
 async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
-  const contexto = { redis, serverId: SERVER_ID, partidaPreparadaTtlSegundos: ttlSegundos };
+  const contexto = { redis, serverId: SERVER_ID, jwtSecret: JWT_SECRET, partidaPreparadaTtlSegundos: ttlSegundos };
   const app = createApp(contexto);
   const server = http.createServer(app);
 
   const broadcaster = new TabuleiroBroadcaster();
   const handlers = new TabuleiroHandlers({ redis, broadcaster });
-  createWebSocketServer(server, { tabuleiro: { redis, broadcaster, handlers } });
+  const wss = criarWebSocketServer(server, contexto, {
+    tabuleiro: { redis, broadcaster, handlers },
+  });
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -54,13 +68,36 @@ async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
   const port = endereco.port;
   return {
     baseUrl: `http://127.0.0.1:${port}`,
-    wsUrl: (partidaId: string, jogadorId = 'jogador-1') =>
-      `ws://127.0.0.1:${port}?partidaId=${partidaId}&jogadorId=${jogadorId}`,
-    fechar: () =>
-      new Promise<void>((resolve, reject) => {
+    port,
+    wsUrl: (partidaId: string, token: string) =>
+      `ws://127.0.0.1:${port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${token}`,
+    // Fecha os clientes WS primeiro (senão `server.close()` espera conexões
+    // ativas para sempre) e depois o HTTP, com belt-and-braces para
+    // keep-alive remanescente do fetch.
+    fechar: async () => {
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
         server.close((err) => (err === undefined ? resolve() : reject(err)));
-      }),
+      });
+    },
   };
+}
+
+function criarJwt(jogadorId: string, apelido: string, sessaoId: string): string {
+  return jwt.sign({ sub: jogadorId, apelido, sessaoId }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
+}
+
+async function criarSessaoNoRedis(sessaoId: string, jogadorId: string): Promise<void> {
+  await redis.set(`sessao:${sessaoId}`, JSON.stringify({ jogadorId, criadoEm: new Date().toISOString() }), 'EX', 3600);
+}
+
+/** Gera um token de sessão válido (JWT + sessão no Redis) para um jogador do roster. */
+async function tokenParaJogador(n: number): Promise<string> {
+  const jogadorId = `jogador-${n}`;
+  const sessaoId = crypto.randomUUID();
+  await criarSessaoNoRedis(sessaoId, jogadorId);
+  return criarJwt(jogadorId, `Jogador ${n}`, sessaoId);
 }
 
 function membro(n: number, sobrescreve: Partial<MembroDaSala> = {}): MembroDaSala {
@@ -105,12 +142,64 @@ async function criarPartidaViaPost(baseUrl: string): Promise<AceiteDoEncaminhame
   return (await resposta.json()) as AceiteDoEncaminhamento;
 }
 
-/** Abre um WS e resolve quando a conexão está pronta para enviar. */
-function abrirWs(url: string): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
-    ws.once('open', () => resolve(ws));
+/**
+ * Conecta um jogador do roster à partida passando pela admissão (issue #46):
+ * token de sessão válido e espera explícita do ADMISSAO_ACEITA — sem sleeps.
+ * O listener do ADMISSAO_ACEITA é anexado antes do `open` (ver cabeçalho).
+ */
+async function conectarPartida(servidor: ServidorEfemero, partidaId: string, jogador = 1): Promise<WebSocket> {
+  const token = await tokenParaJogador(jogador);
+  const ws = new WebSocket(servidor.wsUrl(partidaId, token));
+  const aceita = esperarEvento(ws, 'ADMISSAO_ACEITA');
+
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
     ws.once('error', reject);
+  });
+
+  try {
+    const mensagem = await aceita;
+    assert.equal(mensagem.jogadorId, `jogador-${jogador}`);
+    return ws;
+  } catch (erro) {
+    ws.close();
+    throw erro;
+  }
+}
+
+/**
+ * Upgrade HTTP cru para exercitar rejeições de admissão (resposta antes do
+ * upgrade): resolve com status + corpo quando o servidor responde HTTP.
+ */
+function fazerUpgradeHttp(port: number, token: string, partidaId: string): Promise<{ status: number; texto: string }> {
+  const path = `/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${token}`;
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path,
+      method: 'GET',
+      headers: {
+        'Connection': 'Upgrade',
+        'Upgrade': 'websocket',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      },
+    });
+
+    req.on('error', reject);
+    req.on('upgrade', (_res, socket) => {
+      socket.destroy();
+      reject(new Error('upgrade inesperado — conexão deveria ter sido rejeitada'));
+    });
+    req.on('response', (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        resolve({ status: res.statusCode ?? 0, texto: data });
+      });
+    });
+    req.end();
   });
 }
 
@@ -172,9 +261,7 @@ test('fluxo feliz: selecionar e posicionar peça persiste no Redis', async () =>
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
-    // Pequeno intervalo para o servidor validar a partida e registrar o socket.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
       enviar(ws, { type: 'SELECIONAR_PECA', pecaId: 'inicial-1' });
@@ -209,8 +296,7 @@ test('rejeição: posicionar em célula ocupada responde ERRO_DO_TABULEIRO CELUL
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
       // Posiciona 'inicial-1' em (0,0).
@@ -243,8 +329,7 @@ test('rejeição: girar peça após FINALIZAR responde ERRO_DO_TABULEIRO MANIPUL
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
       enviar(ws, { type: 'SELECIONAR_PECA', pecaId: 'inicial-1' });
@@ -270,28 +355,22 @@ test('rejeição: girar peça após FINALIZAR responde ERRO_DO_TABULEIRO MANIPUL
   }
 });
 
-test('rejeição: jogadorId fora do roster tem a conexão WS encerrada (4403)', async () => {
+test('rejeição: jogador FORA do roster tem o upgrade recusado (403 JOGADOR_FORA_DO_ROSTER)', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    // Conecta com um jogadorId que não pertence ao roster da partida.
-    const ws = new WebSocket(servidor.wsUrl(aceite.partidaId, 'jogador-intruso'));
+    // Token válido para um jogadorId que não pertence ao roster da partida.
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-intruso');
+    const token = criarJwt('jogador-intruso', 'Intruso', sessaoId);
 
-    const codigo = await new Promise<number>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        ws.removeAllListeners();
-        reject(new Error('timeout aguardando fechamento do WS'));
-      }, 5000);
-      ws.once('close', (code: number) => {
-        clearTimeout(timer);
-        resolve(code);
-      });
-      ws.once('error', reject);
-    });
+    const resultado = await fazerUpgradeHttp(servidor.port, token, aceite.partidaId);
 
-    assert.equal(codigo, 4403);
-    ws.close();
+    assert.equal(resultado.status, 403);
+    const msg = JSON.parse(resultado.texto) as { type: string; codigo: string };
+    assert.equal(msg.type, 'ADMISSAO_REJEITADA');
+    assert.equal(msg.codigo, 'JOGADOR_FORA_DO_ROSTER');
   } finally {
     await servidor.fechar();
   }
@@ -302,8 +381,7 @@ test('rejeição: posicionar sem selecionar responde ERRO_DO_TABULEIRO PECA_NAO_
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
       // Tenta posicionar sem ter selecionado a peça antes.
@@ -332,8 +410,7 @@ test('rejeição: posicionar com reserva vazia responde ERRO_DO_TABULEIRO RESERV
     const estadoVazio: EstadoDoTabuleiro = { ...estadoInicialDoTabuleiro(), reserva: [] };
     await salvarEstadoDoTabuleiro(redis, aceite.partidaId, estadoVazio);
 
-    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
       enviar(ws, { type: 'POSICIONAR_PECA', pecaId: 'inicial-1', celula: { linha: 0, coluna: 0 } });
@@ -360,8 +437,7 @@ test('rejeição: estado do tabuleiro ausente responde ERRO_DO_TABULEIRO ESTADO_
     // incoerente) — o cliente não deve receber DADOS_INVALIDOS.
     await removerEstadoDoTabuleiro(redis, aceite.partidaId);
 
-    const ws = await abrirWs(servidor.wsUrl(aceite.partidaId));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
       enviar(ws, { type: 'SELECIONAR_PECA', pecaId: 'inicial-1' });

@@ -278,10 +278,15 @@ wscat -c ws://localhost:8080/ws/lobby
 **5. WebSocket do game-server**
 
 ```sh
-wscat -c ws://localhost:8080/ws/game/<server-id-ou-partida-id>
+# A admissão (issue #46) exige token de sessão (JWT) válido e o jogador no
+# roster da Partida preparada. O path é /ws/game/<serverId> com query
+# partida-id; o token pode ir na query (?token=) ou no cookie access_token.
+wscat -c "ws://localhost:8080/ws/game/<server-id>?partida-id=<partida-id>&token=<jwt-de-sessao>"
 # esperado: HTTP/1.1 101 Switching Protocols (upstream game_servers:1234)
-# dentro da conexão, PING/PONG funciona; demais comandos de jogo ainda são stub
-# que responde PONG a PING e null aos demais (ver backend/game-server/src/ws/ws.ts)
+# 1a mensagem: {"type":"ADMISSAO_ACEITA","jogadorId":...,"apelido":...,"partidaId":...}
+# rejeições chegam como HTTP 400/401/403/404 com corpo ADMISSAO_REJEITADA
+# dentro da conexão, PING/PONG funciona; comandos de tabuleiro são roteados
+# aos handlers (issue #80) (ver backend/game-server/src/ws/ws.ts)
 ```
 
 **6. Validação interna alternativa (debug)**

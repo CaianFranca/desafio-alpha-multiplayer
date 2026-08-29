@@ -8,6 +8,10 @@ export type {
   SalaClientMessage,
   SalaServerMessage,
   ServerMessage,
+  AdmissaoAceitaEvento,
+  AdmissaoRejeitadaEvento,
+  AdmissaoEventoDoServidor,
+  CodigoDeErroDeAdmissao,
 } from './protocol.ts';
 export type {
   Jogador,
