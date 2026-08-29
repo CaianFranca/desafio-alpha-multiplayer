@@ -19,7 +19,7 @@
 // independentemente.
 
 import type { WebSocket } from 'ws';
-import type { SalaEventoDoServidor } from '@flicker/shared';
+import type { SalaEventoDoServidor, SalaServerMessage } from '@flicker/shared';
 
 export class SalasBroadcaster {
   private readonly socketParaSala: Map<WebSocket, string> = new Map();
@@ -93,7 +93,7 @@ export class SalasBroadcaster {
    * fechamento (OPEN !== readyState) são pulados sem erro — `ws` reescreve
    * a flag imediatamente após `close()`.
    */
-  enviar(salaId: string, evento: SalaEventoDoServidor): void {
+  enviar(salaId: string, evento: SalaServerMessage): void {
     const sockets = this.salaParaSockets.get(salaId);
     if (sockets === undefined) {
       return;
@@ -115,7 +115,7 @@ export class SalasBroadcaster {
    * Envia o evento apenas para o socket de origem (usado para erros
    * individuais — ex.: `ERRO_DA_SALA` quando o engine rejeita).
    */
-  enviarParaSocket(socket: WebSocket, evento: SalaEventoDoServidor): void {
+  enviarParaSocket(socket: WebSocket, evento: SalaServerMessage): void {
     if (socket.readyState !== socket.OPEN) {
       return;
     }
@@ -131,7 +131,7 @@ export class SalasBroadcaster {
    * derivados de validação local que devem aparecer em todas as abas
    * conectadas (não usado no escopo atual, mas mantém a API consistente).
    */
-  enviarParaJogador(jogadorId: string, evento: SalaEventoDoServidor): void {
+  enviarParaJogador(jogadorId: string, evento: SalaServerMessage): void {
     const payload = JSON.stringify(evento);
     for (const [socket, j] of this.socketParaJogador.entries()) {
       if (j === jogadorId && socket.readyState === socket.OPEN) {

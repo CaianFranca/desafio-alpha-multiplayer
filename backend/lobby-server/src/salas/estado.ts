@@ -89,13 +89,14 @@ class SalasStateImpl implements SalasState {
   }
 
   async carregar(repo: SalasRepo, projecao: SalasProjecao): Promise<void> {
-    const salasAbertas = await repo.listarSalasAbertas();
+    // Carrega tanto abertas quanto encaminhadas (encaminhada mantém snapshot redirect)
+    const salasAtivas = await repo.listarSalasAtivas();
 
     // Uma única leitura de membros por sala; reaproveitada na hidratação
     // dos apelidos e na reconstrução do engine.
     const membrosPorSala = new Map<string, MembroPersistido[]>();
     const jogadorIds = new Set<string>();
-    for (const sala of salasAbertas) {
+    for (const sala of salasAtivas) {
       const membros = await repo.listarMembrosDaSala(sala.id);
       membrosPorSala.set(sala.id, membros);
       for (const m of membros) {
@@ -113,7 +114,7 @@ class SalasStateImpl implements SalasState {
     // registra o reinício e bloqueia mutações até a consistência ser
     // confirmada, como determina o ADR-0002.
     let novoEstado: EstadoDoLobby = estadoDoLobbyVazio();
-    for (const sala of salasAbertas) {
+    for (const sala of salasAtivas) {
       const todosMembros = membrosPorSala.get(sala.id) ?? [];
       const membrosAtivos = todosMembros.filter((m) => !m.bloqueado);
       const jogadoresBloqueados = todosMembros
@@ -151,10 +152,11 @@ class SalasStateImpl implements SalasState {
         );
         anfitriaoMembroId = membrosDominio[0]!.id;
       }
+      const estadoSala = (sala.status ?? 'aberta') as SalaDominio['estado'];
       const salaDominio: SalaDominio = {
         id: sala.id,
         codigo: sala.codigo,
-        estado: 'aberta' as const,
+        estado: estadoSala === 'encaminhada' ? 'encaminhada' : 'aberta',
         membros: membrosDominio,
         proximaOrdemDeEntrada,
         anfitriaoId: anfitriaoMembroId,
@@ -195,10 +197,13 @@ class SalasStateImpl implements SalasState {
     this._estado = novoEstado;
 
     // Projeção quente no Redis: estado da sala, codigo -> salaId, e
-    // jogadorId -> salaId para cada membro.
+    // jogadorId -> salaId para cada membro. Para encaminhadas, hidratar encaminhamento do PG.
+    const ativaPorId = new Map(salasAtivas.map((s) => [s.id, s]));
     for (const [salaId, info] of this._abertas) {
       await projecao.definirCodigo(info.codigo, salaId);
-      await projecao.definirEstadoSala(salaId, serializarSala(info.sala));
+      const ativa = ativaPorId.get(salaId);
+      const enc = ativa?.serverId && ativa?.partidaId ? { serverId: ativa.serverId, partidaId: ativa.partidaId } : undefined;
+      await projecao.definirEstadoSala(salaId, enc ? serializarSala(info.sala, enc) : serializarSala(info.sala));
       for (const membro of info.sala.membros) {
         if (membro.estado === 'ativo') {
           await projecao.definirAssociacaoJogador(membro.jogadorId, salaId);
