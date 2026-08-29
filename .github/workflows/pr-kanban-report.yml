@@ -25,14 +25,14 @@ jobs:
         id: gerar_relatorio
         uses: actions/github-script@v8
         env:
-          PROJECT_TITLE_CONTAINS: Kanban
+          PROJECT_TITLE_CONTAINS: Painel de Controle - Jogo Multiplayer
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const now = new Date();
 
-            const projectTitleContains = process.env.PROJECT_TITLE_CONTAINS || 'Kanban';
+            const projectTitleContains = process.env.PROJECT_TITLE_CONTAINS || 'Painel de Controle - Jogo Multiplayer';
             const normalize = (value) => (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
             const safe = (value) => String(value || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
