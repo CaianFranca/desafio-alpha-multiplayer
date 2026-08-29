@@ -27,7 +27,7 @@ const redis = criarClienteRedis();
 
 interface ServidorEfemero {
   readonly baseUrl: string;
-  readonly wsUrl: (partidaId: string) => string;
+  readonly wsUrl: (partidaId: string, jogadorId?: string) => string;
   readonly fechar: () => Promise<void>;
 }
 
@@ -49,7 +49,8 @@ async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
   const port = endereco.port;
   return {
     baseUrl: `http://127.0.0.1:${port}`,
-    wsUrl: (partidaId: string) => `ws://127.0.0.1:${port}?partidaId=${partidaId}`,
+    wsUrl: (partidaId: string, jogadorId = 'jogador-1') =>
+      `ws://127.0.0.1:${port}?partidaId=${partidaId}&jogadorId=${jogadorId}`,
     fechar: () =>
       new Promise<void>((resolve, reject) => {
         server.close((err) => (err === undefined ? resolve() : reject(err)));
@@ -259,6 +260,33 @@ test('rejeição: girar peça após FINALIZAR responde ERRO_DO_TABULEIRO MANIPUL
     }
 
     await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('rejeição: jogadorId fora do roster tem a conexão WS encerrada (4403)', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+    // Conecta com um jogadorId que não pertence ao roster da partida.
+    const ws = new WebSocket(servidor.wsUrl(aceite.partidaId, 'jogador-intruso'));
+
+    const codigo = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        ws.removeAllListeners();
+        reject(new Error('timeout aguardando fechamento do WS'));
+      }, 5000);
+      ws.once('close', (code: number) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+      ws.once('error', reject);
+    });
+
+    assert.equal(codigo, 4403);
+    ws.close();
   } finally {
     await servidor.fechar();
   }

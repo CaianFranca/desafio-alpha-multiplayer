@@ -15,10 +15,6 @@ function chaveDoTabuleiro(partidaId: string): string {
   return `game-server:tabuleiro:${partidaId}`;
 }
 
-export function chaveDoEstadoDoTabuleiro(partidaId: string): string {
-  return chaveDoTabuleiro(partidaId);
-}
-
 /**
  * Grava o estado inicial do tabuleiro no Redis com o TTL da partida preparada.
  * `KEEPTTL` não é usado aqui pois a chave ainda não existe.
