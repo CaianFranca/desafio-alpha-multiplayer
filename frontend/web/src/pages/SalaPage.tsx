@@ -5,6 +5,8 @@ import { CodigoDeSalaCard } from '../components/sala/CodigoDeSalaCard'
 import { LinkDiretoCard } from '../components/sala/LinkDiretoCard'
 import { ListaDeMembros } from '../components/sala/ListaDeMembros'
 import { AvisosDoLobby } from '../components/sala/AvisosDoLobby'
+import { ChatDoLobby } from '../components/sala/ChatDoLobby'
+import { ControlesDoAnfitriao } from '../components/sala/ControlesDoAnfitriao'
 import { AuthContext } from '../state/auth-context'
 import { useSalaActions } from '../state/sala-actions-context'
 import { CODIGO_DE_SALA_TAMANHO, normalizarCodigoDeSala } from '../utils/codigoDeSala'
@@ -14,12 +16,31 @@ export function SalaPage() {
   const navigate = useNavigate()
   const { authState } = useContext(AuthContext)
   const jogadorId = authState.status === 'authenticated' ? authState.jogador.id : undefined
-  const { sala, avisos, conectado, erro, criarSala, entrarNaSala, alternarProntidao, sairDaSala } =
-    useSalaWebSocket(jogadorId)
+  const {
+    sala,
+    avisos,
+    mensagensDeChat,
+    jogadoresBloqueados,
+    conectado,
+    erro,
+    criarSala,
+    entrarNaSala,
+    alternarProntidao,
+    sairDaSala,
+    enviarMensagemDeChat,
+    expulsarMembro,
+    desbloquearJogador,
+    encerrarSala,
+    iniciarPartida,
+  } = useSalaWebSocket(jogadorId)
   const { registrarSairDaSala } = useSalaActions()
   const [codigoInput, setCodigoInput] = useState('')
   const conviteEnviadoRef = useRef<string | null>(null)
   const conectando = !conectado && !sala
+
+  // Anfitrião: membro local identificado por jogadorId, comparado ao anfitriaoId da sala.
+  const membroLocal = sala?.membros.find((m) => m.jogadorId === jogadorId) ?? null
+  const ehAnfitriao = membroLocal !== null && sala !== null && sala.anfitriaoId === membroLocal.id
 
   // Sai da sala (SAIR_DA_SALA) e volta ao início — fonte única usada pelo
   // botão do corpo e pelo Header (via contexto). Nunca encerra a Sessão.
@@ -143,6 +164,23 @@ export function SalaPage() {
               )}
             </div>
 
+            {/* Controles do Anfitrião + Chat: bloco inferior da coluna esquerda */}
+            <div className="mt-auto pt-8 flex flex-col gap-6">
+              {sala && (
+                <>
+                  <ControlesDoAnfitriao
+                    sala={sala}
+                    ehAnfitriao={ehAnfitriao}
+                    jogadoresBloqueados={jogadoresBloqueados}
+                    aoEncerrarSala={encerrarSala}
+                    aoIniciarPartida={iniciarPartida}
+                    aoDesbloquearJogador={desbloquearJogador}
+                  />
+                  <ChatDoLobby mensagens={mensagensDeChat} aoEnviar={enviarMensagemDeChat} />
+                </>
+              )}
+            </div>
+
             {/* diamante divisor no centro (visível desktop) */}
             <div
               className="hidden lg:flex absolute top-1/2 -right-[7px] -translate-y-1/2 w-[14px] h-[14px] bg-[#111] border border-white/15 rotate-45 items-center justify-center"
@@ -175,7 +213,12 @@ export function SalaPage() {
                   <LinkDiretoCard link={sala.convite.link} />
                 </div>
 
-                <ListaDeMembros sala={sala} />
+                <ListaDeMembros
+                  sala={sala}
+                  jogadorIdLocal={jogadorId}
+                  ehAnfitriao={ehAnfitriao}
+                  onExpulsar={expulsarMembro}
+                />
                 <AvisosDoLobby avisos={avisos} />
               </>
             ) : (
