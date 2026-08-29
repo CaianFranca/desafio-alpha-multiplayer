@@ -1068,8 +1068,6 @@ test('Sala encaminhada rejeita todas as mutações com SALA_ENCAMINHADA', () => 
     sair('jogador-1'),
     expulsar('membro-1', 'membro-2'),
     autorizar('membro-1', 'jogador-2'),
-    desconectar('jogador-1'),
-    reconectar('jogador-1'),
     expirar('membro-1'),
     alternar('jogador-1'),
     encaminhar('membro-1'),
@@ -1085,6 +1083,33 @@ test('Sala encaminhada rejeita todas as mutações com SALA_ENCAMINHADA', () => 
     if (resultado.sucesso) return;
     assert.equal(resultado.erro.codigo, 'SALA_ENCAMINHADA', `comando ${comando.tipo}`);
   }
+
+  // Presença não é mutação de composição — desconectar/reconectar
+  // permanecem válidos em sala encaminhada para entregar o redirect (B1).
+  const desconectado = aplicarComando(encaminhada, desconectar('jogador-1'));
+  assert.equal(desconectado.sucesso, true, 'desconectar_jogador em encaminhada');
+  if (!desconectado.sucesso) return;
+  assert.deepEqual(desconectado.eventos, [
+    {
+      tipo: 'membro_desconectado',
+      salaId: 'sala-1',
+      membroId: 'membro-1',
+      jogadorId: 'jogador-1',
+      ordemDeEntrada: 1,
+    },
+  ]);
+  const reconectado = aplicarComando(desconectado.estado, reconectar('jogador-1'));
+  assert.equal(reconectado.sucesso, true, 'reconectar_jogador em encaminhada');
+  if (!reconectado.sucesso) return;
+  assert.deepEqual(reconectado.eventos, [
+    {
+      tipo: 'membro_reconectado',
+      salaId: 'sala-1',
+      membroId: 'membro-1',
+      jogadorId: 'jogador-1',
+      ordemDeEntrada: 1,
+    },
+  ]);
 
   const confirmacao = confirmarConsistenciaDaSala(encaminhada, confirmar());
   assert.deepEqual(confirmacao, { sucesso: true, estado: encaminhada, eventos: [] });

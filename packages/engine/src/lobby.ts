@@ -788,10 +788,9 @@ export function desconectarJogador(
     return salaInconsistente;
   }
 
-  const salaCongelada = exigirSalaNaoEncaminhada(sala);
-  if (salaCongelada) {
-    return salaCongelada;
-  }
+  // Presença não é mutação de composição — sala encaminhada mantém
+  // reconexão para entregar o redirect (SALA_ATUALIZADA com encaminhamento).
+  // O congelamento da composição continua nos gates de sair/expulsar/etc.
 
   const contexto = exigirMembroAtivo(sala, { jogadorId: comando.jogadorId });
   if (!('membro' in contexto)) {
@@ -843,10 +842,7 @@ export function reconectarJogador(
     return salaInconsistente;
   }
 
-  const salaCongelada = exigirSalaNaoEncaminhada(sala);
-  if (salaCongelada) {
-    return salaCongelada;
-  }
+  // Idem — reconexão em sala encaminhada deve funcionar para o B1 (snapshot com redirect).
 
   const contexto = exigirMembroAtivo(sala, { jogadorId: comando.jogadorId });
   if (!('membro' in contexto)) {
