@@ -1,6 +1,10 @@
 import type { Redis } from 'ioredis';
 import type { MembroDaSala, OfertaDeEncaminhamento, PartidaId, ServerId } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
+import {
+  inicializarEstadoDoTabuleiro,
+  removerEstadoDoTabuleiro,
+} from './tabuleiro.ts';
 
 export type EstadoDaPartida = 'preparada';
 
@@ -35,6 +39,9 @@ export async function criarPartidaPreparada(
 
   await redis.set(chaveDaPartida(partida.partidaId), JSON.stringify(partida), 'EX', partidaPreparadaTtlSegundos);
 
+  // Estado do tabuleiro nasce junto com a partida, com o mesmo TTL (issue #80).
+  await inicializarEstadoDoTabuleiro(redis, partida.partidaId, partidaPreparadaTtlSegundos);
+
   return partida;
 }
 
@@ -51,5 +58,8 @@ export async function existePartida(redis: Redis, partidaId: PartidaId): Promise
 }
 
 export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promise<boolean> {
-  return (await redis.del(chaveDaPartida(partidaId))) === 1;
+  const removida = (await redis.del(chaveDaPartida(partidaId))) === 1;
+  // Remove também o estado do tabuleiro associado (issue #80).
+  await removerEstadoDoTabuleiro(redis, partidaId);
+  return removida;
 }
