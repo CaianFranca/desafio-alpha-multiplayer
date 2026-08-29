@@ -167,16 +167,18 @@ export function SalaPage() {
             {/* Controles do Anfitrião + Chat: bloco inferior da coluna esquerda */}
             <div className="mt-auto pt-8 flex flex-col gap-6">
               {sala && (
-                <ControlesDoAnfitriao
-                  sala={sala}
-                  ehAnfitriao={ehAnfitriao}
-                  jogadoresBloqueados={jogadoresBloqueados}
-                  aoEncerrarSala={encerrarSala}
-                  aoIniciarPartida={iniciarPartida}
-                  aoDesbloquearJogador={desbloquearJogador}
-                />
+                <>
+                  <ControlesDoAnfitriao
+                    sala={sala}
+                    ehAnfitriao={ehAnfitriao}
+                    jogadoresBloqueados={jogadoresBloqueados}
+                    aoEncerrarSala={encerrarSala}
+                    aoIniciarPartida={iniciarPartida}
+                    aoDesbloquearJogador={desbloquearJogador}
+                  />
+                  <ChatDoLobby mensagens={mensagensDeChat} aoEnviar={enviarMensagemDeChat} />
+                </>
               )}
-              <ChatDoLobby mensagens={mensagensDeChat} avisos={avisos} aoEnviar={enviarMensagemDeChat} />
             </div>
 
             {/* diamante divisor no centro (visível desktop) */}

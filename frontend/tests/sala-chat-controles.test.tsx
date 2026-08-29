@@ -1,82 +1,11 @@
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { render, renderHook, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
-
-// --- Mock WebSocket global (padrão de tests/sala.test.tsx) ---
-class MockWebSocket {
-  static instances: MockWebSocket[] = []
-  static CONNECTING = 0
-  static OPEN = 1
-  static CLOSING = 2
-  static CLOSED = 3
-  static forceNoAutoOpen = false
-  url: string
-  readyState = 0
-  onopen: ((ev: Event) => void) | null = null
-  onclose: ((ev: CloseEvent) => void) | null = null
-  onmessage: ((ev: MessageEvent) => void) | null = null
-  onerror: ((ev: Event) => void) | null = null
-  sentMessages: string[] = []
-
-  constructor(url: string) {
-    this.url = url
-    if (MockWebSocket.forceNoAutoOpen) {
-      this.readyState = MockWebSocket.CONNECTING
-    } else {
-      this.readyState = MockWebSocket.OPEN
-      queueMicrotask(() => this.onopen?.(new Event('open')))
-    }
-    MockWebSocket.instances.push(this)
-  }
-
-  simulateOpen() {
-    this.readyState = MockWebSocket.OPEN
-    this.onopen?.(new Event('open'))
-  }
-
-  send(data: string) {
-    this.sentMessages.push(data)
-  }
-
-  close() {
-    this.onclose?.(new CloseEvent('close') as CloseEvent)
-  }
-
-  simulateMessage(data: unknown) {
-    this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(data) }) as MessageEvent)
-  }
-
-  static clean() {
-    MockWebSocket.instances = []
-  }
-
-  static last(): MockWebSocket | undefined {
-    return MockWebSocket.instances[MockWebSocket.instances.length - 1]
-  }
-}
-
-// @ts-expect-error overwrite global for tests
-global.WebSocket = MockWebSocket as unknown as typeof WebSocket
-// garante OPEN no global para o hook comparar
-// @ts-expect-error ensure static property
-if ((global.WebSocket as unknown as { OPEN?: number }).OPEN === undefined) {
-  // @ts-expect-error assign
-  global.WebSocket.OPEN = 1
-}
-// jsdom não tem MessageEvent construtor completo, polyfill simples se necessário
-if (typeof MessageEvent === 'undefined') {
-  // @ts-expect-error polyfill
-  global.MessageEvent = class MessageEvent extends Event {
-    data: unknown
-    constructor(type: string, init: { data: unknown }) {
-      super(type)
-      this.data = init.data
-    }
-  }
-}
+import { useSalaWebSocket } from '../web/src/hooks/useSalaWebSocket'
+import { MockWebSocket } from './helpers/mockWebSocket'
 
 function renderWithRouter(initialEntries: string[] = ['/salas/criar'], authState: AuthState = mockAuthenticatedState) {
   MockWebSocket.clean()
@@ -108,7 +37,7 @@ function criarMembro(overrides: Partial<{
 
 function criarSala(overrides: Partial<{
   codigoDeSala: string
-  estado: 'aberta' | 'encaminhada'
+  estado: 'aberta' | 'encaminhada' | 'encerrada' | 'expirada'
   anfitriaoId: string
   membros: ReturnType<typeof criarMembro>[]
   conviteLink: string
@@ -119,7 +48,7 @@ function criarSala(overrides: Partial<{
   return {
     id: 'sala-1',
     codigoDeSala: codigo,
-    estado: (overrides.estado ?? 'aberta') as 'aberta' | 'encaminhada',
+    estado: (overrides.estado ?? 'aberta') as 'aberta' | 'encaminhada' | 'encerrada' | 'expirada',
     anfitriaoId,
     membros,
     convite: { codigoDeSala: codigo, link: overrides.conviteLink ?? `http://localhost/sala/${codigo}` },
@@ -264,6 +193,14 @@ describe('lobby - chat e controles do Anfitrião', () => {
     expect(screen.getByRole('button', { name: /iniciar partida/i })).toBeInTheDocument()
   })
 
+  it('chat não renderiza sem sala (tela de criar/entrar)', async () => {
+    renderWithRouter(['/salas/criar'])
+
+    // Sem SALA_ATUALIZADA, nenhuma sala existe: sem seção de chat na tela
+    await waitFor(() => expect(screen.getByText(/crie uma sala ou entre/i)).toBeInTheDocument())
+    expect(screen.queryByLabelText('Chat do Lobby')).not.toBeInTheDocument()
+  })
+
   // --- Expulsar ---
 
   it('Anfitrião expulsa outro Membro e o comando traz o membroId alvo', async () => {
@@ -387,9 +324,67 @@ describe('lobby - chat e controles do Anfitrião', () => {
     expect(envio).toEqual({ type: 'INICIAR_PARTIDA' })
   })
 
+  // --- Encerramento e expiração ---
+
+  it('SALA_ATUALIZADA encerrada volta ao estado criar/entrar: sem chat, sem prontidão, com aviso', async () => {
+    const ws = await montarLobbyComoAnfitriao()
+    expect(screen.getByRole('button', { name: /alternar prontidão/i })).toBeInTheDocument()
+
+    const salaEncerrada = criarSala({
+      codigoDeSala: 'A3K9M2',
+      membros: [],
+      anfitriaoId: 'm-eu',
+      estado: 'encerrada',
+    })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaEncerrada })
+
+    // Sala deixa de existir para o jogador: controles e chat somem, tela volta a Criar Sala
+    expect(await screen.findByRole('button', { name: /criar sala/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /alternar prontidão/i })).not.toBeInTheDocument()
+    // O "Sair da Sala" do Header persiste; o do corpo da página (contexto de sala) some
+    const main = document.querySelector('main')!
+    expect(within(main).queryByRole('button', { name: /^sair da sala$/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Chat do Lobby')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /encerrar sala/i })).not.toBeInTheDocument()
+    // Aviso explica o porquê
+    expect(await screen.findByText(/a sala foi encerrada/i)).toBeInTheDocument()
+  })
+
+  it('SALA_ATUALIZADA expirada também volta ao estado criar/entrar', async () => {
+    const ws = await montarLobbyComoAnfitriao()
+
+    const salaExpirada = criarSala({
+      codigoDeSala: 'A3K9M2',
+      membros: [],
+      anfitriaoId: 'm-eu',
+      estado: 'expirada',
+    })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaExpirada })
+
+    expect(await screen.findByRole('button', { name: /criar sala/i })).toBeInTheDocument()
+    expect(await screen.findByText(/a sala expirou/i)).toBeInTheDocument()
+  })
+
+  it('SALA_ATUALIZADA encaminhada mantém a sala (não volta ao criar/entrar)', async () => {
+    const ws = await montarLobbyComoAnfitriao()
+
+    const salaEncaminhada = criarSala({
+      codigoDeSala: 'A3K9M2',
+      membros: [criarEu()],
+      anfitriaoId: 'm-eu',
+      estado: 'encaminhada',
+    })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaEncaminhada })
+
+    expect(await screen.findByText(/sala encaminhada para a partida/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /alternar prontidão/i })).toBeInTheDocument()
+    expect(screen.getByLabelText('Chat do Lobby')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /criar sala/i })).not.toBeInTheDocument()
+  })
+
   // --- Aviso de encaminhada ---
 
-  it('SALA_ATUALIZADA com estado encaminhada gera linha [SISTEMA] no feed do chat, sem duplicar', async () => {
+  it('SALA_ATUALIZADA com estado encaminhada gera aviso no AvisosDoLobby, sem duplicar e sem entrar no chat', async () => {
     const ws = await montarLobbyComoAnfitriao()
     const salaEncaminhada = criarSala({
       codigoDeSala: 'A3K9M2',
@@ -399,11 +394,58 @@ describe('lobby - chat e controles do Anfitrião', () => {
     })
 
     ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaEncaminhada })
+    expect(await screen.findByText(/sala encaminhada para a partida/i)).toBeInTheDocument()
+
+    // O feed do chat exibe somente mensagens de jogadores — aviso não vira linha [SISTEMA]
     const feed = screen.getByLabelText('Histórico do chat')
-    await within(feed).findByText(/sala encaminhada para a partida/i)
+    expect(within(feed).queryByText(/sala encaminhada para a partida/i)).not.toBeInTheDocument()
 
     // Reenvio do mesmo estado não duplica o aviso (salaAnterior já estava encaminhada)
     ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaEncaminhada })
-    await waitFor(() => expect(within(feed).getAllByText(/sala encaminhada para a partida/i)).toHaveLength(1))
+    await waitFor(() => expect(screen.getAllByText(/sala encaminhada para a partida/i)).toHaveLength(1))
+  })
+
+  // --- Guardas de envio do hook (defesa além do maxLength da UI) ---
+
+  it('enviarMensagemDeChat recusa vazio, só-espaços e acima de 500 caracteres', async () => {
+    const { result } = renderHook(() => useSalaWebSocket('j-1'))
+    await waitFor(() => expect(MockWebSocket.last()!.readyState).toBe(MockWebSocket.OPEN))
+    const ws = MockWebSocket.last()!
+
+    result.current.enviarMensagemDeChat('')
+    result.current.enviarMensagemDeChat('   ')
+    result.current.enviarMensagemDeChat('x'.repeat(501))
+    expect(ws.sentMessages).toHaveLength(0)
+
+    result.current.enviarMensagemDeChat('Olá grupo')
+    expect(ws.sentMessages).toHaveLength(1)
+    expect(JSON.parse(ws.sentMessages[0] as string)).toEqual({
+      type: 'ENVIAR_MENSAGEM_DE_CHAT',
+      conteudo: 'Olá grupo',
+    })
+  })
+
+  // --- Reconciliação da lista de bloqueados ---
+
+  it('bloqueado re-admitido na sala (retorno_autorizado -> SALA_ATUALIZADA) sai da lista de bloqueados', async () => {
+    const zanetti = criarMembro({ id: 'm2', jogadorId: 'j-zanetti', apelido: 'Zanetti', ordemDeEntrada: 1 })
+    const ws = await montarLobbyComoAnfitriao([criarEu(), zanetti])
+
+    // Expulsão observada: Zanetti entra na lista local
+    const salaAposExpulsao = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarEu()], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm2', jogadorId: 'j-zanetti', sala: salaAposExpulsao })
+    const secaoBloqueados = await screen.findByLabelText('Jogadores bloqueados')
+    expect(within(secaoBloqueados).getByText('Zanetti')).toBeInTheDocument()
+
+    // Retorno autorizado após DESBLOQUEAR: o servidor emite só SALA_ATUALIZADA
+    // (sem MEMBRO_ENTROU). A lista local deve reconciliar com a sala recebida.
+    const salaComRetorno = criarSala({
+      codigoDeSala: 'A3K9M2',
+      membros: [criarEu(), zanetti],
+      anfitriaoId: 'm-eu',
+    })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaComRetorno })
+
+    await waitFor(() => expect(screen.queryByLabelText('Jogadores bloqueados')).not.toBeInTheDocument())
   })
 })

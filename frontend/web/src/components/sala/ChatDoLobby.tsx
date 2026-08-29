@@ -1,45 +1,24 @@
-import { useMemo, useState } from 'react'
-import type { AvisoDoLobby, MensagemDeChatDoLobby } from '../../hooks/useSalaWebSocket'
+import { useState } from 'react'
+import type { MensagemDeChatDoLobby } from '../../hooks/useSalaWebSocket'
 
 // Espelha o limite validado pelo backend (lobby-server/handlers) no wire.
 const LIMITE_DE_CARACTERES_DO_CHAT = 500
 
 interface Props {
   mensagens: MensagemDeChatDoLobby[]
-  avisos: AvisoDoLobby[]
   aoEnviar: (conteudo: string) => void
 }
 
-interface ItemDoFeed {
-  chave: string
-  ordem: number
-  sistema: boolean
-  texto: string
-}
-
-export function ChatDoLobby({ mensagens, avisos, aoEnviar }: Props) {
+export function ChatDoLobby({ mensagens, aoEnviar }: Props) {
   const [rascunho, setRascunho] = useState('')
 
-  // Feed único: avisos do lobby viram linhas [SISTEMA] e mensagens de jogadores
-  // mantêm o formato "Apelido: conteúdo", intercalados por instante (ordem cronológica).
-  const itensDoFeed = useMemo<ItemDoFeed[]>(() => {
-    const deAvisos = avisos.map((aviso) => ({
-      chave: aviso.id,
-      ordem: aviso.criadoEm,
-      sistema: true,
-      texto: aviso.mensagem,
-    }))
-    const deMensagens = mensagens.map((mensagem) => {
-      const instante = Date.parse(mensagem.enviadoEm)
-      return {
-        chave: mensagem.id,
-        ordem: Number.isNaN(instante) ? 0 : instante,
-        sistema: false,
-        texto: `${mensagem.apelido}: ${mensagem.conteudo}`,
-      }
-    })
-    return [...deAvisos, ...deMensagens].sort((a, b) => a.ordem - b.ordem)
-  }, [avisos, mensagens])
+  // Feed só de jogadores, na ordem de chegada (os avisos do lobby ficam no
+  // AvisosDoLobby — deduplicação de informação). Sem sort: horários de
+  // relógios diferentes (local x servidor) reordenariam o feed.
+  const mensagensDoFeed = mensagens.map((mensagem) => ({
+    chave: mensagem.id,
+    texto: `${mensagem.apelido}: ${mensagem.conteudo}`,
+  }))
 
   const podeEnviar = rascunho.trim().length > 0
 
@@ -74,12 +53,12 @@ export function ChatDoLobby({ mensagens, avisos, aoEnviar }: Props) {
         aria-live="polite"
         aria-label="Histórico do chat"
       >
-        {itensDoFeed.length === 0 ? (
+        {mensagensDoFeed.length === 0 ? (
           <p className="text-white/30">Sem mensagens ainda</p>
         ) : (
-          itensDoFeed.map((item) => (
-            <p key={item.chave} className={item.sistema ? 'text-[#c9a86a]' : 'text-white/60'}>
-              {item.sistema ? `[SISTEMA]: ${item.texto}` : item.texto}
+          mensagensDoFeed.map((item) => (
+            <p key={item.chave} className="text-white/60">
+              {item.texto}
             </p>
           ))
         )}

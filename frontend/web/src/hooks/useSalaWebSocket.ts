@@ -88,6 +88,12 @@ function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null
       if (evento.sala.estado === 'encaminhada' && salaAnterior?.estado !== 'encaminhada') {
         return 'Sala encaminhada para a partida'
       }
+      if (evento.sala.estado === 'encerrada' && salaAnterior?.estado !== 'encerrada') {
+        return 'A Sala foi encerrada'
+      }
+      if (evento.sala.estado === 'expirada' && salaAnterior?.estado !== 'expirada') {
+        return 'A Sala expirou'
+      }
       return null
     case 'MEMBRO_ENTROU':
       return `${evento.membro.apelido} entrou na sala`
@@ -151,15 +157,17 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   // Comandos enfileirados quando o WebSocket ainda não está aberto (handshake).
   const comandosPendentesRef = useRef<SalaComandoDoCliente[]>([])
 
-  // Ao trocar de sala (código diferente), descarta avisos, chat e bloqueados
-  // da sala anterior.
+  // Ao trocar de sala (código diferente), descarta chat e bloqueados da sala
+  // anterior. Avisos só são descartados ao ENTRAR em outra sala: ao voltar
+  // para "sem sala" (sair, encerramento, expiração) eles permanecem para
+  // explicar por que a Sala acabou.
   useEffect(() => {
     const atual = sala?.codigoDeSala ?? null
     const anterior = salaRef.current?.codigoDeSala ?? null
     if (atual !== anterior) {
-      setAvisos([])
       setMensagensDeChat([])
       setJogadoresBloqueados([])
+      setAvisos((prev) => (atual === null ? prev : []))
     }
     salaRef.current = sala
   }, [sala])
@@ -238,7 +246,16 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         default:
           if (isEventoDeSala(evento)) {
             const salaAnterior = salaRef.current
-            setSala(evento.sala)
+            // Sala morta (encerrada pelo Anfitrião ou expirada): o backend
+            // emite SALA_ATUALIZADA com membros [] e estado 'encerrada' —
+            // guarda null para que a página volte ao estado criar/entrar
+            // em vez de renderizar controles sobre uma sala inexistente.
+            const salaMorta = evento.sala.estado === 'encerrada' || evento.sala.estado === 'expirada'
+            setSala(salaMorta ? null : evento.sala)
+            if (salaMorta) {
+              setMensagensDeChat([])
+              setJogadoresBloqueados([])
+            }
             if (evento.type === 'MEMBRO_EXPULSO') {
               // Lista local da sessão: o Anfitrião acumula expulsos observados
               // (apelido lido da sala anterior ao evento). Não há protocolo
@@ -252,9 +269,12 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
                   : [...prev, { jogadorId: evento.jogadorId, apelido }],
               )
             }
-            if (evento.type === 'MEMBRO_ENTROU') {
-              setJogadoresBloqueados((prev) => prev.filter((j) => j.jogadorId !== evento.membro.jogadorId))
-            }
+            // Reconciliação: um jogador bloqueado re-admitido (retorno após
+            // DESBLOQUEAR chega como retorno_autorizado -> SALA_ATUALIZADA, e
+            // a primeira admissão como MEMBRO_ENTROU) sai da lista local —
+            // evita exibir nome bloqueado que já voltou à sala.
+            const jogadorIdsNaSala = new Set(evento.sala.membros.map((m) => m.jogadorId))
+            setJogadoresBloqueados((prev) => prev.filter((j) => !jogadorIdsNaSala.has(j.jogadorId)))
             const msg = mensagemDeAviso(evento, salaAnterior)
             if (msg) adicionarAviso(msg, evento.type)
             return
@@ -340,7 +360,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
 
   const enviarMensagemDeChat = useCallback(
     (conteudo: string) => {
-      enviar({ type: 'ENVIAR_MENSAGEM_DE_CHAT', conteudo })
+      // Espelha a validação do backend (1..500, trim) — o servidor recusaria
+      // com ERRO_DA_SALA { DADOS_INVALIDOS }; a guarda evita a viagem.
+      const texto = conteudo.trim()
+      if (texto.length === 0 || texto.length > 500) return
+      enviar({ type: 'ENVIAR_MENSAGEM_DE_CHAT', conteudo: texto })
     },
     [enviar],
   )
