@@ -13,6 +13,7 @@ export function PartidaMoldura({ onBordaChange }: PartidaMolduraProps) {
     if (!el || !onBordaChange) return
 
     function medir(): void {
+      if (!el || !onBordaChange) return
       const v = getComputedStyle(el).borderTopWidth
       const px = getBordaMolduraPxViaEstilo(v)
       onBordaChange(px)

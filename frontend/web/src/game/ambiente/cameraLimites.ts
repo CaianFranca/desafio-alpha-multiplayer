@@ -115,10 +115,10 @@ export function clampAlvo(
 }
 
 /**
- * Distância mínima (mais afastada) que ainda enquadra a Mesa com a margem interativa.
+ * Distância mais afastada (teto do zoom) que ainda enquadra a Mesa com a margem interativa.
  * @param aspectVisivel - aspect da área visível (descontada a borda da moldura)
  */
-export function calcularDistanciaMin(aspectVisivel?: number): number {
+export function calcularDistanciaAfastada(aspectVisivel?: number): number {
   const halfTan = tangenteMeioFov(FOV_CAMERA)
   const distH = distanciaParaEnquadrar(PROFUNDIDADE_MESA / 2, MARGEM_CAMERA_INTERATIVA, FOV_CAMERA)
   const aspect = aspectoSeguro(aspectVisivel ?? 1)
@@ -127,37 +127,37 @@ export function calcularDistanciaMin(aspectVisivel?: number): number {
 }
 
 /**
- * Distância máxima teórica (mais próxima) derivada da mínima e do fator de zoom.
- * @param distanciaMin - valor retornado por calcularDistanciaMin
+ * Distância mais próxima teórica (piso do zoom) derivada da afastada e do fator de zoom.
+ * @param distanciaAfastada - valor retornado por calcularDistanciaAfastada
  */
-export function calcularDistanciaMax(distanciaMin: number): number {
-  return distanciaMin / FATOR_ZOOM_MAX
+export function calcularDistanciaProxima(distanciaAfastada: number): number {
+  return distanciaAfastada / FATOR_ZOOM_MAX
 }
 
-export function resolverDistanciaMaxEfetiva(
-  distanciaMin: number,
-  distanciaMaxTeorica: number,
+export function resolverDistanciaProximaEfetiva(
+  distanciaAfastada: number,
+  distanciaProximaTeorica: number,
 ): number {
-  const lower = Math.max(distanciaMaxTeorica, DISTANCIA_MINIMA_POR_ALTURA)
-  return Math.min(lower, distanciaMin)
+  const lower = Math.max(distanciaProximaTeorica, DISTANCIA_MINIMA_POR_ALTURA)
+  return Math.min(lower, distanciaAfastada)
 }
 
 export function validarRangeZoom(
-  min: number,
-  maxTeorico: number,
+  distanciaAfastada: number,
+  distanciaProximaTeorica: number,
 ): { efetivo: number; colapsou: boolean } {
-  const efetivo = resolverDistanciaMaxEfetiva(min, maxTeorico)
-  return { efetivo, colapsou: efetivo >= min }
+  const efetivo = resolverDistanciaProximaEfetiva(distanciaAfastada, distanciaProximaTeorica)
+  return { efetivo, colapsou: efetivo >= distanciaAfastada }
 }
 
 export function clampDistancia(
   distancia: number,
-  distanciaMin: number,
-  distanciaMax: number,
+  distanciaAfastada: number,
+  distanciaProxima: number,
 ): number {
-  const maxEfetivo = resolverDistanciaMaxEfetiva(distanciaMin, distanciaMax)
-  if (distancia > distanciaMin) return distanciaMin
-  if (distancia < maxEfetivo) return maxEfetivo
+  const proximaEfetiva = resolverDistanciaProximaEfetiva(distanciaAfastada, distanciaProxima)
+  if (distancia > distanciaAfastada) return distanciaAfastada
+  if (distancia < proximaEfetiva) return proximaEfetiva
   return distancia
 }
 
@@ -183,24 +183,20 @@ export const criarDragInicial = (): EstadoDrag => ({
 
 /**
  * Estado do gesto de pinça (pinch) para zoom.
- * @property distInicial - alias de distanciaInicial (mantido por compatibilidade)
- * @property distanciaInicial - distância entre ponteiros no início do gesto; preferir este nome
+ * @property distanciaInicial - distância entre ponteiros no início do gesto
  */
 export interface EstadoPinch {
   ativo: boolean
-  /** @deprecated use distanciaInicial — mantido como alias */
-  distInicial: number
   distanciaInicial: number
 }
 
 export const criarPinchInicial = (): EstadoPinch => ({
   ativo: false,
-  distInicial: 0,
   distanciaInicial: 0,
 })
 
-export function calcularFatorPinch(distInicial: number, distAtual: number): number {
-  return distInicial / (distAtual || 1)
+export function calcularFatorPinch(distanciaInicial: number, distAtual: number): number {
+  return distanciaInicial / (distAtual || 1)
 }
 
 export function distanciaEntrePontos(

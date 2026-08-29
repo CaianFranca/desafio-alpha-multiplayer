@@ -6,7 +6,7 @@ import {
   descreverCameraFixa,
 } from '../../game/ambiente/contrato'
 import { AmbienteCena } from '../../game/scenes/AmbienteCena'
-import { useCameraInterativa } from './useCameraInterativa'
+import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 

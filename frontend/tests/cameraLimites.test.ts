@@ -9,8 +9,8 @@ import {
   worldPerPixel,
   panDeltaToWorld,
   clampAlvo,
-  calcularDistanciaMin,
-  calcularDistanciaMax,
+  calcularDistanciaAfastada,
+  calcularDistanciaProxima,
   clampDistancia,
   aspectoSeguro,
   aspectoDeSize,
@@ -18,7 +18,7 @@ import {
   aspectoVisivel,
   areaVisivel,
   resolverAltura,
-  resolverDistanciaMaxEfetiva,
+  resolverDistanciaProximaEfetiva,
   validarRangeZoom,
   calcularFatorPinch,
   criarDragInicial,
@@ -197,7 +197,7 @@ describe('cameraLimites — poseCamera invariância 45°', () => {
   })
 
   it('poseCamera com alvo na origem coincide com descreverCameraFixa projetada', () => {
-    const dist = calcularDistanciaMin(1)
+    const dist = calcularDistanciaAfastada(1)
     const { pos } = poseCamera({ x: 0, z: 0 }, dist)
     const c = dist / Math.SQRT2
     expect(pos[0]).toBeCloseTo(0, 10)
@@ -208,14 +208,14 @@ describe('cameraLimites — poseCamera invariância 45°', () => {
 
 describe('cameraLimites — limites de pan (FOV + aspect)', () => {
   it('clampAlvo dentro dos limites não altera', () => {
-    const dist = calcularDistanciaMin()
+    const dist = calcularDistanciaAfastada()
     const aspect = 16 / 9
     const alvo = { x: 0, z: 0 }
     expect(clampAlvo(alvo, dist, FOV_CAMERA, aspect)).toEqual({ x: 0, z: 0 })
   })
 
   it('clampAlvo restringe X e Z quando fora (Z com fator 45°)', () => {
-    const dist = calcularDistanciaMin()
+    const dist = calcularDistanciaAfastada()
     const aspect = 1
     const halfH = Math.tan((FOV_CAMERA * Math.PI) / 360) * dist
     const halfW = halfH * aspect
@@ -228,8 +228,8 @@ describe('cameraLimites — limites de pan (FOV + aspect)', () => {
   })
 
   it('maxPan aumenta quando distância diminui (zoom in)', () => {
-    const distMin = calcularDistanciaMin()
-    const distMax = calcularDistanciaMax(distMin)
+    const distMin = calcularDistanciaAfastada()
+    const distMax = calcularDistanciaProxima(distMin)
     const aspect = 1.5
     const c1 = clampAlvo({ x: 999, z: 999 }, distMin, FOV_CAMERA, aspect)
     const c2 = clampAlvo({ x: 999, z: 999 }, distMax, FOV_CAMERA, aspect)
@@ -244,14 +244,14 @@ describe('cameraLimites — limites de pan (FOV + aspect)', () => {
   })
 
   it('aspect zero faz fallback determinístico para 1', () => {
-    const dist = calcularDistanciaMin()
+    const dist = calcularDistanciaAfastada()
     const clampZero = clampAlvo({ x: 999, z: 999 }, dist, FOV_CAMERA, 0)
     const clampUm = clampAlvo({ x: 999, z: 999 }, dist, FOV_CAMERA, 1)
     expect(clampZero).toEqual(clampUm)
   })
 
   it('aspect NaN também faz fallback para 1', () => {
-    const dist = calcularDistanciaMin()
+    const dist = calcularDistanciaAfastada()
     const cNaN = clampAlvo({ x: 1, z: 1 }, dist, FOV_CAMERA, Number.NaN)
     const cUm = clampAlvo({ x: 1, z: 1 }, dist, FOV_CAMERA, 1)
     expect(cNaN).toEqual(cUm)
@@ -261,7 +261,7 @@ describe('cameraLimites — limites de pan (FOV + aspect)', () => {
 
   it('clampAlvo com borda 0 vs 16 vs 48: maxPan menor com borda maior', () => {
     const size = { width: 800, height: 600 }
-    const dist = calcularDistanciaMin()
+    const dist = calcularDistanciaAfastada()
     const aspect0 = aspectoVisivel(size, 0)
     const aspect16 = aspectoVisivel(size, 16)
     const aspect48 = aspectoVisivel(size, 48)
@@ -280,18 +280,18 @@ describe('cameraLimites — zoom e clamp de distância', () => {
     expect(FATOR_ZOOM_MAX).toBe(2.8)
   })
 
-  it('calcularDistanciaMin usa MARGEM_CAMERA_INTERATIVA 1.05 e max(eixoH,eixoW)', () => {
+  it('calcularDistanciaAfastada usa MARGEM_CAMERA_INTERATIVA 1.05 e max(eixoH,eixoW)', () => {
     const meiaMaior = Math.max(LARGURA_MESA, PROFUNDIDADE_MESA) / 2
     const esperado = (meiaMaior * MARGEM_CAMERA_INTERATIVA) / Math.tan((FOV_CAMERA * Math.PI) / 360)
     expect(MARGEM_CAMERA_INTERATIVA).toBe(1.05)
-    expect(calcularDistanciaMin()).toBeCloseTo(esperado, 10)
-    expect(calcularDistanciaMin(1)).toBeCloseTo(esperado, 10)
+    expect(calcularDistanciaAfastada()).toBeCloseTo(esperado, 10)
+    expect(calcularDistanciaAfastada(1)).toBeCloseTo(esperado, 10)
   })
 
-  it('calcularDistanciaMin com aspect 16/9 vs 0.5: portrait maior', () => {
-    const dLandscape = calcularDistanciaMin(16 / 9)
-    const dPortrait = calcularDistanciaMin(0.5)
-    const dSquare = calcularDistanciaMin(1)
+  it('calcularDistanciaAfastada com aspect 16/9 vs 0.5: portrait maior', () => {
+    const dLandscape = calcularDistanciaAfastada(16 / 9)
+    const dPortrait = calcularDistanciaAfastada(0.5)
+    const dSquare = calcularDistanciaAfastada(1)
     // landscape deve ser igual a square (domina altura), portrait deve ser maior (largura domina)
     expect(dLandscape).toBeCloseTo(dSquare, 10)
     expect(dPortrait).toBeGreaterThan(dSquare)
@@ -301,28 +301,28 @@ describe('cameraLimites — zoom e clamp de distância', () => {
     expect(dPortrait).toBeCloseTo(Math.max(distH, distWPortrait), 10)
   })
 
-  it('calcularDistanciaMin fallback aspect inválido → 1', () => {
-    expect(calcularDistanciaMin(0)).toBeCloseTo(calcularDistanciaMin(1), 10)
-    expect(calcularDistanciaMin(Number.NaN)).toBeCloseTo(calcularDistanciaMin(1), 10)
-    expect(calcularDistanciaMin(undefined)).toBeCloseTo(calcularDistanciaMin(1), 10)
+  it('calcularDistanciaAfastada fallback aspect inválido → 1', () => {
+    expect(calcularDistanciaAfastada(0)).toBeCloseTo(calcularDistanciaAfastada(1), 10)
+    expect(calcularDistanciaAfastada(Number.NaN)).toBeCloseTo(calcularDistanciaAfastada(1), 10)
+    expect(calcularDistanciaAfastada(undefined)).toBeCloseTo(calcularDistanciaAfastada(1), 10)
   })
 
-  it('calcularDistanciaMax = min / 2.8', () => {
-    const min = calcularDistanciaMin()
-    expect(calcularDistanciaMax(min)).toBeCloseTo(min / 2.8, 10)
+  it('calcularDistanciaProxima = min / 2.8', () => {
+    const min = calcularDistanciaAfastada()
+    expect(calcularDistanciaProxima(min)).toBeCloseTo(min / 2.8, 10)
   })
 
   it('clampDistancia limita entre max (perto) e min (longe)', () => {
-    const min = calcularDistanciaMin()
-    const max = calcularDistanciaMax(min)
+    const min = calcularDistanciaAfastada()
+    const max = calcularDistanciaProxima(min)
     expect(clampDistancia(min + 10, min, max)).toBeCloseTo(min, 10)
     expect(clampDistancia(max - 10, min, max)).toBeCloseTo(Math.max(max, DISTANCIA_MINIMA_POR_ALTURA), 10)
     expect(clampDistancia((min + max) / 2, min, max)).toBeCloseTo((min + max) / 2, 10)
   })
 
   it('não cruza y=0: altura mínima > ESPESSURA/2 + 0.5', () => {
-    const min = calcularDistanciaMin()
-    const maxTeorico = calcularDistanciaMax(min)
+    const min = calcularDistanciaAfastada()
+    const maxTeorico = calcularDistanciaProxima(min)
     const minAltDist = (ESPESSURA_MESA / 2 + 0.5) * Math.SQRT2
     const clamped = clampDistancia(0.1, min, maxTeorico)
     const altura = clamped / Math.SQRT2
@@ -334,14 +334,14 @@ describe('cameraLimites — zoom e clamp de distância', () => {
     expect(DISTANCIA_MINIMA_POR_ALTURA).toBeCloseTo((ESPESSURA_MESA / 2 + 0.5) * Math.SQRT2, 10)
   })
 
-  it('resolverDistanciaMaxEfetiva e validarRangeZoom', () => {
-    const min = calcularDistanciaMin()
-    const max = calcularDistanciaMax(min)
-    expect(resolverDistanciaMaxEfetiva(min, max)).toBeGreaterThan(0)
-    expect(resolverDistanciaMaxEfetiva(min, max)).toBeLessThanOrEqual(min)
+  it('resolverDistanciaProximaEfetiva e validarRangeZoom', () => {
+    const min = calcularDistanciaAfastada()
+    const max = calcularDistanciaProxima(min)
+    expect(resolverDistanciaProximaEfetiva(min, max)).toBeGreaterThan(0)
+    expect(resolverDistanciaProximaEfetiva(min, max)).toBeLessThanOrEqual(min)
 
     const r = validarRangeZoom(min, max)
-    expect(r.efetivo).toBe(resolverDistanciaMaxEfetiva(min, max))
+    expect(r.efetivo).toBe(resolverDistanciaProximaEfetiva(min, max))
     expect(r.colapsou).toBe(false)
   })
 
@@ -361,8 +361,8 @@ describe('cameraLimites — zoom e clamp de distância', () => {
 
 describe('cameraLimites — re-clamp pós-zoom', () => {
   it('após zoom-out, alvo fora do novo limite é re-clampado via clampAlvo', () => {
-    const min = calcularDistanciaMin()
-    const max = calcularDistanciaMax(min)
+    const min = calcularDistanciaAfastada()
+    const max = calcularDistanciaProxima(min)
     const aspect = 1
     const alvoZoomIn = clampAlvo({ x: 4, z: 4 }, max, FOV_CAMERA, aspect)
     const reClamp = clampAlvo(alvoZoomIn, min, FOV_CAMERA, aspect)
@@ -373,17 +373,17 @@ describe('cameraLimites — re-clamp pós-zoom', () => {
   })
 
   it('após zoom-in, limite amplia e alvo central permanece', () => {
-    const min = calcularDistanciaMin()
-    const max = calcularDistanciaMax(min)
+    const min = calcularDistanciaAfastada()
+    const max = calcularDistanciaProxima(min)
     const alvo = { x: 0, z: 0 }
     expect(clampAlvo(alvo, max, FOV_CAMERA, 1)).toEqual(alvo)
   })
 
   it('re-clamp diferencial: portrait vs landscape dão limites distintos em zoom fechado', () => {
-    const dLandscapeMin = calcularDistanciaMin(16 / 9)
-    const dPortraitMin = calcularDistanciaMin(0.5)
-    const dLandscape = calcularDistanciaMax(dLandscapeMin)
-    const dPortrait = calcularDistanciaMax(dPortraitMin)
+    const dLandscapeMin = calcularDistanciaAfastada(16 / 9)
+    const dPortraitMin = calcularDistanciaAfastada(0.5)
+    const dLandscape = calcularDistanciaProxima(dLandscapeMin)
+    const dPortrait = calcularDistanciaProxima(dPortraitMin)
     const alvo = { x: 5, z: 5 }
     const cLand = clampAlvo(alvo, dLandscape, FOV_CAMERA, 16 / 9)
     const cPort = clampAlvo(alvo, dPortrait, FOV_CAMERA, 0.5)
@@ -400,7 +400,7 @@ describe('cameraLimites — re-clamp pós-zoom', () => {
 })
 
 describe('cameraLimites — calcularFatorPinch', () => {
-  it('fator é distInicial / distAtual', () => {
+  it('fator é distanciaInicial / distAtual', () => {
     expect(calcularFatorPinch(100, 50)).toBeCloseTo(2, 10)
     expect(calcularFatorPinch(100, 200)).toBeCloseTo(0.5, 10)
     expect(calcularFatorPinch(100, 100)).toBeCloseTo(1, 10)
@@ -429,7 +429,7 @@ describe('cameraLimites — estado inicial drag/pinch', () => {
 
   it('criarPinchInicial retorna sem centroInicial', () => {
     const p = criarPinchInicial()
-    expect(p).toEqual({ ativo: false, distInicial: 0, distanciaInicial: 0 })
+    expect(p).toEqual({ ativo: false, distanciaInicial: 0 })
     expect((p as unknown as Record<string, unknown>).centroInicial).toBeUndefined()
   })
 })

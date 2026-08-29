@@ -5,8 +5,8 @@ import {
   atingiuLimiar,
   panDeltaToWorld,
   clampAlvo,
-  calcularDistanciaMin,
-  calcularDistanciaMax,
+  calcularDistanciaAfastada,
+  calcularDistanciaProxima,
   clampDistancia,
   aspectoVisivel,
   resolverAltura,
@@ -16,9 +16,9 @@ import {
   SENSIBILIDADE_WHEEL,
   criarDragInicial,
   criarPinchInicial,
-} from '../../game/ambiente/cameraLimites'
-import type { AlvoXZ, EstadoDrag, EstadoPinch } from '../../game/ambiente/cameraLimites'
-import { FOV_CAMERA } from '../../game/ambiente/contrato'
+} from '../game/ambiente/cameraLimites'
+import type { AlvoXZ, EstadoDrag, EstadoPinch } from '../game/ambiente/cameraLimites'
+import { FOV_CAMERA } from '../game/ambiente/contrato'
 
 interface UseCameraInterativaOptions {
   /** Largura da borda da moldura em px (medida via PartidaMoldura). */
@@ -34,7 +34,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
   const { width, height } = size
 
   const alvoRef = useRef<AlvoXZ>({ x: 0, z: 0 })
-  const distanciaRef = useRef(calcularDistanciaMin())
+  const distanciaRef = useRef(calcularDistanciaAfastada())
   const suprimirCliqueAposArrastoRef = useRef(false)
 
   const dragRef = useRef<EstadoDrag>(criarDragInicial())
@@ -52,16 +52,16 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
     invalidate()
   }
 
-  const distanciaMinInicial = calcularDistanciaMin()
-  const distanciaMinRef = useRef(distanciaMinInicial)
-  const distanciaMaxTeoricaRef = useRef(calcularDistanciaMax(distanciaMinInicial))
+  const distanciaAfastadaInicial = calcularDistanciaAfastada()
+  const distanciaAfastadaRef = useRef(distanciaAfastadaInicial)
+  const distanciaProximaTeoricaRef = useRef(calcularDistanciaProxima(distanciaAfastadaInicial))
 
   useLayoutEffect(() => {
-    const nextMin = calcularDistanciaMin(getAspectVis())
-    const nextMax = calcularDistanciaMax(nextMin)
-    distanciaMinRef.current = nextMin
-    distanciaMaxTeoricaRef.current = nextMax
-    const clampedDist = clampDistancia(distanciaRef.current, nextMin, nextMax)
+    const nextAfastada = calcularDistanciaAfastada(getAspectVis())
+    const nextProxima = calcularDistanciaProxima(nextAfastada)
+    distanciaAfastadaRef.current = nextAfastada
+    distanciaProximaTeoricaRef.current = nextProxima
+    const clampedDist = clampDistancia(distanciaRef.current, nextAfastada, nextProxima)
     if (clampedDist !== distanciaRef.current) distanciaRef.current = clampedDist
     const reClamped = clampAlvo(alvoRef.current, clampedDist, FOV_CAMERA, getAspectVis())
     if (reClamped.x !== alvoRef.current.x || reClamped.z !== alvoRef.current.z) {
@@ -98,8 +98,8 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
     function aplicarZoom(novaDistancia: number): void {
       const clamped = clampDistancia(
         novaDistancia,
-        distanciaMinRef.current,
-        distanciaMaxTeoricaRef.current,
+        distanciaAfastadaRef.current,
+        distanciaProximaTeoricaRef.current,
       )
       if (clamped === distanciaRef.current) return
       distanciaRef.current = clamped
@@ -113,7 +113,6 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
         const d = distanciaPinch(ponteirosRef.current)
         pinchRef.current = {
           ativo: true,
-          distInicial: d > 0 ? d : 1,
           distanciaInicial: d > 0 ? d : 1,
         }
         dragRef.current.ativo = false
@@ -148,12 +147,12 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
 
       if (ponteirosRef.current.size === 2 && pinchRef.current.ativo) {
         const distAtual = distanciaPinch(ponteirosRef.current) || 1
-        const fator = calcularFatorPinch(pinchRef.current.distInicial, distAtual)
+        const fator = calcularFatorPinch(pinchRef.current.distanciaInicial, distAtual)
         const novaDist = pinchRef.current.distanciaInicial * fator
         const clamped = clampDistancia(
           novaDist,
-          distanciaMinRef.current,
-          distanciaMaxTeoricaRef.current,
+          distanciaAfastadaRef.current,
+          distanciaProximaTeoricaRef.current,
         )
         distanciaRef.current = clamped
         aplicarAlvoClampado(alvoRef.current, clamped)
