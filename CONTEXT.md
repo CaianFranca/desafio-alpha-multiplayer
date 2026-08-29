@@ -176,6 +176,36 @@ _Avoid_: mover, andar
 Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento.
 _Avoid_: ficar, pular
 
+## Turnos
+
+**Jogador Ativo**:
+Jogador com a vez na Partida; apenas ele comanda as ações do seu turno.
+_Avoid_: jogador da vez, vez de
+
+**Turno**:
+Janela de ação de um Jogador Ativo, da Passagem de Vez anterior ao Encerramento do Turno.
+_Avoid_: rodada, vez
+
+**Rodada**:
+Sequência completa em que os quatro Jogadores exerceram o turno uma vez.
+_Avoid_: ciclo, volta
+
+**Passagem de Vez**:
+Evento que encerra o turno de um Jogador e ativa o seguinte na ordem de entrada.
+_Avoid_: troca de vez, avanço
+
+**Primeiro Turno**:
+Turno de abertura de cada Jogador, em que ele posiciona a própria Peça Inicial e o próprio peão antes dos turnos normais.
+_Avoid_: turno inicial, primeira rodada
+
+**Confirmação de Posição**:
+Declaração que trava o peão na peça em que terminou e gera o Recebimento quando houve mudança de peça.
+_Avoid_: confirmação de movimento, travar posição
+
+**Encerramento do Turno**:
+Declaração explícita que conclui o turno e dispara a Passagem de Vez.
+_Avoid_: passar a vez, fim de turno
+
 ## Objetivos da Partida
 
 **Gerador**:

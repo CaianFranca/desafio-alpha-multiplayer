@@ -29,7 +29,13 @@ import {
   validarTexto,
 } from './peoes.ts';
 
-export { LADO_DA_GRADE, bordasAbertas, vizinhasConectadas } from './peoes.ts';
+export {
+  LADO_DA_GRADE,
+  bordasAbertas,
+  gerarRecebidas,
+  validarTexto,
+  vizinhasConectadas,
+} from './peoes.ts';
 
 export type TipoDaPeca = 'inicial' | 'reta' | 'T' | 'cruz';
 export type Orientacao = 0 | 90 | 180 | 270;
