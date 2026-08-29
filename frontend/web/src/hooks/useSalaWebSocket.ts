@@ -25,26 +25,28 @@ export interface UseSalaWebSocketReturn {
   sairDaSala: () => void
 }
 
-// Contador simples para IDs de avisos
-let avisoContador = 0
-function proximoAvisoId(): string {
-  avisoContador += 1
-  return `aviso-${avisoContador}-${Date.now()}`
-}
+// Fallback dev — evita magic strings; ver também frontend/vite.config.ts LOBBY_SERVER_PORT
+const DEV_FRONTEND_PORT_SUBSTRING = '5173'
+const DEFAULT_LOBBY_WS_PORT = '3001'
 
 // Mantém apenas os avisos mais recentes para não crescer infinitamente
 // e quebrar o layout (janela deslizante).
 const AVISOS_MAX = 20
 
+/**
+ * Resolve URL do WebSocket do lobby.
+ * Prioridade: 1) VITE_WS_URL (canônico, prod/preview) 2) fallback dev-only:
+ * se host contém 5173 (Vite dev), usa hostname:3001 (DEFAULT_LOBBY_WS_PORT,
+ * mesma env de frontend/vite.config.ts). Em prod, defina VITE_WS_URL.
+ */
 function resolverWsUrl(): string {
-  if (typeof window === 'undefined') return 'ws://localhost:3001'
+  if (typeof window === 'undefined') return `ws://localhost:${DEFAULT_LOBBY_WS_PORT}`
   const envUrl = (import.meta.env as Record<string, string | undefined>).VITE_WS_URL
   if (typeof envUrl === 'string' && envUrl.length > 0) return envUrl
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
-  // Em dev o frontend roda em :5173 e o lobby em :3001 — tenta 3001 quando host contém 5173
-  if (host.includes('5173')) {
-    return `${protocol}//${window.location.hostname}:3001`
+  if (host.includes(DEV_FRONTEND_PORT_SUBSTRING)) {
+    return `${protocol}//${window.location.hostname}:${DEFAULT_LOBBY_WS_PORT}`
   }
   return `${protocol}//${host}`
 }
@@ -90,6 +92,8 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const salaRef = useRef<Sala | null>(null)
+  // Contador de avisos por instância (evita global mutable)
+  const avisoContadorRef = useRef(0)
   // Comandos enfileirados quando o WebSocket ainda não está aberto (handshake).
   const comandosPendentesRef = useRef<SalaComandoDoCliente[]>([])
 
@@ -104,7 +108,9 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   }, [sala])
 
   const adicionarAviso = useCallback((mensagem: string, tipo: string) => {
-    setAvisos((prev) => [...prev, { id: proximoAvisoId(), mensagem, tipo }].slice(-AVISOS_MAX))
+    avisoContadorRef.current += 1
+    const id = `aviso-${avisoContadorRef.current}-${Date.now()}`
+    setAvisos((prev) => [...prev, { id, mensagem, tipo }].slice(-AVISOS_MAX))
   }, [])
 
   const conectar = useCallback(() => {

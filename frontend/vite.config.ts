@@ -4,7 +4,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // Mesma env var respeitada por getConfig() em packages/config
-// (DEFAULT_LOBBY_SERVER_PORT = 3001 lá).
+// (DEFAULT_LOBBY_SERVER_PORT = 3001 lá) e por resolverWsUrl() em
+// web/src/hooks/useSalaWebSocket.ts (VITE_WS_URL > fallback dev 5173→3001).
 const lobbyServerPort = process.env.LOBBY_SERVER_PORT ?? '3001'
 
 export default defineConfig(({ mode }) => ({
