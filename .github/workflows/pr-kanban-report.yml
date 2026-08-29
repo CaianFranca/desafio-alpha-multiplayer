@@ -102,7 +102,16 @@ jobs:
                                   title
                                   url
                                   state
-                                  blockedBy(first: 1) { totalCount }
+                                  blockedBy(first: 20) {
+                                    totalCount
+                                    nodes {
+                                      number
+                                      title
+                                      labels(first: 20) {
+                                        nodes { name }
+                                      }
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -126,7 +135,16 @@ jobs:
                                   title
                                   url
                                   state
-                                  blockedBy(first: 1) { totalCount }
+                                  blockedBy(first: 20) {
+                                    totalCount
+                                    nodes {
+                                      number
+                                      title
+                                      labels(first: 20) {
+                                        nodes { name }
+                                      }
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -201,6 +219,20 @@ jobs:
               return runs.length > 0 ? 'completed (mixed)' : 'not configured';
             }
 
+            function isBacklogIssue(issue) {
+              const title = normalize(issue?.title);
+              if (title.includes('backlog')) return true;
+
+              const labels = issue?.labels?.nodes || [];
+              return labels.some((label) => normalize(label?.name).includes('backlog'));
+            }
+
+            function hasNonBacklogBlockers(issue) {
+              const blockers = issue?.blockedBy?.nodes || [];
+              if (blockers.length === 0) return false;
+              return blockers.some((blocker) => !isBacklogIssue(blocker));
+            }
+
             let selectedProject = null;
             let projectItemData = { title: null, items: [] };
             let kanbanWarning = null;
@@ -229,7 +261,7 @@ jobs:
               if (!content || content.__typename !== 'Issue') continue;
               if (content.state !== 'OPEN') continue;
 
-              if ((content.blockedBy?.totalCount || 0) === 0) {
+              if (!hasNonBacklogBlockers(content)) {
                 openIssuesWithoutBlocks.push(content);
               }
             }
@@ -262,6 +294,8 @@ jobs:
                   ref: pr.head.sha,
                 }),
               ]);
+              const reviewStatus = getReviewStatus(reviews);
+              const checksStatus = getChecksStatus(checkRuns.data, combinedStatus.data);
 
               prDetails.push({
                 number: pr.number,
@@ -269,9 +303,11 @@ jobs:
                 url: pr.html_url,
                 author: pr.user?.login || 'unknown',
                 labels: (pr.labels || []).map((label) => label.name).join(', '),
-                stage: getReviewStatus(reviews) === 'approved' && getChecksStatus(checkRuns.data, combinedStatus.data) === 'success'
+                stage: reviewStatus === 'approved' && checksStatus === 'success'
                   ? 'Merge'
-                  : 'Review',
+                  : reviewStatus === 'changes requested'
+                    ? 'Requested Changes'
+                    : 'To Review',
               });
             }
 
