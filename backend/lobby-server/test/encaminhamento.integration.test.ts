@@ -589,7 +589,6 @@ test('timeout real via AbortController mantém aberta com PARTIDA_FALHOU (B2/R1)
     }, {timeoutMs:300});
   } finally {
     await redis.del('game-servers:disponiveis:fake-timeout');
-    await new Promise<void>(r=>fake.close(()=>r()));
+    await new Promise<void>((r) => fake.close(() => r()));
   }
 });
-
