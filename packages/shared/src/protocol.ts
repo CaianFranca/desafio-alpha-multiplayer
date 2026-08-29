@@ -4,6 +4,7 @@
 import type { SalaComandoDoCliente, SalaEventoDoServidor } from './sala.ts';
 import type { EncaminhamentoEventoDoServidor } from './encaminhamento.ts';
 import type { TabuleiroComandoDoCliente, TabuleiroEventoDoServidor } from './tabuleiro.ts';
+import type { PeaoComandoDoCliente, PeaoEventoDoServidor } from './peoes.ts';
 
 export interface PingMessage {
   type: 'PING';
@@ -13,11 +14,15 @@ export interface PongMessage {
   type: 'PONG';
 }
 
-export type SalaClientMessage = SalaComandoDoCliente | TabuleiroComandoDoCliente;
+export type SalaClientMessage =
+  | SalaComandoDoCliente
+  | TabuleiroComandoDoCliente
+  | PeaoComandoDoCliente;
 export type SalaServerMessage =
   | SalaEventoDoServidor
   | EncaminhamentoEventoDoServidor
-  | TabuleiroEventoDoServidor;
+  | TabuleiroEventoDoServidor
+  | PeaoEventoDoServidor;
 
 export type ClientMessage = PingMessage | SalaClientMessage;
 
