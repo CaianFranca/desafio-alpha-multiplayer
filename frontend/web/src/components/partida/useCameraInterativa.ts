@@ -12,6 +12,8 @@ import {
   resolverAltura,
   getBordaMolduraPxViaEstilo,
   calcularFatorPinch,
+  distanciaPinch,
+  poseCamera,
   SENSIBILIDADE_WHEEL,
   criarDragInicial,
   criarPinchInicial,
@@ -72,11 +74,9 @@ export function useCameraInterativa(): void {
         persp.updateProjectionMatrix()
       }
     }
-    const alvo = alvoRef.current
-    const dist = distanciaRef.current
-    const componente = dist / Math.SQRT2
-    persp.position.set(alvo.x, componente, alvo.z + componente)
-    persp.lookAt(alvo.x, 0, alvo.z)
+    const { pos, alvo: alvoVec } = poseCamera(alvoRef.current, distanciaRef.current)
+    persp.position.set(pos[0], pos[1], pos[2])
+    persp.lookAt(alvoVec[0], alvoVec[1], alvoVec[2])
   })
   /* eslint-enable react-hooks/immutability */
 
@@ -98,10 +98,7 @@ export function useCameraInterativa(): void {
       ponteirosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
       if (ponteirosRef.current.size === 2) {
-        const pts = Array.from(ponteirosRef.current.values())
-        const dx = pts[0].x - pts[1].x
-        const dy = pts[0].y - pts[1].y
-        const d = Math.hypot(dx, dy)
+        const d = distanciaPinch(ponteirosRef.current)
         pinchRef.current = {
           ativo: true,
           distInicial: d > 0 ? d : 1,
@@ -138,10 +135,7 @@ export function useCameraInterativa(): void {
       ponteirosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
       if (ponteirosRef.current.size === 2 && pinchRef.current.ativo) {
-        const pts = Array.from(ponteirosRef.current.values())
-        const dx = pts[0].x - pts[1].x
-        const dy = pts[0].y - pts[1].y
-        const distAtual = Math.hypot(dx, dy) || 1
+        const distAtual = distanciaPinch(ponteirosRef.current) || 1
         const fator = calcularFatorPinch(pinchRef.current.distInicial, distAtual)
         const novaDist = pinchRef.current.distanciaInicial * fator
         const clamped = clampDistancia(novaDist, distanciaMin, distanciaMaxTeorica)

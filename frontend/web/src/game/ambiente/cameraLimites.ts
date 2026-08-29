@@ -4,6 +4,7 @@ import {
   PROFUNDIDADE_MESA,
   FOV_CAMERA,
   MARGEM_ENQUADRAMENTO,
+  componenteInclinacao45,
   distanciaParaEnquadrar,
   tangenteMeioFov,
 } from './contrato'
@@ -56,13 +57,23 @@ export function getBordaMolduraPxViaEstilo(borderWidth: string | number): number
   return v
 }
 
+function normalizarBordaPx(bordaPx: number): number {
+  return Number.isFinite(bordaPx) && bordaPx >= 0 ? bordaPx : 0
+}
+
+function dimensoesVisiveis(
+  size: { width: number; height: number },
+  bordaPx: number,
+): { widthVis: number; heightVis: number } {
+  const b = normalizarBordaPx(bordaPx)
+  return { widthVis: size.width - 2 * b, heightVis: size.height - 2 * b }
+}
+
 export function aspectoVisivel(
   size: { width: number; height: number },
   bordaPx: number,
 ): number {
-  const b = Number.isFinite(bordaPx) && bordaPx >= 0 ? bordaPx : 0
-  const widthVis = size.width - 2 * b
-  const heightVis = size.height - 2 * b
+  const { widthVis, heightVis } = dimensoesVisiveis(size, bordaPx)
   if (widthVis <= 0 || heightVis <= 0) return 1
   return aspectoSeguro(widthVis / heightVis)
 }
@@ -71,10 +82,8 @@ export function areaVisivel(
   size: { width: number; height: number },
   bordaPx: number,
 ): { width: number; height: number } {
-  const b = Number.isFinite(bordaPx) && bordaPx >= 0 ? bordaPx : 0
-  const widthVis = Math.max(0, size.width - 2 * b)
-  const heightVis = Math.max(0, size.height - 2 * b)
-  return { width: widthVis, height: heightVis }
+  const { widthVis, heightVis } = dimensoesVisiveis(size, bordaPx)
+  return { width: Math.max(0, widthVis), height: Math.max(0, heightVis) }
 }
 
 export function resolverAltura(sizeHeight: number, canvasHeight: number): number {
@@ -175,10 +184,23 @@ export function calcularFatorPinch(distInicial: number, distAtual: number): numb
   return distInicial / (distAtual || 1)
 }
 
+export function distanciaEntrePontos(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
+  return Math.hypot(a.x - b.x, a.y - b.y)
+}
+
+export function distanciaPinch(ponteiros: Map<number, { x: number; y: number }>): number {
+  const pts = Array.from(ponteiros.values())
+  if (pts.length < 2) return 0
+  return distanciaEntrePontos(pts[0], pts[1])
+}
+
 export function poseCamera(
   alvo: AlvoXZ,
   distancia: number,
 ): { pos: [number, number, number]; alvo: [number, number, number] } {
-  const c = distancia / Math.SQRT2
+  const c = componenteInclinacao45(distancia)
   return { pos: [alvo.x, c, alvo.z + c], alvo: [alvo.x, 0, alvo.z] }
 }

@@ -61,6 +61,10 @@ export function distanciaParaEnquadrar(
   return (meiaMaior * margem) / tangenteMeioFov(fovGraus)
 }
 
+export function componenteInclinacao45(distancia: number): number {
+  return distancia / Math.SQRT2
+}
+
 export function descreverCameraFixa(
   larguraMesa: number,
   profundidadeMesa: number,
@@ -68,7 +72,6 @@ export function descreverCameraFixa(
 ): CameraFixa {
   const meiaMaiorDimensao = Math.max(larguraMesa, profundidadeMesa) / 2
   const distancia = distanciaParaEnquadrar(meiaMaiorDimensao, MARGEM_ENQUADRAMENTO, fov)
-  // Inclinação de 45°: atan2(altura, distanciaHorizontal) = atan2(c, c) = 45°.
-  const componente = distancia / Math.SQRT2
+  const componente = componenteInclinacao45(distancia)
   return { posicao: [0, componente, componente], alvo: [0, 0, 0] }
 }
