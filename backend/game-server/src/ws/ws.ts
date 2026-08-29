@@ -138,12 +138,10 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
     }
 
     (async () => {
-      if (sessao.sessaoId !== undefined) {
-        const sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
-        if (!sessaoValida) {
-          enviarErroNoSocket(socket, 401, erroRejeitada('SESSAO_INVALIDA', 'sessão revogada ou inexistente'));
-          return;
-        }
+      const sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
+      if (!sessaoValida) {
+        enviarErroNoSocket(socket, 401, erroRejeitada('SESSAO_INVALIDA', 'sessão revogada ou inexistente'));
+        return;
       }
 
       const partida = await obterPartida(contexto.redis, partidaId);

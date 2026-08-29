@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 export interface SessaoDoJogador {
   readonly jogadorId: string;
   readonly apelido: string;
-  readonly sessaoId?: string;
+  readonly sessaoId: string;
 }
 
 /**
@@ -23,9 +23,9 @@ export function validarTokenDeSessao(token: string, secret: string): SessaoDoJog
       : (typeof raw.jogadorId === 'string' && raw.jogadorId.length > 0 ? raw.jogadorId : null);
 
     const apelido = typeof raw.apelido === 'string' && raw.apelido.length > 0 ? raw.apelido : null;
-    const sessaoId = typeof raw.sessaoId === 'string' && raw.sessaoId.length > 0 ? raw.sessaoId : undefined;
+    const sessaoId = typeof raw.sessaoId === 'string' && raw.sessaoId.length > 0 ? raw.sessaoId : null;
 
-    if (jogadorId === null || apelido === null) {
+    if (jogadorId === null || apelido === null || sessaoId === null) {
       return null;
     }
     return { jogadorId, apelido, sessaoId };

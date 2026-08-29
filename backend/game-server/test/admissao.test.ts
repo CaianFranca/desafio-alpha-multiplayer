@@ -489,6 +489,27 @@ test('token de sessão ausente é recusado', async () => {
   }
 });
 
+test('JWT sem sessaoId é recusado com SESSAO_INVALIDA', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaNoRedis(partidaId, roster);
+
+    // Token válido porém sem o claim sessaoId obrigatório
+    const token = criarJwt('jogador-1', 'Jogador 1');
+
+    const resultado = await fazerUpgradeHttp(servidor.port, token, partidaId);
+
+    assert.equal(resultado.status, 401);
+    const msg = JSON.parse(resultado.texto);
+    assert.equal(msg.type, 'ADMISSAO_REJEITADA');
+    assert.equal(msg.codigo, 'SESSAO_INVALIDA');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
 test('falha interna responde 500 com codigo ERRO_INTERNO', async () => {
   const servidor = await subirServidor();
   try {
