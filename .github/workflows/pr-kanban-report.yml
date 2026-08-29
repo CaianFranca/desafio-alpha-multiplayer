@@ -357,7 +357,7 @@ jobs:
           secure: ${{ secrets.SMTP_SECURE }}
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          from: ${{ secrets.SMTP_FROM }}
+          from: gianluccas54@gmail.com
           to: ${{ env.CONTRIBUTOR_EMAILS }}
           subject: "Relatório automático de PRs e Kanban - ${{ github.repository }}"
           body: ${{ steps.gerar_relatorio.outputs.report_body }}
