@@ -5,6 +5,8 @@ import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
+import { PartidaPage } from '../web/src/pages/PartidaPage'
+import type { EstadoDaTela } from '../web/src/components/partida/partidaTelaMachine'
 
 function renderWithRouter(initialEntries: string[] = ['/'], authState: AuthState = visitorState) {
   const router = createMemoryRouter(routes, { initialEntries })
@@ -132,5 +134,133 @@ describe('partida route', () => {
 
     expect(screen.getByTestId('ambiente-de-jogo')).toBeInTheDocument()
     expect(screen.getByTestId('partida-moldura')).toBeInTheDocument()
+  })
+})
+
+function renderPartidaComEstado(
+  estadoInicial: EstadoDaTela,
+  initialEntries: string[] = ['/partida'],
+  authState: AuthState = mockAuthenticatedState,
+) {
+  const router = createMemoryRouter(
+    [
+      {
+        path: '/partida',
+        element: <PartidaPage estadoInicial={estadoInicial} />,
+      },
+    ],
+    { initialEntries },
+  )
+  return render(
+    <AuthProvider initialState={authState}>
+      <RouterProvider router={router} />
+    </AuthProvider>,
+  )
+}
+
+describe('partida estados da tela', () => {
+  const autenticado = mockAuthenticatedState
+
+  it('estado padrão carregando mostra overlay-carregando', () => {
+    renderWithRouter(['/partida'], autenticado)
+    const overlay = screen.getByTestId('overlay-carregando')
+    expect(overlay).toBeInTheDocument()
+    expect(overlay).toHaveAttribute('role', 'status')
+    expect(overlay).toHaveClass('absolute')
+    expect(overlay).toHaveClass('inset-0')
+    expect(overlay).toHaveClass('z-10')
+    expect(screen.getByText('Carregando...')).toBeInTheDocument()
+  })
+
+  it('aguardando via query param mostra overlay-aguardando com Partida preparada', () => {
+    renderWithRouter(['/partida?partidaEstado=aguardando'], autenticado)
+    const overlay = screen.getByTestId('overlay-aguardando')
+    expect(overlay).toBeInTheDocument()
+    expect(overlay).toHaveAttribute('role', 'status')
+    expect(screen.getByText('Aguardando partida')).toBeInTheDocument()
+    expect(screen.getByText('Partida preparada')).toBeInTheDocument()
+  })
+
+  it('disponivel via query param não mostra overlay (canvas livre)', () => {
+    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+    expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-aguardando')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
+    expect(screen.getByTestId('ambiente-de-jogo')).toBeInTheDocument()
+    expect(screen.getByTestId('partida-moldura')).toBeInTheDocument()
+  })
+
+  it('falha via query param mostra overlay-falha com botão Tentar novamente', () => {
+    renderWithRouter(['/partida?partidaEstado=falha'], autenticado)
+    const overlay = screen.getByTestId('overlay-falha')
+    expect(overlay).toBeInTheDocument()
+    expect(overlay).toHaveAttribute('role', 'alert')
+    expect(screen.getByText('Falha ao carregar')).toBeInTheDocument()
+    expect(screen.getByTestId('partida-tentar-novamente')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument()
+  })
+
+  it('overlays sobre canvas com z-10 e moldura com z-20', () => {
+    renderWithRouter(['/partida'], autenticado)
+    expect(screen.getByTestId('overlay-carregando')).toHaveClass('z-10')
+    expect(screen.getByTestId('partida-moldura')).toHaveClass('z-20')
+    expect(screen.getByTestId('ambiente-de-jogo')).toHaveClass('absolute')
+  })
+
+  it('falha com clique em Tentar novamente transita para carregando', async () => {
+    const user = userEvent.setup()
+    renderPartidaComEstado('falha')
+    expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
+    await user.click(screen.getByTestId('partida-tentar-novamente'))
+    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
+  })
+
+  it('query param inválido é ignorado e mantém carregando', () => {
+    renderWithRouter(['/partida?partidaEstado=invalido'], autenticado)
+    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
+  })
+
+  it('carregando via query param força estado mesmo partindo de outro inicial', () => {
+    renderWithRouter(['/partida?partidaEstado=carregando'], autenticado)
+    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
+  })
+})
+
+describe('partida dev toolbar', () => {
+  const autenticado = mockAuthenticatedState
+
+  it('toolbar DEV renderiza 4 botões quando em DEV', () => {
+    renderWithRouter(['/partida'], autenticado)
+    // em ambiente de teste import.meta.env.DEV === true (não produção)
+    expect(screen.getByTestId('partida-dev-toolbar')).toBeInTheDocument()
+    expect(screen.getByTestId('dev-forcar-carregando')).toBeInTheDocument()
+    expect(screen.getByTestId('dev-forcar-aguardando')).toBeInTheDocument()
+    expect(screen.getByTestId('dev-forcar-disponivel')).toBeInTheDocument()
+    expect(screen.getByTestId('dev-forcar-falha')).toBeInTheDocument()
+  })
+
+  it('cada botão da toolbar força o estado correspondente', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/partida'], autenticado)
+
+    await user.click(screen.getByTestId('dev-forcar-aguardando'))
+    expect(screen.getByTestId('overlay-aguardando')).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('dev-forcar-falha'))
+    expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('dev-forcar-disponivel'))
+    expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-aguardando')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('dev-forcar-carregando'))
+    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
+  })
+
+  it('toolbar fica acima da moldura com z-30', () => {
+    renderWithRouter(['/partida'], autenticado)
+    expect(screen.getByTestId('partida-dev-toolbar')).toHaveClass('z-30')
   })
 })
