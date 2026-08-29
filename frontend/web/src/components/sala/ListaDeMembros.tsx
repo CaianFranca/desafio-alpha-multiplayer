@@ -3,6 +3,9 @@ import type { Sala } from '@flicker/shared'
 
 interface Props {
   sala: Sala | null
+  jogadorIdLocal?: string
+  ehAnfitriao?: boolean
+  onExpulsar?: (membroId: string) => void
 }
 
 function ordenarMembros(sala: Sala | null) {
@@ -10,7 +13,7 @@ function ordenarMembros(sala: Sala | null) {
   return [...sala.membros].sort((a, b) => a.ordemDeEntrada - b.ordemDeEntrada)
 }
 
-export function ListaDeMembros({ sala }: Props) {
+export function ListaDeMembros({ sala, jogadorIdLocal, ehAnfitriao, onExpulsar }: Props) {
   const membrosOrdenados = useMemo(() => ordenarMembros(sala), [sala])
   const total = 4
   const vagas = useMemo(() => Array.from({ length: total }, (_, i) => membrosOrdenados[i] ?? null), [membrosOrdenados])
@@ -28,11 +31,11 @@ export function ListaDeMembros({ sala }: Props) {
       <ul className="flex flex-col gap-3" aria-label="Lista de Membros">
         {vagas.map((membro, idx) => {
           if (membro) {
-            const ehAnfitriao = sala?.anfitriaoId === membro.id
+            const membroEhAnfitriao = sala?.anfitriaoId === membro.id
             return (
               <li
                 key={membro.id}
-                className={`flex items-center gap-4 p-4 bg-[#1e1e1e] border ${ehAnfitriao ? 'border-l-2 border-l-[#c9a86a] border-y-white/10 border-r-white/10' : 'border-white/10'}`}
+                className={`flex items-center gap-4 p-4 bg-[#1e1e1e] border ${membroEhAnfitriao ? 'border-l-2 border-l-[#c9a86a] border-y-white/10 border-r-white/10' : 'border-white/10'}`}
               >
                 <div className="w-8 h-8 border border-[#c9a86a] flex items-center justify-center text-[#c9a86a] shrink-0" aria-hidden>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -43,7 +46,7 @@ export function ListaDeMembros({ sala }: Props) {
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm font-medium truncate">{membro.apelido}</p>
                   <p className="text-[10px] tracking-wider uppercase text-[#c9a86a]">
-                    {ehAnfitriao ? 'Anfitrião' : 'Membro'} / {membro.presenca === 'conectado' ? 'Conectado' : 'Em reconexão'} {membro.prontidao ? '• Pronto' : ''}
+                    {membroEhAnfitriao ? 'Anfitrião' : 'Membro'} / {membro.presenca === 'conectado' ? 'Conectado' : 'Em reconexão'} {membro.prontidao ? '• Pronto' : ''}
                   </p>
                 </div>
                 {membro.prontidao && (
@@ -56,6 +59,16 @@ export function ListaDeMembros({ sala }: Props) {
                 >
                   <span className="text-[10px]">{membro.prontidao ? '✓' : '○'}</span>
                 </div>
+                {/* Expulsar: apenas o Anfitrião vê, e nunca no próprio Anfitrião */}
+                {ehAnfitriao && onExpulsar && jogadorIdLocal !== undefined && membro.jogadorId !== jogadorIdLocal && (
+                  <button
+                    type="button"
+                    onClick={() => onExpulsar(membro.id)}
+                    className="border border-white/20 px-3 py-1 text-[10px] font-bold tracking-wider uppercase text-white/60 hover:text-red-400 hover:border-red-400/60 transition-colors shrink-0"
+                  >
+                    Expulsar
+                  </button>
+                )}
               </li>
             )
           }

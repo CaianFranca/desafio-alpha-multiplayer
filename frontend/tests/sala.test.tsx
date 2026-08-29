@@ -334,7 +334,8 @@ describe('lobby - página do lobby', () => {
     const salaAtualizada = criarSala({ codigoDeSala: 'A3K9M2', membros: membrosAtualizados, anfitriaoId: 'm1' })
     ws.simulateMessage({ type: 'PRONTIDAO_ATUALIZADA', membroId: 'm2', prontidao: true, sala: salaAtualizada })
 
-    expect(await screen.findByText(/ana.*pronto/i)).toBeInTheDocument()
+    // Aviso aparece em dois lugares: AvisosDoLobby e feed [SISTEMA] do chat
+    expect((await screen.findAllByText(/ana.*pronto/i)).length).toBeGreaterThanOrEqual(1)
   })
 
   it('prontidão alterna otimisticamente antes da reconciliação do servidor', async () => {
@@ -373,22 +374,22 @@ describe('lobby - página do lobby', () => {
     const novoMembro = criarMembro({ id: 'm2', apelido: 'Ana', ordemDeEntrada: 1 })
     const salaComEntrada = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 }), novoMembro], anfitriaoId: 'm1' })
     ws.simulateMessage({ type: 'MEMBRO_ENTROU', membro: novoMembro, sala: salaComEntrada })
-    expect(await screen.findByText(/ana entrou na sala/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/ana entrou na sala/i)).length).toBeGreaterThanOrEqual(1)
 
     // MEMBRO_SAIU
     const salaAposSaida = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 })], anfitriaoId: 'm1' })
     ws.simulateMessage({ type: 'MEMBRO_SAIU', membroId: 'm2', jogadorId: 'j2', sala: salaAposSaida })
-    expect(await screen.findByText(/ana saiu da sala/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/ana saiu da sala/i)).length).toBeGreaterThanOrEqual(1)
 
     // MEMBRO_DESCONECTADO
     ws.simulateMessage({ type: 'MEMBRO_DESCONECTADO', membroId: 'm1', jogadorId: 'j1', presenca: 'em_reconexao', sala: salaAposSaida })
-    expect(await screen.findByText(/desconectado/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/desconectado/i)).length).toBeGreaterThanOrEqual(1)
 
     // ANFITRIAO_SUBSTITUIDO
     const novoAnfitriao = criarMembro({ id: 'm3', apelido: 'Beto', ordemDeEntrada: 1 })
     const salaNovoAnfitriao = criarSala({ codigoDeSala: 'A3K9M2', membros: [novoAnfitriao], anfitriaoId: 'm3' })
     ws.simulateMessage({ type: 'ANFITRIAO_SUBSTITUIDO', anfitriaoId: 'm3', anfitriaoAnteriorId: 'm1', sala: salaNovoAnfitriao })
-    expect(await screen.findByText(/anfitrião substituído/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/anfitrião substituído/i)).length).toBeGreaterThanOrEqual(1)
   })
 
   it('cópia de Código de Sala e Link Direto funciona', async () => {
@@ -502,7 +503,7 @@ describe('lobby - página do lobby', () => {
     // MEMBRO_SAIU identifica pelo apelido (lido da sala anterior, ainda com o membro)
     const salaAposSaida = criarSala({ codigoDeSala: 'A3K9M2', membros: [], anfitriaoId: 'm1' })
     ws.simulateMessage({ type: 'MEMBRO_SAIU', membroId: 'm1', jogadorId: 'j1', sala: salaAposSaida })
-    expect(await screen.findByText(/lucasgomes saiu da sala/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/lucasgomes saiu da sala/i)).length).toBeGreaterThanOrEqual(1)
   })
 
   it('expulsão identifica o Membro pelo apelido', async () => {
@@ -516,6 +517,6 @@ describe('lobby - página do lobby', () => {
     // MEMBRO_EXPULSO identifica pelo apelido (lido da sala anterior, ainda com o membro)
     const salaAposExpulsao = criarSala({ codigoDeSala: 'A3K9M2', membros: [], anfitriaoId: 'm1' })
     ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm1', jogadorId: 'j1', sala: salaAposExpulsao })
-    expect(await screen.findByText(/lucasgomes foi expulso/i)).toBeInTheDocument()
+    expect((await screen.findAllByText(/lucasgomes foi expulso/i)).length).toBeGreaterThanOrEqual(1)
   })
 })

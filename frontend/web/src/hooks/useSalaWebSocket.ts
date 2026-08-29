@@ -11,11 +11,26 @@ export interface AvisoDoLobby {
   id: string
   mensagem: string
   tipo: string
+  criadoEm: number
+}
+
+export interface MensagemDeChatDoLobby {
+  id: string
+  apelido: string
+  conteudo: string
+  enviadoEm: string
+}
+
+export interface JogadorBloqueado {
+  jogadorId: string
+  apelido: string
 }
 
 export interface UseSalaWebSocketReturn {
   sala: Sala | null
   avisos: AvisoDoLobby[]
+  mensagensDeChat: MensagemDeChatDoLobby[]
+  jogadoresBloqueados: JogadorBloqueado[]
   conectado: boolean
   erro: string | null
   enviar: (comando: SalaComandoDoCliente) => void
@@ -23,6 +38,11 @@ export interface UseSalaWebSocketReturn {
   entrarNaSala: (codigoDeSala: CodigoDeSala) => void
   alternarProntidao: () => void
   sairDaSala: () => void
+  enviarMensagemDeChat: (conteudo: string) => void
+  expulsarMembro: (membroId: string) => void
+  desbloquearJogador: (jogadorId: string) => void
+  encerrarSala: () => void
+  iniciarPartida: () => void
 }
 
 // Fallback dev — evita magic strings; ver também frontend/vite.config.ts LOBBY_SERVER_PORT
@@ -32,6 +52,16 @@ const DEFAULT_LOBBY_WS_PORT = '3001'
 // Mantém apenas os avisos mais recentes para não crescer infinitamente
 // e quebrar o layout (janela deslizante).
 const AVISOS_MAX = 20
+
+// Mantém apenas as mensagens de chat mais recentes (histórico do servidor +
+// mensagens ao vivo) com teto de memória.
+const MENSAGENS_DE_CHAT_MAX = 200
+
+// Fallback quando o apelido do expulso não está na sala anterior:
+// jogadorId truncado para exibição curta.
+function apelidoDeFallback(jogadorId: string): string {
+  return `Jogador ${jogadorId.slice(0, 8)}`
+}
 
 /**
  * Resolve URL do WebSocket do lobby.
@@ -53,6 +83,11 @@ function resolverWsUrl(): string {
 
 function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null): string | null {
   switch (evento.type) {
+    case 'SALA_ATUALIZADA':
+      if (evento.sala.estado === 'encaminhada' && salaAnterior?.estado !== 'encaminhada') {
+        return 'Sala encaminhada para a partida'
+      }
+      return null
     case 'MEMBRO_ENTROU':
       return `${evento.membro.apelido} entrou na sala`
     case 'MEMBRO_SAIU': {
@@ -101,6 +136,8 @@ function isEventoDeSala(evento: SalaEventoDoServidor): evento is EventoDeSalaCom
 export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const [sala, setSala] = useState<Sala | null>(null)
   const [avisos, setAvisos] = useState<AvisoDoLobby[]>([])
+  const [mensagensDeChat, setMensagensDeChat] = useState<MensagemDeChatDoLobby[]>([])
+  const [jogadoresBloqueados, setJogadoresBloqueados] = useState<JogadorBloqueado[]>([])
   const [conectado, setConectado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -108,15 +145,20 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const salaRef = useRef<Sala | null>(null)
   // Contador de avisos por instância (evita global mutable)
   const avisoContadorRef = useRef(0)
+  // Contador de mensagens de chat por instância (ids estáveis no feed)
+  const chatContadorRef = useRef(0)
   // Comandos enfileirados quando o WebSocket ainda não está aberto (handshake).
   const comandosPendentesRef = useRef<SalaComandoDoCliente[]>([])
 
-  // Ao trocar de sala (código diferente), descarta avisos da sala anterior.
+  // Ao trocar de sala (código diferente), descarta avisos, chat e bloqueados
+  // da sala anterior.
   useEffect(() => {
     const atual = sala?.codigoDeSala ?? null
     const anterior = salaRef.current?.codigoDeSala ?? null
     if (atual !== anterior) {
       setAvisos([])
+      setMensagensDeChat([])
+      setJogadoresBloqueados([])
     }
     salaRef.current = sala
   }, [sala])
@@ -124,7 +166,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const adicionarAviso = useCallback((mensagem: string, tipo: string) => {
     avisoContadorRef.current += 1
     const id = `aviso-${avisoContadorRef.current}-${Date.now()}`
-    setAvisos((prev) => [...prev, { id, mensagem, tipo }].slice(-AVISOS_MAX))
+    setAvisos((prev) => [...prev, { id, mensagem, tipo, criadoEm: Date.now() }].slice(-AVISOS_MAX))
   }, [])
 
   const conectar = useCallback(() => {
@@ -180,13 +222,39 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           setErro(evento.mensagem)
           adicionarAviso(evento.mensagem, evento.type)
           return
-        case 'MENSAGEM_DE_CHAT':
-          // fora de escopo deste issue, mas preserva compatibilidade
+        case 'MENSAGEM_DE_CHAT': {
+          chatContadorRef.current += 1
+          const id = `chat-${chatContadorRef.current}-${Date.now()}`
+          const mensagem: MensagemDeChatDoLobby = {
+            id,
+            apelido: evento.apelido,
+            conteudo: evento.conteudo,
+            enviadoEm: evento.enviadoEm,
+          }
+          setMensagensDeChat((prev) => [...prev, mensagem].slice(-MENSAGENS_DE_CHAT_MAX))
           return
+        }
         default:
           if (isEventoDeSala(evento)) {
+            const salaAnterior = salaRef.current
             setSala(evento.sala)
-            const msg = mensagemDeAviso(evento, salaRef.current)
+            if (evento.type === 'MEMBRO_EXPULSO') {
+              // Lista local da sessão: o Anfitrião acumula expulsos observados
+              // (apelido lido da sala anterior ao evento). Não há protocolo
+              // para listar bloqueados — pendência registrada na issue #35.
+              const apelido =
+                salaAnterior?.membros.find((m) => m.id === evento.membroId)?.apelido ??
+                apelidoDeFallback(evento.jogadorId)
+              setJogadoresBloqueados((prev) =>
+                prev.some((j) => j.jogadorId === evento.jogadorId)
+                  ? prev
+                  : [...prev, { jogadorId: evento.jogadorId, apelido }],
+              )
+            }
+            if (evento.type === 'MEMBRO_ENTROU') {
+              setJogadoresBloqueados((prev) => prev.filter((j) => j.jogadorId !== evento.membro.jogadorId))
+            }
+            const msg = mensagemDeAviso(evento, salaAnterior)
             if (msg) adicionarAviso(msg, evento.type)
             return
           }
@@ -269,5 +337,51 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     comandosPendentesRef.current = []
   }, [enviar])
 
-  return { sala, avisos, conectado, erro, enviar, criarSala, entrarNaSala, alternarProntidao, sairDaSala }
+  const enviarMensagemDeChat = useCallback(
+    (conteudo: string) => {
+      enviar({ type: 'ENVIAR_MENSAGEM_DE_CHAT', conteudo })
+    },
+    [enviar],
+  )
+
+  const expulsarMembro = useCallback(
+    (membroId: string) => {
+      enviar({ type: 'EXPULSAR_MEMBRO', membroId })
+    },
+    [enviar],
+  )
+
+  const desbloquearJogador = useCallback(
+    (jogadorId: string) => {
+      enviar({ type: 'DESBLOQUEAR_JOGADOR', jogadorId })
+    },
+    [enviar],
+  )
+
+  const encerrarSala = useCallback(() => {
+    enviar({ type: 'ENCERRAR_SALA' })
+  }, [enviar])
+
+  const iniciarPartida = useCallback(() => {
+    enviar({ type: 'INICIAR_PARTIDA' })
+  }, [enviar])
+
+  return {
+    sala,
+    avisos,
+    mensagensDeChat,
+    jogadoresBloqueados,
+    conectado,
+    erro,
+    enviar,
+    criarSala,
+    entrarNaSala,
+    alternarProntidao,
+    sairDaSala,
+    enviarMensagemDeChat,
+    expulsarMembro,
+    desbloquearJogador,
+    encerrarSala,
+    iniciarPartida,
+  }
 }
