@@ -467,7 +467,7 @@ export class SalasHandlers {
     // Capturar codigo para limpar a projeção antes do engine (a referência
     // está no SalasState.abertas e também no Redis).
     const infoSala = this.estado.abertas.get(salaId);
-    if (infoSala?.sala.estado === 'encaminhada') {
+    if (this.salaEstaEncaminhada(salaId)) {
       this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e sua composição está congelada.');
       return;
     }
@@ -597,7 +597,7 @@ export class SalasHandlers {
       return;
     }
 
-    if (salaInfo.sala.estado === 'encaminhada') {
+    if (this.salaEstaEncaminhada(salaId)) {
       this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e não aceita expulsões.');
       return;
     }
@@ -700,7 +700,7 @@ export class SalasHandlers {
       return;
     }
 
-    if (salaInfo.sala.estado === 'encaminhada') {
+    if (this.salaEstaEncaminhada(salaId)) {
       this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e não aceita desbloqueios.');
       return;
     }
@@ -848,7 +848,7 @@ export class SalasHandlers {
       return;
     }
 
-    if (salaInfo.sala.estado === 'encaminhada') {
+    if (this.salaEstaEncaminhada(salaId)) {
       this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e não pode ser encerrada.');
       return;
     }
@@ -929,7 +929,7 @@ export class SalasHandlers {
     }
 
     // Bloqueio se já encaminhada
-    if (salaInfo.sala.estado === 'encaminhada') {
+    if (this.salaEstaEncaminhada(salaId)) {
       this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala já foi encaminhada.');
       return;
     }
@@ -1224,7 +1224,7 @@ export class SalasHandlers {
     }
 
     const infoSala = this.estado.abertas.get(salaId);
-    if (infoSala?.sala.estado === 'encaminhada') {
+    if (this.salaEstaEncaminhada(salaId)) {
       this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e não aceita mais mensagens.');
       return;
     }
