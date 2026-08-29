@@ -34,7 +34,7 @@ export function panDeltaToWorld(
   clientHeight: number,
 ): AlvoXZ {
   const wpp = worldPerPixel(fovGraus, distancia, clientHeight)
-  return { x: -dxPx * wpp, z: dyPx * wpp }
+  return { x: -dxPx * wpp, z: -dyPx * wpp }
 }
 
 export function aspectoSeguro(aspect: number): number {

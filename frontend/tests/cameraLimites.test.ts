@@ -87,14 +87,14 @@ describe('cameraLimites — conversão px→mundo', () => {
     expect(worldPerPixel(50, 10, 0)).toBe(0)
   })
 
-  it('panDeltaToWorld inverte X e preserva Z', () => {
+  it('panDeltaToWorld inverte X e Z (câmera por arrasto)', () => {
     const fov = 50
     const dist = 10
     const h = 600
     const wpp = worldPerPixel(fov, dist, h)
     const delta = panDeltaToWorld(10, 5, fov, dist, h)
     expect(delta.x).toBeCloseTo(-10 * wpp, 10)
-    expect(delta.z).toBeCloseTo(5 * wpp, 10)
+    expect(delta.z).toBeCloseTo(-5 * wpp, 10)
   })
 
   it('arrastar para direita move alvo para esquerda (X negativo)', () => {
@@ -102,9 +102,9 @@ describe('cameraLimites — conversão px→mundo', () => {
     expect(delta.x).toBeLessThan(0)
   })
 
-  it('arrastar para baixo move alvo para frente (Z positivo)', () => {
+  it('arrastar para baixo move alvo para trás (Z negativo) — revela topo', () => {
     const delta = panDeltaToWorld(0, 15, 50, 10, 500)
-    expect(delta.z).toBeGreaterThan(0)
+    expect(delta.z).toBeLessThan(0)
   })
 })
 
