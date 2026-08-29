@@ -1,0 +1,363 @@
+name: Relatório de PRs e Kanban
+
+on:
+  schedule:
+    # 12:00 e 18:00 America/Sao_Paulo (BRT, UTC-3)
+    - cron: "0 15,21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  statuses: read
+  repository-projects: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+
+    env:
+      CONTRIBUTOR_EMAILS: caianhnf23@gmail.com, lucassbleal9@gmail.com, ftaveira611@gmail.com, dluccammendes@gmail.com, gustavofonteneledev@gmail.com, jfilipe532@hotmail.com, jgabrielalves@alu.ufc.br, gianluccas54@gmail.com, leog42119@gmail.com, emanuelmvieira10@gmail.com, toso.augusto01@gmail.com, renatoprofissional08@gmail.com
+
+    steps:
+      - name: Gerar relatório de Kanban e PRs
+        id: gerar_relatorio
+        uses: actions/github-script@v8
+        env:
+          PROJECT_TITLE_CONTAINS: Painel de Controle - Jogo Multiplayer
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const now = new Date();
+
+            const projectTitleContains = process.env.PROJECT_TITLE_CONTAINS || 'Painel de Controle - Jogo Multiplayer';
+            const normalize = (value) => (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+            const safe = (value) => String(value || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+
+            async function getOwnerType() {
+              const data = await github.rest.repos.get({ owner, repo });
+              return data.data.owner.type === 'Organization' ? 'organization' : 'user';
+            }
+
+            async function listProjects(ownerType) {
+              const projects = [];
+              let hasNextPage = true;
+              let after = null;
+
+              while (hasNextPage) {
+                const query = ownerType === 'organization'
+                  ? `
+                    query($login: String!, $after: String) {
+                      organization(login: $login) {
+                        projectsV2(first: 50, after: $after) {
+                          nodes { id number title }
+                          pageInfo { hasNextPage endCursor }
+                        }
+                      }
+                    }
+                  `
+                  : `
+                    query($login: String!, $after: String) {
+                      user(login: $login) {
+                        projectsV2(first: 50, after: $after) {
+                          nodes { id number title }
+                          pageInfo { hasNextPage endCursor }
+                        }
+                      }
+                    }
+                  `;
+
+                const response = await github.graphql(query, { login: owner, after });
+                const container = ownerType === 'organization' ? response.organization : response.user;
+
+                if (!container || !container.projectsV2) {
+                  return projects;
+                }
+
+                projects.push(...container.projectsV2.nodes);
+                hasNextPage = container.projectsV2.pageInfo.hasNextPage;
+                after = container.projectsV2.pageInfo.endCursor;
+              }
+
+              return projects;
+            }
+
+            async function getProjectItems(ownerType, projectNumber) {
+              const items = [];
+              let hasNextPage = true;
+              let after = null;
+
+              while (hasNextPage) {
+                const query = ownerType === 'organization'
+                  ? `
+                    query($login: String!, $projectNumber: Int!, $after: String) {
+                      organization(login: $login) {
+                        projectV2(number: $projectNumber) {
+                          title
+                          items(first: 100, after: $after) {
+                            nodes {
+                              content {
+                                __typename
+                                ... on Issue {
+                                  number
+                                  title
+                                  url
+                                  state
+                                  blockedBy(first: 50) { totalCount nodes { state } }
+                                }
+                              }
+                            }
+                            pageInfo { hasNextPage endCursor }
+                          }
+                        }
+                      }
+                    }
+                  `
+                  : `
+                    query($login: String!, $projectNumber: Int!, $after: String) {
+                      user(login: $login) {
+                        projectV2(number: $projectNumber) {
+                          title
+                          items(first: 100, after: $after) {
+                            nodes {
+                              content {
+                                __typename
+                                ... on Issue {
+                                  number
+                                  title
+                                  url
+                                  state
+                                  blockedBy(first: 50) { totalCount nodes { state } }
+                                }
+                              }
+                            }
+                            pageInfo { hasNextPage endCursor }
+                          }
+                        }
+                      }
+                    }
+                  `;
+
+                const response = await github.graphql(query, {
+                  login: owner,
+                  projectNumber,
+                  after,
+                });
+
+                const container = ownerType === 'organization' ? response.organization : response.user;
+                if (!container || !container.projectV2) {
+                  return { title: null, items: [] };
+                }
+
+                const project = container.projectV2;
+                items.push(...project.items.nodes);
+                hasNextPage = project.items.pageInfo.hasNextPage;
+                after = project.items.pageInfo.endCursor;
+
+                if (!hasNextPage) {
+                  return { title: project.title, items };
+                }
+              }
+
+              return { title: null, items };
+            }
+
+            function getReviewStatus(reviews) {
+              const latestByUser = new Map();
+              for (const review of reviews) {
+                if (!review.user?.login) continue;
+                if (!['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)) continue;
+                latestByUser.set(review.user.login, review.state);
+              }
+
+              const states = [...latestByUser.values()];
+              if (states.includes('CHANGES_REQUESTED')) return 'changes requested';
+              if (states.includes('APPROVED')) return 'approved';
+              return 'pending review';
+            }
+
+            function getReviewers(reviews) {
+              const seen = new Map();
+              for (const review of reviews) {
+                if (!review.user?.login) continue;
+                if (review.state === 'DISMISSED') continue;
+                if (!seen.has(review.user.login)) {
+                  seen.set(review.user.login, review.state);
+                } else if (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED') {
+                  seen.set(review.user.login, review.state);
+                }
+              }
+              return [...seen.entries()].map(([login, state]) => ({ login, state }));
+            }
+
+            function getChecksStatus(checkRuns, combinedStatus) {
+              const runs = checkRuns?.check_runs || [];
+              const status = combinedStatus?.state;
+
+              if (runs.some((run) => run.status !== 'completed')) {
+                return 'in progress';
+              }
+
+              const failingConclusions = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure', 'stale']);
+              if (runs.some((run) => failingConclusions.has(run.conclusion))) {
+                return 'failed';
+              }
+
+              if (status === 'failure' || status === 'error') {
+                return 'failed';
+              }
+              if (status === 'pending') {
+                return 'pending';
+              }
+              if (status === 'success' || runs.some((run) => run.conclusion === 'success')) {
+                return 'success';
+              }
+
+              return runs.length > 0 ? 'completed (mixed)' : 'not configured';
+            }
+
+            let selectedProject = null;
+            let projectItemData = { title: null, items: [] };
+            let kanbanWarning = null;
+
+            try {
+              const ownerType = await getOwnerType();
+              const projects = await listProjects(ownerType);
+
+              selectedProject = projects.find((project) => normalize(project.title) === normalize(projectTitleContains))
+                || projects.find((project) => normalize(project.title).includes(normalize(projectTitleContains)))
+                || null;
+
+              if (selectedProject) {
+                projectItemData = await getProjectItems(ownerType, selectedProject.number);
+              } else {
+                kanbanWarning = `Projeto Kanban não encontrado com o filtro: "${projectTitleContains}".`;
+              }
+            } catch (error) {
+              kanbanWarning = `Falha ao ler dados do Kanban: ${error.message}`;
+            }
+
+            const openIssuesWithoutBlocks = [];
+
+            function hasOpenBlocker(issue) {
+              const blockers = issue?.blockedBy?.nodes || [];
+              return blockers.some((blocker) => blocker && blocker.state === 'OPEN');
+            }
+
+            for (const item of projectItemData.items) {
+              const content = item.content;
+              if (!content || content.__typename !== 'Issue') continue;
+              if (content.state !== 'OPEN') continue;
+
+              if (!hasOpenBlocker(content)) {
+                openIssuesWithoutBlocks.push(content);
+              }
+            }
+
+            const openPrs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const prDetails = [];
+            for (const pr of openPrs) {
+              const [reviews, checkRuns, combinedStatus] = await Promise.all([
+                github.paginate(github.rest.pulls.listReviews, {
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  per_page: 100,
+                }),
+                github.rest.checks.listForRef({
+                  owner,
+                  repo,
+                  ref: pr.head.sha,
+                  per_page: 100,
+                }),
+                github.rest.repos.getCombinedStatusForRef({
+                  owner,
+                  repo,
+                  ref: pr.head.sha,
+                }),
+              ]);
+
+              prDetails.push({
+                number: pr.number,
+                title: pr.title,
+                url: pr.html_url,
+                author: pr.user?.login || 'unknown',
+                labels: (pr.labels || []).map((label) => label.name).join(', '),
+                reviewers: getReviewers(reviews),
+                stage: getReviewStatus(reviews) === 'approved' && getChecksStatus(checkRuns.data, combinedStatus.data) === 'success'
+                  ? 'Merge'
+                  : 'Review',
+              });
+            }
+
+            const generatedAt = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+            const reportLines = [
+              `📋 *Pull Requests*`,
+              ``,
+            ];
+
+            if (kanbanWarning) {
+              reportLines.push(`⚠️ ${safe(kanbanWarning)}`, ``);
+            }
+
+            if (prDetails.length === 0) {
+              reportLines.push('Nenhuma PR ativa no momento.');
+            } else {
+              for (const pr of prDetails) {
+                const labelsPart = pr.labels ? ` *(${safe(pr.labels)})*` : '';
+                const reviewerNames = (pr.reviewers || []).map((r) => r.login);
+                const reviewersPart = reviewerNames.length > 0
+                  ? `\n🧑‍💻 Já revisaram: ${reviewerNames.map((name) => safe(name)).join(', ')}`
+                  : '';
+                reportLines.push(
+                  `• *#${pr.number}* ${safe(pr.title)} — ${safe(pr.author)}${labelsPart} — 🔎 Etapa ${pr.stage}`,
+                  `🔗 ${pr.url}${reviewersPart}`,
+                  ''
+                );
+              }
+            }
+
+            reportLines.push('', '🐛 *Issues abertas sem bloqueio*', '');
+
+            if (openIssuesWithoutBlocks.length === 0) {
+              reportLines.push('Nenhuma issue aberta sem bloqueio encontrada.');
+            } else {
+              openIssuesWithoutBlocks
+                .sort((a, b) => a.number - b.number)
+                .forEach((issue, index) => {
+                  reportLines.push(`${index + 1}. *#${issue.number}* ${safe(issue.title)} — 🔗 ${issue.url}`);
+                });
+            }
+
+            reportLines.push('', `Gerado em: ${generatedAt} (America/Sao_Paulo)`);
+
+            const reportBody = reportLines.join('\n');
+
+            await core.summary
+              .addHeading('Relatório de PRs e Kanban')
+              .addRaw(reportBody)
+              .write();
+            core.setOutput('report_body', reportBody);
+
+            core.info('Relatório gerado com sucesso.');
+
+      - name: Enviar relatório por e-mail
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          secure: ${{ secrets.SMTP_SECURE }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          from: gianluccas54@gmail.com
+          to: ${{ env.CONTRIBUTOR_EMAILS }}
+          subject: "Relatório automático de PRs e Kanban - ${{ github.repository }}"
+          body: ${{ steps.gerar_relatorio.outputs.report_body }}
