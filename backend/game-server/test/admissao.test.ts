@@ -488,3 +488,24 @@ test('token de sessão ausente é recusado', async () => {
     await servidor.fechar();
   }
 });
+
+test('falha interna responde 500 com codigo ERRO_INTERNO', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    await redis.set(chaveDaPartida(partidaId), '{json-corrompido', 'EX', 600);
+
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-1');
+    const token = criarJwt('jogador-1', 'Jogador 1', sessaoId);
+
+    const resultado = await fazerUpgradeHttp(servidor.port, token, partidaId);
+
+    assert.equal(resultado.status, 500);
+    const msg = JSON.parse(resultado.texto);
+    assert.equal(msg.type, 'ADMISSAO_REJEITADA');
+    assert.equal(msg.codigo, 'ERRO_INTERNO');
+  } finally {
+    await servidor.fechar();
+  }
+});

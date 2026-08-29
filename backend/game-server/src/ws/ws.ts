@@ -208,7 +208,7 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
       });
     })().catch((error) => {
       console.error('[ws] falha no fluxo de admissao:', (error as Error).message);
-      enviarErroNoSocket(socket, 500, JSON.stringify({ type: 'ADMISSAO_REJEITADA', motivo: 'falha interna no servidor' }));
+      enviarErroNoSocket(socket, 500, erroRejeitada('ERRO_INTERNO', 'falha interna no servidor'));
     });
   });
 

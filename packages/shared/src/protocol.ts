@@ -27,7 +27,8 @@ export type CodigoDeErroDeAdmissao =
   | 'SERVER_ID_INVALIDO'
   | 'PARTIDA_NAO_ENCONTRADA'
   | 'JOGADOR_FORA_DO_ROSTER'
-  | 'PARTIDA_ID_AUSENTE';
+  | 'PARTIDA_ID_AUSENTE'
+  | 'ERRO_INTERNO';
 
 export interface AdmissaoRejeitadaEvento {
   readonly type: 'ADMISSAO_REJEITADA';
