@@ -1,6 +1,7 @@
 import {
   LIMIAR_ARRASTO_PX,
   FATOR_ZOOM_MAX,
+  SENSIBILIDADE_WHEEL,
   DISTANCIA_MINIMA_POR_ALTURA,
   atingiuLimiar,
   worldPerPixel,
@@ -10,7 +11,17 @@ import {
   calcularDistanciaMax,
   clampDistancia,
   aspectoSeguro,
+  aspectoDeSize,
+  getBordaMolduraPxViaEstilo,
+  aspectoVisivel,
+  areaVisivel,
   resolverAltura,
+  resolverDistanciaMaxEfetiva,
+  validarRangeZoom,
+  calcularFatorPinch,
+  criarDragInicial,
+  criarPinchInicial,
+  poseCamera,
 } from '../web/src/game/ambiente/cameraLimites'
 import {
   FOV_CAMERA,
@@ -18,6 +29,8 @@ import {
   PROFUNDIDADE_MESA,
   ESPESSURA_MESA,
   MARGEM_ENQUADRAMENTO,
+  tangenteMeioFov,
+  distanciaParaEnquadrar,
 } from '../web/src/game/ambiente/contrato'
 
 describe('cameraLimites — limiar de arrasto', () => {
@@ -60,6 +73,16 @@ describe('cameraLimites — conversão px→mundo', () => {
     expect(worldPerPixel(fov, dist, h)).toBeCloseTo(esperado, 10)
   })
 
+  it('usa tangenteMeioFov internamente', () => {
+    const fov = 50
+    const dist = 10
+    const h = 500
+    expect(worldPerPixel(fov, dist, h)).toBeCloseTo(
+      (2 * tangenteMeioFov(fov) * dist) / h,
+      10,
+    )
+  })
+
   it('retorna 0 quando clientHeight é zero', () => {
     expect(worldPerPixel(50, 10, 0)).toBe(0)
   })
@@ -99,6 +122,85 @@ describe('cameraLimites — helpers determinísticos', () => {
     expect(resolverAltura(0, 500)).toBe(500)
     expect(resolverAltura(0, 0)).toBe(1)
     expect(resolverAltura(-10, 0)).toBe(1)
+  })
+
+  it('SENSIBILIDADE_WHEEL exportada é 0.002', () => {
+    expect(SENSIBILIDADE_WHEEL).toBe(0.002)
+  })
+})
+
+describe('cameraLimites — aspectoDeSize / getBorda / aspectoVisivel', () => {
+  it('aspectoDeSize delega para aspectoSeguro', () => {
+    expect(aspectoDeSize({ width: 1920, height: 1080 })).toBeCloseTo(1920 / 1080, 10)
+    expect(aspectoDeSize({ width: 0, height: 1080 })).toBe(1)
+    expect(aspectoDeSize({ width: 800, height: 0 })).toBe(1)
+    expect(aspectoDeSize({ width: -10, height: 100 })).toBe(1)
+  })
+
+  it('getBordaMolduraPxViaEstilo parseia string e number', () => {
+    expect(getBordaMolduraPxViaEstilo('12px')).toBe(12)
+    expect(getBordaMolduraPxViaEstilo('8px')).toBe(8)
+    expect(getBordaMolduraPxViaEstilo('0px')).toBe(0)
+    expect(getBordaMolduraPxViaEstilo('')).toBe(0)
+    expect(getBordaMolduraPxViaEstilo('abc')).toBe(0)
+    expect(getBordaMolduraPxViaEstilo(16)).toBe(16)
+    expect(getBordaMolduraPxViaEstilo(0)).toBe(0)
+    expect(getBordaMolduraPxViaEstilo(Number.NaN)).toBe(0)
+    expect(getBordaMolduraPxViaEstilo(-5)).toBe(0)
+    expect(getBordaMolduraPxViaEstilo('-3px')).toBe(0)
+  })
+
+  it('aspectoVisivel subtrai borda dos dois lados', () => {
+    const size = { width: 1920, height: 1080 }
+    // sem borda
+    expect(aspectoVisivel(size, 0)).toBeCloseTo(1920 / 1080, 10)
+    // com borda 8 (widthVis=1904, heightVis=1064)
+    expect(aspectoVisivel(size, 8)).toBeCloseTo(1904 / 1064, 10)
+    // com borda 12
+    expect(aspectoVisivel(size, 12)).toBeCloseTo((1920 - 24) / (1080 - 24), 10)
+  })
+
+  it('aspectoVisivel fallback 1 quando visível ≤0', () => {
+    expect(aspectoVisivel({ width: 10, height: 10 }, 10)).toBe(1)
+    expect(aspectoVisivel({ width: 0, height: 0 }, 0)).toBe(1)
+    expect(aspectoVisivel({ width: 100, height: 100 }, 100)).toBe(1)
+  })
+
+  it('areaVisivel retorna dimensões visíveis', () => {
+    expect(areaVisivel({ width: 100, height: 80 }, 10)).toEqual({ width: 80, height: 60 })
+    expect(areaVisivel({ width: 10, height: 10 }, 10)).toEqual({ width: 0, height: 0 })
+  })
+
+  it('distanciaParaEnquadrar e tangenteMeioFov coerentes', () => {
+    const meia = 10
+    expect(tangenteMeioFov(50)).toBeCloseTo(Math.tan((50 * Math.PI) / 360), 10)
+    expect(distanciaParaEnquadrar(meia, 0.8, 50)).toBeCloseTo(
+      (meia * 0.8) / Math.tan((50 * Math.PI) / 360),
+      10,
+    )
+  })
+})
+
+describe('cameraLimites — poseCamera invariância 45°', () => {
+  it('poseCamera mantém inclinação 45° e alvo em y=0', () => {
+    const alvo = { x: 2, z: -3 }
+    const dist = 17
+    const { pos, alvo: alvoOut } = poseCamera(alvo, dist)
+    const c = dist / Math.SQRT2
+    expect(pos).toEqual([2, c, -3 + c])
+    expect(alvoOut).toEqual([2, 0, -3])
+    const altura = pos[1]
+    const horiz = Math.hypot(pos[0] - alvoOut[0], pos[2] - alvoOut[2])
+    expect(Math.atan2(altura, horiz)).toBeCloseTo(Math.PI / 4, 10)
+  })
+
+  it('poseCamera com alvo na origem coincide com descreverCameraFixa projetada', () => {
+    const dist = calcularDistanciaMin(1)
+    const { pos } = poseCamera({ x: 0, z: 0 }, dist)
+    const c = dist / Math.SQRT2
+    expect(pos[0]).toBeCloseTo(0, 10)
+    expect(pos[1]).toBeCloseTo(c, 10)
+    expect(pos[2]).toBeCloseTo(c, 10)
   })
 })
 
@@ -154,6 +256,21 @@ describe('cameraLimites — limites de pan (FOV + aspect)', () => {
     expect(typeof cNaN.x).toBe('number')
     expect(typeof cNaN.z).toBe('number')
   })
+
+  it('clampAlvo com borda 0 vs 16 vs 48: maxPan menor com borda maior', () => {
+    const size = { width: 800, height: 600 }
+    const dist = calcularDistanciaMin()
+    const aspect0 = aspectoVisivel(size, 0)
+    const aspect16 = aspectoVisivel(size, 16)
+    const aspect48 = aspectoVisivel(size, 48)
+    const m0 = clampAlvo({ x: 999, z: 999 }, dist, FOV_CAMERA, aspect0)
+    const m16 = clampAlvo({ x: 999, z: 999 }, dist, FOV_CAMERA, aspect16)
+    const m48 = clampAlvo({ x: 999, z: 999 }, dist, FOV_CAMERA, aspect48)
+    // borda aumenta redução da área visível; pan limite não deve aumentar
+    // comparação por maxPanX: com bordas similares o aspect muda pouco, mas não cresce
+    expect(Math.abs(m16.x)).toBeLessThanOrEqual(Math.abs(m0.x) + 1e-9)
+    expect(Math.abs(m48.x)).toBeLessThanOrEqual(Math.abs(m16.x) + 1e-9)
+  })
 })
 
 describe('cameraLimites — zoom e clamp de distância', () => {
@@ -161,10 +278,30 @@ describe('cameraLimites — zoom e clamp de distância', () => {
     expect(FATOR_ZOOM_MAX).toBe(2.8)
   })
 
-  it('calcularDistanciaMin usa MARGEM_ENQUADRAMENTO 0.8', () => {
+  it('calcularDistanciaMin usa MARGEM_ENQUADRAMENTO 0.8 e max(eixoH,eixoW)', () => {
     const meiaMaior = Math.max(LARGURA_MESA, PROFUNDIDADE_MESA) / 2
     const esperado = (meiaMaior * MARGEM_ENQUADRAMENTO) / Math.tan((FOV_CAMERA * Math.PI) / 360)
     expect(calcularDistanciaMin()).toBeCloseTo(esperado, 10)
+    expect(calcularDistanciaMin(1)).toBeCloseTo(esperado, 10)
+  })
+
+  it('calcularDistanciaMin com aspect 16/9 vs 0.5: portrait maior', () => {
+    const dLandscape = calcularDistanciaMin(16 / 9)
+    const dPortrait = calcularDistanciaMin(0.5)
+    const dSquare = calcularDistanciaMin(1)
+    // landscape deve ser igual a square (domina altura), portrait deve ser maior (largura domina)
+    expect(dLandscape).toBeCloseTo(dSquare, 10)
+    expect(dPortrait).toBeGreaterThan(dSquare)
+    const halfTan = tangenteMeioFov(FOV_CAMERA)
+    const distH = (PROFUNDIDADE_MESA / 2 * MARGEM_ENQUADRAMENTO) / halfTan
+    const distWPortrait = (LARGURA_MESA / 2 * MARGEM_ENQUADRAMENTO) / (halfTan * 0.5)
+    expect(dPortrait).toBeCloseTo(Math.max(distH, distWPortrait), 10)
+  })
+
+  it('calcularDistanciaMin fallback aspect inválido → 1', () => {
+    expect(calcularDistanciaMin(0)).toBeCloseTo(calcularDistanciaMin(1), 10)
+    expect(calcularDistanciaMin(Number.NaN)).toBeCloseTo(calcularDistanciaMin(1), 10)
+    expect(calcularDistanciaMin(undefined)).toBeCloseTo(calcularDistanciaMin(1), 10)
   })
 
   it('calcularDistanciaMax = min / 2.8', () => {
@@ -193,6 +330,30 @@ describe('cameraLimites — zoom e clamp de distância', () => {
   it('DISTANCIA_MINIMA_POR_ALTURA coerente com ESPESSURA', () => {
     expect(DISTANCIA_MINIMA_POR_ALTURA).toBeCloseTo((ESPESSURA_MESA / 2 + 0.5) * Math.SQRT2, 10)
   })
+
+  it('resolverDistanciaMaxEfetiva e validarRangeZoom', () => {
+    const min = calcularDistanciaMin()
+    const max = calcularDistanciaMax(min)
+    expect(resolverDistanciaMaxEfetiva(min, max)).toBeGreaterThan(0)
+    expect(resolverDistanciaMaxEfetiva(min, max)).toBeLessThanOrEqual(min)
+
+    const r = validarRangeZoom(min, max)
+    expect(r.efetivo).toBe(resolverDistanciaMaxEfetiva(min, max))
+    expect(r.colapsou).toBe(false)
+  })
+
+  it('validarRangeZoom colapso quando DIST_MIN_ALT > min (mesa fictícia pequena)', () => {
+    // Simula mesa muito pequena onde min teórico já é menor que altura mínima
+    const minPequeno = 1
+    const maxTeorico = 0.3
+    const { efetivo, colapsou } = validarRangeZoom(minPequeno, maxTeorico)
+    // lower = max(0.3, DIST_ALT≈2.12) = 2.12 ; efetivo = min(2.12,1)=1 → colapsou
+    expect(efetivo).toBe(minPequeno)
+    expect(colapsou).toBe(true)
+    // clampDistancia nesse regime sempre retorna min
+    expect(clampDistancia(0.5, minPequeno, maxTeorico)).toBe(minPequeno)
+    expect(clampDistancia(2, minPequeno, maxTeorico)).toBe(minPequeno)
+  })
 })
 
 describe('cameraLimites — re-clamp pós-zoom', () => {
@@ -213,5 +374,52 @@ describe('cameraLimites — re-clamp pós-zoom', () => {
     const max = calcularDistanciaMax(min)
     const alvo = { x: 0, z: 0 }
     expect(clampAlvo(alvo, max, FOV_CAMERA, 1)).toEqual(alvo)
+  })
+
+  it('re-clamp diferencial: portrait vs landscape dão limites distintos', () => {
+    const dLandscape = calcularDistanciaMin(16 / 9)
+    const dPortrait = calcularDistanciaMin(0.5)
+    const alvo = { x: 5, z: 5 }
+    const cLand = clampAlvo(alvo, dLandscape, FOV_CAMERA, 16 / 9)
+    const cPort = clampAlvo(alvo, dPortrait, FOV_CAMERA, 0.5)
+    // landscape largo com distância menor → halfWidth grande → X travado; portrait estreito com distância maior → Z travado
+    expect(Math.abs(cLand.x)).toBeLessThanOrEqual(Math.abs(cPort.x) + 1e-9)
+    expect(Math.abs(cPort.z)).toBeLessThanOrEqual(Math.abs(cLand.z) + 1e-9)
+    expect(cLand.x !== cPort.x || cLand.z !== cPort.z).toBe(true)
+  })
+})
+
+describe('cameraLimites — calcularFatorPinch', () => {
+  it('fator é distInicial / distAtual', () => {
+    expect(calcularFatorPinch(100, 50)).toBeCloseTo(2, 10)
+    expect(calcularFatorPinch(100, 200)).toBeCloseTo(0.5, 10)
+    expect(calcularFatorPinch(100, 100)).toBeCloseTo(1, 10)
+  })
+
+  it('protege divisão por zero', () => {
+    expect(calcularFatorPinch(100, 0)).toBe(100)
+    expect(Number.isFinite(calcularFatorPinch(50, 0))).toBe(true)
+  })
+})
+
+describe('cameraLimites — estado inicial drag/pinch', () => {
+  it('criarDragInicial retorna objeto neutro', () => {
+    expect(criarDragInicial()).toEqual({
+      ativo: false,
+      pointerId: null,
+      inicioX: 0,
+      inicioY: 0,
+      ultimoX: 0,
+      ultimoY: 0,
+      engatado: false,
+    })
+    // cada chamada retorna nova instância
+    expect(criarDragInicial()).not.toBe(criarDragInicial())
+  })
+
+  it('criarPinchInicial retorna sem centroInicial', () => {
+    const p = criarPinchInicial()
+    expect(p).toEqual({ ativo: false, distInicial: 0, distanciaInicial: 0 })
+    expect((p as unknown as Record<string, unknown>).centroInicial).toBeUndefined()
   })
 })

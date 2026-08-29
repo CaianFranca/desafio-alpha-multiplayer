@@ -8,44 +8,60 @@ import {
   calcularDistanciaMin,
   calcularDistanciaMax,
   clampDistancia,
-  aspectoSeguro,
+  aspectoVisivel,
   resolverAltura,
+  getBordaMolduraPxViaEstilo,
+  calcularFatorPinch,
+  SENSIBILIDADE_WHEEL,
+  criarDragInicial,
+  criarPinchInicial,
 } from '../../game/ambiente/cameraLimites'
-import type { AlvoXZ } from '../../game/ambiente/cameraLimites'
+import type { AlvoXZ, EstadoDrag, EstadoPinch } from '../../game/ambiente/cameraLimites'
 import { FOV_CAMERA } from '../../game/ambiente/contrato'
-
-const SENSIBILIDADE_WHEEL = 0.002
 
 export function useCameraInterativa(): void {
   const { camera, gl, size, invalidate } = useThree()
+  const { width, height } = size
 
   const alvoRef = useRef<AlvoXZ>({ x: 0, z: 0 })
   const distanciaRef = useRef(calcularDistanciaMin())
   const suprimirCliqueAposArrastoRef = useRef(false)
 
-  const dragRef = useRef({
-    ativo: false,
-    pointerId: null as number | null,
-    inicioX: 0,
-    inicioY: 0,
-    ultimoX: 0,
-    ultimoY: 0,
-    engatado: false,
-  })
-
-  const pinchRef = useRef<{
-    ativo: boolean
-    distInicial: number
-    distanciaInicial: number
-    centroInicial: AlvoXZ | null
-  }>({ ativo: false, distInicial: 0, distanciaInicial: 0, centroInicial: null })
+  const dragRef = useRef<EstadoDrag>(criarDragInicial())
+  const pinchRef = useRef<EstadoPinch>(criarPinchInicial())
 
   const ponteirosRef = useRef<Map<number, { x: number; y: number }>>(new Map())
+
+  function getBordaPx(): number {
+    const el = document.querySelector('[data-testid="partida-moldura"]')
+    if (!el) return 0
+    const v = getComputedStyle(el).borderTopWidth
+    const parsed = getBordaMolduraPxViaEstilo(v)
+    if (parsed > 0) return parsed
+    // Fallback: implementação atual de PartidaMoldura tem a borda no filho interno
+    const inner = el.querySelector('div')
+    if (inner) {
+      const vi = getComputedStyle(inner).borderTopWidth
+      return getBordaMolduraPxViaEstilo(vi)
+    }
+    return 0
+  }
+
+  function getAspectVis(): number {
+    const b = getBordaPx()
+    return aspectoVisivel({ width, height }, b)
+  }
+
+  function aplicarAlvoClampado(alvo: AlvoXZ, dist: number): void {
+    const aspect = getAspectVis()
+    alvoRef.current = clampAlvo(alvo, dist, FOV_CAMERA, aspect)
+    invalidate()
+  }
 
   /* eslint-disable react-hooks/immutability -- mutação de câmera R3F é intencional */
   useFrame(() => {
     const persp = camera as THREE.PerspectiveCamera
-    const aspect = aspectoSeguro(size.width > 0 && size.height > 0 ? size.width / size.height : 1)
+    const aspect = getAspectVis()
     if (persp.isPerspectiveCamera) {
       if (Math.abs(persp.aspect - aspect) > 1e-4) {
         persp.aspect = aspect
@@ -68,16 +84,14 @@ export function useCameraInterativa(): void {
     const canvas = gl.domElement
     const alvoEl = (canvas.parentElement ?? canvas) as HTMLElement
 
-    const distanciaMin = calcularDistanciaMin()
+    const distanciaMin = calcularDistanciaMin(getAspectVis())
     const distanciaMaxTeorica = calcularDistanciaMax(distanciaMin)
 
     function aplicarZoom(novaDistancia: number): void {
       const clamped = clampDistancia(novaDistancia, distanciaMin, distanciaMaxTeorica)
       if (clamped === distanciaRef.current) return
       distanciaRef.current = clamped
-      const aspect = aspectoSeguro(size.width > 0 && size.height > 0 ? size.width / size.height : 1)
-      alvoRef.current = clampAlvo(alvoRef.current, clamped, FOV_CAMERA, aspect)
-      invalidate()
+      aplicarAlvoClampado(alvoRef.current, clamped)
     }
 
     function onPointerDown(e: PointerEvent): void {
@@ -92,7 +106,6 @@ export function useCameraInterativa(): void {
           ativo: true,
           distInicial: d > 0 ? d : 1,
           distanciaInicial: distanciaRef.current,
-          centroInicial: { ...alvoRef.current },
         }
         dragRef.current.ativo = false
         dragRef.current.engatado = false
@@ -129,13 +142,11 @@ export function useCameraInterativa(): void {
         const dx = pts[0].x - pts[1].x
         const dy = pts[0].y - pts[1].y
         const distAtual = Math.hypot(dx, dy) || 1
-        const fator = pinchRef.current.distInicial / distAtual
+        const fator = calcularFatorPinch(pinchRef.current.distInicial, distAtual)
         const novaDist = pinchRef.current.distanciaInicial * fator
         const clamped = clampDistancia(novaDist, distanciaMin, distanciaMaxTeorica)
         distanciaRef.current = clamped
-        const aspect = aspectoSeguro(size.width > 0 && size.height > 0 ? size.width / size.height : 1)
-        alvoRef.current = clampAlvo(alvoRef.current, clamped, FOV_CAMERA, aspect)
-        invalidate()
+        aplicarAlvoClampado(alvoRef.current, clamped)
         return
       }
 
@@ -155,22 +166,33 @@ export function useCameraInterativa(): void {
       dragRef.current.ultimoX = e.clientX
       dragRef.current.ultimoY = e.clientY
 
-      const h = resolverAltura(size.height, gl.domElement.clientHeight)
+      const h = resolverAltura(height, gl.domElement.clientHeight)
       const delta = panDeltaToWorld(dx, dy, FOV_CAMERA, distanciaRef.current, h)
-      const aspecto = aspectoSeguro(size.width > 0 && size.height > 0 ? size.width / size.height : 1)
       const alvoNovo = {
         x: alvoRef.current.x + delta.x,
         z: alvoRef.current.z + delta.z,
       }
-      alvoRef.current = clampAlvo(alvoNovo, distanciaRef.current, FOV_CAMERA, aspecto)
-      invalidate()
+      aplicarAlvoClampado(alvoNovo, distanciaRef.current)
     }
 
     function onPointerUp(e: PointerEvent): void {
       ponteirosRef.current.delete(e.pointerId)
 
       if (pinchRef.current.ativo && ponteirosRef.current.size < 2) {
-        pinchRef.current.ativo = false
+        pinchRef.current = criarPinchInicial()
+        // Re-arme drag com o ponteiro restante, se houver
+        if (ponteirosRef.current.size === 1) {
+          const [[restId, pos]] = Array.from(ponteirosRef.current.entries())
+          dragRef.current = {
+            ativo: true,
+            pointerId: restId,
+            inicioX: pos.x,
+            inicioY: pos.y,
+            ultimoX: pos.x,
+            ultimoY: pos.y,
+            engatado: false,
+          }
+        }
       }
 
       if (dragRef.current.pointerId === e.pointerId) {
@@ -230,5 +252,7 @@ export function useCameraInterativa(): void {
       alvoEl.removeEventListener('wheel', onWheel)
       alvoEl.removeEventListener('click', onClickCapture, true)
     }
-  }, [camera, gl, invalidate, size])
+    // getAspectVis e aplicarAlvoClampado são estáveis via width/height já listados
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camera, gl, invalidate, width, height])
 }
