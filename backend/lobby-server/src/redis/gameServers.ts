@@ -6,5 +6,5 @@ export {
   chaveGameServer,
   estaDisponivel,
   listarGameServersDisponiveis,
-} from '@flicker/shared';
-export type { GameServerDisponivel } from '@flicker/shared';
+} from '@flicker/shared/server';
+export type { GameServerDisponivel } from '@flicker/shared/server';

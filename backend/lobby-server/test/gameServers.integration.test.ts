@@ -8,7 +8,7 @@ import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import jwt from 'jsonwebtoken';
 import { getConfig } from '@flicker/config';
-import { GAME_SERVERS_PREFIX } from '@flicker/shared';
+import { GAME_SERVERS_PREFIX } from '@flicker/shared/server';
 import { createApp } from '../src/app.ts';
 import { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../src/middleware/serviceToken.ts';
 import { Redis } from 'ioredis';

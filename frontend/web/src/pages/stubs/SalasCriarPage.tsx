@@ -1,6 +1,5 @@
-import { StubPage } from './StubPage'
-import { stubs } from '../../components/home/placeholders'
+import { SalaPage } from '../SalaPage'
 
 export function SalasCriarPage() {
-  return <StubPage title={stubs.salasCriar.title} message={stubs.salasCriar.message} />
+  return <SalaPage />
 }
