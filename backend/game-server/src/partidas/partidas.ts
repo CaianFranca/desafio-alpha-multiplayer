@@ -53,3 +53,48 @@ export async function existePartida(redis: Redis, partidaId: PartidaId): Promise
 export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promise<boolean> {
   return (await redis.del(chaveDaPartida(partidaId))) === 1;
 }
+
+const SCRIPT_ATUALIZAR_PRESENCA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ttl = redis.call('TTL', KEYS[1])
+local ok, partida = pcall(cjson.decode, raw)
+if not ok or not partida or not partida.roster then
+  return 0
+end
+local mudou = false
+for i, m in ipairs(partida.roster) do
+  if m.jogadorId == ARGV[1] then
+    if m.presenca ~= 'conectado' then
+      m.presenca = 'conectado'
+      mudou = true
+    end
+  end
+end
+if mudou then
+  local novo = cjson.encode(partida)
+  if ttl > 0 then
+    redis.call('SET', KEYS[1], novo, 'EX', ttl)
+  else
+    redis.call('SET', KEYS[1], novo)
+  end
+  return 1
+end
+return 0
+`.trim();
+
+export async function atualizarPresencaAtomica(
+  redis: Redis,
+  partidaId: PartidaId,
+  jogadorId: string,
+): Promise<boolean> {
+  const resultado = await redis.eval(
+    SCRIPT_ATUALIZAR_PRESENCA,
+    1,
+    chaveDaPartida(partidaId),
+    jogadorId,
+  );
+  return resultado === 1;
+}

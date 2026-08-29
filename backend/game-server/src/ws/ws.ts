@@ -1,10 +1,10 @@
 import type { Server, IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData } from 'ws';
-import type { ClientMessage, ServerMessage, PartidaId, ServerId, MembroDaSala } from '@flicker/shared';
+import type { ClientMessage, ServerMessage, PartidaId, ServerId, MembroDaSala, CodigoDeErroDeAdmissao, AdmissaoRejeitadaEvento } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
-import { obterPartida, chaveDaPartida, type PartidaPreparada } from '../partidas/partidas.ts';
-import { validarTokenDeSessao } from '../auth.ts';
+import { obterPartida, atualizarPresencaAtomica } from '../partidas/partidas.ts';
+import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
 import { adicionarConexao, removerConexao, type ConexaoDoJogador } from './conexao.ts';
 
 const WS_PATH_RE = /^\/ws\/game\/([^/]+)$/;
@@ -18,8 +18,8 @@ interface UpgradeResultado {
 
 type UpgradeErro = { readonly permitido: false; readonly status: number; readonly body: string };
 
-function erroRejeitada(codigo: string, motivo: string): string {
-  return JSON.stringify({ type: 'ADMISSAO_REJEITADA', codigo, motivo });
+function erroRejeitada(codigo: CodigoDeErroDeAdmissao, motivo: string): string {
+  return JSON.stringify({ type: 'ADMISSAO_REJEITADA', codigo, motivo } satisfies AdmissaoRejeitadaEvento);
 }
 
 function parsearUpgrade(request: IncomingMessage, serverIdProprio: ServerId): UpgradeResultado | UpgradeErro {
@@ -137,9 +137,23 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
       return;
     }
 
-    obterPartida(contexto.redis, partidaId).then((partida) => {
+    (async () => {
+      if (sessao.sessaoId !== undefined) {
+        const sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
+        if (!sessaoValida) {
+          enviarErroNoSocket(socket, 401, erroRejeitada('SESSAO_INVALIDA', 'sessão revogada ou inexistente'));
+          return;
+        }
+      }
+
+      const partida = await obterPartida(contexto.redis, partidaId);
       if (partida === null) {
         enviarErroNoSocket(socket, 404, erroRejeitada('PARTIDA_NAO_ENCONTRADA', `partida ${partidaId} não encontrada`));
+        return;
+      }
+
+      if (partida.estado !== 'preparada') {
+        enviarErroNoSocket(socket, 404, erroRejeitada('PARTIDA_NAO_ENCONTRADA', 'partida não está no estado preparada'));
         return;
       }
 
@@ -149,9 +163,7 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
         return;
       }
 
-      atualizarPresenca(contexto, partida, sessao.jogadorId).catch((error) => {
-        console.error('[ws] falha ao atualizar presenca:', (error as Error).message);
-      });
+      await atualizarPresencaAtomica(contexto.redis, partidaId, sessao.jogadorId);
 
       wss.handleUpgrade(request, socket, head, (ws) => {
         ws.send(JSON.stringify({
@@ -193,26 +205,12 @@ export function criarWebSocketServer(server: Server, contexto: ContextoDoGameSer
           });
           removerConexao(conexao);
         });
-
-        wss.emit('connection', ws, request);
       });
-    }).catch((error) => {
-      console.error('[ws] falha ao buscar partida:', (error as Error).message);
-      enviarErroNoSocket(socket, 500, erroRejeitada('PARTIDA_NAO_ENCONTRADA', 'falha ao buscar partida'));
+    })().catch((error) => {
+      console.error('[ws] falha no fluxo de admissao:', (error as Error).message);
+      enviarErroNoSocket(socket, 500, JSON.stringify({ type: 'ADMISSAO_REJEITADA', motivo: 'falha interna no servidor' }));
     });
   });
 
   return wss;
-}
-
-async function atualizarPresenca(
-  contexto: ContextoDoGameServer,
-  partida: PartidaPreparada,
-  jogadorId: string,
-): Promise<void> {
-  const rosterAtualizado = partida.roster.map((m) =>
-    m.jogadorId === jogadorId ? { ...m, presenca: 'conectado' as const } : m,
-  );
-  const partidaAtualizada = { ...partida, roster: rosterAtualizado };
-  await contexto.redis.set(chaveDaPartida(partida.partidaId), JSON.stringify(partidaAtualizada), 'EX', contexto.partidaPreparadaTtlSegundos);
 }

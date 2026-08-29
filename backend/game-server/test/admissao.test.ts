@@ -31,14 +31,18 @@ function membro(n: number, sobrescreve: Partial<MembroDaSala> = {}): MembroDaSal
     jogadorId: `jogador-${n}`,
     apelido: `Jogador ${n}`,
     ordemDeEntrada: n,
-    presenca: 'conectado',
+    presenca: 'em_reconexao',
     prontidao: true,
     ...sobrescreve,
   };
 }
 
-function criarJwt(jogadorId: string, apelido: string, opcoes: Partial<jwt.SignOptions> = {}): string {
-  return jwt.sign({ jogadorId, apelido }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h', ...opcoes });
+function criarJwt(jogadorId: string, apelido: string, sessaoId?: string, opcoes: Partial<jwt.SignOptions> = {}): string {
+  return jwt.sign({ sub: jogadorId, apelido, sessaoId }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h', ...opcoes });
+}
+
+async function criarSessaoNoRedis(sessaoId: string, jogadorId: string): Promise<void> {
+  await redis.set(`sessao:${sessaoId}`, JSON.stringify({ jogadorId, criadoEm: new Date().toISOString() }), 'EX', 3600);
 }
 
 async function subirServidor(): Promise<ServidorEfemero> {
@@ -194,14 +198,17 @@ after(async () => {
   }
 });
 
-test('Jogador do roster com JWT válido é admitido na partida', async () => {
+test('Jogador do roster com JWT válido é admitido na partida e presença transita para conectado', async () => {
   const servidor = await subirServidor();
   try {
     const partidaId = crypto.randomUUID() as PartidaId;
     const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
     await criarPartidaNoRedis(partidaId, roster);
 
-    const token = criarJwt('jogador-1', 'Jogador 1');
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-1');
+
+    const token = criarJwt('jogador-1', 'Jogador 1', sessaoId);
     const resultado = await conectarWs(servidor.port, token, partidaId);
 
     assert.ok(resultado.conectou, 'deveria ter conectado');
@@ -211,6 +218,12 @@ test('Jogador do roster com JWT válido é admitido na partida', async () => {
     assert.equal(msg.jogadorId, 'jogador-1');
     assert.equal(msg.apelido, 'Jogador 1');
     assert.equal(msg.partidaId, partidaId);
+
+    const bruto = await redis.get(chaveDaPartida(partidaId));
+    assert.ok(bruto !== null, 'partida deveria existir no redis');
+    const partida = JSON.parse(bruto!);
+    const membroAtualizado = partida.roster.find((m: MembroDaSala) => m.jogadorId === 'jogador-1');
+    assert.equal(membroAtualizado.presenca, 'conectado');
   } finally {
     await servidor.fechar();
   }
@@ -223,15 +236,16 @@ test('Jogador FORA do roster é recusado', async () => {
     const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
     await criarPartidaNoRedis(partidaId, roster);
 
-    const token = criarJwt('jogador-99', 'Intruso');
-    const resultado = await conectarWs(servidor.port, token, partidaId);
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-99');
+    const token = criarJwt('jogador-99', 'Intruso', sessaoId);
 
-    assert.ok(!resultado.conectou || resultado.mensagem !== null, 'deveria ter recebido erro');
-    if (resultado.mensagem !== null) {
-      const msg = JSON.parse(resultado.mensagem);
-      assert.equal(msg.type, 'ADMISSAO_REJEITADA');
-      assert.equal(msg.codigo, 'JOGADOR_FORA_DO_ROSTER');
-    }
+    const resultado = await fazerUpgradeHttp(servidor.port, token, partidaId);
+
+    assert.equal(resultado.status, 403);
+    const msg = JSON.parse(resultado.texto);
+    assert.equal(msg.type, 'ADMISSAO_REJEITADA');
+    assert.equal(msg.codigo, 'JOGADOR_FORA_DO_ROSTER');
   } finally {
     await servidor.fechar();
   }
@@ -245,7 +259,7 @@ test('JWT inválido/expirado é recusado', async () => {
     await criarPartidaNoRedis(partidaId, roster);
 
     // Token com secret errado
-    const tokenErrado = jwt.sign({ jogadorId: 'jogador-1', apelido: 'Jogador 1' }, 'secret_completamente_diferente', { algorithm: 'HS256', expiresIn: '1h' });
+    const tokenErrado = jwt.sign({ sub: 'jogador-1', apelido: 'Jogador 1' }, 'secret_completamente_diferente', { algorithm: 'HS256', expiresIn: '1h' });
     const resultadoErrado = await fazerUpgradeHttp(servidor.port, tokenErrado, partidaId);
 
     assert.equal(resultadoErrado.status, 401);
@@ -253,8 +267,15 @@ test('JWT inválido/expirado é recusado', async () => {
     assert.equal(msgErrado.type, 'ADMISSAO_REJEITADA');
     assert.equal(msgErrado.codigo, 'SESSAO_INVALIDA');
 
+    // Token sem campos obrigatórios no payload
+    const tokenSemJogador = jwt.sign({ sessaoId: 'x' }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
+    const resultadoSemJogador = await fazerUpgradeHttp(servidor.port, tokenSemJogador, partidaId);
+    assert.equal(resultadoSemJogador.status, 401);
+    const msgSemJogador = JSON.parse(resultadoSemJogador.texto);
+    assert.equal(msgSemJogador.codigo, 'SESSAO_INVALIDA');
+
     // Token expirado
-    const tokenExpirado = criarJwt('jogador-1', 'Jogador 1', { expiresIn: '0s' });
+    const tokenExpirado = criarJwt('jogador-1', 'Jogador 1', crypto.randomUUID(), { expiresIn: '0s' });
     const resultadoExpirado = await fazerUpgradeHttp(servidor.port, tokenExpirado, partidaId);
 
     assert.equal(resultadoExpirado.status, 401);
@@ -269,14 +290,12 @@ test('JWT inválido/expirado é recusado', async () => {
 test('serverId diferente no path é recusado com 404', async () => {
   const servidor = await subirServidor();
   try {
-    const resultado = await conectarWs(servidor.port, 'qualquer-token', 'qualquer-partida', 'server-diferente');
+    const resultado = await fazerUpgradeHttp(servidor.port, 'qualquer-token', 'qualquer-partida', 'server-diferente');
 
-    assert.ok(!resultado.conectou || resultado.mensagem !== null, 'deveria ter recebido erro');
-    if (resultado.mensagem !== null) {
-      const msg = JSON.parse(resultado.mensagem);
-      assert.equal(msg.type, 'ADMISSAO_REJEITADA');
-      assert.equal(msg.codigo, 'SERVER_ID_INVALIDO');
-    }
+    assert.equal(resultado.status, 404);
+    const msg = JSON.parse(resultado.texto);
+    assert.equal(msg.type, 'ADMISSAO_REJEITADA');
+    assert.equal(msg.codigo, 'SERVER_ID_INVALIDO');
   } finally {
     await servidor.fechar();
   }
@@ -285,15 +304,16 @@ test('serverId diferente no path é recusado com 404', async () => {
 test('partida-id inexistente é recusado', async () => {
   const servidor = await subirServidor();
   try {
-    const token = criarJwt('jogador-1', 'Jogador 1');
-    const resultado = await conectarWs(servidor.port, token, 'partida-que-nao-existe');
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-1');
+    const token = criarJwt('jogador-1', 'Jogador 1', sessaoId);
 
-    assert.ok(!resultado.conectou || resultado.mensagem !== null, 'deveria ter recebido erro');
-    if (resultado.mensagem !== null) {
-      const msg = JSON.parse(resultado.mensagem);
-      assert.equal(msg.type, 'ADMISSAO_REJEITADA');
-      assert.equal(msg.codigo, 'PARTIDA_NAO_ENCONTRADA');
-    }
+    const resultado = await fazerUpgradeHttp(servidor.port, token, 'partida-que-nao-existe');
+
+    assert.equal(resultado.status, 404);
+    const msg = JSON.parse(resultado.texto);
+    assert.equal(msg.type, 'ADMISSAO_REJEITADA');
+    assert.equal(msg.codigo, 'PARTIDA_NAO_ENCONTRADA');
   } finally {
     await servidor.fechar();
   }
@@ -340,6 +360,130 @@ test('partida-id ausente na query é recusado', async () => {
     const msg = JSON.parse(body.texto);
     assert.equal(msg.type, 'ADMISSAO_REJEITADA');
     assert.equal(msg.codigo, 'PARTIDA_ID_AUSENTE');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('os quatro jogadores do roster são admitidos e a partida permanece preparada', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaNoRedis(partidaId, roster);
+
+    const resultados: ResultadoWs[] = [];
+    for (let i = 1; i <= 4; i += 1) {
+      const sessaoId = crypto.randomUUID();
+      await criarSessaoNoRedis(sessaoId, `jogador-${i}`);
+      const token = criarJwt(`jogador-${i}`, `Jogador ${i}`, sessaoId);
+      resultados.push(await conectarWs(servidor.port, token, partidaId));
+    }
+
+    for (const resultado of resultados) {
+      assert.ok(resultado.conectou, 'todos os do roster deveriam conectar');
+      assert.ok(resultado.mensagem !== null, 'deveria receber ADMISSAO_ACEITA');
+      assert.equal(JSON.parse(resultado.mensagem!).type, 'ADMISSAO_ACEITA');
+    }
+
+    const bruto = await redis.get(chaveDaPartida(partidaId));
+    assert.ok(bruto !== null, 'partida deveria existir');
+    const partida = JSON.parse(bruto!);
+    assert.equal(partida.estado, 'preparada');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('partida em estado não preparada é recusada', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaNoRedis(partidaId, roster);
+    await redis.set(chaveDaPartida(partidaId), JSON.stringify({
+      partidaId,
+      serverId: SERVER_ID,
+      salaId: 'sala-teste',
+      codigoDeSala: 'TEST01',
+      roster,
+      estado: 'em_andamento',
+      criadaEm: new Date().toISOString(),
+    }), 'EX', 600);
+
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-1');
+    const token = criarJwt('jogador-1', 'Jogador 1', sessaoId);
+
+    const resultado = await fazerUpgradeHttp(servidor.port, token, partidaId);
+
+    assert.equal(resultado.status, 404);
+    const msg = JSON.parse(resultado.texto);
+    assert.equal(msg.codigo, 'PARTIDA_NAO_ENCONTRADA');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('sessão revogada/inexistente é recusada mesmo com JWT válido', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaNoRedis(partidaId, roster);
+
+    const sessaoId = crypto.randomUUID();
+    const token = criarJwt('jogador-1', 'Jogador 1', sessaoId);
+    // Não cria a sessão no Redis -> sessão inexistente
+
+    const resultado = await fazerUpgradeHttp(servidor.port, token, partidaId);
+
+    assert.equal(resultado.status, 401);
+    const msg = JSON.parse(resultado.texto);
+    assert.equal(msg.codigo, 'SESSAO_INVALIDA');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('token de sessão ausente é recusado', async () => {
+  const servidor = await subirServidor();
+  try {
+    const body = await new Promise<{ status: number; texto: string }>((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: servidor.port,
+        path: `/ws/game/${SERVER_ID}?partida-id=qualquer`,
+        method: 'GET',
+        headers: {
+          'Connection': 'Upgrade',
+          'Upgrade': 'websocket',
+          'Sec-WebSocket-Version': '13',
+          'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        },
+      });
+
+      req.on('error', reject);
+      req.on('upgrade', (_res, socket) => {
+        socket.destroy();
+        reject(new Error('upgrade inesperado'));
+      });
+
+      req.on('response', (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          resolve({ status: res.statusCode ?? 0, texto: data });
+        });
+      });
+
+      req.end();
+    });
+
+    assert.equal(body.status, 401);
+    const msg = JSON.parse(body.texto);
+    assert.equal(msg.type, 'ADMISSAO_REJEITADA');
+    assert.equal(msg.codigo, 'SESSAO_INVALIDA');
   } finally {
     await servidor.fechar();
   }

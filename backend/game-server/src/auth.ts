@@ -1,8 +1,10 @@
+import type { Redis } from 'ioredis';
 import jwt from 'jsonwebtoken';
 
 export interface SessaoDoJogador {
   readonly jogadorId: string;
   readonly apelido: string;
+  readonly sessaoId?: string;
 }
 
 /**
@@ -15,15 +17,39 @@ export function validarTokenDeSessao(token: string, secret: string): SessaoDoJog
     if (typeof decoded === 'string') {
       return null;
     }
-    const { jogadorId, apelido } = decoded as Record<string, unknown>;
-    if (typeof jogadorId !== 'string' || jogadorId.length === 0) {
+    const raw = decoded as Record<string, unknown>;
+    const jogadorId = typeof raw.sub === 'string' && raw.sub.length > 0
+      ? raw.sub
+      : (typeof raw.jogadorId === 'string' && raw.jogadorId.length > 0 ? raw.jogadorId : null);
+
+    const apelido = typeof raw.apelido === 'string' && raw.apelido.length > 0 ? raw.apelido : null;
+    const sessaoId = typeof raw.sessaoId === 'string' && raw.sessaoId.length > 0 ? raw.sessaoId : undefined;
+
+    if (jogadorId === null || apelido === null) {
       return null;
     }
-    if (typeof apelido !== 'string' || apelido.length === 0) {
-      return null;
-    }
-    return { jogadorId, apelido };
+    return { jogadorId, apelido, sessaoId };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Valida se a sessão no Redis existe e pertence ao jogador indicado.
+ */
+export async function validarSessaoNoRedis(
+  redis: Redis,
+  sessaoId: string,
+  jogadorIdEsperado: string,
+): Promise<boolean> {
+  try {
+    const raw = await redis.get(`sessao:${sessaoId}`);
+    if (raw === null) {
+      return false;
+    }
+    const parsed = JSON.parse(raw) as { jogadorId?: string };
+    return parsed.jogadorId === jogadorIdEsperado;
+  } catch {
+    return false;
   }
 }
