@@ -4,7 +4,8 @@ import type {
   Sala,
   SalaEventoDoServidor,
   SalaComandoDoCliente,
-} from '@flicker/shared/src/sala'
+} from '@flicker/shared'
+import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 
 export interface AvisoDoLobby {
   id: string
@@ -155,60 +156,30 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       if (typeof data !== 'object' || data === null || !('type' in data)) return
       const evento = data as SalaEventoDoServidor
       switch (evento.type) {
-        case 'SALA_ATUALIZADA':
-          setSala(evento.sala)
-          break
-        case 'MEMBRO_ENTROU':
-          setSala(evento.sala)
-          {
-            const msg = mensagemDeAviso(evento, salaRef.current)
-            if (msg) adicionarAviso(msg, evento.type)
-          }
-          break
-        case 'MEMBRO_SAIU':
-          setSala(evento.sala)
-          {
-            const msg = mensagemDeAviso(evento, salaRef.current)
-            if (msg) adicionarAviso(msg, evento.type)
-          }
-          break
-        case 'MEMBRO_DESCONECTADO':
-          setSala(evento.sala)
-          {
-            const msg = mensagemDeAviso(evento, salaRef.current)
-            if (msg) adicionarAviso(msg, evento.type)
-          }
-          break
-        case 'ANFITRIAO_SUBSTITUIDO':
-          setSala(evento.sala)
-          {
-            const msg = mensagemDeAviso(evento, salaRef.current)
-            if (msg) adicionarAviso(msg, evento.type)
-          }
-          break
-        case 'PRONTIDAO_ATUALIZADA':
-          setSala(evento.sala)
-          {
-            const msg = mensagemDeAviso(evento, salaRef.current)
-            if (msg) adicionarAviso(msg, evento.type)
-          }
-          break
         case 'ERRO_DA_SALA':
           setErro(evento.mensagem)
           adicionarAviso(evento.mensagem, evento.type)
-          break
-        case 'MEMBRO_EXPULSO':
-          setSala(evento.sala)
-          {
-            const msg = mensagemDeAviso(evento, salaRef.current)
-            if (msg) adicionarAviso(msg, evento.type)
-          }
-          break
+          return
         case 'MENSAGEM_DE_CHAT':
           // fora de escopo deste issue, mas preserva compatibilidade
-          break
+          return
+        case 'SALA_ATUALIZADA':
+        case 'MEMBRO_ENTROU':
+        case 'MEMBRO_SAIU':
+        case 'MEMBRO_DESCONECTADO':
+        case 'MEMBRO_EXPULSO':
+        case 'ANFITRIAO_SUBSTITUIDO':
+        case 'PRONTIDAO_ATUALIZADA': {
+          // Todos carregam `sala` no payload: atualiza o estado e deriva o
+          // aviso único da mensagem (evita repetir o bloco por caso).
+          setSala(evento.sala)
+          const msg = mensagemDeAviso(evento, salaRef.current)
+          if (msg) adicionarAviso(msg, evento.type)
+          return
+        }
         default:
-          break
+          // Evento desconhecido: não mexe no estado (preserva a sala atual).
+          return
       }
     }
   }, [adicionarAviso])
@@ -253,8 +224,8 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const entrarNaSala = useCallback(
     (codigoDeSala: CodigoDeSala) => {
       setErro(null)
-      const codigo = codigoDeSala.trim().toUpperCase()
-      if (codigo.length !== 6) {
+      const codigo = normalizarCodigoDeSala(codigoDeSala)
+      if (!codigo) {
         setErro('Código de Sala inválido')
         return
       }

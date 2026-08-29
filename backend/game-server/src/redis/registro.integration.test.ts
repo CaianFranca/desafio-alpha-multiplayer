@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import test, { describe } from 'node:test';
 import { Redis } from 'ioredis';
 import { GAME_SERVERS_PREFIX } from '@flicker/config';
-import { estaDisponivel, listarGameServersDisponiveis } from '@flicker/shared';
+import { estaDisponivel, listarGameServersDisponiveis } from '@flicker/shared/server';
 import { anunciar, iniciarHeartbeat, pararHeartbeat, removerRegistro } from './registro.ts';
 
 function criarRedis(): Redis | null {

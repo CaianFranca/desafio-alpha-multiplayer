@@ -16,4 +16,5 @@ export type {
   CadastroPayload,
   LoginPayload,
 } from './autenticacao.ts';
-export * from './redis/gameServers.js';
+// Somente DTOs (type-only) no entry raiz para o bundle do browser continuar seguro.
+// Helpers de runtime (redis) vivem no entry server-side: `@flicker/shared/server`.

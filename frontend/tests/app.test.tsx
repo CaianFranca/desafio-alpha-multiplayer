@@ -187,7 +187,32 @@ describe('authentication states', () => {
     expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
     // Stub substituído por lobby real (issue #32): verifica layout bipartido
     expect(screen.getByText(/ponto de encontro/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /iniciar sessão/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /criar sala/i })).toBeInTheDocument()
+  })
+
+  it('no lobby, o header oferece Sair da Sala (SAIR_DA_SALA) e Sair (logout)', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/salas/criar'], autenticado)
+
+    const header = screen.getByRole('banner')
+    // "Sair da Sala" do header é a saída da sala (não desautentica), e "Sair" é o logout.
+    expect(within(header).getByRole('button', { name: /^sair da sala$/i })).toBeInTheDocument()
+    expect(within(header).getByRole('button', { name: /^sair$/i })).toBeInTheDocument()
+
+    // Sair da Sala volta ao início mantendo a Sessão ativa.
+    await user.click(within(header).getByRole('button', { name: /^sair da sala$/i }))
+
+    expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    const headerHome = screen.getByRole('banner')
+    expect(within(headerHome).getByText(apelidoMock)).toBeInTheDocument()
+    expect(within(headerHome).getByRole('link', { name: /criar sala/i })).toBeInTheDocument()
+    expect(within(headerHome).queryByRole('button', { name: /^sair da sala$/i })).not.toBeInTheDocument()
+
+    // Sair encerra a Sessão: volta como Visitante à home.
+    await user.click(within(headerHome).getByRole('button', { name: /^sair$/i }))
+
+    expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    expect(within(screen.getByRole('banner')).queryByText(apelidoMock)).not.toBeInTheDocument()
   })
 
   it('authenticated header Criar Sala action navigates to the create room page', async () => {

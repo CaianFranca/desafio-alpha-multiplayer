@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { Sala } from '@flicker/shared/src/sala'
+import type { Sala } from '@flicker/shared'
 
 interface Props {
   sala: Sala | null

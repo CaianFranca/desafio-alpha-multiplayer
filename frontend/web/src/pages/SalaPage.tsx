@@ -1,11 +1,13 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useSalaWebSocket } from '../hooks/useSalaWebSocket'
-import { CodigoDeAcessoCard } from '../components/sala/CodigoDeAcessoCard'
+import { CodigoDeSalaCard } from '../components/sala/CodigoDeSalaCard'
 import { LinkDiretoCard } from '../components/sala/LinkDiretoCard'
 import { ListaDeMembros } from '../components/sala/ListaDeMembros'
 import { AvisosDoLobby } from '../components/sala/AvisosDoLobby'
 import { AuthContext } from '../state/auth-context'
+import { useSalaActions } from '../state/sala-actions-context'
+import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 
 export function SalaPage() {
   const { codigoDeSala: codigoParam } = useParams<{ codigoDeSala: string }>()
@@ -14,26 +16,44 @@ export function SalaPage() {
   const jogadorId = authState.status === 'authenticated' ? authState.jogador.id : undefined
   const { sala, avisos, conectado, erro, criarSala, entrarNaSala, alternarProntidao, sairDaSala } =
     useSalaWebSocket(jogadorId)
+  const { registrarSairDaSala } = useSalaActions()
   const [codigoInput, setCodigoInput] = useState('')
   const conviteEnviadoRef = useRef<string | null>(null)
   const conectando = !conectado && !sala
 
-  // Entrada por rota de Convite /sala/:codigoDeSala — envia apenas uma vez
-  // por código, para não reentrar após sair da sala.
+  // Sai da sala (SAIR_DA_SALA) e volta ao início — fonte única usada pelo
+  // botão do corpo e pelo Header (via contexto). Nunca encerra a Sessão.
+  const sairDaSalaEComecarDeNovo = useCallback(() => {
+    sairDaSala()
+    navigate('/')
+  }, [sairDaSala, navigate])
+
+  // Expõe a ação ao Header enquanto a página está montada.
   useEffect(() => {
-    if (codigoParam && !sala && conviteEnviadoRef.current !== codigoParam) {
-      const codigo = codigoParam.trim().toUpperCase()
-      if (codigo.length === 6) {
-        conviteEnviadoRef.current = codigoParam
-        entrarNaSala(codigo)
-      }
+    registrarSairDaSala(sairDaSalaEComecarDeNovo)
+    return () => registrarSairDaSala(null)
+  }, [sairDaSalaEComecarDeNovo, registrarSairDaSala])
+
+  // Entrada por rota de Convite /sala/:codigoDeSala — envia apenas uma vez
+  // por código normalizado, para não reentrar após sair da sala.
+  useEffect(() => {
+    if (!codigoParam || sala) return
+    const codigo = normalizarCodigoDeSala(codigoParam)
+    if (codigo && conviteEnviadoRef.current !== codigo) {
+      conviteEnviadoRef.current = codigo
+      entrarNaSala(codigo)
     }
   }, [codigoParam, sala, entrarNaSala])
 
-  function handleSair() {
-    sairDaSala()
-    navigate('/')
-  }
+  // Se o servidor rejeitar a entrada (ex.: SALA_NAO_ENCONTRADA), libera a ref
+  // para permitir nova tentativa — sem reenviar sozinho enquanto houver erro.
+  useEffect(() => {
+    if (!erro || sala || !codigoParam) return
+    const codigo = normalizarCodigoDeSala(codigoParam)
+    if (codigo && conviteEnviadoRef.current === codigo) {
+      conviteEnviadoRef.current = null
+    }
+  }, [erro, sala, codigoParam])
 
   const possuiSala = sala !== null
 
@@ -65,7 +85,7 @@ export function SalaPage() {
                     disabled={conectando}
                     className="w-fit border border-white/20 px-8 py-3 text-sm tracking-[0.18em] uppercase text-white hover:bg-white hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white"
                   >
-                    Iniciar Sessão →
+                    Criar Sala →
                   </button>
 
                   <div className="flex flex-col gap-2 pt-6 border-t border-white/10">
@@ -84,7 +104,8 @@ export function SalaPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (codigoInput.trim().length === 6) entrarNaSala(codigoInput)
+                          const codigo = normalizarCodigoDeSala(codigoInput)
+                          if (codigo) entrarNaSala(codigo)
                         }}
                         disabled={conectando}
                         className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-xs font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#c9a86a]"
@@ -108,7 +129,7 @@ export function SalaPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={handleSair}
+                    onClick={sairDaSalaEComecarDeNovo}
                     className="w-fit border border-white/20 px-8 py-3 text-sm tracking-[0.18em] uppercase text-white/70 hover:text-white hover:border-white/40 transition-colors"
                   >
                     Sair da Sala
@@ -142,7 +163,7 @@ export function SalaPage() {
                 </span>
               ) : (
                 <span className="flex items-center gap-2 text-[10px] tracking-widest uppercase text-green-400">
-                  <span className="w-2 h-2 rounded-full bg-green-400" aria-hidden /> Ativo
+                  <span className="w-2 h-2 rounded-full bg-green-400" aria-hidden /> Conectado
                 </span>
               )}
             </div>
@@ -150,7 +171,7 @@ export function SalaPage() {
             {possuiSala ? (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <CodigoDeAcessoCard codigoDeSala={sala.codigoDeSala} />
+                  <CodigoDeSalaCard codigoDeSala={sala.codigoDeSala} />
                   <LinkDiretoCard link={sala.convite.link} />
                 </div>
 
@@ -162,7 +183,7 @@ export function SalaPage() {
                 {/* Estado vazio mostra cards desabilitados e vagas */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 opacity-60">
                   <div className="border border-white/10 bg-[#1e1e1e] p-5">
-                    <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Código de Acesso</p>
+                    <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Código de Sala</p>
                     <p className="text-sm text-white/30 mt-3">Crie uma sala para ver o código</p>
                   </div>
                   <div className="border border-white/10 bg-[#1e1e1e] p-5">

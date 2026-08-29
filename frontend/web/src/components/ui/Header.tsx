@@ -1,19 +1,30 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../state/useAuth'
+import { useSalaActions } from '../../state/sala-actions-context'
 import { CtaLink } from './CtaLink'
 import { criarSalaLabel } from '../auth/AuthActions'
+
+const styleBotaoHeader =
+  'border border-white/20 px-4 py-2 text-xs tracking-[0.18em] font-bold uppercase text-white hover:bg-white hover:text-black transition-colors'
 
 export function Header() {
   const { authState, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const emLobby = location.pathname.startsWith('/salas') || location.pathname.startsWith('/sala')
+  const { sairDaSala } = useSalaActions()
 
   // A navegação pós-logout fica aqui porque o AuthProvider está acima do
   // RouterProvider em main.tsx (o provider não tem acesso ao navigate).
   async function handleLogout() {
     await logout()
     navigate('/')
+  }
+
+  function handleSairDaSala() {
+    // A ação registrada pela SalaPage envia SAIR_DA_SALA e volta ao início —
+    // nunca encerra a Sessão.
+    sairDaSala?.()
   }
 
   return (
@@ -34,25 +45,20 @@ export function Header() {
             <div className="flex items-center gap-3">
               <span className="text-sm font-bold">{authState.jogador.apelido}</span>
               {emLobby ? (
-                <button
-                  type="button"
-                  onClick={() => void handleLogout()}
-                  className="border border-white/20 px-4 py-2 text-xs tracking-wider font-bold uppercase text-white hover:bg-white hover:text-black transition-colors"
-                >
+                <button type="button" onClick={handleSairDaSala} className={styleBotaoHeader}>
                   Sair da Sala
                 </button>
               ) : (
-                <>
-                  <CtaLink to="/salas/criar" variant="primary" size="sm">{criarSalaLabel}</CtaLink>
-                  <button
-                    type="button"
-                    onClick={() => void handleLogout()}
-                    className="text-sm text-(--color-muted) hover:text-white transition-colors"
-                  >
-                    Sair
-                  </button>
-                </>
+                <CtaLink to="/salas/criar" variant="primary" size="sm">{criarSalaLabel}</CtaLink>
               )}
+              {/* Sair encerra a Sessão (logout); sair da Sala é o botão ao lado. */}
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                className={styleBotaoHeader}
+              >
+                Sair
+              </button>
             </div>
           )}
         </div>

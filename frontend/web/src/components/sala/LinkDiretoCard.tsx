@@ -1,4 +1,5 @@
 import { useCopiar } from '../../hooks/useCopiar'
+import { BotaoCopiar } from './BotaoCopiar'
 
 interface Props {
   link: string
@@ -24,23 +25,7 @@ export function LinkDiretoCard({ link }: Props) {
         <p className="text-sm text-white/90 truncate" title={link} aria-label="Link Direto">
           {exibicao}
         </p>
-        <button
-          type="button"
-          onClick={() => void copiar(link)}
-          aria-label="Copiar Link Direto"
-          className="border border-white/20 w-8 h-8 flex items-center justify-center text-white/70 hover:text-white hover:border-white/40 transition-colors shrink-0"
-        >
-          <span aria-hidden>
-            {copiado ? (
-              '✓'
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-              </svg>
-            )}
-          </span>
-        </button>
+        <BotaoCopiar rotulo="Link Direto" copiado={copiado} aoClicar={() => void copiar(link)} />
       </div>
       {copiado && <span className="text-xs text-green-400">Copiado!</span>}
     </div>

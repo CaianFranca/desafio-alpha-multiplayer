@@ -193,7 +193,7 @@ describe('lobby - página do lobby', () => {
     // heading institucional Criar Sala deve estar visível mesmo antes de criar
     expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
 
-    const botaoCriar = screen.getByRole('button', { name: /iniciar sessão/i })
+    const botaoCriar = screen.getByRole('button', { name: /criar sala/i })
     await user.click(botaoCriar)
 
     const ws = MockWebSocket.last()
@@ -288,7 +288,7 @@ describe('lobby - página do lobby', () => {
     const user = userEvent.setup()
     renderWithRouter(['/salas/criar'], mockAuthenticatedState)
 
-    const botaoCriar = screen.getByRole('button', { name: /iniciar sessão/i })
+    const botaoCriar = screen.getByRole('button', { name: /criar sala/i })
     await user.click(botaoCriar)
     const ws = MockWebSocket.last()!
     const sala = criarSala({
@@ -399,7 +399,7 @@ describe('lobby - página do lobby', () => {
     ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala })
     await screen.findByText('A3K9M2')
 
-    const botaoCopiarCodigo = screen.getByRole('button', { name: /copiar código de acesso/i })
+    const botaoCopiarCodigo = screen.getByRole('button', { name: /copiar código de sala/i })
     await user.click(botaoCopiarCodigo)
     // Valida feedback visual de cópia (comportamento externo, evita spy frágil em jsdom)
     expect(await screen.findByText('Copiado!')).toBeInTheDocument()
@@ -426,6 +426,25 @@ describe('lobby - página do lobby', () => {
     expect(envio.type).toBe('SAIR_DA_SALA')
     // Após sair, a UI volta a mostrar estado vazio
     await waitFor(() => expect(screen.queryByText('A3K9M2')).not.toBeInTheDocument())
+  })
+
+  it('Sair da Sala do header envia SAIR_DA_SALA (não desautentica) e volta ao início', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const sala = criarSala({ codigoDeSala: 'A3K9M2' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala })
+    await screen.findByText('A3K9M2')
+
+    const header = screen.getByRole('banner')
+    const botaoSair = within(header).getByRole('button', { name: /^sair da sala$/i })
+    await user.click(botaoSair)
+
+    const envio = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1] as string)
+    expect(envio.type).toBe('SAIR_DA_SALA')
+    // Continua autenticado e volta para a home
+    expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    expect(within(screen.getByRole('banner')).getByText(mockAuthenticatedState.jogador.apelido)).toBeInTheDocument()
   })
 
   it('entrada por convite durante o handshake é reenviada quando o socket abre (Bug 1)', async () => {
@@ -462,14 +481,14 @@ describe('lobby - página do lobby', () => {
     // Indicador de conexão aparece
     expect(screen.getByText(/conectando/i)).toBeInTheDocument()
     // Botões desabilitados enquanto não há conexão
-    expect(screen.getByRole('button', { name: /iniciar sessão/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /criar sala/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /entrar na sala/i })).toBeDisabled()
 
     // Ao abrir, o indicador some e os botões ficam habilitados
     ws.simulateOpen()
-    expect(await screen.findByText('Ativo')).toBeInTheDocument()
+    expect(await screen.findByText('Conectado')).toBeInTheDocument()
     expect(screen.queryByText(/conectando/i)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /iniciar sessão/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /criar sala/i })).toBeEnabled()
   })
 
   it('saída identifica o Membro pelo apelido', async () => {
