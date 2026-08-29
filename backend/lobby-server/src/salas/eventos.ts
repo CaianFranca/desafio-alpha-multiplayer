@@ -110,15 +110,6 @@ export function mapearSala(
   return base;
 }
 
-export function mapearSalaComEncaminhamento(
-  sala: SalaDominio,
-  apelidoPorJogadorId: ApelidoPorJogadorId,
-  linkBase: string,
-  encaminhamento?: { serverId: string; partidaId: string },
-): Sala {
-  return mapearSala(sala, apelidoPorJogadorId, linkBase, encaminhamento);
-}
-
 function encontrarSala(
   estado: EstadoDoLobby,
   salaId: string,

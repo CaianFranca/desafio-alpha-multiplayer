@@ -245,17 +245,6 @@ export class SalasRepo {
     return { serverId: linha.server_id, partidaId: linha.partida_id };
   }
 
-  /** Resolve sala ativa (aberta ou encaminhada) pelo código — para snapshot/reconexão de sala encaminhada. */
-  async obterSalaAtivaPorCodigo(codigo: string): Promise<string | null> {
-    const resultado = await this.pool.query<{ id: string }>(
-      `SELECT id FROM salas_historico
-       WHERE codigo_sala = $1 AND status IN ('aberta', 'encaminhada')
-       LIMIT 1`,
-      [codigo],
-    );
-    return resultado.rows[0]?.id ?? null;
-  }
-
   /** Resolve sala ativa (aberta ou encaminhada) do jogador — inclui encaminhada para snapshot. */
   async obterSalaAtivaDoJogador(jogadorId: string): Promise<string | null> {
     const resultado = await this.pool.query<{ salaId: string }>(
@@ -268,24 +257,6 @@ export class SalasRepo {
       [jogadorId],
     );
     return resultado.rows[0]?.salaId ?? null;
-  }
-
-  /** Lista todas as salas encaminhadas (para diagnóstico/testes). */
-  async listarSalasEncaminhadas(): Promise<SalaAtiva[]> {
-    const resultado = await this.pool.query<QueryResultRow & SalaAtiva>(
-      `SELECT id, codigo_sala AS codigo, anfitriao_id AS "anfitriaoId", status, server_id AS "serverId", partida_id AS "partidaId"
-       FROM salas_historico
-       WHERE status = 'encaminhada'
-       ORDER BY id`,
-    );
-    return resultado.rows.map((linha) => ({
-      id: linha.id,
-      codigo: linha.codigo,
-      anfitriaoId: linha.anfitriaoId,
-      status: linha.status as StatusDaSala,
-      serverId: (linha.serverId as string | null) ?? null,
-      partidaId: (linha.partidaId as string | null) ?? null,
-    }));
   }
 
   /**

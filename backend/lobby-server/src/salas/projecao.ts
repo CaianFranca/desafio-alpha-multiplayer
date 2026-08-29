@@ -99,18 +99,6 @@ export function serializarSala(
   return base;
 }
 
-export async function definirEncaminhamentoNaProjecao(
-  projecao: SalasProjecao,
-  salaId: string,
-  serverId: string,
-  partidaId: string,
-): Promise<void> {
-  const atual = await projecao.obterEstadoSala(salaId);
-  if (atual) {
-    await projecao.definirEstadoSala(salaId, { ...atual, estado: 'encaminhada', encaminhamento: { serverId, partidaId } });
-  }
-}
-
 export class SalasProjecao {
   private readonly redis: Redis;
 
