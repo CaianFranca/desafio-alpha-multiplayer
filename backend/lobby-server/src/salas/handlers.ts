@@ -53,6 +53,25 @@ import {
   ehColisaoDeCodigo,
   gerarCodigoDeSala,
 } from './codigo.ts';
+
+const CODIGOS_ENCAMINHAMENTO_VALIDOS: ReadonlySet<string> = new Set([
+  'DADOS_INVALIDOS',
+  'SALA_NAO_ENCONTRADA',
+  'SALA_ENCERRADA',
+  'ROSTER_INVALIDO',
+  'PARTIDA_NAO_ENCONTRADA',
+  'ENCAMINHAMENTO_RECUSADO',
+  'ENCAMINHAMENTO_FALHOU',
+]);
+
+function normalizarCodigoDeErroDoEncaminhamento(
+  valor: unknown,
+  fallback: CodigoDeErroDoEncaminhamento,
+): CodigoDeErroDoEncaminhamento {
+  return typeof valor === 'string' && CODIGOS_ENCAMINHAMENTO_VALIDOS.has(valor)
+    ? (valor as CodigoDeErroDoEncaminhamento)
+    : fallback;
+}
 import { SalasRepo } from './repositorio.ts';
 import { SalasProjecao, serializarSala } from './projecao.ts';
 import { SalasBroadcaster } from './broadcast.ts';
@@ -1042,9 +1061,9 @@ export class SalasHandlers {
               } else if (resp.status === 409 || resp.status === 400) {
                 erroKind = 'recusa';
                 try {
-                  const body = (await resp.json()) as { codigo?: CodigoDeErroDoEncaminhamento; motivo?: string };
+                  const body = (await resp.json()) as { codigo?: string; motivo?: string };
                   erroMotivo = body.motivo ?? `recusa ${resp.status}`;
-                  erroCodigo = (body.codigo as CodigoDeErroDoEncaminhamento) ?? 'ENCAMINHAMENTO_RECUSADO';
+                  erroCodigo = normalizarCodigoDeErroDoEncaminhamento(body.codigo, 'ENCAMINHAMENTO_RECUSADO');
                 } catch {
                   erroMotivo = `recusa ${resp.status}`;
                 }
@@ -1065,11 +1084,11 @@ export class SalasHandlers {
         }
       }
     } catch (e) {
-      const rec = e as { codigo?: CodigoDeErroDoEncaminhamento; motivo?: string; message?: string };
+      const rec = e as { codigo?: string; motivo?: string; message?: string };
       if (rec?.codigo === 'ENCAMINHAMENTO_RECUSADO' || rec?.codigo === 'ROSTER_INVALIDO') {
         erroKind = 'recusa';
         erroMotivo = rec.motivo ?? rec.message ?? 'encaminhamento recusado';
-        erroCodigo = rec.codigo as CodigoDeErroDoEncaminhamento;
+        erroCodigo = normalizarCodigoDeErroDoEncaminhamento(rec.codigo, 'ENCAMINHAMENTO_RECUSADO');
       } else {
         erroKind = 'falhou';
         erroMotivo = (e as Error).message;
