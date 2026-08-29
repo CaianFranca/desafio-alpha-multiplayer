@@ -17,6 +17,9 @@ jobs:
   report:
     runs-on: ubuntu-latest
 
+    env:
+      CONTRIBUTOR_EMAILS: caianhnf23@gmail.com, lucassbleal9@gmail.com, ftaveira611@gmail.com, dluccammendes@gmail.com, gustavofonteneledev@gmail.com, jfilipe532@hotmail.com, jgabrielalves@alu.ufc.br, gianluccas54@gmail.com, leog42119@gmail.com, emanuelmvieira10@gmail.com, toso.augusto01@gmail.com, renatoprofissional08@gmail.com
+
     steps:
       - name: Gerar relatório de Kanban e PRs
         id: gerar_relatorio
@@ -102,16 +105,7 @@ jobs:
                                   title
                                   url
                                   state
-                                  blockedBy(first: 20) {
-                                    totalCount
-                                    nodes {
-                                      number
-                                      title
-                                      labels(first: 20) {
-                                        nodes { name }
-                                      }
-                                    }
-                                  }
+                                  blockedBy(first: 50) { totalCount nodes { state } }
                                 }
                               }
                             }
@@ -135,16 +129,7 @@ jobs:
                                   title
                                   url
                                   state
-                                  blockedBy(first: 20) {
-                                    totalCount
-                                    nodes {
-                                      number
-                                      title
-                                      labels(first: 20) {
-                                        nodes { name }
-                                      }
-                                    }
-                                  }
+                                  blockedBy(first: 50) { totalCount nodes { state } }
                                 }
                               }
                             }
@@ -193,6 +178,20 @@ jobs:
               return 'pending review';
             }
 
+            function getReviewers(reviews) {
+              const seen = new Map();
+              for (const review of reviews) {
+                if (!review.user?.login) continue;
+                if (review.state === 'DISMISSED') continue;
+                if (!seen.has(review.user.login)) {
+                  seen.set(review.user.login, review.state);
+                } else if (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED') {
+                  seen.set(review.user.login, review.state);
+                }
+              }
+              return [...seen.entries()].map(([login, state]) => ({ login, state }));
+            }
+
             function getChecksStatus(checkRuns, combinedStatus) {
               const runs = checkRuns?.check_runs || [];
               const status = combinedStatus?.state;
@@ -219,20 +218,6 @@ jobs:
               return runs.length > 0 ? 'completed (mixed)' : 'not configured';
             }
 
-            function isBacklogIssue(issue) {
-              const title = normalize(issue?.title);
-              if (title.includes('backlog')) return true;
-
-              const labels = issue?.labels?.nodes || [];
-              return labels.some((label) => normalize(label?.name).includes('backlog'));
-            }
-
-            function hasNonBacklogBlockers(issue) {
-              const blockers = issue?.blockedBy?.nodes || [];
-              if (blockers.length === 0) return false;
-              return blockers.some((blocker) => !isBacklogIssue(blocker));
-            }
-
             let selectedProject = null;
             let projectItemData = { title: null, items: [] };
             let kanbanWarning = null;
@@ -256,12 +241,17 @@ jobs:
 
             const openIssuesWithoutBlocks = [];
 
+            function hasOpenBlocker(issue) {
+              const blockers = issue?.blockedBy?.nodes || [];
+              return blockers.some((blocker) => blocker && blocker.state === 'OPEN');
+            }
+
             for (const item of projectItemData.items) {
               const content = item.content;
               if (!content || content.__typename !== 'Issue') continue;
               if (content.state !== 'OPEN') continue;
 
-              if (!hasNonBacklogBlockers(content)) {
+              if (!hasOpenBlocker(content)) {
                 openIssuesWithoutBlocks.push(content);
               }
             }
@@ -294,8 +284,6 @@ jobs:
                   ref: pr.head.sha,
                 }),
               ]);
-              const reviewStatus = getReviewStatus(reviews);
-              const checksStatus = getChecksStatus(checkRuns.data, combinedStatus.data);
 
               prDetails.push({
                 number: pr.number,
@@ -303,11 +291,10 @@ jobs:
                 url: pr.html_url,
                 author: pr.user?.login || 'unknown',
                 labels: (pr.labels || []).map((label) => label.name).join(', '),
-                stage: reviewStatus === 'approved' && checksStatus === 'success'
+                reviewers: getReviewers(reviews),
+                stage: getReviewStatus(reviews) === 'approved' && getChecksStatus(checkRuns.data, combinedStatus.data) === 'success'
                   ? 'Merge'
-                  : reviewStatus === 'changes requested'
-                    ? 'Requested Changes'
-                    : 'To Review',
+                  : 'Review',
               });
             }
 
@@ -326,9 +313,13 @@ jobs:
             } else {
               for (const pr of prDetails) {
                 const labelsPart = pr.labels ? ` *(${safe(pr.labels)})*` : '';
+                const reviewerNames = (pr.reviewers || []).map((r) => r.login);
+                const reviewersPart = reviewerNames.length > 0
+                  ? `\n🧑‍💻 Já revisaram: ${reviewerNames.map((name) => safe(name)).join(', ')}`
+                  : '';
                 reportLines.push(
                   `• *#${pr.number}* ${safe(pr.title)} — ${safe(pr.author)}${labelsPart} — 🔎 Etapa ${pr.stage}`,
-                  `🔗 ${pr.url}`,
+                  `🔗 ${pr.url}${reviewersPart}`,
                   ''
                 );
               }
@@ -367,6 +358,6 @@ jobs:
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_FROM }}
-          to: gianluccas54@gmail.com
+          to: ${{ env.CONTRIBUTOR_EMAILS }}
           subject: "Relatório automático de PRs e Kanban - ${{ github.repository }}"
           body: ${{ steps.gerar_relatorio.outputs.report_body }}
