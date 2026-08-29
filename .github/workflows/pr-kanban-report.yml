@@ -23,9 +23,6 @@ jobs:
         uses: actions/github-script@v8
         env:
           PROJECT_TITLE_CONTAINS: Kanban
-          STATUS_FIELD_NAME: Status
-          SPRINT_ATUAL_VALUE: Sprint Atual
-          EM_PROGRESSO_VALUE: Em Progresso
         with:
           script: |
             const owner = context.repo.owner;
@@ -33,9 +30,6 @@ jobs:
             const now = new Date();
 
             const projectTitleContains = process.env.PROJECT_TITLE_CONTAINS || 'Kanban';
-            const statusFieldName = process.env.STATUS_FIELD_NAME || 'Status';
-            const sprintAtualValue = process.env.SPRINT_ATUAL_VALUE || 'Sprint Atual';
-            const emProgressoValue = process.env.EM_PROGRESSO_VALUE || 'Em Progresso';
             const normalize = (value) => (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
             const safe = (value) => String(value || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
@@ -111,18 +105,6 @@ jobs:
                                   blockedBy(first: 1) { totalCount }
                                 }
                               }
-                              fieldValues(first: 30) {
-                                nodes {
-                                  ... on ProjectV2ItemFieldSingleSelectValue {
-                                    name
-                                    field {
-                                      ... on ProjectV2SingleSelectField {
-                                        name
-                                      }
-                                    }
-                                  }
-                                }
-                              }
                             }
                             pageInfo { hasNextPage endCursor }
                           }
@@ -145,18 +127,6 @@ jobs:
                                   url
                                   state
                                   blockedBy(first: 1) { totalCount }
-                                }
-                              }
-                              fieldValues(first: 30) {
-                                nodes {
-                                  ... on ProjectV2ItemFieldSingleSelectValue {
-                                    name
-                                    field {
-                                      ... on ProjectV2SingleSelectField {
-                                        name
-                                      }
-                                    }
-                                  }
                                 }
                               }
                             }
@@ -189,16 +159,6 @@ jobs:
               }
 
               return { title: null, items };
-            }
-
-            function getStatusValue(item) {
-              for (const fieldValue of item.fieldValues?.nodes || []) {
-                const fieldName = fieldValue?.field?.name;
-                if (normalize(fieldName) === normalize(statusFieldName)) {
-                  return fieldValue.name;
-                }
-              }
-              return null;
             }
 
             function getReviewStatus(reviews) {
@@ -262,27 +222,17 @@ jobs:
               kanbanWarning = `Falha ao ler dados do Kanban: ${error.message}`;
             }
 
-            const sprintAtualIssues = [];
-            const emProgressoIssues = [];
+            const openIssuesWithoutBlocks = [];
 
             for (const item of projectItemData.items) {
               const content = item.content;
               if (!content || content.__typename !== 'Issue') continue;
               if (content.state !== 'OPEN') continue;
 
-              const statusValue = getStatusValue(item);
-              if (!statusValue) continue;
-
-              if (normalize(statusValue) === normalize(sprintAtualValue)) {
-                sprintAtualIssues.push(content);
-              }
-
-              if (normalize(statusValue) === normalize(emProgressoValue)) {
-                emProgressoIssues.push(content);
+              if ((content.blockedBy?.totalCount || 0) === 0) {
+                openIssuesWithoutBlocks.push(content);
               }
             }
-
-            const sprintAtualSemBloqueio = sprintAtualIssues.filter((issue) => (issue.blockedBy?.totalCount || 0) === 0);
 
             const openPrs = await github.paginate(github.rest.pulls.list, {
               owner,
@@ -313,53 +263,54 @@ jobs:
                 }),
               ]);
 
-              const createdAt = new Date(pr.created_at);
-              const ageDays = Math.floor((now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
-
               prDetails.push({
                 number: pr.number,
                 title: pr.title,
                 url: pr.html_url,
                 author: pr.user?.login || 'unknown',
-                labels: (pr.labels || []).map((label) => label.name).join(', ') || '-',
-                ageDays,
-                reviewStatus: getReviewStatus(reviews),
-                ciStatus: getChecksStatus(checkRuns.data, combinedStatus.data),
+                labels: (pr.labels || []).map((label) => label.name).join(', '),
+                stage: getReviewStatus(reviews) === 'approved' && getChecksStatus(checkRuns.data, combinedStatus.data) === 'success'
+                  ? 'Merge'
+                  : 'Review',
               });
             }
 
             const generatedAt = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-            const projectTitle = projectItemData.title || selectedProject?.title || '-';
-
             const reportLines = [
-              `## 📊 Relatório automático de PRs e Kanban`,
+              `📋 *Pull Requests*`,
               ``,
-              `**Gerado em:** ${generatedAt} (America/Sao_Paulo)`,
-              ``,
-              `### Kanban`,
-              `- Projeto: **${safe(projectTitle)}**`,
-              `- Issues em **${safe(sprintAtualValue)}** sem bloqueio: **${sprintAtualSemBloqueio.length}**`,
-              `- Issues em **${safe(emProgressoValue)}**: **${emProgressoIssues.length}**`,
             ];
 
             if (kanbanWarning) {
-              reportLines.push(`- ⚠️ ${safe(kanbanWarning)}`);
+              reportLines.push(`⚠️ ${safe(kanbanWarning)}`, ``);
             }
-
-            reportLines.push('', '### PRs ativas', `- Total de PRs abertas: **${prDetails.length}**`, '');
 
             if (prDetails.length === 0) {
               reportLines.push('Nenhuma PR ativa no momento.');
             } else {
-              reportLines.push('| PR | Autor | Labels | Idade (dias) | Review | CI/Checks |');
-              reportLines.push('| --- | --- | --- | ---: | --- | --- |');
-
               for (const pr of prDetails) {
+                const labelsPart = pr.labels ? ` *(${safe(pr.labels)})*` : '';
                 reportLines.push(
-                  `| [#${pr.number} - ${safe(pr.title)}](${pr.url}) | ${safe(pr.author)} | ${safe(pr.labels)} | ${pr.ageDays} | ${safe(pr.reviewStatus)} | ${safe(pr.ciStatus)} |`
+                  `• *#${pr.number}* ${safe(pr.title)} — ${safe(pr.author)}${labelsPart} — 🔎 Etapa ${pr.stage}`,
+                  `🔗 ${pr.url}`,
+                  ''
                 );
               }
             }
+
+            reportLines.push('', '🐛 *Issues abertas sem bloqueio*', '');
+
+            if (openIssuesWithoutBlocks.length === 0) {
+              reportLines.push('Nenhuma issue aberta sem bloqueio encontrada.');
+            } else {
+              openIssuesWithoutBlocks
+                .sort((a, b) => a.number - b.number)
+                .forEach((issue, index) => {
+                  reportLines.push(`${index + 1}. *#${issue.number}* ${safe(issue.title)} — 🔗 ${issue.url}`);
+                });
+            }
+
+            reportLines.push('', `Gerado em: ${generatedAt} (America/Sao_Paulo)`);
 
             const reportBody = reportLines.join('\n');
 
