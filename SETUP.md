@@ -170,8 +170,7 @@ docker compose up -d --build  # reproduz o ambiente do zero (após down -v)
 - `down` sem `-v` preserva o volume `postgres_data`: Cadastros criados via
   `/api/auth/register` continuam no banco após `down` + `up -d`.
 - `down -v` remove `postgres_data`: o banco volta vazio; o seed
-  `teste@flicker.local` (senha em texto puro, incompatível com `bcrypt.compare`)
-  e qualquer Cadastro somem.
+  `teste@flicker.local` (senha já hashada com `bcrypt`) e qualquer Cadastro somem.
 - `up -d --build` após `down -v` recompila as imagens (`lobby-server`,
   `game-server`, `db-migrate`, `nginx`) e recria o volume limpo — fluxo
   reproduzível para um novo dev.
@@ -222,9 +221,10 @@ curl -i http://localhost:8080/api/auth/me -H 'cookie: access_token=<valor>; refr
 # esperado: HTTP/1.1 200 + Jogador (quando Sessão válida); 401 quando ausente/expirada
 ```
 
-> Nota: o seed `teste@flicker.local` grava senha em texto puro e não é
-> compatível com `bcrypt.compare`; use sempre um Cadastro criado via
-> `/api/auth/register` para o smoke. Dívida da issue #24 (ST-04).
+> Nota: o seed `teste@flicker.local` grava a senha já hashada via `bcrypt`
+> (`senha_development_123` com 10 salt rounds), compatível com `bcrypt.compare`.
+> Ainda assim, o smoke usa Cadastros criados via `/api/auth/register` para
+> exercitar os fluxos reais de registro e login.
 
 **3. Persistência — `down` sem `-v` vs `restart`**
 
