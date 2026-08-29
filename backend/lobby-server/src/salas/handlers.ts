@@ -84,7 +84,7 @@ import {
 import { SalasReconexao, JANELA_RECONEXAO_SEGUNDOS } from './reconexao.ts';
 import { getConfig } from '@flicker/config';
 import type { AuthenticatedWebSocket } from '../ws/ws.ts';
-import { listarGameServersDisponiveis as listarGameServersShared } from '@flicker/shared';
+import { listarGameServersDisponiveis as listarGameServersShared } from '@flicker/shared/server';
 import type { Redis } from 'ioredis';
 import { redisClient as defaultRedis } from '../config/redis.ts';
 
