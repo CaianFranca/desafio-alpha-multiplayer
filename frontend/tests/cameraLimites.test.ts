@@ -9,7 +9,8 @@ import {
   calcularDistanciaMin,
   calcularDistanciaMax,
   clampDistancia,
-  reclampAlvoAposZoom,
+  aspectoSeguro,
+  resolverAltura,
 } from '../web/src/game/ambiente/cameraLimites'
 import {
   FOV_CAMERA,
@@ -25,7 +26,7 @@ describe('cameraLimites — limiar de arrasto', () => {
   })
 
   it('não atinge limiar abaixo de 6px', () => {
-    expect(atingiuLimiar(3, 4)).toBe(false) // 5 < 6
+    expect(atingiuLimiar(3, 4)).toBe(false)
     expect(atingiuLimiar(5, 0)).toBe(false)
     expect(atingiuLimiar(0, 0)).toBe(false)
   })
@@ -33,8 +34,7 @@ describe('cameraLimites — limiar de arrasto', () => {
   it('atinge limiar exatamente em 6px', () => {
     expect(atingiuLimiar(6, 0)).toBe(true)
     expect(atingiuLimiar(0, 6)).toBe(true)
-    expect(atingiuLimiar(3, 4) === false).toBe(true) // sanidade: 5 ainda é false
-    // 6 no hipot: 6 / sqrt(2) ≈ 4.2426
+    expect(atingiuLimiar(3, 4) === false).toBe(true)
     const c = 6 / Math.SQRT2
     expect(atingiuLimiar(c, c)).toBe(true)
   })
@@ -45,7 +45,6 @@ describe('cameraLimites — limiar de arrasto', () => {
   })
 
   it('preserva clique: deslocamento pequeno não deve ser considerado arrasto', () => {
-    // simula click sem arrasto
     const dx = 2
     const dy = 2
     expect(atingiuLimiar(dx, dy)).toBe(false)
@@ -86,11 +85,27 @@ describe('cameraLimites — conversão px→mundo', () => {
   })
 })
 
+describe('cameraLimites — helpers determinísticos', () => {
+  it('aspectoSeguro retorna aspecto válido e 1 para inválidos', () => {
+    expect(aspectoSeguro(16 / 9)).toBeCloseTo(16 / 9)
+    expect(aspectoSeguro(0)).toBe(1)
+    expect(aspectoSeguro(-1)).toBe(1)
+    expect(aspectoSeguro(Number.NaN)).toBe(1)
+    expect(aspectoSeguro(Number.POSITIVE_INFINITY)).toBe(1)
+  })
+
+  it('resolverAltura prioriza size, depois canvas, depois 1', () => {
+    expect(resolverAltura(600, 500)).toBe(600)
+    expect(resolverAltura(0, 500)).toBe(500)
+    expect(resolverAltura(0, 0)).toBe(1)
+    expect(resolverAltura(-10, 0)).toBe(1)
+  })
+})
+
 describe('cameraLimites — limites de pan (FOV + aspect)', () => {
   it('clampAlvo dentro dos limites não altera', () => {
     const dist = calcularDistanciaMin()
     const aspect = 16 / 9
-    // com dist min, maxPan é pequeno; centro permanece
     const alvo = { x: 0, z: 0 }
     expect(clampAlvo(alvo, dist, FOV_CAMERA, aspect)).toEqual({ x: 0, z: 0 })
   })
@@ -114,36 +129,28 @@ describe('cameraLimites — limites de pan (FOV + aspect)', () => {
     const aspect = 1.5
     const c1 = clampAlvo({ x: 999, z: 999 }, distMin, FOV_CAMERA, aspect)
     const c2 = clampAlvo({ x: 999, z: 999 }, distMax, FOV_CAMERA, aspect)
-    // com zoom in, deve permitir mais pan
     expect(Math.abs(c2.x)).toBeGreaterThanOrEqual(Math.abs(c1.x))
     expect(Math.abs(c2.z)).toBeGreaterThanOrEqual(Math.abs(c1.z))
   })
 
   it('quando frustum maior que Mesa, maxPan é zero (sem pan)', () => {
-    // força distância muito grande para half > mesa/2
     const distGrande = 100
     const clamp = clampAlvo({ x: 5, z: 5 }, distGrande, FOV_CAMERA, 1)
     expect(clamp).toEqual({ x: 0, z: 0 })
   })
 
-  it('aspect zero faz fallback para window (jsdom)', () => {
-    const originalInnerWidth = window.innerWidth
-    const originalInnerHeight = window.innerHeight
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 800 })
-    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 600 })
+  it('aspect zero faz fallback determinístico para 1', () => {
     const dist = calcularDistanciaMin()
-    const fallbackAspect = 800 / 600
     const clampZero = clampAlvo({ x: 999, z: 999 }, dist, FOV_CAMERA, 0)
-    const clampFallback = clampAlvo({ x: 999, z: 999 }, dist, FOV_CAMERA, fallbackAspect)
-    expect(clampZero).toEqual(clampFallback)
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: originalInnerWidth })
-    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: originalInnerHeight })
+    const clampUm = clampAlvo({ x: 999, z: 999 }, dist, FOV_CAMERA, 1)
+    expect(clampZero).toEqual(clampUm)
   })
 
-  it('aspect NaN também faz fallback', () => {
+  it('aspect NaN também faz fallback para 1', () => {
     const dist = calcularDistanciaMin()
     const cNaN = clampAlvo({ x: 1, z: 1 }, dist, FOV_CAMERA, Number.NaN)
-    // não deve lançar e deve clampar para dentro de [0,0] se frustum grande
+    const cUm = clampAlvo({ x: 1, z: 1 }, dist, FOV_CAMERA, 1)
+    expect(cNaN).toEqual(cUm)
     expect(typeof cNaN.x).toBe('number')
     expect(typeof cNaN.z).toBe('number')
   })
@@ -177,7 +184,6 @@ describe('cameraLimites — zoom e clamp de distância', () => {
     const min = calcularDistanciaMin()
     const maxTeorico = calcularDistanciaMax(min)
     const minAltDist = (ESPESSURA_MESA / 2 + 0.5) * Math.SQRT2
-    // tenta forçar distância muito próxima
     const clamped = clampDistancia(0.1, min, maxTeorico)
     const altura = clamped / Math.SQRT2
     expect(altura).toBeGreaterThan(ESPESSURA_MESA / 2 + 0.5)
@@ -190,17 +196,14 @@ describe('cameraLimites — zoom e clamp de distância', () => {
 })
 
 describe('cameraLimites — re-clamp pós-zoom', () => {
-  it('após zoom-out, alvo fora do novo limite é re-clampado', () => {
+  it('após zoom-out, alvo fora do novo limite é re-clampado via clampAlvo', () => {
     const min = calcularDistanciaMin()
     const max = calcularDistanciaMax(min)
     const aspect = 1
-    // com zoom in, permite pan maior
     const alvoZoomIn = clampAlvo({ x: 4, z: 4 }, max, FOV_CAMERA, aspect)
-    // se alvoZoomIn foi clampado dentro do zoom in, ao voltar para min deve ser re-clampado
-    const reClamp = reclampAlvoAposZoom(alvoZoomIn, min, FOV_CAMERA, aspect)
+    const reClamp = clampAlvo(alvoZoomIn, min, FOV_CAMERA, aspect)
     const direto = clampAlvo(alvoZoomIn, min, FOV_CAMERA, aspect)
     expect(reClamp).toEqual(direto)
-    // e o re-clamp deve ser <= limite do zoom out (geralmente 0)
     const maxPanMin = Math.max(0, LARGURA_MESA / 2 - Math.tan((FOV_CAMERA * Math.PI) / 360) * min * aspect)
     expect(Math.abs(reClamp.x)).toBeLessThanOrEqual(maxPanMin + 1e-9)
   })
@@ -209,6 +212,6 @@ describe('cameraLimites — re-clamp pós-zoom', () => {
     const min = calcularDistanciaMin()
     const max = calcularDistanciaMax(min)
     const alvo = { x: 0, z: 0 }
-    expect(reclampAlvoAposZoom(alvo, max, FOV_CAMERA, 1)).toEqual(alvo)
+    expect(clampAlvo(alvo, max, FOV_CAMERA, 1)).toEqual(alvo)
   })
 })
