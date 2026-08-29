@@ -78,7 +78,8 @@ function resolverWsUrl(): string {
   if (host.includes(DEV_FRONTEND_PORT_SUBSTRING)) {
     return `${protocol}//${window.location.hostname}:${DEFAULT_LOBBY_WS_PORT}`
   }
-  return `${protocol}//${host}`
+  // Atrás do nginx (infra/nginx/nginx.conf), o upgrade de WS acontece em /ws/lobby.
+  return `${protocol}//${host}/ws/lobby`
 }
 
 function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null): string | null {
