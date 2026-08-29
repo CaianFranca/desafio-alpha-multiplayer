@@ -10,7 +10,6 @@ import {
   clampDistancia,
   aspectoVisivel,
   resolverAltura,
-  getBordaMolduraPxViaEstilo,
   calcularFatorPinch,
   distanciaPinch,
   poseCamera,
@@ -21,7 +20,16 @@ import {
 import type { AlvoXZ, EstadoDrag, EstadoPinch } from '../../game/ambiente/cameraLimites'
 import { FOV_CAMERA } from '../../game/ambiente/contrato'
 
-export function useCameraInterativa(): void {
+interface UseCameraInterativaOptions {
+  /** Largura da borda da moldura em px (medida via PartidaMoldura). */
+  bordaPx?: number
+}
+
+/**
+ * Hook de câmera interativa: arrasto (pan), zoom (wheel/pinch) e correção de aspect.
+ * Recebe bordaPx desacoplado (sem querySelector) para cálculo de aspecto visível.
+ */
+export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions = {}): void {
   const { camera, gl, size, invalidate } = useThree()
   const { width, height } = size
 
@@ -34,24 +42,8 @@ export function useCameraInterativa(): void {
 
   const ponteirosRef = useRef<Map<number, { x: number; y: number }>>(new Map())
 
-  function getBordaPx(): number {
-    const el = document.querySelector('[data-testid="partida-moldura"]')
-    if (!el) return 0
-    const v = getComputedStyle(el).borderTopWidth
-    const parsed = getBordaMolduraPxViaEstilo(v)
-    if (parsed > 0) return parsed
-    // Fallback: implementação atual de PartidaMoldura tem a borda no filho interno
-    const inner = el.querySelector('div')
-    if (inner) {
-      const vi = getComputedStyle(inner).borderTopWidth
-      return getBordaMolduraPxViaEstilo(vi)
-    }
-    return 0
-  }
-
   function getAspectVis(): number {
-    const b = getBordaPx()
-    return aspectoVisivel({ width, height }, b)
+    return aspectoVisivel({ width, height }, bordaPx)
   }
 
   function aplicarAlvoClampado(alvo: AlvoXZ, dist: number): void {
@@ -77,7 +69,7 @@ export function useCameraInterativa(): void {
       invalidate()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width, height, invalidate])
+  }, [width, height, bordaPx, invalidate])
 
   /* eslint-disable react-hooks/immutability -- mutação de câmera R3F é intencional */
   useFrame(() => {
@@ -122,7 +114,7 @@ export function useCameraInterativa(): void {
         pinchRef.current = {
           ativo: true,
           distInicial: d > 0 ? d : 1,
-          distanciaInicial: distanciaRef.current,
+          distanciaInicial: d > 0 ? d : 1,
         }
         dragRef.current.ativo = false
         dragRef.current.engatado = false
@@ -255,10 +247,17 @@ export function useCameraInterativa(): void {
       }
     }
 
+    function onBlur(): void {
+      ponteirosRef.current.clear()
+      dragRef.current = criarDragInicial()
+      pinchRef.current = criarPinchInicial()
+    }
+
     alvoEl.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', onPointerUp)
     window.addEventListener('pointercancel', onPointerCancel)
+    window.addEventListener('blur', onBlur)
     alvoEl.addEventListener('wheel', onWheel, { passive: false })
     alvoEl.addEventListener('click', onClickCapture, true)
 
@@ -267,10 +266,11 @@ export function useCameraInterativa(): void {
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerCancel)
+      window.removeEventListener('blur', onBlur)
       alvoEl.removeEventListener('wheel', onWheel)
       alvoEl.removeEventListener('click', onClickCapture, true)
     }
-    // getAspectVis e aplicarAlvoClampado são estáveis via width/height já listados
+    // getAspectVis e aplicarAlvoClampado são estáveis via width/height/bordaPx já listados
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camera, gl, invalidate, width, height])
+  }, [camera, gl, invalidate, width, height, bordaPx])
 }

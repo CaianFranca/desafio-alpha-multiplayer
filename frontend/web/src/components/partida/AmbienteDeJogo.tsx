@@ -10,12 +10,20 @@ import { useCameraInterativa } from './useCameraInterativa'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
-function CameraRig() {
-  useCameraInterativa()
+interface CameraRigProps {
+  bordaPx?: number
+}
+
+function CameraRig({ bordaPx = 0 }: CameraRigProps) {
+  useCameraInterativa({ bordaPx })
   return null
 }
 
-export function AmbienteDeJogo() {
+interface AmbienteDeJogoProps {
+  bordaPx?: number
+}
+
+export function AmbienteDeJogo({ bordaPx = 0 }: AmbienteDeJogoProps) {
   return (
     <div
       data-testid="ambiente-de-jogo"
@@ -38,7 +46,7 @@ export function AmbienteDeJogo() {
           />
         }
       >
-        <CameraRig />
+        <CameraRig bordaPx={bordaPx} />
         <AmbienteCena />
       </Canvas>
     </div>

@@ -3,7 +3,6 @@ import {
   LARGURA_MESA,
   PROFUNDIDADE_MESA,
   FOV_CAMERA,
-  MARGEM_ENQUADRAMENTO,
   componenteInclinacao45,
   distanciaParaEnquadrar,
   tangenteMeioFov,
@@ -12,6 +11,12 @@ import {
 export const LIMIAR_ARRASTO_PX = 6
 export const FATOR_ZOOM_MAX = 2.8
 export const SENSIBILIDADE_WHEEL = 0.002
+
+/** Margem da câmera interativa: >1 para deixar respiro entre borda da Mesa e frustum. */
+export const MARGEM_CAMERA_INTERATIVA = 1.05
+
+/** Fator de inclinação 45°: projeção do movimento vertical da tela no eixo Z do mundo. */
+export const FATOR_INCLINACAO = Math.SQRT2
 
 export const ALTURA_MINIMA_ACIMA_MESA = ESPESSURA_MESA / 2 + 0.5
 export const DISTANCIA_MINIMA_POR_ALTURA = ALTURA_MINIMA_ACIMA_MESA * Math.SQRT2
@@ -35,7 +40,7 @@ export function panDeltaToWorld(
   clientHeight: number,
 ): AlvoXZ {
   const wpp = worldPerPixel(fovGraus, distancia, clientHeight)
-  return { x: -dxPx * wpp, z: -dyPx * wpp }
+  return { x: -dxPx * wpp, z: -dyPx * wpp * FATOR_INCLINACAO }
 }
 
 export function aspectoSeguro(aspect: number): number {
@@ -99,24 +104,32 @@ export function clampAlvo(
   aspect: number,
 ): AlvoXZ {
   const safeAspect = aspectoSeguro(aspect)
-  const halfHeight = tangenteMeioFov(fovGraus) * distancia
-  const halfWidth = halfHeight * safeAspect
-  const maxPanX = Math.max(0, LARGURA_MESA / 2 - halfWidth)
-  const maxPanZ = Math.max(0, PROFUNDIDADE_MESA / 2 - halfHeight)
+  const halfHeightVis = tangenteMeioFov(fovGraus) * distancia
+  const halfWidthVis = halfHeightVis * safeAspect
+  const maxPanX = Math.max(0, LARGURA_MESA / 2 - halfWidthVis)
+  const maxPanZ = Math.max(0, PROFUNDIDADE_MESA / 2 - halfHeightVis * FATOR_INCLINACAO)
   return {
     x: Math.max(-maxPanX, Math.min(maxPanX, alvo.x)),
     z: Math.max(-maxPanZ, Math.min(maxPanZ, alvo.z)),
   }
 }
 
+/**
+ * Distância mínima (mais afastada) que ainda enquadra a Mesa com a margem interativa.
+ * @param aspectVisivel - aspect da área visível (descontada a borda da moldura)
+ */
 export function calcularDistanciaMin(aspectVisivel?: number): number {
   const halfTan = tangenteMeioFov(FOV_CAMERA)
-  const distH = distanciaParaEnquadrar(PROFUNDIDADE_MESA / 2, MARGEM_ENQUADRAMENTO, FOV_CAMERA)
+  const distH = distanciaParaEnquadrar(PROFUNDIDADE_MESA / 2, MARGEM_CAMERA_INTERATIVA, FOV_CAMERA)
   const aspect = aspectoSeguro(aspectVisivel ?? 1)
-  const distW = (LARGURA_MESA / 2 * MARGEM_ENQUADRAMENTO) / (halfTan * aspect)
+  const distW = (LARGURA_MESA / 2 * MARGEM_CAMERA_INTERATIVA) / (halfTan * aspect)
   return Math.max(distH, distW)
 }
 
+/**
+ * Distância máxima teórica (mais próxima) derivada da mínima e do fator de zoom.
+ * @param distanciaMin - valor retornado por calcularDistanciaMin
+ */
 export function calcularDistanciaMax(distanciaMin: number): number {
   return distanciaMin / FATOR_ZOOM_MAX
 }
@@ -168,8 +181,14 @@ export const criarDragInicial = (): EstadoDrag => ({
   engatado: false,
 })
 
+/**
+ * Estado do gesto de pinça (pinch) para zoom.
+ * @property distInicial - alias de distanciaInicial (mantido por compatibilidade)
+ * @property distanciaInicial - distância entre ponteiros no início do gesto; preferir este nome
+ */
 export interface EstadoPinch {
   ativo: boolean
+  /** @deprecated use distanciaInicial — mantido como alias */
   distInicial: number
   distanciaInicial: number
 }

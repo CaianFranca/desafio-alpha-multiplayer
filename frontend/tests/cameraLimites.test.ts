@@ -3,6 +3,8 @@ import {
   FATOR_ZOOM_MAX,
   SENSIBILIDADE_WHEEL,
   DISTANCIA_MINIMA_POR_ALTURA,
+  MARGEM_CAMERA_INTERATIVA,
+  FATOR_INCLINACAO,
   atingiuLimiar,
   worldPerPixel,
   panDeltaToWorld,
@@ -28,7 +30,6 @@ import {
   LARGURA_MESA,
   PROFUNDIDADE_MESA,
   ESPESSURA_MESA,
-  MARGEM_ENQUADRAMENTO,
   tangenteMeioFov,
   distanciaParaEnquadrar,
 } from '../web/src/game/ambiente/contrato'
@@ -87,14 +88,15 @@ describe('cameraLimites — conversão px→mundo', () => {
     expect(worldPerPixel(50, 10, 0)).toBe(0)
   })
 
-  it('panDeltaToWorld inverte X e Z (câmera por arrasto)', () => {
+  it('panDeltaToWorld inverte X e Z com fator 45° em Z', () => {
     const fov = 50
     const dist = 10
     const h = 600
     const wpp = worldPerPixel(fov, dist, h)
     const delta = panDeltaToWorld(10, 5, fov, dist, h)
     expect(delta.x).toBeCloseTo(-10 * wpp, 10)
-    expect(delta.z).toBeCloseTo(-5 * wpp, 10)
+    expect(delta.z).toBeCloseTo(-5 * wpp * FATOR_INCLINACAO, 10)
+    expect(FATOR_INCLINACAO).toBeCloseTo(Math.SQRT2, 10)
   })
 
   it('arrastar para direita move alvo para esquerda (X negativo)', () => {
@@ -212,13 +214,13 @@ describe('cameraLimites — limites de pan (FOV + aspect)', () => {
     expect(clampAlvo(alvo, dist, FOV_CAMERA, aspect)).toEqual({ x: 0, z: 0 })
   })
 
-  it('clampAlvo restringe X e Z quando fora', () => {
+  it('clampAlvo restringe X e Z quando fora (Z com fator 45°)', () => {
     const dist = calcularDistanciaMin()
     const aspect = 1
     const halfH = Math.tan((FOV_CAMERA * Math.PI) / 360) * dist
     const halfW = halfH * aspect
     const maxX = Math.max(0, LARGURA_MESA / 2 - halfW)
-    const maxZ = Math.max(0, PROFUNDIDADE_MESA / 2 - halfH)
+    const maxZ = Math.max(0, PROFUNDIDADE_MESA / 2 - halfH * FATOR_INCLINACAO)
     const fora = { x: 100, z: -100 }
     const clamp = clampAlvo(fora, dist, FOV_CAMERA, aspect)
     expect(clamp.x).toBeCloseTo(maxX, 6)
@@ -278,9 +280,10 @@ describe('cameraLimites — zoom e clamp de distância', () => {
     expect(FATOR_ZOOM_MAX).toBe(2.8)
   })
 
-  it('calcularDistanciaMin usa MARGEM_ENQUADRAMENTO 0.8 e max(eixoH,eixoW)', () => {
+  it('calcularDistanciaMin usa MARGEM_CAMERA_INTERATIVA 1.05 e max(eixoH,eixoW)', () => {
     const meiaMaior = Math.max(LARGURA_MESA, PROFUNDIDADE_MESA) / 2
-    const esperado = (meiaMaior * MARGEM_ENQUADRAMENTO) / Math.tan((FOV_CAMERA * Math.PI) / 360)
+    const esperado = (meiaMaior * MARGEM_CAMERA_INTERATIVA) / Math.tan((FOV_CAMERA * Math.PI) / 360)
+    expect(MARGEM_CAMERA_INTERATIVA).toBe(1.05)
     expect(calcularDistanciaMin()).toBeCloseTo(esperado, 10)
     expect(calcularDistanciaMin(1)).toBeCloseTo(esperado, 10)
   })
@@ -293,8 +296,8 @@ describe('cameraLimites — zoom e clamp de distância', () => {
     expect(dLandscape).toBeCloseTo(dSquare, 10)
     expect(dPortrait).toBeGreaterThan(dSquare)
     const halfTan = tangenteMeioFov(FOV_CAMERA)
-    const distH = (PROFUNDIDADE_MESA / 2 * MARGEM_ENQUADRAMENTO) / halfTan
-    const distWPortrait = (LARGURA_MESA / 2 * MARGEM_ENQUADRAMENTO) / (halfTan * 0.5)
+    const distH = (PROFUNDIDADE_MESA / 2 * MARGEM_CAMERA_INTERATIVA) / halfTan
+    const distWPortrait = (LARGURA_MESA / 2 * MARGEM_CAMERA_INTERATIVA) / (halfTan * 0.5)
     expect(dPortrait).toBeCloseTo(Math.max(distH, distWPortrait), 10)
   })
 
@@ -376,16 +379,23 @@ describe('cameraLimites — re-clamp pós-zoom', () => {
     expect(clampAlvo(alvo, max, FOV_CAMERA, 1)).toEqual(alvo)
   })
 
-  it('re-clamp diferencial: portrait vs landscape dão limites distintos', () => {
-    const dLandscape = calcularDistanciaMin(16 / 9)
-    const dPortrait = calcularDistanciaMin(0.5)
+  it('re-clamp diferencial: portrait vs landscape dão limites distintos em zoom fechado', () => {
+    const dLandscapeMin = calcularDistanciaMin(16 / 9)
+    const dPortraitMin = calcularDistanciaMin(0.5)
+    const dLandscape = calcularDistanciaMax(dLandscapeMin)
+    const dPortrait = calcularDistanciaMax(dPortraitMin)
     const alvo = { x: 5, z: 5 }
     const cLand = clampAlvo(alvo, dLandscape, FOV_CAMERA, 16 / 9)
     const cPort = clampAlvo(alvo, dPortrait, FOV_CAMERA, 0.5)
-    // landscape largo com distância menor → halfWidth grande → X travado; portrait estreito com distância maior → Z travado
-    expect(Math.abs(cLand.x)).toBeLessThanOrEqual(Math.abs(cPort.x) + 1e-9)
-    expect(Math.abs(cPort.z)).toBeLessThanOrEqual(Math.abs(cLand.z) + 1e-9)
+    // em distância mínima (longe, margem 1.05) ambos zeram; em zoom fechado o espaço para pan difere por orientação
+    const cLandMin = clampAlvo(alvo, dLandscapeMin, FOV_CAMERA, 16 / 9)
+    const cPortMin = clampAlvo(alvo, dPortraitMin, FOV_CAMERA, 0.5)
+    expect(cLandMin).toEqual({ x: 0, z: 0 })
+    expect(cPortMin).toEqual({ x: 0, z: 0 })
+    // zoom fechado libera pan e resulta em limites distintos
     expect(cLand.x !== cPort.x || cLand.z !== cPort.z).toBe(true)
+    expect(Math.abs(cLand.x) + Math.abs(cLand.z)).toBeGreaterThan(0)
+    expect(Math.abs(cPort.x) + Math.abs(cPort.z)).toBeGreaterThan(0)
   })
 })
 
