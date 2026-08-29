@@ -14,7 +14,7 @@
 
 import type { Redis } from 'ioredis';
 import type { Sala as SalaDominio } from '@flicker/engine';
-import type { MensagemDeChatEvento } from '@flicker/shared';
+import type { EncaminhamentoDaSala, MensagemDeChatEvento } from '@flicker/shared';
 import { redisClient as defaultRedis } from '../config/redis.ts';
 
 const PROJECAO_TTL_SEGUNDOS = 3600;
@@ -44,7 +44,7 @@ export interface SalaEstadoProjecao {
   readonly proximaOrdemDeEntrada: number;
   readonly consistente: boolean;
   readonly membros: readonly MembroEstadoProjecao[];
-  readonly encaminhamento?: { serverId: string; partidaId: string };
+  readonly encaminhamento?: EncaminhamentoDaSala;
 }
 
 function chaveSalaEstado(salaId: string): string {
@@ -72,7 +72,7 @@ export function chaveJogadorSala(jogadorId: string): string {
  */
 export function serializarSala(
   sala: SalaDominio,
-  encaminhamento?: { serverId: string; partidaId: string },
+  encaminhamento?: EncaminhamentoDaSala,
 ): SalaEstadoProjecao {
   const membros: MembroEstadoProjecao[] = sala.membros
     .filter((m) => m.estado === 'ativo')

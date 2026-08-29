@@ -40,6 +40,7 @@ import type {
   ProntidaoAtualizadaEvento,
 } from '@flicker/shared';
 import type {
+  EncaminhamentoDaSala,
   EncaminhamentoEventoDoServidor,
   PartidaPreparandoEvento,
   PartidaDisponivelEvento,
@@ -91,7 +92,7 @@ export function mapearSala(
   sala: SalaDominio,
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
-  encaminhamento?: { serverId: string; partidaId: string },
+  encaminhamento?: EncaminhamentoDaSala,
 ): Sala {
   const base: Sala = {
     id: sala.id,
@@ -121,7 +122,7 @@ export function salaAtualizada(
   sala: SalaDominio,
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
-  encaminhamento?: { serverId: string; partidaId: string },
+  encaminhamento?: EncaminhamentoDaSala,
 ): SalaAtualizadaEvento {
   return { type: 'SALA_ATUALIZADA', sala: mapearSala(sala, apelidoPorJogadorId, linkBase, encaminhamento) };
 }
@@ -142,7 +143,7 @@ export function traduzirEventos(
   estado: EstadoDoLobby,
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
-  encaminhamentoPorSalaId?: ReadonlyMap<string, { serverId: string; partidaId: string }>,
+  encaminhamentoPorSalaId?: ReadonlyMap<string, EncaminhamentoDaSala>,
 ): readonly (SalaEventoDoServidor | EncaminhamentoEventoDoServidor)[] {
   const saida: (SalaEventoDoServidor | EncaminhamentoEventoDoServidor)[] = [];
 

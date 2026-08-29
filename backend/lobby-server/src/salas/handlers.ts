@@ -44,6 +44,7 @@ import type {
   PartidaRecusadaEvento,
   PartidaFalhouEvento,
   MembroDaSala,
+  EncaminhamentoDaSala,
   CodigoDeErroDoEncaminhamento,
 } from '@flicker/shared';
 import {
@@ -1422,7 +1423,7 @@ export class SalasHandlers {
       this.limparTimer(salaId!, membroAtual.id);
       this.broadcast.registrarSocket(jogadorId, salaId!, socket);
       // B1: snapshot de reconexão deve incluir redirect se sala está encaminhada
-      let encMap: Map<string, { serverId: string; partidaId: string }> | undefined;
+      let encMap: Map<string, EncaminhamentoDaSala> | undefined;
       const salaApos = resultado.estado.salas.find((s) => s.id === salaId!);
       if (salaApos?.estado === 'encaminhada') {
         const proj = await this.projecao.obterEstadoSala(salaId!).catch(() => null);
@@ -1590,7 +1591,7 @@ export class SalasHandlers {
   private async atualizarProjecaoEstado(
     estado: EstadoDoLobby,
     salaId: string,
-    encaminhamentoOverride?: { serverId: string; partidaId: string },
+    encaminhamentoOverride?: EncaminhamentoDaSala,
   ): Promise<void> {
     const sala = estado.salas.find((s) => s.id === salaId);
     if (sala === undefined) {

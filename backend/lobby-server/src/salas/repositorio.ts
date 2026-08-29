@@ -9,6 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
+import type { EncaminhamentoDaSala } from '@flicker/shared';
 import { pool as defaultPool } from '../config/pg.ts';
 
 export type MotivoDeTermino = 'saida' | 'expulsao' | 'expiracao' | 'encerramento';
@@ -26,10 +27,7 @@ export interface SalaAtiva extends SalaAberta {
   readonly partidaId: string | null;
 }
 
-export interface EncaminhamentoPersistido {
-  readonly serverId: string;
-  readonly partidaId: string;
-}
+export type EncaminhamentoPersistido = EncaminhamentoDaSala;
 
 export interface MembroPersistido {
   readonly jogadorId: string;
