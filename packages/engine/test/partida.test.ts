@@ -15,6 +15,9 @@ const selecionarPeca = (pecaId: string) =>
 const girarPeca = (pecaId: string) =>
   ({ tipo: 'girar_peca', pecaId, sentido: 'horario' } as const);
 
+const finalizarManipulacao = () =>
+  ({ tipo: 'finalizar_manipulacao' } as const);
+
 const posicionarPeca = (pecaId: string, linha: number, coluna: number) =>
   ({ tipo: 'posicionar_peca', pecaId, celula: { linha, coluna } } as const);
 
@@ -235,8 +238,11 @@ test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático 
   const encerramento = aplicarComandoDePartida(estado, encerrarTurno(), 'ana');
   assert.equal(encerramento.sucesso, true);
   if (!encerramento.sucesso) return;
+  // A última Recebida encaixada (reta-2) deixa a janela de Manipulação aberta;
+  // a Passagem de Vez a encerra antes do turno_iniciado.
   assert.deepEqual(encerramento.eventos, [
     { tipo: 'turno_encerrado', jogadorId: 'ana' },
+    { tipo: 'manipulacao_finalizada', pecaId: 'reta-2' },
     { tipo: 'turno_iniciado', jogadorId: 'bruno', rodada: 1 },
   ]);
   assert.equal(encerramento.estado.jogadorAtivoId, 'bruno');
@@ -249,6 +255,42 @@ test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático 
   assert.equal(bruno?.primeiroTurnoPendente, true);
   // Peão de bruno ainda sobre a Mesa: Peça do início do turno indefinida.
   assert.equal(encerramento.estado.pecaDoInicioDoTurnoId, null);
+});
+
+test('Passagem de Vez encerra a janela de Manipulação e veda o turno seguinte sobre ela', () => {
+  let estado = partidaIniciada();
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  estado = resolverRecebidas(estado, 'ana');
+
+  // A última Recebida encaixada (reta-2) deixa a janela de Manipulação aberta.
+  assert.equal(estado.tabuleiro.pecaEmManipulacaoId, 'reta-2');
+
+  const encerramento = aplicarComandoDePartida(estado, encerrarTurno(), 'ana');
+  assert.equal(encerramento.sucesso, true);
+  if (!encerramento.sucesso) return;
+  assert.deepEqual(encerramento.eventos, [
+    { tipo: 'turno_encerrado', jogadorId: 'ana' },
+    { tipo: 'manipulacao_finalizada', pecaId: 'reta-2' },
+    { tipo: 'turno_iniciado', jogadorId: 'bruno', rodada: 1 },
+  ]);
+  assert.equal(encerramento.estado.tabuleiro.pecaEmManipulacaoId, null);
+  assert.equal(encerramento.estado.tabuleiro.pecaSelecionadaId, null);
+
+  // O Jogador seguinte não manipula a Peça posicionada pelo anterior: girar
+  // ou finalizar sobre ela é MANIPULACAO_ENCERRADA, sem alterar o estado.
+  const novoTurno = encerramento.estado;
+  assert.equal(
+    codigoDaRejeicao(novoTurno, girarPeca('reta-2'), 'bruno'),
+    'MANIPULACAO_ENCERRADA',
+  );
+  assert.equal(
+    codigoDaRejeicao(novoTurno, finalizarManipulacao(), 'bruno'),
+    'MANIPULACAO_ENCERRADA',
+  );
+  assert.deepEqual(novoTurno, encerramento.estado);
 });
 
 test('PECA_INICIAL_INDISPONIVEL: só a própria inicial, e só no próprio Primeiro Turno', () => {
@@ -432,8 +474,11 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
   const encerramento = aplicarComandoDePartida(estado, encerrarTurno(), 'ana');
   assert.equal(encerramento.sucesso, true);
   if (!encerramento.sucesso) return;
+  // A Recebida encaixada (cruz-1) deixa a janela de Manipulação aberta; a
+  // Passagem de Vez a encerra antes do turno_iniciado.
   assert.deepEqual(encerramento.eventos, [
     { tipo: 'turno_encerrado', jogadorId: 'ana' },
+    { tipo: 'manipulacao_finalizada', pecaId: 'cruz-1' },
     { tipo: 'turno_iniciado', jogadorId: 'bruno', rodada: 2 },
   ]);
   assert.equal(encerramento.estado.jogadorAtivoId, 'bruno');

@@ -556,8 +556,11 @@ function encerrarTurnoDaPartida(
 // Avanço circular pela ordem de entrada: o próximo Jogador assume a vez e, ao
 // voltar ao primeiro, a rodada incrementa. A Peça do início do novo turno é a
 // Peça atual do Peão do próximo Jogador; a Confirmação é zerada e o Tabuleiro
-// é deixado sem Peão selecionado nem pendências (defensivo — os encerramentos
-// válidos já exigem zero pendências).
+// é deixado sem Seleção, sem janela de Manipulação, sem Peão selecionado nem
+// pendências (defensivo — os encerramentos válidos já exigem zero pendências).
+// A Passagem de Vez encerra a janela de Manipulação em aberto: o fechamento é
+// efeito do avanço, então o manipulacao_finalizada precede o turno_iniciado
+// (sem duplicar quando o fechamento já veio nos eventos do Tabuleiro).
 function avancarVez(
   estado: EstadoDaPartida,
   eventos: readonly EventoDaPartida[],
@@ -576,9 +579,24 @@ function avancarVez(
   const peaoDoProximo = estado.tabuleiro.peoes.find(
     (item) => item.peaoId === proximo.peaoId,
   );
+  const pecaEmManipulacaoId = estado.tabuleiro.pecaEmManipulacaoId;
+  const jaFinalizada =
+    pecaEmManipulacaoId !== null &&
+    eventos.some(
+      (evento) =>
+        evento.tipo === 'manipulacao_finalizada' &&
+        evento.pecaId === pecaEmManipulacaoId,
+    );
+  const fechamentoDaManipulacao: readonly EventoDaPartida[] =
+    pecaEmManipulacaoId !== null && !jaFinalizada
+      ? [{ tipo: 'manipulacao_finalizada', pecaId: pecaEmManipulacaoId }]
+      : [];
+
   const novoEstado: EstadoDaPartida = {
     tabuleiro: {
       ...estado.tabuleiro,
+      pecaSelecionadaId: null,
+      pecaEmManipulacaoId: null,
       peaoSelecionadoId: null,
       recebidas: [],
     },
@@ -590,6 +608,7 @@ function avancarVez(
   };
   return sucessoDaPartida(novoEstado, [
     ...eventos,
+    ...fechamentoDaManipulacao,
     { tipo: 'turno_iniciado', jogadorId: proximo.jogadorId, rodada },
   ]);
 }

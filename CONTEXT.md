@@ -147,7 +147,7 @@ Resultado do posicionamento: a peça assentada na célula, sem física ou colis�
 _Avoid_: snap, encaixe físico
 
 **Manipulação**:
-Janela após o encaixe em que a peça ainda pode ser girada na célula.
+Janela após o encaixe em que a peça ainda pode ser girada na célula; a janela também se encerra na Passagem de Vez.
 _Avoid_: ajuste, edição
 
 **Finalização**:
