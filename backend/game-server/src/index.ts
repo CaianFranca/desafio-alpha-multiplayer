@@ -4,6 +4,8 @@ import type { ServerId } from '@flicker/shared';
 import { createApp } from './app.ts';
 import { createWebSocketServer } from './ws/ws.ts';
 import { redisClient } from './config/redis.ts';
+import { TabuleiroBroadcaster } from './tabuleiro/broadcast.ts';
+import { TabuleiroHandlers } from './tabuleiro/handlers.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
 import {
   iniciarHeartbeat,
@@ -21,7 +23,12 @@ const app = createApp(contexto);
 
 const server = http.createServer(app);
 
-createWebSocketServer(server);
+const broadcaster = new TabuleiroBroadcaster();
+const handlers = new TabuleiroHandlers({ redis: redisClient, broadcaster });
+
+createWebSocketServer(server, {
+  tabuleiro: { redis: redisClient, broadcaster, handlers },
+});
 
 let heartbeatHandle: HeartbeatHandle | undefined;
 let registroRetry: NodeJS.Timeout | undefined;
