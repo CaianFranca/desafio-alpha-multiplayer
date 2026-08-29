@@ -84,6 +84,20 @@ function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null
   }
 }
 
+type EventoDeSalaComSala = Extract<SalaEventoDoServidor, { sala: Sala }>
+const EVENTOS_DE_SALA = new Set<SalaEventoDoServidor['type']>([
+  'SALA_ATUALIZADA',
+  'MEMBRO_ENTROU',
+  'MEMBRO_SAIU',
+  'MEMBRO_DESCONECTADO',
+  'MEMBRO_EXPULSO',
+  'ANFITRIAO_SUBSTITUIDO',
+  'PRONTIDAO_ATUALIZADA',
+])
+function isEventoDeSala(evento: SalaEventoDoServidor): evento is EventoDeSalaComSala {
+  return EVENTOS_DE_SALA.has(evento.type)
+}
+
 export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const [sala, setSala] = useState<Sala | null>(null)
   const [avisos, setAvisos] = useState<AvisoDoLobby[]>([])
@@ -169,21 +183,13 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         case 'MENSAGEM_DE_CHAT':
           // fora de escopo deste issue, mas preserva compatibilidade
           return
-        case 'SALA_ATUALIZADA':
-        case 'MEMBRO_ENTROU':
-        case 'MEMBRO_SAIU':
-        case 'MEMBRO_DESCONECTADO':
-        case 'MEMBRO_EXPULSO':
-        case 'ANFITRIAO_SUBSTITUIDO':
-        case 'PRONTIDAO_ATUALIZADA': {
-          // Todos carregam `sala` no payload: atualiza o estado e deriva o
-          // aviso único da mensagem (evita repetir o bloco por caso).
-          setSala(evento.sala)
-          const msg = mensagemDeAviso(evento, salaRef.current)
-          if (msg) adicionarAviso(msg, evento.type)
-          return
-        }
         default:
+          if (isEventoDeSala(evento)) {
+            setSala(evento.sala)
+            const msg = mensagemDeAviso(evento, salaRef.current)
+            if (msg) adicionarAviso(msg, evento.type)
+            return
+          }
           // Evento desconhecido: não mexe no estado (preserva a sala atual).
           return
       }

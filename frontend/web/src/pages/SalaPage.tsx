@@ -7,7 +7,7 @@ import { ListaDeMembros } from '../components/sala/ListaDeMembros'
 import { AvisosDoLobby } from '../components/sala/AvisosDoLobby'
 import { AuthContext } from '../state/auth-context'
 import { useSalaActions } from '../state/sala-actions-context'
-import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
+import { CODIGO_DE_SALA_TAMANHO, normalizarCodigoDeSala } from '../utils/codigoDeSala'
 
 export function SalaPage() {
   const { codigoDeSala: codigoParam } = useParams<{ codigoDeSala: string }>()
@@ -98,7 +98,7 @@ export function SalaPage() {
                         value={codigoInput}
                         onChange={(e) => setCodigoInput(e.target.value.toUpperCase())}
                         placeholder="Código de Sala"
-                        maxLength={6}
+                        maxLength={CODIGO_DE_SALA_TAMANHO}
                         className="flex-1 bg-[#1e1e1e] border border-white/15 px-3 py-2 text-sm tracking-[0.2em] uppercase text-white placeholder:text-white/30 focus:outline-none focus:border-[#c9a86a]"
                       />
                       <button

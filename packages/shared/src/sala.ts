@@ -12,7 +12,8 @@
 
 // --- Tipos base ---
 
-export type CodigoDeSala = string; // seis caracteres alfanuméricos maiúsculos
+export const CODIGO_DE_SALA_TAMANHO = 6
+export type CodigoDeSala = string; // seis caracteres alfanuméricos maiúsculos (ver CODIGO_DE_SALA_TAMANHO)
 
 /**
  * Presença do Membro no wire. Usa snake_case para literal composto ('em_reconexao'),
