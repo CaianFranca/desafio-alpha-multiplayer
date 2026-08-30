@@ -29,7 +29,7 @@ export const POSICAO_TABULEIRO: readonly [number, number, number] = [
 ]
 
 /** Reserva lateral: offset +X a partir do centro. */
-export const OFFSET_RESERVA_X = 6.5
+export const OFFSET_RESERVA_X = 8.0
 export const POSICAO_RESERVA: readonly [number, number, number] = [
   OFFSET_RESERVA_X,
   ALTURA_RESERVA,
@@ -37,7 +37,7 @@ export const POSICAO_RESERVA: readonly [number, number, number] = [
 ]
 
 /** Layout da reserva em grade local. */
-export const COLUNAS_RESERVA = 4
+export const COLUNAS_RESERVA = 2
 export const ESPACAMENTO_RESERVA = 1.7
 
 // ── Tipos de domínio visual (espelha engine/shared) ──
