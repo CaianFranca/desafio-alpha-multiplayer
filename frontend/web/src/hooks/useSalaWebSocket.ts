@@ -258,8 +258,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
 
   const sincronizarEncaminhamentoDoSnapshot = useCallback((novaSala: Sala) => {
     const alvo = novaSala.encaminhamento
-    const ehEncaminhada = novaSala.estado === 'encaminhada' || (alvo !== null && alvo !== undefined)
-    if (ehEncaminhada && alvo !== null && alvo !== undefined) {
+    if (novaSala.estado === 'encaminhada' && alvo !== null && alvo !== undefined) {
       setEncaminhamento({
         fase: 'disponivel',
         alvo: { partidaId: alvo.partidaId, serverId: alvo.serverId },
@@ -267,6 +266,9 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         motivo: null,
         mensagem: null,
       })
+    } else if (novaSala.estado === 'aberta') {
+      // Sala voltou a aberta sem alvo (cancel/timeout da preparação) — reseta overlay preso em preparando
+      setEncaminhamento(estadoInicialDoEncaminhamento())
     }
   }, [])
 
