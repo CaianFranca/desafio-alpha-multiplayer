@@ -11,7 +11,9 @@ import {
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Reserva } from '../tabuleiro/Reserva'
-import type { EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
+import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
+import { peaoMesaParaMundo } from '../tabuleiro/contrato'
+import type { PeaoId, PecaId, EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
@@ -58,22 +60,71 @@ function Mesa() {
 
 interface AmbienteCenaProps {
   estadoExibicao?: EstadoExibicaoTabuleiro | null
+  peaoSelecionadoId?: PeaoId | null
+  /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
+  destinosSet?: ReadonlySet<PecaId>
+  onSelecionarPeao?: (peaoId: PeaoId) => void
+  /** Clique em área vazia (Mesa/chão) desseleciona o peão. */
+  onDesselecionar?: () => void
 }
 
-export function AmbienteCena({ estadoExibicao }: AmbienteCenaProps) {
+export function AmbienteCena({
+  estadoExibicao,
+  peaoSelecionadoId = null,
+  destinosSet,
+  onSelecionarPeao,
+  onDesselecionar,
+}: AmbienteCenaProps) {
+  // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
+  // lado oposto à reserva (-X). Índices preservam a ordem do estado.
+  const peoesNaMesa = (estadoExibicao?.peoes ?? []).filter(
+    (peao) => peao.celula === null,
+  )
+
   return (
     <>
       {/* Vazio quase-preto delimitando a cena, com fog no mesmo tom para profundidade. */}
       <color attach="background" args={[COR_FUNDO]} />
       <fog attach="fog" args={[COR_FUNDO, 24, 70]} />
       <Iluminacao />
-      <Mesa />
-      {estadoExibicao ? (
-        <>
-          <Tabuleiro posicionadas={estadoExibicao.posicionadas} />
-          <Reserva reserva={estadoExibicao.reserva} />
-        </>
-      ) : null}
+      {/*
+        Wrapper de desseleção (issue #90): clique em qualquer alvo inerte da
+        cena (Mesa, célula vazia, peça não destino) borbulha até aqui e
+        desseleciona. Peões e destinos válidos chamam stopPropagation e nunca
+        chegam a este handler. Clique fora de qualquer mesh é tratado pelo
+        onPointerMissed no Canvas (AmbienteDeJogo).
+      */}
+      <group onClick={onDesselecionar}>
+        <Mesa />
+        {estadoExibicao ? (
+          <>
+            <Tabuleiro
+              posicionadas={estadoExibicao.posicionadas}
+              peoes={estadoExibicao.peoes}
+              peaoSelecionadoId={peaoSelecionadoId}
+              destinosSet={destinosSet}
+              onSelecionarPeao={onSelecionarPeao}
+            />
+            <Reserva reserva={estadoExibicao.reserva} />
+            {peoesNaMesa.map((peao) => {
+              const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
+              return (
+                <PeaoPlaceholder
+                  key={peao.peaoId}
+                  cor={peao.cor}
+                  position={peaoMesaParaMundo(indiceGlobal)}
+                  selecionado={peao.peaoId === peaoSelecionadoId}
+                  aoClicar={
+                    onSelecionarPeao
+                      ? () => onSelecionarPeao(peao.peaoId)
+                      : undefined
+                  }
+                />
+              )
+            })}
+          </>
+        ) : null}
+      </group>
     </>
   )
 }
