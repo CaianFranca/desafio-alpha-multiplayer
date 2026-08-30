@@ -4,12 +4,12 @@ import { useSalaWebSocketContext } from '../../state/sala-web-socket-context'
 import { criarSalaLabel, retornarParaSalaLabel } from '../auth/AuthActions'
 
 const styleBotaoHeader =
-  'border border-white/20 px-4 py-2 text-xs tracking-[0.18em] font-bold uppercase text-white hover:bg-white hover:text-black transition-colors'
+  'border border-white/20 px-4 py-2 text-xs tracking-[0.18em] font-bold uppercase text-white hover:bg-white hover:text-black transition-colors shrink-0'
 
 // Rótulo do CTA criado com cantos retos (sem arredondamento) e fundo accent,
 // espelhando o CtaLink primary — corrige a UX do header (critério #128).
 const styleLinkCriarSala =
-  'inline-block border-0 rounded-none bg-[var(--color-accent)] text-gray-800 cursor-pointer font-sans font-bold text-center hover:opacity-90 transition-opacity px-4 py-2 text-sm'
+  'inline-block border-0 rounded-none bg-[var(--color-accent)] text-gray-800 cursor-pointer font-sans font-bold text-center hover:opacity-90 transition-opacity px-4 py-2 text-sm shrink-0 whitespace-nowrap'
 
 export function Header() {
   const { authState, logout } = useAuth()
@@ -33,9 +33,9 @@ export function Header() {
       </a>
       <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 items-center gap-4">
         <Link className="w-fit font-extrabold tracking-[.04em] text-inherit no-underline justify-self-center sm:justify-self-start" to="/">Flicker of Sanity</Link>
-        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-6 gap-y-3">
+        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-6 gap-y-3 min-w-0">
           {!emLobby && (
-            <nav aria-label="Navegação principal" className="flex gap-6">
+            <nav aria-label="Navegação principal" className="flex items-center gap-6 whitespace-nowrap">
               <a href="#trailers" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Trailers</a>
               <a href="#historia" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">História</a>
               <a href="#caracteristicas" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Características</a>
@@ -43,8 +43,8 @@ export function Header() {
             </nav>
           )}
           {authState.status === 'authenticated' && (
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-bold">{authState.jogador.apelido}</span>
+            <div className="flex items-center gap-3 min-w-0 whitespace-nowrap">
+              <span className="text-sm font-bold truncate min-w-0 max-w-[14rem]">{authState.jogador.apelido}</span>
               {emLobby ? (
                 <button type="button" onClick={() => navigate('/')} className={styleBotaoHeader}>
                   Voltar para o início

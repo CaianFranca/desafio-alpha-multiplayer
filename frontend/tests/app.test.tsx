@@ -160,6 +160,25 @@ describe('authentication states', () => {
     expect(within(heroSection).queryByRole('link', { name: /criar conta/i })).not.toBeInTheDocument()
   })
 
+  it('header trunca apelido longo mantendo navegação e controles', () => {
+    const apelidoLongo = 'UmApelidoExtremamenteLongoParaTesteDeAlinhamentoDoHeader'
+    renderWithRouter(['/'], {
+      status: 'authenticated',
+      jogador: {
+        id: '7c9e4f2a-1b3d-4e5f-8a6b-0c1d2e3f4a5b',
+        apelido: apelidoLongo,
+        email: 'apelido.longo@exemplo.com',
+      },
+    })
+
+    const header = screen.getByRole('banner')
+    // Só o apelido trunca com reticências; navegação e controles permanecem.
+    expect(within(header).getByText(apelidoLongo)).toHaveClass('truncate')
+    expect(within(header).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
+    expect(within(header).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(header).getByRole('button', { name: /^sair$/i })).toBeInTheDocument()
+  })
+
   it('final call to action mirrors the current auth state', () => {
     const { unmount } = renderWithRouter(['/'], visitante)
 

@@ -552,6 +552,22 @@ describe('lobby - página do lobby', () => {
     expect(envio).toEqual({ type: 'DESBLOQUEAR_JOGADOR', jogadorId: 'j-zanetti' })
   })
 
+  it('lista de bloqueados tem rolagem própria (não empurra a sala)', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const eu = criarMembro({ id: 'm-eu', jogadorId: mockAuthenticatedState.jogador.id, apelido: 'JogadorTeste', ordemDeEntrada: 0 })
+    const zanetti = criarMembro({ id: 'm2', jogadorId: 'j-zanetti', apelido: 'Zanetti', ordemDeEntrada: 1 })
+    const salaInicial = criarSala({ codigoDeSala: 'A3K9M2', membros: [eu, zanetti], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaInicial })
+    await screen.findByText('Zanetti')
+
+    const salaAposExpulsao = criarSala({ codigoDeSala: 'A3K9M2', membros: [eu], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm2', jogadorId: 'j-zanetti', sala: salaAposExpulsao })
+
+    const secaoBloqueados = await screen.findByLabelText('Jogadores bloqueados')
+    expect(within(secaoBloqueados).getByRole('list')).toHaveClass('overflow-y-auto')
+  })
+
   it('auto-expulsão ignora o SALA_ATUALIZADA trailing e o OK volta à tela de criar/entrar', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/salas/criar'], mockAuthenticatedState)
