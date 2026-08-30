@@ -40,7 +40,7 @@ export function PecaPlaceholder({ tipo, orientacao, position }: PecaPlaceholderP
     <group position={position}>
       <mesh position={[0, 0.08, 0]}>
         <boxGeometry args={[tamanhoPeca, espessura, tamanhoPeca]} />
-        <meshStandardMaterial color={COR_POR_TIPO[tipo]} />
+        <meshStandardMaterial color={COR_POR_TIPO[tipo]} transparent opacity={0.88} />
       </mesh>
       {bordas.map((borda) => {
         const [x, y, z] = offsetDaBorda(borda)
@@ -51,7 +51,7 @@ export function PecaPlaceholder({ tipo, orientacao, position }: PecaPlaceholderP
         return (
           <mesh key={borda} position={[x, y, z]}>
             <boxGeometry args={[w, 0.04, d]} />
-            <meshStandardMaterial color={COR_BORDA_ABERTA} />
+            <meshStandardMaterial color={COR_BORDA_ABERTA} transparent opacity={0.95} />
           </mesh>
         )
       })}

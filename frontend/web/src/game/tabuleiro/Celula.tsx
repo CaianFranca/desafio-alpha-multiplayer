@@ -13,10 +13,14 @@ export function Celula({ celula, peca }: CelulaProps) {
 
   return (
     <group position={pos}>
-      {/* Base da célula — variante A: escura opaca para contraste com Mesa âmbar */}
+      {/* Base da célula — variante A com translucidez para Mesa aparecer */}
       <mesh position={[0, 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[TAMANHO_CELULA * 0.98, TAMANHO_CELULA * 0.98]} />
-        <meshStandardMaterial color={ocupada ? '#5e4e36' : '#1b1915'} />
+        <meshStandardMaterial
+          color={ocupada ? '#5e4e36' : '#1b1915'}
+          transparent
+          opacity={ocupada ? 0.82 : 0.7}
+        />
       </mesh>
       {/* Borda da célula — frame de 4 barras finas cor clara */}
       <group position={[0, 0.018, 0]}>
