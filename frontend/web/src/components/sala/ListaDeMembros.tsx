@@ -49,9 +49,6 @@ export function ListaDeMembros({ sala, jogadorIdLocal, ehAnfitriao, onExpulsar }
                     {membroEhAnfitriao ? 'Anfitrião' : 'Membro'} / {membro.presenca === 'conectado' ? 'Conectado' : 'Em reconexão'} {membro.prontidao ? '• Pronto' : ''}
                   </p>
                 </div>
-                {membro.prontidao && (
-                  <span className="text-green-400 text-xs" aria-label="Pronto">✓</span>
-                )}
                 {/* ícone de prontidão no canto */}
                 <div
                   className={`w-6 h-6 border flex items-center justify-center shrink-0 ${membro.prontidao ? 'border-green-500 text-green-400' : 'border-white/20 text-white/40'}`}

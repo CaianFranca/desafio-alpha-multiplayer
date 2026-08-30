@@ -1,6 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useSalaWebSocket } from '../hooks/useSalaWebSocket'
 import { CodigoDeSalaCard } from '../components/sala/CodigoDeSalaCard'
 import { LinkDiretoCard } from '../components/sala/LinkDiretoCard'
 import { ListaDeMembros } from '../components/sala/ListaDeMembros'
@@ -10,7 +9,7 @@ import { ControlesDoAnfitriao } from '../components/sala/ControlesDoAnfitriao'
 import { TransicaoOverlay } from '../components/sala/TransicaoOverlay'
 import { AvisoEncaminhamento } from '../components/sala/AvisoEncaminhamento'
 import { AuthContext } from '../state/auth-context'
-import { useSalaActions } from '../state/sala-actions-context'
+import { useSalaWebSocketContext } from '../state/sala-web-socket-context'
 import { CODIGO_DE_SALA_TAMANHO, normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { buildGameRedirectHref, buildGameWsUrl } from '../api/encaminhamento'
 
@@ -37,7 +36,7 @@ export function SalaPage() {
     desbloquearJogador,
     encerrarSala,
     iniciarPartida,
-  } = useSalaWebSocket(jogadorId)
+  } = useSalaWebSocketContext()
 
   const alvoHref = useMemo(() => {
     if (encaminhamento.alvo === null) return null
@@ -50,7 +49,6 @@ export function SalaPage() {
   }, [encaminhamento.alvo])
 
   const isDisponivel = encaminhamento.fase === 'disponivel'
-  const { registrarSairDaSala } = useSalaActions()
   const [codigoInput, setCodigoInput] = useState('')
   const conviteEnviadoRef = useRef<string | null>(null)
   const conectando = !conectado && !sala
@@ -59,18 +57,11 @@ export function SalaPage() {
   const membroLocal = sala?.membros.find((m) => m.jogadorId === jogadorId) ?? null
   const ehAnfitriao = membroLocal !== null && sala !== null && sala.anfitriaoId === membroLocal.id
 
-  // Sai da sala (SAIR_DA_SALA) e volta ao início — fonte única usada pelo
-  // botão do corpo e pelo Header (via contexto). Nunca encerra a Sessão.
+  // Sai da sala (SAIR_DA_SALA) e volta à tela de criar/entrar. Nunca encerra a Sessão.
   const sairDaSalaEComecarDeNovo = useCallback(() => {
     sairDaSala()
-    navigate('/')
+    navigate('/salas/criar')
   }, [sairDaSala, navigate])
-
-  // Expõe a ação ao Header enquanto a página está montada.
-  useEffect(() => {
-    registrarSairDaSala(sairDaSalaEComecarDeNovo)
-    return () => registrarSairDaSala(null)
-  }, [sairDaSalaEComecarDeNovo, registrarSairDaSala])
 
   // Entrada por rota de Convite /sala/:codigoDeSala — envia apenas uma vez
   // por código normalizado, para não reentrar após sair da sala.
@@ -96,9 +87,9 @@ export function SalaPage() {
   const possuiSala = sala !== null
 
   return (
-    <div className="min-h-[calc(100vh-5rem)] bg-[#111]" data-testid="sala-page">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-[#111]" data-testid="sala-page">
       {/* Container bipartido */}
-      <div className="max-w-[1100px] mx-auto px-6 lg:px-8 py-10 lg:py-12">
+      <div className="max-w-[1100px] mx-auto px-6 lg:px-8 py-10 lg:py-12 flex-1 min-h-0 overflow-y-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-0 relative">
           {/* Coluna esquerda institucional */}
           <div className="flex flex-col justify-center gap-8 lg:pr-16 py-12 lg:py-20 lg:border-r lg:border-white/10 relative">
@@ -107,7 +98,9 @@ export function SalaPage() {
                 <span className="w-8 h-px bg-[#c9a86a]" aria-hidden />
                 Protocolo de Isolamento
               </p>
-              <h1 className="text-5xl font-light text-white tracking-tight">Criar Sala</h1>
+              <h1 className="text-5xl font-light text-white tracking-tight">
+                {possuiSala ? `Sala ${sala.codigoDeSala}` : 'Criar Sala'}
+              </h1>
               <p className="text-white/60 text-sm leading-relaxed max-w-sm mt-2">
                 Reúna sua equipe de 4 investigadores. O Monte Sérion aguarda. A sanidade é escassa, a cooperação é vital.
               </p>
