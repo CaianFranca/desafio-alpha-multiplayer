@@ -8,20 +8,30 @@ interface Props {
 
 export function TransicaoOverlay({ encaminhamento }: Props) {
   const { fase, alvo } = encaminhamento
-  const redirectRef = useRef<HTMLAnchorElement | null>(null)
+  const timeoutRef = useRef<number | null>(null)
 
-  const visivel = fase === 'preparando' || fase === 'disponivel'
+  const visivel = fase === 'preparando' || (fase === 'disponivel' && alvo !== null)
   const wsAlvo = alvo !== null ? buildGameWsUrl(alvo.serverId, alvo.partidaId) : null
   const href = alvo !== null ? buildGameRedirectHref(alvo.serverId, alvo.partidaId) : null
 
   useEffect(() => {
     if (fase === 'disponivel' && href !== null) {
       const id = window.setTimeout(() => {
-        // Redirect SPA para /partida mantendo o histórico; fallback para WS direto se preferir.
+        // Redireciona para /partida via assign (reload); cancelável em cleanup ou quando fase sai de disponivel.
         window.location.assign(href)
       }, 1500)
-      return () => window.clearTimeout(id)
+      timeoutRef.current = id
+      return () => {
+        window.clearTimeout(id)
+        timeoutRef.current = null
+      }
     }
+    // Saiu de disponivel ou sem alvo — cancela redirect pendente
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
+    }
+    return undefined
   }, [fase, href])
 
   if (!visivel) return null
@@ -62,7 +72,6 @@ export function TransicaoOverlay({ encaminhamento }: Props) {
               </p>
             </div>
             <a
-              ref={redirectRef}
               href={href}
               data-testid="ir-para-partida"
               className="mt-6 inline-flex items-center justify-center rounded-lg bg-[var(--color-accent)] px-6 py-3 text-sm font-bold text-white hover:opacity-90"
