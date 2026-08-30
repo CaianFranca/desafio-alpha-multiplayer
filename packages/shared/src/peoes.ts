@@ -24,9 +24,12 @@
 // PosicionarPecaComando), roteados para a Recebida pelo pecaId no game-server:
 //   shared type:'GIRAR_PECA' (pecaId de Recebida)      <-> engine tipo:'girar_peca' (roteia para a Recebida pelo pecaId)
 //   shared type:'POSICIONAR_PECA' (pecaId de Recebida) <-> engine tipo:'posicionar_peca' (encaixe da Recebida na célula-alvo)
-// O ciclo também emite peca_selecionada / peca_deselecionada no engine (girar
-// uma Recebida exige SELECIONAR_PECA antes); no wire esses eventos chegam via
-// TabuleiroEventoDoServidor (SalaServerMessage), sem redefinição aqui.
+// Os eventos reusados do ciclo (PecaGiradaEvento, PecaPosicionadaEvento,
+// ManipulacaoFinalizadaEvento e ErroDoTabuleiroEvento) chegam pelo
+// TabuleiroEventoDoServidor (SalaServerMessage); aqui ficam apenas os 6 do peão
+// (união exclusiva). A Seleção única da ST-09 é reusada internamente sem evento
+// próprio: escolher o tipo atribui a Peça à Recebida e seta implicitamente a
+// seleção; girar a Recebida roteia pelo pecaId sem exigir seleção prévia.
 
 import type { Celula, PecaId } from './tabuleiro.ts';
 
