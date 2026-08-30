@@ -5,6 +5,7 @@ import { HomePage } from '../pages/HomePage'
 import { CadastroPage } from '../pages/CadastroPage'
 import { EntrarPage } from '../pages/EntrarPage'
 import { SalasCriarPage } from '../pages/stubs/SalasCriarPage'
+import { SalaPage } from '../pages/SalaPage'
 import { PartidaPage } from '../pages/PartidaPage'
 export const routes = [
   {
@@ -26,7 +27,15 @@ export const routes = [
         path: 'sala/:codigoDeSala',
         element: (
           <RequireAuth>
-            <SalasCriarPage />
+            <SalaPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'salas/:codigoDeSala',
+        element: (
+          <RequireAuth>
+            <SalaPage />
           </RequireAuth>
         ),
       },

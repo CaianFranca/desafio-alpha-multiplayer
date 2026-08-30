@@ -51,7 +51,8 @@ export interface Sala {
   anfitriaoId: string | null;
   membros: readonly MembroDaSala[];
   convite: Convite;
-  encaminhamento?: EncaminhamentoDaSala;
+  /** Alvo do redirect quando a Sala está encaminhada (visível após o aceite, inclusive para quem reconectou). */
+  encaminhamento?: EncaminhamentoDaSala | null;
 }
 
 // --- Comandos cliente → servidor (9) ---

@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { CodigoDeSalaCard } from '../components/sala/CodigoDeSalaCard'
 import { LinkDiretoCard } from '../components/sala/LinkDiretoCard'
@@ -6,9 +6,12 @@ import { ListaDeMembros } from '../components/sala/ListaDeMembros'
 import { AvisosDoLobby } from '../components/sala/AvisosDoLobby'
 import { ChatDoLobby } from '../components/sala/ChatDoLobby'
 import { ControlesDoAnfitriao } from '../components/sala/ControlesDoAnfitriao'
+import { EncaminhamentoOverlay } from '../components/sala/EncaminhamentoOverlay'
+import { AvisoEncaminhamento } from '../components/sala/AvisoEncaminhamento'
 import { AuthContext } from '../state/auth-context'
 import { useSalaWebSocketContext } from '../state/sala-web-socket-context'
 import { CODIGO_DE_SALA_TAMANHO, normalizarCodigoDeSala } from '../utils/codigoDeSala'
+import { urlsDoAlvo } from '../api/encaminhamento'
 
 export function SalaPage() {
   const { codigoDeSala: codigoParam } = useParams<{ codigoDeSala: string }>()
@@ -22,6 +25,8 @@ export function SalaPage() {
     jogadoresBloqueados,
     conectado,
     erro,
+    encaminhamento,
+    limparAvisoDeEncaminhamento,
     criarSala,
     entrarNaSala,
     alternarProntidao,
@@ -32,6 +37,14 @@ export function SalaPage() {
     encerrarSala,
     iniciarPartida,
   } = useSalaWebSocketContext()
+
+  const { alvoHref, alvoWs } = useMemo(() => {
+    if (encaminhamento.alvo === null) return { alvoHref: null, alvoWs: null }
+    const { href, wsUrl } = urlsDoAlvo(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId)
+    return { alvoHref: href, alvoWs: wsUrl }
+  }, [encaminhamento.alvo])
+
+  const isDisponivel = encaminhamento.fase === 'disponivel'
   const [codigoInput, setCodigoInput] = useState('')
   const conviteEnviadoRef = useRef<string | null>(null)
   const conectando = !conectado && !sala
@@ -70,7 +83,7 @@ export function SalaPage() {
   const possuiSala = sala !== null
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-[#111]">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-[#111]" data-testid="sala-page">
       {/* Container bipartido */}
       <div className="max-w-[1100px] mx-auto px-6 lg:px-8 py-10 lg:py-12 flex-1 min-h-0 overflow-y-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-0 relative">
@@ -213,6 +226,24 @@ export function SalaPage() {
                   onExpulsar={expulsarMembro}
                 />
                 <AvisosDoLobby avisos={avisos} />
+                {/* Snapshot de sala encaminhada para quem reconectou (issue #45) */}
+                {isDisponivel && alvoWs !== null && alvoHref !== null && (sala?.estado === 'encaminhada' || sala?.encaminhamento != null) && (
+                  <div data-testid="snapshot-encaminhada" className="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
+                    <h2 className="text-sm font-bold text-emerald-900">Sala encaminhada</h2>
+                    <p className="mt-2 text-xs text-emerald-800">Alvo do redirect:</p>
+                    <p data-testid="alvo-do-redirect-snapshot" className="mt-1 break-all font-mono text-xs text-emerald-900">
+                      {alvoWs}
+                    </p>
+                    <a
+                      href={alvoHref}
+                      data-testid="ir-para-partida-snapshot"
+                      className="mt-4 inline-flex rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700"
+                    >
+                      Ir para a partida
+                    </a>
+                  </div>
+                )}
+                <AvisoEncaminhamento encaminhamento={encaminhamento} onFechar={limparAvisoDeEncaminhamento} />
               </>
             ) : (
               <>
@@ -235,6 +266,7 @@ export function SalaPage() {
           </div>
         </div>
       </div>
+      <EncaminhamentoOverlay encaminhamento={encaminhamento} wsAlvo={alvoWs} href={alvoHref} />
     </div>
   )
 }
