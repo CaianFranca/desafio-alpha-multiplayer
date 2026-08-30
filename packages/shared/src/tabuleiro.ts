@@ -91,6 +91,7 @@ export interface ManipulacaoFinalizadaEvento {
   readonly pecaId: PecaId;
 }
 
+// A união cobre também as rejeições de Peões/ciclo (ST-10).
 export type CodigoDeErroDoTabuleiro =
   | CodigoDeErroComum
   | 'ESTADO_INDISPONIVEL'
@@ -100,7 +101,18 @@ export type CodigoDeErroDoTabuleiro =
   | 'CELULA_NAO_ENCONTRADA'
   | 'CELULA_JA_OCUPADA'
   | 'PECA_JA_POSICIONADA'
-  | 'MANIPULACAO_ENCERRADA';
+  | 'MANIPULACAO_ENCERRADA'
+  | 'PEAO_NAO_ENCONTRADO'
+  | 'PEAO_JA_POSICIONADO'
+  | 'PEAO_NAO_SELECIONADO'
+  | 'PECA_INICIAL_EXIGIDA'
+  | 'CELULA_SEM_PECA'
+  | 'PECA_JA_TEM_PEAO'
+  | 'PENDENCIA_NAO_RESOLVIDA'
+  | 'MOVIMENTO_NAO_CONECTADO'
+  | 'PECA_NAO_RECEBIDA'
+  | 'PECA_FORA_DO_ALVO'
+  | 'RECEBIDA_NAO_ENCONTRADA';
 
 export interface ErroDoTabuleiroEvento {
   readonly type: 'ERRO_DO_TABULEIRO';
