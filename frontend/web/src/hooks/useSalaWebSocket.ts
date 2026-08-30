@@ -4,8 +4,10 @@ import type {
   Sala,
   SalaEventoDoServidor,
   SalaComandoDoCliente,
+  ServerMessage,
 } from '@flicker/shared'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
+import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
 
 export interface AvisoDoLobby {
   id: string
@@ -26,6 +28,63 @@ export interface JogadorBloqueado {
   apelido: string
 }
 
+export type FaseDoEncaminhamento = 'ocioso' | 'preparando' | 'disponivel' | 'recusada' | 'falhou'
+
+export interface EstadoDoEncaminhamento {
+  fase: FaseDoEncaminhamento
+  alvo: { partidaId: string; serverId: string } | null
+  codigo: string | null
+  motivo: string | null
+  mensagem: string | null
+}
+
+function estadoInicialDoEncaminhamento(): EstadoDoEncaminhamento {
+  return { fase: 'ocioso', alvo: null, codigo: null, motivo: null, mensagem: null }
+}
+
+function isEncaminhamentoEvento(
+  msg: ServerMessage,
+): msg is Extract<ServerMessage, { type: 'PARTIDA_PREPARANDO' | 'PARTIDA_DISPONIVEL' | 'PARTIDA_RECUSADA' | 'PARTIDA_FALHOU' }> {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    'type' in msg &&
+    (msg.type === 'PARTIDA_PREPARANDO' ||
+      msg.type === 'PARTIDA_DISPONIVEL' ||
+      msg.type === 'PARTIDA_RECUSADA' ||
+      msg.type === 'PARTIDA_FALHOU')
+  )
+}
+
+function aplicarEventoDeEncaminhamento(
+  msg: ServerMessage,
+): EstadoDoEncaminhamento | null {
+  switch (msg.type) {
+    case 'PARTIDA_PREPARANDO':
+      return { fase: 'preparando', alvo: null, codigo: null, motivo: null, mensagem: null }
+    case 'PARTIDA_DISPONIVEL':
+      return {
+        fase: 'disponivel',
+        alvo: { partidaId: (msg as { partidaId: string }).partidaId, serverId: (msg as { serverId: string }).serverId },
+        codigo: null,
+        motivo: null,
+        mensagem: null,
+      }
+    case 'PARTIDA_RECUSADA': {
+      const { codigo, motivo } = msg as { codigo: string; motivo: string }
+      const mensagem = mensagemDeErroDoEncaminhamento(codigo, motivo)
+      return { fase: 'recusada', alvo: null, codigo, motivo, mensagem }
+    }
+    case 'PARTIDA_FALHOU': {
+      const { codigo, motivo } = msg as { codigo: string; motivo: string }
+      const mensagem = mensagemDeErroDoEncaminhamento(codigo, motivo)
+      return { fase: 'falhou', alvo: null, codigo, motivo, mensagem }
+    }
+    default:
+      return null
+  }
+}
+
 export interface UseSalaWebSocketReturn {
   sala: Sala | null
   avisos: AvisoDoLobby[]
@@ -33,6 +92,8 @@ export interface UseSalaWebSocketReturn {
   jogadoresBloqueados: JogadorBloqueado[]
   conectado: boolean
   erro: string | null
+  encaminhamento: EstadoDoEncaminhamento
+  limparAvisoDeEncaminhamento: () => void
   enviar: (comando: SalaComandoDoCliente) => void
   criarSala: () => void
   entrarNaSala: (codigoDeSala: CodigoDeSala) => void
@@ -156,6 +217,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const chatContadorRef = useRef(0)
   // Comandos enfileirados quando o WebSocket ainda não está aberto (handshake).
   const comandosPendentesRef = useRef<SalaComandoDoCliente[]>([])
+  const [encaminhamento, setEncaminhamento] = useState<EstadoDoEncaminhamento>(() => estadoInicialDoEncaminhamento())
 
   // Ao trocar de sala (código diferente), descarta chat e bloqueados da sala
   // anterior. Avisos só são descartados ao ENTRAR em outra sala: ao voltar
@@ -176,6 +238,27 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     avisoContadorRef.current += 1
     const id = `aviso-${avisoContadorRef.current}-${Date.now()}`
     setAvisos((prev) => [...prev, { id, mensagem, tipo, criadoEm: Date.now() }].slice(-AVISOS_MAX))
+  }, [])
+
+  const sincronizarEncaminhamentoDoSnapshot = useCallback((novaSala: Sala) => {
+    const alvo = novaSala.encaminhamento
+    const ehEncaminhada = novaSala.estado === 'encaminhada' || (alvo !== null && alvo !== undefined)
+    if (ehEncaminhada && alvo !== null && alvo !== undefined) {
+      setEncaminhamento({
+        fase: 'disponivel',
+        alvo: { partidaId: alvo.partidaId, serverId: alvo.serverId },
+        codigo: null,
+        motivo: null,
+        mensagem: null,
+      })
+    }
+  }, [])
+
+  const limparAvisoDeEncaminhamento = useCallback(() => {
+    setEncaminhamento((prev) => {
+      if (prev.fase === 'recusada' || prev.fase === 'falhou') return estadoInicialDoEncaminhamento()
+      return prev
+    })
   }, [])
 
   const conectar = useCallback(() => {
@@ -225,6 +308,23 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         return
       }
       if (typeof data !== 'object' || data === null || !('type' in data)) return
+
+      // Encaminhamento (issue #45): PARTIDA_PREPARANDO/DISPONIVEL/RECUSADA/FALHOU
+      if (isEncaminhamentoEvento(data as ServerMessage)) {
+        const next = aplicarEventoDeEncaminhamento(data as ServerMessage)
+        if (next) {
+          setEncaminhamento(next)
+          if (next.fase === 'recusada' || next.fase === 'falhou') {
+            const msg = next.mensagem ?? 'Falha ao preparar a partida'
+            adicionarAviso(msg, next.fase)
+            setErro(msg)
+          } else {
+            setErro(null)
+          }
+        }
+        return
+      }
+
       const evento = data as SalaEventoDoServidor
       switch (evento.type) {
         case 'ERRO_DA_SALA':
@@ -246,6 +346,10 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         default:
           if (isEventoDeSala(evento)) {
             const salaAnterior = salaRef.current
+            // Snapshot de sala encaminhada (issue #45): quem reconectou recebe SALA_ATUALIZADA com encaminhamento
+            if (! (evento.sala.estado === 'encerrada' || evento.sala.estado === 'expirada')) {
+              sincronizarEncaminhamentoDoSnapshot(evento.sala)
+            }
             // Sala morta (encerrada pelo Anfitrião ou expirada): o backend
             // emite SALA_ATUALIZADA com membros [] e estado 'encerrada' —
             // guarda null para que a página volte ao estado criar/entrar
@@ -255,6 +359,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
             if (salaMorta) {
               setMensagensDeChat([])
               setJogadoresBloqueados([])
+              setEncaminhamento(estadoInicialDoEncaminhamento())
             }
             if (evento.type === 'MEMBRO_EXPULSO') {
               // Lista local da sessão: o Anfitrião acumula expulsos observados
@@ -398,6 +503,8 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     jogadoresBloqueados,
     conectado,
     erro,
+    encaminhamento,
+    limparAvisoDeEncaminhamento,
     enviar,
     criarSala,
     entrarNaSala,

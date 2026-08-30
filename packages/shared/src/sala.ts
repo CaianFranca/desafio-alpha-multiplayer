@@ -44,6 +44,9 @@ export interface EncaminhamentoDaSala {
   partidaId: string;
 }
 
+/** Alias canônico para o alvo do redirect — mantido para compatibilidade com issue #45 (AlvoDaPartida). */
+export type AlvoDaPartida = EncaminhamentoDaSala;
+
 export interface Sala {
   id: string;
   codigoDeSala: CodigoDeSala;
@@ -51,7 +54,8 @@ export interface Sala {
   anfitriaoId: string | null;
   membros: readonly MembroDaSala[];
   convite: Convite;
-  encaminhamento?: EncaminhamentoDaSala;
+  /** Alvo do redirect quando a Sala está encaminhada (visível após o aceite, inclusive para quem reconectou). */
+  encaminhamento?: EncaminhamentoDaSala | null;
 }
 
 // --- Comandos cliente → servidor (9) ---
