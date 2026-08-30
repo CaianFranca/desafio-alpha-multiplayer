@@ -4,8 +4,8 @@
 export function buildGameWsUrl(serverId: string, partidaId: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   // O lobby faz proxy de /ws/game/* para o upstream game_servers (SETUP.md).
-  // Query carrega o partidaId (ST-07).
-  return `${protocol}//${window.location.host}/ws/game/${encodeURIComponent(serverId)}?partidaId=${encodeURIComponent(partidaId)}`
+  // Query carrega partida-id kebab-case conforme backend/game-server/src/ws/ws.ts:74.
+  return `${protocol}//${window.location.host}/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}`
 }
 
 export function buildGameRedirectHref(serverId: string, partidaId: string): string {

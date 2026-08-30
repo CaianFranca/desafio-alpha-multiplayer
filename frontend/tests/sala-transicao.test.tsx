@@ -165,6 +165,7 @@ describe('Transição da Sala para a Partida (#45)', () => {
     const link = within(overlay).getByTestId('ir-para-partida') as HTMLAnchorElement
     expect(link.getAttribute('href')).toContain('serverId=server-abc')
     expect(link.getAttribute('href')).toContain('partidaId=partida-123')
+    expect(alvo.textContent).toContain('partida-id=partida-123')
 
     await waitFor(() => expect(assignSpy).toHaveBeenCalled(), { timeout: 3000 })
     expect(assignSpy.mock.calls[0][0]).toContain('server-abc')
