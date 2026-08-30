@@ -14,6 +14,32 @@ export interface PongMessage {
   type: 'PONG';
 }
 
+// --- Admissão (game-server WS) ---
+
+export interface AdmissaoAceitaEvento {
+  readonly type: 'ADMISSAO_ACEITA';
+  readonly jogadorId: string;
+  readonly apelido: string;
+  readonly partidaId: PartidaId;
+}
+
+export type CodigoDeErroDeAdmissao =
+  | 'SESSAO_INVALIDA'
+  | 'SERVER_ID_INVALIDO'
+  | 'PARTIDA_NAO_ENCONTRADA'
+  | 'JOGADOR_FORA_DO_ROSTER'
+  | 'PARTIDA_ID_AUSENTE'
+  | 'ERRO_INTERNO';
+
+export interface AdmissaoRejeitadaEvento {
+  readonly type: 'ADMISSAO_REJEITADA';
+  readonly codigo: CodigoDeErroDeAdmissao;
+  readonly motivo: string;
+}
+
+export type AdmissaoEventoDoServidor = AdmissaoAceitaEvento | AdmissaoRejeitadaEvento;
+
+// --- Union types ---
 export type SalaClientMessage =
   | SalaComandoDoCliente
   | TabuleiroComandoDoCliente
