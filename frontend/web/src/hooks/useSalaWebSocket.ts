@@ -327,7 +327,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       if (typeof data !== 'object' || data === null || !('type' in data)) return
 
       // Encaminhamento (issue #45): PARTIDA_PREPARANDO/DISPONIVEL/RECUSADA/FALHOU
-      // Fonte única é `encaminhamento` → `AvisoEncaminhamento`/`TransicaoOverlay`.
+      // Fonte única é `encaminhamento` → `AvisoEncaminhamento`/`EncaminhamentoOverlay`.
       // Não duplica em `erro` (vermelho) nem em `avisos` — evita mensagem dupla (review PR #127).
       if (isEncaminhamentoEvento(data)) {
         const next = aplicarEventoDeEncaminhamento(data)

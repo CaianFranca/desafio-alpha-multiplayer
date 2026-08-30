@@ -6,7 +6,7 @@ interface Props {
   encaminhamento: EstadoDoEncaminhamento
 }
 
-export function TransicaoOverlay({ encaminhamento }: Props) {
+export function EncaminhamentoOverlay({ encaminhamento }: Props) {
   const { fase, alvo } = encaminhamento
   const timeoutRef = useRef<number | null>(null)
 
@@ -40,16 +40,16 @@ export function TransicaoOverlay({ encaminhamento }: Props) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="transicao-titulo"
+      aria-labelledby="encaminhamento-titulo"
       aria-live="polite"
-      data-testid="transicao-overlay"
+      data-testid="encaminhamento-overlay"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
     >
       <div className="max-w-lg w-full rounded-2xl bg-white p-8 text-center shadow-xl">
         {fase === 'preparando' && (
           <>
             <p className="text-xs font-bold tracking-[.16em] uppercase text-[var(--color-accent)]">Encaminhamento</p>
-            <h2 id="transicao-titulo" className="mt-2 text-2xl font-bold">
+            <h2 id="encaminhamento-titulo" className="mt-2 text-2xl font-bold">
               Preparando partida...
             </h2>
             <p className="mt-3 text-sm text-[var(--color-muted)]">A sala está sendo encaminhada para o servidor de jogo. Aguarde todos os membros.</p>
@@ -61,7 +61,7 @@ export function TransicaoOverlay({ encaminhamento }: Props) {
         {fase === 'disponivel' && alvo !== null && wsAlvo !== null && href !== null && (
           <>
             <p className="text-xs font-bold tracking-[.16em] uppercase text-emerald-600">Partida disponível</p>
-            <h2 id="transicao-titulo" className="mt-2 text-2xl font-bold">
+            <h2 id="encaminhamento-titulo" className="mt-2 text-2xl font-bold">
               Partida disponível!
             </h2>
             <p className="mt-3 text-sm text-[var(--color-muted)]">Redirecionando para o servidor de jogo...</p>

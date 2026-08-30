@@ -102,7 +102,7 @@ function renderSala(codigo = 'ABCDEF') {
   )
 }
 
-describe('Transição da Sala para a Partida (#45)', () => {
+describe('Encaminhamento da Sala para a Partida (#45)', () => {
   it('o estado de preparação é visível para todos os Membros', async () => {
     mockAuthMe()
     const { MockWebSocket, instances } = createMockWebSocket()
@@ -122,11 +122,11 @@ describe('Transição da Sala para a Partida (#45)', () => {
     )
 
     expect(await screen.findByText('ABCDEF')).toBeInTheDocument()
-    expect(screen.queryByTestId('transicao-overlay')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
 
     act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
 
-    expect(await screen.findByTestId('transicao-overlay')).toBeInTheDocument()
+    expect(await screen.findByTestId('encaminhamento-overlay')).toBeInTheDocument()
     expect(screen.getByText(/preparando partida/i)).toBeInTheDocument()
   })
 
@@ -154,7 +154,7 @@ describe('Transição da Sala para a Partida (#45)', () => {
       }),
     )
 
-    const overlay = await screen.findByTestId('transicao-overlay')
+    const overlay = await screen.findByTestId('encaminhamento-overlay')
     expect(overlay).toBeInTheDocument()
     expect(within(overlay).getByRole('heading', { name: /partida disponível/i })).toBeInTheDocument()
     const alvo = within(overlay).getByTestId('alvo-do-redirect')
@@ -186,7 +186,7 @@ describe('Transição da Sala para a Partida (#45)', () => {
     await screen.findByText('ABCDEF')
 
     act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
-    expect(await screen.findByTestId('transicao-overlay')).toBeInTheDocument()
+    expect(await screen.findByTestId('encaminhamento-overlay')).toBeInTheDocument()
 
     act(() =>
       ws.simulateMessage({
@@ -199,7 +199,7 @@ describe('Transição da Sala para a Partida (#45)', () => {
     const aviso = await screen.findByTestId('aviso-encaminhamento')
     expect(aviso).toHaveTextContent(/partida recusada/i)
     expect(aviso).toHaveTextContent(/servidor de jogo recusou/i)
-    expect(screen.queryByTestId('transicao-overlay')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
     expect(await screen.findByText('ABCDEF')).toBeInTheDocument()
     expect(screen.getByText('Beto')).toBeInTheDocument()
 
@@ -227,7 +227,7 @@ describe('Transição da Sala para a Partida (#45)', () => {
     const aviso = await screen.findByTestId('aviso-encaminhamento')
     expect(aviso).toHaveTextContent(/falha ao preparar/i)
     expect(aviso.textContent).toMatch(/tente novamente/i)
-    expect(screen.queryByTestId('transicao-overlay')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
     expect(await screen.findByText('ABCDEF')).toBeInTheDocument()
   })
 
@@ -255,7 +255,7 @@ describe('Transição da Sala para a Partida (#45)', () => {
       }),
     )
 
-    expect(await screen.findByTestId('transicao-overlay')).toBeInTheDocument()
+    expect(await screen.findByTestId('encaminhamento-overlay')).toBeInTheDocument()
     expect(screen.getByTestId('alvo-do-redirect')).toHaveTextContent('server-xyz')
     expect(screen.getByTestId('alvo-do-redirect')).toHaveTextContent('partida-999')
 

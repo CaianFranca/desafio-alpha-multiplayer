@@ -6,7 +6,7 @@ import { ListaDeMembros } from '../components/sala/ListaDeMembros'
 import { AvisosDoLobby } from '../components/sala/AvisosDoLobby'
 import { ChatDoLobby } from '../components/sala/ChatDoLobby'
 import { ControlesDoAnfitriao } from '../components/sala/ControlesDoAnfitriao'
-import { TransicaoOverlay } from '../components/sala/TransicaoOverlay'
+import { EncaminhamentoOverlay } from '../components/sala/EncaminhamentoOverlay'
 import { AvisoEncaminhamento } from '../components/sala/AvisoEncaminhamento'
 import { AuthContext } from '../state/auth-context'
 import { useSalaWebSocketContext } from '../state/sala-web-socket-context'
@@ -270,7 +270,7 @@ export function SalaPage() {
           </div>
         </div>
       </div>
-      <TransicaoOverlay encaminhamento={encaminhamento} />
+      <EncaminhamentoOverlay encaminhamento={encaminhamento} />
     </div>
   )
 }
