@@ -92,6 +92,17 @@ export function criarReservaInicial(): PecaDaReserva[] {
   return reserva
 }
 
+export function chaveCelula(celula: Celula): string {
+  return `${celula.linha}:${celula.coluna}`
+}
+
+export function dimensaoReserva(linhas: number): { largura: number; profundidade: number } {
+  return {
+    largura: COLUNAS_RESERVA * ESPACAMENTO_RESERVA + 0.4,
+    profundidade: linhas * ESPACAMENTO_RESERVA + 0.4,
+  }
+}
+
 /**
  * Mock de exibição para `disponivel`: caminho básico de 5 peças
  * contíguas com orientações que fazem os caminhos se tocarem —
@@ -101,31 +112,31 @@ export function criarEstadoExibicaoMock(): EstadoExibicaoTabuleiro {
   const reserva = criarReservaInicial()
   const posicionadas: PecaPosicionada[] = [
     {
-      pecaId: 'inicial-posicionada-1',
+      pecaId: 'posicionada-inicial-1',
       tipo: 'inicial',
       orientacao: 0,
       celula: { linha: 3, coluna: 3 },
     },
     {
-      pecaId: 'reta-posicionada-2',
+      pecaId: 'posicionada-reta-2',
       tipo: 'reta',
       orientacao: 90,
       celula: { linha: 3, coluna: 4 },
     },
     {
-      pecaId: 'cruz-posicionada-3',
+      pecaId: 'posicionada-cruz-3',
       tipo: 'cruz',
       orientacao: 0,
       celula: { linha: 3, coluna: 5 },
     },
     {
-      pecaId: 'reta-posicionada-4',
+      pecaId: 'posicionada-reta-4',
       tipo: 'reta',
       orientacao: 0,
       celula: { linha: 4, coluna: 5 },
     },
     {
-      pecaId: 't-posicionada-5',
+      pecaId: 'posicionada-t-5',
       tipo: 'T',
       orientacao: 180,
       celula: { linha: 2, coluna: 5 },
@@ -175,8 +186,8 @@ export function mundoParaCelula(
 ): Celula | null {
   const colunaRaw = Math.round((mundoX - POSICAO_TABULEIRO[0]) / TAMANHO_CELULA + Math.floor(LADO_DA_GRADE / 2))
   const linhaRaw = Math.round((mundoZ - POSICAO_TABULEIRO[2]) / TAMANHO_CELULA + Math.floor(LADO_DA_GRADE / 2))
-  const coluna = colunaRaw === 0 ? 0 : colunaRaw
-  const linha = linhaRaw === 0 ? 0 : linhaRaw
+  const coluna = colunaRaw || 0
+  const linha = linhaRaw || 0
   if (linha < 0 || linha >= LADO_DA_GRADE || coluna < 0 || coluna >= LADO_DA_GRADE) {
     return null
   }

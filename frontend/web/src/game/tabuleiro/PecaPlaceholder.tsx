@@ -1,5 +1,5 @@
 import { TAMANHO_CELULA, bordasAbertas } from './contrato'
-import type { TipoDaPeca, Orientacao } from './contrato'
+import type { TipoDaPeca, Orientacao, BordaCardinal } from './contrato'
 
 interface PecaPlaceholderProps {
   tipo: TipoDaPeca
@@ -25,6 +25,13 @@ export function PecaPlaceholder({ tipo, orientacao, position }: PecaPlaceholderP
   const offsetBraco = (tamanhoPeca + larguraTrilha) / 4
   const yCaminho = 0.08 + espessura / 2 + 0.015
 
+  const MAP_BORDA: Record<BordaCardinal, { pos: [number, number, number]; args: [number, number, number] }> = {
+    norte: { pos: [0, 0, -offsetBraco], args: [larguraTrilha, 0.02, comprimentoBraco] },
+    sul: { pos: [0, 0, offsetBraco], args: [larguraTrilha, 0.02, comprimentoBraco] },
+    leste: { pos: [offsetBraco, 0, 0], args: [comprimentoBraco, 0.02, larguraTrilha] },
+    oeste: { pos: [-offsetBraco, 0, 0], args: [comprimentoBraco, 0.02, larguraTrilha] },
+  }
+
   return (
     <group position={position}>
       <mesh position={[0, 0.08, 0]}>
@@ -37,18 +44,7 @@ export function PecaPlaceholder({ tipo, orientacao, position }: PecaPlaceholderP
           <meshStandardMaterial color={COR_CAMINHO} />
         </mesh>
         {bordas.map((borda) => {
-          const isNS = borda === 'norte' || borda === 'sul'
-          const args: [number, number, number] = isNS
-            ? [larguraTrilha, 0.02, comprimentoBraco]
-            : [comprimentoBraco, 0.02, larguraTrilha]
-          const pos: [number, number, number] =
-            borda === 'norte'
-              ? [0, 0, -offsetBraco]
-              : borda === 'sul'
-                ? [0, 0, offsetBraco]
-                : borda === 'leste'
-                  ? [offsetBraco, 0, 0]
-                  : [-offsetBraco, 0, 0]
+          const { pos, args } = MAP_BORDA[borda]
           return (
             <mesh key={borda} position={pos}>
               <boxGeometry args={args} />

@@ -1,4 +1,4 @@
-import { todasAsCelulas } from './contrato'
+import { chaveCelula, todasAsCelulas } from './contrato'
 import type { PecaPosicionada } from './contrato'
 import { Celula } from './Celula'
 
@@ -9,7 +9,7 @@ interface TabuleiroProps {
 export function Tabuleiro({ posicionadas }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
-    posicionadasPorChave.set(`${p.celula.linha}:${p.celula.coluna}`, p)
+    posicionadasPorChave.set(chaveCelula(p.celula), p)
   }
 
   const celulas = todasAsCelulas()
@@ -17,7 +17,7 @@ export function Tabuleiro({ posicionadas }: TabuleiroProps) {
   return (
     <group>
       {celulas.map((celula) => {
-        const chave = `${celula.linha}:${celula.coluna}`
+        const chave = chaveCelula(celula)
         const peca = posicionadasPorChave.get(chave) ?? null
         return <Celula key={chave} celula={celula} peca={peca} />
       })}

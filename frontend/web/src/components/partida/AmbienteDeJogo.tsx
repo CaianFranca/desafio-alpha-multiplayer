@@ -8,6 +8,7 @@ import {
 import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import {
+  chaveCelula,
   criarEstadoExibicaoMock,
   todasAsCelulas,
 } from '../../game/tabuleiro/contrato'
@@ -32,6 +33,9 @@ interface AmbienteDeJogoProps {
 export function AmbienteDeJogo({ bordaPx = 0, estado = null }: AmbienteDeJogoProps) {
   const estadoExibicao = estado === 'disponivel' ? criarEstadoExibicaoMock() : null
   const todasCelulas = todasAsCelulas()
+  const ocupadasSet = new Set(
+    estadoExibicao?.posicionadas.map((p) => chaveCelula(p.celula)) ?? [],
+  )
 
   return (
     <div
@@ -62,12 +66,10 @@ export function AmbienteDeJogo({ bordaPx = 0, estado = null }: AmbienteDeJogoPro
       {estadoExibicao ? (
         <div data-testid="tabuleiro" aria-hidden="true" className="pointer-events-none absolute inset-0">
           {todasCelulas.map((celula) => {
-            const ocupada = estadoExibicao.posicionadas.some(
-              (p) => p.celula.linha === celula.linha && p.celula.coluna === celula.coluna,
-            )
+            const ocupada = ocupadasSet.has(chaveCelula(celula))
             return (
               <div
-                key={`${celula.linha}:${celula.coluna}`}
+                key={chaveCelula(celula)}
                 data-testid="tabuleiro-celula"
                 data-ocupada={ocupada ? 'true' : 'false'}
                 data-linha={celula.linha}
