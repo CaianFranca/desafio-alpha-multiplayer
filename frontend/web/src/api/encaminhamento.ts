@@ -18,6 +18,11 @@ export function alvoDoRedirectLegivel(serverId: string, partidaId: string): stri
   return buildGameWsUrl(serverId, partidaId)
 }
 
+/** Fonte única para URLs do alvo do encaminhamento — evita duplicar buildGame* entre SalaPage e overlay. */
+export function urlsDoAlvo(serverId: string, partidaId: string): { wsUrl: string; href: string } {
+  return { wsUrl: buildGameWsUrl(serverId, partidaId), href: buildGameRedirectHref(serverId, partidaId) }
+}
+
 const MENSAGENS_POR_CODIGO: Record<string, string> = {
   ENCAMINHAMENTO_RECUSADO: 'O servidor de jogo recusou a partida. Tente iniciar novamente.',
   ENCAMINHAMENTO_FALHOU: 'Falha ao preparar a partida. Verifique a conexão e tente novamente.',

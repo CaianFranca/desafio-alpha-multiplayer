@@ -11,7 +11,7 @@ import { AvisoEncaminhamento } from '../components/sala/AvisoEncaminhamento'
 import { AuthContext } from '../state/auth-context'
 import { useSalaWebSocketContext } from '../state/sala-web-socket-context'
 import { CODIGO_DE_SALA_TAMANHO, normalizarCodigoDeSala } from '../utils/codigoDeSala'
-import { buildGameRedirectHref, buildGameWsUrl } from '../api/encaminhamento'
+import { urlsDoAlvo } from '../api/encaminhamento'
 
 export function SalaPage() {
   const { codigoDeSala: codigoParam } = useParams<{ codigoDeSala: string }>()
@@ -38,14 +38,10 @@ export function SalaPage() {
     iniciarPartida,
   } = useSalaWebSocketContext()
 
-  const alvoHref = useMemo(() => {
-    if (encaminhamento.alvo === null) return null
-    return buildGameRedirectHref(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId)
-  }, [encaminhamento.alvo])
-
-  const alvoWs = useMemo(() => {
-    if (encaminhamento.alvo === null) return null
-    return buildGameWsUrl(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId)
+  const { alvoHref, alvoWs } = useMemo(() => {
+    if (encaminhamento.alvo === null) return { alvoHref: null, alvoWs: null }
+    const { href, wsUrl } = urlsDoAlvo(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId)
+    return { alvoHref: href, alvoWs: wsUrl }
   }, [encaminhamento.alvo])
 
   const isDisponivel = encaminhamento.fase === 'disponivel'
@@ -270,7 +266,7 @@ export function SalaPage() {
           </div>
         </div>
       </div>
-      <EncaminhamentoOverlay encaminhamento={encaminhamento} />
+      <EncaminhamentoOverlay encaminhamento={encaminhamento} wsAlvo={alvoWs} href={alvoHref} />
     </div>
   )
 }

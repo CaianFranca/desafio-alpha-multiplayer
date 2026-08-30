@@ -4,15 +4,17 @@ import type { EstadoDoEncaminhamento } from '../../hooks/useSalaWebSocket'
 
 interface Props {
   encaminhamento: EstadoDoEncaminhamento
+  wsAlvo?: string | null
+  href?: string | null
 }
 
-export function EncaminhamentoOverlay({ encaminhamento }: Props) {
+export function EncaminhamentoOverlay({ encaminhamento, wsAlvo: wsAlvoProp, href: hrefProp }: Props) {
   const { fase, alvo } = encaminhamento
   const timeoutRef = useRef<number | null>(null)
 
   const visivel = fase === 'preparando' || (fase === 'disponivel' && alvo !== null)
-  const wsAlvo = alvo !== null ? buildGameWsUrl(alvo.serverId, alvo.partidaId) : null
-  const href = alvo !== null ? buildGameRedirectHref(alvo.serverId, alvo.partidaId) : null
+  const wsAlvo = wsAlvoProp !== undefined ? wsAlvoProp : alvo !== null ? buildGameWsUrl(alvo.serverId, alvo.partidaId) : null
+  const href = hrefProp !== undefined ? hrefProp : alvo !== null ? buildGameRedirectHref(alvo.serverId, alvo.partidaId) : null
 
   useEffect(() => {
     if (fase === 'disponivel' && href !== null) {
