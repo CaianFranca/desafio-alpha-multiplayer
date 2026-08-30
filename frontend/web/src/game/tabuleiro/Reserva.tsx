@@ -1,12 +1,18 @@
 import { COLUNAS_RESERVA, dimensaoReserva, POSICAO_RESERVA, reservaIndiceParaLocal } from './contrato'
 import type { PecaDaReserva } from './contrato'
 import { PecaPlaceholder } from './PecaPlaceholder'
+import type { EstadoInteracaoTabuleiro } from './interacao'
+import { mapearCliqueNaReserva } from './interacao'
+import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 
 interface ReservaProps {
   reserva: readonly PecaDaReserva[]
+  /** Estado de interação para destaque da peça selecionada. */
+  estadoInteracao: EstadoInteracaoTabuleiro
+  onComando: (comando: TabuleiroComandoDoCliente | null) => void
 }
 
-export function Reserva({ reserva }: ReservaProps) {
+export function Reserva({ reserva, estadoInteracao, onComando }: ReservaProps) {
   const total = reserva.length
   const linhas = Math.ceil(total / COLUNAS_RESERVA) || 1
   const { largura, profundidade } = dimensaoReserva(linhas)
@@ -19,12 +25,16 @@ export function Reserva({ reserva }: ReservaProps) {
       </mesh>
       {reserva.map((peca, indice) => {
         const [lx, , lz] = reservaIndiceParaLocal(indice)
+        const destacada = estadoInteracao.pecaSelecionadaId === peca.pecaId
         return (
           <PecaPlaceholder
             key={peca.pecaId}
             tipo={peca.tipo}
             orientacao={peca.orientacao}
             position={[lx, 0.02, lz]}
+            destacada={destacada}
+            cursor="pointer"
+            onClick={() => onComando(mapearCliqueNaReserva(estadoInteracao, peca.pecaId))}
           />
         )
       })}

@@ -1,10 +1,17 @@
 import { TAMANHO_CELULA, bordasAbertas } from './contrato'
 import type { TipoDaPeca, Orientacao, BordaCardinal } from './contrato'
+import type { ThreeEvent } from '@react-three/fiber'
+import { handlersDeCursor } from './cursor'
 
 interface PecaPlaceholderProps {
   tipo: TipoDaPeca
   orientacao: Orientacao
   position?: [number, number, number]
+  /** Destaque visual da peça selecionada/em manipulação. */
+  destacada?: boolean
+  /** Cursor do ponteiro ao pairar (reserva selecionável). */
+  cursor?: 'default' | 'pointer'
+  onClick?: (event: ThreeEvent<MouseEvent>) => void
 }
 
 const COR_POR_TIPO: Record<TipoDaPeca, string> = {
@@ -15,6 +22,10 @@ const COR_POR_TIPO: Record<TipoDaPeca, string> = {
 }
 
 const COR_CAMINHO = '#111111'
+
+// Destaque da peça selecionada/em manipulação: realce quente na borda para
+// distinguir visualmente da composição padrão.
+const COR_DESTAQUE = '#ffe08a'
 
 const TAMANHO_PECA = TAMANHO_CELULA * 0.96
 const ESPESSURA_PECA = 0.12
@@ -30,14 +41,32 @@ const MAP_BORDA: Record<BordaCardinal, { pos: [number, number, number]; args: [n
   oeste: { pos: [-OFFSET_BRACO, 0, 0], args: [COMPRIMENTO_BRACO, 0.02, LARGURA_TRILHA] },
 }
 
-export function PecaPlaceholder({ tipo, orientacao, position }: PecaPlaceholderProps) {
+export function PecaPlaceholder({
+  tipo,
+  orientacao,
+  position,
+  destacada = false,
+  cursor = 'default',
+  onClick,
+}: PecaPlaceholderProps) {
   const bordas = bordasAbertas({ tipo, orientacao })
+  const cursorHandlers = handlersDeCursor(cursor)
 
   return (
     <group position={position}>
-      <mesh position={[0, 0.08, 0]}>
+      <mesh
+        position={[0, 0.08, 0]}
+        onClick={onClick}
+        {...cursorHandlers}
+      >
         <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
-        <meshStandardMaterial color={COR_POR_TIPO[tipo]} transparent opacity={0.88} />
+        <meshStandardMaterial
+          color={COR_POR_TIPO[tipo]}
+          transparent
+          opacity={0.88}
+          emissive={destacada ? COR_DESTAQUE : '#000000'}
+          emissiveIntensity={destacada ? 0.35 : 0}
+        />
       </mesh>
       <group position={[0, Y_CAMINHO, 0]}>
         <mesh>

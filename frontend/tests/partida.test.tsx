@@ -163,15 +163,13 @@ function renderPartidaComEstado(
 describe('partida estados da tela', () => {
   const autenticado = mockAuthenticatedState
 
-  it('estado padrão carregando mostra overlay-carregando', () => {
+  it('sem alvo (URL sem serverId/partidaId) mostra tela de falha', () => {
     renderWithRouter(['/partida'], autenticado)
-    const overlay = screen.getByTestId('overlay-carregando')
+    const overlay = screen.getByTestId('overlay-falha')
     expect(overlay).toBeInTheDocument()
-    expect(overlay).toHaveAttribute('role', 'status')
-    expect(overlay).toHaveClass('absolute')
-    expect(overlay).toHaveClass('inset-0')
-    expect(overlay).toHaveClass('z-10')
-    expect(screen.getByText('Carregando...')).toBeInTheDocument()
+    expect(overlay).toHaveAttribute('role', 'alert')
+    expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
+    expect(screen.getByText('Falha ao carregar')).toBeInTheDocument()
   })
 
   it('aguardando via query param mostra overlay-aguardando com Partida preparada', () => {
@@ -204,7 +202,7 @@ describe('partida estados da tela', () => {
 
   it('overlays sobre canvas com z-10 e moldura com z-20', () => {
     renderWithRouter(['/partida'], autenticado)
-    expect(screen.getByTestId('overlay-carregando')).toHaveClass('z-10')
+    expect(screen.getByTestId('overlay-falha')).toHaveClass('z-10')
     expect(screen.getByTestId('partida-moldura')).toHaveClass('z-20')
     expect(screen.getByTestId('ambiente-de-jogo')).toHaveClass('absolute')
   })
@@ -218,9 +216,9 @@ describe('partida estados da tela', () => {
     expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
   })
 
-  it('query param inválido é ignorado e mantém carregando', () => {
+  it('query param inválido é ignorado e sem alvo mostra falha', () => {
     renderWithRouter(['/partida?partidaEstado=invalido'], autenticado)
-    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
+    expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
   })
 
   it('carregando via query param força estado mesmo partindo de outro inicial', () => {

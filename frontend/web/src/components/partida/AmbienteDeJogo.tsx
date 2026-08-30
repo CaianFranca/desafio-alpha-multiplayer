@@ -8,8 +8,9 @@ import {
 import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import { chaveCelula, todasAsCelulas } from '../../game/tabuleiro/contrato'
-import { criarEstadoExibicaoMock } from '../../game/tabuleiro/mockExibicao'
-import type { EstadoDaTela } from './partidaTelaMachine'
+import type { EstadoExibicaoTabuleiro } from '../../game/tabuleiro/contrato'
+import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
+import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
@@ -25,11 +26,24 @@ function CameraRig({ bordaPx = 0 }: CameraRigProps) {
 
 interface AmbienteDeJogoProps {
   bordaPx?: number
-  estado?: EstadoDaTela | null
+  /**
+   * Estado de exibição da cena. Antes era derivado de `criarEstadoExibicaoMock()`
+   * quando o estado da tela era 'disponivel'; agora vem do modelo do cliente
+   * (reserva/posicionadas aplicados por evento) ou do mock DEV.
+   */
+  estadoExibicao?: EstadoExibicaoTabuleiro | null
+  /** Estado de interação (seleção/manipulação) para cursor e destaques. */
+  estadoInteracao?: EstadoInteracaoTabuleiro | null
+  /** Callback de comando de tabuleiro (null = sem ação) → enviar ao WS. */
+  onComando?: (comando: TabuleiroComandoDoCliente | null) => void
 }
 
-export function AmbienteDeJogo({ bordaPx = 0, estado = null }: AmbienteDeJogoProps) {
-  const estadoExibicao = estado === 'disponivel' ? criarEstadoExibicaoMock() : null
+export function AmbienteDeJogo({
+  bordaPx = 0,
+  estadoExibicao = null,
+  estadoInteracao = null,
+  onComando,
+}: AmbienteDeJogoProps) {
   const todasCelulas = todasAsCelulas()
   const ocupadasSet = new Set(
     estadoExibicao?.posicionadas.map((p) => chaveCelula(p.celula)) ?? [],
@@ -58,7 +72,11 @@ export function AmbienteDeJogo({ bordaPx = 0, estado = null }: AmbienteDeJogoPro
         }
       >
         <CameraRig bordaPx={bordaPx} />
-        <AmbienteCena estadoExibicao={estadoExibicao} />
+        <AmbienteCena
+          estadoExibicao={estadoExibicao}
+          estadoInteracao={estadoInteracao}
+          onComando={onComando}
+        />
       </Canvas>
       {estadoExibicao ? (
         <TabuleiroMirrorDOM

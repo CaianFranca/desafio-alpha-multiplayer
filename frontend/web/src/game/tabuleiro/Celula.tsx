@@ -12,10 +12,17 @@ import {
 } from './contrato'
 import type { Celula as CelulaTipo, PecaPosicionada } from './contrato'
 import { PecaPlaceholder } from './PecaPlaceholder'
+import { handlersDeCursor } from './cursor'
+import type { ThreeEvent } from '@react-three/fiber'
 
 interface CelulaProps {
   celula: CelulaTipo
   peca?: PecaPosicionada | null
+  /** Cursor da grade para a célula (ocupada/vazia; vazia só reage se há seleção). */
+  cursor?: 'default' | 'pointer'
+  /** Destaque visual da peça posicionada selecionada/em manipulação. */
+  pecaDestacada?: boolean
+  onClick?: (event: ThreeEvent<MouseEvent>) => void
 }
 
 const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, number, number] }[] = [
@@ -25,13 +32,19 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
   { pos: [-TAMANHO_CELULA / 2 + BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
 ]
 
-export function Celula({ celula, peca }: CelulaProps) {
+export function Celula({ celula, peca, cursor = 'default', pecaDestacada = false, onClick }: CelulaProps) {
   const pos = celulaParaMundo(celula)
   const ocupada = Boolean(peca)
+  const cursorHandlers = handlersDeCursor(cursor)
 
   return (
     <group position={pos}>
-      <mesh position={[0, CELULA_Y_BASE, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh
+        position={[0, CELULA_Y_BASE, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        onClick={onClick}
+        {...cursorHandlers}
+      >
         <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
         <meshStandardMaterial
           color={ocupada ? '#5e4e36' : '#1b1915'}
@@ -48,7 +61,12 @@ export function Celula({ celula, peca }: CelulaProps) {
         ))}
       </group>
       {peca ? (
-        <PecaPlaceholder tipo={peca.tipo} orientacao={peca.orientacao} position={[0, PECA_Y, 0]} />
+        <PecaPlaceholder
+          tipo={peca.tipo}
+          orientacao={peca.orientacao}
+          position={[0, PECA_Y, 0]}
+          destacada={pecaDestacada}
+        />
       ) : null}
     </group>
   )

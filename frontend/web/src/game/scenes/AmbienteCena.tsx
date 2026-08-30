@@ -12,6 +12,8 @@ import {
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Reserva } from '../tabuleiro/Reserva'
 import type { EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
+import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
+import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
@@ -58,9 +60,26 @@ function Mesa() {
 
 interface AmbienteCenaProps {
   estadoExibicao?: EstadoExibicaoTabuleiro | null
+  /** Estado de interação (seleção/manipulação) para cursor e destaques. */
+  estadoInteracao?: EstadoInteracaoTabuleiro | null
+  onComando?: (comando: TabuleiroComandoDoCliente | null) => void
 }
 
-export function AmbienteCena({ estadoExibicao }: AmbienteCenaProps) {
+// Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
+// sem alvo não monta a cena; DEV sem alvo pode), componentes ficam inertes.
+const estadoInteracaoVazio: EstadoInteracaoTabuleiro = {
+  reserva: [],
+  posicionadas: [],
+  pecaSelecionadaId: null,
+  pecaEmManipulacaoId: null,
+}
+function noop(): void {}
+
+export function AmbienteCena({
+  estadoExibicao,
+  estadoInteracao = null,
+  onComando,
+}: AmbienteCenaProps) {
   return (
     <>
       {/* Vazio quase-preto delimitando a cena, com fog no mesmo tom para profundidade. */}
@@ -70,8 +89,16 @@ export function AmbienteCena({ estadoExibicao }: AmbienteCenaProps) {
       <Mesa />
       {estadoExibicao ? (
         <>
-          <Tabuleiro posicionadas={estadoExibicao.posicionadas} />
-          <Reserva reserva={estadoExibicao.reserva} />
+          <Tabuleiro
+            posicionadas={estadoExibicao.posicionadas}
+            estadoInteracao={estadoInteracao ?? estadoInteracaoVazio}
+            onComando={onComando ?? noop}
+          />
+          <Reserva
+            reserva={estadoExibicao.reserva}
+            estadoInteracao={estadoInteracao ?? estadoInteracaoVazio}
+            onComando={onComando ?? noop}
+          />
         </>
       ) : null}
     </>
