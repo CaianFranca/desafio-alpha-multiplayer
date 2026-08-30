@@ -152,6 +152,14 @@ export function usePartidaWebSocket({
 
     ws.onerror = () => {
       if (!montadoRef.current) return
+      // Falha de conexão não deve reconectar sozinha — exibe tela de falha
+      // até retry manual (PartidaPage.tentarNovamenteComConexao). Suprime o
+      // agendamento do onclose subsequente.
+      ws.onclose = null
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
       onFalhaDeConexaoRef.current()
     }
   }, [serverId, partidaId])
