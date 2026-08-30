@@ -7,6 +7,10 @@ import {
 } from '../../game/ambiente/contrato'
 import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
+import { chaveCelula, todasAsCelulas } from '../../game/tabuleiro/contrato'
+import { criarEstadoExibicaoMock } from '../../game/tabuleiro/mockExibicao'
+import type { EstadoDaTela } from './partidaTelaMachine'
+import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -21,9 +25,16 @@ function CameraRig({ bordaPx = 0 }: CameraRigProps) {
 
 interface AmbienteDeJogoProps {
   bordaPx?: number
+  estado?: EstadoDaTela | null
 }
 
-export function AmbienteDeJogo({ bordaPx = 0 }: AmbienteDeJogoProps) {
+export function AmbienteDeJogo({ bordaPx = 0, estado = null }: AmbienteDeJogoProps) {
+  const estadoExibicao = estado === 'disponivel' ? criarEstadoExibicaoMock() : null
+  const todasCelulas = todasAsCelulas()
+  const ocupadasSet = new Set(
+    estadoExibicao?.posicionadas.map((p) => chaveCelula(p.celula)) ?? [],
+  )
+
   return (
     <div
       data-testid="ambiente-de-jogo"
@@ -47,8 +58,16 @@ export function AmbienteDeJogo({ bordaPx = 0 }: AmbienteDeJogoProps) {
         }
       >
         <CameraRig bordaPx={bordaPx} />
-        <AmbienteCena />
+        <AmbienteCena estadoExibicao={estadoExibicao} />
       </Canvas>
+      {estadoExibicao ? (
+        <TabuleiroMirrorDOM
+          todasCelulas={todasCelulas}
+          ocupadasSet={ocupadasSet}
+          reserva={estadoExibicao.reserva}
+          posicionadas={estadoExibicao.posicionadas}
+        />
+      ) : null}
     </div>
   )
 }
