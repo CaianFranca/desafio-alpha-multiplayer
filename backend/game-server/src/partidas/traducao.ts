@@ -1,16 +1,16 @@
-// Tradução engine→wire dos eventos de tabuleiro e do ciclo de Peões
-// (issues #80 e #88).
+// Tradução engine→wire dos eventos do canal de Partida (issue #117).
 //
 // O domínio (`@flicker/engine`) emite eventos em `snake_case`; o wire
 // (`@flicker/shared`) os espera em `UPPER_SNAKE_CASE`. Campos em
-// `camelCase` são idênticos nos dois lados. A saída é `SalaServerMessage`,
-// pois os eventos de Peões chegam pelo mesmo canal da partida.
+// `camelCase` são idênticos nos dois lados. Cobre os eventos de tabuleiro/
+// Peões (issues #80 e #88) e os do ciclo de Turnos do ST-11. A saída é
+// `SalaServerMessage`, pois os eventos chegam pelo mesmo canal da partida.
 
-import type { EventoDoTabuleiro } from '@flicker/engine';
+import type { EventoDaPartida } from '@flicker/engine';
 import type { SalaServerMessage } from '@flicker/shared';
 
 export function traduzirEventos(
-  eventos: readonly EventoDoTabuleiro[],
+  eventos: readonly EventoDaPartida[],
 ): SalaServerMessage[] {
   const saida: SalaServerMessage[] = [];
   for (const evento of eventos) {
@@ -75,6 +75,24 @@ export function traduzirEventos(
       case 'peao_permaneceu':
         saida.push({
           type: 'PEAO_PERMANECEU',
+          peaoId: evento.peaoId,
+          pecaId: evento.pecaId,
+        });
+        break;
+      case 'turno_iniciado':
+        saida.push({
+          type: 'TURNO_INICIADO',
+          jogadorId: evento.jogadorId,
+          rodada: evento.rodada,
+        });
+        break;
+      case 'turno_encerrado':
+        saida.push({ type: 'TURNO_ENCERRADO', jogadorId: evento.jogadorId });
+        break;
+      case 'posicao_confirmada':
+        saida.push({
+          type: 'POSICAO_CONFIRMADA',
+          jogadorId: evento.jogadorId,
           peaoId: evento.peaoId,
           pecaId: evento.pecaId,
         });

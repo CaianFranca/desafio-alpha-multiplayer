@@ -1,4 +1,4 @@
-// Servidor WebSocket do game-server (issues #46 e #80).
+// Servidor WebSocket do game-server (issues #46 e #117).
 //
 // Assinatura: `criarWebSocketServer(server, contexto, deps?)`. Todo upgrade
 // passa pelo fluxo de admissão (issue #46) em `/ws/game/<serverId>` com
@@ -9,11 +9,14 @@
 // `ADMISSAO_REJEITADA` (400/401/403/404/500). O `jogadorId` é sempre o do
 // JWT — o cliente não se autodeclara.
 //
-// Com `deps.tabuleiro` (issue #80), o socket admitido entra no canal da
-// partida: registra no `TabuleiroBroadcaster` e roteia comandos válidos ao
-// `TabuleiroHandlers`. Como a admissão é toda pré-upgrade, não há comando a
-// bufferizar: quando os listeners anexam, a partida já está validada. PING/
-// PONG responde sempre. Sem `deps`, o servidor opera apenas em PING/PONG.
+// Com `deps.partida` (issue #117), o socket admitido entra no canal da
+// partida: registra no `PartidaBroadcaster`, recebe o turno corrente via
+// `anunciarTurnoAtual` e roteia as mensagens ao `PartidaHandlers` — a guarda
+// do contrato wire é dele, e mensagens fora do contrato são respondidas ao
+// originador com ERRO_DO_TABULEIRO DADOS_INVALIDOS. Como a admissão é toda
+// pré-upgrade, não há comando a bufferizar: quando os listeners anexam, a
+// partida já está validada. PING/PONG responde sempre. Sem `deps`, o servidor
+// opera apenas em PING/PONG.
 
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -29,20 +32,20 @@ import type { ContextoDoGameServer } from '../contexto.ts';
 import { obterPartida, atualizarPresencaAtomica } from '../partidas/partidas.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
 import { adicionarConexao, removerConexao, type ConexaoDoJogador } from './conexao.ts';
-import { TabuleiroBroadcaster } from '../tabuleiro/broadcast.ts';
-import { TabuleiroHandlers } from '../tabuleiro/handlers.ts';
-import { ehComandoDoTabuleiro } from '../tabuleiro/validacao.ts';
+import { PartidaBroadcaster } from '../partidas/broadcast.ts';
+import { PartidaHandlers } from '../partidas/handlers.ts';
 
 const WS_PATH_RE = /^\/ws\/game\/([^/]+)$/;
 
-export interface TabuleiroWsDeps {
-  readonly redis: import('ioredis').Redis;
-  readonly broadcaster: TabuleiroBroadcaster;
-  readonly handlers: TabuleiroHandlers;
+// Só o que o `ws.ts` consome do canal de Partida: o `PartidaHandlers` já
+// carrega a própria referência ao Redis. Deixar `redis` aqui seria peso morto.
+export interface PartidaWsDeps {
+  readonly broadcaster: PartidaBroadcaster;
+  readonly handlers: PartidaHandlers;
 }
 
 export interface WebSocketServerDeps {
-  readonly tabuleiro?: TabuleiroWsDeps;
+  readonly partida?: PartidaWsDeps;
 }
 
 interface UpgradeResultado {
@@ -149,7 +152,10 @@ export function criarWebSocketServer(
   deps?: WebSocketServerDeps,
 ): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true });
-  const tabuleiro = deps?.tabuleiro;
+  // Nome distinto de `partida` (a PartidaPreparada buscada no Redis dentro do
+  // fluxo de admissão) para evitar shadowing: `depsPartida` são as deps do
+  // canal de Partida, `partida` é a partida persistida.
+  const depsPartida = deps?.partida;
 
   server.on('upgrade', (request, socket, head) => {
     const resultado = parsearUpgrade(request, contexto.serverId);
@@ -210,10 +216,12 @@ export function criarWebSocketServer(
         adicionarConexao(conexao);
 
         // Admissão pré-upgrade concluída: a partida já é conhecida e validada.
-        // Com o canal de tabuleiro ativo, o socket entra no broadcaster da
-        // partida e comandos válidos vão direto aos handlers (issue #80).
-        if (tabuleiro !== undefined) {
-          tabuleiro.broadcaster.registrar(partidaId, ws);
+        // Com o canal de partida ativo, o socket entra no broadcaster, recebe
+        // o turno corrente e comandos válidos vão direto aos handlers
+        // (issue #117).
+        if (depsPartida !== undefined) {
+          depsPartida.broadcaster.registrar(partidaId, ws);
+          void depsPartida.handlers.anunciarTurnoAtual(partidaId, ws);
         }
 
         console.info('[ws] jogador admitido', {
@@ -232,19 +240,21 @@ export function criarWebSocketServer(
             return;
           }
 
-          // PING/PONG responde sempre, mesmo com o canal de tabuleiro ativo.
+          // PING/PONG responde sempre, mesmo com o canal de partida ativo.
           if (isPing(parsed)) {
             ws.send(JSON.stringify({ type: 'PONG' } satisfies ServerMessage));
             return;
           }
 
-          if (tabuleiro === undefined) {
+          if (depsPartida === undefined) {
             return;
           }
 
-          if (ehComandoDoTabuleiro(parsed)) {
-            void tabuleiro.handlers.aplicarMensagem(ws, partidaId, parsed);
-          }
+          // Comandos fora do contrato (guard em `handlers.ts`) também seguem
+          // para o handler: ele responde ERRO_DO_TABULEIRO DADOS_INVALIDOS ao
+          // originador — descartar aqui quebraria o contrato fechado do wire
+          // (issue #117) e o teste de guarda de peões.
+          void depsPartida.handlers.aplicarMensagem(ws, partidaId, parsed);
         });
 
         ws.on('close', () => {
@@ -253,8 +263,8 @@ export function criarWebSocketServer(
             partidaId,
           });
           removerConexao(conexao);
-          if (tabuleiro !== undefined) {
-            tabuleiro.broadcaster.remover(ws);
+          if (depsPartida !== undefined) {
+            depsPartida.broadcaster.remover(ws);
           }
         });
       });
