@@ -2,6 +2,7 @@ export type * from './sala.ts';
 export type * from './encaminhamento.ts';
 export type * from './tabuleiro.ts';
 export type * from './peoes.ts';
+export type * from './partida.ts';
 export type {
   ClientMessage,
   PingMessage,
