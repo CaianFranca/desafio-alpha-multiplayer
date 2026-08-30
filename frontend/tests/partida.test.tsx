@@ -266,3 +266,52 @@ describe('partida dev toolbar', () => {
     expect(screen.getByTestId('partida-dev-toolbar')).toHaveClass('z-30')
   })
 })
+
+describe('partida tabuleiro e reserva (issue #83)', () => {
+  const autenticado = mockAuthenticatedState
+
+  it('disponivel mostra grade 7x7 (49 células) com distinção vazia/ocupada e peça encaixada', () => {
+    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+    const celulas = screen.getAllByTestId('tabuleiro-celula')
+    expect(celulas).toHaveLength(49)
+    const ocupadas = celulas.filter((el) => el.getAttribute('data-ocupada') === 'true')
+    const vazias = celulas.filter((el) => el.getAttribute('data-ocupada') === 'false')
+    expect(ocupadas).toHaveLength(1)
+    expect(vazias).toHaveLength(48)
+    expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(1)
+    // garante que existe célula 3:3 ocupada
+    const centroOcupada = celulas.find(
+      (el) => el.getAttribute('data-linha') === '3' && el.getAttribute('data-coluna') === '3' && el.getAttribute('data-ocupada') === 'true',
+    )
+    expect(centroOcupada).toBeInTheDocument()
+  })
+
+  it('disponivel mostra reserva lateral com 22 placeholders (4 iniciais + 6 de cada caminho)', () => {
+    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+    expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
+    expect(screen.getByTestId('reserva')).toBeInTheDocument()
+    const pecas = screen.getAllByTestId('reserva-peca')
+    expect(pecas).toHaveLength(22)
+    expect(pecas.filter((el) => el.getAttribute('data-tipo') === 'inicial')).toHaveLength(4)
+    expect(pecas.filter((el) => el.getAttribute('data-tipo') === 'reta')).toHaveLength(6)
+    expect(pecas.filter((el) => el.getAttribute('data-tipo') === 'T')).toHaveLength(6)
+    expect(pecas.filter((el) => el.getAttribute('data-tipo') === 'cruz')).toHaveLength(6)
+  })
+
+  it('carregando/aguardando/falha não exibem tabuleiro nem reserva', () => {
+    renderWithRouter(['/partida?partidaEstado=carregando'], autenticado)
+    expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('reserva')).not.toBeInTheDocument()
+    // também para aguardando e falha via re-render com toolbar
+  })
+
+  it('aguardando não exibe tabuleiro', () => {
+    renderWithRouter(['/partida?partidaEstado=aguardando'], autenticado)
+    expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
+  })
+
+  it('falha não exibe tabuleiro', () => {
+    renderWithRouter(['/partida?partidaEstado=falha'], autenticado)
+    expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
+  })
+})

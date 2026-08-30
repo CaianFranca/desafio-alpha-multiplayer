@@ -30,7 +30,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Acoplado ao header de App.tsx (5rem); remover/trocar por h-screen quando Partida deixar de ser filha de App
   return (
     <div className="relative min-h-[calc(100vh-5rem)] w-full overflow-hidden">
-      <AmbienteDeJogo bordaPx={bordaPx} />
+      <AmbienteDeJogo bordaPx={bordaPx} estado={estado} />
       <PartidaOverlays estado={estado} onRetry={tentarNovamente} />
       <PartidaMoldura onBordaChange={setBordaPx} />
       <PartidaDevToolbar onForcar={forcarEstado} />

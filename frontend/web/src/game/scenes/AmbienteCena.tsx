@@ -9,6 +9,9 @@ import {
   LARGURA_MESA,
   PROFUNDIDADE_MESA,
 } from '../ambiente/contrato'
+import { Tabuleiro } from '../tabuleiro/Tabuleiro'
+import { Reserva } from '../tabuleiro/Reserva'
+import type { EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
@@ -53,7 +56,11 @@ function Mesa() {
   )
 }
 
-export function AmbienteCena() {
+interface AmbienteCenaProps {
+  estadoExibicao?: EstadoExibicaoTabuleiro | null
+}
+
+export function AmbienteCena({ estadoExibicao }: AmbienteCenaProps) {
   return (
     <>
       {/* Vazio quase-preto delimitando a cena, com fog no mesmo tom para profundidade. */}
@@ -61,6 +68,12 @@ export function AmbienteCena() {
       <fog attach="fog" args={[COR_FUNDO, 24, 70]} />
       <Iluminacao />
       <Mesa />
+      {estadoExibicao ? (
+        <>
+          <Tabuleiro posicionadas={estadoExibicao.posicionadas} />
+          <Reserva reserva={estadoExibicao.reserva} />
+        </>
+      ) : null}
     </>
   )
 }
