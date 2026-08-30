@@ -23,15 +23,7 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'PERMANECER',
 ]);
 
-function ehPecaIdValido(valor: unknown): boolean {
-  return typeof valor === 'string' && valor.length > 0;
-}
-
-function ehPeaoIdValido(valor: unknown): boolean {
-  return typeof valor === 'string' && valor.length > 0;
-}
-
-function ehRecebidaIdValido(valor: unknown): boolean {
+function ehIdNaoVazio(valor: unknown): boolean {
   return typeof valor === 'string' && valor.length > 0;
 }
 
@@ -73,26 +65,26 @@ export function ehComandoDoTabuleiro(
   const mensagem = value as Record<string, unknown>;
   switch (type) {
     case 'SELECIONAR_PECA':
-      return ehPecaIdValido(mensagem.pecaId);
+      return ehIdNaoVazio(mensagem.pecaId);
     case 'GIRAR_PECA':
       return (
-        ehPecaIdValido(mensagem.pecaId)
+        ehIdNaoVazio(mensagem.pecaId)
         && (mensagem.sentido === 'horario' || mensagem.sentido === 'anti_horario')
       );
     case 'POSICIONAR_PECA':
-      return ehPecaIdValido(mensagem.pecaId) && ehCelulaValida(mensagem.celula);
+      return ehIdNaoVazio(mensagem.pecaId) && ehCelulaValida(mensagem.celula);
     case 'FINALIZAR_MANIPULACAO':
       return true;
     case 'SELECIONAR_PEAO':
-      return ehPeaoIdValido(mensagem.peaoId);
+      return ehIdNaoVazio(mensagem.peaoId);
     case 'POSICIONAR_PEAO':
-      return ehPeaoIdValido(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
+      return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     case 'ESCOLHER_TIPO_DA_PECA_RECEBIDA':
-      return ehRecebidaIdValido(mensagem.recebidaId) && ehTipoDaPecaValido(mensagem.tipoDaPeca);
+      return ehIdNaoVazio(mensagem.recebidaId) && ehTipoDaPecaValido(mensagem.tipoDaPeca);
     case 'MOVER_PEAO':
-      return ehPeaoIdValido(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
+      return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     case 'PERMANECER':
-      return ehPeaoIdValido(mensagem.peaoId);
+      return ehIdNaoVazio(mensagem.peaoId);
     default:
       return false;
   }

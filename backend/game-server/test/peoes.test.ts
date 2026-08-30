@@ -205,15 +205,15 @@ function enviar(ws: WebSocket, mensagem: unknown): void {
 }
 
 /**
- * Setup compartilhado do fluxo feliz: posiciona a Peça Inicial em (1,2) (célula
- * interior, para as bordas norte/leste caírem na grade), posiciona o Peão
- * branco sobre ela — disparando o Recebimento de 2 pendências — escolhe o tipo
- * 'reta' e encaixa cada Recebida na célula-alvo. Ao final o Peão branco segue
- * selecionado, sem pendências.
+ * Setup compartilhado: posiciona a Peça Inicial em (1,2) (célula interior,
+ * para as bordas norte/leste caírem na grade) e encaixa o Peão branco sobre
+ * ela — disparando o Recebimento de 2 pendências. Devolve as pendências
+ * geradas; o handler mantém o Peão selecionado após o primeiro posicionamento
+ * (seam do #88), então a sequência fica pronta para escolher os tipos.
  */
-async function prepararSequenciaDoPeao(
+async function posicionarPeaoNaInicial(
   ws: WebSocket,
-): Promise<{ recebidas: Array<Record<string, unknown>>; pecas: string[] }> {
+): Promise<Array<Record<string, unknown>>> {
   enviar(ws, { type: 'SELECIONAR_PECA', pecaId: 'inicial-1' });
   const selecionada = await esperarEvento(ws, 'PECA_SELECIONADA');
   assert.equal(selecionada.pecaId, 'inicial-1');
@@ -243,14 +243,28 @@ async function prepararSequenciaDoPeao(
   assert.deepEqual(recebidas[0]!.celulaAlvo, { linha: 0, coluna: 2 });
   assert.equal(recebidas[1]!.bordaGeradora, 'leste');
   assert.deepEqual(recebidas[1]!.celulaAlvo, { linha: 1, coluna: 3 });
+  return recebidas;
+}
+
+/**
+ * Setup compartilhado do fluxo feliz: posiciona o Peão branco sobre a Peça
+ * Inicial (Recebimento de 2 pendências), escolhe `tipoDaPeca` para cada
+ * pendência e encaixa cada Recebida na célula-alvo. Ao final o Peão branco
+ * segue selecionado (seam #88), sem pendências.
+ */
+async function prepararSequenciaDoPeao(
+  ws: WebSocket,
+  tipoDaPeca = 'reta',
+): Promise<{ recebidas: Array<Record<string, unknown>>; pecas: string[] }> {
+  const recebidas = await posicionarPeaoNaInicial(ws);
 
   const pecas: string[] = [];
   for (const recebida of recebidas) {
     const recebidaId = recebida.recebidaId as string;
-    enviar(ws, { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', recebidaId, tipoDaPeca: 'reta' });
+    enviar(ws, { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', recebidaId, tipoDaPeca });
     const escolhida = await esperarEvento(ws, 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO');
     assert.equal(escolhida.recebidaId, recebidaId);
-    assert.equal(escolhida.tipoDaPeca, 'reta');
+    assert.equal(escolhida.tipoDaPeca, tipoDaPeca);
     const pecaId = escolhida.pecaId as string;
     pecas.push(pecaId);
 
@@ -398,6 +412,101 @@ test('rejeição: comando de peão malformado responde ERRO_DO_TABULEIRO DADOS_I
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.codigo, 'DADOS_INVALIDOS');
+      assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
+    } finally {
+      ws.close();
+    }
+
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('fluxo feliz: permanecer encerra a sequência do peão (PEAO_PERMANECEU)', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+    const ws = await conectarPartida(servidor, aceite.partidaId);
+
+    try {
+      // Escolha livre do tipo (AC3) fora do 'reta': consumir 'cruz-1' e
+      // 'cruz-2' da Reserva prova a liberdade do AC3 ponta a ponta.
+      const { pecas } = await prepararSequenciaDoPeao(ws, 'cruz');
+      assert.equal(pecas[0], 'cruz-1');
+      assert.equal(pecas[1], 'cruz-2');
+
+      enviar(ws, { type: 'PERMANECER', peaoId: 'peao-branco' });
+      const permaneceu = await esperarEvento(ws, 'PEAO_PERMANECEU');
+      assert.equal(permaneceu.peaoId, 'peao-branco');
+      assert.equal(permaneceu.pecaId, 'inicial-1');
+
+      // Permanecer encerra a sequência: o Peão segue na mesma Peça e a
+      // seleção é limpa no estado persistido.
+      const estado = await obterEstadoDoTabuleiro(redis, aceite.partidaId);
+      assert.ok(estado !== null, 'estado do tabuleiro deve existir no Redis');
+      assert.equal(estado!.peaoSelecionadoId, null);
+      assert.equal(estado!.peoes.find((p) => p.peaoId === 'peao-branco')?.pecaId, 'inicial-1');
+      assert.equal(estado!.recebidas.length, 0);
+    } finally {
+      ws.close();
+    }
+
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('rejeição: posicionar segundo peão sobre Peça ocupada responde ERRO_DO_TABULEIRO PECA_JA_TEM_PEAO', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+    const ws = await conectarPartida(servidor, aceite.partidaId);
+
+    try {
+      await prepararSequenciaDoPeao(ws);
+
+      enviar(ws, { type: 'SELECIONAR_PEAO', peaoId: 'peao-vermelho' });
+      const selecionado = await esperarEvento(ws, 'PEAO_SELECIONADO');
+      assert.equal(selecionado.peaoId, 'peao-vermelho');
+
+      // A Peça Inicial (1,2) já abriga o Peão branco; o primeiro
+      // posicionamento do vermelho sobre ela rejeita — mesmo sendo a Peça
+      // Inicial e o encaixe do vermelho.
+      enviar(ws, { type: 'POSICIONAR_PEAO', peaoId: 'peao-vermelho', celula: { linha: 1, coluna: 2 } });
+      const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.codigo, 'PECA_JA_TEM_PEAO');
+      assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
+    } finally {
+      ws.close();
+    }
+
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('rejeição: mover com pendências do Recebimento responde ERRO_DO_TABULEIRO PENDENCIA_NAO_RESOLVIDA', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+    const ws = await conectarPartida(servidor, aceite.partidaId);
+
+    try {
+      // Interrompe a sequência com as 2 Recebidas em aberto e tenta mover: a
+      // pendência é rejeitada antes de qualquer checagem de conectividade.
+      await posicionarPeaoNaInicial(ws);
+
+      enviar(ws, { type: 'MOVER_PEAO', peaoId: 'peao-branco', celula: { linha: 2, coluna: 2 } });
+      const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.codigo, 'PENDENCIA_NAO_RESOLVIDA');
       assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
     } finally {
       ws.close();
