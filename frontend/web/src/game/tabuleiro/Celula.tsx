@@ -36,13 +36,16 @@ export function Celula({ celula, peca, cursor = 'default', pecaDestacada = false
   const pos = celulaParaMundo(celula)
   const ocupada = Boolean(peca)
   const cursorHandlers = handlersDeCursor(cursor)
+  // Célula ocupada: clique só pela peça (evita disparo duplo plano+peca e
+  // mapeamento indevido de POSICIONAR_PECA em célula ocupada). Plano fica inerte.
+  const planeOnClick = ocupada ? undefined : onClick
 
   return (
     <group position={pos}>
       <mesh
         position={[0, CELULA_Y_BASE, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
-        onClick={onClick}
+        onClick={planeOnClick}
         {...cursorHandlers}
       >
         <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />

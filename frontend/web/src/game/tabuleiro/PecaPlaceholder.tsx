@@ -52,11 +52,18 @@ export function PecaPlaceholder({
   const bordas = bordasAbertas({ tipo, orientacao })
   const cursorHandlers = handlersDeCursor(cursor)
 
+  const handleClick = onClick
+    ? (e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation()
+        onClick(e)
+      }
+    : undefined
+
   return (
     <group position={position}>
       <mesh
         position={[0, 0.08, 0]}
-        onClick={onClick}
+        onClick={handleClick}
         {...cursorHandlers}
       >
         <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
