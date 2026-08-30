@@ -1,20 +1,42 @@
-// Type-guard fechado do comando de tabuleiro vindo do cliente WS (issue #80).
+// Type-guard fechado dos comandos de tabuleiro e de Peões vindo do cliente WS
+// (issues #80 e #88).
 //
-// Apenas os 4 comandos do contrato wire são aceitos; campos obrigatórios são
-// validados estruturalmente. Qualquer coisa fora disso é rejeitada pelo
-// `handlers.ts` com `ERRO_DO_TABULEIRO { codigo: 'DADOS_INVALIDOS' }`.
+// Apenas os 4 comandos do contrato wire do #80 mais os 5 do ciclo de Peões do
+// #88 são aceitos; campos obrigatórios são validados estruturalmente. Qualquer
+// coisa fora disso é rejeitada pelo `handlers.ts` com `ERRO_DO_TABULEIRO {
+// codigo: 'DADOS_INVALIDOS' }`.
 
-import type { TabuleiroComandoDoCliente } from '@flicker/shared';
+import type {
+  PeaoComandoDoCliente,
+  TabuleiroComandoDoCliente,
+} from '@flicker/shared';
 
 const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'SELECIONAR_PECA',
   'GIRAR_PECA',
   'POSICIONAR_PECA',
   'FINALIZAR_MANIPULACAO',
+  'SELECIONAR_PEAO',
+  'POSICIONAR_PEAO',
+  'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+  'MOVER_PEAO',
+  'PERMANECER',
 ]);
 
 function ehPecaIdValido(valor: unknown): boolean {
   return typeof valor === 'string' && valor.length > 0;
+}
+
+function ehPeaoIdValido(valor: unknown): boolean {
+  return typeof valor === 'string' && valor.length > 0;
+}
+
+function ehRecebidaIdValido(valor: unknown): boolean {
+  return typeof valor === 'string' && valor.length > 0;
+}
+
+function ehTipoDaPecaValido(valor: unknown): boolean {
+  return valor === 'reta' || valor === 'T' || valor === 'cruz';
 }
 
 function ehCelulaValida(valor: unknown): boolean {
@@ -33,11 +55,13 @@ function ehCelulaValida(valor: unknown): boolean {
 }
 
 /**
- * Type guard puro e fechado sobre `TabuleiroComandoDoCliente`. Valida o
- * `type` e os campos esperados de cada variante; retorna `false` para
- * qualquer mensagem fora do contrato.
+ * Type guard puro e fechado sobre `TabuleiroComandoDoCliente` e
+ * `PeaoComandoDoCliente`. Valida o `type` e os campos esperados de cada
+ * variante; retorna `false` para qualquer mensagem fora do contrato.
  */
-export function ehComandoDoTabuleiro(value: unknown): value is TabuleiroComandoDoCliente {
+export function ehComandoDoTabuleiro(
+  value: unknown,
+): value is TabuleiroComandoDoCliente | PeaoComandoDoCliente {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
@@ -59,6 +83,16 @@ export function ehComandoDoTabuleiro(value: unknown): value is TabuleiroComandoD
       return ehPecaIdValido(mensagem.pecaId) && ehCelulaValida(mensagem.celula);
     case 'FINALIZAR_MANIPULACAO':
       return true;
+    case 'SELECIONAR_PEAO':
+      return ehPeaoIdValido(mensagem.peaoId);
+    case 'POSICIONAR_PEAO':
+      return ehPeaoIdValido(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
+    case 'ESCOLHER_TIPO_DA_PECA_RECEBIDA':
+      return ehRecebidaIdValido(mensagem.recebidaId) && ehTipoDaPecaValido(mensagem.tipoDaPeca);
+    case 'MOVER_PEAO':
+      return ehPeaoIdValido(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
+    case 'PERMANECER':
+      return ehPeaoIdValido(mensagem.peaoId);
     default:
       return false;
   }

@@ -1,21 +1,27 @@
-// Handlers WS do Tabuleiro (issue #80).
+// Handlers WS do Tabuleiro e do ciclo de Peões (issues #80 e #88).
 //
-// Roteia os 4 comandos wire (`@flicker/shared`) para o domínio
-// (`@flicker/engine`) via `aplicarComandoDeTabuleiro`, persiste o novo estado
-// no Redis e faz broadcast dos eventos traduzidos. Rejeições do domínio (e
-// comandos inválidos) são roteadas ao originador com `ERRO_DO_TABULEIRO`,
-// usando o `codigo` fechado do domínio. As mutações são serializadas por
-// `partidaId` para evitar lost-update no read-modify-write do Redis.
+// Roteia os comandos wire de tabuleiro e de Peões (`@flicker/shared`) para o
+// domínio (`@flicker/engine`) via `aplicarComandoDeTabuleiro`, persiste o
+// novo estado no Redis e faz broadcast dos eventos traduzidos. No primeiro
+// posicionamento do Peão (sobre a Peça Inicial) o handler compõe também o
+// Recebimento — gera as pendências via `gerarRecebidas` e mantém o Peão
+// selecionado para a sequência (seam intermediário, substituído pelo canal de
+// Partida do #117). Rejeições do domínio (e comandos inválidos) são roteadas
+// ao originador com `ERRO_DO_TABULEIRO`, usando o `codigo` fechado do domínio.
+// As mutações são serializadas por `partidaId` para evitar lost-update no
+// read-modify-write do Redis.
 
 import type { Redis } from 'ioredis';
 import type { WebSocket } from 'ws';
 import {
   aplicarComandoDeTabuleiro,
+  gerarRecebidas,
   type CodigoDeErroDeTabuleiro,
   type ComandoDeTabuleiro,
 } from '@flicker/engine';
 import type {
   CodigoDeErroDoTabuleiro,
+  PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared';
 import { TabuleiroBroadcaster } from './broadcast.ts';
@@ -86,8 +92,35 @@ export class TabuleiroHandlers {
         return;
       }
 
-      await salvarEstadoDoTabuleiro(this.redis, partidaId, resultado.estado);
-      this.broadcaster.enviar(partidaId, ...traduzirEventos(resultado.eventos));
+      // Primeiro posicionamento do Peão: após o encaixe aceito sobre a Peça
+      // Inicial, compõe o Recebimento (gerarRecebidas sobre a Peça recém-
+      // ocupada) e mantém o Peão selecionado para a sequência — espelha
+      // `posicionarPeaoDaPartida` do Primeiro Turno em partida.ts (#117).
+      let novoEstado = resultado.estado;
+      const eventos = [...resultado.eventos];
+      if (comando.tipo === 'posicionar_peao') {
+        const peao = resultado.estado.peoes.find(
+          (item) => item.peaoId === comando.peaoId,
+        );
+        const peca = peao?.pecaId
+          ? resultado.estado.posicionadas.find((item) => item.pecaId === peao.pecaId)
+          : undefined;
+        const recebidas = peca ? gerarRecebidas(resultado.estado, peca) : [];
+        novoEstado = { ...resultado.estado, peaoSelecionadoId: comando.peaoId, recebidas };
+        if (recebidas.length > 0) {
+          eventos.push({
+            tipo: 'recebimento_gerado',
+            recebidas: recebidas.map(({ recebidaId, bordaGeradora, celulaAlvo }) => ({
+              recebidaId,
+              bordaGeradora,
+              celulaAlvo,
+            })),
+          });
+        }
+      }
+
+      await salvarEstadoDoTabuleiro(this.redis, partidaId, novoEstado);
+      this.broadcaster.enviar(partidaId, ...traduzirEventos(eventos));
     }).catch((erro: unknown) => {
       console.error('[tabuleiro] erro inesperado ao processar comando:', erro);
       this.broadcaster.enviarParaSocket(socket, {
@@ -121,8 +154,13 @@ export class TabuleiroHandlers {
   }
 }
 
-/** Mapeia wire (UPPER_SNAKE) → domínio (snake). Campos em camelCase são idênticos. */
-function mapearComando(comando: TabuleiroComandoDoCliente): ComandoDeTabuleiro {
+/**
+ * Mapeia wire (UPPER_SNAKE) → domínio (snake), tanto para comandos de
+ * tabuleiro quanto para o ciclo de Peões. Campos em camelCase são idênticos.
+ */
+function mapearComando(
+  comando: TabuleiroComandoDoCliente | PeaoComandoDoCliente,
+): ComandoDeTabuleiro {
   switch (comando.type) {
     case 'SELECIONAR_PECA':
       return { tipo: 'selecionar_peca', pecaId: comando.pecaId };
@@ -132,6 +170,20 @@ function mapearComando(comando: TabuleiroComandoDoCliente): ComandoDeTabuleiro {
       return { tipo: 'posicionar_peca', pecaId: comando.pecaId, celula: comando.celula };
     case 'FINALIZAR_MANIPULACAO':
       return { tipo: 'finalizar_manipulacao' };
+    case 'SELECIONAR_PEAO':
+      return { tipo: 'selecionar_peao', peaoId: comando.peaoId };
+    case 'POSICIONAR_PEAO':
+      return { tipo: 'posicionar_peao', peaoId: comando.peaoId, celula: comando.celula };
+    case 'ESCOLHER_TIPO_DA_PECA_RECEBIDA':
+      return {
+        tipo: 'escolher_tipo_da_peca_recebida',
+        recebidaId: comando.recebidaId,
+        tipoDaPeca: comando.tipoDaPeca,
+      };
+    case 'MOVER_PEAO':
+      return { tipo: 'mover_peao', peaoId: comando.peaoId, celula: comando.celula };
+    case 'PERMANECER':
+      return { tipo: 'permanecer', peaoId: comando.peaoId };
     default: {
       // Exaustividade: um novo `type` sem case falha a compilação; em runtime
       // a entrada já foi validada por `ehComandoDoTabuleiro`.
@@ -142,10 +194,10 @@ function mapearComando(comando: TabuleiroComandoDoCliente): ComandoDeTabuleiro {
 }
 
 // Conjunto fechado dos códigos do domínio que pertencem ao contrato wire do
-// tabuleiro (issue #80). O domínio (`@flicker/engine`) tem códigos extras do
-// ST-10 (Peões/Recebimento) que não são alcançáveis pelos 4 comandos do #80;
-// qualquer código fora deste conjunto é normalizado para DADOS_INVALIDOS para
-// nunca vazar um código fora do contrato.
+// tabuleiro (issues #80 e #88): os códigos de Peças do #80 mais os do ciclo
+// de Peões/Recebimento do #88. Qualquer código fora deste conjunto (ex.:
+// códigos do canal de Partida do #117, fora do escopo) é normalizado para
+// DADOS_INVALIDOS para nunca vazar um código fora do contrato.
 const CODIGOS_DO_TABULEIRO_WIRE: ReadonlySet<string> = new Set([
   'DADOS_INVALIDOS',
   'ESTADO_INDISPONIVEL',
@@ -156,6 +208,17 @@ const CODIGOS_DO_TABULEIRO_WIRE: ReadonlySet<string> = new Set([
   'CELULA_JA_OCUPADA',
   'PECA_JA_POSICIONADA',
   'MANIPULACAO_ENCERRADA',
+  'PEAO_NAO_ENCONTRADO',
+  'PEAO_JA_POSICIONADO',
+  'PEAO_NAO_SELECIONADO',
+  'PECA_INICIAL_EXIGIDA',
+  'CELULA_SEM_PECA',
+  'PECA_JA_TEM_PEAO',
+  'PENDENCIA_NAO_RESOLVIDA',
+  'MOVIMENTO_NAO_CONECTADO',
+  'PECA_NAO_RECEBIDA',
+  'PECA_FORA_DO_ALVO',
+  'RECEBIDA_NAO_ENCONTRADA',
 ]);
 
 function paraCodigoDoTabuleiroWire(codigo: CodigoDeErroDeTabuleiro): CodigoDeErroDoTabuleiro {
