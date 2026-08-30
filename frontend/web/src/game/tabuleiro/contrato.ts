@@ -74,10 +74,60 @@ export interface PecaPosicionada {
   readonly celula: Celula
 }
 
+// ── Peões (issue #90 — ST-10) ──
+
+export type PeaoId = string
+
+/** Cores canônicas espelham `CorDoPeao` do engine (branco|vermelho|azul|amarelo). */
+export type CorDoPeao = 'branco' | 'vermelho' | 'azul' | 'amarelo'
+
+/**
+ * Peão na projeção de exibição: `celula` é a célula da peça sobre a qual o
+ * peão está posicionado; `null` significa sobre a Mesa (fora do tabuleiro).
+ */
+export interface PeaoDaExibicao {
+  readonly peaoId: PeaoId
+  readonly cor: CorDoPeao
+  readonly celula: Celula | null
+}
+
 export interface EstadoExibicaoTabuleiro {
   readonly reserva: readonly PecaDaReserva[]
   readonly posicionadas: readonly PecaPosicionada[]
+  readonly peoes: readonly PeaoDaExibicao[]
 }
+
+/** 4 Peões, um por cor; ordem espelha `CORES_DOS_PEOES` do engine. */
+export const QUANTIDADE_PEOES = 4
+
+export const CORES_DOS_PEOES: readonly CorDoPeao[] = [
+  'branco',
+  'vermelho',
+  'azul',
+  'amarelo',
+]
+
+/** Hex placeholder por cor (arte final substitui o placeholder, não os ids). */
+export const HEX_COR_PEAO: Record<CorDoPeao, string> = {
+  branco: '#f2efe6',
+  vermelho: '#c0392b',
+  azul: '#2e6bd6',
+  amarelo: '#f1c40f',
+}
+
+/**
+ * Y local (no grupo da célula) da base do peão sobre a peça. Deriva da
+ * geometria do PecaPlaceholder: PECA_Y (0.02) + centro da caixa (0.08) +
+ * meia espessura (0.06) = topo da peça em 0.16.
+ */
+export const PEAO_Y = PECA_Y + 0.14
+
+/**
+ * Fileira dos peões não posicionados sobre a Mesa: lado oposto à reserva
+ * (-X; reserva fica em +X). Altura y = 0 (plano superior da Mesa).
+ */
+export const OFFSET_FILEIRA_PEOES_X = -8.0
+export const ESPACAMENTO_PEAO_MESA = ESPACAMENTO_RESERVA
 
 // ── Composição inicial da reserva (4 + 6 + 6 + 6 = 22) ──
 
@@ -204,4 +254,121 @@ export function validarDimensoes(): string | null {
     return 'Tabuleiro deve ser menor que a Mesa'
   }
   return null
+}
+
+// ── Conexões e seleção de peões (issue #90 — espelho visual do engine) ──
+//
+// Espelha `vizinhasConectadas` de packages/engine/src/peoes.ts: para cada
+// borda aberta da origem, a célula vizinha na direção; a vizinha está
+// conectada quando tem a borda oposta aberta. O frontend NÃO importa o
+// engine: esta é a projeção de exibição da mesma regra.
+
+const BORDA_OPOSTA: Record<BordaCardinal, BordaCardinal> = {
+  norte: 'sul',
+  sul: 'norte',
+  leste: 'oeste',
+  oeste: 'leste',
+}
+
+// Deslocamento idêntico ao engine: norte {linha:-1}, leste {coluna:+1},
+// sul {linha:+1}, oeste {coluna:-1}.
+const DESLOCAMENTO_DA_BORDA: Record<BordaCardinal, Celula> = {
+  norte: { linha: -1, coluna: 0 },
+  leste: { linha: 0, coluna: 1 },
+  sul: { linha: 1, coluna: 0 },
+  oeste: { linha: 0, coluna: -1 },
+}
+
+export function estaDentroDaGrade(celula: Celula): boolean {
+  return (
+    Number.isInteger(celula.linha) &&
+    Number.isInteger(celula.coluna) &&
+    celula.linha >= 0 &&
+    celula.linha < LADO_DA_GRADE &&
+    celula.coluna >= 0 &&
+    celula.coluna < LADO_DA_GRADE
+  )
+}
+
+export function encontrarPecaNaCelula(
+  posicionadas: readonly PecaPosicionada[],
+  celula: Celula,
+): PecaPosicionada | null {
+  const chave = chaveCelula(celula)
+  return posicionadas.find((p) => chaveCelula(p.celula) === chave) ?? null
+}
+
+/** Vizinhas conectadas à peça de origem (ordem canônica norte→leste→sul→oeste). */
+export function vizinhasConectadas(
+  posicionadas: readonly PecaPosicionada[],
+  origem: PecaPosicionada,
+): PecaPosicionada[] {
+  const conectadas: PecaPosicionada[] = []
+  for (const borda of bordasAbertas(origem)) {
+    const delta = DESLOCAMENTO_DA_BORDA[borda]
+    const celulaVizinha: Celula = {
+      linha: origem.celula.linha + delta.linha,
+      coluna: origem.celula.coluna + delta.coluna,
+    }
+    if (!estaDentroDaGrade(celulaVizinha)) continue
+    const vizinha = encontrarPecaNaCelula(posicionadas, celulaVizinha)
+    if (!vizinha || !bordasAbertas(vizinha).includes(BORDA_OPOSTA[borda])) {
+      continue
+    }
+    conectadas.push(vizinha)
+  }
+  return conectadas
+}
+
+/** Estado de seleção do peão na cena (estado visual local, não regra). */
+export interface SelecaoDePeao {
+  readonly peaoId: PeaoId
+  readonly celula: Celula
+  readonly pecaId: PecaId
+}
+
+/**
+ * Resolve a seleção de um peão clicado: `null` quando o peão não existe ou
+ * está sobre a Mesa (sem peça sob ele) — seleção de peão não posicionado não
+ * gera conexões destacadas.
+ */
+export function selecionarPeaoNaExibicao(
+  estado: Pick<EstadoExibicaoTabuleiro, 'posicionadas' | 'peoes'>,
+  peaoId: PeaoId,
+): SelecaoDePeao | null {
+  const peao = estado.peoes.find((p) => p.peaoId === peaoId)
+  if (!peao || peao.celula === null) return null
+  const peca = encontrarPecaNaCelula(estado.posicionadas, peao.celula)
+  if (!peca) return null
+  return { peaoId: peao.peaoId, celula: peao.celula, pecaId: peca.pecaId }
+}
+
+/**
+ * Destinos válidos do peão selecionado: vizinhas conectadas cuja célula não
+ * está ocupada por outro peão (máx. 1 peão por peça). Espelha a aceitação de
+ * `mover_peao` do engine (conectada + sem PECA_JA_TEM_PEAO).
+ */
+export function destinosConectadosDoPeao(
+  posicionadas: readonly PecaPosicionada[],
+  peoes: readonly PeaoDaExibicao[],
+  peaoId: PeaoId,
+): PecaPosicionada[] {
+  const peao = peoes.find((p) => p.peaoId === peaoId)
+  if (!peao || peao.celula === null) return []
+  const origem = encontrarPecaNaCelula(posicionadas, peao.celula)
+  if (!origem) return []
+  const ocupadasPorOutroPeao = new Set(
+    peoes.flatMap((p) =>
+      p.peaoId !== peaoId && p.celula !== null ? [chaveCelula(p.celula)] : [],
+    ),
+  )
+  return vizinhasConectadas(posicionadas, origem).filter(
+    (p) => !ocupadasPorOutroPeao.has(chaveCelula(p.celula)),
+  )
+}
+
+/** Posição mundo da fileira de peões sobre a Mesa (índice = posição em `peoes`). */
+export function peaoMesaParaMundo(indice: number): [number, number, number] {
+  const z = (indice - (QUANTIDADE_PEOES - 1) / 2) * ESPACAMENTO_PEAO_MESA
+  return [OFFSET_FILEIRA_PEOES_X, 0, z]
 }

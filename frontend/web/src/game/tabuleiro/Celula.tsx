@@ -7,15 +7,29 @@ import {
   celulaParaMundo,
   COR_BORDA_CELULA,
   ESPESSURA_BORDA,
+  PEAO_Y,
   PECA_Y,
   TAMANHO_CELULA,
 } from './contrato'
-import type { Celula as CelulaTipo, PecaPosicionada } from './contrato'
+import type { ThreeEvent } from '@react-three/fiber'
+import type {
+  Celula as CelulaTipo,
+  PeaoDaExibicao,
+  PeaoId,
+  PecaPosicionada,
+} from './contrato'
+import { PeaoPlaceholder } from './PeaoPlaceholder'
 import { PecaPlaceholder } from './PecaPlaceholder'
 
 interface CelulaProps {
   celula: CelulaTipo
   peca?: PecaPosicionada | null
+  /** Peão posicionado sobre a peça desta célula (máx. 1 por peça). */
+  peao?: PeaoDaExibicao | null
+  /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
+  destinoValido?: boolean
+  peaoSelecionadoId?: PeaoId | null
+  onSelecionarPeao?: (peaoId: PeaoId) => void
 }
 
 const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, number, number] }[] = [
@@ -25,9 +39,35 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
   { pos: [-TAMANHO_CELULA / 2 + BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
 ]
 
-export function Celula({ celula, peca }: CelulaProps) {
+export function Celula({
+  celula,
+  peca,
+  peao,
+  destinoValido = false,
+  peaoSelecionadoId = null,
+  onSelecionarPeao,
+}: CelulaProps) {
   const pos = celulaParaMundo(celula)
   const ocupada = Boolean(peca)
+
+  // Destino válido consome o clique: até a #92 (comandos) não há ação a
+  // executar; parar a propagação evita a desseleção por "clique fora".
+  // Peças não conectadas/ocupadas não recebem handler algum — não reagem ao
+  // cursor nem ao clique (AC #90).
+  const handlersDestino = destinoValido
+    ? {
+        onPointerOver: (e: ThreeEvent<PointerEvent>) => {
+          e.stopPropagation()
+          document.body.style.cursor = 'pointer'
+        },
+        onPointerOut: () => {
+          document.body.style.cursor = 'auto'
+        },
+        onClick: (e: ThreeEvent<MouseEvent>) => {
+          e.stopPropagation()
+        },
+      }
+    : {}
 
   return (
     <group position={pos}>
@@ -48,7 +88,26 @@ export function Celula({ celula, peca }: CelulaProps) {
         ))}
       </group>
       {peca ? (
-        <PecaPlaceholder tipo={peca.tipo} orientacao={peca.orientacao} position={[0, PECA_Y, 0]} />
+        <group {...handlersDestino}>
+          <PecaPlaceholder
+            tipo={peca.tipo}
+            orientacao={peca.orientacao}
+            position={[0, PECA_Y, 0]}
+            destacada={destinoValido}
+          />
+        </group>
+      ) : null}
+      {peao ? (
+        <PeaoPlaceholder
+          cor={peao.cor}
+          position={[0, PEAO_Y, 0]}
+          selecionado={peao.peaoId === peaoSelecionadoId}
+          aoClicar={
+            onSelecionarPeao
+              ? () => onSelecionarPeao(peao.peaoId)
+              : undefined
+          }
+        />
       ) : null}
     </group>
   )

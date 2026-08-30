@@ -5,6 +5,8 @@ interface PecaPlaceholderProps {
   tipo: TipoDaPeca
   orientacao: Orientacao
   position?: [number, number, number]
+  /** Destaque visual (emissivo) quando a peça é destino válido do peão (issue #90). */
+  destacada?: boolean
 }
 
 const COR_POR_TIPO: Record<TipoDaPeca, string> = {
@@ -15,6 +17,10 @@ const COR_POR_TIPO: Record<TipoDaPeca, string> = {
 }
 
 const COR_CAMINHO = '#111111'
+
+/** Cor do destaque de destino válido (vizinha conectada ao peão selecionado). */
+const COR_DESTAQUE = '#4ade80'
+const INTENSIDADE_DESTAQUE = 0.7
 
 const TAMANHO_PECA = TAMANHO_CELULA * 0.96
 const ESPESSURA_PECA = 0.12
@@ -30,14 +36,20 @@ const MAP_BORDA: Record<BordaCardinal, { pos: [number, number, number]; args: [n
   oeste: { pos: [-OFFSET_BRACO, 0, 0], args: [COMPRIMENTO_BRACO, 0.02, LARGURA_TRILHA] },
 }
 
-export function PecaPlaceholder({ tipo, orientacao, position }: PecaPlaceholderProps) {
+export function PecaPlaceholder({ tipo, orientacao, position, destacada = false }: PecaPlaceholderProps) {
   const bordas = bordasAbertas({ tipo, orientacao })
 
   return (
     <group position={position}>
       <mesh position={[0, 0.08, 0]}>
         <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
-        <meshStandardMaterial color={COR_POR_TIPO[tipo]} transparent opacity={0.88} />
+        <meshStandardMaterial
+          color={COR_POR_TIPO[tipo]}
+          transparent
+          opacity={0.88}
+          emissive={destacada ? COR_DESTAQUE : '#000000'}
+          emissiveIntensity={destacada ? INTENSIDADE_DESTAQUE : 0}
+        />
       </mesh>
       <group position={[0, Y_CAMINHO, 0]}>
         <mesh>
