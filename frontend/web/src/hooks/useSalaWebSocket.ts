@@ -273,15 +273,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   }, [])
 
   const limparAvisoDeEncaminhamento = useCallback(() => {
-    setEncaminhamento((prev) => {
-      if (prev.fase === 'recusada' || prev.fase === 'falhou') {
-        // Limpa também o `erro` que pode ter sido setado por ERRO_DA_SALA com mesmo código
-        setErro(null)
-        return estadoInicialDoEncaminhamento()
-      }
-      return prev
-    })
-  }, [])
+    // Guard baseado no estado atual — evita updater impuro e double-invoke em StrictMode
+    if (encaminhamento.fase !== 'recusada' && encaminhamento.fase !== 'falhou') return
+    setEncaminhamento(estadoInicialDoEncaminhamento())
+    setErro(null)
+  }, [encaminhamento.fase])
 
   const conectar = useCallback(() => {
     const url = resolverWsUrl()
