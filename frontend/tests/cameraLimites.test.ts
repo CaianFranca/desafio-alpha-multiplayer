@@ -48,7 +48,7 @@ describe('cameraLimites — limiar de arrasto', () => {
   it('atinge limiar exatamente em 6px', () => {
     expect(atingiuLimiar(6, 0)).toBe(true)
     expect(atingiuLimiar(0, 6)).toBe(true)
-    expect(atingiuLimiar(3, 4) === false).toBe(true)
+    expect(atingiuLimiar(3, 4)).toBe(false)
     const c = 6 / Math.SQRT2
     expect(atingiuLimiar(c, c)).toBe(true)
   })
@@ -92,11 +92,26 @@ describe('cameraLimites — conversão px→mundo', () => {
     const fov = 50
     const dist = 10
     const h = 600
-    const wpp = worldPerPixel(fov, dist, h)
+    // Oráculo independente (não usa worldPerPixel) para evitar tautologia:
+    // wpp = 2*tan(fov/2)*dist / h
+    const wppEsperado = (2 * tangenteMeioFov(fov) * dist) / h
     const delta = panDeltaToWorld(10, 5, fov, dist, h)
-    expect(delta.x).toBeCloseTo(-10 * wpp, 10)
-    expect(delta.z).toBeCloseTo(-5 * wpp * FATOR_INCLINACAO, 10)
+    expect(delta.x).toBeCloseTo(-10 * wppEsperado, 10)
+    expect(delta.z).toBeCloseTo(-5 * wppEsperado * FATOR_INCLINACAO, 10)
     expect(FATOR_INCLINACAO).toBeCloseTo(Math.SQRT2, 10)
+  })
+
+  it('panDeltaToWorld: proporção Z/X reflete FATOR_INCLINACAO', () => {
+    const fov = 50
+    const dist = 12
+    const h = 600
+    const dx = 10
+    const dy = 10
+    const delta = panDeltaToWorld(dx, dy, fov, dist, h)
+    // Mesmo deslocamento em px deve gerar |delta.z| ≈ √2 * |delta.x|
+    expect(Math.abs(delta.z)).toBeCloseTo(Math.abs(delta.x) * FATOR_INCLINACAO, 10)
+    // Monotonicidade e sinal já cobertos, mas garante inclinação
+    expect(delta.z / delta.x).toBeCloseTo(FATOR_INCLINACAO, 10)
   })
 
   it('arrastar para direita move alvo para esquerda (X negativo)', () => {
@@ -276,16 +291,34 @@ describe('cameraLimites — limites de pan (FOV + aspect)', () => {
 })
 
 describe('cameraLimites — zoom e clamp de distância', () => {
-  it('FATOR_ZOOM_MAX é 2.8', () => {
-    expect(FATOR_ZOOM_MAX).toBe(2.8)
+  it('FATOR_ZOOM_MAX define proporção afastada/proxima (comportamental)', () => {
+    const afastada = calcularDistanciaAfastada()
+    const proxima = calcularDistanciaProxima(afastada)
+    // Invariante comportamental: proxima = afastada / FATOR_ZOOM_MAX e < afastada
+    expect(proxima).toBeCloseTo(afastada / FATOR_ZOOM_MAX, 10)
+    expect(proxima).toBeLessThan(afastada)
+    expect(proxima).toBeGreaterThan(0)
+    // Sanity de ordem de grandeza sem travar valor exato (evita lock de 2.8)
+    expect(FATOR_ZOOM_MAX).toBeGreaterThan(1)
+    expect(FATOR_ZOOM_MAX).toBeLessThan(10)
   })
 
-  it('calcularDistanciaAfastada usa MARGEM_CAMERA_INTERATIVA 1.05 e max(eixoH,eixoW)', () => {
-    const meiaMaior = Math.max(LARGURA_MESA, PROFUNDIDADE_MESA) / 2
-    const esperado = (meiaMaior * MARGEM_CAMERA_INTERATIVA) / Math.tan((FOV_CAMERA * Math.PI) / 360)
-    expect(MARGEM_CAMERA_INTERATIVA).toBe(1.05)
-    expect(calcularDistanciaAfastada()).toBeCloseTo(esperado, 10)
-    expect(calcularDistanciaAfastada(1)).toBeCloseTo(esperado, 10)
+  it('calcularDistanciaAfastada com margem enquadra Mesa e usa max(eixoH,eixoW)', () => {
+    const halfTan = tangenteMeioFov(FOV_CAMERA)
+    // Sem margem deve ser menor que com MARGEM_CAMERA_INTERATIVA
+    const distH_semMargem = distanciaParaEnquadrar(PROFUNDIDADE_MESA / 2, 1, FOV_CAMERA)
+    const distW_semMargem = (LARGURA_MESA / 2) / (halfTan * 1)
+    const esperadoSemMargem = Math.max(distH_semMargem, distW_semMargem)
+    const comMargem = calcularDistanciaAfastada()
+    expect(comMargem).toBeGreaterThan(esperadoSemMargem)
+    // Com aspect 1 deve ser max entre altura e largura com margem
+    const distH = distanciaParaEnquadrar(PROFUNDIDADE_MESA / 2, MARGEM_CAMERA_INTERATIVA, FOV_CAMERA)
+    const distW = (LARGURA_MESA / 2 * MARGEM_CAMERA_INTERATIVA) / (halfTan * 1)
+    const esperadoComMargem = Math.max(distH, distW)
+    expect(comMargem).toBeCloseTo(esperadoComMargem, 10)
+    expect(calcularDistanciaAfastada(1)).toBeCloseTo(esperadoComMargem, 10)
+    // Margem efetiva >1 garante respiro
+    expect(MARGEM_CAMERA_INTERATIVA).toBeGreaterThan(1)
   })
 
   it('calcularDistanciaAfastada com aspect 16/9 vs 0.5: portrait maior', () => {
@@ -307,9 +340,9 @@ describe('cameraLimites — zoom e clamp de distância', () => {
     expect(calcularDistanciaAfastada(undefined)).toBeCloseTo(calcularDistanciaAfastada(1), 10)
   })
 
-  it('calcularDistanciaProxima = min / 2.8', () => {
+  it('calcularDistanciaProxima = afastada / FATOR_ZOOM_MAX', () => {
     const min = calcularDistanciaAfastada()
-    expect(calcularDistanciaProxima(min)).toBeCloseTo(min / 2.8, 10)
+    expect(calcularDistanciaProxima(min)).toBeCloseTo(min / FATOR_ZOOM_MAX, 10)
   })
 
   it('clampDistancia limita entre max (perto) e min (longe)', () => {

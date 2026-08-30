@@ -15,13 +15,29 @@ export const SENSIBILIDADE_WHEEL = 0.002
 /** Margem da câmera interativa: >1 para deixar respiro entre borda da Mesa e frustum. */
 export const MARGEM_CAMERA_INTERATIVA = 1.05
 
-/** Fator de inclinação 45°: projeção do movimento vertical da tela no eixo Z do mundo. */
+/**
+ * Fator de inclinação 45° (√2): projeção do movimento vertical da tela no
+ * eixo Z do mundo quando a câmera está inclinada 45° sobre o plano da Mesa.
+ *
+ * Fundamento geométrico: com a câmera a 45° (altura == distância horizontal
+ * ao alvo, cf. `componenteInclinacao45`), um deslocamento no plano
+ * perpendicular à câmera corresponde a um deslocamento maior no chão. O
+ * fator √2 (≈1.414) é `1 / cos(45°)` e converte span vertical em span no
+ * chão. Usado em `panDeltaToWorld` (dyPx → delta.z) e em `clampAlvo`
+ * (`halfHeightVis * FATOR_INCLINACAO` para span no chão inclinado).
+ *
+ * Mantido como √2 por recalibragem intencional — não unificar sem revisar
+ * `calcularDistanciaAfastada` (ver JSDoc lá).
+ */
 export const FATOR_INCLINACAO = Math.SQRT2
 
 export const ALTURA_MINIMA_ACIMA_MESA = ESPESSURA_MESA / 2 + 0.5
 export const DISTANCIA_MINIMA_POR_ALTURA = ALTURA_MINIMA_ACIMA_MESA * Math.SQRT2
 
 export type AlvoXZ = { x: number; z: number }
+
+/** Ponto 2D genérico (px ou mundo) para helpers de geometria de ponteiros. */
+export type Ponto2D = { x: number; y: number }
 
 export function atingiuLimiar(dx: number, dy: number): boolean {
   return Math.hypot(dx, dy) >= LIMIAR_ARRASTO_PX
@@ -48,6 +64,9 @@ export function aspectoSeguro(aspect: number): number {
   return 1
 }
 
+// ── helpers internos ──
+
+/** @internal — helper de teste/derivado, não faz parte da API pública */
 export function aspectoDeSize(size: { width: number; height: number }): number {
   const raw = size.width > 0 && size.height > 0 ? size.width / size.height : 1
   return aspectoSeguro(raw)
@@ -83,6 +102,7 @@ export function aspectoVisivel(
   return aspectoSeguro(widthVis / heightVis)
 }
 
+/** @internal — helper de teste/derivado, não faz parte da API pública */
 export function areaVisivel(
   size: { width: number; height: number },
   bordaPx: number,
@@ -97,6 +117,12 @@ export function resolverAltura(sizeHeight: number, canvasHeight: number): number
   return 1
 }
 
+/**
+ * Clampa o alvo XZ para que o frustum não ultrapasse a Mesa.
+ * `halfHeightVis * FATOR_INCLINACAO` modela o span vertical projetado no
+ * chão inclinado a 45° (ver JSDoc de `FATOR_INCLINACAO`); sem o fator, o
+ * clamp subestima o espaço ocupado no eixo Z.
+ */
 export function clampAlvo(
   alvo: AlvoXZ,
   distancia: number,
@@ -117,6 +143,12 @@ export function clampAlvo(
 /**
  * Distância mais afastada (teto do zoom) que ainda enquadra a Mesa com a margem interativa.
  * @param aspectVisivel - aspect da área visível (descontada a borda da moldura)
+ *
+ * Nota sobre FATOR_INCLINACAO: `distH`/`distW` aqui são calculados no plano
+ * perpendicular à câmera (sem `* FATOR_INCLINACAO`), intencionalmente
+ * conservador vs `clampAlvo` que aplica `* FATOR_INCLINACAO` no chão. Unificar
+ * (aplicar √2 aqui) aumentaria `distanciaAfastada` ~1.414× e exigiria
+ * recalibragem de zoom/pan — documentado, não alterado nesta PR.
  */
 export function calcularDistanciaAfastada(aspectVisivel?: number): number {
   const halfTan = tangenteMeioFov(FOV_CAMERA)
@@ -142,6 +174,7 @@ export function resolverDistanciaProximaEfetiva(
   return Math.min(lower, distanciaAfastada)
 }
 
+/** @internal — helper de teste/derivado, não faz parte da API pública */
 export function validarRangeZoom(
   distanciaAfastada: number,
   distanciaProximaTeorica: number,
@@ -199,14 +232,11 @@ export function calcularFatorPinch(distanciaInicial: number, distAtual: number):
   return distanciaInicial / (distAtual || 1)
 }
 
-export function distanciaEntrePontos(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-): number {
+export function distanciaEntrePontos(a: Ponto2D, b: Ponto2D): number {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
-export function distanciaPinch(ponteiros: Map<number, { x: number; y: number }>): number {
+export function distanciaPinch(ponteiros: Map<number, Ponto2D>): number {
   const pts = Array.from(ponteiros.values())
   if (pts.length < 2) return 0
   return distanciaEntrePontos(pts[0], pts[1])

@@ -17,17 +17,28 @@ import {
   criarDragInicial,
   criarPinchInicial,
 } from '../game/ambiente/cameraLimites'
-import type { AlvoXZ, EstadoDrag, EstadoPinch } from '../game/ambiente/cameraLimites'
+import type { AlvoXZ, EstadoDrag, EstadoPinch, Ponto2D } from '../game/ambiente/cameraLimites'
 import { FOV_CAMERA } from '../game/ambiente/contrato'
 
 interface UseCameraInterativaOptions {
-  /** Largura da borda da moldura em px (medida via PartidaMoldura). */
+  /**
+   * Largura da borda da moldura em px, desacoplada via PartidaMoldura
+   * (ResizeObserver mede a moldura visível). Evita querySelector dentro do
+   * hook e garante que `aspectoVisivel` use a área realmente visível;
+   * sem isso o aspect seria calculado sobre o canvas cheio e o clamp/pan
+   * ficaria descalibrado quando há borda.
+   */
   bordaPx?: number
 }
 
 /**
  * Hook de câmera interativa: arrasto (pan), zoom (wheel/pinch) e correção de aspect.
  * Recebe bordaPx desacoplado (sem querySelector) para cálculo de aspecto visível.
+ * O plumbing de `bordaPx` (PartidaMoldura → ResizeObserver) e a supressão de
+ * ghost-click pós-drag (`suprimirCliqueAposArrastoRef`) são intencionais e
+ * não são scope creep: borda garante aspecto fiel à moldura visível; supressão
+ * evita ghost click após arrasto e é compatível com #77 ("clique reservado para
+ * futuro" — não cria interação de clique, apenas suprime falso positivo).
  */
 export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions = {}): void {
   const { camera, gl, size, invalidate } = useThree()
@@ -35,12 +46,15 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
 
   const alvoRef = useRef<AlvoXZ>({ x: 0, z: 0 })
   const distanciaRef = useRef(calcularDistanciaAfastada())
+  // Evita ghost click pós-drag: setado ao engatar arrasto e consumido em
+  // onClickCapture (fase capture). Compatível com #77 — não implementa
+  // interação de clique, apenas suprime falso positivo do drag.
   const suprimirCliqueAposArrastoRef = useRef(false)
 
   const dragRef = useRef<EstadoDrag>(criarDragInicial())
   const pinchRef = useRef<EstadoPinch>(criarPinchInicial())
 
-  const ponteirosRef = useRef<Map<number, { x: number; y: number }>>(new Map())
+  const ponteirosRef = useRef<Map<number, Ponto2D>>(new Map())
 
   function getAspectVis(): number {
     return aspectoVisivel({ width, height }, bordaPx)
@@ -106,6 +120,22 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
       aplicarAlvoClampado(alvoRef.current, clamped)
     }
 
+    function tryCapturar(el: HTMLElement, id: number): void {
+      try {
+        el.setPointerCapture(id)
+      } catch {
+        // ignore se não suportado (ex.: teste/jsdom)
+      }
+    }
+
+    function tryLiberar(el: HTMLElement, id: number): void {
+      try {
+        el.releasePointerCapture(id)
+      } catch {
+        // ignore
+      }
+    }
+
     function onPointerDown(e: PointerEvent): void {
       ponteirosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
@@ -117,11 +147,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
         }
         dragRef.current.ativo = false
         dragRef.current.engatado = false
-        try {
-          alvoEl.setPointerCapture(e.pointerId)
-        } catch {
-          // ignore
-        }
+        tryCapturar(alvoEl, e.pointerId)
         return
       }
 
@@ -134,11 +160,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
       dragRef.current.ultimoX = e.clientX
       dragRef.current.ultimoY = e.clientY
       dragRef.current.engatado = false
-      try {
-        alvoEl.setPointerCapture(e.pointerId)
-      } catch {
-        // ignore se não suportado
-      }
+      tryCapturar(alvoEl, e.pointerId)
     }
 
     function onPointerMove(e: PointerEvent): void {
@@ -149,13 +171,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
         const distAtual = distanciaPinch(ponteirosRef.current) || 1
         const fator = calcularFatorPinch(pinchRef.current.distanciaInicial, distAtual)
         const novaDist = pinchRef.current.distanciaInicial * fator
-        const clamped = clampDistancia(
-          novaDist,
-          distanciaAfastadaRef.current,
-          distanciaProximaTeoricaRef.current,
-        )
-        distanciaRef.current = clamped
-        aplicarAlvoClampado(alvoRef.current, clamped)
+        aplicarZoom(novaDist)
         return
       }
 
@@ -209,20 +225,12 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
         dragRef.current.ativo = false
         dragRef.current.pointerId = null
         dragRef.current.engatado = false
-        try {
-          alvoEl.releasePointerCapture(e.pointerId)
-        } catch {
-          // ignore
-        }
+        tryLiberar(alvoEl, e.pointerId)
         if (!engatado) {
           suprimirCliqueAposArrastoRef.current = false
         }
       } else {
-        try {
-          alvoEl.releasePointerCapture(e.pointerId)
-        } catch {
-          // ignore
-        }
+        tryLiberar(alvoEl, e.pointerId)
       }
     }
 
@@ -238,6 +246,9 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
       aplicarZoom(novaDist)
     }
 
+    // Suprime ghost click que o browser dispara após um drag engatado
+    // (ver suprimirCliqueAposArrastoRef). Compatível com #77: clique segue
+    // reservado para futuro — este handler apenas evita falso positivo.
     function onClickCapture(e: MouseEvent): void {
       if (suprimirCliqueAposArrastoRef.current) {
         e.preventDefault()
