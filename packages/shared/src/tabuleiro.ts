@@ -91,6 +91,7 @@ export interface ManipulacaoFinalizadaEvento {
   readonly pecaId: PecaId;
 }
 
+// A união cobre também as rejeições de Peões/ciclo (ST-10).
 export type CodigoDeErroDoTabuleiro =
   | CodigoDeErroComum
   | 'ESTADO_INDISPONIVEL'
