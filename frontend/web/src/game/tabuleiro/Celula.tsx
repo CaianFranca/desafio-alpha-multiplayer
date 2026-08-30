@@ -66,6 +66,7 @@ export function Celula({ celula, peca, cursor = 'default', pecaDestacada = false
           orientacao={peca.orientacao}
           position={[0, PECA_Y, 0]}
           destacada={pecaDestacada}
+          onClick={onClick}
         />
       ) : null}
     </group>

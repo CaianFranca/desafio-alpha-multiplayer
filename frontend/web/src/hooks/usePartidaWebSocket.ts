@@ -13,7 +13,7 @@
  * ST-09/10/11 sem quebrar o cliente).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type {
   AdmissaoAceitaEvento,
   TabuleiroComandoDoCliente,
@@ -21,11 +21,7 @@ import type {
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 
-export type FaseDaConexaoDaPartida = 'conectando' | 'disponivel' | 'falhou'
-
 export interface UsePartidaWebSocketReturn {
-  /** true quando o socket abriu e o servidor aceitou a admissão. */
-  disponivel: boolean
   conectar: () => void
   desconectar: () => void
   /** Envia comando de tabuleiro pelo canal (fila até o open). */
@@ -37,7 +33,7 @@ interface UsePartidaWebSocketOptions {
   partidaId: string | null
   /** Recebe cada evento de tabuleiro em ordem de chegada do broadcast. */
   onEvento: (evento: TabuleiroEventoDoServidor) => void
-  onAdmisso: (evento: AdmissaoAceitaEvento) => void
+  onAdmissao: (evento: AdmissaoAceitaEvento) => void
   /** Chamado quando a conexão falha (WebSocket não pôde abrir). */
   onFalhaDeConexao: () => void
 }
@@ -52,10 +48,9 @@ export function usePartidaWebSocket({
   serverId,
   partidaId,
   onEvento,
-  onAdmisso,
+  onAdmissao,
   onFalhaDeConexao,
 }: UsePartidaWebSocketOptions): UsePartidaWebSocketReturn {
-  const [disponivel, setDisponivel] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   // Comandos enfileirados enquanto o socket ainda não está aberto (handshake).
@@ -64,13 +59,13 @@ export function usePartidaWebSocket({
   const montadoRef = useRef(true)
   // Refs dos callbacks: estáveis por instância, sem recriar o efeito.
   const onEventoRef = useRef(onEvento)
-  const onAdmissoRef = useRef(onAdmisso)
+  const onAdmissaoRef = useRef(onAdmissao)
   const onFalhaDeConexaoRef = useRef(onFalhaDeConexao)
   useEffect(() => {
     onEventoRef.current = onEvento
-    onAdmissoRef.current = onAdmisso
+    onAdmissaoRef.current = onAdmissao
     onFalhaDeConexaoRef.current = onFalhaDeConexao
-  }, [onEvento, onAdmisso, onFalhaDeConexao])
+  }, [onEvento, onAdmissao, onFalhaDeConexao])
 
   const encerrarConexao = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -126,8 +121,7 @@ export function usePartidaWebSocket({
 
       switch ((data as { type: string }).type) {
         case 'ADMISSAO_ACEITA':
-          setDisponivel(true)
-          onAdmissoRef.current(data as AdmissaoAceitaEvento)
+          onAdmissaoRef.current(data as AdmissaoAceitaEvento)
           return
         case 'PECA_SELECIONADA':
         case 'PECA_DESELECIONADA':
@@ -146,7 +140,6 @@ export function usePartidaWebSocket({
     ws.onclose = () => {
       if (!montadoRef.current) return
       wsRef.current = null
-      setDisponivel(false)
       // Reconexão simples após 1s se ainda montado.
       if (reconnectTimerRef.current === null) {
         reconnectTimerRef.current = window.setTimeout(() => {
@@ -173,7 +166,6 @@ export function usePartidaWebSocket({
   }, [conectar, encerrarConexao])
 
   const desconectar = useCallback(() => {
-    setDisponivel(false)
     comandosPendentesRef.current = []
     encerrarConexao()
   }, [encerrarConexao])
@@ -189,5 +181,5 @@ export function usePartidaWebSocket({
     }
   }, [])
 
-  return { disponivel, conectar, desconectar, enviar }
+  return { conectar, desconectar, enviar }
 }

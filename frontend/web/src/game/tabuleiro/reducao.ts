@@ -22,7 +22,6 @@
 
 import {
   criarReservaInicial,
-  type Celula,
   type Orientacao,
   type PecaDaReserva,
   type PecaPosicionada,
@@ -151,6 +150,3 @@ export function estadoDeExibicaoDoModelo(
 ): { reserva: readonly PecaDaReserva[]; posicionadas: readonly PecaPosicionada[] } {
   return { reserva: estado.reserva, posicionadas: estado.posicionadas }
 }
-
-// Re-export de tipos úteis à fiação da cena (evita acoplar a imports de contrato).
-export type { Celula }

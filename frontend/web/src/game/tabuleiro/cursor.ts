@@ -10,6 +10,12 @@
 import type { ThreeEvent } from '@react-three/fiber'
 
 /**
+ * Agregação global de hovers com pointer para evitar corridas entre meshes:
+ * só limpa o cursor do body quando o último mesh pointer disparar pointerOut.
+ */
+let hoversPointerAtivos = 0
+
+/**
  * Handlers de hover que aplicam o cursor CSS no body. `pointer`/`default` são
  * os únicos valores emitidos pelo domínio (ver `cursorParaCelula`).
  */
@@ -24,10 +30,21 @@ export function handlersDeCursor(
       document.body.style.cursor = estilo
     }
   }
+
   return {
     onPointerOver: () => {
-      if (cursor === 'pointer') aplicar('pointer')
+      if (cursor === 'pointer') {
+        hoversPointerAtivos++
+        aplicar('pointer')
+      }
     },
-    onPointerOut: () => aplicar(''),
+    onPointerOut: () => {
+      if (cursor === 'pointer') {
+        hoversPointerAtivos = Math.max(0, hoversPointerAtivos - 1)
+        if (hoversPointerAtivos === 0) {
+          aplicar('')
+        }
+      }
+    },
   }
 }

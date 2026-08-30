@@ -207,13 +207,14 @@ describe('partida estados da tela', () => {
     expect(screen.getByTestId('ambiente-de-jogo')).toHaveClass('absolute')
   })
 
-  it('falha com clique em Tentar novamente transita para carregando', async () => {
+  it('falha sem alvo e clique em Tentar novamente permanece em falha', async () => {
     const user = userEvent.setup()
     renderPartidaComEstado('falha')
     expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
     await user.click(screen.getByTestId('partida-tentar-novamente'))
-    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
-    expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
+    // Sem alvo, não transita para carregando (evita loop infinito de loader).
+    expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
   })
 
   it('query param inválido é ignorado e sem alvo mostra falha', () => {

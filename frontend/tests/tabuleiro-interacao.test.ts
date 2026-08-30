@@ -2,6 +2,7 @@ import {
   FLASH_BRANCO,
   FLASH_VERMELHO,
   cursorParaCelula,
+  cursorParaPecaPosicionada,
   deveSuprimirCliquePorArrasto,
   ehCelulaOcupada,
   mapearCliqueNaCelula,
@@ -135,6 +136,12 @@ describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
 
   it('célula vazia com seleção tem cursor pointer', () => {
     expect(cursorParaCelula(false, 'inicial-1')).toBe('pointer')
+  })
+
+  it('peça em manipulação tem cursor pointer; fora de manipulação default', () => {
+    expect(cursorParaPecaPosicionada('inicial-1', 'inicial-1')).toBe('pointer')
+    expect(cursorParaPecaPosicionada('inicial-1', 'reta-2')).toBe('default')
+    expect(cursorParaPecaPosicionada(null, 'inicial-1')).toBe('default')
   })
 
   // ── Critério: rotação na célula até Finalização ──

@@ -8,7 +8,7 @@ import { usePartidaTela } from '../components/partida/usePartidaTela'
 import { isEstadoDaTela, type EstadoDaTela } from '../components/partida/partidaTelaMachine'
 import { FlashOverlay } from '../components/partida/FlashOverlay'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
-import { criarEstadoInicialDoCliente, reduzirEvento } from '../game/tabuleiro/reducao'
+import { criarEstadoInicialDoCliente, reduzirEvento, estadoDeExibicaoDoModelo } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente } from '../game/tabuleiro/reducao'
 import { mapearEventoParaFeedback, mapearGiro } from '../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../game/tabuleiro/interacao'
@@ -55,11 +55,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       (evento) => {
         despacharEvento(evento)
         // Feedback: evento de sucesso → flash branco; rejeição → flash vermelho.
-        setFlash(mapearEventoParaFeedback(evento))
+        // Nova referência a cada evento garante reinício do timer no FlashOverlay.
+        const feedback = mapearEventoParaFeedback(evento)
+        setFlash(feedback === null ? null : { ...feedback })
       },
       [],
     ),
-    onAdmisso: useCallback(() => partidaEmAndamento(), [partidaEmAndamento]),
+    onAdmissao: useCallback(() => partidaEmAndamento(), [partidaEmAndamento]),
     onFalhaDeConexao: useCallback(() => falhar(), [falhar]),
   })
 
@@ -69,11 +71,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // sem `?partidaEstado`), a página já começa em 'falha' — sem recarregar.
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
 
-  // Estado de exibição da cena: DEV sem alvo usa o mock; com alvo o modelo do
-  // cliente (deltas). Não-DEV sem alvo não monta cena (estado falha).
+  // Estado de exibição do Ambiente de Jogo: DEV sem alvo usa o mock; com alvo
+  // o modelo do cliente (deltas). Não-DEV sem alvo não monta cena (estado falha).
   const estadoExibicao =
     temAlvo && estadoEmAndamento
-      ? { reserva: modelo.reserva, posicionadas: modelo.posicionadas }
+      ? estadoDeExibicaoDoModelo(modelo)
       : noAlvo && estado === 'disponivel'
         ? criarEstadoExibicaoMock()
         : null
@@ -114,10 +116,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [estadoEmAndamento, girar])
 
   const tentarNovamenteComConexao = useCallback(() => {
-    carregar()
     desconectar()
+    if (!temAlvo) {
+      falhar()
+      return
+    }
+    carregar()
     reconectarSocket()
-  }, [carregar, desconectar, reconectarSocket])
+  }, [carregar, desconectar, reconectarSocket, falhar, temAlvo])
 
   const limparFlash = useCallback(() => setFlash(null), [])
   const [bordaPx, setBordaPx] = useState(0)

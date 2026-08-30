@@ -1,7 +1,7 @@
 import { chaveCelula, todasAsCelulas } from './contrato'
 import type { PecaPosicionada } from './contrato'
 import { Celula } from './Celula'
-import { cursorParaCelula } from './interacao'
+import { cursorParaCelula, cursorParaPecaPosicionada } from './interacao'
 import type { EstadoInteracaoTabuleiro } from './interacao'
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao'
 import type { TabuleiroComandoDoCliente } from '@flicker/shared'
@@ -28,7 +28,10 @@ export function Tabuleiro({ posicionadas, estadoInteracao, onComando }: Tabuleir
         const chave = chaveCelula(celula)
         const peca = posicionadasPorChave.get(chave) ?? null
         const ocupada = Boolean(peca)
-        const cursor = cursorParaCelula(ocupada, estadoInteracao.pecaSelecionadaId)
+        const cursor =
+          peca !== null
+            ? cursorParaPecaPosicionada(estadoInteracao.pecaEmManipulacaoId, peca.pecaId)
+            : cursorParaCelula(ocupada, estadoInteracao.pecaSelecionadaId)
         const destacada =
           peca !== null &&
           (estadoInteracao.pecaSelecionadaId === peca.pecaId ||
