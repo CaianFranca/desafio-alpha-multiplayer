@@ -32,7 +32,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const estadoViaUrl =
     import.meta.env.DEV && isEstadoDaTela(param) ? (param as EstadoDaTela) : null
   const estadoInicialEfetivo = estadoViaUrl ?? estadoInicial
-  const { estado, carregar, partidaEmAndamento, falhar, forcarEstado } = usePartidaTela({
+  const { estado, carregar, tentarNovamente, partidaEmAndamento, falhar, forcarEstado } = usePartidaTela({
       estadoInicial:
         // Sem alvo (fora do gate DEV) o estado inicial é falha: não há canal para conectar.
         !temAlvo && estadoViaUrl === null ? 'falha' : estadoInicialEfetivo,
@@ -121,9 +121,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       falhar()
       return
     }
-    carregar()
+    // Usa tentarNovamente para honrar loader (loader?.catch(falhar)) quando fornecido;
+    // cai para carregar quando sem loader. Mantém sem alvo em falha.
+    if (loader) {
+      tentarNovamente()
+    } else {
+      carregar()
+    }
     reconectarSocket()
-  }, [carregar, desconectar, reconectarSocket, falhar, temAlvo])
+  }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader])
 
   const limparFlash = useCallback(() => setFlash(null), [])
   const [bordaPx, setBordaPx] = useState(0)
