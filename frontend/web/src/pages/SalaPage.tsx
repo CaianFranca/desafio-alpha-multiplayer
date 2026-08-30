@@ -70,9 +70,9 @@ export function SalaPage() {
   const possuiSala = sala !== null
 
   return (
-    <div className="min-h-[calc(100vh-5rem)] bg-[#111]">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-[#111]">
       {/* Container bipartido */}
-      <div className="max-w-[1100px] mx-auto px-6 lg:px-8 py-10 lg:py-12">
+      <div className="max-w-[1100px] mx-auto px-6 lg:px-8 py-10 lg:py-12 flex-1 min-h-0 overflow-y-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-0 relative">
           {/* Coluna esquerda institucional */}
           <div className="flex flex-col justify-center gap-8 lg:pr-16 py-12 lg:py-20 lg:border-r lg:border-white/10 relative">

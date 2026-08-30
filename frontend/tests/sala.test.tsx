@@ -552,7 +552,7 @@ describe('lobby - página do lobby', () => {
     expect(envio).toEqual({ type: 'DESBLOQUEAR_JOGADOR', jogadorId: 'j-zanetti' })
   })
 
-  it('auto-expulsão mostra popup e o OK volta à tela de criar/entrar', async () => {
+  it('auto-expulsão ignora o SALA_ATUALIZADA trailing e o OK volta à tela de criar/entrar', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/salas/criar'], mockAuthenticatedState)
     const ws = MockWebSocket.last()!
@@ -571,8 +571,63 @@ describe('lobby - página do lobby', () => {
     expect(await screen.findByRole('alertdialog', { name: /você foi expulso da sala/i })).toBeInTheDocument()
     expect(screen.queryByText('A3K9M2')).not.toBeInTheDocument()
 
+    // O backend emite SALA_ATUALIZADA em seguida (estado 'aberta', sem o
+    // expulso nos membros): o gate ignora e a sala NÃO ressuscita.
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: criarSala({ codigoDeSala: 'A3K9M2', membros: [], anfitriaoId: 'm-eu' }) })
+    await waitFor(() => expect(screen.queryByText('A3K9M2')).not.toBeInTheDocument())
+    expect(screen.getByRole('alertdialog', { name: /você foi expulso da sala/i })).toBeInTheDocument()
+
     // OK volta à tela de criar/entrar.
     await user.click(screen.getByRole('button', { name: /^ok$/i }))
     expect(await screen.findByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
+
+    // Reingresso limpa o gate: criar uma sala nova com o jogador local nos
+    // membros faz a sala aparecer novamente.
+    await user.click(screen.getByRole('button', { name: /criar sala/i }))
+    const reingressado = criarMembro({ id: 'm-novo', jogadorId: euJogadorId, apelido: 'JogadorTeste', ordemDeEntrada: 0 })
+    ws.simulateMessage({
+      type: 'SALA_ATUALIZADA',
+      sala: criarSala({ codigoDeSala: 'B4K5M6', membros: [reingressado], anfitriaoId: 'm-novo' }),
+    })
+    expect(await screen.findByText('B4K5M6')).toBeInTheDocument()
+  })
+
+  it('header oculta a navegação principal no lobby e a restaura na home', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+
+    // No lobby, os links institucionais da home ficam ocultos.
+    expect(screen.queryByRole('navigation', { name: /navegação principal/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Trailers' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /história/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /características/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /objetivos/i })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /voltar para o início/i }))
+
+    // Na home, a navegação principal reaparece.
+    expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: /navegação principal/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
+    expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
+    expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '#caracteristicas')
+    expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '#objetivos')
+  })
+
+  it('sala ocupa o espaço restante da viewport: overflow interno no wrapper, não no documento', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const sala = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ apelido: 'LucasGomes', ordemDeEntrada: 0 })] })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala })
+    await screen.findByText('A3K9M2')
+
+    // O primeiro filho de <main> é a raiz da página da sala, que trava a
+    // altura (overflow-hidden): a rolagem não acontece no documento.
+    const main = document.querySelector('main')!
+    expect(main.firstElementChild).toHaveClass('overflow-hidden')
+
+    // O conteúdo (ex.: o grid alto da sala) rola dentro do wrapper.
+    const heading = screen.getByRole('heading', { name: /sala A3K9M2/i })
+    expect(heading.closest('.overflow-y-auto')).not.toBeNull()
   })
 })

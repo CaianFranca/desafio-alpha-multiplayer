@@ -165,6 +165,10 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const chatContadorRef = useRef(0)
   // Comandos enfileirados quando o WebSocket ainda não está aberto (handshake).
   const comandosPendentesRef = useRef<SalaComandoDoCliente[]>([])
+  // Gate de auto-expulsão: enquanto o expulso não reingressa (reentrou ou
+  // criou sala nova), ignora eventos atrasados da sala antiga — inclusive o
+  // SALA_ATUALIZADA trailing com estado 'aberta', que ressuscitaria a sala.
+  const expulsoRef = useRef(false)
 
   // Ao trocar de sala (código diferente), descarta chat e bloqueados da sala
   // anterior. Avisos só são descartados ao ENTRAR em outra sala: ao voltar
@@ -246,6 +250,8 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           adicionarAviso(evento.mensagem, evento.type)
           return
         case 'MENSAGEM_DE_CHAT': {
+          // Expulso: ignora mensagens atrasadas da sala da qual saiu.
+          if (expulsoRef.current) return
           chatContadorRef.current += 1
           const id = `chat-${chatContadorRef.current}-${Date.now()}`
           const mensagem: MensagemDeChatDoLobby = {
@@ -260,6 +266,16 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         default:
           if (isEventoDeSala(evento)) {
             const salaAnterior = salaRef.current
+            // Gate de auto-expulsão: eventos de sala atrasados são ignorados
+            // até o jogador voltar a ser membro (reentrou ou criou sala nova),
+            // momento em que o gate é liberado.
+            if (expulsoRef.current) {
+              const reingressou = jogadorId
+                ? evento.sala.membros.some((m) => m.jogadorId === jogadorId)
+                : false
+              if (!reingressou) return
+              expulsoRef.current = false
+            }
             // Auto-expulsão: o anfitrião expulsou a si mesmo identificado pelo
             // jogadorId. O backend entrega MEMBRO_EXPULSO ao socket do expulso;
             // aqui o jogador sai visualmente da sala, sem aviso nem inclusão na
@@ -274,6 +290,8 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
               setMensagensDeChat([])
               setJogadoresBloqueados([])
               setExpulso(true)
+              // Ativa o gate que ignora eventos atrasados da sala antiga.
+              expulsoRef.current = true
               return
             }
             // Sala morta (encerrada pelo Anfitrião ou expirada): o backend
@@ -347,6 +365,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       setJogadoresBloqueados([])
       setConectado(false)
       setExpulso(false)
+      expulsoRef.current = false
       return
     }
     conectar()

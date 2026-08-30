@@ -34,12 +34,14 @@ export function Header() {
       <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 items-center gap-4">
         <Link className="w-fit font-extrabold tracking-[.04em] text-inherit no-underline justify-self-center sm:justify-self-start" to="/">Flicker of Sanity</Link>
         <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-6 gap-y-3">
-          <nav aria-label="Navegação principal" className="flex gap-6">
-            <a href="#trailers" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Trailers</a>
-            <a href="#historia" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">História</a>
-            <a href="#caracteristicas" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Características</a>
-            <a href="#objetivos" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Objetivos</a>
-          </nav>
+          {!emLobby && (
+            <nav aria-label="Navegação principal" className="flex gap-6">
+              <a href="#trailers" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Trailers</a>
+              <a href="#historia" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">História</a>
+              <a href="#caracteristicas" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Características</a>
+              <a href="#objetivos" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Objetivos</a>
+            </nav>
+          )}
           {authState.status === 'authenticated' && (
             <div className="flex items-center gap-3">
               <span className="text-sm font-bold">{authState.jogador.apelido}</span>
