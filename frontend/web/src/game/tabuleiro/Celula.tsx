@@ -1,4 +1,4 @@
-import { CELULA_INSET, celulaParaMundo, COR_BORDA_CELULA, ESPESSURA_BORDA, TAMANHO_CELULA } from './contrato'
+import { BORDA_OFFSET, BORDA_Y, CELULA_INSET, celulaParaMundo, COR_BORDA_CELULA, ESPESSURA_BORDA, TAMANHO_CELULA } from './contrato'
 import type { Celula as CelulaTipo, PecaPosicionada } from './contrato'
 import { PecaPlaceholder } from './PecaPlaceholder'
 
@@ -8,10 +8,10 @@ interface CelulaProps {
 }
 
 const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, number, number] }[] = [
-  { pos: [0, 0, TAMANHO_CELULA / 2 - 0.02], args: [CELULA_INSET, 0.01, ESPESSURA_BORDA] },
-  { pos: [0, 0, -TAMANHO_CELULA / 2 + 0.02], args: [CELULA_INSET, 0.01, ESPESSURA_BORDA] },
-  { pos: [TAMANHO_CELULA / 2 - 0.02, 0, 0], args: [ESPESSURA_BORDA, 0.01, CELULA_INSET] },
-  { pos: [-TAMANHO_CELULA / 2 + 0.02, 0, 0], args: [ESPESSURA_BORDA, 0.01, CELULA_INSET] },
+  { pos: [0, 0, TAMANHO_CELULA / 2 - BORDA_OFFSET], args: [CELULA_INSET, BORDA_Y, ESPESSURA_BORDA] },
+  { pos: [0, 0, -TAMANHO_CELULA / 2 + BORDA_OFFSET], args: [CELULA_INSET, BORDA_Y, ESPESSURA_BORDA] },
+  { pos: [TAMANHO_CELULA / 2 - BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
+  { pos: [-TAMANHO_CELULA / 2 + BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
 ]
 
 export function Celula({ celula, peca }: CelulaProps) {

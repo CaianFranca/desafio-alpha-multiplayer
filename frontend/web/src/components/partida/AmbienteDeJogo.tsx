@@ -13,6 +13,7 @@ import {
   todasAsCelulas,
 } from '../../game/tabuleiro/contrato'
 import type { EstadoDaTela } from './partidaTelaMachine'
+import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -62,35 +63,13 @@ export function AmbienteDeJogo({ bordaPx = 0, estado = null }: AmbienteDeJogoPro
         <CameraRig bordaPx={bordaPx} />
         <AmbienteCena estadoExibicao={estadoExibicao} />
       </Canvas>
-      {/* Mirror DOM para testes (jsdom sem WebGL): expõe 49 células + 22 reserva quando disponivel */}
       {estadoExibicao ? (
-        <div data-testid="tabuleiro" aria-hidden="true" className="pointer-events-none absolute inset-0">
-          {todasCelulas.map((celula) => {
-            const ocupada = ocupadasSet.has(chaveCelula(celula))
-            return (
-              <div
-                key={chaveCelula(celula)}
-                data-testid="tabuleiro-celula"
-                data-ocupada={ocupada ? 'true' : 'false'}
-                data-linha={celula.linha}
-                data-coluna={celula.coluna}
-              />
-            )
-          })}
-          <div data-testid="reserva">
-            {estadoExibicao.reserva.map((peca) => (
-              <div
-                key={peca.pecaId}
-                data-testid="reserva-peca"
-                data-tipo={peca.tipo}
-                data-peca-id={peca.pecaId}
-              />
-            ))}
-          </div>
-          {estadoExibicao.posicionadas.map((p) => (
-            <div key={p.pecaId} data-testid="peca-posicionada" data-peca-id={p.pecaId} />
-          ))}
-        </div>
+        <TabuleiroMirrorDOM
+          todasCelulas={todasCelulas}
+          ocupadasSet={ocupadasSet}
+          reserva={estadoExibicao.reserva}
+          posicionadas={estadoExibicao.posicionadas}
+        />
       ) : null}
     </div>
   )

@@ -42,6 +42,8 @@ export const ESPACAMENTO_RESERVA = 1.7
 
 export const CELULA_INSET = TAMANHO_CELULA * 0.98
 export const ESPESSURA_BORDA = 0.04
+export const BORDA_OFFSET = 0.02
+export const BORDA_Y = 0.01
 export const COR_BORDA_CELULA = '#f2e0b6'
 
 // ── Tipos de domínio visual (espelha engine/shared) ──
@@ -81,6 +83,8 @@ const COMPOSICAO_RESERVA: readonly { tipo: TipoDaPeca; quantidade: number }[] = 
   { tipo: 'T', quantidade: 6 },
   { tipo: 'cruz', quantidade: 6 },
 ]
+
+export const TOTAL_RESERVA = COMPOSICAO_RESERVA.reduce((s, e) => s + e.quantidade, 0)
 
 export function criarReservaInicial(): PecaDaReserva[] {
   const reserva: PecaDaReserva[] = []
@@ -202,8 +206,7 @@ export function mundoParaCelula(
 // ── Reserva: índice → mundo ──
 
 export function reservaIndiceParaLocal(indice: number): [number, number, number] {
-  const total = COMPOSICAO_RESERVA.reduce((s, e) => s + e.quantidade, 0)
-  const linhas = Math.ceil(total / COLUNAS_RESERVA)
+  const linhas = Math.ceil(TOTAL_RESERVA / COLUNAS_RESERVA)
   const col = indice % COLUNAS_RESERVA
   const row = Math.floor(indice / COLUNAS_RESERVA)
   const localX = (col - (COLUNAS_RESERVA - 1) / 2) * ESPACAMENTO_RESERVA
