@@ -3,8 +3,8 @@
 
 import type { SalaComandoDoCliente, SalaEventoDoServidor } from './sala.ts';
 import type { EncaminhamentoEventoDoServidor, PartidaId } from './encaminhamento.ts';
-import type { TabuleiroEventoDoServidor } from './tabuleiro.ts';
-import type { PeaoEventoDoServidor } from './peoes.ts';
+import type { TabuleiroComandoDoCliente, TabuleiroEventoDoServidor } from './tabuleiro.ts';
+import type { PeaoComandoDoCliente, PeaoEventoDoServidor } from './peoes.ts';
 import type { PartidaComandoDoCliente, PartidaEventoDoServidor } from './partida.ts';
 
 export interface PingMessage {
@@ -41,8 +41,14 @@ export interface AdmissaoRejeitadaEvento {
 export type AdmissaoEventoDoServidor = AdmissaoAceitaEvento | AdmissaoRejeitadaEvento;
 
 // --- Union types ---
-// ST-11: Partida(11 com jogadorId) supersede Tabuleiro(4)/Peao(5) no client do jogo; server mantém Tabuleiro/Peao + Partida para compatibilidade de eventos.
-export type SalaClientMessage = SalaComandoDoCliente | PartidaComandoDoCliente;
+// ST-11 compat temporária: mantém Tabuleiro/Peao sem jogadorId até migrar game-server/frontend (#117).
+// Partida(11 com jogadorId) é o contrato alvo; remover Tabuleiro/Peao após migração.
+// TODO ST-11: remover Tabuleiro/Peao de SalaClientMessage após migrar game-server/frontend (#117)
+export type SalaClientMessage =
+  | SalaComandoDoCliente
+  | TabuleiroComandoDoCliente
+  | PeaoComandoDoCliente
+  | PartidaComandoDoCliente;
 export type SalaServerMessage =
   | SalaEventoDoServidor
   | EncaminhamentoEventoDoServidor
