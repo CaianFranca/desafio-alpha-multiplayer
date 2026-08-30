@@ -40,6 +40,10 @@ export const POSICAO_RESERVA: readonly [number, number, number] = [
 export const COLUNAS_RESERVA = 2
 export const ESPACAMENTO_RESERVA = 1.7
 
+export const CELULA_INSET = TAMANHO_CELULA * 0.98
+export const ESPESSURA_BORDA = 0.04
+export const COR_BORDA_CELULA = '#f2e0b6'
+
 // ── Tipos de domínio visual (espelha engine/shared) ──
 
 export type TipoDaPeca = 'inicial' | 'reta' | 'T' | 'cruz'
@@ -186,8 +190,9 @@ export function mundoParaCelula(
 ): Celula | null {
   const colunaRaw = Math.round((mundoX - POSICAO_TABULEIRO[0]) / TAMANHO_CELULA + Math.floor(LADO_DA_GRADE / 2))
   const linhaRaw = Math.round((mundoZ - POSICAO_TABULEIRO[2]) / TAMANHO_CELULA + Math.floor(LADO_DA_GRADE / 2))
-  const coluna = colunaRaw || 0
-  const linha = linhaRaw || 0
+  if (Number.isNaN(colunaRaw) || Number.isNaN(linhaRaw)) return null
+  const coluna = colunaRaw === 0 ? 0 : colunaRaw
+  const linha = linhaRaw === 0 ? 0 : linhaRaw
   if (linha < 0 || linha >= LADO_DA_GRADE || coluna < 0 || coluna >= LADO_DA_GRADE) {
     return null
   }

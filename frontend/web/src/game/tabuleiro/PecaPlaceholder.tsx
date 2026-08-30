@@ -16,31 +16,32 @@ const COR_POR_TIPO: Record<TipoDaPeca, string> = {
 
 const COR_CAMINHO = '#111111'
 
+const TAMANHO_PECA = TAMANHO_CELULA * 0.96
+const ESPESSURA_PECA = 0.12
+const LARGURA_TRILHA = TAMANHO_PECA * 0.22
+const COMPRIMENTO_BRACO = TAMANHO_PECA / 2 - LARGURA_TRILHA / 2
+const OFFSET_BRACO = (TAMANHO_PECA + LARGURA_TRILHA) / 4
+const Y_CAMINHO = 0.08 + ESPESSURA_PECA / 2 + 0.015
+
+const MAP_BORDA: Record<BordaCardinal, { pos: [number, number, number]; args: [number, number, number] }> = {
+  norte: { pos: [0, 0, -OFFSET_BRACO], args: [LARGURA_TRILHA, 0.02, COMPRIMENTO_BRACO] },
+  sul: { pos: [0, 0, OFFSET_BRACO], args: [LARGURA_TRILHA, 0.02, COMPRIMENTO_BRACO] },
+  leste: { pos: [OFFSET_BRACO, 0, 0], args: [COMPRIMENTO_BRACO, 0.02, LARGURA_TRILHA] },
+  oeste: { pos: [-OFFSET_BRACO, 0, 0], args: [COMPRIMENTO_BRACO, 0.02, LARGURA_TRILHA] },
+}
+
 export function PecaPlaceholder({ tipo, orientacao, position }: PecaPlaceholderProps) {
   const bordas = bordasAbertas({ tipo, orientacao })
-  const tamanhoPeca = TAMANHO_CELULA * 0.96
-  const espessura = 0.12
-  const larguraTrilha = tamanhoPeca * 0.22
-  const comprimentoBraco = tamanhoPeca / 2 - larguraTrilha / 2
-  const offsetBraco = (tamanhoPeca + larguraTrilha) / 4
-  const yCaminho = 0.08 + espessura / 2 + 0.015
-
-  const MAP_BORDA: Record<BordaCardinal, { pos: [number, number, number]; args: [number, number, number] }> = {
-    norte: { pos: [0, 0, -offsetBraco], args: [larguraTrilha, 0.02, comprimentoBraco] },
-    sul: { pos: [0, 0, offsetBraco], args: [larguraTrilha, 0.02, comprimentoBraco] },
-    leste: { pos: [offsetBraco, 0, 0], args: [comprimentoBraco, 0.02, larguraTrilha] },
-    oeste: { pos: [-offsetBraco, 0, 0], args: [comprimentoBraco, 0.02, larguraTrilha] },
-  }
 
   return (
     <group position={position}>
       <mesh position={[0, 0.08, 0]}>
-        <boxGeometry args={[tamanhoPeca, espessura, tamanhoPeca]} />
+        <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
         <meshStandardMaterial color={COR_POR_TIPO[tipo]} transparent opacity={0.88} />
       </mesh>
-      <group position={[0, yCaminho, 0]}>
+      <group position={[0, Y_CAMINHO, 0]}>
         <mesh>
-          <boxGeometry args={[larguraTrilha, 0.02, larguraTrilha]} />
+          <boxGeometry args={[LARGURA_TRILHA, 0.02, LARGURA_TRILHA]} />
           <meshStandardMaterial color={COR_CAMINHO} />
         </mesh>
         {bordas.map((borda) => {
