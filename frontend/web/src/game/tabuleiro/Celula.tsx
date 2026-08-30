@@ -13,20 +13,30 @@ export function Celula({ celula, peca }: CelulaProps) {
 
   return (
     <group position={pos}>
-      {/* Base da célula */}
-      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      {/* Base da célula — variante A: escura opaca para contraste com Mesa âmbar */}
+      <mesh position={[0, 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[TAMANHO_CELULA * 0.98, TAMANHO_CELULA * 0.98]} />
-        <meshStandardMaterial
-          color={ocupada ? '#4a3f35' : '#2f2a26'}
-          transparent
-          opacity={ocupada ? 0.95 : 0.85}
-        />
+        <meshStandardMaterial color={ocupada ? '#5e4e36' : '#1b1915'} />
       </mesh>
-      {/* Borda da grade */}
-      <mesh position={[0, 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[TAMANHO_CELULA, TAMANHO_CELULA]} />
-        <meshStandardMaterial color="#1a1614" wireframe={false} transparent opacity={0.15} />
-      </mesh>
+      {/* Borda da célula — frame de 4 barras finas cor clara */}
+      <group position={[0, 0.018, 0]}>
+        <mesh position={[0, 0, TAMANHO_CELULA / 2 - 0.02]}>
+          <boxGeometry args={[TAMANHO_CELULA * 0.98, 0.01, 0.04]} />
+          <meshStandardMaterial color="#f2e0b6" transparent opacity={0.95} />
+        </mesh>
+        <mesh position={[0, 0, -TAMANHO_CELULA / 2 + 0.02]}>
+          <boxGeometry args={[TAMANHO_CELULA * 0.98, 0.01, 0.04]} />
+          <meshStandardMaterial color="#f2e0b6" transparent opacity={0.95} />
+        </mesh>
+        <mesh position={[TAMANHO_CELULA / 2 - 0.02, 0, 0]}>
+          <boxGeometry args={[0.04, 0.01, TAMANHO_CELULA * 0.98]} />
+          <meshStandardMaterial color="#f2e0b6" transparent opacity={0.95} />
+        </mesh>
+        <mesh position={[-TAMANHO_CELULA / 2 + 0.02, 0, 0]}>
+          <boxGeometry args={[0.04, 0.01, TAMANHO_CELULA * 0.98]} />
+          <meshStandardMaterial color="#f2e0b6" transparent opacity={0.95} />
+        </mesh>
+      </group>
       {peca ? (
         <PecaPlaceholder tipo={peca.tipo} orientacao={peca.orientacao} position={[0, 0.02, 0]} />
       ) : null}
