@@ -44,9 +44,6 @@ export interface EncaminhamentoDaSala {
   partidaId: string;
 }
 
-/** Alias canônico para o alvo do redirect — mantido para compatibilidade com issue #45 (AlvoDaPartida). */
-export type AlvoDaPartida = EncaminhamentoDaSala;
-
 export interface Sala {
   id: string;
   codigoDeSala: CodigoDeSala;
