@@ -49,14 +49,29 @@ export interface CameraFixa {
  * alvo na origem [0, 0, 0] e distância calculada para enquadrar a maior
  * dimensão da Mesa com a margem definida.
  */
+export function tangenteMeioFov(fovGraus: number): number {
+  return Math.tan((fovGraus * Math.PI) / 360)
+}
+
+export function distanciaParaEnquadrar(
+  meiaMaior: number,
+  margem: number,
+  fovGraus: number,
+): number {
+  return (meiaMaior * margem) / tangenteMeioFov(fovGraus)
+}
+
+export function componenteInclinacao45(distancia: number): number {
+  return distancia / Math.SQRT2
+}
+
 export function descreverCameraFixa(
   larguraMesa: number,
   profundidadeMesa: number,
   fov: number,
 ): CameraFixa {
   const meiaMaiorDimensao = Math.max(larguraMesa, profundidadeMesa) / 2
-  const distancia = (meiaMaiorDimensao * MARGEM_ENQUADRAMENTO) / Math.tan((fov * Math.PI) / 360)
-  // Inclinação de 45°: atan2(altura, distanciaHorizontal) = atan2(c, c) = 45°.
-  const componente = distancia / Math.SQRT2
+  const distancia = distanciaParaEnquadrar(meiaMaiorDimensao, MARGEM_ENQUADRAMENTO, fov)
+  const componente = componenteInclinacao45(distancia)
   return { posicao: [0, componente, componente], alvo: [0, 0, 0] }
 }
