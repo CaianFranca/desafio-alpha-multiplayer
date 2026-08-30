@@ -18,7 +18,7 @@ const COR_CAMINHO = '#111111'
 
 export function PecaPlaceholder({ tipo, orientacao, position }: PecaPlaceholderProps) {
   const bordas = bordasAbertas({ tipo, orientacao })
-  const tamanhoPeca = TAMANHO_CELULA * 0.88
+  const tamanhoPeca = TAMANHO_CELULA * 0.96
   const espessura = 0.12
   const larguraTrilha = tamanhoPeca * 0.22
   const comprimentoBraco = tamanhoPeca / 2 - larguraTrilha / 2

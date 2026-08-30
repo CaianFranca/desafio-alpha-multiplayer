@@ -93,8 +93,9 @@ export function criarReservaInicial(): PecaDaReserva[] {
 }
 
 /**
- * Mock de exibição para `disponivel`: uma peça encaixada no centro e
- * reserva completa (22 placeholders) — sem física, apenas visual.
+ * Mock de exibição para `disponivel`: caminho básico de 5 peças
+ * contíguas com orientações que fazem os caminhos se tocarem —
+ * Inicial L + Reta H + Cruz + Reta V + T, formando encaixe visível.
  */
 export function criarEstadoExibicaoMock(): EstadoExibicaoTabuleiro {
   const reserva = criarReservaInicial()
@@ -104,6 +105,30 @@ export function criarEstadoExibicaoMock(): EstadoExibicaoTabuleiro {
       tipo: 'inicial',
       orientacao: 0,
       celula: { linha: 3, coluna: 3 },
+    },
+    {
+      pecaId: 'reta-posicionada-2',
+      tipo: 'reta',
+      orientacao: 90,
+      celula: { linha: 3, coluna: 4 },
+    },
+    {
+      pecaId: 'cruz-posicionada-3',
+      tipo: 'cruz',
+      orientacao: 0,
+      celula: { linha: 3, coluna: 5 },
+    },
+    {
+      pecaId: 'reta-posicionada-4',
+      tipo: 'reta',
+      orientacao: 0,
+      celula: { linha: 4, coluna: 5 },
+    },
+    {
+      pecaId: 't-posicionada-5',
+      tipo: 'T',
+      orientacao: 180,
+      celula: { linha: 2, coluna: 5 },
     },
   ]
   return { reserva, posicionadas }

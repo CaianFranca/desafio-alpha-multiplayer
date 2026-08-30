@@ -81,12 +81,15 @@ describe('contrato do tabuleiro', () => {
     expect(reserva.every((p) => p.orientacao === 0)).toBe(true)
   })
 
-  it('estado mock exibe reserva completa e peça encaixada no centro sem física', () => {
+  it('estado mock exibe reserva completa e caminho basico de 5 pecas encaixadas sem fisica', () => {
     const mock = criarEstadoExibicaoMock()
     expect(mock.reserva).toHaveLength(22)
-    expect(mock.posicionadas).toHaveLength(1)
-    expect(mock.posicionadas[0].celula).toEqual({ linha: 3, coluna: 3 })
-    expect(mock.posicionadas[0].tipo).toBe('inicial')
+    expect(mock.posicionadas).toHaveLength(5)
+    expect(mock.posicionadas[0]).toMatchObject({ celula: { linha: 3, coluna: 3 }, tipo: 'inicial', orientacao: 0 })
+    expect(mock.posicionadas[1]).toMatchObject({ celula: { linha: 3, coluna: 4 }, tipo: 'reta', orientacao: 90 })
+    expect(mock.posicionadas[2]).toMatchObject({ celula: { linha: 3, coluna: 5 }, tipo: 'cruz', orientacao: 0 })
+    expect(mock.posicionadas[3]).toMatchObject({ celula: { linha: 4, coluna: 5 }, tipo: 'reta', orientacao: 0 })
+    expect(mock.posicionadas[4]).toMatchObject({ celula: { linha: 2, coluna: 5 }, tipo: 'T', orientacao: 180 })
   })
 
   it('bordas abertas por tipo e orientação (placeholder BoxGeometry)', () => {

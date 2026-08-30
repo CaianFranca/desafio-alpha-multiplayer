@@ -270,16 +270,15 @@ describe('partida dev toolbar', () => {
 describe('partida tabuleiro e reserva (issue #83)', () => {
   const autenticado = mockAuthenticatedState
 
-  it('disponivel mostra grade 7x7 (49 células) com distinção vazia/ocupada e peça encaixada', () => {
+  it('disponivel mostra grade 7x7 (49 células) com distinção vazia/ocupada e caminho basico de 5 pecas encaixadas', () => {
     renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
     const celulas = screen.getAllByTestId('tabuleiro-celula')
     expect(celulas).toHaveLength(49)
     const ocupadas = celulas.filter((el) => el.getAttribute('data-ocupada') === 'true')
     const vazias = celulas.filter((el) => el.getAttribute('data-ocupada') === 'false')
-    expect(ocupadas).toHaveLength(1)
-    expect(vazias).toHaveLength(48)
-    expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(1)
-    // garante que existe célula 3:3 ocupada
+    expect(ocupadas).toHaveLength(5)
+    expect(vazias).toHaveLength(44)
+    expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(5)
     const centroOcupada = celulas.find(
       (el) => el.getAttribute('data-linha') === '3' && el.getAttribute('data-coluna') === '3' && el.getAttribute('data-ocupada') === 'true',
     )
