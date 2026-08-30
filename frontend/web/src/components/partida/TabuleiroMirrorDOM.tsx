@@ -1,4 +1,4 @@
-import { chaveCelula } from '../../game/tabuleiro/contrato'
+import { chaveCelula, selecionarPeaoNaExibicao } from '../../game/tabuleiro/contrato'
 import type {
   Celula,
   PeaoDaExibicao,
@@ -43,20 +43,11 @@ export function TabuleiroMirrorDOM({
   aoSelecionarPeao,
   aoDesselecionar,
 }: TabuleiroMirrorDOMProps) {
-  const peaoSelecionado =
+  // Mesma derivação pura usada pela cena: resolve a peça sob o peão selecionado
+  // (null quando o peão está sobre a Mesa ou sem peça → sem conexões destacadas).
+  const selecao =
     peaoSelecionadoId !== null
-      ? peoes.find((peao) => peao.peaoId === peaoSelecionadoId) ?? null
-      : null
-  // A seleção só produz conexões/destaque quando o peão está posicionado
-  // sobre uma peça da grade.
-  const selecaoPosicionada = Boolean(
-    peaoSelecionado &&
-      peaoSelecionado.celula !== null &&
-      posicionadas.some((p) => chaveCelula(p.celula) === chaveCelula(peaoSelecionado.celula!)),
-  )
-  const pecaDoPeaoSelecionado =
-    selecaoPosicionada && peaoSelecionado?.celula
-      ? posicionadas.find((p) => chaveCelula(p.celula) === chaveCelula(peaoSelecionado.celula!))?.pecaId ?? null
+      ? selecionarPeaoNaExibicao({ posicionadas, peoes }, peaoSelecionadoId)
       : null
 
   return (
@@ -94,12 +85,10 @@ export function TabuleiroMirrorDOM({
           data-testid="peca-posicionada"
           data-peca-id={p.pecaId}
           data-conectada={
-            selecaoPosicionada ? (destinosSet.has(p.pecaId) ? 'true' : 'false') : undefined
+            selecao ? (destinosSet.has(p.pecaId) ? 'true' : 'false') : undefined
           }
           data-selecionada={
-            selecaoPosicionada
-              ? (pecaDoPeaoSelecionado === p.pecaId ? 'true' : 'false')
-              : undefined
+            selecao ? (selecao.pecaId === p.pecaId ? 'true' : 'false') : undefined
           }
         />
       ))}

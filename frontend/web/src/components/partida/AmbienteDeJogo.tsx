@@ -94,6 +94,7 @@ export function AmbienteDeJogo({ bordaPx = 0, estado = null }: AmbienteDeJogoPro
         <AmbienteCena
           estadoExibicao={estadoExibicao}
           peaoSelecionadoId={peaoSelecionadoId}
+          destinosSet={destinosSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
         />

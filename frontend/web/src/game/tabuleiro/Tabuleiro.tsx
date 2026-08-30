@@ -1,11 +1,8 @@
-import {
-  chaveCelula,
-  destinosConectadosDoPeao,
-  todasAsCelulas,
-} from './contrato'
+import { chaveCelula, todasAsCelulas } from './contrato'
 import type {
   PeaoDaExibicao,
   PeaoId,
+  PecaId,
   PecaPosicionada,
 } from './contrato'
 import { Celula } from './Celula'
@@ -15,6 +12,12 @@ interface TabuleiroProps {
   peoes?: readonly PeaoDaExibicao[]
   /** Peão selecionado (estado visual local; null = nenhum). */
   peaoSelecionadoId?: PeaoId | null
+  /**
+   * PecaIds destinos válidos do peão selecionado, derivados uma única vez no
+   * pai (mesma fonte do espelho DOM). Célula cuja peça está neste conjunto é
+   * destacada e reage ao ponteiro; as demais permanecem inertes.
+   */
+  destinosSet?: ReadonlySet<PecaId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
 
@@ -22,6 +25,7 @@ export function Tabuleiro({
   posicionadas,
   peoes = [],
   peaoSelecionadoId = null,
+  destinosSet = new Set<string>(),
   onSelecionarPeao,
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
@@ -34,14 +38,6 @@ export function Tabuleiro({
   for (const peao of peoes) {
     if (peao.celula !== null) {
       peoesPorChave.set(chaveCelula(peao.celula), peao)
-    }
-  }
-
-  // Destinos válidos do peão selecionado → conjunto de células destacadas.
-  const destinosValidos = new Set<string>()
-  if (peaoSelecionadoId !== null) {
-    for (const peca of destinosConectadosDoPeao(posicionadas, peoes, peaoSelecionadoId)) {
-      destinosValidos.add(chaveCelula(peca.celula))
     }
   }
 
@@ -59,7 +55,7 @@ export function Tabuleiro({
             celula={celula}
             peca={peca}
             peao={peao}
-            destinoValido={destinosValidos.has(chave)}
+            destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
             peaoSelecionadoId={peaoSelecionadoId}
             onSelecionarPeao={onSelecionarPeao}
           />

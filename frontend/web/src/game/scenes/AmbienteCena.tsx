@@ -13,7 +13,7 @@ import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Reserva } from '../tabuleiro/Reserva'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
-import type { PeaoId, EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
+import type { PeaoId, PecaId, EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
@@ -61,6 +61,8 @@ function Mesa() {
 interface AmbienteCenaProps {
   estadoExibicao?: EstadoExibicaoTabuleiro | null
   peaoSelecionadoId?: PeaoId | null
+  /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
+  destinosSet?: ReadonlySet<PecaId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
   /** Clique em área vazia (Mesa/chão) desseleciona o peão. */
   onDesselecionar?: () => void
@@ -69,6 +71,7 @@ interface AmbienteCenaProps {
 export function AmbienteCena({
   estadoExibicao,
   peaoSelecionadoId = null,
+  destinosSet,
   onSelecionarPeao,
   onDesselecionar,
 }: AmbienteCenaProps) {
@@ -99,6 +102,7 @@ export function AmbienteCena({
               posicionadas={estadoExibicao.posicionadas}
               peoes={estadoExibicao.peoes}
               peaoSelecionadoId={peaoSelecionadoId}
+              destinosSet={destinosSet}
               onSelecionarPeao={onSelecionarPeao}
             />
             <Reserva reserva={estadoExibicao.reserva} />
