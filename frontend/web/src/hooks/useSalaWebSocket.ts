@@ -65,20 +65,18 @@ function aplicarEventoDeEncaminhamento(
     case 'PARTIDA_DISPONIVEL':
       return {
         fase: 'disponivel',
-        alvo: { partidaId: (msg as { partidaId: string }).partidaId, serverId: (msg as { serverId: string }).serverId },
+        alvo: { partidaId: msg.partidaId, serverId: msg.serverId },
         codigo: null,
         motivo: null,
         mensagem: null,
       }
     case 'PARTIDA_RECUSADA': {
-      const { codigo, motivo } = msg as { codigo: string; motivo: string }
-      const mensagem = mensagemDeErroDoEncaminhamento(codigo, motivo)
-      return { fase: 'recusada', alvo: null, codigo, motivo, mensagem }
+      const mensagem = mensagemDeErroDoEncaminhamento(msg.codigo, msg.motivo)
+      return { fase: 'recusada', alvo: null, codigo: msg.codigo, motivo: msg.motivo, mensagem }
     }
     case 'PARTIDA_FALHOU': {
-      const { codigo, motivo } = msg as { codigo: string; motivo: string }
-      const mensagem = mensagemDeErroDoEncaminhamento(codigo, motivo)
-      return { fase: 'falhou', alvo: null, codigo, motivo, mensagem }
+      const mensagem = mensagemDeErroDoEncaminhamento(msg.codigo, msg.motivo)
+      return { fase: 'falhou', alvo: null, codigo: msg.codigo, motivo: msg.motivo, mensagem }
     }
     default:
       return null
@@ -256,7 +254,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
 
   const limparAvisoDeEncaminhamento = useCallback(() => {
     setEncaminhamento((prev) => {
-      if (prev.fase === 'recusada' || prev.fase === 'falhou') return estadoInicialDoEncaminhamento()
+      if (prev.fase === 'recusada' || prev.fase === 'falhou') {
+        // Limpa também o `erro` que pode ter sido setado por ERRO_DA_SALA com mesmo código
+        setErro(null)
+        return estadoInicialDoEncaminhamento()
+      }
       return prev
     })
   }, [])
@@ -310,18 +312,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       if (typeof data !== 'object' || data === null || !('type' in data)) return
 
       // Encaminhamento (issue #45): PARTIDA_PREPARANDO/DISPONIVEL/RECUSADA/FALHOU
+      // Fonte única é `encaminhamento` → `AvisoEncaminhamento`/`TransicaoOverlay`.
+      // Não duplica em `erro` (vermelho) nem em `avisos` — evita mensagem dupla (review PR #127).
       if (isEncaminhamentoEvento(data as ServerMessage)) {
         const next = aplicarEventoDeEncaminhamento(data as ServerMessage)
-        if (next) {
-          setEncaminhamento(next)
-          if (next.fase === 'recusada' || next.fase === 'falhou') {
-            const msg = next.mensagem ?? 'Falha ao preparar a partida'
-            adicionarAviso(msg, next.fase)
-            setErro(msg)
-          } else {
-            setErro(null)
-          }
-        }
+        if (next) setEncaminhamento(next)
         return
       }
 
@@ -388,7 +383,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           return
       }
     }
-  }, [adicionarAviso])
+  }, [adicionarAviso, sincronizarEncaminhamentoDoSnapshot])
 
   useEffect(() => {
     conectar()

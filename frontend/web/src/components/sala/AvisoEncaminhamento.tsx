@@ -1,4 +1,4 @@
-import type { EstadoDoEncaminhamento } from '../../hooks/useSala'
+import type { EstadoDoEncaminhamento } from '../../hooks/useSalaWebSocket'
 
 interface Props {
   encaminhamento: EstadoDoEncaminhamento

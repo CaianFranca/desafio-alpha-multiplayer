@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { buildGameRedirectHref, buildGameWsUrl } from '../../api/encaminhamento'
-import type { EstadoDoEncaminhamento } from '../../hooks/useSala'
+import type { EstadoDoEncaminhamento } from '../../hooks/useSalaWebSocket'
 
 interface Props {
   encaminhamento: EstadoDoEncaminhamento
