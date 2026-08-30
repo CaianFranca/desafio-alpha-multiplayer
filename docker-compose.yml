@@ -58,6 +58,7 @@ services:
       - ./backend/lobby-server:/app/backend/lobby-server
       - ./packages/config:/app/packages/config
       - ./packages/shared:/app/packages/shared
+      - ./packages/engine:/app/packages/engine
       - /app/node_modules
       - /app/backend/lobby-server/node_modules
     working_dir: /app/backend/lobby-server
@@ -104,6 +105,7 @@ services:
       - ./backend/game-server:/app/backend/game-server
       - ./packages/config:/app/packages/config
       - ./packages/shared:/app/packages/shared
+      - ./packages/engine:/app/packages/engine
       - /app/node_modules
       - /app/backend/game-server/node_modules
     working_dir: /app/backend/game-server

@@ -2,8 +2,10 @@ import http from 'node:http';
 import { getConfig } from '@flicker/config';
 import type { ServerId } from '@flicker/shared';
 import { createApp } from './app.ts';
-import { createWebSocketServer } from './ws/ws.ts';
+import { criarWebSocketServer } from './ws/ws.ts';
 import { redisClient } from './config/redis.ts';
+import { TabuleiroBroadcaster } from './tabuleiro/broadcast.ts';
+import { TabuleiroHandlers } from './tabuleiro/handlers.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
 import {
   iniciarHeartbeat,
@@ -14,14 +16,19 @@ import {
   type HeartbeatHandle,
 } from './redis/registro.ts';
 
-const { gameServerPort, partidaPreparadaTtlSegundos, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, gameServerId: configServerId } = getConfig();
+const { gameServerPort, partidaPreparadaTtlSegundos, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, gameServerId: configServerId, jwtSecret } = getConfig();
 const serverId: ServerId = resolverServerId(configServerId) as ServerId;
-const contexto: ContextoDoGameServer = { redis: redisClient, serverId, partidaPreparadaTtlSegundos };
+const contexto: ContextoDoGameServer = { redis: redisClient, serverId, jwtSecret, partidaPreparadaTtlSegundos };
 const app = createApp(contexto);
 
 const server = http.createServer(app);
 
-createWebSocketServer(server);
+const broadcaster = new TabuleiroBroadcaster();
+const handlers = new TabuleiroHandlers({ redis: redisClient, broadcaster });
+
+criarWebSocketServer(server, contexto, {
+  tabuleiro: { redis: redisClient, broadcaster, handlers },
+});
 
 let heartbeatHandle: HeartbeatHandle | undefined;
 let registroRetry: NodeJS.Timeout | undefined;

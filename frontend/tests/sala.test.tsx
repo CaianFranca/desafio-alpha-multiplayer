@@ -5,82 +5,7 @@ import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
-
-// --- Mock WebSocket global ---
-class MockWebSocket {
-  static instances: MockWebSocket[] = []
-  static CONNECTING = 0
-  static OPEN = 1
-  static CLOSING = 2
-  static CLOSED = 3
-  // Simula o handshake real: o próximo socket nasce CONNECTING e só abre
-  // quando o teste chamar simulateOpen(). Exige o teste de retry do Bug 1.
-  static forceNoAutoOpen = false
-  url: string
-  readyState = 0
-  onopen: ((ev: Event) => void) | null = null
-  onclose: ((ev: CloseEvent) => void) | null = null
-  onmessage: ((ev: MessageEvent) => void) | null = null
-  onerror: ((ev: Event) => void) | null = null
-  sentMessages: string[] = []
-
-  constructor(url: string) {
-    this.url = url
-    if (MockWebSocket.forceNoAutoOpen) {
-      // Recomeça CONNECTING; simulateOpen() será chamado pelo teste.
-      this.readyState = MockWebSocket.CONNECTING
-    } else {
-      this.readyState = MockWebSocket.OPEN
-      queueMicrotask(() => this.onopen?.(new Event('open')))
-    }
-    MockWebSocket.instances.push(this)
-  }
-
-  simulateOpen() {
-    this.readyState = MockWebSocket.OPEN
-    this.onopen?.(new Event('open'))
-  }
-
-  send(data: string) {
-    this.sentMessages.push(data)
-  }
-
-  close() {
-    this.onclose?.(new CloseEvent('close') as CloseEvent)
-  }
-
-  simulateMessage(data: unknown) {
-    this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(data) }) as MessageEvent)
-  }
-
-  static clean() {
-    MockWebSocket.instances = []
-  }
-
-  static last(): MockWebSocket | undefined {
-    return MockWebSocket.instances[MockWebSocket.instances.length - 1]
-  }
-}
-
-// @ts-expect-error overwrite global for tests
-global.WebSocket = MockWebSocket as unknown as typeof WebSocket
-// garante OPEN no global para o hook comparar
-// @ts-expect-error ensure static property
-if ((global.WebSocket as unknown as { OPEN?: number }).OPEN === undefined) {
-  // @ts-expect-error assign
-  global.WebSocket.OPEN = 1
-}
-// jsdom não tem MessageEvent construtor completo, polyfill simples se necessário
-if (typeof MessageEvent === 'undefined') {
-  // @ts-expect-error polyfill
-  global.MessageEvent = class MessageEvent extends Event {
-    data: unknown
-    constructor(type: string, init: { data: unknown }) {
-      super(type)
-      this.data = init.data
-    }
-  }
-}
+import { MockWebSocket } from './helpers/mockWebSocket'
 
 // Mock clipboard - jsdom defineProperty precisa ser configurável
 const clipboardWriteTextMock = vi.fn().mockResolvedValue(undefined)
@@ -334,7 +259,10 @@ describe('lobby - página do lobby', () => {
     const salaAtualizada = criarSala({ codigoDeSala: 'A3K9M2', membros: membrosAtualizados, anfitriaoId: 'm1' })
     ws.simulateMessage({ type: 'PRONTIDAO_ATUALIZADA', membroId: 'm2', prontidao: true, sala: salaAtualizada })
 
-    expect(await screen.findByText(/ana.*pronto/i)).toBeInTheDocument()
+    // Aviso aparece em um único lugar: AvisosDoLobby (o chat exibe só
+    // mensagens de jogadores — sem linhas [SISTEMA])
+    expect(await screen.findByText(/ana está pronto/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/ana está pronto/i)).toHaveLength(1)
   })
 
   it('prontidão alterna otimisticamente antes da reconciliação do servidor', async () => {
@@ -382,7 +310,7 @@ describe('lobby - página do lobby', () => {
 
     // MEMBRO_DESCONECTADO
     ws.simulateMessage({ type: 'MEMBRO_DESCONECTADO', membroId: 'm1', jogadorId: 'j1', presenca: 'em_reconexao', sala: salaAposSaida })
-    expect(await screen.findByText(/desconectado/i)).toBeInTheDocument()
+    expect(await screen.findByText(/lucasgomes desconectado \(em_reconexao\)/i)).toBeInTheDocument()
 
     // ANFITRIAO_SUBSTITUIDO
     const novoAnfitriao = criarMembro({ id: 'm3', apelido: 'Beto', ordemDeEntrada: 1 })

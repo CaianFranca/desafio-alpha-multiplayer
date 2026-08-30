@@ -93,6 +93,7 @@ export interface ManipulacaoFinalizadaEvento {
 
 export type CodigoDeErroDoTabuleiro =
   | CodigoDeErroComum
+  | 'ESTADO_INDISPONIVEL'
   | 'PECA_NAO_ENCONTRADA'
   | 'PECA_NAO_SELECIONADA'
   | 'RESERVA_ESGOTADA'
