@@ -11,7 +11,6 @@ import {
   COLUNAS_RESERVA,
   ESPACAMENTO_RESERVA,
   criarReservaInicial,
-  criarEstadoExibicaoMock,
   bordasAbertas,
   celulaParaMundo,
   mundoParaCelula,
@@ -20,6 +19,7 @@ import {
   todasAsCelulas,
   validarDimensoes,
 } from '../web/src/game/tabuleiro/contrato'
+import { criarEstadoExibicaoMock } from '../web/src/game/tabuleiro/mockExibicao'
 import { LARGURA_MESA } from '../web/src/game/ambiente/contrato'
 
 describe('contrato do tabuleiro', () => {

@@ -1,4 +1,15 @@
-import { BORDA_OFFSET, BORDA_Y, CELULA_INSET, celulaParaMundo, COR_BORDA_CELULA, ESPESSURA_BORDA, TAMANHO_CELULA } from './contrato'
+import {
+  BORDA_OFFSET,
+  BORDA_Y,
+  CELULA_INSET,
+  CELULA_Y_BASE,
+  CELULA_Y_BORDA,
+  celulaParaMundo,
+  COR_BORDA_CELULA,
+  ESPESSURA_BORDA,
+  PECA_Y,
+  TAMANHO_CELULA,
+} from './contrato'
 import type { Celula as CelulaTipo, PecaPosicionada } from './contrato'
 import { PecaPlaceholder } from './PecaPlaceholder'
 
@@ -20,7 +31,7 @@ export function Celula({ celula, peca }: CelulaProps) {
 
   return (
     <group position={pos}>
-      <mesh position={[0, 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, CELULA_Y_BASE, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
         <meshStandardMaterial
           color={ocupada ? '#5e4e36' : '#1b1915'}
@@ -28,7 +39,7 @@ export function Celula({ celula, peca }: CelulaProps) {
           opacity={ocupada ? 0.82 : 0.7}
         />
       </mesh>
-      <group position={[0, 0.018, 0]}>
+      <group position={[0, CELULA_Y_BORDA, 0]}>
         {BORDAS_CONFIG.map((b, i) => (
           <mesh key={i} position={b.pos}>
             <boxGeometry args={b.args} />
@@ -37,7 +48,7 @@ export function Celula({ celula, peca }: CelulaProps) {
         ))}
       </group>
       {peca ? (
-        <PecaPlaceholder tipo={peca.tipo} orientacao={peca.orientacao} position={[0, 0.02, 0]} />
+        <PecaPlaceholder tipo={peca.tipo} orientacao={peca.orientacao} position={[0, PECA_Y, 0]} />
       ) : null}
     </group>
   )

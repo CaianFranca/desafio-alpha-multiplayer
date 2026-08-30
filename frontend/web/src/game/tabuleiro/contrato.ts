@@ -45,6 +45,10 @@ export const ESPESSURA_BORDA = 0.04
 export const BORDA_OFFSET = 0.02
 export const BORDA_Y = 0.01
 export const COR_BORDA_CELULA = '#f2e0b6'
+export const CELULA_Y_BASE = 0.012
+export const CELULA_Y_BORDA = 0.018
+export const PECA_Y = 0.02
+export type PecaId = string
 
 // ── Tipos de domínio visual (espelha engine/shared) ──
 
@@ -58,13 +62,13 @@ export interface Celula {
 }
 
 export interface PecaDaReserva {
-  readonly pecaId: string
+  readonly pecaId: PecaId
   readonly tipo: TipoDaPeca
   readonly orientacao: Orientacao
 }
 
 export interface PecaPosicionada {
-  readonly pecaId: string
+  readonly pecaId: PecaId
   readonly tipo: TipoDaPeca
   readonly orientacao: Orientacao
   readonly celula: Celula
@@ -111,47 +115,7 @@ export function dimensaoReserva(linhas: number): { largura: number; profundidade
   }
 }
 
-/**
- * Mock de exibição para `disponivel`: caminho básico de 5 peças
- * contíguas com orientações que fazem os caminhos se tocarem —
- * Inicial L + Reta H + Cruz + Reta V + T, formando encaixe visível.
- */
-export function criarEstadoExibicaoMock(): EstadoExibicaoTabuleiro {
-  const reserva = criarReservaInicial()
-  const posicionadas: PecaPosicionada[] = [
-    {
-      pecaId: 'posicionada-inicial-1',
-      tipo: 'inicial',
-      orientacao: 0,
-      celula: { linha: 3, coluna: 3 },
-    },
-    {
-      pecaId: 'posicionada-reta-2',
-      tipo: 'reta',
-      orientacao: 90,
-      celula: { linha: 3, coluna: 4 },
-    },
-    {
-      pecaId: 'posicionada-cruz-3',
-      tipo: 'cruz',
-      orientacao: 0,
-      celula: { linha: 3, coluna: 5 },
-    },
-    {
-      pecaId: 'posicionada-reta-4',
-      tipo: 'reta',
-      orientacao: 0,
-      celula: { linha: 4, coluna: 5 },
-    },
-    {
-      pecaId: 'posicionada-t-5',
-      tipo: 'T',
-      orientacao: 180,
-      celula: { linha: 2, coluna: 5 },
-    },
-  ]
-  return { reserva, posicionadas }
-}
+
 
 // ── Bordas abertas por tipo/orientação (visual do placeholder) ──
 
@@ -188,6 +152,10 @@ export function celulaParaMundo(celula: Celula): [number, number, number] {
   return [POSICAO_TABULEIRO[0] + x, POSICAO_TABULEIRO[1], POSICAO_TABULEIRO[2] + z]
 }
 
+function normalizarZero(n: number): number {
+  return n === 0 ? 0 : n
+}
+
 export function mundoParaCelula(
   mundoX: number,
   mundoZ: number,
@@ -195,8 +163,8 @@ export function mundoParaCelula(
   const colunaRaw = Math.round((mundoX - POSICAO_TABULEIRO[0]) / TAMANHO_CELULA + Math.floor(LADO_DA_GRADE / 2))
   const linhaRaw = Math.round((mundoZ - POSICAO_TABULEIRO[2]) / TAMANHO_CELULA + Math.floor(LADO_DA_GRADE / 2))
   if (Number.isNaN(colunaRaw) || Number.isNaN(linhaRaw)) return null
-  const coluna = colunaRaw === 0 ? 0 : colunaRaw
-  const linha = linhaRaw === 0 ? 0 : linhaRaw
+  const coluna = normalizarZero(colunaRaw)
+  const linha = normalizarZero(linhaRaw)
   if (linha < 0 || linha >= LADO_DA_GRADE || coluna < 0 || coluna >= LADO_DA_GRADE) {
     return null
   }

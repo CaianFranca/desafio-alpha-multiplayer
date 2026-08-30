@@ -7,11 +7,8 @@ import {
 } from '../../game/ambiente/contrato'
 import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
-import {
-  chaveCelula,
-  criarEstadoExibicaoMock,
-  todasAsCelulas,
-} from '../../game/tabuleiro/contrato'
+import { chaveCelula, todasAsCelulas } from '../../game/tabuleiro/contrato'
+import { criarEstadoExibicaoMock } from '../../game/tabuleiro/mockExibicao'
 import type { EstadoDaTela } from './partidaTelaMachine'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 
