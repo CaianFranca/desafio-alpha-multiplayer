@@ -4,7 +4,7 @@ import type {
   Sala,
   SalaEventoDoServidor,
   SalaComandoDoCliente,
-  ServerMessage,
+  EncaminhamentoEventoDoServidor,
 } from '@flicker/shared'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
@@ -42,22 +42,21 @@ function estadoInicialDoEncaminhamento(): EstadoDoEncaminhamento {
   return { fase: 'ocioso', alvo: null, codigo: null, motivo: null, mensagem: null }
 }
 
-function isEncaminhamentoEvento(
-  msg: ServerMessage,
-): msg is Extract<ServerMessage, { type: 'PARTIDA_PREPARANDO' | 'PARTIDA_DISPONIVEL' | 'PARTIDA_RECUSADA' | 'PARTIDA_FALHOU' }> {
+function isEncaminhamentoEvento(msg: unknown): msg is EncaminhamentoEventoDoServidor {
   return (
     typeof msg === 'object' &&
     msg !== null &&
     'type' in msg &&
-    (msg.type === 'PARTIDA_PREPARANDO' ||
-      msg.type === 'PARTIDA_DISPONIVEL' ||
-      msg.type === 'PARTIDA_RECUSADA' ||
-      msg.type === 'PARTIDA_FALHOU')
+    typeof (msg as { type: unknown }).type === 'string' &&
+    ((msg as { type: string }).type === 'PARTIDA_PREPARANDO' ||
+      (msg as { type: string }).type === 'PARTIDA_DISPONIVEL' ||
+      (msg as { type: string }).type === 'PARTIDA_RECUSADA' ||
+      (msg as { type: string }).type === 'PARTIDA_FALHOU')
   )
 }
 
 function aplicarEventoDeEncaminhamento(
-  msg: ServerMessage,
+  msg: EncaminhamentoEventoDoServidor,
 ): EstadoDoEncaminhamento | null {
   switch (msg.type) {
     case 'PARTIDA_PREPARANDO':
@@ -330,8 +329,8 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       // Encaminhamento (issue #45): PARTIDA_PREPARANDO/DISPONIVEL/RECUSADA/FALHOU
       // Fonte única é `encaminhamento` → `AvisoEncaminhamento`/`TransicaoOverlay`.
       // Não duplica em `erro` (vermelho) nem em `avisos` — evita mensagem dupla (review PR #127).
-      if (isEncaminhamentoEvento(data as ServerMessage)) {
-        const next = aplicarEventoDeEncaminhamento(data as ServerMessage)
+      if (isEncaminhamentoEvento(data)) {
+        const next = aplicarEventoDeEncaminhamento(data)
         if (next) setEncaminhamento(next)
         return
       }
@@ -389,7 +388,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
             }
               
               // Snapshot de sala encaminhada (issue #45): quem reconectou recebe SALA_ATUALIZADA com encaminhamento
-            if (! (evento.sala.estado === 'encerrada' || evento.sala.estado === 'expirada')) {
+            if (!(evento.sala.estado === 'encerrada' || evento.sala.estado === 'expirada')) {
               sincronizarEncaminhamentoDoSnapshot(evento.sala)
             }
             // Sala morta (encerrada pelo Anfitrião ou expirada): o backend
@@ -430,7 +429,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           return
       }
     }
-  }, [adicionarAviso,  jogadorId, sincronizarEncaminhamentoDoSnapshot])
+  }, [adicionarAviso, jogadorId, sincronizarEncaminhamentoDoSnapshot])
 
   useEffect(() => {
     if (!jogadorId) {
