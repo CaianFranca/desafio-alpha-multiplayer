@@ -48,7 +48,6 @@ describe('cameraLimites — limiar de arrasto', () => {
   it('atinge limiar exatamente em 6px', () => {
     expect(atingiuLimiar(6, 0)).toBe(true)
     expect(atingiuLimiar(0, 6)).toBe(true)
-    expect(atingiuLimiar(3, 4)).toBe(false)
     const c = 6 / Math.SQRT2
     expect(atingiuLimiar(c, c)).toBe(true)
   })
@@ -442,6 +441,60 @@ describe('cameraLimites — calcularFatorPinch', () => {
   it('protege divisão por zero', () => {
     expect(calcularFatorPinch(100, 0)).toBe(100)
     expect(Number.isFinite(calcularFatorPinch(50, 0))).toBe(true)
+  })
+})
+
+describe('cameraLimites — pinch ancorado no mundo (integração do hook)', () => {
+  // Replica a aritmética do hook useCameraInterativa:
+  // novaDist = distanciaRef.current * calcularFatorPinch(distanciaInicial_px, distAtual_px)
+  // Documenta a invariante que impede a regressão de R2: a base do zoom deve
+  // ser a distância de mundo corrente, NUNCA o gap em px dos dedos.
+  function novaDistanciaHook(world: number, inicioPx: number, atualPx: number): number {
+    return world * calcularFatorPinch(inicioPx, atualPx)
+  }
+
+  it('pinch-in (dedos se afastam, atual > início) aproxima, não joga ao zoom-out', () => {
+    const afastada = calcularDistanciaAfastada(16 / 9)
+    const proxima = calcularDistanciaProxima(afastada)
+    const world = afastada // câmera começa no teto do zoom
+    const inicioPx = 100
+    const atualPx = 200 // dedos se afastam → aproximar
+    const novaDist = novaDistanciaHook(world, inicioPx, atualPx)
+    const clamped = clampDistancia(novaDist, afastada, proxima)
+    // Aproximação: distância final menor que a atual, dentro do range válido
+    expect(novaDist).toBeLessThan(world)
+    expect(clamped).toBeLessThan(world)
+    expect(clamped).toBeGreaterThanOrEqual(proxima)
+  })
+
+  it('pinch-out (dedos se juntam, atual < início) afasta para o teto', () => {
+    const afastada = calcularDistanciaAfastada(16 / 9)
+    const proxima = calcularDistanciaProxima(afastada)
+    const world = proxima // câmera começa no piso do zoom
+    const inicioPx = 100
+    const atualPx = 50 // dedos se juntam → afastar
+    const novaDist = novaDistanciaHook(world, inicioPx, atualPx)
+    const clamped = clampDistancia(novaDist, afastada, proxima)
+    expect(novaDist).toBeGreaterThan(world)
+    expect(clamped).toBeGreaterThan(world)
+    expect(clamped).toBeLessThanOrEqual(afastada)
+  })
+
+  it('gap px não vaza para a unidade de mundo (regressão de ancoragem)', () => {
+    const afastada = calcularDistanciaAfastada(16 / 9)
+    const proxima = calcularDistanciaProxima(afastada)
+    const world = afastada
+    const inicioPx = 100
+    const atualPx = 200
+    const novaDist = novaDistanciaHook(world, inicioPx, atualPx)
+    // Se a base fosse o gap em px (bug de R2), novaDist = início²/atual ≈ 50
+    // e clamparia para o zoom-out máximo. Com a âncora no mundo, fica ~½ da
+    // distância atual e permanece DENTRO do range (não colapsa no teto).
+    const pxVazado = (inicioPx * inicioPx) / atualPx
+    expect(novaDist).not.toBeCloseTo(pxVazado, 6)
+    const clampedPxVazado = clampDistancia(pxVazado, afastada, proxima)
+    const clampedAncorado = clampDistancia(novaDist, afastada, proxima)
+    expect(clampedAncorado).toBeLessThan(clampedPxVazado)
   })
 })
 

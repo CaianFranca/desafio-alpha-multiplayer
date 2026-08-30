@@ -170,7 +170,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
       if (ponteirosRef.current.size === 2 && pinchRef.current.ativo) {
         const distAtual = distanciaPinch(ponteirosRef.current) || 1
         const fator = calcularFatorPinch(pinchRef.current.distanciaInicial, distAtual)
-        const novaDist = pinchRef.current.distanciaInicial * fator
+        const novaDist = distanciaRef.current * fator
         aplicarZoom(novaDist)
         return
       }
