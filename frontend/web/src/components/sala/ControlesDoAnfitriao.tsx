@@ -56,7 +56,7 @@ export function ControlesDoAnfitriao({
       {jogadoresBloqueados.length > 0 && (
         <div className="flex flex-col gap-2" aria-label="Jogadores bloqueados">
           <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Jogadores bloqueados</p>
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-2 max-h-36 overflow-y-auto pr-1">
             {jogadoresBloqueados.map((jogador) => (
               <li
                 key={jogador.jogadorId}

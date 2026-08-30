@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom/vitest'
+import './helpers/mockWebSocket'
 
 // jsdom não implementa ResizeObserver; o <Canvas> do @react-three/fiber
 // (via react-use-measure) exige um na montagem. Stub sem observação real:
