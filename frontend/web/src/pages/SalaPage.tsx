@@ -1,6 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useSalaWebSocket } from '../hooks/useSalaWebSocket'
 import { CodigoDeSalaCard } from '../components/sala/CodigoDeSalaCard'
 import { LinkDiretoCard } from '../components/sala/LinkDiretoCard'
 import { ListaDeMembros } from '../components/sala/ListaDeMembros'
@@ -8,7 +7,7 @@ import { AvisosDoLobby } from '../components/sala/AvisosDoLobby'
 import { ChatDoLobby } from '../components/sala/ChatDoLobby'
 import { ControlesDoAnfitriao } from '../components/sala/ControlesDoAnfitriao'
 import { AuthContext } from '../state/auth-context'
-import { useSalaActions } from '../state/sala-actions-context'
+import { useSalaWebSocketContext } from '../state/sala-web-socket-context'
 import { CODIGO_DE_SALA_TAMANHO, normalizarCodigoDeSala } from '../utils/codigoDeSala'
 
 export function SalaPage() {
@@ -32,8 +31,7 @@ export function SalaPage() {
     desbloquearJogador,
     encerrarSala,
     iniciarPartida,
-  } = useSalaWebSocket(jogadorId)
-  const { registrarSairDaSala } = useSalaActions()
+  } = useSalaWebSocketContext()
   const [codigoInput, setCodigoInput] = useState('')
   const conviteEnviadoRef = useRef<string | null>(null)
   const conectando = !conectado && !sala
@@ -42,18 +40,11 @@ export function SalaPage() {
   const membroLocal = sala?.membros.find((m) => m.jogadorId === jogadorId) ?? null
   const ehAnfitriao = membroLocal !== null && sala !== null && sala.anfitriaoId === membroLocal.id
 
-  // Sai da sala (SAIR_DA_SALA) e volta ao início — fonte única usada pelo
-  // botão do corpo e pelo Header (via contexto). Nunca encerra a Sessão.
+  // Sai da sala (SAIR_DA_SALA) e volta à tela de criar/entrar. Nunca encerra a Sessão.
   const sairDaSalaEComecarDeNovo = useCallback(() => {
     sairDaSala()
-    navigate('/')
+    navigate('/salas/criar')
   }, [sairDaSala, navigate])
-
-  // Expõe a ação ao Header enquanto a página está montada.
-  useEffect(() => {
-    registrarSairDaSala(sairDaSalaEComecarDeNovo)
-    return () => registrarSairDaSala(null)
-  }, [sairDaSalaEComecarDeNovo, registrarSairDaSala])
 
   // Entrada por rota de Convite /sala/:codigoDeSala — envia apenas uma vez
   // por código normalizado, para não reentrar após sair da sala.
@@ -90,7 +81,9 @@ export function SalaPage() {
                 <span className="w-8 h-px bg-[#c9a86a]" aria-hidden />
                 Protocolo de Isolamento
               </p>
-              <h1 className="text-5xl font-light text-white tracking-tight">Criar Sala</h1>
+              <h1 className="text-5xl font-light text-white tracking-tight">
+                {possuiSala ? `Sala ${sala.codigoDeSala}` : 'Criar Sala'}
+              </h1>
               <p className="text-white/60 text-sm leading-relaxed max-w-sm mt-2">
                 Reúna sua equipe de 4 investigadores. O Monte Sérion aguarda. A sanidade é escassa, a cooperação é vital.
               </p>

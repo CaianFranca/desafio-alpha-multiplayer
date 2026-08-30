@@ -5,6 +5,7 @@ import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
+import { MockWebSocket } from './helpers/mockWebSocket'
 
 // Replica a composição de main.tsx (AuthProvider envolvendo RouterProvider),
 // permitindo injetar o estado de autenticação via props do provider.
@@ -140,7 +141,7 @@ describe('authentication states', () => {
 
     const header = screen.getByRole('banner')
     expect(within(header).queryByText(apelidoMock)).not.toBeInTheDocument()
-    expect(within(header).queryByRole('link', { name: /criar sala/i })).not.toBeInTheDocument()
+    expect(within(header).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
 
     const heroSection = document.getElementById('hero')!
     expect(within(heroSection).getByRole('link', { name: /criar conta/i })).toBeInTheDocument()
@@ -152,10 +153,10 @@ describe('authentication states', () => {
 
     const header = screen.getByRole('banner')
     expect(within(header).getByText(apelidoMock)).toBeInTheDocument()
-    expect(within(header).getByRole('link', { name: /criar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(header).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
 
     const heroSection = document.getElementById('hero')!
-    expect(within(heroSection).getByRole('link', { name: /criar sala/i })).toBeInTheDocument()
+    expect(within(heroSection).getByRole('link', { name: /criar\/entrar sala/i })).toBeInTheDocument()
     expect(within(heroSection).queryByRole('link', { name: /criar conta/i })).not.toBeInTheDocument()
   })
 
@@ -164,12 +165,12 @@ describe('authentication states', () => {
 
     const finalCtaRegion = screen.getByRole('region', { name: /pronto para enfrentar o sanatório/i })
     expect(within(finalCtaRegion).getByRole('link', { name: /criar conta/i })).toBeInTheDocument()
-    expect(within(finalCtaRegion).queryByRole('link', { name: /criar sala/i })).not.toBeInTheDocument()
+    expect(within(finalCtaRegion).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
     unmount()
 
     renderWithRouter(['/'], autenticado)
     const authenticatedFinalCta = screen.getByRole('region', { name: /pronto para enfrentar o sanatório/i })
-    expect(within(authenticatedFinalCta).getByRole('link', { name: /criar sala/i })).toBeInTheDocument()
+    expect(within(authenticatedFinalCta).getByRole('link', { name: /criar\/entrar sala/i })).toBeInTheDocument()
     expect(within(authenticatedFinalCta).queryByRole('link', { name: /criar conta/i })).not.toBeInTheDocument()
   })
 
@@ -190,23 +191,33 @@ describe('authentication states', () => {
     expect(screen.getByRole('button', { name: /criar sala/i })).toBeInTheDocument()
   })
 
-  it('no lobby, o header oferece Sair da Sala (SAIR_DA_SALA) e Sair (logout)', async () => {
+  it('no lobby, o header oferece Voltar para o início (sem SAIR_DA_SALA) e Sair (logout)', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/salas/criar'], autenticado)
 
     const header = screen.getByRole('banner')
-    // "Sair da Sala" do header é a saída da sala (não desautentica), e "Sair" é o logout.
-    expect(within(header).getByRole('button', { name: /^sair da sala$/i })).toBeInTheDocument()
+    // "Voltar para o início" apenas navega para a home (não sai da sala), e "Sair" é o logout.
+    expect(within(header).getByRole('button', { name: /voltar para o início/i })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: /^sair$/i })).toBeInTheDocument()
 
-    // Sair da Sala volta ao início mantendo a Sessão ativa.
-    await user.click(within(header).getByRole('button', { name: /^sair da sala$/i }))
+    // Voltar para o início: navega sem enviar SAIR_DA_SALA.
+    const ws = MockWebSocket.last()
+    await user.click(within(header).getByRole('button', { name: /voltar para o início/i }))
 
     expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
     const headerHome = screen.getByRole('banner')
     expect(within(headerHome).getByText(apelidoMock)).toBeInTheDocument()
-    expect(within(headerHome).getByRole('link', { name: /criar sala/i })).toBeInTheDocument()
-    expect(within(headerHome).queryByRole('button', { name: /^sair da sala$/i })).not.toBeInTheDocument()
+    expect(within(headerHome).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(headerHome).queryByRole('button', { name: /voltar para o início/i })).not.toBeInTheDocument()
+    // Nenhum SAIR_DA_SALA foi enviado ao voltar (apenas navegação).
+    const enviouSair = ws?.sentMessages.some((m) => {
+      try {
+        return JSON.parse(m as string).type === 'SAIR_DA_SALA'
+      } catch {
+        return false
+      }
+    })
+    expect(enviouSair).toBe(false)
 
     // Sair encerra a Sessão: volta como Visitante à home.
     await user.click(within(headerHome).getByRole('button', { name: /^sair$/i }))
@@ -215,11 +226,11 @@ describe('authentication states', () => {
     expect(within(screen.getByRole('banner')).queryByText(apelidoMock)).not.toBeInTheDocument()
   })
 
-  it('authenticated header Criar Sala action navigates to the create room page', async () => {
+  it('authenticated header Criar/Entrar Sala action navigates to the create room page', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/'], autenticado)
 
-    await user.click(within(screen.getByRole('banner')).getByRole('link', { name: /criar sala/i }))
+    await user.click(within(screen.getByRole('banner')).getByRole('link', { name: /criar\/entrar sala/i }))
 
     expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
   })

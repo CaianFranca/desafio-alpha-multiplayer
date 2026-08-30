@@ -43,6 +43,8 @@ export interface UseSalaWebSocketReturn {
   desbloquearJogador: (jogadorId: string) => void
   encerrarSala: () => void
   iniciarPartida: () => void
+  expulso: boolean
+  descartarExpulsao: () => void
 }
 
 // Fallback dev — evita magic strings; ver também frontend/vite.config.ts LOBBY_SERVER_PORT
@@ -56,6 +58,10 @@ const AVISOS_MAX = 20
 // Mantém apenas as mensagens de chat mais recentes (histórico do servidor +
 // mensagens ao vivo) com teto de memória.
 const MENSAGENS_DE_CHAT_MAX = 200
+
+// Duração dos avisos auto-dismiss: somem sozinhos após este tempo, sem
+// exigir recarga nem interação (critério #128).
+const AVISOS_DURACAO_MS = 8000
 
 // Fallback quando o apelido do expulso não está na sala anterior:
 // jogadorId truncado para exibição curta.
@@ -147,9 +153,12 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const [jogadoresBloqueados, setJogadoresBloqueados] = useState<JogadorBloqueado[]>([])
   const [conectado, setConectado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+  const [expulso, setExpulso] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const salaRef = useRef<Sala | null>(null)
+  // Avisos auto-dismiss: guarda os timers por instância para limpar no unmount.
+  const avisoTimersRef = useRef<number[]>([])
   // Contador de avisos por instância (evita global mutable)
   const avisoContadorRef = useRef(0)
   // Contador de mensagens de chat por instância (ids estáveis no feed)
@@ -176,6 +185,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     avisoContadorRef.current += 1
     const id = `aviso-${avisoContadorRef.current}-${Date.now()}`
     setAvisos((prev) => [...prev, { id, mensagem, tipo, criadoEm: Date.now() }].slice(-AVISOS_MAX))
+    // Auto-dismiss: remove o aviso após AVISOS_DURACAO_MS sem recarregar.
+    const timer = window.setTimeout(() => {
+      setAvisos((prev) => prev.filter((aviso) => aviso.id !== id))
+    }, AVISOS_DURACAO_MS)
+    avisoTimersRef.current = [...avisoTimersRef.current, timer]
   }, [])
 
   const conectar = useCallback(() => {
@@ -246,6 +260,22 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         default:
           if (isEventoDeSala(evento)) {
             const salaAnterior = salaRef.current
+            // Auto-expulsão: o anfitrião expulsou a si mesmo identificado pelo
+            // jogadorId. O backend entrega MEMBRO_EXPULSO ao socket do expulso;
+            // aqui o jogador sai visualmente da sala, sem aviso nem inclusão na
+            // lista de bloqueados (ele é a vítima, não o observador).
+            if (
+              evento.type === 'MEMBRO_EXPULSO' &&
+              jogadorId &&
+              evento.jogadorId === jogadorId &&
+              salaRef.current?.membros.some((m) => m.jogadorId === jogadorId)
+            ) {
+              setSala(null)
+              setMensagensDeChat([])
+              setJogadoresBloqueados([])
+              setExpulso(true)
+              return
+            }
             // Sala morta (encerrada pelo Anfitrião ou expirada): o backend
             // emite SALA_ATUALIZADA com membros [] e estado 'encerrada' —
             // guarda null para que a página volte ao estado criar/entrar
@@ -283,11 +313,13 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           return
       }
     }
-  }, [adicionarAviso])
+  }, [adicionarAviso, jogadorId])
 
   useEffect(() => {
-    conectar()
-    return () => {
+    if (!jogadorId) {
+      // Sem jogador (ex.: logout ou sessão expirada): desconecta e reseta o
+      // estado para não exibir uma sala/sessão fantasma — o App é compartilhado
+      // entre páginas e o socket é mantido num provider de nível superior.
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null
@@ -303,8 +335,41 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         }
         wsRef.current = null
       }
+      for (const timer of avisoTimersRef.current) clearTimeout(timer)
+      avisoTimersRef.current = []
+      // Reset intencional quando o jogador sai (logout/sessão expirada):
+      // descarta a sala e a sessão fantasma — escapadela contextual igual à
+      // usada para react-hooks/immutability por causa da reconexão recursiva.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSala(null)
+      setAvisos([])
+      setMensagensDeChat([])
+      setJogadoresBloqueados([])
+      setConectado(false)
+      setExpulso(false)
+      return
     }
-  }, [conectar])
+    conectar()
+    return () => {
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      for (const timer of avisoTimersRef.current) clearTimeout(timer)
+      avisoTimersRef.current = []
+      const ws = wsRef.current
+      if (ws) {
+        // Evita reconexão no unmount
+        ws.onclose = null
+        try {
+          ws.close()
+        } catch {
+          // ignora
+        }
+        wsRef.current = null
+      }
+    }
+  }, [conectar, jogadorId])
 
   const enviar = useCallback((comando: SalaComandoDoCliente) => {
     const ws = wsRef.current
@@ -376,12 +441,12 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     [enviar],
   )
 
-  const desbloquearJogador = useCallback(
-    (jogadorId: string) => {
-      enviar({ type: 'DESBLOQUEAR_JOGADOR', jogadorId })
-    },
-    [enviar],
-  )
+  const desbloquearJogador = useCallback((jogadorId: string) => {
+    // Remoção otimista imediata: a entrada "Desbloquear" some da tela logo ao
+    // clicar, sem depender da reconciliação do servidor (critério #128).
+    setJogadoresBloqueados((prev) => prev.filter((j) => j.jogadorId !== jogadorId))
+    enviar({ type: 'DESBLOQUEAR_JOGADOR', jogadorId })
+  }, [enviar])
 
   const encerrarSala = useCallback(() => {
     enviar({ type: 'ENCERRAR_SALA' })
@@ -390,6 +455,10 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const iniciarPartida = useCallback(() => {
     enviar({ type: 'INICIAR_PARTIDA' })
   }, [enviar])
+
+  const descartarExpulsao = useCallback(() => {
+    setExpulso(false)
+  }, [])
 
   return {
     sala,
@@ -408,5 +477,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     desbloquearJogador,
     encerrarSala,
     iniciarPartida,
+    expulso,
+    descartarExpulsao,
   }
 }

@@ -1,4 +1,4 @@
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { render, screen, within, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
@@ -352,11 +352,12 @@ describe('lobby - página do lobby', () => {
 
     const envio = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1] as string)
     expect(envio.type).toBe('SAIR_DA_SALA')
-    // Após sair, a UI volta a mostrar estado vazio
+    // Após sair, a UI volta a mostrar estado vazio e navega para a tela de criar/entrar
     await waitFor(() => expect(screen.queryByText('A3K9M2')).not.toBeInTheDocument())
+    expect(await screen.findByRole('button', { name: /criar sala/i })).toBeInTheDocument()
   })
 
-  it('Sair da Sala do header envia SAIR_DA_SALA (não desautentica) e volta ao início', async () => {
+  it('botão do header "Voltar para o início" navega sem enviar SAIR_DA_SALA e mantém a sala', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/salas/criar'], mockAuthenticatedState)
     const ws = MockWebSocket.last()!
@@ -365,14 +366,26 @@ describe('lobby - página do lobby', () => {
     await screen.findByText('A3K9M2')
 
     const header = screen.getByRole('banner')
-    const botaoSair = within(header).getByRole('button', { name: /^sair da sala$/i })
-    await user.click(botaoSair)
+    const botaoVoltar = within(header).getByRole('button', { name: /voltar para o início/i })
+    await user.click(botaoVoltar)
 
-    const envio = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1] as string)
-    expect(envio.type).toBe('SAIR_DA_SALA')
-    // Continua autenticado e volta para a home
+    // Navega apenas: NENHUMA mensagem enviada é SAIR_DA_SALA.
+    const enviouSair = ws.sentMessages.some((m) => {
+      try {
+        return JSON.parse(m as string).type === 'SAIR_DA_SALA'
+      } catch {
+        return false
+      }
+    })
+    expect(enviouSair).toBe(false)
+
+    // Continua autenticado e volta para a home.
     expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
-    expect(within(screen.getByRole('banner')).getByText(mockAuthenticatedState.jogador.apelido)).toBeInTheDocument()
+    const headerHome = screen.getByRole('banner')
+    expect(within(headerHome).getByText(mockAuthenticatedState.jogador.apelido)).toBeInTheDocument()
+    // Como o provider não desmonta ao navegar, emSala persistiu: header mostra
+    // o link "Retornar para Sala" apontando para /salas/criar.
+    expect(within(headerHome).getByRole('link', { name: /retornar para sala/i })).toHaveAttribute('href', '/salas/criar')
   })
 
   it('entrada por convite durante o handshake é reenviada quando o socket abre (Bug 1)', async () => {
@@ -445,5 +458,121 @@ describe('lobby - página do lobby', () => {
     const salaAposExpulsao = criarSala({ codigoDeSala: 'A3K9M2', membros: [], anfitriaoId: 'm1' })
     ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm1', jogadorId: 'j1', sala: salaAposExpulsao })
     expect(await screen.findByText(/lucasgomes foi expulso/i)).toBeInTheDocument()
+  })
+
+  it('título do lobby mostra "Sala A3K9M2" ao criar sala', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const sala = criarSala({ codigoDeSala: 'A3K9M2' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala })
+    await screen.findByText('A3K9M2')
+
+    expect(screen.getByRole('heading', { name: /sala A3K9M2/i })).toBeInTheDocument()
+  })
+
+  it('apenas um símbolo de prontidão por membro (o quadrado verde)', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const membros = [
+      criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0, prontidao: true }),
+      criarMembro({ id: 'm2', apelido: 'Ana', ordemDeEntrada: 1, prontidao: true }),
+    ]
+    const sala = criarSala({ codigoDeSala: 'A3K9M2', membros, anfitriaoId: 'm1' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala })
+    await screen.findByText('LucasGomes')
+
+    expect(screen.getAllByLabelText('Membro pronto')).toHaveLength(2)
+    expect(screen.queryByLabelText('Pronto')).not.toBeInTheDocument()
+  })
+
+  it('contêiner de avisos tem rolagem própria (não empurra a sala)', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const salaInicial = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 })], anfitriaoId: 'm1' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaInicial })
+    await screen.findByText('LucasGomes')
+
+    const novoMembro = criarMembro({ id: 'm2', apelido: 'Ana', ordemDeEntrada: 1 })
+    const salaComEntrada = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 }), novoMembro], anfitriaoId: 'm1' })
+    ws.simulateMessage({ type: 'MEMBRO_ENTROU', membro: novoMembro, sala: salaComEntrada })
+    await screen.findByText(/ana entrou na sala/i)
+
+    const container = screen.getByLabelText('Avisos do Lobby')
+    expect(container).toHaveClass('overflow-y-auto')
+  })
+
+  it('avisos somem sozinhos após 8s sem recarregar', async () => {
+    vi.useFakeTimers()
+    try {
+      renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+      const ws = MockWebSocket.last()!
+      const salaInicial = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 })], anfitriaoId: 'm1' })
+      ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaInicial })
+      await act(async () => {})
+
+      const novoMembro = criarMembro({ id: 'm2', apelido: 'Ana', ordemDeEntrada: 1 })
+      const salaComEntrada = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarMembro({ id: 'm1', apelido: 'LucasGomes', ordemDeEntrada: 0 }), novoMembro], anfitriaoId: 'm1' })
+      ws.simulateMessage({ type: 'MEMBRO_ENTROU', membro: novoMembro, sala: salaComEntrada })
+      await act(async () => {})
+
+      expect(screen.getByText(/ana entrou na sala/i)).toBeInTheDocument()
+
+      await act(async () => {
+        vi.advanceTimersByTime(8000)
+      })
+      expect(screen.queryByText(/ana entrou na sala/i)).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('Desbloquear some imediatamente da tela do Anfitrião e envia DESBLOQUEAR_JOGADOR', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const euJogadorId = mockAuthenticatedState.jogador.id
+    const eu = criarMembro({ id: 'm-eu', jogadorId: euJogadorId, apelido: 'JogadorTeste', ordemDeEntrada: 0 })
+    const zanetti = criarMembro({ id: 'm2', jogadorId: 'j-zanetti', apelido: 'Zanetti', ordemDeEntrada: 1 })
+    const salaInicial = criarSala({ codigoDeSala: 'A3K9M2', membros: [eu, zanetti], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaInicial })
+    await screen.findByText('Zanetti')
+
+    const salaAposExpulsao = criarSala({ codigoDeSala: 'A3K9M2', membros: [eu], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm2', jogadorId: 'j-zanetti', sala: salaAposExpulsao })
+
+    const secaoBloqueados = await screen.findByLabelText('Jogadores bloqueados')
+    expect(within(secaoBloqueados).getByText('Zanetti')).toBeInTheDocument()
+
+    await user.click(within(secaoBloqueados).getByRole('button', { name: /desbloquear/i }))
+
+    // Remoção otimista: a seção some imediatamente, sem re-simular evento.
+    expect(screen.queryByLabelText('Jogadores bloqueados')).not.toBeInTheDocument()
+    // E o comando é enviado.
+    const envio = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1] as string)
+    expect(envio).toEqual({ type: 'DESBLOQUEAR_JOGADOR', jogadorId: 'j-zanetti' })
+  })
+
+  it('auto-expulsão mostra popup e o OK volta à tela de criar/entrar', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const euJogadorId = mockAuthenticatedState.jogador.id
+    const eu = criarMembro({ id: 'm-eu', jogadorId: euJogadorId, apelido: 'JogadorTeste', ordemDeEntrada: 0 })
+    const salaInicial = criarSala({ codigoDeSala: 'A3K9M2', membros: [eu], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaInicial })
+    await screen.findByText('A3K9M2')
+
+    // Anfitrião (outro jogador) expulsa o jogador local: o evento chega com o
+    // jogadorId local e a sala do evento não o contém mais.
+    const salaAposExpulsao = criarSala({ codigoDeSala: 'A3K9M2', membros: [], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm-eu', jogadorId: euJogadorId, sala: salaAposExpulsao })
+
+    // Popup de expulsão aparece e o código da sala some visualmente.
+    expect(await screen.findByRole('alertdialog', { name: /você foi expulso da sala/i })).toBeInTheDocument()
+    expect(screen.queryByText('A3K9M2')).not.toBeInTheDocument()
+
+    // OK volta à tela de criar/entrar.
+    await user.click(screen.getByRole('button', { name: /^ok$/i }))
+    expect(await screen.findByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
   })
 })

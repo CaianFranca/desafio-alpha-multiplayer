@@ -56,7 +56,7 @@ describe('reidratação da sessão', () => {
     renderApp()
 
     expect(await screen.findByText('Ana')).toBeInTheDocument()
-    expect(within(screen.getByRole('banner')).getByRole('link', { name: /criar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(screen.getByRole('banner')).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
   })
 
   it('sessão expirada (401 no /me) mantém o estado de Visitante', async () => {
