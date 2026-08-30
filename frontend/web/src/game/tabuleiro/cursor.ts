@@ -15,6 +15,20 @@ import type { ThreeEvent } from '@react-three/fiber'
  */
 let hoversPointerAtivos = 0
 
+/** Reseta cursor global — usado em cleanup de desmonte com hover ativo. */
+export function resetarCursorGlobal(): void {
+  hoversPointerAtivos = 0
+  if (typeof document !== 'undefined') {
+    document.body.style.cursor = ''
+  }
+}
+
+function aplicarCursor(estilo: string): void {
+  if (typeof document !== 'undefined') {
+    document.body.style.cursor = estilo
+  }
+}
+
 /**
  * Handlers de hover que aplicam o cursor CSS no body. `pointer`/`default` são
  * os únicos valores emitidos pelo domínio (ver `cursorParaCelula`).
@@ -24,10 +38,14 @@ export function handlersDeCursor(
 ): {
   onPointerOver: (e: ThreeEvent<PointerEvent>) => void
   onPointerOut: (e: ThreeEvent<PointerEvent>) => void
+  onPointerLeave: (e: ThreeEvent<PointerEvent>) => void
 } {
-  const aplicar = (estilo: string) => {
-    if (typeof document !== 'undefined') {
-      document.body.style.cursor = estilo
+  const onOut = () => {
+    if (cursor === 'pointer') {
+      hoversPointerAtivos = Math.max(0, hoversPointerAtivos - 1)
+      if (hoversPointerAtivos === 0) {
+        aplicarCursor('')
+      }
     }
   }
 
@@ -35,16 +53,10 @@ export function handlersDeCursor(
     onPointerOver: () => {
       if (cursor === 'pointer') {
         hoversPointerAtivos++
-        aplicar('pointer')
+        aplicarCursor('pointer')
       }
     },
-    onPointerOut: () => {
-      if (cursor === 'pointer') {
-        hoversPointerAtivos = Math.max(0, hoversPointerAtivos - 1)
-        if (hoversPointerAtivos === 0) {
-          aplicar('')
-        }
-      }
-    },
+    onPointerOut: onOut,
+    onPointerLeave: onOut,
   }
 }
