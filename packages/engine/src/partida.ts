@@ -13,6 +13,7 @@
 
 import {
   aplicarComandoDeTabuleiro,
+  aplicarLimpeza,
   calcularIluminacao,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
@@ -361,8 +362,22 @@ function posicionarPeaoDaPartida(
       recebidas: projetarRecebidas(recebidas),
     });
   }
+  // Limpeza (ST-13 / issue #147): ponto definitivo da Iluminação — aplicada
+  // depois de travar o Peão e recalcular a Iluminação, antes de retornar. As
+  // Recebidas caem na Vizinhança do Peão (sempre iluminadas) e não são
+  // removidas. O estado é filtrado e o evento só sai quando há remoção.
   const celulasIluminadas = calcularIluminacao(tabuleiro);
-  return sucessoDaPartida({ ...estado, tabuleiro, celulasIluminadas }, eventos);
+  const { posicionadas, removidas } = aplicarLimpeza(
+    tabuleiro,
+    celulasIluminadas,
+  );
+  if (removidas.length > 0) {
+    eventos.push({ tipo: 'limpeza_aplicada', pecasRemovidas: removidas });
+  }
+  return sucessoDaPartida(
+    { ...estado, tabuleiro: { ...tabuleiro, posicionadas }, celulasIluminadas },
+    eventos,
+  );
 }
 
 function moverPeaoDaPartida(
@@ -514,10 +529,17 @@ function confirmarPosicaoDoPeao(
   }
   const tabuleiro = { ...estado.tabuleiro, recebidas };
   const celulasIluminadas = calcularIluminacao(tabuleiro);
+  const { posicionadas, removidas } = aplicarLimpeza(
+    tabuleiro,
+    celulasIluminadas,
+  );
+  if (removidas.length > 0) {
+    eventos.push({ tipo: 'limpeza_aplicada', pecasRemovidas: removidas });
+  }
   return sucessoDaPartida(
     {
       ...estado,
-      tabuleiro,
+      tabuleiro: { ...tabuleiro, posicionadas },
       posicaoConfirmada: true,
       celulasIluminadas,
     },
