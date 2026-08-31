@@ -197,5 +197,5 @@ export type PeaoEventoDoServidor =
   | PeaoMovidoEvento
   | PeaoPermaneceuEvento
   // O evento da escolha da vaga (#138) e o legado da escolha do tipo viajam
-  // pela união da Partida (ver comentario no cabecalho de ./partida.ts).
+  // pela união da Partida (ver comentário no cabeçalho de ./partida.ts).
   | TipoDaPecaRecebidaEscolhidoEvento;
