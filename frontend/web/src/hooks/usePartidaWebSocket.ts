@@ -16,23 +16,28 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type {
   AdmissaoAceitaEvento,
+  PartidaComandoDoCliente,
   TabuleiroComandoDoCliente,
   TabuleiroEventoDoServidor,
+  PeaoEventoDoServidor,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
   desconectar: () => void
-  /** Envia comando de tabuleiro pelo canal (fila até o open). */
-  enviar: (comando: TabuleiroComandoDoCliente) => void
+  /**
+   * Envia comando pelo canal (fila até o open). Aceita comandos de tabuleiro
+   * (legacy, sem jogadorId) e comandos de peão (com jogadorId injetado).
+   */
+  enviar: (comando: TabuleiroComandoDoCliente | PartidaComandoDoCliente) => void
 }
 
 interface UsePartidaWebSocketOptions {
   serverId: string | null
   partidaId: string | null
-  /** Recebe cada evento de tabuleiro em ordem de chegada do broadcast. */
-  onEvento: (evento: TabuleiroEventoDoServidor) => void
+  /** Recebe cada evento de tabuleiro ou peão em ordem de chegada do broadcast. */
+  onEvento: (evento: TabuleiroEventoDoServidor | PeaoEventoDoServidor) => void
   onAdmissao: (evento: AdmissaoAceitaEvento) => void
   /** Chamado quando a conexão falha (WebSocket não pôde abrir). */
   onFalhaDeConexao: () => void
@@ -54,7 +59,7 @@ export function usePartidaWebSocket({
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   // Comandos enfileirados enquanto o socket ainda não está aberto (handshake).
-  const comandosPendentesRef = useRef<TabuleiroComandoDoCliente[]>([])
+  const comandosPendentesRef = useRef<(TabuleiroComandoDoCliente | PartidaComandoDoCliente)[]>([])
   // Booleano de montado para impedir setState/reconexão após unmount.
   const montadoRef = useRef(true)
   // Refs dos callbacks: estáveis por instância, sem recriar o efeito.
@@ -129,10 +134,16 @@ export function usePartidaWebSocket({
         case 'PECA_POSICIONADA':
         case 'MANIPULACAO_FINALIZADA':
         case 'ERRO_DO_TABULEIRO':
-          onEventoRef.current(data as TabuleiroEventoDoServidor)
+        case 'PEAO_SELECIONADO':
+        case 'RECEBIMENTO_GERADO':
+        case 'PEAO_POSICIONADO':
+        case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO':
+        case 'PEAO_MOVIDO':
+        case 'PEAO_PERMANECEU':
+          onEventoRef.current(data as TabuleiroEventoDoServidor | PeaoEventoDoServidor)
           return
         default:
-          // Evento desconhecido (ex.: PING/PONG, Peões fora do escopo): ignora.
+          // Evento desconhecido (ex.: PING/PONG, Turnos ST-11): ignora.
           return
       }
     }
@@ -178,7 +189,7 @@ export function usePartidaWebSocket({
     encerrarConexao()
   }, [encerrarConexao])
 
-  const enviar = useCallback((comando: TabuleiroComandoDoCliente) => {
+  const enviar = useCallback((comando: TabuleiroComandoDoCliente | PartidaComandoDoCliente) => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(comando))

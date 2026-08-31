@@ -11,7 +11,8 @@
 //   shared type:'FINALIZAR_MANIPULACAO' + jogadorId <-> engine tipo:'finalizar_manipulacao' + ator
 //   shared type:'SELECIONAR_PEAO' + jogadorId <-> engine tipo:'selecionar_peao' + ator
 //   shared type:'POSICIONAR_PEAO' + jogadorId <-> engine tipo:'posicionar_peao' + ator
-//   shared type:'ESCOLHER_TIPO_DA_PECA_RECEBIDA' + jogadorId <-> engine tipo:'escolher_tipo_da_peca_recebida' + ator
+//   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' + jogadorId <-> engine tipo:'escolher_vaga_da_peca_recebida' + ator — issue #138
+//   shared type:'ESCOLHER_TIPO_DA_PECA_RECEBIDA' + jogadorId <-> engine tipo:'escolher_tipo_da_peca_recebida' + ator — legado ST-10, removido do domínio pela #138 (limpeza wire na #140/#143)
 //   shared type:'MOVER_PEAO' + jogadorId <-> engine tipo:'mover_peao' + ator
 //   shared type:'PERMANECER' + jogadorId <-> engine tipo:'permanecer' + ator
 //   shared type:'CONFIRMAR_POSICAO_DO_PEAO' + jogadorId <-> engine tipo:'confirmar_posicao_do_peao' + ator
@@ -20,6 +21,12 @@
 //   shared type:'TURNO_INICIADO' { jogadorId, rodada } <-> engine tipo:'turno_iniciado' { jogadorId, rodada }
 //   shared type:'TURNO_ENCERRADO' { jogadorId } <-> engine tipo:'turno_encerrado' { jogadorId }
 //   shared type:'POSICAO_CONFIRMADA' { jogadorId, peaoId, pecaId } <-> engine tipo:'posicao_confirmada' { jogadorId, peaoId, pecaId }
+//   shared type:'PECA_SORTEADA' { pecaId, tipoDaPeca, orientacao } <-> engine tipo:'peca_sorteada' idem — emitido pelo Recebimento da #138 (e pelo sorteio unitário da Caixa)
+//   shared type:'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO' { recebidaId, borda, celulaAlvo } <-> engine tipo:'vaga_da_peca_recebida_escolhida' idem — issue #138
+//   (Estes dois eventos novos vivem nesta união, e não em
+//   PeaoEventoDoServidor/TabuleiroEventoDoServidor, porque são o contrato do
+//   canal de Partida — o canal alvo do ST-11 — e as uniões antigas têm
+//   switches exaustivos no frontend legado, intocado pela #138.)
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   Erros: CodigoDeErroDaPartida alias de CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120) — FORA_DA_VEZ etc via ERRO_DO_TABULEIRO (SalaServerMessage via TabuleiroEventoDoServidor).
@@ -28,8 +35,21 @@
 // Reuso: importa PecaId de ./tabuleiro.ts e PeaoId de ./peoes.ts; não duplica tipos base.
 // Sem runtime/validação/sem @flicker/engine — apenas DTOs.
 
-import type { Celula, CodigoDeErroDoTabuleiro, PecaId, SentidoDeRotacao } from './tabuleiro.ts';
-import type { PeaoId, RecebidaId, TipoDePecaDeCaminho } from './peoes.ts';
+import type {
+  Celula,
+  CodigoDeErroDoTabuleiro,
+  Orientacao,
+  PecaId,
+  SentidoDeRotacao,
+  TipoDePecaDaCaixa,
+} from './tabuleiro.ts';
+import type {
+  PeaoId,
+  RecebidaId,
+  BordaCardinal,
+  TipoDePecaDeCaminho,
+  VagaDaPecaRecebidaEscolhidaEvento,
+} from './peoes.ts';
 
 // --- Comandos cliente → servidor (11) ---
 
@@ -71,11 +91,27 @@ export interface PosicionarPeaoPartidaComando {
   readonly celula: Celula;
 }
 
+/**
+ * Escolha do tipo da Recebida (legado ST-10).
+ *
+ * @deprecated O domínio #138 removeu a escolha de tipo: o cliente escolhe a
+ * VAGA de cada peça já sorteada (EscolherVagaDaPecaRecebidaPartidaComando).
+ * Permanece na união até a limpeza do wire legado (#140/#143).
+ */
 export interface EscolherTipoDaPecaRecebidaPartidaComando {
   readonly type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA';
   readonly jogadorId: string;
   readonly recebidaId: RecebidaId;
   readonly tipoDaPeca: TipoDePecaDeCaminho;
+}
+
+// Escolha da vaga (issue #138): uma escolha POR peça sorteada — a borda
+// indicada deve ser uma vaga disponível da Peça sob o Peão selecionado.
+export interface EscolherVagaDaPecaRecebidaPartidaComando {
+  readonly type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA';
+  readonly jogadorId: string;
+  readonly recebidaId: RecebidaId;
+  readonly borda: BordaCardinal;
 }
 
 export interface MoverPeaoPartidaComando {
@@ -109,13 +145,15 @@ export type PartidaComandoDoCliente =
   | FinalizarManipulacaoPartidaComando
   | SelecionarPeaoPartidaComando
   | PosicionarPeaoPartidaComando
-  | EscolherTipoDaPecaRecebidaPartidaComando
+  | EscolherVagaDaPecaRecebidaPartidaComando
   | MoverPeaoPartidaComando
   | PermanecerPartidaComando
   | ConfirmarPosicaoDoPeaoComando
-  | EncerrarTurnoComando;
+  | EncerrarTurnoComando
+  // Legado ST-10, fora do domínio desde a #138 (limpeza na #140/#143).
+  | EscolherTipoDaPecaRecebidaPartidaComando;
 
-// --- Eventos servidor → cliente (5) ---
+// --- Eventos servidor → cliente (5 + 2 da issue #138) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';
@@ -135,6 +173,19 @@ export interface PosicaoConfirmadaEvento {
   readonly pecaId: PecaId;
 }
 
+// Uma peça retirada da Caixa por sorteio (issue #138: uma por peça do
+// Recebimento; a primitiva unitária sortearDaCaixa também a emite).
+export interface PecaSorteadaEvento {
+  readonly type: 'PECA_SORTEADA';
+  readonly pecaId: PecaId;
+  readonly tipoDaPeca: TipoDePecaDaCaixa;
+  readonly orientacao: Orientacao;
+}
+
+// Reexportado de ./peoes.ts (conceito de Recebida): a escolha da vaga fixa a
+// borda e a célula-alvo da pendência e seleciona a Peça sorteada.
+export type { VagaDaPecaRecebidaEscolhidaEvento };
+
 export interface CelulasIluminadasEvento {
   readonly type: 'CELULAS_ILUMINADAS';
   readonly celulas: readonly { readonly linha: number; readonly coluna: number }[];
@@ -150,7 +201,9 @@ export type PartidaEventoDoServidor =
   | TurnoEncerradoEvento
   | PosicaoConfirmadaEvento
   | CelulasIluminadasEvento
-  | LimpezaAplicadaWireEvento;
+  | LimpezaAplicadaWireEvento
+  | PecaSorteadaEvento
+  | VagaDaPecaRecebidaEscolhidaEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

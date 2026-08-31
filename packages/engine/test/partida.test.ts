@@ -8,7 +8,6 @@ import {
   type ComandoDePartida,
   type CodigoDeErroDaPartida,
   type EstadoDaPartida,
-  type TipoDePecaDeCaminho,
 } from '../src/index.ts';
 
 const selecionarPeca = (pecaId: string) =>
@@ -29,8 +28,11 @@ const selecionarPeao = (peaoId: string) =>
 const posicionarPeao = (peaoId: string, linha: number, coluna: number) =>
   ({ tipo: 'posicionar_peao', peaoId, celula: { linha, coluna } } as const);
 
-const escolherTipo = (recebidaId: string, tipoDaPeca: TipoDePecaDeCaminho) =>
-  ({ tipo: 'escolher_tipo_da_peca_recebida', recebidaId, tipoDaPeca } as const);
+const escolherVaga = (
+  recebidaId: string,
+  borda: 'norte' | 'leste' | 'sul' | 'oeste',
+) =>
+  ({ tipo: 'escolher_vaga_da_peca_recebida', recebidaId, borda } as const);
 
 const moverPeao = (peaoId: string, linha: number, coluna: number) =>
   ({ tipo: 'mover_peao', peaoId, celula: { linha, coluna } } as const);
@@ -88,21 +90,38 @@ const jogadorAtivo = (estado: EstadoDaPartida) => {
   return jogador;
 };
 
-// Resolve todas as pendências do Recebimento do Peão selecionado: escolhe o
-// tipo na Caixa e encaixa cada Recebida na célula-alvo fixada.
+// Resolve todas as pendências do Recebimento do Peão selecionado: escolhe a
+// vaga de cada peça sorteada (primeira borda canônica ainda disponível) e
+// encaixa a Recebida na célula-alvo derivada da vaga.
 function resolverRecebidas(
   estado: EstadoDaPartida,
   ator: string,
-  tipoDaPeca: TipoDePecaDeCaminho = 'reta',
 ): EstadoDaPartida {
   while (estado.tabuleiro.recebidas.length > 0) {
     const pendente = estado.tabuleiro.recebidas[0];
-    estado = aplicar(estado, escolherTipo(pendente.recebidaId, tipoDaPeca), ator);
+    let resolvida: EstadoDaPartida | undefined;
+    for (const borda of ['norte', 'leste', 'sul', 'oeste'] as const) {
+      const resultado = aplicarComandoDePartida(
+        estado,
+        escolherVaga(pendente.recebidaId, borda),
+        ator,
+      );
+      if (resultado.sucesso) {
+        resolvida = resultado.estado;
+        break;
+      }
+    }
+    if (!resolvida) {
+      throw new Error(
+        `nenhuma vaga disponível para a pendência ${pendente.recebidaId}`,
+      );
+    }
+    estado = resolvida;
     const escolhida = estado.tabuleiro.recebidas.find(
       (item) => item.recebidaId === pendente.recebidaId,
     );
-    if (!escolhida || escolhida.pecaId === null) {
-      throw new Error('Recebida escolhida deveria ter Peça atribuída');
+    if (!escolhida || escolhida.celulaAlvo === null) {
+      throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
     }
     estado = aplicar(
       estado,
@@ -214,8 +233,9 @@ test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático 
   );
   assert.equal(encaixeDoPeao.sucesso, true);
   if (!encaixeDoPeao.sucesso) return;
-  // O encaixe gera o Recebimento automaticamente (norte e leste vazias) e o
-  // Peão segue selecionado para a sequência.
+  // O encaixe gera o Recebimento automaticamente (norte e leste vazias): uma
+  // peca_sorteada por peça retirada da Caixa (ordem de composição: reta-1 e
+  // reta-2) e o Peão segue selecionado para a sequência.
   assert.deepEqual(encaixeDoPeao.eventos, [
     {
       tipo: 'peao_posicionado',
@@ -223,11 +243,13 @@ test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático 
       pecaId: 'inicial-1',
       celula: { linha: 3, coluna: 3 },
     },
+    { tipo: 'peca_sorteada', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0 },
+    { tipo: 'peca_sorteada', pecaId: 'reta-2', tipoDaPeca: 'reta', orientacao: 0 },
     {
       tipo: 'recebimento_gerado',
       recebidas: [
-        { recebidaId: 'recebida-inicial-1-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
-        { recebidaId: 'recebida-inicial-1-leste', bordaGeradora: 'leste', celulaAlvo: { linha: 3, coluna: 4 } },
+        { recebidaId: 'recebida-reta-1', pecaId: 'reta-1', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
+        { recebidaId: 'recebida-reta-2', pecaId: 'reta-2', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
       ],
     },
     {
@@ -368,6 +390,50 @@ test('MOVIMENTO_INDISPONIVEL no Primeiro Turno; encerrar exige Peão posicionado
   assert.equal(estado.jogadorAtivoId, 'bruno');
 });
 
+test('recebimento com caixa vazia gera zero pendências e permite encerrar o turno', () => {
+  let estado = partidaIniciada();
+  estado = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, caixa: [] },
+  };
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const encaixe = aplicarComandoDePartida(
+    estado,
+    posicionarPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(encaixe.sucesso, true);
+  if (!encaixe.sucesso) return;
+  // Caixa vazia: nem peca_sorteada nem recebimento_gerado — e o turno pode
+  // ser encerrado normalmente.
+  assert.ok(!encaixe.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!encaixe.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.deepEqual(encaixe.estado.tabuleiro.recebidas, []);
+
+  const encerramento = aplicarComandoDePartida(encaixe.estado, encerrarTurno(), 'ana');
+  assert.equal(encerramento.sucesso, true);
+  if (!encerramento.sucesso) return;
+  assert.equal(encerramento.estado.jogadorAtivoId, 'bruno');
+});
+
+test('recebimento com caixa insuficiente entrega as peças restantes sem erro', () => {
+  let estado = partidaIniciada();
+  estado = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, caixa: estado.tabuleiro.caixa.slice(0, 1) },
+  };
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  // Duas vagas, uma peça na Caixa: o Jogador recebe apenas a restante.
+  assert.equal(estado.tabuleiro.recebidas.length, 1);
+  assert.equal(estado.tabuleiro.recebidas[0].recebidaId, 'recebida-reta-1');
+  assert.deepEqual(estado.tabuleiro.caixa, []);
+});
+
 test('FORA_DA_VEZ: ator fora da vez, desconhecido e elemento de outro Jogador', () => {
   const estado = partidaIniciada();
 
@@ -452,17 +518,20 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
 
   // Re-seleção reentra na sequência sem Recebimento; a Confirmação de
   // Posição trava o Peão na Peça em que terminou e gera o Recebimento
-  // (norte da reta-1 vazio; o sul aponta para a inicial-1 ocupada).
+  // (norte da reta-1 vazio; o sul aponta para a inicial-1 ocupada). A peça
+  // sorteada é a 7ª da composição (reta-7: as seis primeiras — reta-1 a
+  // reta-6 — já saíram nos quatro Primeiros Turnos).
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
   assert.equal(confirmacao.sucesso, true);
   if (!confirmacao.sucesso) return;
   assert.deepEqual(confirmacao.eventos, [
     { tipo: 'posicao_confirmada', jogadorId: 'ana', peaoId: 'peao-branco', pecaId: 'reta-1' },
+    { tipo: 'peca_sorteada', pecaId: 'reta-7', tipoDaPeca: 'reta', orientacao: 0 },
     {
       tipo: 'recebimento_gerado',
       recebidas: [
-        { recebidaId: 'recebida-reta-1-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 1, coluna: 3 } },
+        { recebidaId: 'recebida-reta-7', pecaId: 'reta-7', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
       ],
     },
     {
@@ -508,15 +577,15 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
     'POSICAO_CONFIRMADA',
   );
 
-  estado = resolverRecebidas(estado, 'ana', 'cruz');
+  estado = resolverRecebidas(estado, 'ana');
   const encerramento = aplicarComandoDePartida(estado, encerrarTurno(), 'ana');
   assert.equal(encerramento.sucesso, true);
   if (!encerramento.sucesso) return;
-  // A Recebida encaixada (cruz-1) deixa a janela de Manipulação aberta; a
+  // A Recebida encaixada (reta-7) deixa a janela de Manipulação aberta; a
   // Passagem de Vez a encerra antes do turno_iniciado.
   assert.deepEqual(encerramento.eventos, [
     { tipo: 'turno_encerrado', jogadorId: 'ana' },
-    { tipo: 'manipulacao_finalizada', pecaId: 'cruz-1' },
+    { tipo: 'manipulacao_finalizada', pecaId: 'reta-7' },
     { tipo: 'turno_iniciado', jogadorId: 'bruno', rodada: 2 },
   ]);
   assert.equal(encerramento.estado.jogadorAtivoId, 'bruno');
@@ -731,10 +800,26 @@ test('iluminação: mover_peao não altera até confirmar_posicao_do_peao; perma
   // selecionar_peao não altera
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   assert.deepEqual(estado.celulasIluminadas, antes);
-  // selecionar_peca em peça indisponível rejeita e preserva iluminação
-  const sel = aplicarComandoDePartida(estado, selecionarPeca('inicial-1'), 'ana');
+
+  // A Caixa é opaca (ST-12): selecionar peça de caminho direto dela é
+  // rejeitado — e a rejeição preserva o estado e a iluminação.
+  const sel = aplicarComandoDePartida(estado, selecionarPeca('cruz-1'), 'ana');
   assert.equal(sel.sucesso, false);
-  assert.equal(sel.erro.codigo, 'PECA_INICIAL_INDISPONIVEL');
+  if (sel.sucesso) throw new Error('inacessível');
+  assert.equal(sel.erro.codigo, 'PECA_NAO_ENCONTRADA');
+  assert.deepEqual(estado.celulasIluminadas, antes);
+  // girar_peca sobre peça da Caixa é rejeitado, sem alterar a iluminação
+  // (que independe de orientação).
+  const gir = aplicarComandoDePartida(estado, girarPeca('cruz-1'), 'ana');
+  assert.equal(gir.sucesso, false);
+  if (gir.sucesso) throw new Error('inacessível');
+  assert.equal(gir.erro.codigo, 'PECA_NAO_ENCONTRADA');
+  assert.deepEqual(estado.celulasIluminadas, antes);
+  // posicionar_peca delegado (caminho direto é PECA_NAO_RECEBIDA, mas ainda preserva iluminação)
+  const pos = aplicarComandoDePartida(estado, posicionarPeca('cruz-1', 1, 1), 'ana');
+  assert.equal(pos.sucesso, false);
+  assert.equal(pos.erro.codigo, 'PECA_NAO_RECEBIDA');
+
   assert.deepEqual(estado.celulasIluminadas, antes);
   // Mover tentativo não altera
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');

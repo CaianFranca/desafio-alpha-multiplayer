@@ -62,6 +62,11 @@ export type {
   TurnoIniciadoEvento,
 } from './partida.ts';
 
+// Tipo de retorno de gerarRecebidas (declarado em peoes.ts, que não pode
+// importar de tabuleiro.ts em runtime): estado com a Caixa consumida +
+// pendências sorteadas + eventos peca_sorteada.
+export type { RecebimentoGerado } from './peoes.ts';
+
 export type {
   BordaCardinal,
   Celula,
@@ -70,7 +75,7 @@ export type {
   CorDoPeao,
   EntradaDoEstadoDoTabuleiro,
   ErroDeDominioDoTabuleiro,
-  EscolherTipoDaPecaRecebidaComando,
+  EscolherVagaDaPecaRecebidaComando,
   EstadoDoTabuleiro,
   EventoDoTabuleiro,
   FinalizarManipulacaoComando,
@@ -105,10 +110,10 @@ export type {
   SelecionarPeaoComando,
   SentidoDeRotacao,
   TipoDaPeca,
-  TipoDaPecaRecebidaEscolhidoEvento,
   TipoDePecaDaCaixa,
   TipoDePecaDeCaminho,
   TipoDePecaEspecial,
+  VagaDaPecaRecebidaEscolhidaEvento,
 } from './tabuleiro.ts';
 
 export {
@@ -149,6 +154,7 @@ export {
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   sortearDaCaixa,
+  vagasDisponiveis,
   vizinhasConectadas,
   vizinhos,
 } from './tabuleiro.ts';
