@@ -26,8 +26,19 @@
 // Reuso: importa PecaId de ./tabuleiro.ts e PeaoId de ./peoes.ts; não duplica tipos base.
 // Sem runtime/validação/sem @flicker/engine — apenas DTOs.
 
-import type { Celula, CodigoDeErroDoTabuleiro, PecaId, SentidoDeRotacao } from './tabuleiro.ts';
-import type { PeaoId, RecebidaId, TipoDePecaDeCaminho } from './peoes.ts';
+import type {
+  Celula,
+  CodigoDeErroDoTabuleiro,
+  Orientacao,
+  PecaId,
+  SentidoDeRotacao,
+} from './tabuleiro.ts';
+import type {
+  BordaCardinal,
+  PeaoId,
+  RecebidaId,
+  TipoDePecaDeCaminho,
+} from './peoes.ts';
 
 // --- Comandos cliente → servidor (11) ---
 
@@ -133,10 +144,94 @@ export interface PosicaoConfirmadaEvento {
   readonly pecaId: PecaId;
 }
 
+// --- Snapshot wire (ST-14) — projeção tipada sem runtime ---
+
+export type EstadoDaPartidaWire = 'preparada' | 'em_andamento';
+
+export type CorDoPeaoWire = 'branco' | 'vermelho' | 'azul' | 'amarelo';
+
+export type TipoDaPecaWire =
+  | 'inicial'
+  | TipoDePecaDeCaminho
+  | 'gerador'
+  | 'sala_do_diretor'
+  | 'sala_medica'
+  | 'portao_de_saida';
+
+export interface JogadorNoSnapshot {
+  readonly jogadorId: string;
+  readonly apelido: string;
+  readonly cor: CorDoPeaoWire;
+  readonly ordem: number;
+  readonly peaoId: PeaoId;
+  readonly primeiroTurnoPendente: boolean;
+}
+
+export interface PecaPosicionadaNoSnapshot {
+  readonly pecaId: PecaId;
+  readonly tipo: TipoDaPecaWire;
+  readonly orientacao: Orientacao;
+  readonly celula: Celula;
+}
+
+export interface PecaInicialNoSnapshot {
+  readonly pecaId: PecaId;
+  readonly tipo: 'inicial';
+  readonly orientacao: Orientacao;
+}
+
+export interface PeaoNoSnapshot {
+  readonly peaoId: PeaoId;
+  readonly cor: CorDoPeaoWire;
+  readonly pecaId: PecaId | null;
+}
+
+export interface RecebidaNoSnapshot {
+  readonly recebidaId: RecebidaId;
+  readonly bordaGeradora: BordaCardinal;
+  readonly celulaAlvo: Celula;
+  readonly pecaId: PecaId | null;
+  readonly tipo: TipoDePecaDeCaminho | null;
+  readonly orientacao: Orientacao;
+}
+
+export interface TabuleiroNoSnapshot {
+  readonly posicionadas: readonly PecaPosicionadaNoSnapshot[];
+  readonly iniciais: readonly PecaInicialNoSnapshot[];
+  readonly peoes: readonly PeaoNoSnapshot[];
+  readonly recebidas: readonly RecebidaNoSnapshot[];
+  readonly pecaSelecionadaId: PecaId | null;
+  readonly pecaEmManipulacaoId: PecaId | null;
+  readonly peaoSelecionadoId: PeaoId | null;
+}
+
+export interface EstadoDaPartidaSnapshot {
+  readonly tabuleiro: TabuleiroNoSnapshot;
+  readonly jogadores: readonly JogadorNoSnapshot[];
+  readonly jogadorAtivoId: string;
+  readonly rodada: number;
+  readonly pecaDoInicioDoTurnoId: PecaId | null;
+  readonly posicaoConfirmada: boolean;
+  readonly celulasIluminadas: readonly Celula[];
+  readonly estado: EstadoDaPartidaWire;
+}
+
+export interface PartidaIniciadaEvento {
+  readonly type: 'PARTIDA_INICIADA';
+  readonly partidaId: string;
+}
+
+export interface EstadoDaPartidaEvento {
+  readonly type: 'ESTADO_DA_PARTIDA';
+  readonly snapshot: EstadoDaPartidaSnapshot;
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
-  | PosicaoConfirmadaEvento;
+  | PosicaoConfirmadaEvento
+  | PartidaIniciadaEvento
+  | EstadoDaPartidaEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

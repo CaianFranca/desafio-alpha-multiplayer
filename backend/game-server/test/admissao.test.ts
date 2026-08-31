@@ -12,6 +12,9 @@ import type {
 import { createApp } from '../src/app.ts';
 import { criarWebSocketServer } from '../src/ws/ws.ts';
 import { chaveDaPartida } from '../src/partidas/partidas.ts';
+import { chaveDoEstadoDaPartida, inicializarEstadoDaPartida } from '../src/partidas/estado.ts';
+import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
+import { PartidaHandlers } from '../src/partidas/handlers.ts';
 import type { ContextoDoGameServer } from '../src/contexto.ts';
 
 const SERVER_ID = 'game-server-teste';
@@ -87,6 +90,67 @@ async function criarPartidaNoRedis(
     criadaEm: new Date().toISOString(),
   };
   await redis.set(chaveDaPartida(partidaId), JSON.stringify(partida), 'EX', 600);
+}
+
+async function criarPartidaComEstadoNoRedis(
+  partidaId: PartidaId,
+  roster: readonly MembroDaSala[],
+): Promise<void> {
+  await criarPartidaNoRedis(partidaId, roster);
+  await inicializarEstadoDaPartida(redis, partidaId, 600, roster.map((m) => m.jogadorId));
+}
+
+async function subirServidorComPartida(): Promise<ServidorEfemero & { broadcaster: PartidaBroadcaster; handlers: PartidaHandlers; wss: import('ws').WebSocketServer }> {
+  const contexto: ContextoDoGameServer = {
+    redis,
+    serverId: SERVER_ID,
+    jwtSecret: JWT_SECRET,
+    partidaPreparadaTtlSegundos: 600,
+  };
+  const app = createApp(contexto);
+  const server = http.createServer(app);
+  const broadcaster = new PartidaBroadcaster();
+  const handlers = new PartidaHandlers({ redis, broadcaster });
+  const wss = criarWebSocketServer(server, contexto, { partida: { broadcaster, handlers } });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const endereco = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${endereco.port}`,
+    port: endereco.port,
+    serverId: SERVER_ID,
+    broadcaster,
+    handlers,
+    wss,
+    fechar: async () => {
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err === undefined ? resolve() : reject(err)));
+      });
+    },
+  };
+}
+
+function coletarMensagensWs(port: number, token: string, partidaId: PartidaId, duracaoMs = 800): Promise<string[]> {
+  return new Promise((resolve) => {
+    const mensagens: string[] = [];
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${token}`);
+    ws.on('message', (data) => mensagens.push(data.toString()));
+    ws.on('open', () => {
+      setTimeout(() => {
+        ws.close();
+        resolve(mensagens);
+      }, duracaoMs);
+    });
+    ws.on('error', () => resolve(mensagens));
+    setTimeout(() => {
+      try { ws.close(); } catch {}
+      resolve(mensagens);
+    }, duracaoMs + 2000);
+  });
 }
 
 interface ResultadoWs {
@@ -218,6 +282,7 @@ test('Jogador do roster com JWT válido é admitido na partida e presença trans
     assert.equal(msg.jogadorId, 'jogador-1');
     assert.equal(msg.apelido, 'Jogador 1');
     assert.equal(msg.partidaId, partidaId);
+    assert.equal(msg.estado, 'preparada');
 
     const bruto = await redis.get(chaveDaPartida(partidaId));
     assert.ok(bruto !== null, 'partida deveria existir no redis');
@@ -365,7 +430,7 @@ test('partida-id ausente na query é recusado', async () => {
   }
 });
 
-test('os quatro jogadores do roster são admitidos e a partida permanece preparada', async () => {
+test('os quatro jogadores do roster são admitidos e a partida transita para em_andamento na 4ª admissão', async () => {
   const servidor = await subirServidor();
   try {
     const partidaId = crypto.randomUUID() as PartidaId;
@@ -380,16 +445,126 @@ test('os quatro jogadores do roster são admitidos e a partida permanece prepara
       resultados.push(await conectarWs(servidor.port, token, partidaId));
     }
 
-    for (const resultado of resultados) {
+    for (let idx = 0; idx < resultados.length; idx++) {
+      const resultado = resultados[idx]!;
       assert.ok(resultado.conectou, 'todos os do roster deveriam conectar');
       assert.ok(resultado.mensagem !== null, 'deveria receber ADMISSAO_ACEITA');
-      assert.equal(JSON.parse(resultado.mensagem!).type, 'ADMISSAO_ACEITA');
+      const msg = JSON.parse(resultado.mensagem!);
+      assert.equal(msg.type, 'ADMISSAO_ACEITA');
+      if (idx < 3) {
+        assert.equal(msg.estado, 'preparada', `jogador ${idx + 1} deve receber preparada`);
+      } else {
+        assert.equal(msg.estado, 'em_andamento', '4º jogador deve receber em_andamento');
+      }
     }
 
     const bruto = await redis.get(chaveDaPartida(partidaId));
     assert.ok(bruto !== null, 'partida deveria existir');
     const partida = JSON.parse(bruto!);
-    assert.equal(partida.estado, 'preparada');
+    assert.equal(partida.estado, 'em_andamento');
+    // Após início, a partida deixa de ter TTL (persiste)
+    const ttl = await redis.ttl(chaveDaPartida(partidaId));
+    assert.equal(ttl, -1, 'partida em_andamento não deve ter TTL');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('ESTADO_DA_PARTIDA snapshot contém tabuleiro e metadados do turno', async () => {
+  const servidor = await subirServidorComPartida();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaComEstadoNoRedis(partidaId, roster);
+
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-1');
+    const token = criarJwt('jogador-1', 'Jogador 1', sessaoId);
+
+    const mensagens = await coletarMensagensWs(servidor.port, token, partidaId, 800);
+    const parsed = mensagens.map((m) => JSON.parse(m));
+
+    const admissao = parsed.find((m) => m.type === 'ADMISSAO_ACEITA');
+    assert.ok(admissao, 'deveria receber ADMISSAO_ACEITA');
+    assert.equal(admissao.estado, 'preparada');
+
+    const estadoMsg = parsed.find((m) => m.type === 'ESTADO_DA_PARTIDA');
+    assert.ok(estadoMsg, 'deveria receber ESTADO_DA_PARTIDA');
+    const snap = estadoMsg.snapshot;
+    assert.ok(snap, 'snapshot deve existir');
+    assert.equal(snap.estado, 'preparada');
+    assert.equal(snap.jogadorAtivoId, 'jogador-1');
+    assert.equal(snap.rodada, 1);
+    assert.equal(snap.posicaoConfirmada, false);
+    assert.equal(snap.pecaDoInicioDoTurnoId, null);
+    assert.ok(Array.isArray(snap.celulasIluminadas));
+    assert.ok(Array.isArray(snap.tabuleiro.posicionadas));
+    assert.ok(Array.isArray(snap.tabuleiro.iniciais));
+    assert.equal(snap.tabuleiro.iniciais.length, 4);
+    assert.ok(Array.isArray(snap.tabuleiro.peoes));
+    assert.equal(snap.tabuleiro.peoes.length, 4);
+    assert.ok(Array.isArray(snap.tabuleiro.recebidas));
+    assert.ok(Array.isArray(snap.jogadores));
+    assert.equal(snap.jogadores.length, 4);
+    for (const j of snap.jogadores) {
+      assert.ok(typeof j.jogadorId === 'string' && j.jogadorId.length > 0);
+      assert.ok(typeof j.apelido === 'string' && j.apelido.length > 0);
+      assert.ok(['branco', 'vermelho', 'azul', 'amarelo'].includes(j.cor));
+      assert.ok(typeof j.ordem === 'number' && j.ordem >= 1 && j.ordem <= 4);
+      assert.ok(typeof j.peaoId === 'string' && j.peaoId.startsWith('peao-'));
+      assert.equal(typeof j.primeiroTurnoPendente, 'boolean');
+    }
+    // Verifica apelido/cor/ordem correspondem ao roster
+    const j1 = snap.jogadores.find((j: any) => j.jogadorId === 'jogador-1');
+    assert.equal(j1.apelido, 'Jogador 1');
+    assert.equal(j1.cor, 'branco');
+    assert.equal(j1.ordem, 1);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('PARTIDA_INICIADA broadcast apenas na 4ª admissão', async () => {
+  const servidor = await subirServidorComPartida();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaComEstadoNoRedis(partidaId, roster);
+
+    // 3 primeiras admissões não devem gerar PARTIDA_INICIADA
+    for (let i = 1; i <= 3; i++) {
+      const sessaoId = crypto.randomUUID();
+      await criarSessaoNoRedis(sessaoId, `jogador-${i}`);
+      const token = criarJwt(`jogador-${i}`, `Jogador ${i}`, sessaoId);
+      const msgs = await coletarMensagensWs(servidor.port, token, partidaId, 600);
+      const parsed = msgs.map((m) => JSON.parse(m));
+      assert.ok(parsed.find((m) => m.type === 'ADMISSAO_ACEITA'), `jogador ${i} deve receber ADMISSAO_ACEITA`);
+      assert.equal(parsed.find((m) => m.type === 'ADMISSAO_ACEITA').estado, 'preparada');
+      assert.ok(parsed.find((m) => m.type === 'ESTADO_DA_PARTIDA'), `jogador ${i} deve receber ESTADO_DA_PARTIDA`);
+      assert.equal(parsed.filter((m) => m.type === 'PARTIDA_INICIADA').length, 0, `jogador ${i} não deve receber PARTIDA_INICIADA`);
+    }
+
+    // 4ª admissão deve gerar PARTIDA_INICIADA e estado em_andamento
+    const sessaoId4 = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId4, 'jogador-4');
+    const token4 = criarJwt('jogador-4', 'Jogador 4', sessaoId4);
+    const msgs4 = await coletarMensagensWs(servidor.port, token4, partidaId, 800);
+    const parsed4 = msgs4.map((m) => JSON.parse(m));
+    const adm4 = parsed4.find((m) => m.type === 'ADMISSAO_ACEITA');
+    assert.ok(adm4, '4º jogador deve receber ADMISSAO_ACEITA');
+    assert.equal(adm4.estado, 'em_andamento');
+    const estado4 = parsed4.find((m) => m.type === 'ESTADO_DA_PARTIDA');
+    assert.ok(estado4, '4º jogador deve receber ESTADO_DA_PARTIDA');
+    assert.equal(estado4.snapshot.estado, 'em_andamento');
+    const iniciadas = parsed4.filter((m) => m.type === 'PARTIDA_INICIADA');
+    assert.equal(iniciadas.length, 1, '4º jogador deve receber PARTIDA_INICIADA');
+    assert.equal(iniciadas[0].partidaId, partidaId);
+
+    // Verifica persistência sem TTL para partida e estado
+    const ttlPartida = await redis.ttl(chaveDaPartida(partidaId));
+    assert.equal(ttlPartida, -1);
+    const ttlEstado = await redis.ttl(chaveDoEstadoDaPartida(partidaId));
+    assert.equal(ttlEstado, -1);
   } finally {
     await servidor.fechar();
   }

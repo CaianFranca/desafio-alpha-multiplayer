@@ -22,6 +22,7 @@ export interface AdmissaoAceitaEvento {
   readonly jogadorId: string;
   readonly apelido: string;
   readonly partidaId: PartidaId;
+  readonly estado: 'preparada' | 'em_andamento';
 }
 
 export type CodigoDeErroDeAdmissao =

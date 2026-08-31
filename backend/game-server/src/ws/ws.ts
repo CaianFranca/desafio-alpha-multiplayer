@@ -29,7 +29,9 @@ import type {
   AdmissaoRejeitadaEvento,
 } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
-import { obterPartida, atualizarPresencaAtomica } from '../partidas/partidas.ts';
+import { obterPartida, transicionarSeCompletoOuAtualizarPresenca } from '../partidas/partidas.ts';
+import { obterEstadoDaPartida } from '../partidas/estado.ts';
+import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
 import { adicionarConexao, removerConexao, type ConexaoDoJogador } from './conexao.ts';
 import { PartidaBroadcaster } from '../partidas/broadcast.ts';
@@ -197,7 +199,11 @@ export function criarWebSocketServer(
         return;
       }
 
-      await atualizarPresencaAtomica(contexto.redis, partidaId, sessao.jogadorId);
+      const transicao = await transicionarSeCompletoOuAtualizarPresenca(
+        contexto.redis,
+        partidaId,
+        sessao.jogadorId,
+      );
 
       wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
         ws.send(JSON.stringify({
@@ -205,6 +211,7 @@ export function criarWebSocketServer(
           jogadorId: sessao.jogadorId,
           apelido: sessao.apelido,
           partidaId,
+          estado: transicao.estado,
         } satisfies ServerMessage));
 
         const conexao: ConexaoDoJogador = {
@@ -217,11 +224,38 @@ export function criarWebSocketServer(
 
         // Admissão pré-upgrade concluída: a partida já é conhecida e validada.
         // Com o canal de partida ativo, o socket entra no broadcaster, recebe
-        // o turno corrente e comandos válidos vão direto aos handlers
-        // (issue #117).
+        // o snapshot da partida (ESTADO_DA_PARTIDA), o turno corrente e, na 4ª
+        // admissão, o broadcast de PARTIDA_INICIADA (ST-14).
         if (depsPartida !== undefined) {
           depsPartida.broadcaster.registrar(partidaId, ws);
-          void depsPartida.handlers.anunciarTurnoAtual(partidaId, ws);
+          void (async () => {
+            try {
+              const [estadoEngine, partidaAtual] = await Promise.all([
+                obterEstadoDaPartida(contexto.redis, partidaId),
+                obterPartida(contexto.redis, partidaId),
+              ]);
+              if (estadoEngine !== null && partidaAtual !== null) {
+                const snapshot = paraSnapshotWire(
+                  estadoEngine,
+                  partidaAtual.roster,
+                  transicao.estado,
+                );
+                depsPartida.broadcaster.enviarParaSocket(ws, {
+                  type: 'ESTADO_DA_PARTIDA',
+                  snapshot,
+                });
+              }
+            } catch (erro) {
+              console.error('[ws] falha ao enviar snapshot da partida:', (erro as Error).message);
+            }
+            if (transicao.iniciou) {
+              depsPartida.broadcaster.enviar(partidaId, {
+                type: 'PARTIDA_INICIADA',
+                partidaId,
+              });
+            }
+            void depsPartida.handlers.anunciarTurnoAtual(partidaId, ws);
+          })();
         }
 
         console.info('[ws] jogador admitido', {
