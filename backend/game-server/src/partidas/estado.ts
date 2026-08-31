@@ -56,15 +56,23 @@ export async function obterEstadoDaPartida(
 }
 
 /**
- * Reescreve o estado da partida preservando o TTL restante da partida
- * preparada (`KEEPTTL`), para que o estado expire junto com a partida.
+ * Reescreve o estado da partida preservando o TTL restante da chave do
+ * estado, para que ele expire junto com a partida. Em vez de `KEEPTTL` (que,
+ * se a chave tiver expirado entre o `obter` e o `salvar`, criaria a chave sem
+ * TTL — um estado órfão que nunca expira, #135), consulta-se o TTL remanescente
+ * e aplica-se `SET ... EX ttl`. Se a chave já expirou/inexiste (`ttl <= 0`),
+ * a partida acabou e o estado não é repersistido.
  */
 export async function salvarEstadoDaPartida(
   redis: Redis,
   partidaId: string,
   estado: EstadoDaPartida,
 ): Promise<void> {
-  await redis.set(chaveDoEstadoDaPartida(partidaId), JSON.stringify(estado), 'KEEPTTL');
+  const ttl = await redis.ttl(chaveDoEstadoDaPartida(partidaId));
+  if (ttl <= 0) {
+    return;
+  }
+  await redis.set(chaveDoEstadoDaPartida(partidaId), JSON.stringify(estado), 'EX', ttl);
 }
 
 /** Remove o estado da partida (usado no cancelamento da partida). */
