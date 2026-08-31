@@ -34,6 +34,8 @@
 //
 // Reuso: importa PecaId de ./tabuleiro.ts e PeaoId de ./peoes.ts; não duplica tipos base.
 // Sem runtime/validação/sem @flicker/engine — apenas DTOs.
+// Sufixo "Wire": eventos com homônimo em @flicker/engine recebem sufixo Wire
+// para evitar colisão nominal em consumers que importam ambos pacotes.
 
 import type {
   Celula,
@@ -188,7 +190,7 @@ export type { VagaDaPecaRecebidaEscolhidaEvento };
 
 export interface CelulasIluminadasEvento {
   readonly type: 'CELULAS_ILUMINADAS';
-  readonly celulas: readonly { readonly linha: number; readonly coluna: number }[];
+  readonly celulas: readonly Celula[];
 }
 
 export interface LimpezaAplicadaWireEvento {

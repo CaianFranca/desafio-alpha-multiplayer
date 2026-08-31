@@ -875,6 +875,7 @@ const temLimpeza = (eventos: readonly { readonly tipo: string }[]) =>
 
 test('limpeza: Primeiro Turno remove peça fora da iluminação sem retorno à Caixa', () => {
   let estado = partidaIniciada();
+  const caixaAntes = estado.tabuleiro.caixa.length;
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -897,7 +898,11 @@ test('limpeza: Primeiro Turno remove peça fora da iluminação sem retorno à C
     !resultado.estado.tabuleiro.posicionadas.some((p) => p.pecaId === 'fora-1'),
   );
   // Sem retorno à Caixa: a peça removida não volta para a caixa.
-  assert.equal(resultado.estado.tabuleiro.caixa.length, 71);
+  // caixaAntes é o tamanho antes de posicionarPeao; gerarRecebidas desenha
+  // peças da Caixa. Verifica que a limpeza não altera o resultado.
+  const recebimento = resultado.eventos.find((e) => e.tipo === 'recebimento_gerado');
+  const desenhadas = recebimento ? (recebimento.recebidas as readonly unknown[]).length : 0;
+  assert.equal(resultado.estado.tabuleiro.caixa.length, caixaAntes - desenhadas);
 });
 
 test('limpeza: Confirmação de Posição com mudança de peça remove peça fora da iluminação', () => {
@@ -990,6 +995,7 @@ test('limpeza: mover_peao, permanecer e encerrar_turno não emitem limpeza_aplic
 
 test('limpeza: remove só peças, preservando caixa, peões, jogadores e iluminação', () => {
   let estado = partidaIniciada();
+  const caixaAntes = estado.tabuleiro.caixa.length;
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -1010,7 +1016,9 @@ test('limpeza: remove só peças, preservando caixa, peões, jogadores e ilumina
     tabuleiro.posicionadas.map((p) => p.pecaId),
     ['inicial-1'],
   );
-  assert.equal(tabuleiro.caixa.length, 71, 'Caixa intacta');
+  const recebimento = resultado.eventos.find((e) => e.tipo === 'recebimento_gerado');
+  const desenhadas = recebimento ? (recebimento.recebidas as readonly unknown[]).length : 0;
+  assert.equal(tabuleiro.caixa.length, caixaAntes - desenhadas, 'Caixa intacta');
   assert.equal(tabuleiro.peoes.length, 4, 'Peões intactos');
   assert.equal(jogadores.length, 4, 'Jogadores intactos');
   assert.equal(jogadores.filter((j) => j.jogadorId === estado.jogadorAtivoId).length, 1);
