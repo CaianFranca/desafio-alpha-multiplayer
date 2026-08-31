@@ -26,7 +26,6 @@ import type {
   OperacaoBemSucedidaDoTabuleiro,
   OperacaoRejeitadaDoTabuleiro,
   Orientacao,
-  PecaDaReserva,
   PecaPosicionada,
   PecaRecebida,
   PermanecerComando,
@@ -42,12 +41,17 @@ import type {
 export const LADO_DA_GRADE = 7;
 
 // Bordas abertas da Orientação base (0°), por tipo: Inicial norte+leste
-// (adjacentes), Reta norte+sul (opostas), T norte+leste+oeste, Cruz todas.
+// (adjacentes), Reta norte+sul (opostas), T norte+leste+oeste, Cruz e as
+// Especiais (ST-12) todas as quatro abertas.
 const BORDAS_BASE: Record<TipoDaPeca, readonly BordaCardinal[]> = {
   inicial: ['norte', 'leste'],
   reta: ['norte', 'sul'],
   T: ['norte', 'leste', 'oeste'],
   cruz: ['norte', 'leste', 'sul', 'oeste'],
+  gerador: ['norte', 'leste', 'sul', 'oeste'],
+  sala_do_diretor: ['norte', 'leste', 'sul', 'oeste'],
+  sala_medica: ['norte', 'leste', 'sul', 'oeste'],
+  portao_de_saida: ['norte', 'leste', 'sul', 'oeste'],
 };
 
 const ORDEM_CANONICA_DAS_BORDAS: readonly BordaCardinal[] = [
@@ -82,7 +86,7 @@ const DESLOCAMENTO_DA_BORDA: Record<BordaCardinal, Celula> = {
 // e aplica-se a rotação horária correspondente aos passos de 90° da
 // Orientação. Resultado em ordem canônica para determinismo.
 export function bordasAbertas(
-  peca: Pick<PecaDaReserva, 'tipo' | 'orientacao'>,
+  peca: Pick<PecaPosicionada, 'tipo' | 'orientacao'>,
 ): BordaCardinal[] {
   let bordas = BORDAS_BASE[peca.tipo];
   for (let passos = peca.orientacao / 90; passos > 0; passos--) {
@@ -186,7 +190,7 @@ export function selecionarPeao(
 
 // Recebimento (ST-10): um slot para cada borda aberta da Peça sob o Peão cuja
 // célula vizinha está vazia (dentro da grade). A célula-alvo é fixada na
-// criação; o tipo só é escolhido depois, consumindo a Reserva. Exportada para
+// criação; o tipo só é escolhido depois, consumindo a Caixa. Exportada para
 // a camada da Partida (ST-11), que decide quando o Recebimento acontece.
 export function gerarRecebidas(
   estado: EstadoDoTabuleiro,
@@ -332,13 +336,15 @@ export function escolherTipoDaPecaRecebida(
     );
   }
 
-  // Consumo determinístico: a primeira Peça do tipo na Reserva, que deixa a
-  // Reserva e passa a pertencer ao slot da Recebida.
-  const peca = estado.reserva.find((item) => item.tipo === comando.tipoDaPeca);
+  // Consumo determinístico da Caixa (ST-12): a primeira Peça do tipo pedido,
+  // que deixa a Caixa e passa a pertencer ao slot da Recebida. Fluxo legado
+  // do Recebimento (ST-10) — o sorteio unitário da #139 substituirá a escolha
+  // do tipo.
+  const peca = estado.caixa.find((item) => item.tipo === comando.tipoDaPeca);
   if (!peca) {
     return rejeitar(
-      'RESERVA_ESGOTADA',
-      `A Reserva não possui Peças do tipo "${comando.tipoDaPeca}".`,
+      'CAIXA_ESGOTADA',
+      `A Caixa não possui Peças do tipo "${comando.tipoDaPeca}".`,
     );
   }
 
@@ -360,16 +366,16 @@ export function escolherTipoDaPecaRecebida(
   });
 
   // A escolha torna a Peça atribuída a "selecionada" (reuso da Seleção única
-  // da ST-09), para que girar_peca funcione com o mesmo padrão da Reserva.
+  // da ST-09), para que girar_peca funcione com o mesmo padrão das Iniciais.
   return sucesso(
     {
       ...estado,
-      reserva: estado.reserva.filter((item) => item.pecaId !== peca.pecaId),
+      caixa: estado.caixa.filter((item) => item.pecaId !== peca.pecaId),
       recebidas: estado.recebidas.map((item) =>
         item.recebidaId === recebida.recebidaId
-          ? // A Recebida nasce na Orientação base (0°): a orientação da Peça
-            // consumida da Reserva pode estar stale (girada via seleção) e o
-            // giro deliberado da Recebida fica em girar_peca.
+          ? // A Recebida nasce na Orientação base (0°): a Caixa é opaca e a
+            // orientação da Peça consumida é sempre a de composição; o giro
+            // deliberado da Recebida fica em girar_peca.
             { ...item, pecaId: peca.pecaId, tipo: comando.tipoDaPeca, orientacao: 0 }
           : item,
       ),

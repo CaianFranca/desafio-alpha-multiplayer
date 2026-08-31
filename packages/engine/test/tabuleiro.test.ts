@@ -45,31 +45,55 @@ function codigoDaRejeicao(
   return resultado.erro.codigo;
 }
 
-function peçaDaReserva(estado: EstadoDoTabuleiro, pecaId: string) {
-  const peca = estado.reserva.find((item) => item.pecaId === pecaId);
+function peçaNasIniciais(estado: EstadoDoTabuleiro, pecaId: string) {
+  const peca = estado.iniciais.find((item) => item.pecaId === pecaId);
   if (!peca) {
-    throw new Error(`Peça ${pecaId} não está na reserva`);
+    throw new Error(`Peça ${pecaId} não está entre as iniciais`);
   }
   return peca;
 }
 
-test('estado inicial da reserva tem 4 iniciais, 6 retas, 6 T e 6 cruz com ids únicos', () => {
+test('estado inicial tem 4 iniciais fora da caixa e a caixa de 71 peças de caminho', () => {
   const estado = estadoInicialDoTabuleiro();
 
-  assert.equal(estado.reserva.length, 22);
-  const porTipo = { inicial: 0, reta: 0, T: 0, cruz: 0 };
-  for (const peca of estado.reserva) {
-    porTipo[peca.tipo] += 1;
+  // As 4 Peças Iniciais ficam fora da Caixa (ST-12).
+  assert.equal(estado.iniciais.length, 4);
+  assert.deepEqual(
+    estado.iniciais.map((peca) => peca.pecaId),
+    ['inicial-1', 'inicial-2', 'inicial-3', 'inicial-4'],
+  );
+  for (const peca of estado.iniciais) {
+    assert.equal(peca.tipo, 'inicial');
     assert.equal(peca.orientacao, 0);
   }
-  assert.deepEqual(porTipo, { inicial: 4, reta: 6, T: 6, cruz: 6 });
 
-  const ids = new Set(estado.reserva.map((peca) => peca.pecaId));
-  assert.equal(ids.size, 22);
-  assert.ok(ids.has('inicial-1'));
-  assert.ok(ids.has('reta-6'));
-  assert.ok(ids.has('t-1'));
-  assert.ok(ids.has('cruz-6'));
+  // Sem seed, a Caixa permanece na ordem de composição.
+  assert.equal(estado.caixa.length, 71);
+  const porTipo: Record<string, number> = {};
+  for (const peca of estado.caixa) {
+    porTipo[peca.tipo] = (porTipo[peca.tipo] ?? 0) + 1;
+    assert.equal(peca.orientacao, 0);
+    assert.notEqual(peca.tipo, 'inicial');
+  }
+  assert.deepEqual(porTipo, {
+    reta: 10,
+    T: 32,
+    cruz: 12,
+    gerador: 6,
+    sala_do_diretor: 3,
+    sala_medica: 4,
+    portao_de_saida: 4,
+  });
+
+  const ids = new Set(estado.caixa.map((peca) => peca.pecaId));
+  assert.equal(ids.size, 71);
+  assert.ok(ids.has('reta-10'));
+  assert.ok(ids.has('t-32'));
+  assert.ok(ids.has('cruz-12'));
+  assert.ok(ids.has('gerador-6'));
+  assert.ok(ids.has('sala-do-diretor-3'));
+  assert.ok(ids.has('sala-medica-4'));
+  assert.ok(ids.has('portao-de-saida-4'));
 
   assert.deepEqual(estado.posicionadas, []);
   assert.equal(estado.pecaSelecionadaId, null);
@@ -139,64 +163,64 @@ test('bordas abertas giram com a orientação em passos horários de 90 graus', 
   ]);
 });
 
-test('girar peça selecionada altera a orientação na reserva em passos de 90 graus', () => {
-  let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('reta-1'));
+test('girar peça inicial selecionada altera a orientação fora da caixa em passos de 90 graus', () => {
+  let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-2'));
 
-  const primeiroGiro = aplicarComandoDeTabuleiro(estado, girar('reta-1'));
+  const primeiroGiro = aplicarComandoDeTabuleiro(estado, girar('inicial-2'));
   assert.equal(primeiroGiro.sucesso, true);
   if (!primeiroGiro.sucesso) return;
   assert.deepEqual(primeiroGiro.eventos, [
     {
       tipo: 'peca_girada',
-      pecaId: 'reta-1',
+      pecaId: 'inicial-2',
       orientacaoAnterior: 0,
       orientacao: 90,
       sentido: 'horario',
     },
   ]);
 
-  estado = aplicar(aplicar(estado, girar('reta-1')), girar('reta-1'));
-  assert.equal(peçaDaReserva(estado, 'reta-1').orientacao, 180);
+  estado = aplicar(aplicar(estado, girar('inicial-2')), girar('inicial-2'));
+  assert.equal(peçaNasIniciais(estado, 'inicial-2').orientacao, 180);
 
-  estado = aplicar(estado, girar('reta-1'));
-  assert.equal(peçaDaReserva(estado, 'reta-1').orientacao, 270);
+  estado = aplicar(estado, girar('inicial-2'));
+  assert.equal(peçaNasIniciais(estado, 'inicial-2').orientacao, 270);
 });
 
 test('girar anti-horário faz wrap-around e ambos os sentidos são discretos', () => {
-  let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('t-1'));
+  let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-3'));
 
-  estado = aplicar(estado, girar('t-1', 'anti_horario'));
-  assert.equal(peçaDaReserva(estado, 't-1').orientacao, 270);
+  estado = aplicar(estado, girar('inicial-3', 'anti_horario'));
+  assert.equal(peçaNasIniciais(estado, 'inicial-3').orientacao, 270);
 
-  estado = aplicar(estado, girar('t-1', 'horario'));
-  assert.equal(peçaDaReserva(estado, 't-1').orientacao, 0);
+  estado = aplicar(estado, girar('inicial-3', 'horario'));
+  assert.equal(peçaNasIniciais(estado, 'inicial-3').orientacao, 0);
 
-  estado = aplicar(estado, girar('t-1', 'anti_horario'));
-  estado = aplicar(estado, girar('t-1', 'anti_horario'));
-  assert.equal(peçaDaReserva(estado, 't-1').orientacao, 180);
+  estado = aplicar(estado, girar('inicial-3', 'anti_horario'));
+  estado = aplicar(estado, girar('inicial-3', 'anti_horario'));
+  assert.equal(peçaNasIniciais(estado, 'inicial-3').orientacao, 180);
 });
 
 test('seleção única: seleciona, troca e deseleção ao clicar na própria seleção', () => {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   assert.equal(estado.pecaSelecionadaId, 'inicial-1');
 
-  const troca = aplicarComandoDeTabuleiro(estado, selecionar('reta-2'));
+  const troca = aplicarComandoDeTabuleiro(estado, selecionar('inicial-2'));
   assert.equal(troca.sucesso, true);
   if (!troca.sucesso) return;
-  assert.equal(troca.estado.pecaSelecionadaId, 'reta-2');
-  assert.deepEqual(troca.eventos, [{ tipo: 'peca_selecionada', pecaId: 'reta-2' }]);
+  assert.equal(troca.estado.pecaSelecionadaId, 'inicial-2');
+  assert.deepEqual(troca.eventos, [{ tipo: 'peca_selecionada', pecaId: 'inicial-2' }]);
   estado = troca.estado;
 
-  const deselecao = aplicarComandoDeTabuleiro(estado, selecionar('reta-2'));
+  const deselecao = aplicarComandoDeTabuleiro(estado, selecionar('inicial-2'));
   assert.equal(deselecao.sucesso, true);
   if (!deselecao.sucesso) return;
   assert.equal(deselecao.estado.pecaSelecionadaId, null);
   assert.deepEqual(deselecao.eventos, [
-    { tipo: 'peca_deselecionada', pecaId: 'reta-2' },
+    { tipo: 'peca_deselecionada', pecaId: 'inicial-2' },
   ]);
 });
 
-test('posicionar em célula vazia encaixa a peça e consome a reserva', () => {
+test('posicionar em célula vazia encaixa a peça e a retira das iniciais', () => {
   const inicial = estadoInicialDoTabuleiro();
   let estado = aplicar(inicial, selecionar('inicial-1'));
 
@@ -204,8 +228,8 @@ test('posicionar em célula vazia encaixa a peça e consome a reserva', () => {
   assert.equal(encaixe.sucesso, true);
   if (!encaixe.sucesso) return;
 
-  assert.equal(encaixe.estado.reserva.length, inicial.reserva.length - 1);
-  assert.ok(!encaixe.estado.reserva.some((peca) => peca.pecaId === 'inicial-1'));
+  assert.equal(encaixe.estado.iniciais.length, inicial.iniciais.length - 1);
+  assert.ok(!encaixe.estado.iniciais.some((peca) => peca.pecaId === 'inicial-1'));
   assert.deepEqual(encaixe.estado.posicionadas, [
     { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
   ]);
@@ -232,7 +256,7 @@ test('posicionar em célula ocupada é rejeitado com código fechado', () => {
   estado = aplicar(estado, selecionar('inicial-3'));
   assert.equal(codigoDaRejeicao(estado, posicionar('inicial-3', 3, 3)), 'CELULA_JA_OCUPADA');
   // A rejeição preserva o estado sem consumir nada.
-  assert.equal(estado.reserva.some((peca) => peca.pecaId === 'inicial-3'), true);
+  assert.equal(estado.iniciais.some((peca) => peca.pecaId === 'inicial-3'), true);
 });
 
 test('após o encaixe, girar a peça posicionada é permitido até a Finalização', () => {
@@ -278,12 +302,12 @@ test('nova seleção encerra a manipulação anterior', () => {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 2, 2));
 
-  const novaSelecao = aplicarComandoDeTabuleiro(estado, selecionar('reta-1'));
+  const novaSelecao = aplicarComandoDeTabuleiro(estado, selecionar('inicial-2'));
   assert.equal(novaSelecao.sucesso, true);
   if (!novaSelecao.sucesso) return;
   assert.deepEqual(novaSelecao.eventos, [
     { tipo: 'manipulacao_finalizada', pecaId: 'inicial-1' },
-    { tipo: 'peca_selecionada', pecaId: 'reta-1' },
+    { tipo: 'peca_selecionada', pecaId: 'inicial-2' },
   ]);
   estado = novaSelecao.estado;
   assert.equal(estado.pecaEmManipulacaoId, null);
@@ -324,16 +348,19 @@ test('comandos inválidos são rejeitados com códigos fechados', () => {
   const estado = estadoInicialDoTabuleiro();
 
   // Sem seleção ativa.
-  assert.equal(codigoDaRejeicao(estado, girar('reta-1')), 'PECA_NAO_SELECIONADA');
+  assert.equal(codigoDaRejeicao(estado, girar('inicial-2')), 'PECA_NAO_SELECIONADA');
   assert.equal(
     codigoDaRejeicao(estado, posicionar('inicial-1', 3, 3)),
     'PECA_NAO_SELECIONADA',
   );
-  // Peça de caminho não pode ser posicionada diretamente (só via Recebimento).
+  // Peça de caminho está na Caixa (opaca): não pode ser posicionada diretamente
+  // (só via Recebimento) nem girada/selecionada.
   assert.equal(
     codigoDaRejeicao(estado, posicionar('reta-1', 3, 3)),
     'PECA_NAO_RECEBIDA',
   );
+  assert.equal(codigoDaRejeicao(estado, selecionar('reta-1')), 'PECA_NAO_ENCONTRADA');
+  assert.equal(codigoDaRejeicao(estado, girar('reta-1')), 'PECA_NAO_ENCONTRADA');
 
   // Peça inexistente.
   assert.equal(codigoDaRejeicao(estado, selecionar('fantasma-1')), 'PECA_NAO_ENCONTRADA');
@@ -346,19 +373,23 @@ test('comandos inválidos são rejeitados com códigos fechados', () => {
   assert.equal(codigoDaRejeicao(ocupado, selecionar('inicial-1')), 'PECA_JA_POSICIONADA');
 });
 
-test('reserva esgotada rejeita o posicionamento com código fechado', () => {
-  const esgotado: EstadoDoTabuleiro = {
-    reserva: [],
-    posicionadas: [],
-    pecaSelecionadaId: null,
-    pecaEmManipulacaoId: null,
-    peoes: [],
-    peaoSelecionadoId: null,
-    recebidas: [],
-  };
+test('peça da caixa não é posicionável nem selecionável; posicionamento só de iniciais', () => {
+  const estado = estadoInicialDoTabuleiro();
+
+  // Peça de caminho direto da Caixa: vedada — entra apenas pelo Recebimento.
   assert.equal(
-    codigoDaRejeicao(esgotado, posicionar('reta-1', 3, 3)),
-    'RESERVA_ESGOTADA',
+    codigoDaRejeicao(estado, posicionar('cruz-1', 3, 3)),
+    'PECA_NAO_RECEBIDA',
+  );
+  // Peça especial da Caixa: mesma vedação.
+  assert.equal(
+    codigoDaRejeicao(estado, posicionar('gerador-1', 3, 3)),
+    'PECA_NAO_RECEBIDA',
+  );
+  // Peça inexistente segue PECA_NAO_ENCONTRADA.
+  assert.equal(
+    codigoDaRejeicao(estado, posicionar('fantasma-1', 3, 3)),
+    'PECA_NAO_ENCONTRADA',
   );
 });
 

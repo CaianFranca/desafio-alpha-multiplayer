@@ -1,10 +1,12 @@
-// Domínio puro do Tabuleiro (ST-09 / issue #82 e ST-10 / issue #89).
+// Domínio puro do Tabuleiro (ST-09 / issue #82, ST-10 / issue #89 e ST-12 /
+// issue #144).
 //
-// Seam único das regras de tabuleiro: grade fixa 7x7 (ADR-0004), Reserva,
-// Seleção única e janela de Manipulação (ST-09), e os tipos do ciclo de Peões
-// com o dispatch aplicarComandoDeTabuleiro (ST-10) — que produz eventos de
-// domínio e rejeições com códigos fechados, no mesmo padrão do domínio do
-// lobby (lobby.ts). Os handlers de Peões, conexões, Recebimento e ciclo, e a
+// Seam único das regras de tabuleiro: grade fixa 7x7 (ADR-0004), Caixa
+// (ST-12) com as 4 Peças Iniciais fora dela, Seleção única e janela de
+// Manipulação (ST-09), e os tipos do ciclo de Peões com o dispatch
+// aplicarComandoDeTabuleiro (ST-10) — que produz eventos de domínio e
+// rejeições com códigos fechados, no mesmo padrão do domínio do lobby
+// (lobby.ts). Os handlers de Peões, conexões, Recebimento e ciclo, e a
 // camada base compartilhada (resultado, validação, grade, rotação, bordas),
 // vivem em peoes.ts — a dependência em runtime é única: tabuleiro.ts →
 // peoes.ts. Nenhum contrato wire, Redis ou Express vive aqui: este módulo é
@@ -37,7 +39,23 @@ export {
   vizinhasConectadas,
 } from './peoes.ts';
 
-export type TipoDaPeca = 'inicial' | 'reta' | 'T' | 'cruz';
+export type TipoDePecaDeCaminho = 'reta' | 'T' | 'cruz';
+
+// Peças especiais da Caixa (ST-12): entram apenas por sorteio; conquistas e
+// efeitos no Tabuleiro pertencem a issues futuras (#142).
+export type TipoDePecaEspecial =
+  | 'gerador'
+  | 'sala_do_diretor'
+  | 'sala_medica'
+  | 'portao_de_saida';
+
+// Tipos que compõem a Caixa: caminho + especiais. A Peça Inicial nunca entra
+// na Caixa.
+export type TipoDePecaDaCaixa = TipoDePecaDeCaminho | TipoDePecaEspecial;
+
+// Todos os tipos de Peça do Tabuleiro: a Inicial (fora da Caixa) mais os
+// tipos da Caixa.
+export type TipoDaPeca = 'inicial' | TipoDePecaDeCaminho | TipoDePecaEspecial;
 export type Orientacao = 0 | 90 | 180 | 270;
 export type SentidoDeRotacao = 'horario' | 'anti_horario';
 export type BordaCardinal = 'norte' | 'leste' | 'sul' | 'oeste';
@@ -47,9 +65,17 @@ export interface Celula {
   readonly coluna: number;
 }
 
-export interface PecaDaReserva {
+export interface PecaDaCaixa {
   readonly pecaId: string;
-  readonly tipo: TipoDaPeca;
+  readonly tipo: TipoDePecaDaCaixa;
+  readonly orientacao: Orientacao;
+}
+
+// As 4 Peças Iniciais de partida, fora da Caixa; cada Jogador encaixa a
+// própria diretamente no Primeiro Turno (ST-11).
+export interface PecaInicial {
+  readonly pecaId: string;
+  readonly tipo: 'inicial';
   readonly orientacao: Orientacao;
 }
 
@@ -62,9 +88,6 @@ export interface PecaPosicionada {
 
 export type CorDoPeao = 'branco' | 'vermelho' | 'azul' | 'amarelo';
 
-// Peças de caminho (reta, T, cruz) — a Peça Inicial nunca é Recebida.
-export type TipoDePecaDeCaminho = Exclude<TipoDaPeca, 'inicial'>;
-
 // O Peão é um elemento simples: cor e posição — sobre a Mesa (pecaId null) ou
 // sobre exatamente uma Peça posicionada (uma Peça aceita no máximo um Peão).
 export interface Peao {
@@ -76,7 +99,7 @@ export interface Peao {
 // Slot do Recebimento (ST-10): criado ao selecionar um Peão posicionado, um
 // para cada borda aberta com célula vizinha vazia. Não contém Peça até a
 // escolha do tipo (escolher_tipo_da_peca_recebida), que atribui pecaId e tipo
-// a partir da Reserva.
+// a partir da Caixa.
 export interface PecaRecebida {
   readonly recebidaId: string;
   readonly bordaGeradora: BordaCardinal;
@@ -86,13 +109,19 @@ export interface PecaRecebida {
   readonly orientacao: Orientacao;
 }
 
-// `pecaSelecionadaId` aponta para uma peça da Reserva (Seleção única) ou, no
-// ciclo do Peão, para a Peça atribuída à Recebida escolhida mais recentemente.
-// `pecaEmManipulacaoId` aponta para a última peça posicionada enquanto sua
-// janela de Manipulação está aberta; Finalização (nova seleção, novo
-// posicionamento ou clique na própria peça posicionada) fecha a janela.
+// `pecaSelecionadaId` aponta para uma Peça Inicial fora da Caixa (Seleção
+// única) ou, no ciclo do Peão, para a Peça atribuída à Recebida escolhida
+// mais recentemente. `pecaEmManipulacaoId` aponta para a última peça
+// posicionada enquanto sua janela de Manipulação está aberta; Finalização
+// (nova seleção, novo posicionamento ou clique na própria peça posicionada)
+// fecha a janela.
 export interface EstadoDoTabuleiro {
-  readonly reserva: readonly PecaDaReserva[];
+  // Caixa da partida (ST-12): composição fixa de 71 peças de caminho e
+  // especiais, embaralhada uma única vez na criação do estado; sorteio
+  // unitário sem reposição (sortearDaCaixa e escolher_tipo_da_peca_recebida).
+  readonly caixa: readonly PecaDaCaixa[];
+  // As 4 Peças Iniciais, fora da Caixa, encaixadas diretamente.
+  readonly iniciais: readonly PecaInicial[];
   readonly posicionadas: readonly PecaPosicionada[];
   readonly pecaSelecionadaId: string | null;
   readonly pecaEmManipulacaoId: string | null;
@@ -138,7 +167,7 @@ export interface EscolherTipoDaPecaRecebidaComando {
   readonly tipo: 'escolher_tipo_da_peca_recebida';
   readonly recebidaId: string;
   // O discriminador da união ocupa o nome "tipo"; o tipo da Peça de caminho
-  // escolhido na Reserva vem em "tipoDaPeca".
+  // escolhido na Caixa vem em "tipoDaPeca".
   readonly tipoDaPeca: TipoDePecaDeCaminho;
 }
 
@@ -186,6 +215,16 @@ export interface PecaPosicionadaEvento {
   readonly tipo: 'peca_posicionada';
   readonly pecaId: string;
   readonly celula: Celula;
+  readonly orientacao: Orientacao;
+}
+
+// ST-12: a Caixa fornece exatamente uma Peça por sorteio, sem reposição; a
+// Peça sorteada sai da Caixa e a primitiva não a posiciona — o consumo da
+// Peça sorteada pertence à camada da Partida (issue #139).
+export interface PecaSorteadaEvento {
+  readonly tipo: 'peca_sorteada';
+  readonly pecaId: string;
+  readonly tipoDaPeca: TipoDePecaDaCaixa;
   readonly orientacao: Orientacao;
 }
 
@@ -245,6 +284,7 @@ export type EventoDoTabuleiro =
   | PecaDeselecionadaEvento
   | PecaGiradaEvento
   | PecaPosicionadaEvento
+  | PecaSorteadaEvento
   | ManipulacaoFinalizadaEvento
   | PeaoSelecionadoEvento
   | RecebimentoGeradoEvento
@@ -257,7 +297,7 @@ export type CodigoDeErroDeTabuleiro =
   | 'DADOS_INVALIDOS'
   | 'PECA_NAO_ENCONTRADA'
   | 'PECA_NAO_SELECIONADA'
-  | 'RESERVA_ESGOTADA'
+  | 'CAIXA_ESGOTADA'
   | 'CELULA_NAO_ENCONTRADA'
   | 'CELULA_JA_OCUPADA'
   | 'PECA_JA_POSICIONADA'
@@ -303,31 +343,102 @@ const CORES_DOS_PEOES: readonly CorDoPeao[] = [
   'amarelo',
 ];
 
-const COMPOSICAO_INICIAL_DA_RESERVA: readonly {
-  readonly tipo: TipoDaPeca;
+// Composição fixa da Caixa (ST-12 / issue #144): 54 peças de caminho e 17
+// especiais, 71 no total. As 4 Peças Iniciais ficam fora da Caixa.
+export const COMPOSICAO_DA_CAIXA: readonly {
+  readonly tipo: TipoDePecaDaCaixa;
   readonly quantidade: number;
 }[] = [
-  { tipo: 'inicial', quantidade: 4 },
-  { tipo: 'reta', quantidade: 6 },
-  { tipo: 'T', quantidade: 6 },
-  { tipo: 'cruz', quantidade: 6 },
+  { tipo: 'reta', quantidade: 10 },
+  { tipo: 'T', quantidade: 32 },
+  { tipo: 'cruz', quantidade: 12 },
+  { tipo: 'gerador', quantidade: 6 },
+  { tipo: 'sala_do_diretor', quantidade: 3 },
+  { tipo: 'sala_medica', quantidade: 4 },
+  { tipo: 'portao_de_saida', quantidade: 4 },
 ];
 
-// Reserva de partida: 4 Peças Iniciais + 6 de cada tipo de caminho
-// (reta, T, cruz); ids determinísticos por tipo.
-export function estadoInicialDoTabuleiro(): EstadoDoTabuleiro {
-  const reserva: PecaDaReserva[] = [];
-  for (const entrada of COMPOSICAO_INICIAL_DA_RESERVA) {
+// Ids determinísticos por tipo: reta-1..10, t-1..32, cruz-1..12,
+// gerador-1..6, sala-do-diretor-1..3, sala-medica-1..4, portao-de-saida-1..4.
+const ID_DO_TIPO: Record<TipoDePecaDaCaixa, string> = {
+  reta: 'reta',
+  T: 't',
+  cruz: 'cruz',
+  gerador: 'gerador',
+  sala_do_diretor: 'sala-do-diretor',
+  sala_medica: 'sala-medica',
+  portao_de_saida: 'portao-de-saida',
+};
+
+// Caixa na ordem de composição (sem embaralhar): determinismo preservado para
+// estados sem seed e para a serialização em JSON puro.
+function montarCaixa(): PecaDaCaixa[] {
+  const caixa: PecaDaCaixa[] = [];
+  for (const entrada of COMPOSICAO_DA_CAIXA) {
     for (let indice = 1; indice <= entrada.quantidade; indice++) {
-      reserva.push({
-        pecaId: `${entrada.tipo.toLowerCase()}-${indice}`,
+      caixa.push({
+        pecaId: `${ID_DO_TIPO[entrada.tipo]}-${indice}`,
         tipo: entrada.tipo,
         orientacao: 0,
       });
     }
   }
+  return caixa;
+}
+
+// PRNG determinístico (mulberry32): 32 bits, sem dependências externas.
+function criarPrng(seed: number): () => number {
+  let estado = seed >>> 0;
+  return () => {
+    estado = (estado + 0x6d2b79f5) >>> 0;
+    let t = estado;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Embaralhamento único (Fisher-Yates) guiado pela seed: a mesma seed produz
+// exatamente a mesma ordem da Caixa.
+function embaralharCaixa(
+  caixa: readonly PecaDaCaixa[],
+  seed: number,
+): PecaDaCaixa[] {
+  const prng = criarPrng(seed);
+  const embaralhada = [...caixa];
+  for (let indice = embaralhada.length - 1; indice > 0; indice--) {
+    const alvo = Math.floor(prng() * (indice + 1));
+    [embaralhada[indice], embaralhada[alvo]] = [
+      embaralhada[alvo],
+      embaralhada[indice],
+    ];
+  }
+  return embaralhada;
+}
+
+export interface EntradaDoEstadoDoTabuleiro {
+  // Seed opcional do embaralhamento da Caixa; sem seed, a Caixa permanece na
+  // ordem de composição (determinismo preservado para testes). O game-server
+  // passa a seed real na integração da Partida (issue #139).
+  readonly seed?: number;
+}
+
+// Partida recém-preparada: Caixa com a composição fixa de 71 peças
+// (embaralhada quando a seed é fornecida) e as 4 Peças Iniciais fora dela.
+export function estadoInicialDoTabuleiro(
+  entrada?: EntradaDoEstadoDoTabuleiro,
+): EstadoDoTabuleiro {
+  const caixa = montarCaixa();
   return {
-    reserva,
+    caixa:
+      entrada?.seed === undefined
+        ? caixa
+        : embaralharCaixa(caixa, entrada.seed),
+    iniciais: [1, 2, 3, 4].map((ordem) => ({
+      pecaId: `inicial-${ordem}`,
+      tipo: 'inicial' as const,
+      orientacao: 0 as const,
+    })),
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
@@ -340,6 +451,27 @@ export function estadoInicialDoTabuleiro(): EstadoDoTabuleiro {
     peaoSelecionadoId: null,
     recebidas: [],
   };
+}
+
+// Primitiva de sorteio (ST-12): retira a primeira Peça da Caixa, sem
+// reposição, e emite peca_sorteada — sem posicionar a Peça. Caixa esgotada
+// rejeita com CAIXA_ESGOTADA e preserva o estado.
+export function sortearDaCaixa(estado: EstadoDoTabuleiro): ResultadoDoTabuleiro {
+  const [peca, ...resto] = estado.caixa;
+  if (!peca) {
+    return rejeitar('CAIXA_ESGOTADA', 'A Caixa não possui mais Peças.');
+  }
+  return sucesso(
+    { ...estado, caixa: resto },
+    [
+      {
+        tipo: 'peca_sorteada',
+        pecaId: peca.pecaId,
+        tipoDaPeca: peca.tipo,
+        orientacao: peca.orientacao,
+      },
+    ],
+  );
 }
 
 // Vizinhança ortogonal (ADR-0004): apenas células que compartilham uma borda;
@@ -403,7 +535,7 @@ function selecionarPeca(
     return fecharManipulacao(estado);
   }
 
-  const peca = encontrarNaReserva(estado, comando.pecaId);
+  const peca = encontrarNasIniciais(estado, comando.pecaId);
   if (peca) {
     if (
       estado.pecaSelecionadaId !== null &&
@@ -463,7 +595,7 @@ function girarPeca(
     if (estado.pecaEmManipulacaoId === comando.pecaId) {
       return girarPosicionada(estado, comando);
     }
-    if (encontrarNaReserva(estado, comando.pecaId)) {
+    if (encontrarNasIniciais(estado, comando.pecaId)) {
       return rejeitar(
         'PECA_NAO_SELECIONADA',
         'Há uma Manipulação em andamento; finalize-a antes de selecionar outra Peça.',
@@ -471,7 +603,7 @@ function girarPeca(
     }
   }
 
-  // Peça Recebida segue o mesmo padrão da Reserva: só a selecionada gira.
+  // Peça Recebida segue o mesmo padrão das Iniciais: só a selecionada gira.
   const recebida = encontrarRecebidaPorPeca(estado, comando.pecaId);
   if (recebida) {
     if (estado.pecaSelecionadaId !== comando.pecaId) {
@@ -484,8 +616,8 @@ function girarPeca(
   }
 
   if (estado.pecaSelecionadaId === comando.pecaId) {
-    // Seleção ativa de peça da Reserva: gira nos dois sentidos.
-    return girarDaReserva(estado, comando);
+    // Seleção ativa de Peça Inicial: gira nos dois sentidos.
+    return girarDaMesa(estado, comando);
   }
 
   if (encontrarPosicionada(estado, comando.pecaId)) {
@@ -495,13 +627,14 @@ function girarPeca(
     );
   }
 
-  if (encontrarNaReserva(estado, comando.pecaId)) {
+  if (encontrarNasIniciais(estado, comando.pecaId)) {
     return rejeitar(
       'PECA_NAO_SELECIONADA',
       'A Peça indicada não é a selecionada.',
     );
   }
 
+  // Peça ainda dentro da Caixa: não é manipulável — sai apenas por sorteio.
   return rejeitar('PECA_NAO_ENCONTRADA', 'A Peça não foi encontrada.');
 }
 
@@ -525,12 +658,16 @@ function posicionarPeca(
     return posicionarRecebida(estado, recebida, comando);
   }
 
-  if (estado.reserva.length === 0) {
-    return rejeitar('RESERVA_ESGOTADA', 'A Reserva não possui mais Peças.');
-  }
-
-  const pecaNaReserva = encontrarNaReserva(estado, comando.pecaId);
-  if (!pecaNaReserva) {
+  // ST-12: a Caixa é opaca — apenas as Peças Iniciais (fora dela) e as
+  // Recebidas são posicionáveis; peça de caminho entra só pelo Recebimento.
+  const pecaNasIniciais = encontrarNasIniciais(estado, comando.pecaId);
+  if (!pecaNasIniciais) {
+    if (encontrarNaCaixa(estado, comando.pecaId)) {
+      return rejeitar(
+        'PECA_NAO_RECEBIDA',
+        'Peças de caminho só podem entrar pelo Recebimento.',
+      );
+    }
     if (encontrarPosicionada(estado, comando.pecaId)) {
       return rejeitar(
         'PECA_JA_POSICIONADA',
@@ -538,15 +675,6 @@ function posicionarPeca(
       );
     }
     return rejeitar('PECA_NAO_ENCONTRADA', 'A Peça não foi encontrada.');
-  }
-
-  // ST-10: Peças de caminho só entram pelo Recebimento; apenas a Peça Inicial
-  // é posicionável diretamente, em qualquer célula vazia.
-  if (pecaNaReserva.tipo !== 'inicial') {
-    return rejeitar(
-      'PECA_NAO_RECEBIDA',
-      'Peças de caminho só podem entrar pelo Recebimento.',
-    );
   }
 
   if (estado.pecaSelecionadaId !== comando.pecaId) {
@@ -564,14 +692,14 @@ function posicionarPeca(
   }
 
   const posicionada: PecaPosicionada = {
-    pecaId: pecaNaReserva.pecaId,
-    tipo: pecaNaReserva.tipo,
-    orientacao: pecaNaReserva.orientacao,
+    pecaId: pecaNasIniciais.pecaId,
+    tipo: pecaNasIniciais.tipo,
+    orientacao: pecaNasIniciais.orientacao,
     celula: comando.celula,
   };
   const novoEstado: EstadoDoTabuleiro = {
     ...estado,
-    reserva: estado.reserva.filter((item) => item.pecaId !== comando.pecaId),
+    iniciais: estado.iniciais.filter((item) => item.pecaId !== comando.pecaId),
     posicionadas: [...estado.posicionadas, posicionada],
     pecaSelecionadaId: null,
     // O Encaixe abre a janela de Manipulação da peça posicionada (e substitui
@@ -614,7 +742,7 @@ function fecharManipulacao(estado: EstadoDoTabuleiro): ResultadoDoTabuleiro {
   );
 }
 
-function girarDaReserva(
+function girarDaMesa(
   estado: EstadoDoTabuleiro,
   comando: GirarPecaComando,
 ): ResultadoDoTabuleiro {
@@ -625,7 +753,7 @@ function girarDaReserva(
       'Nenhuma Peça está selecionada.',
     );
   }
-  const peca = encontrarNaReserva(estado, pecaSelecionadaId);
+  const peca = encontrarNasIniciais(estado, pecaSelecionadaId);
   if (!peca) {
     return rejeitar('PECA_NAO_ENCONTRADA', 'A Peça não foi encontrada.');
   }
@@ -633,7 +761,7 @@ function girarDaReserva(
   const orientacaoNova = rotacionar(peca.orientacao, comando.sentido);
   const novoEstado: EstadoDoTabuleiro = {
     ...estado,
-    reserva: estado.reserva.map((item) =>
+    iniciais: estado.iniciais.map((item) =>
       item.pecaId === peca.pecaId ? { ...item, orientacao: orientacaoNova } : item,
     ),
   };
@@ -675,9 +803,16 @@ function girarPosicionada(
   ]);
 }
 
-function encontrarNaReserva(
+function encontrarNasIniciais(
   estado: EstadoDoTabuleiro,
   pecaId: string,
-): PecaDaReserva | undefined {
-  return estado.reserva.find((peca) => peca.pecaId === pecaId);
+): PecaInicial | undefined {
+  return estado.iniciais.find((peca) => peca.pecaId === pecaId);
+}
+
+function encontrarNaCaixa(
+  estado: EstadoDoTabuleiro,
+  pecaId: string,
+): PecaDaCaixa | undefined {
+  return estado.caixa.find((peca) => peca.pecaId === pecaId);
 }

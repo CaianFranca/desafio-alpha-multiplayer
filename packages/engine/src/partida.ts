@@ -131,9 +131,12 @@ const CORES_PELA_ORDEM: readonly CorDoPeao[] = [
 
 // Partida recém-preparada: roster na ordem recebida, vez do primeiro Jogador
 // e o evento de abertura do turno dele (o game-server precisa do
-// turno_iniciado inicial para abrir a Partida).
+// turno_iniciado inicial para abrir a Partida). A seed opcional é propagada
+// ao embaralhamento único da Caixa (ST-12); sem seed, a Caixa permanece na
+// ordem de composição.
 export function estadoInicialDaPartida(
   jogadoresEmOrdem: readonly string[],
+  entrada?: { readonly seed?: number },
 ): ResultadoDaPartida {
   const idsInvalidos = validarTexto(...jogadoresEmOrdem);
   if (idsInvalidos) {
@@ -166,7 +169,7 @@ export function estadoInicialDaPartida(
   );
 
   const estado: EstadoDaPartida = {
-    tabuleiro: estadoInicialDoTabuleiro(),
+    tabuleiro: estadoInicialDoTabuleiro(entrada),
     jogadores,
     jogadorAtivoId: jogadores[0].jogadorId,
     rodada: 1,
@@ -254,15 +257,16 @@ function exigirPeaoDoAtor(
 
 // Guarda da Peça Inicial (ST-11): cada Jogador posiciona exclusivamente a
 // própria inicial-<ordem>, e somente no próprio Primeiro Turno. A verificação
-// cobre Reserva e Peças posicionadas (a Seleção da própria inicial posicionada
-// encerra a Manipulação e continua válida no Primeiro Turno).
+// cobre as Peças Iniciais fora da Caixa (ST-12) e as Peças posicionadas (a
+// Seleção da própria inicial posicionada encerra a Manipulação e continua
+// válida no Primeiro Turno).
 function exigirPecaInicialDisponivel(
   estado: EstadoDaPartida,
   pecaId: string,
   ator: JogadorDaPartida,
 ): OperacaoRejeitadaDaPartida | undefined {
   const ehInicial =
-    estado.tabuleiro.reserva.some(
+    estado.tabuleiro.iniciais.some(
       (peca) => peca.pecaId === pecaId && peca.tipo === 'inicial',
     ) ||
     estado.tabuleiro.posicionadas.some(

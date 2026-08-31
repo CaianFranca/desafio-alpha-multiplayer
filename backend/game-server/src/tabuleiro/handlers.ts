@@ -194,16 +194,18 @@ function mapearComando(
 }
 
 // Conjunto fechado dos códigos do domínio que pertencem ao contrato wire do
-// tabuleiro (issues #80 e #88): os códigos de Peças do #80 mais os do ciclo
-// de Peões/Recebimento do #88. Qualquer código fora deste conjunto (ex.:
-// códigos do canal de Partida do #117, fora do escopo) é normalizado para
-// DADOS_INVALIDOS para nunca vazar um código fora do contrato.
+// tabuleiro (issues #80 e #88): os códigos de Peças do #80, os do ciclo de
+// Peões/Recebimento do #88 e o da Caixa da ST-12 (#144). Qualquer código fora
+// deste conjunto (ex.: códigos do canal de Partida do #117, fora do escopo)
+// é normalizado para DADOS_INVALIDOS para nunca vazar um código fora do
+// contrato.
 const CODIGOS_DO_TABULEIRO_WIRE: ReadonlySet<string> = new Set([
   'DADOS_INVALIDOS',
   'ESTADO_INDISPONIVEL',
   'PECA_NAO_ENCONTRADA',
   'PECA_NAO_SELECIONADA',
   'RESERVA_ESGOTADA',
+  'CAIXA_ESGOTADA',
   'CELULA_NAO_ENCONTRADA',
   'CELULA_JA_OCUPADA',
   'PECA_JA_POSICIONADA',
