@@ -38,7 +38,7 @@ import {
   removerEstadoDaPartida,
   salvarEstadoDaPartida,
 } from '../src/partidas/estado.ts';
-import { estadoInicialDaPartida, type EstadoDaPartida } from '@flicker/engine';
+import { aplicarComandoDePartida, estadoInicialDaPartida, type EstadoDaPartida } from '@flicker/engine';
 
 const SERVER_ID = 'game-server-teste-tabuleiro';
 const JWT_SECRET = 'test_secret_para_tabuleiro';
@@ -338,11 +338,11 @@ test('fluxo feliz: selecionar e posicionar peça persiste no Redis', async () =>
       assert.equal(posicionada.pecaId, 'inicial-1');
       assert.deepEqual(posicionada.celula, { linha: 0, coluna: 0 });
 
-      // O estado no Redis reflete a posição: a reserva não contém mais 'inicial-1'.
+      // O estado no Redis reflete a posição: as iniciais não contêm mais 'inicial-1'.
       const estado = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.ok(estado !== null, 'estado da partida deve existir no Redis');
-      const aindaNaReserva = estado!.tabuleiro.reserva.some((p) => p.pecaId === 'inicial-1');
-      assert.equal(aindaNaReserva, false);
+      const aindaNasIniciais = estado!.tabuleiro.iniciais.some((p) => p.pecaId === 'inicial-1');
+      assert.equal(aindaNasIniciais, false);
       const posicionadas = estado!.tabuleiro.posicionadas.filter((p) => p.pecaId === 'inicial-1');
       assert.equal(posicionadas.length, 1);
       assert.deepEqual(posicionadas[0]!.celula, { linha: 0, coluna: 0 });
@@ -466,31 +466,52 @@ test('rejeição: posicionar sem selecionar responde ERRO_DO_TABULEIRO PECA_NAO_
   }
 });
 
-test('rejeição: posicionar com reserva vazia responde ERRO_DO_TABULEIRO RESERVA_ESGOTADA', async () => {
+test('rejeição: escolher tipo com caixa esgotada responde ERRO_DO_TABULEIRO CAIXA_ESGOTADA', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    // Esvazia a reserva diretamente no estado persistido (ciclo de vida
-    // sintético) para exercitar o caminho RESERVA_ESGOTADA do domínio.
+    // Estado sintético (ciclo de vida direto no domínio): peão do jogador-1
+    // encaixado sobre a inicial-1, com o Recebimento pendente e a Caixa
+    // esvaziada, para exercitar o caminho CAIXA_ESGOTADA do domínio via wire.
     const inicial = estadoInicialDaPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
     assert.equal(inicial.sucesso, true, 'roster válido deveria iniciar a Partida');
     if (!inicial.sucesso) {
       throw new Error('inacessível');
     }
+    let estado = inicial.estado;
+    for (const comando of [
+      { tipo: 'selecionar_peca', pecaId: 'inicial-1' },
+      { tipo: 'posicionar_peca', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 } },
+      { tipo: 'selecionar_peao', peaoId: 'peao-branco' },
+      { tipo: 'posicionar_peao', peaoId: 'peao-branco', celula: { linha: 3, coluna: 3 } },
+    ] as const) {
+      const resultado = aplicarComandoDePartida(estado, comando, 'jogador-1');
+      assert.equal(resultado.sucesso, true, `${comando.tipo} deveria ser aceito`);
+      if (!resultado.sucesso) {
+        throw new Error('inacessível');
+      }
+      estado = resultado.estado;
+    }
+    assert.ok(estado.tabuleiro.recebidas.length > 0, 'Recebimento deveria ter pendências');
     const estadoVazio: EstadoDaPartida = {
-      ...inicial.estado,
-      tabuleiro: { ...inicial.estado.tabuleiro, reserva: [] },
+      ...estado,
+      tabuleiro: { ...estado.tabuleiro, caixa: [] },
     };
     await salvarEstadoDaPartida(redis, aceite.partidaId, estadoVazio);
 
     const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
-      enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-1', pecaId: 'inicial-1', celula: { linha: 0, coluna: 0 } });
+      enviar(ws, {
+        type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+        jogadorId: 'jogador-1',
+        recebidaId: 'recebida-inicial-1-norte',
+        tipoDaPeca: 'reta',
+      });
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
-      assert.equal(erro.codigo, 'RESERVA_ESGOTADA');
+      assert.equal(erro.codigo, 'CAIXA_ESGOTADA');
       assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
     } finally {
       ws.close();

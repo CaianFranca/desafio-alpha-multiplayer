@@ -67,6 +67,7 @@ export type {
   CodigoDeErroDeTabuleiro,
   ComandoDeTabuleiro,
   CorDoPeao,
+  EntradaDoEstadoDoTabuleiro,
   ErroDeDominioDoTabuleiro,
   EscolherTipoDaPecaRecebidaComando,
   EstadoDoTabuleiro,
@@ -83,13 +84,15 @@ export type {
   PeaoPermaneceuEvento,
   PeaoPosicionadoEvento,
   PeaoSelecionadoEvento,
-  PecaDaReserva,
+  PecaDaCaixa,
   PecaDeselecionadaEvento,
   PecaGiradaEvento,
+  PecaInicial,
   PecaPosicionada,
   PecaPosicionadaEvento,
   PecaRecebida,
   PecaSelecionadaEvento,
+  PecaSorteadaEvento,
   PendenciaDeRecebimento,
   PermanecerComando,
   PosicionarPecaComando,
@@ -101,7 +104,9 @@ export type {
   SentidoDeRotacao,
   TipoDaPeca,
   TipoDaPecaRecebidaEscolhidoEvento,
+  TipoDePecaDaCaixa,
   TipoDePecaDeCaminho,
+  TipoDePecaEspecial,
 } from './tabuleiro.ts';
 
 export {
@@ -133,11 +138,13 @@ export {
 } from './partida.ts';
 
 export {
+  COMPOSICAO_DA_CAIXA,
   LADO_DA_GRADE,
   aplicarComandoDeTabuleiro,
   bordasAbertas,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
+  sortearDaCaixa,
   vizinhasConectadas,
   vizinhos,
 } from './tabuleiro.ts';

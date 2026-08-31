@@ -273,7 +273,7 @@ test('gerarRecebidas considera apenas células dentro da grade', () => {
   assert.deepEqual(gerarRecebidas(estado, peca)[0].celulaAlvo, { linha: 0, coluna: 1 });
 });
 
-test('tipo da recebida é livre e consome a Reserva; peça inicial nunca é recebida', () => {
+test('tipo da recebida é livre e consome a Caixa; peça inicial nunca é recebida', () => {
   let parcial = estadoComRecebidasPendentes();
 
   const escolha = aplicarComandoDeTabuleiro(
@@ -282,8 +282,8 @@ test('tipo da recebida é livre e consome a Reserva; peça inicial nunca é rece
   );
   assert.equal(escolha.sucesso, true);
   if (!escolha.sucesso) return;
-  // A primeira cruz da Reserva é consumida e atribuída ao slot.
-  assert.ok(!escolha.estado.reserva.some((peca) => peca.pecaId === 'cruz-1'));
+  // A primeira cruz da Caixa é consumida e atribuída ao slot.
+  assert.ok(!escolha.estado.caixa.some((peca) => peca.pecaId === 'cruz-1'));
   assert.equal(escolha.estado.recebidas[0].pecaId, 'cruz-1');
   assert.equal(escolha.estado.recebidas[0].tipo, 'cruz');
   assert.equal(escolha.estado.pecaSelecionadaId, 'cruz-1');
@@ -306,16 +306,16 @@ test('tipo da recebida é livre e consome a Reserva; peça inicial nunca é rece
   );
 });
 
-test('reserva sem peças do tipo rejeita a escolha com RESERVA_ESGOTADA', () => {
+test('caixa sem peças do tipo rejeita a escolha com CAIXA_ESGOTADA', () => {
   let estado = estadoComRecebidasPendentes();
   estado = {
     ...estado,
-    reserva: estado.reserva.filter((peca) => peca.tipo !== 'T'),
+    caixa: estado.caixa.filter((peca) => peca.tipo !== 'T'),
   };
 
   assert.equal(
     codigoDaRejeicao(estado, escolherTipo('recebida-inicial-1-norte', 'T')),
-    'RESERVA_ESGOTADA',
+    'CAIXA_ESGOTADA',
   );
 });
 
@@ -385,14 +385,13 @@ test('girar recebida segue o padrão da seleção única', () => {
   ), true);
 });
 
-test('recebida nasce com orientação 0 mesmo com a peça da Reserva girada antes da escolha', () => {
+test('recebida nasce com orientação 0; a caixa é opaca e não é manipulável', () => {
   let estado = estadoComRecebidasPendentes();
 
-  // Girar a futura peça consumida na Reserva é permitido (só o encaixe direto
-  // é barrado); a orientação stale não pode vazar para a Recebida.
-  estado = aplicar(estado, selecionar('reta-1'));
-  estado = aplicar(estado, girar('reta-1'));
-  assert.equal(estado.reserva.find((peca) => peca.pecaId === 'reta-1')?.orientacao, 90);
+  // A Caixa é opaca (ST-12): peça de caminho dentro dela não é selecionável
+  // nem girável — não existe "girar antes da escolha".
+  assert.equal(codigoDaRejeicao(estado, selecionar('reta-1')), 'PECA_NAO_ENCONTRADA');
+  assert.equal(codigoDaRejeicao(estado, girar('reta-1')), 'PECA_NAO_ENCONTRADA');
 
   estado = aplicar(estado, escolherTipo('recebida-inicial-1-norte', 'reta'));
   assert.equal(estado.recebidas[0].pecaId, 'reta-1');
@@ -604,16 +603,16 @@ test('peça inicial pode ser posicionada em qualquer célula vazia com peças e 
   ));
 });
 
-test('peça de caminho direto da Reserva é rejeitada com PECA_NAO_RECEBIDA', () => {
+test('peça de caminho direto da Caixa é rejeitada com PECA_NAO_RECEBIDA', () => {
   let estado = estadoInicialDoTabuleiro();
   assert.equal(
     codigoDaRejeicao(estado, posicionar('reta-1', 3, 3)),
     'PECA_NAO_RECEBIDA',
   );
 
-  // Mesmo com a peça selecionada e reserva cheia, o caminho direto é vedado.
-  estado = aplicar(estado, selecionar('reta-1'));
-  estado = aplicar(estado, girar('reta-1'));
+  // Mesmo com uma Peça Inicial selecionada, o caminho direto da Caixa é vedado.
+  estado = aplicar(estado, selecionar('inicial-1'));
+  estado = aplicar(estado, girar('inicial-1'));
   assert.equal(
     codigoDaRejeicao(estado, posicionar('reta-1', 3, 3)),
     'PECA_NAO_RECEBIDA',

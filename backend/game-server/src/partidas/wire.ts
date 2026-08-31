@@ -155,15 +155,16 @@ export function mapearComandoDaPartida(
 
 // Conjunto fechado dos códigos do domínio que pertencem ao contrato wire do
 // canal de Partida (issue #117): os códigos de Tabuleiro/Peões das issues #80
-// e #88 mais os 5 códigos de Turno do ST-11. Qualquer código fora deste
-// conjunto é normalizado para DADOS_INVALIDOS para nunca vazar um código fora
-// do contrato.
+// e #88, o da Caixa da ST-12 (#144) e os 5 códigos de Turno do ST-11. Qualquer
+// código fora deste conjunto é normalizado para DADOS_INVALIDOS para nunca
+// vazar um código fora do contrato.
 const CODIGOS_DA_PARTIDA_WIRE: ReadonlySet<string> = new Set([
   'DADOS_INVALIDOS',
   'ESTADO_INDISPONIVEL',
   'PECA_NAO_ENCONTRADA',
   'PECA_NAO_SELECIONADA',
   'RESERVA_ESGOTADA',
+  'CAIXA_ESGOTADA',
   'CELULA_NAO_ENCONTRADA',
   'CELULA_JA_OCUPADA',
   'PECA_JA_POSICIONADA',

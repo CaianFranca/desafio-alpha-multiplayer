@@ -87,7 +87,7 @@ const jogadorAtivo = (estado: EstadoDaPartida) => {
 };
 
 // Resolve todas as pendências do Recebimento do Peão selecionado: escolhe o
-// tipo na Reserva e encaixa cada Recebida na célula-alvo fixada.
+// tipo na Caixa e encaixa cada Recebida na célula-alvo fixada.
 function resolverRecebidas(
   estado: EstadoDaPartida,
   ator: string,
@@ -168,7 +168,8 @@ test('estadoInicialDaPartida monta o roster, a vez e o evento de abertura', () =
   assert.equal(estado.rodada, 1);
   assert.equal(estado.pecaDoInicioDoTurnoId, null);
   assert.equal(estado.posicaoConfirmada, false);
-  assert.equal(estado.tabuleiro.reserva.length, 22);
+  assert.equal(estado.tabuleiro.caixa.length, 71);
+  assert.equal(estado.tabuleiro.iniciais.length, 4);
   assert.equal(estado.tabuleiro.peoes.length, 4);
   assert.deepEqual(resultado.eventos, [
     { tipo: 'turno_iniciado', jogadorId: 'ana', rodada: 1 },

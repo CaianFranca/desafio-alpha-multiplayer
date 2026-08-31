@@ -386,9 +386,9 @@ test('fluxo feliz: ciclo do peão persiste no Redis (Primeiro Turno + mover na R
       const peaoBranco = estado!.tabuleiro.peoes.find((p) => p.peaoId === 'peao-branco');
       assert.equal(peaoBranco?.pecaId, 'reta-1');
       assert.equal(estado!.tabuleiro.recebidas.length, 0);
-      const reserva = estado!.tabuleiro.reserva.map((p) => p.pecaId);
-      assert.ok(!reserva.includes('reta-1'), 'reta-1 deve ter saído da reserva');
-      assert.ok(!reserva.includes('reta-2'), 'reta-2 deve ter saído da reserva');
+      const caixa = estado!.tabuleiro.caixa.map((p) => p.pecaId);
+      assert.ok(!caixa.includes('reta-1'), 'reta-1 deve ter saído da caixa');
+      assert.ok(!caixa.includes('reta-2'), 'reta-2 deve ter saído da caixa');
 
       const porPeca = new Map(estado!.tabuleiro.posicionadas.map((p) => [p.pecaId, p.celula]));
       assert.deepEqual(porPeca.get('inicial-1'), { linha: 3, coluna: 3 });
