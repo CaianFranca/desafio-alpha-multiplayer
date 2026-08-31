@@ -136,6 +136,7 @@ export {
   LADO_DA_GRADE,
   aplicarComandoDeTabuleiro,
   bordasAbertas,
+  calcularIluminacao,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   vizinhasConectadas,

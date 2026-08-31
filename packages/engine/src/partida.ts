@@ -13,9 +13,11 @@
 
 import {
   aplicarComandoDeTabuleiro,
+  calcularIluminacao,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   validarTexto,
+  type Celula,
   type ComandoDeTabuleiro,
   type CorDoPeao,
   type CodigoDeErroDeTabuleiro,
@@ -41,6 +43,8 @@ export interface JogadorDaPartida {
 
 // Estado da Partida: o Tabuleiro (com Seleção única, Manipulação, Recebidas e
 // Peões dentro do EstadoDoTabuleiro) mais os campos do loop de turnos.
+// Iluminação é campo materializado — união ortogonal (célula do peão + 4
+// vizinhas) compartilhada, recalculada só nos pontos definitivos.
 export interface EstadoDaPartida {
   readonly tabuleiro: EstadoDoTabuleiro;
   // Roster em ordem de entrada; a vez avança circularmente por "ordem".
@@ -51,6 +55,7 @@ export interface EstadoDaPartida {
   // está sobre a Mesa (Primeiro Turno ainda não concluído).
   readonly pecaDoInicioDoTurnoId: string | null;
   readonly posicaoConfirmada: boolean;
+  readonly celulasIluminadas: readonly Celula[];
 }
 
 export interface ConfirmarPosicaoDoPeaoComando {
@@ -172,6 +177,7 @@ export function estadoInicialDaPartida(
     rodada: 1,
     pecaDoInicioDoTurnoId: null,
     posicaoConfirmada: false,
+    celulasIluminadas: [],
   };
   return sucessoDaPartida(estado, [
     { tipo: 'turno_iniciado', jogadorId: jogadores[0].jogadorId, rodada: 1 },
@@ -351,7 +357,8 @@ function posicionarPeaoDaPartida(
       recebidas: projetarRecebidas(recebidas),
     });
   }
-  return sucessoDaPartida({ ...estado, tabuleiro }, eventos);
+  const celulasIluminadas = calcularIluminacao(tabuleiro);
+  return sucessoDaPartida({ ...estado, tabuleiro, celulasIluminadas }, eventos);
 }
 
 function moverPeaoDaPartida(
@@ -501,11 +508,14 @@ function confirmarPosicaoDoPeao(
       recebidas: projetarRecebidas(recebidas),
     });
   }
+  const tabuleiro = { ...estado.tabuleiro, recebidas };
+  const celulasIluminadas = calcularIluminacao(tabuleiro);
   return sucessoDaPartida(
     {
       ...estado,
-      tabuleiro: { ...estado.tabuleiro, recebidas },
+      tabuleiro,
       posicaoConfirmada: true,
+      celulasIluminadas,
     },
     eventos,
   );
@@ -605,6 +615,7 @@ function avancarVez(
     rodada,
     pecaDoInicioDoTurnoId: peaoDoProximo?.pecaId ?? null,
     posicaoConfirmada: false,
+    celulasIluminadas: estado.celulasIluminadas,
   };
   return sucessoDaPartida(novoEstado, [
     ...eventos,
