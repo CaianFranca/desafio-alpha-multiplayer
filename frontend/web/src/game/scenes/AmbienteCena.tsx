@@ -11,6 +11,8 @@ import {
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Reserva } from '../tabuleiro/Reserva'
+import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
+import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
 import type { PeaoId, PecaId, EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
@@ -60,21 +62,37 @@ function Mesa() {
 
 interface AmbienteCenaProps {
   estadoExibicao?: EstadoExibicaoTabuleiro | null
+  /** Estado de interação (seleção/manipulação) para cursor e destaques. */
+  estadoInteracao?: EstadoInteracaoTabuleiro | null
+  onComando?: (comando: TabuleiroComandoDoCliente | null) => void
+}
+
+// Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
+// sem alvo não monta a cena; DEV sem alvo pode), componentes ficam inertes.
+const estadoInteracaoVazio: EstadoInteracaoTabuleiro = {
+  reserva: [],
+  posicionadas: [],
+  pecaSelecionadaId: null,
+  pecaEmManipulacaoId: null,
+}
+function noop(): void {}
+
+export function AmbienteCena({
+  estadoExibicao,
+  estadoInteracao = null,
+  onComando,
+  peaoSelecionadoId = null,
+  destinosSet,
+  onSelecionarPeao,
+  onDesselecionar,
+}: AmbienteCenaProps) {
   peaoSelecionadoId?: PeaoId | null
   /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
   destinosSet?: ReadonlySet<PecaId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
   /** Clique em área vazia (Mesa/chão) desseleciona o peão. */
   onDesselecionar?: () => void
-}
-
-export function AmbienteCena({
-  estadoExibicao,
-  peaoSelecionadoId = null,
-  destinosSet,
-  onSelecionarPeao,
-  onDesselecionar,
-}: AmbienteCenaProps) {
+  
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à reserva (-X). Índices preservam a ordem do estado.
   const peoesNaMesa = (estadoExibicao?.peoes ?? []).filter(
@@ -100,12 +118,18 @@ export function AmbienteCena({
           <>
             <Tabuleiro
               posicionadas={estadoExibicao.posicionadas}
+              estadoInteracao={estadoInteracao ?? estadoInteracaoVazio}
+              onComando={onComando ?? noop}
               peoes={estadoExibicao.peoes}
               peaoSelecionadoId={peaoSelecionadoId}
               destinosSet={destinosSet}
               onSelecionarPeao={onSelecionarPeao}
             />
-            <Reserva reserva={estadoExibicao.reserva} />
+            <Reserva
+              reserva={estadoExibicao.reserva}
+              estadoInteracao={estadoInteracao ?? estadoInteracaoVazio}
+              onComando={onComando ?? noop}
+            />
             {peoesNaMesa.map((peao) => {
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (

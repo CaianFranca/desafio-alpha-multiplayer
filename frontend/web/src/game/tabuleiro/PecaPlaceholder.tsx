@@ -1,12 +1,17 @@
 import { TAMANHO_CELULA, bordasAbertas } from './contrato'
 import type { TipoDaPeca, Orientacao, BordaCardinal } from './contrato'
+import type { ThreeEvent } from '@react-three/fiber'
+import { handlersDeCursor } from './cursor'
 
 interface PecaPlaceholderProps {
   tipo: TipoDaPeca
   orientacao: Orientacao
   position?: [number, number, number]
-  /** Destaque visual (emissivo) quando a peça é destino válido do peão (issue #90). */
+  /** Destaque visual da peça selecionada/em manipulação. */
   destacada?: boolean
+  /** Cursor do ponteiro ao pairar (reserva selecionável). */
+  cursor?: 'default' | 'pointer'
+  onClick?: (event: ThreeEvent<MouseEvent>) => void
 }
 
 const COR_POR_TIPO: Record<TipoDaPeca, string> = {
@@ -18,8 +23,10 @@ const COR_POR_TIPO: Record<TipoDaPeca, string> = {
 
 const COR_CAMINHO = '#111111'
 
+// Destaque da peça selecionada/em manipulação: realce quente na borda para
+// distinguir visualmente da composição padrão.
 /** Cor do destaque de destino válido (vizinha conectada ao peão selecionado). */
-const COR_DESTAQUE = '#4ade80'
+const COR_DESTAQUE = '#ffe08a'
 const INTENSIDADE_DESTAQUE = 0.7
 
 const TAMANHO_PECA = TAMANHO_CELULA * 0.96
@@ -36,12 +43,31 @@ const MAP_BORDA: Record<BordaCardinal, { pos: [number, number, number]; args: [n
   oeste: { pos: [-OFFSET_BRACO, 0, 0], args: [COMPRIMENTO_BRACO, 0.02, LARGURA_TRILHA] },
 }
 
-export function PecaPlaceholder({ tipo, orientacao, position, destacada = false }: PecaPlaceholderProps) {
+export function PecaPlaceholder({
+  tipo,
+  orientacao,
+  position,
+  destacada = false,
+  cursor = 'default',
+  onClick,
+}: PecaPlaceholderProps) {
   const bordas = bordasAbertas({ tipo, orientacao })
+  const cursorHandlers = handlersDeCursor(cursor)
+
+  const handleClick = onClick
+    ? (e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation()
+        onClick(e)
+      }
+    : undefined
 
   return (
     <group position={position}>
-      <mesh position={[0, 0.08, 0]}>
+      <mesh
+        position={[0, 0.08, 0]}
+        onClick={handleClick}
+        {...cursorHandlers}
+      >
         <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
         <meshStandardMaterial
           color={COR_POR_TIPO[tipo]}

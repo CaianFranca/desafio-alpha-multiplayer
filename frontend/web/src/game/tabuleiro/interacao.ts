@@ -88,6 +88,14 @@ export function cursorParaCelula(
   return 'pointer'
 }
 
+/** Pointer se for a peça em manipulação (finalizável por clique). */
+export function cursorParaPecaPosicionada(
+  pecaEmManipulacaoId: string | null,
+  pecaId: string,
+): 'default' | 'pointer' {
+  return pecaEmManipulacaoId === pecaId ? 'pointer' : 'default'
+}
+
 /** Delegação pura ao limiar da câmera (6px, ver cameraLimites.ts:11). */
 export function deveSuprimirCliquePorArrasto(dx: number, dy: number): boolean {
   return atingiuLimiar(dx, dy)
