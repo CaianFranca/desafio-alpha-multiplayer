@@ -38,10 +38,12 @@ import type { Celula, PeaoDaExibicao, PecaPosicionada, TipoDaPeca } from './cont
 import type {
   ErroDoTabuleiroEvento,
   ManipulacaoFinalizadaEvento,
+  PecaDeselecionadaEvento,
   PeaoComandoDoCliente,
   PeaoEventoDoServidor,
   PecaGiradaEvento,
   PecaPosicionadaEvento,
+  PecaSelecionadaEvento,
   PendenciaDeRecebimento,
   SentidoDeRotacao,
   TabuleiroComandoDoCliente,
@@ -253,6 +255,8 @@ export function mapearMovimentacao(
 /** Eventos do ciclo do Peão + reusos do Tabuleiro que chegam no mesmo canal. */
 export type EventoDoCicloDoPeao =
   | PeaoEventoDoServidor
+  | PecaSelecionadaEvento
+  | PecaDeselecionadaEvento
   | PecaPosicionadaEvento
   | PecaGiradaEvento
   | ManipulacaoFinalizadaEvento
@@ -272,6 +276,8 @@ export function mapearEventoPeaoParaFeedback(
     case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO':
     case 'PEAO_MOVIDO':
     case 'PEAO_PERMANECEU':
+    case 'PECA_SELECIONADA':
+    case 'PECA_DESELECIONADA':
     case 'PECA_POSICIONADA':
     case 'PECA_GIRADA':
     case 'MANIPULACAO_FINALIZADA':

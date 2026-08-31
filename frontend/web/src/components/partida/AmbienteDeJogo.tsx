@@ -10,6 +10,7 @@ import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import type { EstadoExibicaoTabuleiro } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
+import type { FlashFeedback } from '../../game/tabuleiro/interacao'
 import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 import {
   chaveCelula,
@@ -18,6 +19,9 @@ import {
 } from '../../game/tabuleiro/contrato'
 import type { PeaoId } from '../../game/tabuleiro/contrato'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
+import { mapearCliqueNoPeao } from '../../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
+import type { PeaoComandoDoCliente } from '@flicker/shared'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -35,32 +39,66 @@ interface AmbienteDeJogoProps {
   /**
    * Estado de exibição da cena. Antes era derivado de `criarEstadoExibicaoMock()`
    * quando o estado da tela era 'disponivel'; agora vem do modelo do cliente
-   * (reserva/posicionadas aplicados por evento) ou do mock DEV.
+   * (reserva/posicionadas/peoes aplicados por evento) ou do mock DEV.
    */
   estadoExibicao?: EstadoExibicaoTabuleiro | null
-  /** Estado de interação (seleção/manipulação) para cursor e destaques. */
+  /** Estado de interação do tabuleiro (seleção/manipulação) para cursor e destaques. */
   estadoInteracao?: EstadoInteracaoTabuleiro | null
+  /** Estado de interação dos peões (derivado do modelo para mapeamento de cliques). */
+  estadoInteracaoPeoes?: EstadoInteracaoPeoes | null
   /** Callback de comando de tabuleiro (null = sem ação) → enviar ao WS. */
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
+  /** Callback de comando de peão (com jogadorId já injetado pelo pai). */
+  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  /** Callback de rejeição de peão (flash vermelho). */
+  onRejeicaoPeao?: (feedback: FlashFeedback) => void
+  /** Peão selecionado vindo do modelo/servidor (null = nenhum). */
+  peaoSelecionadoIdServidor?: PeaoId | null
 }
 
 export function AmbienteDeJogo({
   bordaPx = 0,
   estadoExibicao = null,
   estadoInteracao = null,
+  estadoInteracaoPeoes = null,
   onComando,
+  onComandoPeao,
+  onRejeicaoPeao,
+  peaoSelecionadoIdServidor = null,
 }: AmbienteDeJogoProps) {
-  // Seleção de peão: estado visual temporário da cena (issue #90). Não é
-  // regra de jogo nem comando — a emissão de SELECIONAR_PEAO pertence à #92.
-  const [peaoSelecionadoId, setPeaoSelecionadoId] = useState<PeaoId | null>(null)
+  // ── Seleção de peão: o servidor é a autoridade ──
+  // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
+  // por clique em área inerte (sem comando de desseleção no ciclo). A seleção
+  // do servidor é aplicada à renderização sempre que o valor muda (padrão
+  // "ajustar estado quando a prop muda", sem efeito).
+  const [peaoSelecionadoIdLocal, setPeaoSelecionadoIdLocal] = useState<PeaoId | null>(peaoSelecionadoIdServidor)
+  const [servidorAnterior, setServidorAnterior] = useState<PeaoId | null>(peaoSelecionadoIdServidor)
+  if (peaoSelecionadoIdServidor !== servidorAnterior) {
+    setServidorAnterior(peaoSelecionadoIdServidor)
+    // Nova seleção do servidor re-estabelece a autoridade sobre o estado local.
+    setPeaoSelecionadoIdLocal(peaoSelecionadoIdServidor)
+  }
 
-  // Clicar um peão seleciona (repetir o mesmo clique é idempotente, como o
-  // engine); clicar destino inerte/Mesa/vazio desseleciona.
-  const aoSelecionarPeao = useCallback((peaoId: PeaoId) => {
-    setPeaoSelecionadoId(peaoId)
-  }, [])
+  // Clicar um peão seleciona (ou emite comando ao servidor se disponível);
+  // clicar destino inerte/Mesa/vazio desseleciona.
+  const aoSelecionarPeao = useCallback(
+    (peaoId: PeaoId) => {
+      setPeaoSelecionadoIdLocal(peaoId)
+
+      // Se há interação de peões e comando disponível, mapeia o clique.
+      if (estadoInteracaoPeoes && onComandoPeao) {
+        const resultado = mapearCliqueNoPeao(estadoInteracaoPeoes, peaoId)
+        if (resultado?.tipo === 'comando') {
+          onComandoPeao(resultado.comando)
+        } else if (resultado?.tipo === 'rejeicao') {
+          onRejeicaoPeao?.(resultado.rejeicao.feedback)
+        }
+      }
+    },
+    [estadoInteracaoPeoes, onComandoPeao, onRejeicaoPeao],
+  )
   const aoDesselecionar = useCallback(() => {
-    setPeaoSelecionadoId(null)
+    setPeaoSelecionadoIdLocal(null)
   }, [])
 
   const todasCelulas = todasAsCelulas()
@@ -70,11 +108,11 @@ export function AmbienteDeJogo({
   // Destinos válidos do peão selecionado: mesmo conjunto deriva destaque/cursor
   // na cena e data-conectada no espelho DOM (fonte única de verdade).
   const destinosSet = new Set<string>(
-    estadoExibicao && peaoSelecionadoId !== null
+    estadoExibicao && peaoSelecionadoIdLocal !== null
       ? destinosConectadosDoPeao(
           estadoExibicao.posicionadas,
           estadoExibicao.peoes,
-          peaoSelecionadoId,
+          peaoSelecionadoIdLocal,
         ).map((peca) => peca.pecaId)
       : [],
   )
@@ -108,7 +146,7 @@ export function AmbienteDeJogo({
           estadoExibicao={estadoExibicao}
           estadoInteracao={estadoInteracao}
           onComando={onComando}
-          peaoSelecionadoId={peaoSelecionadoId}
+          peaoSelecionadoId={peaoSelecionadoIdLocal}
           destinosSet={destinosSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
@@ -121,7 +159,7 @@ export function AmbienteDeJogo({
           reserva={estadoExibicao.reserva}
           posicionadas={estadoExibicao.posicionadas}
           peoes={estadoExibicao.peoes}
-          peaoSelecionadoId={peaoSelecionadoId}
+          peaoSelecionadoId={peaoSelecionadoIdLocal}
           destinosSet={destinosSet}
           aoSelecionarPeao={aoSelecionarPeao}
           aoDesselecionar={aoDesselecionar}

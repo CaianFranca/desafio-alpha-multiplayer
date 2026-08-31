@@ -211,14 +211,14 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
   it('tipos ofertados derivam da Reserva (dedupe, ordem canônica reta→T→cruz)', () => {
     expect(
       tiposDeCaminhoDisponiveisNaReserva([
-        { pecaId: 'a', tipo: 'inicial' },
-        { pecaId: 'b', tipo: 'T' },
-        { pecaId: 'c', tipo: 'reta' },
-        { pecaId: 'd', tipo: 'cruz' },
-        { pecaId: 'e', tipo: 'cruz' },
+        { tipo: 'inicial' },
+        { tipo: 'T' },
+        { tipo: 'reta' },
+        { tipo: 'cruz' },
+        { tipo: 'cruz' },
       ]),
     ).toEqual(['reta', 'T', 'cruz'])
-    expect(tiposDeCaminhoDisponiveisNaReserva([{ pecaId: 'a', tipo: 'inicial' }])).toEqual([])
+    expect(tiposDeCaminhoDisponiveisNaReserva([{ tipo: 'inicial' }])).toEqual([])
   })
 
   // ── AC 4: girar e posicionar a Recebida na célula vizinha, orientação livre ──

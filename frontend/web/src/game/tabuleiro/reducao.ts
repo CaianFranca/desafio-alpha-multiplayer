@@ -26,8 +26,14 @@ import {
   type Orientacao,
   type PecaDaReserva,
   type PecaPosicionada,
+  type PeaoDaExibicao,
+  type TipoDaPeca,
 } from './contrato'
-import type { TabuleiroEventoDoServidor } from '@flicker/shared'
+import type {
+  TabuleiroEventoDoServidor,
+  PeaoEventoDoServidor,
+  PendenciaDeRecebimento,
+} from '@flicker/shared'
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -35,6 +41,14 @@ export interface EstadoDoTabuleiroNoCliente {
   readonly posicionadas: readonly PecaPosicionada[]
   readonly pecaSelecionadaId: string | null
   readonly pecaEmManipulacaoId: string | null
+  /** Peões com posição autoritativa do servidor (issue #91). */
+  readonly peoes: readonly PeaoDaExibicao[]
+  /** Recebidas aguardando escolha de tipo e encaixe. */
+  readonly recebidasPendentes: readonly PendenciaDeRecebimento[]
+  /** Peão selecionado no ciclo (vem do servidor via PEAO_SELECIONADO). */
+  readonly peaoSelecionadoId: string | null
+  /** Peças cujo tipo foi definido por ESCOLHER_TIPO_DA_PECA_RECEBIDA (chave = pecaId). */
+  readonly pecasDeRecebimento: Record<string, TipoDaPeca>
 }
 
 /** Estado inicial determinístico do cliente (deltas a partir do zero). */
@@ -44,6 +58,10 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
+    peoes: [],
+    recebidasPendentes: [],
+    peaoSelecionadoId: null,
+    pecasDeRecebimento: {},
   }
 }
 
@@ -76,12 +94,16 @@ function girarPosicionada(
 /**
  * Aplica um evento do servidor ao estado do cliente, produzindo um novo
  * estado imutável. Eventos desconhecidos ou erro retornam o estado inalterado.
+ *
+ * Aceita eventos de tabuleiro (ST-09) e de peões/ciclo (ST-10). Eventos de
+ * turno (ST-11) não alteram o modelo e são ignorados pelo socket (default).
  */
 export function reduzirEvento(
   estado: EstadoDoTabuleiroNoCliente,
-  evento: TabuleiroEventoDoServidor,
+  evento: TabuleiroEventoDoServidor | PeaoEventoDoServidor,
 ): EstadoDoTabuleiroNoCliente {
   switch (evento.type) {
+    // ── Eventos de Tabuleiro (ST-09) ──
     case 'PECA_SELECIONADA':
       return { ...estado, pecaSelecionadaId: evento.pecaId }
     case 'PECA_DESELECIONADA':
@@ -99,20 +121,25 @@ export function reduzirEvento(
         : girarNaReserva(estado, evento.pecaId, evento.orientacao)
     }
     case 'PECA_POSICIONADA': {
-      // PECA_POSICIONADA não traz `tipo`; preserva o da Reserva.
+      // PECA_POSICIONADA não traz `tipo`; preserva o da Reserva ou do
+      // recebimento (peças recebidas vêm de fora da Reserva).
       const pecaNaReserva = estado.reserva.find(
         (p) => p.pecaId === evento.pecaId,
       )
-      if (!pecaNaReserva) return estado
+      const tipo = pecaNaReserva?.tipo
+        ?? estado.pecasDeRecebimento[evento.pecaId]
+      if (tipo === undefined) return estado
       const posicionada: PecaPosicionada = {
         pecaId: evento.pecaId,
-        tipo: pecaNaReserva.tipo,
+        tipo,
         orientacao: evento.orientacao,
         celula: evento.celula,
       }
       return {
         ...estado,
-        reserva: estado.reserva.filter((p) => p.pecaId !== evento.pecaId),
+        reserva: pecaNaReserva
+          ? estado.reserva.filter((p) => p.pecaId !== evento.pecaId)
+          : estado.reserva,
         posicionadas: [...estado.posicionadas, posicionada],
         // Encaixe abre a janela de Manipulação e limpa a Seleção.
         pecaSelecionadaId: null,
@@ -126,6 +153,43 @@ export function reduzirEvento(
     case 'ERRO_DO_TABULEIRO':
       // Rejeição não altera o modelo local (flash é da camada de feedback).
       return estado
+
+    // ── Eventos de Peão / Ciclo (ST-10) ──
+    case 'PEAO_SELECIONADO':
+      return { ...estado, peaoSelecionadoId: evento.peaoId }
+    case 'RECEBIMENTO_GERADO':
+      return { ...estado, recebidasPendentes: evento.recebidas }
+    case 'PEAO_POSICIONADO': {
+      const peoes = estado.peoes.map((p) =>
+        p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
+      )
+      return { ...estado, peoes }
+    }
+    case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO': {
+      // Remove a pendência correspondente e registra o tipo para que
+      // PECA_POSICIONADA posterior encontre o tipo (fora da Reserva).
+      return {
+        ...estado,
+        pecasDeRecebimento: {
+          ...estado.pecasDeRecebimento,
+          [evento.pecaId]: evento.tipoDaPeca,
+        },
+        pecaSelecionadaId: evento.pecaId,
+        recebidasPendentes: estado.recebidasPendentes.filter(
+          (r) => r.recebidaId !== evento.recebidaId,
+        ),
+      }
+    }
+    case 'PEAO_MOVIDO': {
+      const peoes = estado.peoes.map((p) =>
+        p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
+      )
+      return { ...estado, peoes }
+    }
+    case 'PEAO_PERMANECEU':
+      // Permanência não altera o modelo — peão já está na posição correta.
+      return estado
+
     default: {
       // Exaustividade: novo evento wire sem case falha em compilação.
       const _exaustivo: never = evento
@@ -140,7 +204,7 @@ export function reduzirEvento(
  */
 export function reduzirEventos(
   estado: EstadoDoTabuleiroNoCliente,
-  eventos: readonly TabuleiroEventoDoServidor[],
+  eventos: readonly (TabuleiroEventoDoServidor | PeaoEventoDoServidor)[],
 ): EstadoDoTabuleiroNoCliente {
   return eventos.reduce(reduzirEvento, estado)
 }
@@ -149,7 +213,5 @@ export function reduzirEventos(
 export function estadoDeExibicaoDoModelo(
   estado: EstadoDoTabuleiroNoCliente,
 ): EstadoExibicaoTabuleiro {
-  // O modelo ainda não rastreia peões (conexão dos peões com o game-server é
-  // feature futura); exibição sem peões é o estado fiel ao modelo.
-  return { reserva: estado.reserva, posicionadas: estado.posicionadas, peoes: [] }
+  return { reserva: estado.reserva, posicionadas: estado.posicionadas, peoes: estado.peoes }
 }
