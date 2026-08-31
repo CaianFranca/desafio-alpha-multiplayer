@@ -7,9 +7,19 @@
 // codigo: 'DADOS_INVALIDOS' }`.
 
 import type {
+  EscolherTipoDaPecaRecebidaComando,
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared';
+
+// Comandos aceitos no wire do seam legado: a forma de escolha de tipo (ST-10)
+// saiu do domínio na #138 e não é mais aceita — o tipo shared permanece na
+// união só até a limpeza do wire (#140/#143), então o guard estreita a união
+// ao devolver o tipo aceito.
+export type ComandoDoTabuleiroAceito = Exclude<
+  TabuleiroComandoDoCliente | PeaoComandoDoCliente,
+  EscolherTipoDaPecaRecebidaComando
+>;
 
 const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'SELECIONAR_PECA',
@@ -18,7 +28,7 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'FINALIZAR_MANIPULACAO',
   'SELECIONAR_PEAO',
   'POSICIONAR_PEAO',
-  'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+  'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
   'PERMANECER',
 ]);
@@ -27,8 +37,13 @@ function ehIdNaoVazio(valor: unknown): boolean {
   return typeof valor === 'string' && valor.length > 0;
 }
 
-function ehTipoDaPecaValido(valor: unknown): boolean {
-  return valor === 'reta' || valor === 'T' || valor === 'cruz';
+function ehBordaValida(valor: unknown): boolean {
+  return (
+    valor === 'norte' ||
+    valor === 'leste' ||
+    valor === 'sul' ||
+    valor === 'oeste'
+  );
 }
 
 function ehCelulaValida(valor: unknown): boolean {
@@ -49,11 +64,13 @@ function ehCelulaValida(valor: unknown): boolean {
 /**
  * Type guard puro e fechado sobre `TabuleiroComandoDoCliente` e
  * `PeaoComandoDoCliente`. Valida o `type` e os campos esperados de cada
- * variante; retorna `false` para qualquer mensagem fora do contrato.
+ * variante; retorna `false` para qualquer mensagem fora do contrato —
+ * incluindo o comando legado de escolha de tipo, fora do domínio desde a
+ * #138.
  */
 export function ehComandoDoTabuleiro(
   value: unknown,
-): value is TabuleiroComandoDoCliente | PeaoComandoDoCliente {
+): value is ComandoDoTabuleiroAceito {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
@@ -79,8 +96,8 @@ export function ehComandoDoTabuleiro(
       return ehIdNaoVazio(mensagem.peaoId);
     case 'POSICIONAR_PEAO':
       return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
-    case 'ESCOLHER_TIPO_DA_PECA_RECEBIDA':
-      return ehIdNaoVazio(mensagem.recebidaId) && ehTipoDaPecaValido(mensagem.tipoDaPeca);
+    case 'ESCOLHER_VAGA_DA_PECA_RECEBIDA':
+      return ehIdNaoVazio(mensagem.recebidaId) && ehBordaValida(mensagem.borda);
     case 'MOVER_PEAO':
       return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     case 'PERMANECER':

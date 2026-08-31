@@ -19,13 +19,9 @@ import {
   type CodigoDeErroDeTabuleiro,
   type ComandoDeTabuleiro,
 } from '@flicker/engine';
-import type {
-  CodigoDeErroDoTabuleiro,
-  PeaoComandoDoCliente,
-  TabuleiroComandoDoCliente,
-} from '@flicker/shared';
+import type { CodigoDeErroDoTabuleiro } from '@flicker/shared';
 import { PartidaBroadcaster } from '../partidas/broadcast.ts';
-import { ehComandoDoTabuleiro } from './validacao.ts';
+import { ehComandoDoTabuleiro, type ComandoDoTabuleiroAceito } from './validacao.ts';
 import { traduzirEventos } from '../partidas/traducao.ts';
 import {
   obterEstadoDoTabuleiro,
@@ -96,6 +92,8 @@ export class TabuleiroHandlers {
       // Inicial, compõe o Recebimento (gerarRecebidas sobre a Peça recém-
       // ocupada) e mantém o Peão selecionado para a sequência — espelha
       // `posicionarPeaoDaPartida` do Primeiro Turno em partida.ts (#117).
+      // Desde a #138 o Recebimento sorteia as peças da Caixa (peca_sorteada
+      // por peça) e cria as pendências sem vaga.
       let novoEstado = resultado.estado;
       const eventos = [...resultado.eventos];
       if (comando.tipo === 'posicionar_peao') {
@@ -105,16 +103,27 @@ export class TabuleiroHandlers {
         const peca = peao?.pecaId
           ? resultado.estado.posicionadas.find((item) => item.pecaId === peao.pecaId)
           : undefined;
-        const recebidas = peca ? gerarRecebidas(resultado.estado, peca) : [];
-        novoEstado = { ...resultado.estado, peaoSelecionadoId: comando.peaoId, recebidas };
-        if (recebidas.length > 0) {
+        const sorteio = peca
+          ? gerarRecebidas(resultado.estado, peca)
+          : { estado: resultado.estado, recebidas: [], eventos: [] };
+        novoEstado = {
+          ...sorteio.estado,
+          peaoSelecionadoId: comando.peaoId,
+          recebidas: sorteio.recebidas,
+        };
+        eventos.push(...sorteio.eventos);
+        if (sorteio.recebidas.length > 0) {
           eventos.push({
             tipo: 'recebimento_gerado',
-            recebidas: recebidas.map(({ recebidaId, bordaGeradora, celulaAlvo }) => ({
-              recebidaId,
-              bordaGeradora,
-              celulaAlvo,
-            })),
+            recebidas: sorteio.recebidas.map(
+              ({ recebidaId, pecaId, tipo, vaga, celulaAlvo }) => ({
+                recebidaId,
+                pecaId,
+                tipoDaPeca: tipo,
+                vaga,
+                celulaAlvo,
+              }),
+            ),
           });
         }
       }
@@ -157,9 +166,11 @@ export class TabuleiroHandlers {
 /**
  * Mapeia wire (UPPER_SNAKE) → domínio (snake), tanto para comandos de
  * tabuleiro quanto para o ciclo de Peões. Campos em camelCase são idênticos.
+ * A entrada já foi estreitada por `ehComandoDoTabuleiro` (o comando legado de
+ * escolha de tipo, fora do domínio desde a #138, não chega aqui).
  */
 function mapearComando(
-  comando: TabuleiroComandoDoCliente | PeaoComandoDoCliente,
+  comando: ComandoDoTabuleiroAceito,
 ): ComandoDeTabuleiro {
   switch (comando.type) {
     case 'SELECIONAR_PECA':
@@ -174,11 +185,11 @@ function mapearComando(
       return { tipo: 'selecionar_peao', peaoId: comando.peaoId };
     case 'POSICIONAR_PEAO':
       return { tipo: 'posicionar_peao', peaoId: comando.peaoId, celula: comando.celula };
-    case 'ESCOLHER_TIPO_DA_PECA_RECEBIDA':
+    case 'ESCOLHER_VAGA_DA_PECA_RECEBIDA':
       return {
-        tipo: 'escolher_tipo_da_peca_recebida',
+        tipo: 'escolher_vaga_da_peca_recebida',
         recebidaId: comando.recebidaId,
-        tipoDaPeca: comando.tipoDaPeca,
+        borda: comando.borda,
       };
     case 'MOVER_PEAO':
       return { tipo: 'mover_peao', peaoId: comando.peaoId, celula: comando.celula };

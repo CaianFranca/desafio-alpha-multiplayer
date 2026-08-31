@@ -246,11 +246,29 @@ function enviar(ws: WebSocket, mensagem: unknown): void {
   ws.send(JSON.stringify(mensagem));
 }
 
+// Deslocamento da célula-alvo por vaga escolhida (bordas abertas da Inicial).
+const DESLOCAMENTO_DA_VAGA = {
+  norte: { linha: -1, coluna: 0 },
+  leste: { linha: 0, coluna: 1 },
+} as const;
+
+// Vagas da Peça Inicial em `celula` (bordas abertas norte+leste, em ordem
+// canônica, com célula vizinha dentro da grade), na ordem em que as
+// pendências são geradas pelo Recebimento (issue #138).
+function vagasDaInicialEm(
+  celula: { linha: number; coluna: number },
+): Array<'norte' | 'leste'> {
+  const vagas: Array<'norte' | 'leste'> = [];
+  if (celula.linha > 0) vagas.push('norte');
+  if (celula.coluna < 6) vagas.push('leste');
+  return vagas;
+}
+
 /**
  * Primeiro Turno completo do jogador `<n>` via WS: Peça Inicial própria,
- * Peão sobre ela (Recebimento automático), escolha do tipo + encaixe das
- * Recebidas na célula-alvo e Encerramento do Turno. O jogador precisa estar
- * ativo (a ordem dos testes garante a vez).
+ * Peão sobre ela (Recebimento automático com sorteio da Caixa), escolha da
+ * vaga de cada peça sorteada + encaixe na célula-alvo derivada e Encerramento
+ * do Turno. O jogador precisa estar ativo (a ordem dos testes garante a vez).
  */
 async function concluirPrimeiroTurnoNoWs(
   ws: WebSocket,
@@ -284,14 +302,26 @@ async function concluirPrimeiroTurnoNoWs(
   const recebimento = await recebimentoEspera;
   const recebidas = (recebimento.recebidas ?? []) as Array<Record<string, unknown>>;
 
-  for (const recebida of recebidas) {
+  // Uma escolha de vaga POR peça sorteada (issue #138): as vagas seguem a
+  // ordem canônica das pendências geradas para a Peça Inicial.
+  const vagas = vagasDaInicialEm(celula);
+  assert.equal(recebidas.length, vagas.length);
+  for (let indice = 0; indice < recebidas.length; indice++) {
+    const recebida = recebidas[indice]!;
     const recebidaId = recebida.recebidaId as string;
-    const celulaAlvo = recebida.celulaAlvo as { linha: number; coluna: number };
+    const pecaDoEncaixe = recebida.pecaId as string;
+    const borda = vagas[indice]!;
+    const deslocamento = DESLOCAMENTO_DA_VAGA[borda];
+    const celulaAlvo = {
+      linha: celula.linha + deslocamento.linha,
+      coluna: celula.coluna + deslocamento.coluna,
+    };
 
-    enviar(ws, { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', jogadorId, recebidaId, tipoDaPeca: 'reta' });
-    const escolhida = await esperarEvento(ws, 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO');
+    enviar(ws, { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', jogadorId, recebidaId, borda });
+    const escolhida = await esperarEvento(ws, 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO');
     assert.equal(escolhida.recebidaId, recebidaId);
-    const pecaDoEncaixe = escolhida.pecaId as string;
+    assert.equal(escolhida.borda, borda);
+    assert.deepEqual(escolhida.celulaAlvo, celulaAlvo);
 
     enviar(ws, { type: 'POSICIONAR_PECA', jogadorId, pecaId: pecaDoEncaixe, celula: celulaAlvo });
     const encaixada = await esperarEvento(ws, 'PECA_POSICIONADA');
@@ -466,14 +496,14 @@ test('rejeição: posicionar sem selecionar responde ERRO_DO_TABULEIRO PECA_NAO_
   }
 });
 
-test('rejeição: escolher tipo com caixa esgotada responde ERRO_DO_TABULEIRO CAIXA_ESGOTADA', async () => {
+test('rejeição: escolher vaga indisponível responde ERRO_DO_TABULEIRO DADOS_INVALIDOS', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
     // Estado sintético (ciclo de vida direto no domínio): peão do jogador-1
-    // encaixado sobre a inicial-1, com o Recebimento pendente e a Caixa
-    // esvaziada, para exercitar o caminho CAIXA_ESGOTADA do domínio via wire.
+    // encaixado sobre a inicial-1 em (3,3), com o Recebimento pendente
+    // gerado pelo novo fluxo da #138 (peças sorteadas, sem vaga).
     const inicial = estadoInicialDaPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
     assert.equal(inicial.sucesso, true, 'roster válido deveria iniciar a Partida');
     if (!inicial.sucesso) {
@@ -494,24 +524,24 @@ test('rejeição: escolher tipo com caixa esgotada responde ERRO_DO_TABULEIRO CA
       estado = resultado.estado;
     }
     assert.ok(estado.tabuleiro.recebidas.length > 0, 'Recebimento deveria ter pendências');
-    const estadoVazio: EstadoDaPartida = {
-      ...estado,
-      tabuleiro: { ...estado.tabuleiro, caixa: [] },
-    };
-    await salvarEstadoDaPartida(redis, aceite.partidaId, estadoVazio);
+    const pendente = estado.tabuleiro.recebidas[0]!;
+    assert.equal(pendente.vaga, null, 'pendência nova deveria nascer sem vaga');
+    await salvarEstadoDaPartida(redis, aceite.partidaId, estado);
 
     const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
+      // A inicial só abre norte e leste: a borda sul não é uma vaga
+      // disponível — o domínio rejeita com DADOS_INVALIDOS.
       enviar(ws, {
-        type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+        type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
         jogadorId: 'jogador-1',
-        recebidaId: 'recebida-inicial-1-norte',
-        tipoDaPeca: 'reta',
+        recebidaId: pendente.recebidaId,
+        borda: 'sul',
       });
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
-      assert.equal(erro.codigo, 'CAIXA_ESGOTADA');
+      assert.equal(erro.codigo, 'DADOS_INVALIDOS');
       assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
     } finally {
       ws.close();

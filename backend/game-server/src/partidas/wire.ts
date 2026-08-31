@@ -13,12 +13,22 @@
 
 import type {
   CodigoDeErroDoTabuleiro,
+  EscolherTipoDaPecaRecebidaPartidaComando,
   PartidaComandoDoCliente,
 } from '@flicker/shared';
 import type {
   CodigoDeErroDaPartida,
   ComandoDePartida,
 } from '@flicker/engine';
+
+// Comandos aceitos no wire do canal de Partida: a forma legada de escolha de
+// tipo (ST-10) saiu do domínio na #138 e não é mais aceita — o tipo shared
+// permanece na união só até a limpeza do wire (#140/#143), então o guard
+// estreita a união ao devolver o tipo aceito.
+export type ComandoDaPartidaAceito = Exclude<
+  PartidaComandoDoCliente,
+  EscolherTipoDaPecaRecebidaPartidaComando
+>;
 
 const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'SELECIONAR_PECA',
@@ -27,7 +37,7 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'FINALIZAR_MANIPULACAO',
   'SELECIONAR_PEAO',
   'POSICIONAR_PEAO',
-  'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+  'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
   'PERMANECER',
   'CONFIRMAR_POSICAO_DO_PEAO',
@@ -38,8 +48,13 @@ function ehIdNaoVazio(valor: unknown): boolean {
   return typeof valor === 'string' && valor.length > 0;
 }
 
-function ehTipoDaPecaValido(valor: unknown): boolean {
-  return valor === 'reta' || valor === 'T' || valor === 'cruz';
+function ehBordaValida(valor: unknown): boolean {
+  return (
+    valor === 'norte' ||
+    valor === 'leste' ||
+    valor === 'sul' ||
+    valor === 'oeste'
+  );
 }
 
 function ehCelulaValida(valor: unknown): boolean {
@@ -59,11 +74,12 @@ function ehCelulaValida(valor: unknown): boolean {
 
 /**
  * Type guard puro e fechado sobre `PartidaComandoDoCliente`. Valida o `type`,
- * o `jogadorId` (obrigatório em todos os 11 comandos) e os campos esperados
- * de cada variante; retorna `false` para qualquer mensagem fora do contrato —
- * incluindo os comandos legacy de tabuleiro/Peões sem `jogadorId`.
+ * o `jogadorId` (obrigatório em todos os comandos) e os campos esperados de
+ * cada variante; retorna `false` para qualquer mensagem fora do contrato —
+ * incluindo os comandos legacy de tabuleiro/Peões sem `jogadorId` e o comando
+ * legado de escolha de tipo, fora do domínio desde a #138.
  */
-export function ehComandoDaPartida(value: unknown): value is PartidaComandoDoCliente {
+export function ehComandoDaPartida(value: unknown): value is ComandoDaPartidaAceito {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
@@ -93,8 +109,8 @@ export function ehComandoDaPartida(value: unknown): value is PartidaComandoDoCli
       return ehIdNaoVazio(mensagem.peaoId);
     case 'POSICIONAR_PEAO':
       return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
-    case 'ESCOLHER_TIPO_DA_PECA_RECEBIDA':
-      return ehIdNaoVazio(mensagem.recebidaId) && ehTipoDaPecaValido(mensagem.tipoDaPeca);
+    case 'ESCOLHER_VAGA_DA_PECA_RECEBIDA':
+      return ehIdNaoVazio(mensagem.recebidaId) && ehBordaValida(mensagem.borda);
     case 'MOVER_PEAO':
       return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     case 'PERMANECER':
@@ -115,7 +131,7 @@ export function ehComandoDaPartida(value: unknown): value is PartidaComandoDoCli
  * sessão autenticada na guarda de impersonation (#135).
  */
 export function mapearComandoDaPartida(
-  comando: PartidaComandoDoCliente,
+  comando: ComandoDaPartidaAceito,
 ): ComandoDePartida {
   switch (comando.type) {
     case 'SELECIONAR_PECA':
@@ -130,11 +146,11 @@ export function mapearComandoDaPartida(
       return { tipo: 'selecionar_peao', peaoId: comando.peaoId };
     case 'POSICIONAR_PEAO':
       return { tipo: 'posicionar_peao', peaoId: comando.peaoId, celula: comando.celula };
-    case 'ESCOLHER_TIPO_DA_PECA_RECEBIDA':
+    case 'ESCOLHER_VAGA_DA_PECA_RECEBIDA':
       return {
-        tipo: 'escolher_tipo_da_peca_recebida',
+        tipo: 'escolher_vaga_da_peca_recebida',
         recebidaId: comando.recebidaId,
-        tipoDaPeca: comando.tipoDaPeca,
+        borda: comando.borda,
       };
     case 'MOVER_PEAO':
       return { tipo: 'mover_peao', peaoId: comando.peaoId, celula: comando.celula };
