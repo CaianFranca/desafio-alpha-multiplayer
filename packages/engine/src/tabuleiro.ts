@@ -279,6 +279,14 @@ export interface PeaoPermaneceuEvento {
   readonly pecaId: string;
 }
 
+// Limpeza (ST-13 / issue #147): nos pontos definitivos da Iluminação, as Peças
+// cujas células ficaram fora dela são removidas permanentemente do estado —
+// sem retorno à Caixa. Emitido apenas quando houver Peças removidas.
+export interface LimpezaAplicadaEvento {
+  readonly tipo: 'limpeza_aplicada';
+  readonly pecasRemovidas: readonly string[];
+}
+
 export type EventoDoTabuleiro =
   | PecaSelecionadaEvento
   | PecaDeselecionadaEvento
@@ -291,7 +299,8 @@ export type EventoDoTabuleiro =
   | PeaoPosicionadoEvento
   | TipoDaPecaRecebidaEscolhidoEvento
   | PeaoMovidoEvento
-  | PeaoPermaneceuEvento;
+  | PeaoPermaneceuEvento
+  | LimpezaAplicadaEvento;
 
 export type CodigoDeErroDeTabuleiro =
   | 'DADOS_INVALIDOS'
@@ -510,6 +519,42 @@ export function calcularIluminacao(tabuleiro: EstadoDoTabuleiro): readonly Celul
   return [...mapa.values()].sort((a, b) =>
     a.linha !== b.linha ? a.linha - b.linha : a.coluna - b.coluna,
   );
+}
+
+// Limpeza (ST-13 / issue #147): remove permanentemente do estado as Peças
+// posicionadas cujas células ficaram fora da Iluminação — sem retorno à Caixa.
+// Pura e determinística (percorre tabuleiro.posicionadas na ordem existente).
+// Defensiva: preserva explicitamente qualquer Peça sob um Peão, mesmo que a
+// Iluminação já a garanta por critério de aceitação.
+export function aplicarLimpeza(
+  tabuleiro: EstadoDoTabuleiro,
+  celulasIluminadas: readonly Celula[],
+): {
+  posicionadas: readonly PecaPosicionada[];
+  removidas: readonly string[];
+} {
+  const iluminadas = new Set(
+    celulasIluminadas.map((celula) => `${celula.linha},${celula.coluna}`),
+  );
+  // Conjunto defensivo dos pecaIds sob os Peões: nunca removidos, mesmo que a
+  // Iluminação já os cubra.
+  const sobPeao = new Set(
+    tabuleiro.peoes
+      .map((peao) => peao.pecaId)
+      .filter((pecaId): pecaId is string => pecaId !== null),
+  );
+
+  const posicionadas: PecaPosicionada[] = [];
+  const removidas: string[] = [];
+  for (const peca of tabuleiro.posicionadas) {
+    const chave = `${peca.celula.linha},${peca.celula.coluna}`;
+    if (iluminadas.has(chave) || sobPeao.has(peca.pecaId)) {
+      posicionadas.push(peca);
+    } else {
+      removidas.push(peca.pecaId);
+    }
+  }
+  return { posicionadas, removidas };
 }
 
 export function aplicarComandoDeTabuleiro(

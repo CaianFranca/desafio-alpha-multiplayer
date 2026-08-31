@@ -455,6 +455,8 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
         { recebidaId: 'recebida-reta-1-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 1, coluna: 3 } },
       ],
     },
+    // Limpeza: a reta-2 (3,4) ficou fora da iluminação da reta-1 (2,3).
+    { tipo: 'limpeza_aplicada', pecasRemovidas: ['reta-2'] },
   ]);
   assert.equal(confirmacao.estado.posicaoConfirmada, true);
   estado = confirmacao.estado;
@@ -738,4 +740,207 @@ test('iluminação: mover_peao não altera até confirmar_posicao_do_peao; perma
   assert.equal(permRes.sucesso, true);
   if (!permRes.sucesso) throw new Error('permanecer deveria suceder');
   assert.deepEqual(permRes.estado.celulasIluminadas, permAntes);
+});
+
+// Injetor de estado: adiciona uma peça manualmente a posicionadas, como os
+// testes de iluminação fazem com tabComDois — para forçar uma peça fora do
+// alcance do Peão sem depender da sequência completa do Recebimento.
+function comPecaFora(
+  estado: EstadoDaPartida,
+  pecaId: string,
+  tipo: 'inicial' | 'reta' | 'T' | 'cruz' | 'gerador',
+  linha: number,
+  coluna: number,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId, tipo, orientacao: 0 as const, celula: { linha, coluna } },
+      ],
+    },
+  };
+}
+
+const temLimpeza = (eventos: readonly { readonly tipo: string }[]) =>
+  eventos.some((evento) => evento.tipo === 'limpeza_aplicada');
+
+test('limpeza: Primeiro Turno remove peça fora da iluminação sem retorno à Caixa', () => {
+  let estado = partidaIniciada();
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Peão em (3,3) ilumina (2,3),(3,2),(3,3),(3,4),(4,3); (0,0) fica fora.
+  estado = comPecaFora(estado, 'fora-1', 'inicial', 0, 0);
+
+  const resultado = aplicarComandoDePartida(
+    estado,
+    posicionarPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+
+  const limpeza = resultado.eventos.find((e) => e.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza, 'esperava o evento limpeza_aplicada');
+  if (limpeza?.tipo !== 'limpeza_aplicada') return;
+  assert.deepEqual(limpeza.pecasRemovidas, ['fora-1']);
+  assert.ok(
+    !resultado.estado.tabuleiro.posicionadas.some((p) => p.pecaId === 'fora-1'),
+  );
+  // Sem retorno à Caixa: a peça removida não volta para a caixa.
+  assert.equal(resultado.estado.tabuleiro.caixa.length, 71);
+});
+
+test('limpeza: Confirmação de Posição com mudança de peça remove peça fora da iluminação', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Fora da iluminação dos quatro peões em rodada 2.
+  estado = comPecaFora(estado, 'fora-2', 'cruz', 0, 5);
+
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+
+  const limpeza = resultado.eventos.find((e) => e.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza, 'esperava o evento limpeza_aplicada');
+  if (limpeza?.tipo !== 'limpeza_aplicada') return;
+  // Inclui a peça injetada fora da iluminação (outras peças posicionadas fora
+  // da iluminação — ex: reta-2 — também são limpas, conforme o esperado).
+  assert.ok(limpeza.pecasRemovidas.includes('fora-2'));
+  assert.ok(limpeza.pecasRemovidas.includes('reta-2'));
+  assert.ok(
+    !resultado.estado.tabuleiro.posicionadas.some((p) => p.pecaId === 'fora-2'),
+  );
+});
+
+test('limpeza: peça sob o peão é preservada', () => {
+  let estado = partidaIniciada();
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Peça fora da iluminação, para garantir que o evento dispara.
+  estado = comPecaFora(estado, 'fora-3', 'T', 5, 5);
+
+  const resultado = aplicarComandoDePartida(
+    estado,
+    posicionarPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+
+  // A peça sob o peão (inicial-1, iluminada por ele) e a peça do peão em si
+  // permanecem em posicionadas e não estão em limpeza_aplicada.
+  assert.ok(
+    resultado.estado.tabuleiro.posicionadas.some((p) => p.pecaId === 'inicial-1'),
+  );
+  const limpeza = resultado.eventos.find((e) => e.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza, 'esperava o evento limpeza_aplicada');
+  if (limpeza?.tipo !== 'limpeza_aplicada') return;
+  assert.ok(!limpeza.pecasRemovidas.includes('inicial-1'));
+});
+
+test('limpeza: mover_peao, permanecer e encerrar_turno não emitem limpeza_aplicada', () => {
+  // mover_peao
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = comPecaFora(estado, 'fora-m1', 'reta', 0, 5);
+  const mov = aplicarComandoDePartida(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  assert.equal(mov.sucesso, true);
+  if (!mov.sucesso) return;
+  assert.ok(!temLimpeza(mov.eventos), 'mover_peao não deve limpar');
+
+  // permanecer (sem mudança de peça encerra o turno direto)
+  let perm = partidaEmRodada2();
+  perm = aplicar(perm, selecionarPeao('peao-branco'), 'ana');
+  perm = comPecaFora(perm, 'fora-p1', 'cruz', 0, 5);
+  const resPerm = aplicarComandoDePartida(perm, permanecer('peao-branco'), 'ana');
+  assert.equal(resPerm.sucesso, true);
+  if (!resPerm.sucesso) return;
+  assert.ok(!temLimpeza(resPerm.eventos), 'permanecer não deve limpar');
+
+  // encerrar_turno (Primeiro Turno, com recebidas resolvidas)
+  let enc = partidaIniciada();
+  enc = aplicar(enc, selecionarPeca('inicial-1'), 'ana');
+  enc = aplicar(enc, posicionarPeca('inicial-1', 3, 3), 'ana');
+  enc = aplicar(enc, selecionarPeao('peao-branco'), 'ana');
+  enc = aplicar(enc, posicionarPeao('peao-branco', 3, 3), 'ana');
+  enc = resolverRecebidas(enc, 'ana');
+  enc = comPecaFora(enc, 'fora-e1', 'gerador', 0, 5);
+  const resEnc = aplicarComandoDePartida(enc, encerrarTurno(), 'ana');
+  assert.equal(resEnc.sucesso, true);
+  if (!resEnc.sucesso) return;
+  assert.ok(!temLimpeza(resEnc.eventos), 'encerrar_turno não deve limpar');
+});
+
+test('limpeza: remove só peças, preservando caixa, peões, jogadores e iluminação', () => {
+  let estado = partidaIniciada();
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = comPecaFora(estado, 'fora-4', 'reta', 0, 0);
+
+  const resultado = aplicarComandoDePartida(
+    estado,
+    posicionarPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+
+  const { tabuleiro, jogadores, celulasIluminadas } = resultado.estado;
+  // A peça sob o peão permanece; a de fora é removida.
+  assert.equal(tabuleiro.posicionadas.length, 1);
+  assert.deepEqual(
+    tabuleiro.posicionadas.map((p) => p.pecaId),
+    ['inicial-1'],
+  );
+  assert.equal(tabuleiro.caixa.length, 71, 'Caixa intacta');
+  assert.equal(tabuleiro.peoes.length, 4, 'Peões intactos');
+  assert.equal(jogadores.length, 4, 'Jogadores intactos');
+  assert.equal(jogadores.filter((j) => j.jogadorId === estado.jogadorAtivoId).length, 1);
+  // Iluminação do peão em (3,3), recalculada e íntegra.
+  assert.equal(celulasIluminadas.length, 5);
+  assert.ok(celulasIluminadas.some((c) => c.linha === 3 && c.coluna === 3));
+});
+
+test('limpeza: remove peça inicial, de caminho e especial fora da iluminação', () => {
+  let estado = partidaIniciada();
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Inicial, de caminho e especial, todas fora da iluminação de (3,3).
+  estado = comPecaFora(estado, 'inicial-x', 'inicial', 0, 0);
+  estado = comPecaFora(estado, 'reta-x', 'reta', 6, 6);
+  estado = comPecaFora(estado, 'gerador-x', 'gerador', 6, 0);
+
+  const resultado = aplicarComandoDePartida(
+    estado,
+    posicionarPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+
+  const limpeza = resultado.eventos.find((e) => e.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza, 'esperava o evento limpeza_aplicada');
+  if (limpeza?.tipo !== 'limpeza_aplicada') return;
+  assert.deepEqual(
+    limpeza.pecasRemovidas,
+    ['inicial-x', 'reta-x', 'gerador-x'],
+  );
+  const ids = resultado.estado.tabuleiro.posicionadas.map((p) => p.pecaId);
+  assert.ok(!ids.includes('inicial-x'));
+  assert.ok(!ids.includes('reta-x'));
+  assert.ok(!ids.includes('gerador-x'));
+  assert.ok(ids.includes('inicial-1'));
 });
