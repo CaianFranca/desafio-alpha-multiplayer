@@ -214,7 +214,7 @@ export function aplicarComandoDePartida(
       return selecionarPecaDaPartida(estado, comando, jogadorAtivo);
     case 'girar_peca':
     case 'finalizar_manipulacao':
-    case 'escolher_tipo_da_peca_recebida':
+    case 'escolher_vaga_da_peca_recebida':
       return delegarAoTabuleiro(estado, comando);
     case 'selecionar_peao': {
       const alheio = exigirPeaoDoAtor(comando.peaoId, jogadorAtivo);
@@ -345,21 +345,25 @@ function posicionarPeaoDaPartida(
     ? resultado.estado.posicionadas.find((item) => item.pecaId === peao.pecaId)
     : undefined;
   // Invariante do fluxo: no Primeiro Turno o encaixe aceito deixa o Peão sobre
-  // uma Peça; sem Peça, o Recebimento simplesmente não é gerado.
-  const recebidas = peca ? gerarRecebidas(resultado.estado, peca) : [];
+  // uma Peça; sem Peça, o Recebimento simplesmente não é gerado. O Recebimento
+  // sorteia as peças da Caixa (#138) — peca_sorteada por peça — e cria as
+  // pendências sem vaga.
+  const sorteio = peca
+    ? gerarRecebidas(resultado.estado, peca)
+    : { estado: resultado.estado, recebidas: [], eventos: [] as EventoDoTabuleiro[] };
 
-  // O Peão segue selecionado: a sequência (escolher tipos e encaixar as
-  // Recebidas) começa imediatamente.
+  // O Peão segue selecionado: a sequência (escolher a vaga de cada peça e
+  // encaixar as Recebidas) começa imediatamente.
   const tabuleiro = {
-    ...resultado.estado,
+    ...sorteio.estado,
     peaoSelecionadoId: comando.peaoId,
-    recebidas,
+    recebidas: sorteio.recebidas,
   };
-  const eventos: EventoDaPartida[] = [...resultado.eventos];
-  if (recebidas.length > 0) {
+  const eventos: EventoDaPartida[] = [...resultado.eventos, ...sorteio.eventos];
+  if (sorteio.recebidas.length > 0) {
     eventos.push({
       tipo: 'recebimento_gerado',
-      recebidas: projetarRecebidas(recebidas),
+      recebidas: projetarRecebidas(sorteio.recebidas),
     });
   }
   // Limpeza (ST-13 / issue #147): ponto definitivo da Iluminação — aplicada
@@ -512,7 +516,9 @@ function confirmarPosicaoDoPeao(
     );
   }
 
-  const recebidas = gerarRecebidas(estado.tabuleiro, peca);
+  // O Recebimento sorteia as peças da Caixa (#138): peca_sorteada por peça e
+  // pendências sem vaga.
+  const sorteio = gerarRecebidas(estado.tabuleiro, peca);
   const eventos: EventoDaPartida[] = [
     {
       tipo: 'posicao_confirmada',
@@ -520,14 +526,15 @@ function confirmarPosicaoDoPeao(
       peaoId: peao.peaoId,
       pecaId: peca.pecaId,
     },
+    ...sorteio.eventos,
   ];
-  if (recebidas.length > 0) {
+  if (sorteio.recebidas.length > 0) {
     eventos.push({
       tipo: 'recebimento_gerado',
-      recebidas: projetarRecebidas(recebidas),
+      recebidas: projetarRecebidas(sorteio.recebidas),
     });
   }
-  const tabuleiro = { ...estado.tabuleiro, recebidas };
+  const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
   const celulasIluminadas = calcularIluminacao(tabuleiro);
   const { posicionadas, removidas } = aplicarLimpeza(
     tabuleiro,
@@ -664,14 +671,19 @@ function delegarAoTabuleiro(
   );
 }
 
-// O evento de Recebimento carrega apenas a projeção da pendência
-// (recebidaId, bordaGeradora e celulaAlvo), sem os campos internos do slot.
+// O evento de Recebimento carrega a projeção da pendência (issue #138):
+// recebidaId, a peça sorteada (pecaId + tipoDaPeca) e a vaga (com a
+// célula-alvo derivada dela), nulas até a escolha.
 function projetarRecebidas(recebidas: readonly PecaRecebida[]) {
-  return recebidas.map(({ recebidaId, bordaGeradora, celulaAlvo }) => ({
-    recebidaId,
-    bordaGeradora,
-    celulaAlvo,
-  }));
+  return recebidas.map(
+    ({ recebidaId, pecaId, tipo, vaga, celulaAlvo }) => ({
+      recebidaId,
+      pecaId,
+      tipoDaPeca: tipo,
+      vaga,
+      celulaAlvo,
+    }),
+  );
 }
 
 function sucessoDaPartida(

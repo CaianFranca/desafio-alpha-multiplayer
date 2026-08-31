@@ -55,12 +55,20 @@ export function traduzirEventos(
           celula: evento.celula,
         });
         break;
-      case 'tipo_da_peca_recebida_escolhido':
+      case 'peca_sorteada':
         saida.push({
-          type: 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO',
-          recebidaId: evento.recebidaId,
+          type: 'PECA_SORTEADA',
           pecaId: evento.pecaId,
           tipoDaPeca: evento.tipoDaPeca,
+          orientacao: evento.orientacao,
+        });
+        break;
+      case 'vaga_da_peca_recebida_escolhida':
+        saida.push({
+          type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
+          recebidaId: evento.recebidaId,
+          borda: evento.borda,
+          celulaAlvo: evento.celulaAlvo,
         });
         break;
       case 'peao_movido':

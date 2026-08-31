@@ -228,6 +228,24 @@ function enviar(ws: WebSocket, mensagem: unknown): void {
   ws.send(JSON.stringify(mensagem));
 }
 
+// Deslocamento da célula-alvo por vaga escolhida (bordas abertas da Inicial).
+const DESLOCAMENTO_DA_VAGA = {
+  norte: { linha: -1, coluna: 0 },
+  leste: { linha: 0, coluna: 1 },
+} as const;
+
+// Vagas da Peça Inicial em `celula` (bordas abertas norte+leste, em ordem
+// canônica, com célula vizinha dentro da grade), na ordem em que as
+// pendências são geradas pelo Recebimento (issue #138).
+function vagasDaInicialEm(
+  celula: { linha: number; coluna: number },
+): Array<'norte' | 'leste'> {
+  const vagas: Array<'norte' | 'leste'> = [];
+  if (celula.linha > 0) vagas.push('norte');
+  if (celula.coluna < 6) vagas.push('leste');
+  return vagas;
+}
+
 /**
  * Setup do Primeiro Turno de jogador-1: posiciona a Peça Inicial em (1,2)
  * (célula interior, para as bordas norte/leste caírem na grade) e encaixa o
@@ -262,11 +280,14 @@ async function posicionarPeaoNaInicial(
   const recebimento = await recebimentoEspera;
   const recebidas = recebimento.recebidas as Array<Record<string, unknown>>;
   assert.equal(recebidas.length, 2);
-  // Ordem canônica das bordas da Peça Inicial: norte antes de leste.
-  assert.equal(recebidas[0]!.bordaGeradora, 'norte');
-  assert.deepEqual(recebidas[0]!.celulaAlvo, { linha: 0, coluna: 2 });
-  assert.equal(recebidas[1]!.bordaGeradora, 'leste');
-  assert.deepEqual(recebidas[1]!.celulaAlvo, { linha: 1, coluna: 3 });
+  // Cada pendência já carrega a peça sorteada (ordem de composição da Caixa,
+  // sem seed: reta-1 e reta-2) e nasce sem vaga (issue #138).
+  assert.equal(recebidas[0]!.recebidaId, 'recebida-reta-1');
+  assert.equal(recebidas[0]!.pecaId, 'reta-1');
+  assert.equal(recebidas[0]!.vaga, null);
+  assert.equal(recebidas[0]!.celulaAlvo, null);
+  assert.equal(recebidas[1]!.recebidaId, 'recebida-reta-2');
+  assert.equal(recebidas[1]!.pecaId, 'reta-2');
   return recebidas;
 }
 
@@ -296,17 +317,27 @@ test('fluxo feliz: encerrar o Primeiro Turno avança a vez (TURNO_ENCERRADO + TU
     const ws2 = await conectarPartida(servidor, aceite.partidaId, 2);
 
     try {
-      // Primeiro Turno de jogador-1: Peça Inicial + Peão (Recebimento) e o
-      // encaixe das 2 Recebidas na célula-alvo.
+      // Primeiro Turno de jogador-1: Peça Inicial + Peão (Recebimento com
+      // sorteio da Caixa) e o encaixe das 2 Recebidas nas vagas escolhidas.
       const recebidas = await posicionarPeaoNaInicial(ws);
-      for (const recebida of recebidas) {
+      const vagas = vagasDaInicialEm({ linha: 1, coluna: 2 });
+      assert.equal(recebidas.length, vagas.length);
+      for (let indice = 0; indice < recebidas.length; indice++) {
+        const recebida = recebidas[indice]!;
         const recebidaId = recebida.recebidaId as string;
-        const celulaAlvo = recebida.celulaAlvo as { linha: number; coluna: number };
+        const pecaDoEncaixe = recebida.pecaId as string;
+        const borda = vagas[indice]!;
+        const deslocamento = DESLOCAMENTO_DA_VAGA[borda];
+        const celulaAlvo = {
+          linha: 1 + deslocamento.linha,
+          coluna: 2 + deslocamento.coluna,
+        };
 
-        enviar(ws, { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', jogadorId: 'jogador-1', recebidaId, tipoDaPeca: 'reta' });
-        const escolhida = await esperarEvento(ws, 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO');
+        enviar(ws, { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', jogadorId: 'jogador-1', recebidaId, borda });
+        const escolhida = await esperarEvento(ws, 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO');
         assert.equal(escolhida.recebidaId, recebidaId);
-        const pecaDoEncaixe = escolhida.pecaId as string;
+        assert.equal(escolhida.borda, borda);
+        assert.deepEqual(escolhida.celulaAlvo, celulaAlvo);
 
         enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-1', pecaId: pecaDoEncaixe, celula: celulaAlvo });
         const encaixada = await esperarEvento(ws, 'PECA_POSICIONADA');
