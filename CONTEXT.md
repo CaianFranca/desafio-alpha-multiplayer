@@ -134,9 +134,25 @@ _Avoid_: peça de começo
 Categoria de peça que reconstrói os caminhos do sanatório: reta (duas bordas opostas abertas), T (três bordas abertas) e cruz (quatro bordas abertas).
 _Avoid_: tile de caminho
 
-**Reserva**:
-Conjunto de peças disponíveis sobre a mesa, ao lado do tabuleiro; o posicionamento consome peças da reserva.
-_Avoid_: pilha, estoque, banco
+**Caixa**:
+Fonte única e finita de peças da partida, representada sobre a mesa; composta e embaralhada no início da partida, fornece as peças do Recebimento por sorteio, sem reposição.
+_Avoid_: pilha, estoque, banco, reserva
+
+**Sorteio**:
+Retirada de uma peça da Caixa pelo serviço da partida, uma a uma, visível a todos os Jogadores.
+
+**Embaralhamento**:
+Ordenação aleatória da Caixa no início da partida.
+
+**Composição**:
+Conjunto de peças que formam a Caixa no início da partida.
+
+**Esgotamento**:
+Estado da Caixa sem peças restantes; nenhum Recebimento acontece enquanto durar.
+
+**Peça Especial**:
+Categoria de peça com quatro bordas abertas que não reconstrói caminhos e concede conquistas; tipos: Gerador, Sala do Diretor, Sala Médica e Portão de Saída.
+_Avoid_: peça de objetivo
 
 **Posicionamento**:
 Ação de encaixar uma peça em uma célula vazia do tabuleiro.
@@ -157,7 +173,7 @@ _Avoid_: confirmação, travar
 ## Peões e Conexões
 
 **Peão**:
-Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão; move-se entre peças conectadas; não é uma Peça.
+Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até quatro; move-se entre peças conectadas; não é uma Peça.
 _Avoid_: pawn, token, boneco
 
 **Conexão**:
@@ -165,8 +181,8 @@ Relação entre duas peças vizinhas cujas bordas abertas estão voltadas uma pa
 _Avoid_: ligação, elo
 
 **Recebimento**:
-Retirada de peças de caminho da reserva, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; ocorre no início da sequência do peão.
-_Avoid_: sorteio, ganho
+Peças sorteadas da Caixa que o Jogador recebe, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; o Jogador escolhe a vaga de cada peça sorteada; quando a Caixa não tem peças suficientes, recebe as restantes; ocorre no início da sequência do peão.
+_Avoid_: ganho
 
 **Movimentação**:
 Ação de deslocar o peão para uma peça vizinha conectada; encerra a sequência do peão.
@@ -209,17 +225,32 @@ _Avoid_: passar a vez, fim de turno
 ## Objetivos da Partida
 
 **Gerador**:
-Dispositivo do sanatório que a equipe deve ativar; a vitória exige ativar os três geradores.
+Peça Especial do sanatório que a equipe deve ativar; fica permanentemente ligado quando a posição de um peão é confirmada sobre ele; a vitória exige três geradores ligados.
 _Avoid_: energia, fonte de luz
 
 **Cartão de Acesso**:
-Item obtido pela equipe que libera a abertura do portão de saída.
+Item obtido pela equipe na Sala do Diretor que libera a abertura do Portão de Saída.
 _Avoid_: chave, cartão-chave
 
 **Portão de Saída**:
-Local por onde a equipe escapa; os quatro jogadores devem se reunir nele para vencer.
+Peça Especial por onde a equipe escapa; os quatro Jogadores devem se reunir nele para vencer; aceita até quatro peões simultaneamente.
 _Avoid_: saída, porta
 
+**Sala do Diretor**:
+Peça Especial que concede o Cartão de Acesso quando a posição de um peão é confirmada sobre ela.
+
+**Sala Médica**:
+Peça Especial que concede Proteção contra o próximo ataque de monstro quando a posição de um peão é confirmada sobre ela.
+
+**Proteção**:
+Estado de um Jogador que nega o próximo ataque de monstro; não acumulável; permanece até ser consumida.
+
+**Conquista**:
+Efeito imediato concedido quando a posição de um peão é confirmada sobre uma Peça Especial.
+
+**Objetivo Global**:
+Condição de vitória acompanhada coletivamente pela equipe: geradores ligados e Cartão de Acesso obtido.
+
 **Peça**:
-Componente do tabuleiro posicionado pelos jogadores durante a exploração, reconstruindo o caminho do sanatório.
+Componente do tabuleiro posicionado pelos Jogadores durante a exploração; pode reconstruir o caminho do sanatório ou conceder conquistas (Peça Especial).
 _Avoid_: tile, bloco
