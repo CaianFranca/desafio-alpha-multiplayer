@@ -118,6 +118,14 @@ _Avoid_: casa, quadrado, slot
 Relação entre células que compartilham uma borda; células diagonais não são vizinhas.
 _Avoid_: adjacência
 
+**Iluminação**:
+Conjunto de células iluminadas pelos peões do tabuleiro: a célula de cada peão unida às células da sua Vizinhança; independe de Conexões e é compartilhada por todos os Jogadores.
+_Avoid_: área visível, luz
+
+**Limpeza**:
+Mecânica do tabuleiro que remove permanentemente as peças cujas células ficaram fora da Iluminação; aplicada individualmente no turno do Jogador Ativo, no máximo uma vez, quando a Iluminação muda; as células das peças removidas ficam livres.
+_Avoid_: faxina, purge
+
 **Borda Aberta**:
 Lado de uma peça com conexão externa aberta, definido pelo tipo e pela orientação da peça.
 _Avoid_: lado aberto, saída
