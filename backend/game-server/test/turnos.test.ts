@@ -4,7 +4,10 @@
 // vez pelo canal de Partida: o Encerramento do Primeiro Turno emite
 // TURNO_ENCERRADO + TURNO_INICIADO (próximo Jogador, mesma rodada) no mesmo
 // broadcast e persiste o estado com o próximo ator; um comando de Jogador fora
-// da vez é rejeitado com ERRO_DO_TABULEIRO FORA_DA_VEZ, sem alterar o estado.
+// da vez é rejeitado com ERRO_DO_TABULEIRO FORA_DA_VEZ, sem alterar o estado;
+// e um comando cujo `jogadorId` do wire divirja da sessão autenticada
+// (impersonation, #135) é rejeitado com ERRO_DO_TABULEIRO DADOS_INVALIDOS,
+// também sem alterar o estado.
 //
 // Cuidado com o TURNO_INICIADO da admissão (issue #46): `anunciarTurnoAtual`
 // envia o turno corrente (jogador-1, rodada 1) ao socket recém-admitido, no
@@ -369,6 +372,45 @@ test('rejeição: comando de Jogador fora da vez responde ERRO_DO_TABULEIRO FORA
       assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
 
       // Estado inalterado: a vez segue com jogador-1 e nada foi selecionado.
+      const estado = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.ok(estado !== null, 'estado da partida deve existir no Redis');
+      assert.equal(estado!.jogadorAtivoId, 'jogador-1');
+      assert.equal(estado!.rodada, 1);
+      assert.equal(estado!.tabuleiro.pecaSelecionadaId, null);
+      assert.equal(estado!.tabuleiro.posicionadas.length, 0);
+    } finally {
+      ws1.close();
+      ws2.close();
+    }
+
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('rejeição: comando com jogadorId de outro jogador responde ERRO_DO_TABULEIRO DADOS_INVALIDOS (impersonation)', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+    // A vez é de jogador-1 (Primeiro Turno). ws1 autentica como jogador-1,
+    // mas tenta disparar um comando cujo `jogadorId` do wire é jogador-2.
+    const ws1 = await conectarPartida(servidor, aceite.partidaId);
+    const ws2 = await conectarPartida(servidor, aceite.partidaId, 2);
+
+    try {
+      // Impersonation: o ator declarado no wire (jogador-2) diverge da sessão
+      // autenticada de ws1 (jogador-1). Sem o fix (#135) isso passaria como se
+      // fosse a vez de jogador-1; com o fix, o handler rejeita antes do
+      // dispatch com DADOS_INVALIDOS — nunca FORA_DA_VEZ.
+      enviar(ws1, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-2' });
+      const erro = await esperarEvento(ws1, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.codigo, 'DADOS_INVALIDOS');
+      assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
+
+      // Estado inalterado: nenhum comando foi aplicado.
       const estado = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.ok(estado !== null, 'estado da partida deve existir no Redis');
       assert.equal(estado!.jogadorAtivoId, 'jogador-1');
