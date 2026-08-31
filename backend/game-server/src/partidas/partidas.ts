@@ -155,6 +155,50 @@ end
 return cjson.encode({mudou=mudou, completo=completo, iniciou=iniciou, estado=estadoAtual})
 `.trim();
 
+const SCRIPT_DESCONECTAR_PRESENCA = `
+local function salvarPreservandoTtl(chave, valor)
+  local ttl = redis.call('TTL', chave)
+  if ttl == -2 then
+    return
+  elseif ttl == -1 then
+    redis.call('SET', chave, valor)
+  elseif ttl > 0 then
+    redis.call('SET', chave, valor, 'EX', ttl)
+  else
+    redis.call('SET', chave, valor)
+  end
+end
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return cjson.encode({mudou=false})
+end
+local ok, partida = pcall(cjson.decode, raw)
+if not ok or not partida or not partida.roster then
+  return cjson.encode({mudou=false})
+end
+local mudou = false
+for i, m in ipairs(partida.roster) do
+  if m.jogadorId == ARGV[1] then
+    if m.presenca ~= 'em_reconexao' then
+      m.presenca = 'em_reconexao'
+      mudou = true
+    end
+  end
+end
+if mudou then
+  salvarPreservandoTtl(KEYS[1], cjson.encode(partida))
+end
+return cjson.encode({mudou=mudou})
+`.trim();
+
+export async function marcarDesconexao(
+  redis: Redis,
+  partidaId: PartidaId,
+  jogadorId: string,
+): Promise<void> {
+  await redis.eval(SCRIPT_DESCONECTAR_PRESENCA, 1, chaveDaPartida(partidaId), jogadorId);
+}
+
 export async function transicionarSeCompletoOuAtualizarPresenca(
   redis: Redis,
   partidaId: PartidaId,
