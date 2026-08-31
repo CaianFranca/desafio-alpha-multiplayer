@@ -254,7 +254,10 @@ export function criarWebSocketServer(
           // para o handler: ele responde ERRO_DO_TABULEIRO DADOS_INVALIDOS ao
           // originador — descartar aqui quebraria o contrato fechado do wire
           // (issue #117) e o teste de guarda de peões.
-          void depsPartida.handlers.aplicarMensagem(ws, partidaId, parsed);
+          // O ator do dispatch é a sessão autenticada (`sessao.jogadorId`),
+          // nunca o `jogadorId` autodeclarado no wire: o handler rejeita
+          // comandos cujo `jogadorId` divirja da sessão (impersonation, #135).
+          void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
         });
 
         ws.on('close', () => {
