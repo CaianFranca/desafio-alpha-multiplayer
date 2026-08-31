@@ -230,6 +230,16 @@ test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático 
         { recebidaId: 'recebida-inicial-1-leste', bordaGeradora: 'leste', celulaAlvo: { linha: 3, coluna: 4 } },
       ],
     },
+    {
+      tipo: 'celulas_iluminadas',
+      celulas: [
+        { linha: 2, coluna: 3 },
+        { linha: 3, coluna: 2 },
+        { linha: 3, coluna: 3 },
+        { linha: 3, coluna: 4 },
+        { linha: 4, coluna: 3 },
+      ],
+    },
   ]);
   assert.equal(encaixeDoPeao.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   assert.equal(encaixeDoPeao.estado.tabuleiro.recebidas.length, 2);
@@ -453,6 +463,29 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
       tipo: 'recebimento_gerado',
       recebidas: [
         { recebidaId: 'recebida-reta-1-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 1, coluna: 3 } },
+      ],
+    },
+    {
+      tipo: 'celulas_iluminadas',
+      celulas: [
+        // peao-vermelho em (0,0)
+        { linha: 0, coluna: 0 },
+        { linha: 0, coluna: 1 },
+        { linha: 1, coluna: 0 },
+        // peao-branco em (2,3)
+        { linha: 1, coluna: 3 },
+        { linha: 2, coluna: 2 },
+        { linha: 2, coluna: 3 },
+        { linha: 2, coluna: 4 },
+        { linha: 3, coluna: 3 },
+        // peao-amarelo em (6,0)
+        { linha: 5, coluna: 0 },
+        // peao-azul em (6,6)
+        { linha: 5, coluna: 6 },
+        { linha: 6, coluna: 0 },
+        { linha: 6, coluna: 1 },
+        { linha: 6, coluna: 5 },
+        { linha: 6, coluna: 6 },
       ],
     },
     // Limpeza: a reta-2 (3,4) ficou fora da iluminação da reta-1 (2,3).

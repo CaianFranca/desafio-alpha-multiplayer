@@ -47,6 +47,7 @@ export type {
 export type {
   CodigoDeErroDaPartida,
   ComandoDePartida,
+  CelulasIluminadasEvento,
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
   ErroDeDominioDaPartida,

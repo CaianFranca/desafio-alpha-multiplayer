@@ -20,6 +20,8 @@
 //   shared type:'TURNO_INICIADO' { jogadorId, rodada } <-> engine tipo:'turno_iniciado' { jogadorId, rodada }
 //   shared type:'TURNO_ENCERRADO' { jogadorId } <-> engine tipo:'turno_encerrado' { jogadorId }
 //   shared type:'POSICAO_CONFIRMADA' { jogadorId, peaoId, pecaId } <-> engine tipo:'posicao_confirmada' { jogadorId, peaoId, pecaId }
+//   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
+//   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   Erros: CodigoDeErroDaPartida alias de CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120) — FORA_DA_VEZ etc via ERRO_DO_TABULEIRO (SalaServerMessage via TabuleiroEventoDoServidor).
 //   shared type:UPPER_SNAKE no wire vs engine tipo:snake no domínio; campos em camelCase nos dois lados
 //
@@ -113,7 +115,7 @@ export type PartidaComandoDoCliente =
   | ConfirmarPosicaoDoPeaoComando
   | EncerrarTurnoComando;
 
-// --- Eventos servidor → cliente (3) ---
+// --- Eventos servidor → cliente (5) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';
@@ -133,10 +135,22 @@ export interface PosicaoConfirmadaEvento {
   readonly pecaId: PecaId;
 }
 
+export interface CelulasIluminadasEvento {
+  readonly type: 'CELULAS_ILUMINADAS';
+  readonly celulas: readonly { readonly linha: number; readonly coluna: number }[];
+}
+
+export interface LimpezaAplicadaWireEvento {
+  readonly type: 'LIMPEZA_APLICADA';
+  readonly pecasRemovidas: readonly string[];
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
-  | PosicaoConfirmadaEvento;
+  | PosicaoConfirmadaEvento
+  | CelulasIluminadasEvento
+  | LimpezaAplicadaWireEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

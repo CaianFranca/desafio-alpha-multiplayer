@@ -91,11 +91,17 @@ export interface PosicaoConfirmadaEvento {
   readonly pecaId: string;
 }
 
+export interface CelulasIluminadasEvento {
+  readonly tipo: 'celulas_iluminadas';
+  readonly celulas: readonly Celula[];
+}
+
 export type EventoDaPartida =
   | EventoDoTabuleiro
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
-  | PosicaoConfirmadaEvento;
+  | PosicaoConfirmadaEvento
+  | CelulasIluminadasEvento;
 
 export type CodigoDeErroDaPartida =
   | CodigoDeErroDeTabuleiro
@@ -367,6 +373,9 @@ function posicionarPeaoDaPartida(
   // Recebidas caem na Vizinhança do Peão (sempre iluminadas) e não são
   // removidas. O estado é filtrado e o evento só sai quando há remoção.
   const celulasIluminadas = calcularIluminacao(tabuleiro);
+  if (!iluminacoesIguais(estado.celulasIluminadas, celulasIluminadas)) {
+    eventos.push({ tipo: 'celulas_iluminadas', celulas: celulasIluminadas });
+  }
   const { posicionadas, removidas } = aplicarLimpeza(
     tabuleiro,
     celulasIluminadas,
@@ -529,6 +538,9 @@ function confirmarPosicaoDoPeao(
   }
   const tabuleiro = { ...estado.tabuleiro, recebidas };
   const celulasIluminadas = calcularIluminacao(tabuleiro);
+  if (!iluminacoesIguais(estado.celulasIluminadas, celulasIluminadas)) {
+    eventos.push({ tipo: 'celulas_iluminadas', celulas: celulasIluminadas });
+  }
   const { posicionadas, removidas } = aplicarLimpeza(
     tabuleiro,
     celulasIluminadas,
@@ -689,4 +701,15 @@ function rejeitarDaPartida(
     sucesso: false,
     erro: { tipo: 'erro_de_dominio', codigo, mensagem },
   };
+}
+
+function iluminacoesIguais(
+  a: readonly Celula[],
+  b: readonly Celula[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].linha !== b[i].linha || a[i].coluna !== b[i].coluna) return false;
+  }
+  return true;
 }
