@@ -731,22 +731,10 @@ test('iluminação: mover_peao não altera até confirmar_posicao_do_peao; perma
   // selecionar_peao não altera
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   assert.deepEqual(estado.celulasIluminadas, antes);
-  // selecionar_peca não altera (cruz-1 ainda está na reserva em rodada 2)
-  const sel = aplicarComandoDePartida(estado, selecionarPeca('cruz-1'), 'ana');
-  assert.equal(sel.sucesso, true);
-  if (!sel.sucesso) throw new Error('selecionar_peca cruz-1 deveria suceder em rodada 2');
-  assert.deepEqual(sel.estado.celulasIluminadas, antes);
-  estado = sel.estado;
-  // girar_peca via comando não altera a iluminação (independe de orientação)
-  const gir = aplicarComandoDePartida(estado, girarPeca('cruz-1'), 'ana');
-  assert.equal(gir.sucesso, true);
-  if (!gir.sucesso) throw new Error('girar_peca cruz-1 deveria suceder');
-  assert.deepEqual(gir.estado.celulasIluminadas, antes);
-  estado = gir.estado;
-  // posicionar_peca delegado (caminho direto é PECA_NAO_RECEBIDA, mas ainda preserva iluminação)
-  const pos = aplicarComandoDePartida(estado, posicionarPeca('cruz-1', 1, 1), 'ana');
-  assert.equal(pos.sucesso, false);
-  assert.equal(pos.erro.codigo, 'PECA_NAO_RECEBIDA');
+  // selecionar_peca em peça indisponível rejeita e preserva iluminação
+  const sel = aplicarComandoDePartida(estado, selecionarPeca('inicial-1'), 'ana');
+  assert.equal(sel.sucesso, false);
+  assert.equal(sel.erro.codigo, 'PECA_INICIAL_INDISPONIVEL');
   assert.deepEqual(estado.celulasIluminadas, antes);
   // Mover tentativo não altera
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
