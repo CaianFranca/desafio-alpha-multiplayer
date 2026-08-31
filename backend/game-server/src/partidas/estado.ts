@@ -82,16 +82,10 @@ export async function salvarEstadoDaPartida(
     await redis.set(chave, JSON.stringify(estado));
     return;
   }
-  if (ttl === 0) {
-    await redis.set(chave, JSON.stringify(estado));
-    await redis.persist(chave);
-    return;
-  }
   if (ttl > 0) {
     await redis.set(chave, JSON.stringify(estado), 'EX', ttl);
     return;
   }
-  // Fall-through defensivo: ttl inesperado (ex.: -1 já tratado) — persiste sem TTL
   await redis.set(chave, JSON.stringify(estado));
 }
 

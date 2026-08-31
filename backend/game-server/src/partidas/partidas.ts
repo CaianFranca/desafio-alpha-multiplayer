@@ -98,16 +98,13 @@ const TTL_SEM_EXPIRACAO = -1;
 const SCRIPT_TRANSICAO_PRESENCA = `
 local function salvarPreservandoTtl(chave, valor)
   local ttl = redis.call('TTL', chave)
-  if ttl == -1 then
-    redis.call('SET', chave, valor)
-  elseif ttl == 0 then
-    redis.call('SET', chave, valor)
-    redis.call('PERSIST', chave)
-  elseif ttl > 0 then
-    redis.call('SET', chave, valor, 'EX', ttl)
-  elseif ttl == -2 then
+  if ttl == -2 then
     -- chave expirou entre GET e SET — não repersiste
     return
+  elseif ttl == -1 then
+    redis.call('SET', chave, valor)
+  elseif ttl > 0 then
+    redis.call('SET', chave, valor, 'EX', ttl)
   else
     redis.call('SET', chave, valor)
   end
@@ -135,9 +132,9 @@ for i, m in ipairs(partida.roster) do
     conectados = conectados + 1
   end
 end
-local completo = (conectados == 4)
+local completo = (conectados == #partida.roster)
 local iniciou = false
-if completo and partida.estado == 'preparada' then
+if completo and partida.estado == 'preparada' and redis.call('EXISTS', KEYS[2]) == 1 then
   partida.estado = 'em_andamento'
   iniciou = true
 end
