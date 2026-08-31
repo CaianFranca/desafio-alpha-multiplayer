@@ -1,7 +1,10 @@
 // Domínio puro dos Peões, conexões, Recebimento e ciclo da sequência
 // (ST-10 / issue #89), refinado pela ST-11 (issue #114): a seleção do Peão
 // deixa de gerar Recebimento — o Recebimento do Peão já posicionado passou a
-// pertencer à camada da Partida (partida.ts), via gerarRecebidas exportada.
+// pertencer à camada da Partida (partida.ts), via gerarRecebidas exportada —
+// e pela ST-12 / issue #138: o Recebimento sorteia as peças da Caixa (uma a
+// uma) e o Jogador escolhe a vaga de cada peça sorteada
+// (escolher_vaga_da_peca_recebida), sem escolha de tipo no domínio.
 //
 // Handlers do ciclo do Peão, extraídos de tabuleiro.ts (W2 da review #107):
 // o estado, os tipos de comando/evento/erro e o dispatch
@@ -12,13 +15,11 @@
 // rotação, bordas abertas e busca de peças posicionadas). Domínio puro e
 // imutável: nenhum contrato wire, Redis ou Express vive aqui.
 
-import assert from 'node:assert/strict';
-
 import type {
   BordaCardinal,
   Celula,
   CodigoDeErroDeTabuleiro,
-  EscolherTipoDaPecaRecebidaComando,
+  EscolherVagaDaPecaRecebidaComando,
   EstadoDoTabuleiro,
   EventoDoTabuleiro,
   GirarPecaComando,
@@ -35,7 +36,6 @@ import type {
   SelecionarPeaoComando,
   SentidoDeRotacao,
   TipoDaPeca,
-  TipoDePecaDeCaminho,
 } from './tabuleiro.ts';
 
 export const LADO_DA_GRADE = 7;
@@ -188,30 +188,77 @@ export function selecionarPeao(
   );
 }
 
-// Recebimento (ST-10): um slot para cada borda aberta da Peça sob o Peão cuja
-// célula vizinha está vazia (dentro da grade). A célula-alvo é fixada na
-// criação; o tipo só é escolhido depois, consumindo a Caixa. Exportada para
-// a camada da Partida (ST-11), que decide quando o Recebimento acontece.
+// Vagas de Recebimento (ST-12 / issue #138): bordas abertas da Peça geradora
+// cuja célula vizinha está vazia (dentro da grade), excluindo as já escolhidas
+// pelas pendências informadas. Em ordem canônica (norte, leste, sul, oeste).
+export function vagasDisponiveis(
+  estado: EstadoDoTabuleiro,
+  peca: PecaPosicionada,
+  recebidas: readonly PecaRecebida[] = [],
+): { borda: BordaCardinal; celula: Celula }[] {
+  const vagas: { borda: BordaCardinal; celula: Celula }[] = [];
+  for (const borda of bordasAbertas(peca)) {
+    if (recebidas.some((item) => item.vaga === borda)) {
+      continue;
+    }
+    const celula = celulaVizinhaNaBorda(peca.celula, borda);
+    if (!celula || encontrarPosicionadaPorCelula(estado, celula)) {
+      continue;
+    }
+    vagas.push({ borda, celula });
+  }
+  return vagas;
+}
+
+export interface RecebimentoGerado {
+  // Estado com a Caixa já consumida pelo sorteio.
+  readonly estado: EstadoDoTabuleiro;
+  // Uma pendência por peça sorteada, com vaga nula até a escolha.
+  readonly recebidas: PecaRecebida[];
+  // Um peca_sorteada por peça retirada da Caixa, em ordem de sorteio.
+  readonly eventos: EventoDoTabuleiro[];
+}
+
+// Recebimento (ST-12 / issue #138): sorteia N = min(vagas, caixa) peças da
+// Caixa — uma a uma, consumindo a primeira peça restante N vezes — e cria uma
+// pendência por peça sorteada, sem vaga: a escolha da vaga de cada peça é o
+// comando escolher_vaga_da_peca_recebida. Caixa vazia ou insuficiente NÃO é
+// erro: N apenas diminui (o Jogador recebe as restantes; sem Caixa, nenhuma).
+// Exportada para a camada da Partida (ST-11), que decide quando o Recebimento
+// acontece. O consumo da primeira peça espelha a primitiva sortearDaCaixa
+// (tabuleiro.ts) — a dependência em runtime é única (tabuleiro.ts → peoes.ts),
+// então o sorteio é refeito aqui em sequência.
 export function gerarRecebidas(
   estado: EstadoDoTabuleiro,
   peca: PecaPosicionada,
-): PecaRecebida[] {
+): RecebimentoGerado {
+  const quantidade = Math.min(
+    vagasDisponiveis(estado, peca).length,
+    estado.caixa.length,
+  );
+  const eventos: EventoDoTabuleiro[] = [];
+  let caixa = estado.caixa;
   const recebidas: PecaRecebida[] = [];
-  for (const borda of bordasAbertas(peca)) {
-    const celulaAlvo = celulaVizinhaNaBorda(peca.celula, borda);
-    if (!celulaAlvo || encontrarPosicionadaPorCelula(estado, celulaAlvo)) {
-      continue;
-    }
+  for (let indice = 0; indice < quantidade; indice++) {
+    const [sorteada, ...resto] = caixa;
+    // A quantidade é limitada pela Caixa: a primeira peça sempre existe.
+    caixa = resto;
+    eventos.push({
+      tipo: 'peca_sorteada',
+      pecaId: sorteada.pecaId,
+      tipoDaPeca: sorteada.tipo,
+      orientacao: sorteada.orientacao,
+    });
     recebidas.push({
-      recebidaId: `recebida-${peca.pecaId}-${borda}`,
-      bordaGeradora: borda,
-      celulaAlvo,
-      pecaId: null,
-      tipo: null,
-      orientacao: 0,
+      recebidaId: `recebida-${sorteada.pecaId}`,
+      pecaId: sorteada.pecaId,
+      tipo: sorteada.tipo,
+      orientacao: sorteada.orientacao,
+      vaga: null,
+      celulaAlvo: null,
     });
   }
-  return recebidas;
+  return { estado: { ...estado, caixa }, recebidas, eventos };
 }
 
 export function posicionarPeao(
@@ -290,28 +337,22 @@ export function posicionarPeao(
   );
 }
 
-export function escolherTipoDaPecaRecebida(
+// Escolha da vaga (issue #138): o Jogador escolhe, POR peça sorteada, a vaga
+// que ela ocupa — uma borda aberta da Peça sob o Peão com célula vizinha
+// vazia, ainda não escolhida por outra pendência. Fixa a borda e a célula-alvo
+// da pendência e seleciona a Peça sorteada (mesmo padrão da escolha do tipo
+// do legado ST-10).
+export function escolherVagaDaPecaRecebida(
   estado: EstadoDoTabuleiro,
-  comando: EscolherTipoDaPecaRecebidaComando,
+  comando: EscolherVagaDaPecaRecebidaComando,
 ): ResultadoDoTabuleiro {
   const dadosInvalidos = validarTexto(comando.recebidaId);
   if (dadosInvalidos) {
     return dadosInvalidos;
   }
 
-  if (
-    comando.tipoDaPeca !== 'reta' &&
-    comando.tipoDaPeca !== 'T' &&
-    comando.tipoDaPeca !== 'cruz'
-  ) {
-    return rejeitar(
-      'DADOS_INVALIDOS',
-      'O tipo da Peça Recebida deve ser "reta", "T" ou "cruz".',
-    );
-  }
-
-  // A escolha do tipo pertence à sequência do Peão selecionado: todo sub-fluxo
-  // do Recebimento exige um Peão em sequência.
+  // A escolha da vaga pertence à sequência do Peão selecionado: todo
+  // sub-fluxo do Recebimento exige um Peão em sequência.
   if (estado.peaoSelecionadoId === null) {
     return rejeitar(
       'PEAO_NAO_SELECIONADO',
@@ -329,22 +370,35 @@ export function escolherTipoDaPecaRecebida(
     );
   }
 
-  if (recebida.pecaId !== null) {
+  if (recebida.vaga !== null) {
     return rejeitar(
       'DADOS_INVALIDOS',
-      'A Peça Recebida indicada já tem o tipo escolhido.',
+      'A Peça Recebida indicada já tem a vaga escolhida.',
     );
   }
 
-  // Consumo determinístico da Caixa (ST-12): a primeira Peça do tipo pedido,
-  // que deixa a Caixa e passa a pertencer ao slot da Recebida. Fluxo legado
-  // do Recebimento (ST-10) — o sorteio unitário da #139 substituirá a escolha
-  // do tipo.
-  const peca = estado.caixa.find((item) => item.tipo === comando.tipoDaPeca);
-  if (!peca) {
+  // A vaga deriva da Peça sob o Peão selecionado: é dela que as bordas
+  // abertas com célula vizinha vazia são calculadas.
+  const peao = estado.peoes.find(
+    (item) => item.peaoId === estado.peaoSelecionadoId,
+  );
+  const pecaSobOPeao = peao?.pecaId
+    ? encontrarPosicionada(estado, peao.pecaId)
+    : undefined;
+  if (!pecaSobOPeao) {
     return rejeitar(
-      'CAIXA_ESGOTADA',
-      `A Caixa não possui Peças do tipo "${comando.tipoDaPeca}".`,
+      'DADOS_INVALIDOS',
+      'O Peão selecionado não está sobre uma Peça; não há vagas a escolher.',
+    );
+  }
+
+  const vaga = vagasDisponiveis(estado, pecaSobOPeao, estado.recebidas).find(
+    (candidata) => candidata.borda === comando.borda,
+  );
+  if (!vaga) {
+    return rejeitar(
+      'DADOS_INVALIDOS',
+      'A borda indicada não é uma vaga disponível: deve ser borda aberta da Peça sob o Peão, com célula vizinha vazia e ainda não escolhida.',
     );
   }
 
@@ -359,27 +413,23 @@ export function escolherTipoDaPecaRecebida(
     pecaEmManipulacaoId = null;
   }
   eventos.push({
-    tipo: 'tipo_da_peca_recebida_escolhido',
+    tipo: 'vaga_da_peca_recebida_escolhida',
     recebidaId: recebida.recebidaId,
-    pecaId: peca.pecaId,
-    tipoDaPeca: comando.tipoDaPeca,
+    borda: vaga.borda,
+    celulaAlvo: vaga.celula,
   });
 
-  // A escolha torna a Peça atribuída a "selecionada" (reuso da Seleção única
+  // A escolha torna a Peça sorteada a "selecionada" (reuso da Seleção única
   // da ST-09), para que girar_peca funcione com o mesmo padrão das Iniciais.
   return sucesso(
     {
       ...estado,
-      caixa: estado.caixa.filter((item) => item.pecaId !== peca.pecaId),
       recebidas: estado.recebidas.map((item) =>
         item.recebidaId === recebida.recebidaId
-          ? // A Recebida nasce na Orientação base (0°): a Caixa é opaca e a
-            // orientação da Peça consumida é sempre a de composição; o giro
-            // deliberado da Recebida fica em girar_peca.
-            { ...item, pecaId: peca.pecaId, tipo: comando.tipoDaPeca, orientacao: 0 }
+          ? { ...item, vaga: vaga.borda, celulaAlvo: vaga.celula }
           : item,
       ),
-      pecaSelecionadaId: peca.pecaId,
+      pecaSelecionadaId: recebida.pecaId,
       pecaEmManipulacaoId,
     },
     eventos,
@@ -508,12 +558,12 @@ export function permanecer(
   );
 }
 
-// Encaixe de Peça Recebida: a célula é fixa (a célula-alvo fixada no
-// Recebimento), com Orientação livre e SEM exigência de conexão com a Peça
+// Encaixe de Peça Recebida: a célula é fixa (a célula-alvo derivada da vaga
+// escolhida), com Orientação livre e SEM exigência de conexão com a Peça
 // geradora (ST-10). A Recebida sai da lista de pendências e a janela de
 // Manipulação da ST-09 abre como em qualquer Encaixe — girar a peça
 // posicionada vai pela janela, sem consultar a seleção. A seleção é limpa no
-// encaixe; a próxima escolha de tipo seleciona a próxima Recebida.
+// encaixe; a próxima escolha de vaga seleciona a próxima Recebida.
 export function posicionarRecebida(
   estado: EstadoDoTabuleiro,
   recebida: PecaRecebida,
@@ -527,12 +577,14 @@ export function posicionarRecebida(
     );
   }
 
-  // Invariante do roteamento: encontrarRecebidaPorPeca só alcança Recebidas
-  // com o tipo já escolhido; o assert estreita os tipos sem rejeição morta.
-  assert.ok(
-    recebida.pecaId !== null && recebida.tipo !== null,
-    'Recebida sem tipo escolhido alcançou o encaixe.',
-  );
+  // Roteamento por pecaId alcança pendências com e sem vaga: encaixe sem a
+  // vaga escolhida é rejeição de domínio (a célula-alvo ainda não existe).
+  if (recebida.vaga === null || recebida.celulaAlvo === null) {
+    return rejeitar(
+      'DADOS_INVALIDOS',
+      'A Peça Recebida ainda não tem a vaga escolhida; escolha a vaga antes de encaixar.',
+    );
+  }
 
   if (
     comando.celula.linha !== recebida.celulaAlvo.linha ||

@@ -14,7 +14,7 @@
 
 import {
   exigirCelulaNoAlcance,
-  escolherTipoDaPecaRecebida,
+  escolherVagaDaPecaRecebida,
   estaDentroDaGrade,
   encontrarPosicionada,
   encontrarPosicionadaPorCelula,
@@ -36,6 +36,7 @@ export {
   bordasAbertas,
   gerarRecebidas,
   validarTexto,
+  vagasDisponiveis,
   vizinhasConectadas,
 } from './peoes.ts';
 
@@ -96,17 +97,24 @@ export interface Peao {
   readonly pecaId: string | null;
 }
 
-// Slot do Recebimento (ST-10): criado ao selecionar um Peão posicionado, um
-// para cada borda aberta com célula vizinha vazia. Não contém Peça até a
-// escolha do tipo (escolher_tipo_da_peca_recebida), que atribui pecaId e tipo
-// a partir da Caixa.
+// Slot do Recebimento (ST-12 / issue #138): cada slot carrega a Peça já
+// sorteada da Caixa (pecaId, tipo e orientação de composição) e a vaga só é
+// fixada depois, pelo comando escolher_vaga_da_peca_recebida — a borda da Peça
+// geradora com célula vizinha vazia escolhida pelo Jogador vira a célula-alvo.
 export interface PecaRecebida {
   readonly recebidaId: string;
-  readonly bordaGeradora: BordaCardinal;
-  readonly celulaAlvo: Celula;
-  readonly pecaId: string | null;
-  readonly tipo: TipoDePecaDeCaminho | null;
+  // A Peça sorteada já pertence ao slot desde o Recebimento (não há escolha
+  // de tipo no domínio desde a #138).
+  readonly pecaId: string;
+  readonly tipo: TipoDePecaDaCaixa;
+  // Orientação de composição da Caixa (0°); o giro deliberado fica em
+  // girar_peca, pelo mesmo padrão das Iniciais.
   readonly orientacao: Orientacao;
+  // Vaga escolhida: borda aberta da Peça sob o Peão com célula vizinha vazia;
+  // null até a escolha.
+  readonly vaga: BordaCardinal | null;
+  // Célula derivada da vaga; null até a escolha.
+  readonly celulaAlvo: Celula | null;
 }
 
 // `pecaSelecionadaId` aponta para uma Peça Inicial fora da Caixa (Seleção
@@ -117,8 +125,9 @@ export interface PecaRecebida {
 // fecha a janela.
 export interface EstadoDoTabuleiro {
   // Caixa da partida (ST-12): composição fixa de 71 peças de caminho e
-  // especiais, embaralhada uma única vez na criação do estado; sorteio
-  // unitário sem reposição (sortearDaCaixa e escolher_tipo_da_peca_recebida).
+  // especiais, embaralhada uma única vez na criação do estado; consumo da
+  // primeira peça, sem reposição, pelo sorteio unitário (sortearDaCaixa) e
+  // pelo Recebimento (gerarRecebidas, issue #138).
   readonly caixa: readonly PecaDaCaixa[];
   // As 4 Peças Iniciais, fora da Caixa, encaixadas diretamente.
   readonly iniciais: readonly PecaInicial[];
@@ -163,12 +172,13 @@ export interface PosicionarPeaoComando {
   readonly celula: Celula;
 }
 
-export interface EscolherTipoDaPecaRecebidaComando {
-  readonly tipo: 'escolher_tipo_da_peca_recebida';
+// Recebimento (issue #138): escolhe a vaga (borda aberta da Peça sob o Peão
+// com célula vizinha vazia) de uma pendência do Recebimento — uma escolha POR
+// peça sorteada.
+export interface EscolherVagaDaPecaRecebidaComando {
+  readonly tipo: 'escolher_vaga_da_peca_recebida';
   readonly recebidaId: string;
-  // O discriminador da união ocupa o nome "tipo"; o tipo da Peça de caminho
-  // escolhido na Caixa vem em "tipoDaPeca".
-  readonly tipoDaPeca: TipoDePecaDeCaminho;
+  readonly borda: BordaCardinal;
 }
 
 export interface MoverPeaoComando {
@@ -189,7 +199,7 @@ export type ComandoDeTabuleiro =
   | FinalizarManipulacaoComando
   | SelecionarPeaoComando
   | PosicionarPeaoComando
-  | EscolherTipoDaPecaRecebidaComando
+  | EscolherVagaDaPecaRecebidaComando
   | MoverPeaoComando
   | PermanecerComando;
 
@@ -238,12 +248,14 @@ export interface PeaoSelecionadoEvento {
   readonly peaoId: string;
 }
 
-// Pendências geradas pelo Recebimento: um slot por borda aberta com célula
-// vizinha vazia, com a célula-alvo já fixada.
+// Pendências geradas pelo Recebimento (issue #138): uma por peça sorteada,
+// com a vaga (e a célula-alvo derivada dela) ainda nulas até a escolha.
 export interface PendenciaDeRecebimento {
   readonly recebidaId: string;
-  readonly bordaGeradora: BordaCardinal;
-  readonly celulaAlvo: Celula;
+  readonly pecaId: string;
+  readonly tipoDaPeca: TipoDePecaDaCaixa;
+  readonly vaga: BordaCardinal | null;
+  readonly celulaAlvo: Celula | null;
 }
 
 export interface RecebimentoGeradoEvento {
@@ -258,11 +270,13 @@ export interface PeaoPosicionadoEvento {
   readonly celula: Celula;
 }
 
-export interface TipoDaPecaRecebidaEscolhidoEvento {
-  readonly tipo: 'tipo_da_peca_recebida_escolhido';
+// Recebimento (issue #138): a escolha da vaga fixa a borda e a célula-alvo da
+// pendência e seleciona a Peça sorteada correspondente.
+export interface VagaDaPecaRecebidaEscolhidaEvento {
+  readonly tipo: 'vaga_da_peca_recebida_escolhida';
   readonly recebidaId: string;
-  readonly pecaId: string;
-  readonly tipoDaPeca: TipoDePecaDeCaminho;
+  readonly borda: BordaCardinal;
+  readonly celulaAlvo: Celula;
 }
 
 export interface PeaoMovidoEvento {
@@ -289,7 +303,7 @@ export type EventoDoTabuleiro =
   | PeaoSelecionadoEvento
   | RecebimentoGeradoEvento
   | PeaoPosicionadoEvento
-  | TipoDaPecaRecebidaEscolhidoEvento
+  | VagaDaPecaRecebidaEscolhidaEvento
   | PeaoMovidoEvento
   | PeaoPermaneceuEvento;
 
@@ -529,8 +543,8 @@ export function aplicarComandoDeTabuleiro(
       return selecionarPeao(estado, comando);
     case 'posicionar_peao':
       return posicionarPeao(estado, comando);
-    case 'escolher_tipo_da_peca_recebida':
-      return escolherTipoDaPecaRecebida(estado, comando);
+    case 'escolher_vaga_da_peca_recebida':
+      return escolherVagaDaPecaRecebida(estado, comando);
     case 'mover_peao':
       return moverPeao(estado, comando);
     case 'permanecer':
