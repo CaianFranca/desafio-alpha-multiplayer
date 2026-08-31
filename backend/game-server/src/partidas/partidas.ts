@@ -85,51 +85,6 @@ export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promi
   return removida;
 }
 
-const SCRIPT_ATUALIZAR_PRESENCA = `
-local raw = redis.call('GET', KEYS[1])
-if not raw then
-  return 0
-end
-local ttl = redis.call('TTL', KEYS[1])
-local ok, partida = pcall(cjson.decode, raw)
-if not ok or not partida or not partida.roster then
-  return 0
-end
-local mudou = false
-for i, m in ipairs(partida.roster) do
-  if m.jogadorId == ARGV[1] then
-    if m.presenca ~= 'conectado' then
-      m.presenca = 'conectado'
-      mudou = true
-    end
-  end
-end
-if mudou then
-  local novo = cjson.encode(partida)
-  if ttl > 0 then
-    redis.call('SET', KEYS[1], novo, 'EX', ttl)
-  else
-    redis.call('SET', KEYS[1], novo)
-  end
-  return 1
-end
-return 0
-`.trim();
-
-export async function atualizarPresencaAtomica(
-  redis: Redis,
-  partidaId: PartidaId,
-  jogadorId: string,
-): Promise<boolean> {
-  const resultado = await redis.eval(
-    SCRIPT_ATUALIZAR_PRESENCA,
-    1,
-    chaveDaPartida(partidaId),
-    jogadorId,
-  );
-  return resultado === 1;
-}
-
 export interface ResultadoTransicaoDePresenca {
   readonly mudou: boolean;
   readonly completo: boolean;
@@ -138,6 +93,22 @@ export interface ResultadoTransicaoDePresenca {
 }
 
 const SCRIPT_TRANSICAO_PRESENCA = `
+local function salvarPreservandoTtl(chave, valor)
+  local ttl = redis.call('TTL', chave)
+  if ttl == -1 then
+    redis.call('SET', chave, valor)
+  elseif ttl == 0 then
+    redis.call('SET', chave, valor)
+    redis.call('PERSIST', chave)
+  elseif ttl > 0 then
+    redis.call('SET', chave, valor, 'EX', ttl)
+  elseif ttl == -2 then
+    -- chave expirou entre GET e SET — não repersiste
+    return
+  else
+    redis.call('SET', chave, valor)
+  end
+end
 local raw = redis.call('GET', KEYS[1])
 if not raw then
   return cjson.encode({mudou=false, completo=false, iniciou=false, estado=''})
@@ -171,18 +142,14 @@ local estadoAtual = partida.estado
 if mudou or iniciou then
   local novo = cjson.encode(partida)
   if iniciou then
+    -- ST-14: partida em_andamento persiste sem TTL (sem expiração)
     redis.call('SET', KEYS[1], novo)
     redis.call('PERSIST', KEYS[1])
     if redis.call('EXISTS', KEYS[2]) == 1 then
       redis.call('PERSIST', KEYS[2])
     end
   else
-    local ttl = redis.call('TTL', KEYS[1])
-    if ttl > 0 then
-      redis.call('SET', KEYS[1], novo, 'EX', ttl)
-    else
-      redis.call('SET', KEYS[1], novo)
-    end
+    salvarPreservandoTtl(KEYS[1], novo)
   end
 end
 return cjson.encode({mudou=mudou, completo=completo, iniciou=iniciou, estado=estadoAtual})
@@ -203,12 +170,12 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
   const json = typeof bruto === 'string' ? bruto : String(bruto ?? '');
   try {
     const parsed = JSON.parse(json) as ResultadoTransicaoDePresenca;
-    // Normaliza estado vazio (partida inexistente) para preparada defensivo
     if (parsed.estado !== 'preparada' && parsed.estado !== 'em_andamento') {
-      return { mudou: false, completo: false, iniciou: false, estado: 'preparada' };
+      // Estado vazio indica partida inexistente ou payload corrompido — não mascarar como 'preparada'
+      return { mudou: false, completo: false, iniciou: false, estado: parsed.estado as EstadoDaPartida };
     }
     return parsed;
   } catch {
-    return { mudou: false, completo: false, iniciou: false, estado: 'preparada' };
+    return { mudou: false, completo: false, iniciou: false, estado: '' as unknown as EstadoDaPartida };
   }
 }

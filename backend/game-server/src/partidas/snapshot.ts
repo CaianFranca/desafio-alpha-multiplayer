@@ -5,21 +5,31 @@
 // Fronteira shared vs engine — sync manual, UPPER_SNAKE no wire vs snake no domínio, camelCase nos campos.
 
 import type { EstadoDaPartida } from '@flicker/engine';
+import type { Celula } from '@flicker/shared';
 import type { EstadoDaPartidaSnapshot, EstadoDaPartidaWire } from '@flicker/shared';
 import type { MembroDaSala } from '@flicker/shared';
+
+function copiarCelula(celula: { linha: number; coluna: number }): Celula {
+  return { linha: celula.linha, coluna: celula.coluna };
+}
 
 export function paraSnapshotWire(
   estado: EstadoDaPartida,
   roster: readonly MembroDaSala[],
   estadoWire: EstadoDaPartidaWire,
 ): EstadoDaPartidaSnapshot {
+  const rosterPorJogadorId = new Map(roster.map((m) => [m.jogadorId, m] as const));
+
   const jogadores = [...estado.jogadores]
     .sort((a, b) => a.ordem - b.ordem)
     .map((jogador) => {
-      const membro = roster.find((m) => m.jogadorId === jogador.jogadorId);
+      const membro = rosterPorJogadorId.get(jogador.jogadorId);
+      if (membro === undefined) {
+        throw new Error(`roster inconsistente: jogador ${jogador.jogadorId} não encontrado`);
+      }
       return {
         jogadorId: jogador.jogadorId,
-        apelido: membro?.apelido ?? jogador.jogadorId,
+        apelido: membro.apelido,
         cor: jogador.cor,
         ordem: jogador.ordem,
         peaoId: jogador.peaoId,
@@ -32,11 +42,11 @@ export function paraSnapshotWire(
       pecaId: peca.pecaId,
       tipo: peca.tipo,
       orientacao: peca.orientacao,
-      celula: { linha: peca.celula.linha, coluna: peca.celula.coluna },
+      celula: copiarCelula(peca.celula),
     })),
     iniciais: estado.tabuleiro.iniciais.map((peca) => ({
       pecaId: peca.pecaId,
-      tipo: peca.tipo as 'inicial',
+      tipo: peca.tipo,
       orientacao: peca.orientacao,
     })),
     peoes: estado.tabuleiro.peoes.map((peao) => ({
@@ -47,10 +57,7 @@ export function paraSnapshotWire(
     recebidas: estado.tabuleiro.recebidas.map((recebida) => ({
       recebidaId: recebida.recebidaId,
       bordaGeradora: recebida.bordaGeradora,
-      celulaAlvo: {
-        linha: recebida.celulaAlvo.linha,
-        coluna: recebida.celulaAlvo.coluna,
-      },
+      celulaAlvo: copiarCelula(recebida.celulaAlvo),
       pecaId: recebida.pecaId,
       tipo: recebida.tipo,
       orientacao: recebida.orientacao,
@@ -67,10 +74,7 @@ export function paraSnapshotWire(
     rodada: estado.rodada,
     pecaDoInicioDoTurnoId: estado.pecaDoInicioDoTurnoId,
     posicaoConfirmada: estado.posicaoConfirmada,
-    celulasIluminadas: estado.celulasIluminadas.map((celula) => ({
-      linha: celula.linha,
-      coluna: celula.coluna,
-    })),
+    celulasIluminadas: estado.celulasIluminadas.map(copiarCelula),
     estado: estadoWire,
   };
 }

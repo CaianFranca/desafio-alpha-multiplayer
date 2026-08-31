@@ -70,17 +70,26 @@ export async function salvarEstadoDaPartida(
   partidaId: string,
   estado: EstadoDaPartida,
 ): Promise<void> {
-  const ttl = await redis.ttl(chaveDoEstadoDaPartida(partidaId));
+  const chave = chaveDoEstadoDaPartida(partidaId);
+  const ttl = await redis.ttl(chave);
   if (ttl === -2) {
     return;
   }
   if (ttl === -1) {
-    await redis.set(chaveDoEstadoDaPartida(partidaId), JSON.stringify(estado));
+    await redis.set(chave, JSON.stringify(estado));
+    return;
+  }
+  if (ttl === 0) {
+    await redis.set(chave, JSON.stringify(estado));
+    await redis.persist(chave);
     return;
   }
   if (ttl > 0) {
-    await redis.set(chaveDoEstadoDaPartida(partidaId), JSON.stringify(estado), 'EX', ttl);
+    await redis.set(chave, JSON.stringify(estado), 'EX', ttl);
+    return;
   }
+  // Fall-through defensivo: ttl inesperado (ex.: -1 já tratado) — persiste sem TTL
+  await redis.set(chave, JSON.stringify(estado));
 }
 
 /** Remove o estado da partida (usado no cancelamento da partida). */

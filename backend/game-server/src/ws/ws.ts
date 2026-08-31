@@ -223,9 +223,11 @@ export function criarWebSocketServer(
         adicionarConexao(conexao);
 
         // Admissão pré-upgrade concluída: a partida já é conhecida e validada.
-        // Com o canal de partida ativo, o socket entra no broadcaster, recebe
-        // o snapshot da partida (ESTADO_DA_PARTIDA), o turno corrente e, na 4ª
-        // admissão, o broadcast de PARTIDA_INICIADA (ST-14).
+        // Com o canal de partida ativo, o socket entra no broadcaster e, na
+        // ordem ST-14: ADMISSAO_ACEITA (já enviada acima) → PARTIDA_INICIADA
+        // broadcast (se 4ª admissão) → ESTADO_DA_PARTIDA unicast →
+        // anunciarTurnoAtual (TURNO_INICIADO). Snapshot e turno são unicast ao
+        // socket admitido; PARTIDA_INICIADA é broadcast a todos da partida.
         if (depsPartida !== undefined) {
           depsPartida.broadcaster.registrar(partidaId, ws);
           void (async () => {
@@ -234,6 +236,12 @@ export function criarWebSocketServer(
                 obterEstadoDaPartida(contexto.redis, partidaId),
                 obterPartida(contexto.redis, partidaId),
               ]);
+              if (transicao.iniciou) {
+                depsPartida.broadcaster.enviar(partidaId, {
+                  type: 'PARTIDA_INICIADA',
+                  partidaId,
+                });
+              }
               if (estadoEngine !== null && partidaAtual !== null) {
                 const snapshot = paraSnapshotWire(
                   estadoEngine,
@@ -244,17 +252,22 @@ export function criarWebSocketServer(
                   type: 'ESTADO_DA_PARTIDA',
                   snapshot,
                 });
+              } else {
+                console.error('[ws] estado indisponível para snapshot', {
+                  partidaId,
+                  temEstado: estadoEngine !== null,
+                  temPartida: partidaAtual !== null,
+                });
+                depsPartida.broadcaster.enviarParaSocket(ws, {
+                  type: 'ERRO_DO_TABULEIRO',
+                  codigo: 'ESTADO_INDISPONIVEL',
+                  mensagem: 'Estado da partida indisponível para snapshot.',
+                });
               }
             } catch (erro) {
               console.error('[ws] falha ao enviar snapshot da partida:', (erro as Error).message);
             }
-            if (transicao.iniciou) {
-              depsPartida.broadcaster.enviar(partidaId, {
-                type: 'PARTIDA_INICIADA',
-                partidaId,
-              });
-            }
-            void depsPartida.handlers.anunciarTurnoAtual(partidaId, ws);
+            await depsPartida.handlers.anunciarTurnoAtual(partidaId, ws);
           })();
         }
 
