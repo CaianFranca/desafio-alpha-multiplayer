@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   aplicarComandoDePartida,
+  calcularIluminacao,
   estadoInicialDaPartida,
+  estadoInicialDoTabuleiro,
   type ComandoDePartida,
   type CodigoDeErroDaPartida,
   type EstadoDaPartida,
@@ -603,4 +605,137 @@ test('após qualquer rejeição o estado da Partida fica inalterado, com um úni
     );
     assert.equal(estado.rodada, 1);
   }
+});
+
+test('iluminação: inicial vazia, 1 peão centro ilumina 5, borda 3, diagonais nunca', () => {
+  let estado = partidaIniciada();
+  assert.deepEqual(estado.celulasIluminadas, []);
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  assert.deepEqual(estado.celulasIluminadas, [
+    { linha: 2, coluna: 3 },
+    { linha: 3, coluna: 2 },
+    { linha: 3, coluna: 3 },
+    { linha: 3, coluna: 4 },
+    { linha: 4, coluna: 3 },
+  ]);
+  // Diagonais nunca iluminadas
+  assert.ok(!estado.celulasIluminadas.some((c) => c.linha === 2 && c.coluna === 2));
+  assert.ok(!estado.celulasIluminadas.some((c) => c.linha === 2 && c.coluna === 4));
+
+  // Encerrar e posicionar em borda (0,0) → 3 células
+  estado = resolverRecebidas(estado, 'ana');
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+  estado = aplicar(estado, selecionarPeca('inicial-2'), 'bruno');
+  estado = aplicar(estado, posicionarPeca('inicial-2', 0, 0), 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  estado = aplicar(estado, posicionarPeao('peao-vermelho', 0, 0), 'bruno');
+  assert.equal(estado.celulasIluminadas.length, 8);
+  // Células da borda: (0,0),(0,1),(1,0) — sem diagonais fora da grade
+  const borda = estado.celulasIluminadas.filter((c) => c.linha <= 1 && c.coluna <= 1);
+  assert.deepEqual(borda.sort((a, b) => a.linha - b.linha || a.coluna - b.coluna), [
+    { linha: 0, coluna: 0 },
+    { linha: 0, coluna: 1 },
+    { linha: 1, coluna: 0 },
+  ]);
+});
+
+test('iluminação: união desduplicada e independente de conexões/orientação, vazias inclusas', () => {
+  let estado = partidaIniciada();
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, girarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  // Apesar do giro, iluminação ortogonal idêntica
+  assert.equal(estado.celulasIluminadas.length, 5);
+
+  // União dedup 8 únicas via função pura (evita colisão com recebidas ocupadas)
+  const tab = estadoInicialDoTabuleiro();
+  const tabComDois = {
+    ...tab,
+    posicionadas: [
+      { pecaId: 'inicial-1', tipo: 'inicial' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 3 } },
+      { pecaId: 'inicial-2', tipo: 'inicial' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 4 } },
+    ],
+    peoes: [
+      { peaoId: 'peao-branco', cor: 'branco' as const, pecaId: 'inicial-1' },
+      { peaoId: 'peao-vermelho', cor: 'vermelho' as const, pecaId: 'inicial-2' },
+      { peaoId: 'peao-azul', cor: 'azul' as const, pecaId: null },
+      { peaoId: 'peao-amarelo', cor: 'amarelo' as const, pecaId: null },
+    ],
+  };
+  const iluminacao = calcularIluminacao(tabComDois);
+  assert.equal(iluminacao.length, 8);
+  assert.deepEqual(iluminacao, [
+    { linha: 2, coluna: 3 },
+    { linha: 2, coluna: 4 },
+    { linha: 3, coluna: 2 },
+    { linha: 3, coluna: 3 },
+    { linha: 3, coluna: 4 },
+    { linha: 3, coluna: 5 },
+    { linha: 4, coluna: 3 },
+    { linha: 4, coluna: 4 },
+  ]);
+  // Vazias inclusas: (2,3) e (3,5) não têm peças mas estão iluminadas
+  assert.ok(iluminacao.some((c) => c.linha === 2 && c.coluna === 3));
+  assert.ok(iluminacao.some((c) => c.linha === 3 && c.coluna === 5));
+  // Independe de orientação/conexões: girar peças não muda vizinhança ortogonal
+  const tabGirado = {
+    ...tabComDois,
+    posicionadas: tabComDois.posicionadas.map((p) => ({ ...p, orientacao: 90 as const })),
+  };
+  assert.deepEqual(calcularIluminacao(tabGirado), iluminacao);
+});
+
+test('iluminação: mover_peao não altera até confirmar_posicao_do_peao; permanecer/selecionar/posicionar_peca não alteram', () => {
+  let estado = partidaEmRodada2();
+  const antes = [...estado.celulasIluminadas];
+  // selecionar_peao não altera
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  assert.deepEqual(estado.celulasIluminadas, antes);
+  // selecionar_peca não altera (cruz-1 ainda está na reserva em rodada 2)
+  const sel = aplicarComandoDePartida(estado, selecionarPeca('cruz-1'), 'ana');
+  assert.equal(sel.sucesso, true);
+  if (!sel.sucesso) throw new Error('selecionar_peca cruz-1 deveria suceder em rodada 2');
+  assert.deepEqual(sel.estado.celulasIluminadas, antes);
+  estado = sel.estado;
+  // girar_peca via comando não altera a iluminação (independe de orientação)
+  const gir = aplicarComandoDePartida(estado, girarPeca('cruz-1'), 'ana');
+  assert.equal(gir.sucesso, true);
+  if (!gir.sucesso) throw new Error('girar_peca cruz-1 deveria suceder');
+  assert.deepEqual(gir.estado.celulasIluminadas, antes);
+  estado = gir.estado;
+  // posicionar_peca delegado (caminho direto é PECA_NAO_RECEBIDA, mas ainda preserva iluminação)
+  const pos = aplicarComandoDePartida(estado, posicionarPeca('cruz-1', 1, 1), 'ana');
+  assert.equal(pos.sucesso, false);
+  assert.equal(pos.erro.codigo, 'PECA_NAO_RECEBIDA');
+  assert.deepEqual(estado.celulasIluminadas, antes);
+  // Mover tentativo não altera
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  assert.deepEqual(estado.celulasIluminadas, antes);
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  assert.deepEqual(estado.celulasIluminadas, antes);
+  const confirm = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirm.sucesso, true);
+  if (!confirm.sucesso) throw new Error('confirmar deveria suceder');
+  assert.notDeepEqual(confirm.estado.celulasIluminadas, antes);
+  assert.ok(confirm.estado.celulasIluminadas.some((c) => c.linha === 1 && c.coluna === 3));
+  // Após confirmar, mover bloqueado e iluminação permanece
+  const depois = [...confirm.estado.celulasIluminadas];
+  assert.equal(
+    codigoDaRejeicao(confirm.estado, moverPeao('peao-branco', 3, 3), 'ana'),
+    'POSICAO_CONFIRMADA',
+  );
+  assert.deepEqual(confirm.estado.celulasIluminadas, depois);
+  // Permanecer em turno onde não mudou de peça não altera até avançar
+  let permEstado = partidaEmRodada2();
+  const permAntes = [...permEstado.celulasIluminadas];
+  permEstado = aplicar(permEstado, selecionarPeao('peao-branco'), 'ana');
+  const permRes = aplicarComandoDePartida(permEstado, permanecer('peao-branco'), 'ana');
+  assert.equal(permRes.sucesso, true);
+  if (!permRes.sucesso) throw new Error('permanecer deveria suceder');
+  assert.deepEqual(permRes.estado.celulasIluminadas, permAntes);
 });

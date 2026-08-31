@@ -489,6 +489,29 @@ export function vizinhos(celula: Celula): Celula[] {
   );
 }
 
+// Iluminação (ST-13 / ADR-0005): união ortogonal das células dos Peões —
+// célula do Peão + 4 vizinhas por vizinhos() — compartilhada, com vazias
+// inclusas. Pura, independente de conexões/bordasAbertas, determinística
+// (ordenada linha asc, coluna asc) e defensiva contra pecaId órfão.
+export function calcularIluminacao(tabuleiro: EstadoDoTabuleiro): readonly Celula[] {
+  const mapa = new Map<string, Celula>();
+  for (const peao of tabuleiro.peoes) {
+    if (peao.pecaId === null) continue;
+    const peca = tabuleiro.posicionadas.find((item) => item.pecaId === peao.pecaId);
+    if (!peca) continue;
+    const celulas: Celula[] = [peca.celula, ...vizinhos(peca.celula)];
+    for (const celula of celulas) {
+      const chave = `${celula.linha},${celula.coluna}`;
+      if (!mapa.has(chave)) {
+        mapa.set(chave, { linha: celula.linha, coluna: celula.coluna });
+      }
+    }
+  }
+  return [...mapa.values()].sort((a, b) =>
+    a.linha !== b.linha ? a.linha - b.linha : a.coluna - b.coluna,
+  );
+}
+
 export function aplicarComandoDeTabuleiro(
   estado: EstadoDoTabuleiro,
   comando: ComandoDeTabuleiro,
