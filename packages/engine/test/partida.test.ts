@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   aplicarComandoDePartida,
+  calcularIluminacao,
   estadoInicialDaPartida,
+  estadoInicialDoTabuleiro,
   type ComandoDePartida,
   type CodigoDeErroDaPartida,
   type EstadoDaPartida,
@@ -639,8 +641,7 @@ test('iluminação: inicial vazia, 1 peão centro ilumina 5, borda 3, diagonais 
   ]);
 });
 
-test('iluminação: união desduplicada e independente de conexões/orientação, vazias inclusas', async () => {
-  const { calcularIluminacao, estadoInicialDoTabuleiro } = await import('../src/index.ts');
+test('iluminação: união desduplicada e independente de conexões/orientação, vazias inclusas', () => {
   let estado = partidaIniciada();
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, girarPeca('inicial-1'), 'ana');
@@ -690,47 +691,50 @@ test('iluminação: união desduplicada e independente de conexões/orientação
 
 test('iluminação: mover_peao não altera até confirmar_posicao_do_peao; permanecer/selecionar/posicionar_peca não alteram', () => {
   let estado = partidaEmRodada2();
-  const antes = JSON.stringify(estado.celulasIluminadas);
-  // Selecionar peão não altera
+  const antes = [...estado.celulasIluminadas];
+  // selecionar_peao não altera
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  assert.equal(JSON.stringify(estado.celulasIluminadas), antes);
-  // Posicionar peça de outro tipo não altera (delegado)
-  const pecaRecebidaId = estado.tabuleiro.recebidas[0]?.recebidaId;
-  if (pecaRecebidaId) {
-    // Gera recebimento via confirmar primeiro para ter pendência
-    // Não há pendência aqui; testa posicionar_peca da reserva via tabuleiro delegado (inicial já usada)
-    // Apenas garante que chamada não altera iluminação
-    const res = aplicarComandoDePartida(estado, selecionarPeca('reta-1'), 'ana');
-    if (res.sucesso) {
-      assert.equal(JSON.stringify(res.estado.celulasIluminadas), antes);
-    }
-  }
+  assert.deepEqual(estado.celulasIluminadas, antes);
+  // selecionar_peca não altera (cruz-1 ainda está na reserva em rodada 2)
+  const sel = aplicarComandoDePartida(estado, selecionarPeca('cruz-1'), 'ana');
+  assert.equal(sel.sucesso, true);
+  if (!sel.sucesso) throw new Error('selecionar_peca cruz-1 deveria suceder em rodada 2');
+  assert.deepEqual(sel.estado.celulasIluminadas, antes);
+  estado = sel.estado;
+  // girar_peca via comando não altera a iluminação (independe de orientação)
+  const gir = aplicarComandoDePartida(estado, girarPeca('cruz-1'), 'ana');
+  assert.equal(gir.sucesso, true);
+  if (!gir.sucesso) throw new Error('girar_peca cruz-1 deveria suceder');
+  assert.deepEqual(gir.estado.celulasIluminadas, antes);
+  estado = gir.estado;
+  // posicionar_peca delegado (caminho direto é PECA_NAO_RECEBIDA, mas ainda preserva iluminação)
+  const pos = aplicarComandoDePartida(estado, posicionarPeca('cruz-1', 1, 1), 'ana');
+  assert.equal(pos.sucesso, false);
+  assert.equal(pos.erro.codigo, 'PECA_NAO_RECEBIDA');
+  assert.deepEqual(estado.celulasIluminadas, antes);
   // Mover tentativo não altera
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
-  assert.equal(JSON.stringify(estado.celulasIluminadas), antes);
+  assert.deepEqual(estado.celulasIluminadas, antes);
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  assert.equal(JSON.stringify(estado.celulasIluminadas), antes);
+  assert.deepEqual(estado.celulasIluminadas, antes);
   const confirm = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
   assert.equal(confirm.sucesso, true);
-  if (confirm.sucesso) {
-    assert.notEqual(JSON.stringify(confirm.estado.celulasIluminadas), antes);
-    assert.ok(confirm.estado.celulasIluminadas.some((c) => c.linha === 1 && c.coluna === 3));
-    // Após confirmar, mover bloqueado e iluminação permanece
-    const depois = JSON.stringify(confirm.estado.celulasIluminadas);
-    assert.equal(
-      codigoDaRejeicao(confirm.estado, moverPeao('peao-branco', 3, 3), 'ana'),
-      'POSICAO_CONFIRMADA',
-    );
-    assert.equal(JSON.stringify(confirm.estado.celulasIluminadas), depois);
-  }
+  if (!confirm.sucesso) throw new Error('confirmar deveria suceder');
+  assert.notDeepEqual(confirm.estado.celulasIluminadas, antes);
+  assert.ok(confirm.estado.celulasIluminadas.some((c) => c.linha === 1 && c.coluna === 3));
+  // Após confirmar, mover bloqueado e iluminação permanece
+  const depois = [...confirm.estado.celulasIluminadas];
+  assert.equal(
+    codigoDaRejeicao(confirm.estado, moverPeao('peao-branco', 3, 3), 'ana'),
+    'POSICAO_CONFIRMADA',
+  );
+  assert.deepEqual(confirm.estado.celulasIluminadas, depois);
   // Permanecer em turno onde não mudou de peça não altera até avançar
   let permEstado = partidaEmRodada2();
-  const permAntes = JSON.stringify(permEstado.celulasIluminadas);
+  const permAntes = [...permEstado.celulasIluminadas];
   permEstado = aplicar(permEstado, selecionarPeao('peao-branco'), 'ana');
   const permRes = aplicarComandoDePartida(permEstado, permanecer('peao-branco'), 'ana');
   assert.equal(permRes.sucesso, true);
-  if (permRes.sucesso) {
-    // Avançar preserva iluminação anterior (peão não moveu)
-    assert.equal(JSON.stringify(permRes.estado.celulasIluminadas), permAntes);
-  }
+  if (!permRes.sucesso) throw new Error('permanecer deveria suceder');
+  assert.deepEqual(permRes.estado.celulasIluminadas, permAntes);
 });
