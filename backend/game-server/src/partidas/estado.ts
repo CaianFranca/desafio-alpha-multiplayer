@@ -13,6 +13,9 @@ import {
   type EstadoDaPartida,
 } from '@flicker/engine';
 
+const TTL_NAO_EXISTE = -2;
+const TTL_SEM_EXPIRACAO = -1;
+
 export function chaveDoEstadoDaPartida(partidaId: string): string {
   return `game-server:partida-estado:${partidaId}`;
 }
@@ -72,10 +75,10 @@ export async function salvarEstadoDaPartida(
 ): Promise<void> {
   const chave = chaveDoEstadoDaPartida(partidaId);
   const ttl = await redis.ttl(chave);
-  if (ttl === -2) {
+  if (ttl === TTL_NAO_EXISTE) {
     return;
   }
-  if (ttl === -1) {
+  if (ttl === TTL_SEM_EXPIRACAO) {
     await redis.set(chave, JSON.stringify(estado));
     return;
   }

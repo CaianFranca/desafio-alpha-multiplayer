@@ -205,6 +205,11 @@ export function criarWebSocketServer(
         sessao.jogadorId,
       );
 
+      if (transicao === null || (transicao.estado !== 'preparada' && transicao.estado !== 'em_andamento')) {
+        enviarErroNoSocket(socket, 500, erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
+        return;
+      }
+
       wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
         ws.send(JSON.stringify({
           type: 'ADMISSAO_ACEITA',
@@ -266,6 +271,11 @@ export function criarWebSocketServer(
               }
             } catch (erro) {
               console.error('[ws] falha ao enviar snapshot da partida:', (erro as Error).message);
+              depsPartida.broadcaster.enviarParaSocket(ws, {
+                type: 'ERRO_DO_TABULEIRO',
+                codigo: 'ESTADO_INDISPONIVEL',
+                mensagem: 'Estado da partida indisponível para snapshot.',
+              });
             }
             await depsPartida.handlers.anunciarTurnoAtual(partidaId, ws);
           })();

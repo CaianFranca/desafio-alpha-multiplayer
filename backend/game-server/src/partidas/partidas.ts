@@ -92,6 +92,9 @@ export interface ResultadoTransicaoDePresenca {
   readonly estado: EstadoDaPartida;
 }
 
+const TTL_NAO_EXISTE = -2;
+const TTL_SEM_EXPIRACAO = -1;
+
 const SCRIPT_TRANSICAO_PRESENCA = `
 local function salvarPreservandoTtl(chave, valor)
   local ttl = redis.call('TTL', chave)
@@ -159,7 +162,7 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
   redis: Redis,
   partidaId: PartidaId,
   jogadorId: string,
-): Promise<ResultadoTransicaoDePresenca> {
+): Promise<ResultadoTransicaoDePresenca | null> {
   const bruto = await redis.eval(
     SCRIPT_TRANSICAO_PRESENCA,
     2,
@@ -172,10 +175,10 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
     const parsed = JSON.parse(json) as ResultadoTransicaoDePresenca;
     if (parsed.estado !== 'preparada' && parsed.estado !== 'em_andamento') {
       // Estado vazio indica partida inexistente ou payload corrompido — não mascarar como 'preparada'
-      return { mudou: false, completo: false, iniciou: false, estado: parsed.estado as EstadoDaPartida };
+      return null;
     }
     return parsed;
   } catch {
-    return { mudou: false, completo: false, iniciou: false, estado: '' as unknown as EstadoDaPartida };
+    return null;
   }
 }
