@@ -165,7 +165,11 @@ export function reduzirEvento(
         // Encaixe na célula-alvo resolve a pendência correspondente (issue
         // #91: a pendência só sai da lista quando a peça é POSICIONADA).
         recebidasPendentes: estado.recebidasPendentes.filter(
-          (r) => chaveCelula(r.celulaAlvo) !== chaveCelula(evento.celula),
+          (r) =>
+            // Forma nova (#138): célula-alvo indefinida (null) ainda não foi
+            // resolvida pelo encaixe — não sai da lista aqui.
+            r.celulaAlvo === null ||
+            chaveCelula(r.celulaAlvo) !== chaveCelula(evento.celula),
         ),
       }
     }
@@ -185,7 +189,13 @@ export function reduzirEvento(
       // TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher).
       return {
         ...estado,
-        recebidasPendentes: evento.recebidas.map((r) => ({ ...r, pecaId: null })),
+        recebidasPendentes: evento.recebidas.map((r) =>
+          // Legado ST-10: o wire não carrega o pecaId da pendência — o campo
+          // client-side nasce null até TIPO_DA_PECA_RECEBIDA_ESCOLHIDO. Forma
+          // nova (#138, PendenciaDaPecaSorteada): a peça já vem sorteada, sem
+          // sobrescrever o pecaId.
+          'bordaGeradora' in r ? { ...r, pecaId: null } : r,
+        ),
       }
     case 'PEAO_POSICIONADO': {
       const peoes = estado.peoes.map((p) =>

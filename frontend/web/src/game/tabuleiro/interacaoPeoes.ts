@@ -43,6 +43,7 @@ import type {
   PecaDeselecionadaEvento,
   PeaoComandoDoCliente,
   PeaoEventoDoServidor,
+  PendenciaDaPecaSorteada,
   PendenciaDeRecebimento,
   PecaGiradaEvento,
   PecaPosicionadaEvento,
@@ -65,9 +66,13 @@ import type {
  * ESCOLHIDO preencher (o wire não carrega o pecaId da pendência). A pendência
  * só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
-export type PendenciaNoCliente = PendenciaDeRecebimento & {
-  readonly pecaId: string | null
-}
+export type PendenciaNoCliente =
+  // Legado ST-10 (@deprecated): borda geradora e célula-alvo fixas na criação,
+  // com pecaId client-side preenchido por TIPO_DA_PECA_RECEBIDA_ESCOLHIDO.
+  | (PendenciaDeRecebimento & { readonly pecaId: string | null })
+  // Novo (#138): a peça já vem sorteada da Caixa (pecaId + tipo + vaga) e a
+  // célula-alvo deriva da vaga — pode estar null até ESCOLHER_VAGA_DA_PECA_RECEBIDA.
+  | PendenciaDaPecaSorteada
 
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]
@@ -213,7 +218,11 @@ export function mapearPosicionarRecebida(
   const pecaId = estado.pecaSelecionadaId
   if (pecaId === null) return null
   const ehAlvoDePendencia = estado.recebidasPendentes.some(
-    (pendencia) => chaveCelula(pendencia.celulaAlvo) === chaveCelula(celula),
+    (pendencia) =>
+      // Forma nova (#138): célula-alvo ainda indefinida (null) até o sorteio
+      // fixar a vaga — não é encaixável por esta rota legada.
+      pendencia.celulaAlvo !== null &&
+      chaveCelula(pendencia.celulaAlvo) === chaveCelula(celula),
   )
   if (!ehAlvoDePendencia) return null
   return { type: 'POSICIONAR_PECA', pecaId, celula }
@@ -308,7 +317,10 @@ export function rotearCliqueDeCelula(
 ): ResultadoDeCliqueEmCelula {
   if (haRecebidasPendentes(estadoPeoes)) {
     const pendencia = estadoPeoes.recebidasPendentes.find(
-      (r) => chaveCelula(r.celulaAlvo) === chaveCelula(celula),
+      (r) =>
+        // Forma nova (#138): célula-alvo ainda indefinida (null) até o sorteio
+        // fixar a vaga — não é encaixável por esta rota legada.
+        r.celulaAlvo !== null && chaveCelula(r.celulaAlvo) === chaveCelula(celula),
     )
     if (!pendencia) return null
     if (pendencia.pecaId === null) return { focarPendencia: pendencia.recebidaId }
