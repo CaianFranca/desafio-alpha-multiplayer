@@ -15,7 +15,7 @@ import {
   rotearCliqueDeCelula,
   tiposDeCaminhoDisponiveisNaReserva,
 } from '../web/src/game/tabuleiro/interacaoPeoes'
-import { FLASH_BRANCO, FLASH_VERMELHO } from '../web/src/game/tabuleiro/interacao'
+import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from '../web/src/game/tabuleiro/interacao'
 import type {
   EstadoInteracaoPeoes,
   EventoDoCicloDoPeao,
@@ -430,12 +430,13 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     for (const evento of eventosDeSucesso) {
       const flash = mapearEventoPeaoParaFeedback(evento)
       expect(flash).toBe(FLASH_BRANCO)
+      if (flash === null) throw new Error('flash inesperadamente nulo')
       expect(flash.cor).toBe('branco')
       expect(flash.hex).toBe('#ffffff')
     }
   })
 
-  it('rejeição do servidor produz flash vermelho distinto do branco', () => {
+  it('rejeição por pendência produz flash vermelho com motivo específico (issue #118)', () => {
     const erro: ErroDoTabuleiroEvento = {
       type: 'ERRO_DO_TABULEIRO',
       codigo: 'PENDENCIA_NAO_RESOLVIDA',
@@ -443,14 +444,69 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     }
     const flashVermelho = mapearEventoPeaoParaFeedback(erro)
     const flashBranco = mapearEventoPeaoParaFeedback({ type: 'PEAO_SELECIONADO', peaoId: 'peao-1' })
+    if (flashVermelho === null || flashBranco === null) {
+      throw new Error('flash inesperadamente nulo')
+    }
 
-    expect(flashVermelho).toBe(FLASH_VERMELHO)
     expect(flashVermelho.cor).toBe('vermelho')
     expect(flashVermelho.hex).toBe('#ff3b30')
+    expect(flashVermelho.motivo).toBe('pendencia_nao_resolvida')
     expect(flashVermelho.duracaoMs).toBeGreaterThan(flashBranco.duracaoMs)
     expect(flashVermelho.hex).not.toBe(flashBranco.hex)
     expect(flashVermelho.cor).not.toBe(flashBranco.cor)
-    expect(FLASH_VERMELHO.motivo).not.toBe(FLASH_BRANCO.motivo)
+    expect(flashVermelho.motivo).not.toBe(flashBranco.motivo)
+  })
+
+  // ── AC 4: feedback distinto para FORA_DA_VEZ e turnos (issue #118) ──
+
+  it('ação fora da vez produz flash âmbar distinto do vermelho (issue #118)', () => {
+    const erro: ErroDoTabuleiroEvento = {
+      type: 'ERRO_DO_TABULEIRO',
+      codigo: 'FORA_DA_VEZ',
+      mensagem: 'Não é a sua vez.',
+    }
+    const flashAmbar = mapearEventoPeaoParaFeedback(erro)
+    expect(flashAmbar).toBe(FLASH_AMBAR)
+    if (flashAmbar === null) throw new Error('flash inesperadamente nulo')
+
+    expect(flashAmbar.cor).toBe('ambar')
+    expect(flashAmbar.hex).toBe('#ffb340')
+    expect(flashAmbar.motivo).toBe('fora_da_vez')
+    // Distinto da rejeição vermelha: hex e cor próprios.
+    expect(flashAmbar.hex).not.toBe(FLASH_VERMELHO.hex)
+    expect(flashAmbar.cor).not.toBe(FLASH_VERMELHO.cor)
+  })
+
+  it('demais rejeições do servidor seguem o flash vermelho genérico (issue #118)', () => {
+    const erro: ErroDoTabuleiroEvento = {
+      type: 'ERRO_DO_TABULEIRO',
+      codigo: 'MOVIMENTO_INDISPONIVEL',
+      mensagem: 'O Peão só se move a partir do turno seguinte.',
+    }
+    expect(mapearEventoPeaoParaFeedback(erro)).toBe(FLASH_VERMELHO)
+  })
+
+  it('abertura e encerramento de turno não geram flash (issue #118)', () => {
+    expect(
+      mapearEventoPeaoParaFeedback({
+        type: 'TURNO_INICIADO',
+        jogadorId: 'jogador-1',
+        rodada: 1,
+      }),
+    ).toBeNull()
+    expect(
+      mapearEventoPeaoParaFeedback({ type: 'TURNO_ENCERRADO', jogadorId: 'jogador-1' }),
+    ).toBeNull()
+  })
+
+  it('Confirmação de Posição produz flash branco (issue #118)', () => {
+    const flash = mapearEventoPeaoParaFeedback({
+      type: 'POSICAO_CONFIRMADA',
+      jogadorId: 'jogador-1',
+      peaoId: 'peao-1',
+      pecaId: 'reta-2',
+    })
+    expect(flash).toBe(FLASH_BRANCO)
   })
 
   // ── AC 8: arrasto reservado à câmera, sem conflito com o clique simples ──

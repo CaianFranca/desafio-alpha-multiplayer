@@ -67,6 +67,8 @@ interface AmbienteCenaProps {
   estadoInteracao?: EstadoInteracaoTabuleiro | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   peaoSelecionadoId?: PeaoId | null
+  /** Peão do Jogador Ativo da vez (destaque emissivo suave, #118). */
+  peaoAtivoId?: PeaoId | null
   /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
   destinosSet?: ReadonlySet<PecaId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
@@ -101,6 +103,7 @@ export function AmbienteCena({
   estadoInteracao = null,
   onComando,
   peaoSelecionadoId = null,
+  peaoAtivoId = null,
   destinosSet,
   onSelecionarPeao,
   onDesselecionar,
@@ -140,6 +143,7 @@ export function AmbienteCena({
               onComando={onComando ?? noop}
               peoes={estadoExibicao.peoes}
               peaoSelecionadoId={peaoSelecionadoId}
+              peaoAtivoId={peaoAtivoId}
               destinosSet={destinosSet}
               onSelecionarPeao={onSelecionarPeao}
               estadoPeoes={estadoPeoes}
@@ -164,6 +168,7 @@ export function AmbienteCena({
                   cor={peao.cor}
                   position={peaoMesaParaMundo(indiceGlobal)}
                   selecionado={peao.peaoId === peaoSelecionadoId}
+                  ativo={peao.peaoId === peaoAtivoId}
                   aoClicar={
                     onSelecionarPeao
                       ? () => onSelecionarPeao(peao.peaoId)

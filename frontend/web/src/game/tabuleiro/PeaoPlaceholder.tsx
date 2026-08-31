@@ -25,6 +25,8 @@ interface PeaoPlaceholderProps {
   escala?: number
   /** Destaque emissivo quando este peão é o selecionado. */
   selecionado?: boolean
+  /** Destaque emissivo suave quando este peão é o do Jogador Ativo (#118). */
+  ativo?: boolean
   /** Clique simples seleciona; sem handler, o peão é inerte ao ponteiro. */
   aoClicar?: () => void
 }
@@ -46,16 +48,24 @@ const Y_CABECA =
   BASE_ALTURA + CORPO_ALTURA + COLARINHO_ALTURA + CABECA_RAIO * 0.9
 
 const EMISSIVO_SELECIONADO = 0.6
+const EMISSIVO_ATIVO = 0.35
 
 export function PeaoPlaceholder({
   cor,
   position,
   escala = 1,
   selecionado = false,
+  ativo = false,
   aoClicar,
 }: PeaoPlaceholderProps) {
   const hex = HEX_COR_PEAO[cor]
-  const emissiveIntensity = selecionado ? EMISSIVO_SELECIONADO : 0
+  // A seleção domina o brilho; o destaque de Jogador Ativo é mais suave e
+  // pode coexistir visualmente com a seleção do próprio peão.
+  const emissiveIntensity = selecionado
+    ? EMISSIVO_SELECIONADO
+    : ativo
+      ? EMISSIVO_ATIVO
+      : 0
 
   // Só interage ao ponteiro quando há handler de seleção.
   const handlers = aoClicar

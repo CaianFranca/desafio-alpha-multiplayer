@@ -28,7 +28,7 @@
  * cameraLimites.ts).
  */
 
-import { FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
+import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
 import type { FlashFeedback, EstadoInteracaoTabuleiro } from './interacao'
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada, mapearCliqueNaReserva } from './interacao'
 import {
@@ -43,14 +43,18 @@ import type {
   PecaDeselecionadaEvento,
   PeaoComandoDoCliente,
   PeaoEventoDoServidor,
+  PendenciaDaPecaSorteada,
   PendenciaDeRecebimento,
   PecaGiradaEvento,
   PecaPosicionadaEvento,
   PecaSelecionadaEvento,
+  PosicaoConfirmadaEvento,
   RecebidaId,
   SentidoDeRotacao,
   TabuleiroComandoDoCliente,
   TipoDePecaDeCaminho,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
 } from '@flicker/shared'
 
 // ── Estado mínimo para mapear interações ──
@@ -60,14 +64,15 @@ import type {
 // chega no wire via TIPO_DA_PECA_RECEBIDA_ESCOLHIDO).
 
 /**
- * Pendência no cliente (issue #91): campos do wire (`PendenciaDeRecebimento`)
- * + campo client-side `pecaId` — null até o evento TIPO_DA_PECA_RECEBIDA_-
- * ESCOLHIDO preencher (o wire não carrega o pecaId da pendência). A pendência
- * só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
+ * Pendência no cliente (issue #91): campos do wire + campo client-side
+ * `pecaId` — null até o evento TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher na
+ * forma LEGADA (ST-10); na forma NOVA (#138) o wire já traz o pecaId da peça
+ * sorteada e a celulaAlvo pode ser null (vaga ainda não escolhida). A
+ * pendência só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
-export type PendenciaNoCliente = PendenciaDeRecebimento & {
-  readonly pecaId: string | null
-}
+export type PendenciaNoCliente =
+  | (Omit<PendenciaDeRecebimento, 'pecaId'> & { readonly pecaId: string | null })
+  | (Omit<PendenciaDaPecaSorteada, 'pecaId'> & { readonly pecaId: string | null })
 
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]
@@ -213,7 +218,9 @@ export function mapearPosicionarRecebida(
   const pecaId = estado.pecaSelecionadaId
   if (pecaId === null) return null
   const ehAlvoDePendencia = estado.recebidasPendentes.some(
-    (pendencia) => chaveCelula(pendencia.celulaAlvo) === chaveCelula(celula),
+    (pendencia) =>
+      pendencia.celulaAlvo !== null &&
+      chaveCelula(pendencia.celulaAlvo) === chaveCelula(celula),
   )
   if (!ehAlvoDePendencia) return null
   return { type: 'POSICIONAR_PECA', pecaId, celula }
@@ -308,7 +315,9 @@ export function rotearCliqueDeCelula(
 ): ResultadoDeCliqueEmCelula {
   if (haRecebidasPendentes(estadoPeoes)) {
     const pendencia = estadoPeoes.recebidasPendentes.find(
-      (r) => chaveCelula(r.celulaAlvo) === chaveCelula(celula),
+      (r) =>
+        r.celulaAlvo !== null &&
+        chaveCelula(r.celulaAlvo) === chaveCelula(celula),
     )
     if (!pendencia) return null
     if (pendencia.pecaId === null) return { focarPendencia: pendencia.recebidaId }
@@ -430,7 +439,8 @@ export function mapearCliqueNaReservaComCiclo(
 
 // ── Mapeamento evento → feedback visual ──
 
-/** Eventos do ciclo do Peão + reusos do Tabuleiro que chegam no mesmo canal. */
+/** Eventos do ciclo do Peão + reusos do Tabuleiro que chegam no mesmo canal,
+ * + eventos de turno (ST-11, issue #118) para o feedback unificado da página. */
 export type EventoDoCicloDoPeao =
   | PeaoEventoDoServidor
   | PecaSelecionadaEvento
@@ -439,14 +449,19 @@ export type EventoDoCicloDoPeao =
   | PecaGiradaEvento
   | ManipulacaoFinalizadaEvento
   | ErroDoTabuleiroEvento
+  | TurnoIniciadoEvento
+  | TurnoEncerradoEvento
+  | PosicaoConfirmadaEvento
 
 /**
- * Traduz evento do servidor em flash: aprovação/seleção → branco; rejeição
- * (ERRO_DO_TABULEIRO) → vermelho (distinto do branco, duração maior).
+ * Traduz evento do servidor em flash (issue #118): aprovação/seleção →
+ * branco; rejeição → vermelho, com motivo específico para pendências; ação
+ * fora da vez → âmbar (distinto do erro); Confirmação de Posição → branco;
+ * abertura/encerramento de turno → null (sem flash).
  */
 export function mapearEventoPeaoParaFeedback(
   evento: EventoDoCicloDoPeao,
-): FlashFeedback {
+): FlashFeedback | null {
   switch (evento.type) {
     case 'PEAO_SELECIONADO':
     case 'RECEBIMENTO_GERADO':
@@ -459,9 +474,19 @@ export function mapearEventoPeaoParaFeedback(
     case 'PECA_POSICIONADA':
     case 'PECA_GIRADA':
     case 'MANIPULACAO_FINALIZADA':
+    case 'POSICAO_CONFIRMADA':
       return FLASH_BRANCO
     case 'ERRO_DO_TABULEIRO':
+      if (evento.codigo === 'FORA_DA_VEZ') return FLASH_AMBAR
+      if (evento.codigo === 'PENDENCIA_NAO_RESOLVIDA') {
+        return { ...FLASH_VERMELHO, motivo: 'pendencia_nao_resolvida' }
+      }
       return FLASH_VERMELHO
+    case 'TURNO_INICIADO':
+    case 'TURNO_ENCERRADO':
+      // Passagem de vez não é flash: o destaque do ativo e o indicador de
+      // rodada comunicam a mudança (issue #118).
+      return null
     default: {
       // Exaustividade: novo evento wire sem case falha em compilação.
       const _exaustivo: never = evento

@@ -303,3 +303,151 @@ describe('redução do ciclo do peão — espelho do engine (issue #91)', () => 
     expect(estado.pecaEmManipulacaoId).toBe('reta-1')
   })
 })
+
+describe('redução dos turnos no cliente — fase, rodada e mapa aprendido (issue #118)', () => {
+  const TURNO_1_J1 = { type: 'TURNO_INICIADO', jogadorId: 'jogador-1', rodada: 1 } as const
+
+  it('estado inicial sem vez, sem rodada e sem mapa aprendido', () => {
+    const inicial = criarEstadoInicialDoCliente()
+    expect(inicial.jogadorAtivoId).toBeNull()
+    expect(inicial.rodada).toBeNull()
+    expect(inicial.movimentouNoTurno).toBe(false)
+    expect(inicial.posicaoConfirmadaNoTurno).toBe(false)
+    expect(inicial.peaoPorJogador).toEqual({})
+  })
+
+  it('TURNO_INICIADO seta jogadorAtivoId/rodada e reseta a fase do turno', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1)
+    expect(estado.jogadorAtivoId).toBe('jogador-1')
+    expect(estado.rodada).toBe(1)
+    expect(estado.movimentouNoTurno).toBe(false)
+    expect(estado.posicaoConfirmadaNoTurno).toBe(false)
+
+    // Fase suja de um turno anterior é zerada pelo próximo TURNO_INICIADO.
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_MOVIDO',
+      peaoId: 'peao-branco',
+      pecaIdDe: 'inicial-1',
+      pecaIdPara: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+    })
+    expect(estado.movimentouNoTurno).toBe(true)
+    estado = reduzirEvento(estado, { type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 1 })
+    expect(estado.jogadorAtivoId).toBe('jogador-2')
+    expect(estado.movimentouNoTurno).toBe(false)
+    expect(estado.posicaoConfirmadaNoTurno).toBe(false)
+  })
+
+  it('PEAO_MOVIDO dentro do turno marca movimentouNoTurno; fora de turno não marca', () => {
+    // Sem vez ativa: movimento de outro contexto não marca a fase.
+    const foraDeTurno = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_MOVIDO',
+      peaoId: 'peao-branco',
+      pecaIdDe: 'inicial-1',
+      pecaIdPara: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+    })
+    expect(foraDeTurno.movimentouNoTurno).toBe(false)
+
+    // Dentro da janela do turno: marca a fase.
+    const dentro = reduzirEvento(
+      reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1),
+      {
+        type: 'PEAO_MOVIDO',
+        peaoId: 'peao-branco',
+        pecaIdDe: 'inicial-1',
+        pecaIdPara: 'reta-1',
+        celula: { linha: 2, coluna: 3 },
+      },
+    )
+    expect(dentro.movimentouNoTurno).toBe(true)
+  })
+
+  it('POSICAO_CONFIRMADA marca posicaoConfirmadaNoTurno', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1)
+    estado = reduzirEvento(estado, {
+      type: 'POSICAO_CONFIRMADA',
+      jogadorId: 'jogador-1',
+      peaoId: 'peao-branco',
+      pecaId: 'reta-1',
+    })
+    expect(estado.posicaoConfirmadaNoTurno).toBe(true)
+  })
+
+  it('TURNO_ENCERRADO limpa a vez (limpeza mínima) e preserva rodada e mapa', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1)
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+    })
+    estado = reduzirEvento(estado, { type: 'TURNO_ENCERRADO', jogadorId: 'jogador-1' })
+    expect(estado.jogadorAtivoId).toBeNull()
+    expect(estado.movimentouNoTurno).toBe(false)
+    expect(estado.posicaoConfirmadaNoTurno).toBe(false)
+    expect(estado.rodada).toBe(1)
+    expect(estado.peaoPorJogador).toEqual({ 'jogador-1': 'peao-branco' })
+  })
+
+  it('mapa peaoPorJogador é aprendido na janela do turno (posicionado, movido e permanecido)', () => {
+    // TURNO_INICIADO(jogador-1) → eventos de peão → atribuídos a jogador-1.
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1)
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+    })
+    expect(estado.peaoPorJogador['jogador-1']).toBe('peao-branco')
+
+    // Turno de jogador-2: evento atribui o peão dele, preservando o de 1.
+    estado = reduzirEvento(estado, { type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 1 })
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_MOVIDO',
+      peaoId: 'peao-vermelho',
+      pecaIdDe: 'inicial-2',
+      pecaIdPara: 'reta-1',
+      celula: { linha: 3, coluna: 4 },
+    })
+    expect(estado.peaoPorJogador['jogador-1']).toBe('peao-branco')
+    expect(estado.peaoPorJogador['jogador-2']).toBe('peao-vermelho')
+
+    // PEAO_PERMANECEU também atribui (permanência em turno próprio).
+    estado = reduzirEvento(estado, { type: 'TURNO_INICIADO', jogadorId: 'jogador-3', rodada: 2 })
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_PERMANECEU',
+      peaoId: 'peao-azul',
+      pecaId: 'inicial-3',
+    })
+    expect(estado.peaoPorJogador['jogador-3']).toBe('peao-azul')
+  })
+
+  it('eventos de peão anteriores ao primeiro TURNO_INICIADO não atribuem mapa', () => {
+    const estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+    })
+    expect(estado.peaoPorJogador).toEqual({})
+  })
+
+  it('ERRO_DO_TABULEIRO não altera o estado de turno', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1)
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_MOVIDO',
+      peaoId: 'peao-branco',
+      pecaIdDe: 'inicial-1',
+      pecaIdPara: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+    })
+    const antes = estado
+    estado = reduzirEvento(estado, {
+      type: 'ERRO_DO_TABULEIRO',
+      codigo: 'FORA_DA_VEZ',
+      mensagem: 'Não é a sua vez.',
+    })
+    expect(estado).toBe(antes)
+  })
+})

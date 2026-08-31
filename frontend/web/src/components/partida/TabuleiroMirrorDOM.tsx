@@ -28,6 +28,8 @@ interface TabuleiroMirrorDOMProps {
   peoes: readonly PeaoDaExibicao[]
   /** Peão selecionado (estado visual local espelhado da cena, issue #90). */
   peaoSelecionadoId: PeaoId | null
+  /** Peão do Jogador Ativo da vez (data-ativo no espelho, #118). */
+  peaoAtivoId?: PeaoId | null
   /** PecaIds destinos válidos do peão selecionado (mesma fonte do destaque). */
   destinosSet: ReadonlySet<PecaId>
   aoSelecionarPeao?: (peaoId: PeaoId) => void
@@ -66,6 +68,7 @@ export function TabuleiroMirrorDOM({
   posicionadas,
   peoes,
   peaoSelecionadoId,
+  peaoAtivoId = null,
   destinosSet,
   aoSelecionarPeao,
   aoDesselecionar,
@@ -177,7 +180,9 @@ export function TabuleiroMirrorDOM({
               key={r.recebidaId}
               data-testid="recebida-pendente"
               data-recebida-id={r.recebidaId}
-              data-celula-alvo={chaveCelula(r.celulaAlvo)}
+              data-celula-alvo={
+                r.celulaAlvo !== null ? chaveCelula(r.celulaAlvo) : undefined
+              }
               data-peca-id={r.pecaId ?? undefined}
               data-focada={r.recebidaId === recebidaFocadaId ? 'true' : 'false'}
               onClick={(e) => {
@@ -196,6 +201,7 @@ export function TabuleiroMirrorDOM({
             data-cor={peao.cor}
             data-posicionado={peao.celula !== null ? 'true' : 'false'}
             data-selecionado={peao.peaoId === peaoSelecionadoId ? 'true' : 'false'}
+            data-ativo={peao.peaoId === peaoAtivoId ? 'true' : 'false'}
             onClick={(e) => {
               // stopPropagation: não deixar o clique chegar ao "clique fora"
               // da raiz, que desselecionaria na sequência.

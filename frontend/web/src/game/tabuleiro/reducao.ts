@@ -27,6 +27,15 @@
  *     Recebida (pecaSelecionadaId) até o encaixe.
  *   - PEAO_POSICIONADO re-seleciona o peão (Primeiro Turno, partida.ts:344);
  *     PEAO_MOVIDO/PEAO_PERMANECEU limpam a seleção (mover/permanecer).
+ *
+ * Turnos (issue #118 — espelho do ST-11):
+ *   - TURNO_INICIADO seta jogadorAtivoId/rodada e reseta a fase do turno;
+ *     TURNO_ENCERRADO limpa a vez (limpeza mínima; rodada e mapa preservados).
+ *   - PEAO_MOVIDO dentro do turno marca movimentouNoTurno; POSICAO_CONFIRMADA
+ *     marca posicaoConfirmadaNoTurno (a Permanência encerra a vez no servidor —
+ *     o próximo TURNO_INICIADO governa a fase seguinte).
+ *   - PEAO_POSICIONADO/PEAO_MOVIDO/PEAO_PERMANECEU atribuem o peão do evento
+ *     ao Jogador Ativo no mapa peaoPorJogador (janela do turno, ver campo).
  */
 
 import {
@@ -44,7 +53,18 @@ import type { PendenciaNoCliente } from './interacaoPeoes'
 import type {
   TabuleiroEventoDoServidor,
   PeaoEventoDoServidor,
+  PosicaoConfirmadaEvento,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
 } from '@flicker/shared'
+
+/** Eventos que o canal da Partida entrega ao redutor (tabuleiro, peões, turnos). */
+export type EventoDoJogoNoCliente =
+  | TabuleiroEventoDoServidor
+  | PeaoEventoDoServidor
+  | TurnoIniciadoEvento
+  | TurnoEncerradoEvento
+  | PosicaoConfirmadaEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -60,6 +80,22 @@ export interface EstadoDoTabuleiroNoCliente {
   readonly peaoSelecionadoId: string | null
   /** Peças cujo tipo foi definido por ESCOLHER_TIPO_DA_PECA_RECEBIDA (chave = pecaId). */
   readonly pecasDeRecebimento: Record<string, TipoDaPeca>
+  /** Jogador Ativo da vez (TURNO_INICIADO; null entre turnos). */
+  readonly jogadorAtivoId: string | null
+  /** Rodada corrente (TURNO_INICIADO; rodada 1 = Primeiro Turno de todos). */
+  readonly rodada: number | null
+  /** O peão do Jogador Ativo já se moveu neste turno (PEAO_MOVIDO). */
+  readonly movimentouNoTurno: boolean
+  /** A posição do peão do Jogador Ativo já foi confirmada (POSICAO_CONFIRMADA). */
+  readonly posicaoConfirmadaNoTurno: boolean
+  /**
+   * Mapa aprendido jogadorId→peaoId (issue #118): cada evento de peão dentro
+   * da janela do turno (TURNO_INICIADO→TURNO_ENCERRADO) atribui o peão ao
+   * Jogador Ativo — turnos são serializados, então o dono é o ativo. Sem
+   * eventos ainda (início da rodada 1), a consulta fica indefinida e o
+   * destaque/buttons degradam a null (substituído pelo snapshot #154/#156).
+   */
+  readonly peaoPorJogador: Readonly<Record<string, string>>
 }
 
 /** Estado inicial determinístico do cliente (deltas a partir do zero). */
@@ -80,6 +116,12 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     recebidasPendentes: [],
     peaoSelecionadoId: null,
     pecasDeRecebimento: {},
+    // Turnos (issue #118): sem vez nem rodada até o primeiro TURNO_INICIADO.
+    jogadorAtivoId: null,
+    rodada: null,
+    movimentouNoTurno: false,
+    posicaoConfirmadaNoTurno: false,
+    peaoPorJogador: {},
   }
 }
 
@@ -110,15 +152,29 @@ function girarPosicionada(
 }
 
 /**
+ * Atribui o peão do evento ao Jogador Ativo no mapa aprendido (issue #118):
+ * turnos são serializados, então os eventos de peão dentro da janela
+ * TURNO_INICIADO→TURNO_ENCERRADO pertencem ao jogador da vez. Sem vez ativa
+ * (ex.: eventos anteriores ao primeiro TURNO_INICIADO), o mapa fica intacto.
+ */
+function aprenderPeaoDoAtivo(
+  estado: EstadoDoTabuleiroNoCliente,
+  peaoId: string,
+): Readonly<Record<string, string>> {
+  if (estado.jogadorAtivoId === null) return estado.peaoPorJogador
+  return { ...estado.peaoPorJogador, [estado.jogadorAtivoId]: peaoId }
+}
+
+/**
  * Aplica um evento do servidor ao estado do cliente, produzindo um novo
  * estado imutável. Eventos desconhecidos ou erro retornam o estado inalterado.
  *
- * Aceita eventos de tabuleiro (ST-09) e de peões/ciclo (ST-10). Eventos de
- * turno (ST-11) não alteram o modelo e são ignorados pelo socket (default).
+ * Aceita eventos de tabuleiro (ST-09), de peões/ciclo (ST-10) e de turno
+ * (ST-11).
  */
 export function reduzirEvento(
   estado: EstadoDoTabuleiroNoCliente,
-  evento: TabuleiroEventoDoServidor | PeaoEventoDoServidor,
+  evento: EventoDoJogoNoCliente,
 ): EstadoDoTabuleiroNoCliente {
   switch (evento.type) {
     // ── Eventos de Tabuleiro (ST-09) ──
@@ -164,8 +220,12 @@ export function reduzirEvento(
         pecaEmManipulacaoId: evento.pecaId,
         // Encaixe na célula-alvo resolve a pendência correspondente (issue
         // #91: a pendência só sai da lista quando a peça é POSICIONADA).
+        // Forma nova (#138): sem vaga escolhida, celulaAlvo é null — nunca
+        // coincide com o encaixe.
         recebidasPendentes: estado.recebidasPendentes.filter(
-          (r) => chaveCelula(r.celulaAlvo) !== chaveCelula(evento.celula),
+          (r) =>
+            r.celulaAlvo === null ||
+            chaveCelula(r.celulaAlvo) !== chaveCelula(evento.celula),
         ),
       }
     }
@@ -181,11 +241,16 @@ export function reduzirEvento(
     case 'PEAO_SELECIONADO':
       return { ...estado, peaoSelecionadoId: evento.peaoId }
     case 'RECEBIMENTO_GERADO':
-      // Pendências do wire ganham o campo client-side `pecaId` (null até o
-      // TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher).
+      // Pendências do wire ganham o campo client-side `pecaId`: null até o
+      // TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher na forma LEGADA (ST-10);
+      // na forma NOVA (#138) o wire já traz o pecaId da peça sorteada —
+      // preservado (a vaga/célula-alvo pode ainda ser null).
       return {
         ...estado,
-        recebidasPendentes: evento.recebidas.map((r) => ({ ...r, pecaId: null })),
+        recebidasPendentes: evento.recebidas.map((r) => ({
+          ...r,
+          pecaId: 'pecaId' in r ? r.pecaId : null,
+        })),
       }
     case 'PEAO_POSICIONADO': {
       const peoes = estado.peoes.map((p) =>
@@ -193,7 +258,13 @@ export function reduzirEvento(
       )
       // Primeiro Turno: o engine re-seleciona o peão no `posicionar_peao`
       // (partida.ts) — o cliente espelha a seleção explicitamente.
-      return { ...estado, peoes, peaoSelecionadoId: evento.peaoId }
+      // A janela do turno atribui o peão ao Jogador Ativo (issue #118).
+      return {
+        ...estado,
+        peoes,
+        peaoSelecionadoId: evento.peaoId,
+        peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
+      }
     }
     case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO': {
       // Espelha o engine (peoes.ts:367): a peça escolhida é CONSUMIDA da
@@ -217,12 +288,48 @@ export function reduzirEvento(
         p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
       )
       // mover_peao no engine limpa o peaoSelecionadoId — o cliente espelha
-      // para não manter seleção fantasma.
-      return { ...estado, peoes, peaoSelecionadoId: null }
+      // para não manter seleção fantasma. Dentro do turno, o movimento marca
+      // a fase e atribui o peão ao Jogador Ativo (issue #118).
+      return {
+        ...estado,
+        peoes,
+        peaoSelecionadoId: null,
+        movimentouNoTurno:
+          estado.jogadorAtivoId !== null ? true : estado.movimentouNoTurno,
+        peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
+      }
     }
     case 'PEAO_PERMANECEU':
-      // permanecer no engine limpa o peaoSelecionadoId (não altera posição).
-      return { ...estado, peaoSelecionadoId: null }
+      // permanecer no engine limpa o peaoSelecionadoId (não altera posição);
+      // a janela do turno atribui o peão ao Jogador Ativo (issue #118).
+      return {
+        ...estado,
+        peaoSelecionadoId: null,
+        peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
+      }
+
+    // ── Eventos de Turno (ST-11, issue #118) ──
+    case 'TURNO_INICIADO':
+      // Novo turno: seta a vez e a rodada, reseta a fase (movimentou/confirmado).
+      return {
+        ...estado,
+        jogadorAtivoId: evento.jogadorId,
+        rodada: evento.rodada,
+        movimentouNoTurno: false,
+        posicaoConfirmadaNoTurno: false,
+      }
+    case 'TURNO_ENCERRADO':
+      // Limpeza mínima: a vez cai até o próximo TURNO_INICIADO; a rodada e o
+      // mapa aprendido jogadorId→peaoId preservam o contexto entre turnos.
+      return {
+        ...estado,
+        jogadorAtivoId: null,
+        movimentouNoTurno: false,
+        posicaoConfirmadaNoTurno: false,
+      }
+    case 'POSICAO_CONFIRMADA':
+      // A Confirmação de Posição trava o peão do Jogador Ativo neste turno.
+      return { ...estado, posicaoConfirmadaNoTurno: true }
 
     default: {
       // Exaustividade: novo evento wire sem case falha em compilação.
@@ -238,7 +345,7 @@ export function reduzirEvento(
  */
 export function reduzirEventos(
   estado: EstadoDoTabuleiroNoCliente,
-  eventos: readonly (TabuleiroEventoDoServidor | PeaoEventoDoServidor)[],
+  eventos: readonly EventoDoJogoNoCliente[],
 ): EstadoDoTabuleiroNoCliente {
   return eventos.reduce(reduzirEvento, estado)
 }

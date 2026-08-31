@@ -17,10 +17,20 @@ import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import { useAuth } from '../state/useAuth'
 import type {
+  ConfirmarPosicaoDoPeaoComando,
+  EncerrarTurnoComando,
   PartidaComandoDoCliente,
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
+
+/** Comandos do canal: tabuleiro (ST-09), peões (ST-10) e turnos (ST-11, #118),
+ * sem o jogadorId — injetado uma única vez em enviarComJogador. */
+type ComandoDoCanal =
+  | TabuleiroComandoDoCliente
+  | PeaoComandoDoCliente
+  | Omit<ConfirmarPosicaoDoPeaoComando, 'jogadorId'>
+  | Omit<EncerrarTurnoComando, 'jogadorId'>
 
 interface PartidaPageProps {
   estadoInicial?: EstadoDaTela
@@ -65,10 +75,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     onEvento: useCallback(
       (evento) => {
         despacharEvento(evento)
-        // Feedback unificado: cobre eventos de tabuleiro e peão.
-        // Branco para aprovação/seleção; vermelho para ERRO_DO_TABULEIRO.
+        // Feedback unificado: cobre eventos de tabuleiro, peão e turno (#118).
+        // Branco para aprovação/seleção; vermelho para ERRO_DO_TABULEIRO
+        // (motivo específico para pendências); âmbar para FORA_DA_VEZ;
+        // TURNO_INICIADO/TURNO_ENCERRADO não geram flash (null).
         const feedback = mapearEventoPeaoParaFeedback(evento)
-        setFlash({ ...feedback })
+        if (feedback !== null) setFlash({ ...feedback })
       },
       [],
     ),
@@ -100,7 +112,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // (ST-10); o espalhamento sobre a união produz a união dos comandos de
   // Partida com jogadorId (PartidaComandoDoCliente).
   const enviarComJogador = useCallback(
-    (comando: TabuleiroComandoDoCliente | PeaoComandoDoCliente) => {
+    (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
       enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
@@ -135,6 +147,39 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const onRejeicaoPeao = useCallback((feedback: FlashFeedback) => {
     setFlash({ ...feedback })
   }, [])
+
+  // ── Turnos (issue #118): vez, rodada, fase e peão do Jogador Ativo ──
+  // A vez só existe com jogador autenticado e TURNO_INICIADO recebido; o peão
+  // próprio/vivo vem do mapa aprendido peaoPorJogador (null = ainda não
+  // aprendido — degradação até o primeiro evento de peão do jogador).
+  const minhaVez = jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+  const peaoProprioId =
+    jogadorId !== null ? (modelo.peaoPorJogador[jogadorId] ?? null) : null
+  const peaoAtivoId =
+    modelo.jogadorAtivoId !== null
+      ? (modelo.peaoPorJogador[modelo.jogadorAtivoId] ?? null)
+      : null
+  const peaoProprioPosicionado =
+    peaoProprioId !== null &&
+    modelo.peoes.some(
+      (p) => p.peaoId === peaoProprioId && p.celula !== null,
+    )
+  // Fase do turno → botão visível. Confirmado → Encerrar. Primeiro Turno
+  // (rodada 1) não tem Permanecer/Confirmar: coloca o peão e as Recebidas,
+  // então Encerra (colocação completa = peão posicionado e sem pendências).
+  // Turno normal: movimentou → Confirmar Posição; senão → Permanecer.
+  type FaseDoTurno = 'permanecer' | 'confirmar' | 'encerrar' | null
+  const faseDoTurno: FaseDoTurno = !minhaVez
+    ? null
+    : modelo.posicaoConfirmadaNoTurno
+      ? 'encerrar'
+      : modelo.rodada === 1
+        ? peaoProprioPosicionado && modelo.recebidasPendentes.length === 0
+          ? 'encerrar'
+          : null
+        : modelo.movimentouNoTurno
+          ? 'confirmar'
+          : 'permanecer'
 
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao
@@ -178,6 +223,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader])
 
   const limparFlash = useCallback(() => setFlash(null), [])
+
+  // ── Comandos de turno (issue #118) — todos via enviarComJogador ──
+  // Botões que dependem de peaoId não disparam sem os dados resolvidos;
+  // Encerrar não depende de peaoId e permanece habilitado com pendências
+  // (o servidor rejeita com PENDENCIA_NAO_RESOLVIDA sem passar a vez).
+  const permanecerNoTurno = useCallback(() => {
+    if (peaoProprioId === null) return
+    enviarComJogador({ type: 'PERMANECER', peaoId: peaoProprioId })
+  }, [enviarComJogador, peaoProprioId])
+
+  const confirmarPosicaoNoTurno = useCallback(() => {
+    if (peaoProprioId === null) return
+    enviarComJogador({ type: 'CONFIRMAR_POSICAO_DO_PEAO', peaoId: peaoProprioId })
+  }, [enviarComJogador, peaoProprioId])
+
+  const encerrarTurno = useCallback(() => {
+    enviarComJogador({ type: 'ENCERRAR_TURNO' })
+  }, [enviarComJogador])
   const [bordaPx, setBordaPx] = useState(0)
 
   // Acoplado ao header de App.tsx (5rem); remover/trocar por h-screen quando Partida deixar de ser filha de App
@@ -192,9 +255,62 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
+        peaoAtivoId={peaoAtivoId}
       />
       <PartidaOverlays estado={estado} onRetry={tentarNovamenteComConexao} />
       <FlashOverlay flash={flash} onClear={limparFlash} />
+      {/* Indicador discreto de rodada (issue #118): escondido até o primeiro
+          TURNO_INICIADO; colisão evitada com a moldura (canto direito). */}
+      {estadoEmAndamento && modelo.rodada !== null ? (
+        <div
+          data-testid="indicador-rodada"
+          className="pointer-events-none absolute right-4 top-4 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
+        >
+          Rodada {modelo.rodada}
+        </div>
+      ) : null}
+      {/* Botões por fase do turno (issue #118): só na minha vez; canto
+          direito-inferior para não colidir com os controles de giro nem com a
+          PartidaDevToolbar (ambos centralizados). */}
+      {estadoEmAndamento && faseDoTurno !== null ? (
+        <div
+          data-testid="controles-de-turno"
+          className="pointer-events-auto absolute bottom-6 right-6 z-30 flex gap-2"
+        >
+          {faseDoTurno === 'permanecer' ? (
+            <button
+              type="button"
+              data-testid="botao-permanecer"
+              onClick={permanecerNoTurno}
+              disabled={peaoProprioId === null}
+              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+            >
+              Permanecer
+            </button>
+          ) : null}
+          {faseDoTurno === 'confirmar' ? (
+            <button
+              type="button"
+              data-testid="botao-confirmar-posicao"
+              onClick={confirmarPosicaoNoTurno}
+              disabled={peaoProprioId === null}
+              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+            >
+              Confirmar Posição
+            </button>
+          ) : null}
+          {faseDoTurno === 'encerrar' ? (
+            <button
+              type="button"
+              data-testid="botao-encerrar-turno"
+              onClick={encerrarTurno}
+              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700"
+            >
+              Encerrar Turno
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {estadoEmAndamento ? (
         <div
           data-testid="controles-de-giro"

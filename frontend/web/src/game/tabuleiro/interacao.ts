@@ -40,7 +40,7 @@ export interface EstadoInteracaoTabuleiro {
 
 export type SentidoDeRotacao = 'horario' | 'anti_horario'
 
-export type CorFlash = 'branco' | 'vermelho'
+export type CorFlash = 'branco' | 'vermelho' | 'ambar'
 
 export interface FlashFeedback {
   readonly cor: CorFlash
@@ -63,6 +63,17 @@ export const FLASH_VERMELHO: FlashFeedback = {
   hex: '#ff3b30',
   duracaoMs: 500,
   motivo: 'rejeicao_do_servico',
+}
+
+/**
+ * Âmbar (issue #118): ação fora da vez — distinto do vermelho de rejeição
+ * (não é erro do comando, é a vez de outro jogador).
+ */
+export const FLASH_AMBAR: FlashFeedback = {
+  cor: 'ambar',
+  hex: '#ffb340',
+  duracaoMs: 500,
+  motivo: 'fora_da_vez',
 }
 
 // ── Helpers de ocupação / cursor ──

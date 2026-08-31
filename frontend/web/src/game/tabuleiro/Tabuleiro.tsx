@@ -25,6 +25,8 @@ interface TabuleiroProps {
   peoes?: readonly PeaoDaExibicao[]
   /** Peão selecionado (estado visual local; null = nenhum). */
   peaoSelecionadoId?: PeaoId | null
+  /** Peão do Jogador Ativo da vez (destaque, #118). */
+  peaoAtivoId?: PeaoId | null
   /**
    * PecaIds destinos válidos do peão selecionado, derivados uma única vez no
    * pai (mesma fonte do espelho DOM). Célula cuja peça está neste conjunto é
@@ -50,6 +52,7 @@ export function Tabuleiro({
   onComando,
   peoes = [],
   peaoSelecionadoId = null,
+  peaoAtivoId = null,
   destinosSet = new Set<string>(),
   onSelecionarPeao,
   estadoPeoes = null,
@@ -113,6 +116,7 @@ export function Tabuleiro({
             alvoPendente={alvoPendente}
             celulaFocada={focada}
             peaoSelecionadoId={peaoSelecionadoId}
+            peaoAtivoId={peaoAtivoId}
             onSelecionarPeao={onSelecionarPeao}
           />
         )

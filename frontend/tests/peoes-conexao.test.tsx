@@ -282,6 +282,7 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
 
     const flash = await screen.findByTestId('flash-overlay')
     expect(flash.getAttribute('data-cor')).toBe('vermelho')
-    expect(flash.getAttribute('data-motivo')).toBe('rejeicao_do_servico')
+    // Issue #118: pendências não resolvidas carregam o motivo específico.
+    expect(flash.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')
   })
 })

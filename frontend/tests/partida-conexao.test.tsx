@@ -222,3 +222,170 @@ describe('partida conectada ao game-server (issue #85)', () => {
     expect(screen.getByTestId('girar-horario')).toBeDisabled()
   })
 })
+
+describe('turnos no cliente — rodada, destaque do ativo e botões por fase (issue #118)', () => {
+  // Jogador autenticado do mock-auth (mesmo id das injeções de comando).
+  const MEU_JOGADOR_ID = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
+
+  afterEach(() => {
+    MockWebSocket.clean()
+  })
+
+  function peaoDoEspelho(peaoId: string): HTMLElement | undefined {
+    return screen
+      .getAllByTestId('peao')
+      .find((el) => el.getAttribute('data-peao-id') === peaoId)
+  }
+
+  it('TURNO_INICIADO exibe indicador de rodada e botões só na vez do jogador', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Sem TURNO_INICIADO: indicador escondido e sem botões de turno.
+    expect(screen.queryByTestId('indicador-rodada')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('controles-de-turno')).not.toBeInTheDocument()
+
+    // Minha vez (rodada 2): indicador visível e fase "sem movimento" →
+    // Permanecer, desabilitado enquanto o peão próprio não é aprendido.
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
+    })
+    expect(await screen.findByTestId('indicador-rodada')).toHaveTextContent('Rodada 2')
+    expect(screen.getByTestId('botao-permanecer')).toBeDisabled()
+
+    // Primeiro evento de peão da janela aprende o mapa → destaque do ativo e
+    // botão habilitado (política: sem peaoId resolvido, não dispara comando).
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_PERMANECEU',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+      })
+    })
+    expect(screen.getByTestId('botao-permanecer')).not.toBeDisabled()
+    const branco = peaoDoEspelho('peao-branco')
+    expect(branco?.getAttribute('data-ativo')).toBe('true')
+    const azul = peaoDoEspelho('peao-azul')
+    expect(azul?.getAttribute('data-ativo')).toBe('false')
+
+    // Vez de outro jogador: nenhum botão de ação; indicador permanece.
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 })
+    })
+    expect(screen.queryByTestId('controles-de-turno')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('botao-permanecer')).not.toBeInTheDocument()
+    expect(screen.getByTestId('indicador-rodada')).toHaveTextContent('Rodada 2')
+  })
+
+  it('Primeiro Turno (rodada 1) sem peão posicionado não mostra Permanecer/Confirmar; com colocação completa mostra Encerrar', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 1 })
+    })
+    // Peão do ativo ainda sobre a Mesa: nenhum botão de turno.
+    await waitFor(() =>
+      expect(screen.queryByTestId('controles-de-turno')).not.toBeInTheDocument(),
+    )
+
+    // Peão posicionado e sem pendências no wire → colocação completa →
+    // Encerrar Turno (sem Permanecer/Confirmar no Primeiro Turno).
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+    })
+    expect(await screen.findByTestId('botao-encerrar-turno')).toBeInTheDocument()
+    expect(screen.queryByTestId('botao-permanecer')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('botao-confirmar-posicao')).not.toBeInTheDocument()
+  })
+
+  it('fluxo por fase: Permanecer → Confirmar Posição → Encerrar Turno envia comandos wire com jogadorId', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Minha vez (rodada 2) com o peão próprio aprendido.
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_PERMANECEU',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+      })
+    })
+
+    // Fase sem movimento: Permanecer → PERMANECER com o peaoId próprio.
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('botao-permanecer'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'PERMANECER',
+        peaoId: 'peao-branco',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+
+    // Depois de PEAO_MOVIDO: Confirmar Posição → CONFIRMAR_POSICAO_DO_PEAO.
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_MOVIDO',
+        peaoId: 'peao-branco',
+        pecaIdDe: 'inicial-1',
+        pecaIdPara: 'reta-1',
+        celula: { linha: 2, coluna: 3 },
+      })
+    })
+    await waitFor(() =>
+      expect(screen.queryByTestId('botao-permanecer')).not.toBeInTheDocument(),
+    )
+    await user.click(screen.getByTestId('botao-confirmar-posicao'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'CONFIRMAR_POSICAO_DO_PEAO',
+        peaoId: 'peao-branco',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+
+    // Depois de POSICAO_CONFIRMADA: Encerrar Turno → ENCERRAR_TURNO.
+    act(() => {
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: MEU_JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'reta-1',
+      })
+    })
+    await waitFor(() =>
+      expect(screen.queryByTestId('botao-confirmar-posicao')).not.toBeInTheDocument(),
+    )
+    await user.click(screen.getByTestId('botao-encerrar-turno'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'ENCERRAR_TURNO',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+  })
+
+  it('ERRO_DO_TABULEIRO FORA_DA_VEZ produz flash âmbar distinto (issue #118)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    act(() => {
+      ws.simulateMessage({
+        type: 'ERRO_DO_TABULEIRO',
+        codigo: 'FORA_DA_VEZ',
+        mensagem: 'Não é a sua vez.',
+      })
+    })
+    const ambar = await screen.findByTestId('flash-overlay')
+    expect(ambar.getAttribute('data-cor')).toBe('ambar')
+    expect(ambar.getAttribute('data-motivo')).toBe('fora_da_vez')
+  })
+})

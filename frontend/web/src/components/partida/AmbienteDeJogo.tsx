@@ -53,6 +53,8 @@ interface AmbienteDeJogoProps {
   onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /** Peão selecionado vindo do modelo/servidor (null = nenhum). */
   peaoSelecionadoIdServidor?: PeaoId | null
+  /** Peão do Jogador Ativo da vez (destaque, #118). */
+  peaoAtivoId?: PeaoId | null
 }
 
 export function AmbienteDeJogo({
@@ -64,6 +66,7 @@ export function AmbienteDeJogo({
   onComandoPeao,
   onRejeicaoPeao,
   peaoSelecionadoIdServidor = null,
+  peaoAtivoId = null,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade ──
   // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
@@ -118,13 +121,17 @@ export function AmbienteDeJogo({
     ) ?? null
   const recebidaFocadaVigenteId: RecebidaId | null = focadaVigente?.recebidaId ?? null
   // Alvos de pendências ativas: mesmo padrão do destinosSet (chaves derivadas
-  // no pai, fonte única para cena e espelho DOM).
+  // no pai, fonte única para cena e espelho DOM). Forma nova (#138): sem vaga
+  // escolhida, celulaAlvo é null — não gera alvo.
   const alvosPendentesSet = new Set<string>(
-    recebidasPendentes.map((r) => chaveCelula(r.celulaAlvo)),
+    recebidasPendentes.flatMap((r) =>
+      r.celulaAlvo !== null ? [chaveCelula(r.celulaAlvo)] : [],
+    ),
   )
-  const alvoFocadoKey: string | null = focadaVigente
-    ? chaveCelula(focadaVigente.celulaAlvo)
-    : null
+  const alvoFocadoKey: string | null =
+    focadaVigente && focadaVigente.celulaAlvo !== null
+      ? chaveCelula(focadaVigente.celulaAlvo)
+      : null
 
   const todasCelulas = todasAsCelulas()
   const ocupadasSet = new Set(
@@ -172,6 +179,7 @@ export function AmbienteDeJogo({
           estadoInteracao={estadoInteracao}
           onComando={onComando}
           peaoSelecionadoId={peaoSelecionadoIdLocal}
+          peaoAtivoId={peaoAtivoId}
           destinosSet={destinosSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
@@ -191,6 +199,7 @@ export function AmbienteDeJogo({
           posicionadas={estadoExibicao.posicionadas}
           peoes={estadoExibicao.peoes}
           peaoSelecionadoId={peaoSelecionadoIdLocal}
+          peaoAtivoId={peaoAtivoId}
           destinosSet={destinosSet}
           aoSelecionarPeao={aoSelecionarPeao}
           aoDesselecionar={aoDesselecionar}
