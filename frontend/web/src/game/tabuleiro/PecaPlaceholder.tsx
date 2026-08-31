@@ -25,7 +25,9 @@ const COR_CAMINHO = '#111111'
 
 // Destaque da peça selecionada/em manipulação: realce quente na borda para
 // distinguir visualmente da composição padrão.
+/** Cor do destaque de destino válido (vizinha conectada ao peão selecionado). */
 const COR_DESTAQUE = '#ffe08a'
+const INTENSIDADE_DESTAQUE = 0.7
 
 const TAMANHO_PECA = TAMANHO_CELULA * 0.96
 const ESPESSURA_PECA = 0.12
@@ -72,7 +74,7 @@ export function PecaPlaceholder({
           transparent
           opacity={0.88}
           emissive={destacada ? COR_DESTAQUE : '#000000'}
-          emissiveIntensity={destacada ? 0.35 : 0}
+          emissiveIntensity={destacada ? INTENSIDADE_DESTAQUE : 0}
         />
       </mesh>
       <group position={[0, Y_CAMINHO, 0]}>

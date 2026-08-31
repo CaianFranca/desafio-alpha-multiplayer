@@ -313,3 +313,88 @@ describe('partida tabuleiro e reserva (issue #83)', () => {
     expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
   })
 })
+
+function peaoPorId(id: string): HTMLElement {
+  return screen.getAllByTestId('peao').find((el) => el.getAttribute('data-peao-id') === id)!
+}
+
+function pecaPorId(id: string): HTMLElement {
+  return screen
+    .getAllByTestId('peca-posicionada')
+    .find((el) => el.getAttribute('data-peca-id') === id)!
+}
+
+describe('partida peões e conexões (issue #90)', () => {
+  const autenticado = mockAuthenticatedState
+
+  it('disponivel mostra 4 peões de cores distintas, exatamente 1 posicionado', () => {
+    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+    const peoes = screen.getAllByTestId('peao')
+    expect(peoes).toHaveLength(4)
+    expect(new Set(peoes.map((el) => el.getAttribute('data-cor'))).size).toBe(4)
+    expect(peoes.filter((el) => el.getAttribute('data-posicionado') === 'true')).toHaveLength(1)
+    expect(peoes.filter((el) => el.getAttribute('data-posicionado') === 'false')).toHaveLength(3)
+    // nenhum selecionado por padrão
+    expect(peoes.every((el) => el.getAttribute('data-selecionado') === 'false')).toBe(true)
+  })
+
+  it('sem seleção de peão posicionado, peças não expõem conexão', () => {
+    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+    for (const el of screen.getAllByTestId('peca-posicionada')) {
+      expect(el).not.toHaveAttribute('data-conectada')
+      expect(el).not.toHaveAttribute('data-selecionada')
+    }
+  })
+
+  it('clicar peão posicionado seleciona e destaca a vizinha conectada no espelho', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+
+    await user.click(peaoPorId('peao-1-branco'))
+
+    expect(peaoPorId('peao-1-branco')).toHaveAttribute('data-selecionado', 'true')
+    // (3,4) reta@90 tem oeste aberto voltado à inicial → conectada/destino
+    expect(pecaPorId('posicionada-reta-2')).toHaveAttribute('data-conectada', 'true')
+    // demais posicionadas não conectadas: presentes e falsas
+    expect(pecaPorId('posicionada-cruz-3')).toHaveAttribute('data-conectada', 'false')
+    expect(pecaPorId('posicionada-reta-4')).toHaveAttribute('data-conectada', 'false')
+    expect(pecaPorId('posicionada-t-5')).toHaveAttribute('data-conectada', 'false')
+    // a peça sob o peão selecionado marca data-selecionada
+    expect(pecaPorId('posicionada-inicial-1')).toHaveAttribute('data-selecionada', 'true')
+    expect(pecaPorId('posicionada-reta-2')).toHaveAttribute('data-selecionada', 'false')
+  })
+
+  it('clicar outro peão troca a seleção; peão sobre a Mesa não produz conexões', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+
+    await user.click(peaoPorId('peao-1-branco'))
+    await user.click(peaoPorId('peao-2-vermelho'))
+
+    expect(peaoPorId('peao-1-branco')).toHaveAttribute('data-selecionado', 'false')
+    expect(peaoPorId('peao-2-vermelho')).toHaveAttribute('data-selecionado', 'true')
+    // seleção não posicionada: attributes de conexão somem (peões na Mesa)
+    for (const el of screen.getAllByTestId('peca-posicionada')) {
+      expect(el).not.toHaveAttribute('data-conectada')
+      expect(el).not.toHaveAttribute('data-selecionada')
+    }
+  })
+
+  it('clicar fora (célula vazia do espelho) desseleciona o peão', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+
+    await user.click(peaoPorId('peao-1-branco'))
+    expect(peaoPorId('peao-1-branco')).toHaveAttribute('data-selecionado', 'true')
+
+    const celulaVazia = screen
+      .getAllByTestId('tabuleiro-celula')
+      .find((el) => el.getAttribute('data-ocupada') === 'false')!
+    await user.click(celulaVazia)
+
+    expect(peaoPorId('peao-1-branco')).toHaveAttribute('data-selecionado', 'false')
+    for (const el of screen.getAllByTestId('peca-posicionada')) {
+      expect(el).not.toHaveAttribute('data-conectada')
+    }
+  })
+})

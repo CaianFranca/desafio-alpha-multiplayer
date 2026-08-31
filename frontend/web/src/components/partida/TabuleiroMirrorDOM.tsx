@@ -1,21 +1,62 @@
-import { chaveCelula } from '../../game/tabuleiro/contrato'
-import type { Celula, PecaDaReserva, PecaPosicionada } from '../../game/tabuleiro/contrato'
+import { chaveCelula, selecionarPeaoNaExibicao } from '../../game/tabuleiro/contrato'
+import type {
+  Celula,
+  PeaoDaExibicao,
+  PeaoId,
+  PecaDaReserva,
+  PecaId,
+  PecaPosicionada,
+} from '../../game/tabuleiro/contrato'
 
 interface TabuleiroMirrorDOMProps {
   todasCelulas: readonly Celula[]
   ocupadasSet: ReadonlySet<string>
   reserva: readonly PecaDaReserva[]
   posicionadas: readonly PecaPosicionada[]
+  peoes: readonly PeaoDaExibicao[]
+  /** Peão selecionado (estado visual local espelhado da cena, issue #90). */
+  peaoSelecionadoId: PeaoId | null
+  /** PecaIds destinos válidos do peão selecionado (mesma fonte do destaque). */
+  destinosSet: ReadonlySet<PecaId>
+  aoSelecionarPeao?: (peaoId: PeaoId) => void
+  aoDesselecionar?: () => void
 }
 
+/**
+ * Espelho DOM do tabuleiro — seam de testes (a cena WebGL é caixa-preta no
+ * jsdom). Deriva do MESMO estado que a cena: peões, seleção e conexões.
+ *
+ * Os handlers de clique aqui só têm efeito em testes: em browser real o
+ * overlay é `pointer-events-none` (os cliques passam para a cena, onde os
+ * mesmos callbacks são disparados via raycast). Clicar um peão seleciona;
+ * clicar qualquer outra área do espelho desseleciona — espelhando o
+ * comportamento da cena.
+ */
 export function TabuleiroMirrorDOM({
   todasCelulas,
   ocupadasSet,
   reserva,
   posicionadas,
+  peoes,
+  peaoSelecionadoId,
+  destinosSet,
+  aoSelecionarPeao,
+  aoDesselecionar,
 }: TabuleiroMirrorDOMProps) {
+  // Mesma derivação pura usada pela cena: resolve a peça sob o peão selecionado
+  // (null quando o peão está sobre a Mesa ou sem peça → sem conexões destacadas).
+  const selecao =
+    peaoSelecionadoId !== null
+      ? selecionarPeaoNaExibicao({ posicionadas, peoes }, peaoSelecionadoId)
+      : null
+
   return (
-    <div data-testid="tabuleiro" aria-hidden="true" className="pointer-events-none absolute inset-0">
+    <div
+      data-testid="tabuleiro"
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0"
+      onClick={aoDesselecionar}
+    >
       {todasCelulas.map((celula) => {
         const ocupada = ocupadasSet.has(chaveCelula(celula))
         return (
@@ -39,8 +80,36 @@ export function TabuleiroMirrorDOM({
         ))}
       </div>
       {posicionadas.map((p) => (
-        <div key={p.pecaId} data-testid="peca-posicionada" data-peca-id={p.pecaId} />
+        <div
+          key={p.pecaId}
+          data-testid="peca-posicionada"
+          data-peca-id={p.pecaId}
+          data-conectada={
+            selecao ? (destinosSet.has(p.pecaId) ? 'true' : 'false') : undefined
+          }
+          data-selecionada={
+            selecao ? (selecao.pecaId === p.pecaId ? 'true' : 'false') : undefined
+          }
+        />
       ))}
+      <div data-testid="peoes">
+        {peoes.map((peao) => (
+          <div
+            key={peao.peaoId}
+            data-testid="peao"
+            data-peao-id={peao.peaoId}
+            data-cor={peao.cor}
+            data-posicionado={peao.celula !== null ? 'true' : 'false'}
+            data-selecionado={peao.peaoId === peaoSelecionadoId ? 'true' : 'false'}
+            onClick={(e) => {
+              // stopPropagation: não deixar o clique chegar ao "clique fora"
+              // da raiz, que desselecionaria na sequência.
+              e.stopPropagation()
+              aoSelecionarPeao?.(peao.peaoId)
+            }}
+          />
+        ))}
+      </div>
     </div>
   )
 }

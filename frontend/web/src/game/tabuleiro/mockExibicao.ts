@@ -1,5 +1,5 @@
-import type { EstadoExibicaoTabuleiro } from './contrato'
-import { criarReservaInicial } from './contrato'
+import type { EstadoExibicaoTabuleiro, PeaoDaExibicao } from './contrato'
+import { CORES_DOS_PEOES, criarReservaInicial } from './contrato'
 
 export function criarEstadoExibicaoMock(): EstadoExibicaoTabuleiro {
   const reserva = criarReservaInicial()
@@ -35,5 +35,13 @@ export function criarEstadoExibicaoMock(): EstadoExibicaoTabuleiro {
       celula: { linha: 2, coluna: 5 },
     },
   ]
-  return { reserva, posicionadas }
+  // 4 peões de cores distintas (ids determinísticos por cor, espelhando o
+  // engine). O peão branco inicia posicionado sobre a Peça Inicial em (3,3);
+  // os demais aguardam sobre a Mesa (celula: null).
+  const peoes: PeaoDaExibicao[] = CORES_DOS_PEOES.map((cor, indice) => ({
+    peaoId: `peao-${indice + 1}-${cor}`,
+    cor,
+    celula: cor === 'branco' ? { linha: 3, coluna: 3 } : null,
+  }))
+  return { reserva, posicionadas, peoes }
 }
