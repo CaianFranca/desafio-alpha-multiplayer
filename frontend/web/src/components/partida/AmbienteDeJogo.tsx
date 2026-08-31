@@ -10,7 +10,8 @@ import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import type { EstadoExibicaoTabuleiro } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
-import type { TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { FlashFeedback } from '../../game/tabuleiro/interacao'
+import type { PeaoComandoDoCliente, RecebidaId, TabuleiroComandoDoCliente } from '@flicker/shared'
 import {
   chaveCelula,
   destinosConectadosDoPeao,
@@ -18,6 +19,8 @@ import {
 } from '../../game/tabuleiro/contrato'
 import type { PeaoId } from '../../game/tabuleiro/contrato'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
+import { mapearCliqueNoPeao } from '../../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -35,33 +38,93 @@ interface AmbienteDeJogoProps {
   /**
    * Estado de exibição da cena. Antes era derivado de `criarEstadoExibicaoMock()`
    * quando o estado da tela era 'disponivel'; agora vem do modelo do cliente
-   * (reserva/posicionadas aplicados por evento) ou do mock DEV.
+   * (reserva/posicionadas/peoes aplicados por evento) ou do mock DEV.
    */
   estadoExibicao?: EstadoExibicaoTabuleiro | null
-  /** Estado de interação (seleção/manipulação) para cursor e destaques. */
+  /** Estado de interação do tabuleiro (seleção/manipulação) para cursor e destaques. */
   estadoInteracao?: EstadoInteracaoTabuleiro | null
+  /** Estado de interação dos peões (derivado do modelo para mapeamento de cliques). */
+  estadoInteracaoPeoes?: EstadoInteracaoPeoes | null
   /** Callback de comando de tabuleiro (null = sem ação) → enviar ao WS. */
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
+  /** Callback de comando de peão (com jogadorId já injetado pelo pai). */
+  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  /** Callback de rejeição de peão (flash vermelho). */
+  onRejeicaoPeao?: (feedback: FlashFeedback) => void
+  /** Peão selecionado vindo do modelo/servidor (null = nenhum). */
+  peaoSelecionadoIdServidor?: PeaoId | null
 }
 
 export function AmbienteDeJogo({
   bordaPx = 0,
   estadoExibicao = null,
   estadoInteracao = null,
+  estadoInteracaoPeoes = null,
   onComando,
+  onComandoPeao,
+  onRejeicaoPeao,
+  peaoSelecionadoIdServidor = null,
 }: AmbienteDeJogoProps) {
-  // Seleção de peão: estado visual temporário da cena (issue #90). Não é
-  // regra de jogo nem comando — a emissão de SELECIONAR_PEAO pertence à #92.
-  const [peaoSelecionadoId, setPeaoSelecionadoId] = useState<PeaoId | null>(null)
+  // ── Seleção de peão: o servidor é a autoridade ──
+  // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
+  // por clique em área inerte (sem comando de desseleção no ciclo). A seleção
+  // do servidor é aplicada à renderização sempre que o valor muda (padrão
+  // "ajustar estado quando a prop muda", sem efeito).
+  const [peaoSelecionadoIdLocal, setPeaoSelecionadoIdLocal] = useState<PeaoId | null>(peaoSelecionadoIdServidor)
+  const [servidorAnterior, setServidorAnterior] = useState<PeaoId | null>(peaoSelecionadoIdServidor)
+  if (peaoSelecionadoIdServidor !== servidorAnterior) {
+    setServidorAnterior(peaoSelecionadoIdServidor)
+    // Nova seleção do servidor re-estabelece a autoridade sobre o estado local.
+    setPeaoSelecionadoIdLocal(peaoSelecionadoIdServidor)
+  }
 
-  // Clicar um peão seleciona (repetir o mesmo clique é idempotente, como o
-  // engine); clicar destino inerte/Mesa/vazio desseleciona.
-  const aoSelecionarPeao = useCallback((peaoId: PeaoId) => {
-    setPeaoSelecionadoId(peaoId)
-  }, [])
+  // Clicar um peão seleciona (ou emite comando ao servidor se disponível);
+  // clicar destino inerte/Mesa/vazio desseleciona. A seleção otimista acontece
+  // APÓS o mapeamento: rejeição (pendências bloqueando outro peão) não altera
+  // a seleção local (#91 — antes selecionava antes de mapear).
+  const aoSelecionarPeao = useCallback(
+    (peaoId: PeaoId) => {
+      if (estadoInteracaoPeoes && onComandoPeao) {
+        const resultado = mapearCliqueNoPeao(estadoInteracaoPeoes, peaoId)
+        if (resultado?.tipo === 'rejeicao') {
+          onRejeicaoPeao?.(resultado.rejeicao.feedback)
+          return
+        }
+        if (resultado?.tipo === 'comando') {
+          onComandoPeao(resultado.comando)
+        }
+      }
+      setPeaoSelecionadoIdLocal(peaoId)
+    },
+    [estadoInteracaoPeoes, onComandoPeao, onRejeicaoPeao],
+  )
   const aoDesselecionar = useCallback(() => {
-    setPeaoSelecionadoId(null)
+    setPeaoSelecionadoIdLocal(null)
   }, [])
+
+  // ── Foco local de pendências de Recebimento (#91, decisão 1) ──
+  // Dono do foco: clicar célula-alvo de pendência SEM tipo foca a pendência;
+  // clicar peça da Reserva envia ESCOLHER_TIPO para a focada. O foco é
+  // validado contra as pendências vigentes (pendência resolvida/tipada ou
+  // lista vazia derrubam o foco — derivação, sem efeito de reset).
+  const [recebidaFocadaId, setRecebidaFocadaId] = useState<RecebidaId | null>(null)
+  const aoFocarPendencia = useCallback((recebidaId: RecebidaId) => {
+    setRecebidaFocadaId(recebidaId)
+  }, [])
+  const recebidasPendentes = estadoInteracaoPeoes?.recebidasPendentes ?? []
+  const focadaVigente =
+    recebidasPendentes.find(
+      (r) => r.recebidaId === recebidaFocadaId && r.pecaId === null,
+    ) ?? null
+  const recebidaFocadaVigenteId: RecebidaId | null = focadaVigente?.recebidaId ?? null
+  // Alvos de pendências ativas: mesmo padrão do destinosSet (chaves derivadas
+  // no pai, fonte única para cena e espelho DOM).
+  const alvosPendentesSet = new Set<string>(
+    recebidasPendentes.map((r) => chaveCelula(r.celulaAlvo)),
+  )
+  const alvoFocadoKey: string | null = focadaVigente
+    ? chaveCelula(focadaVigente.celulaAlvo)
+    : null
 
   const todasCelulas = todasAsCelulas()
   const ocupadasSet = new Set(
@@ -70,11 +133,11 @@ export function AmbienteDeJogo({
   // Destinos válidos do peão selecionado: mesmo conjunto deriva destaque/cursor
   // na cena e data-conectada no espelho DOM (fonte única de verdade).
   const destinosSet = new Set<string>(
-    estadoExibicao && peaoSelecionadoId !== null
+    estadoExibicao && peaoSelecionadoIdLocal !== null
       ? destinosConectadosDoPeao(
           estadoExibicao.posicionadas,
           estadoExibicao.peoes,
-          peaoSelecionadoId,
+          peaoSelecionadoIdLocal,
         ).map((peca) => peca.pecaId)
       : [],
   )
@@ -108,10 +171,16 @@ export function AmbienteDeJogo({
           estadoExibicao={estadoExibicao}
           estadoInteracao={estadoInteracao}
           onComando={onComando}
-          peaoSelecionadoId={peaoSelecionadoId}
+          peaoSelecionadoId={peaoSelecionadoIdLocal}
           destinosSet={destinosSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
+          estadoPeoes={estadoInteracaoPeoes}
+          onComandoPeao={onComandoPeao}
+          alvosPendentesSet={alvosPendentesSet}
+          alvoFocadoKey={alvoFocadoKey}
+          recebidaFocadaId={recebidaFocadaVigenteId}
+          aoFocarPendencia={aoFocarPendencia}
         />
       </Canvas>
       {estadoExibicao ? (
@@ -121,10 +190,18 @@ export function AmbienteDeJogo({
           reserva={estadoExibicao.reserva}
           posicionadas={estadoExibicao.posicionadas}
           peoes={estadoExibicao.peoes}
-          peaoSelecionadoId={peaoSelecionadoId}
+          peaoSelecionadoId={peaoSelecionadoIdLocal}
           destinosSet={destinosSet}
           aoSelecionarPeao={aoSelecionarPeao}
           aoDesselecionar={aoDesselecionar}
+          estadoInteracao={estadoInteracao}
+          estadoPeoes={estadoInteracaoPeoes}
+          onComando={onComando}
+          onComandoPeao={onComandoPeao}
+          recebidaFocadaId={recebidaFocadaVigenteId}
+          aoFocarPendencia={aoFocarPendencia}
+          alvosPendentesSet={alvosPendentesSet}
+          alvoFocadoKey={alvoFocadoKey}
         />
       ) : null}
     </div>

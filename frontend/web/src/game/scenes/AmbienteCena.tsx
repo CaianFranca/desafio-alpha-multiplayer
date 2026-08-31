@@ -12,7 +12,8 @@ import {
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Reserva } from '../tabuleiro/Reserva'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
-import type { TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { EstadoInteracaoPeoes } from '../tabuleiro/interacaoPeoes'
+import type { PeaoComandoDoCliente, RecebidaId, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
 import type { PeaoId, PecaId, EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
@@ -71,6 +72,18 @@ interface AmbienteCenaProps {
   onSelecionarPeao?: (peaoId: PeaoId) => void
   /** Clique em área vazia (Mesa/chão) desseleciona o peão. */
   onDesselecionar?: () => void
+  /** Estado do ciclo do peão: roteia cliques em células/Reserva (#91). */
+  estadoPeoes?: EstadoInteracaoPeoes | null
+  /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
+  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  /** Chaves das células-alvo de pendências ativas (destaque, #91). */
+  alvosPendentesSet?: ReadonlySet<string>
+  /** Chave da célula-alvo da pendência FOCADA (destaque distinto, #91). */
+  alvoFocadoKey?: string | null
+  /** Recebida focada (validada pelo dono do foco, AmbienteDeJogo). */
+  recebidaFocadaId?: RecebidaId | null
+  /** Foco local de pendência sem tipo (dono: AmbienteDeJogo). */
+  aoFocarPendencia?: (recebidaId: RecebidaId) => void
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -91,6 +104,12 @@ export function AmbienteCena({
   destinosSet,
   onSelecionarPeao,
   onDesselecionar,
+  estadoPeoes = null,
+  onComandoPeao,
+  alvosPendentesSet,
+  alvoFocadoKey = null,
+  recebidaFocadaId = null,
+  aoFocarPendencia,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à reserva (-X). Índices preservam a ordem do estado.
@@ -123,11 +142,19 @@ export function AmbienteCena({
               peaoSelecionadoId={peaoSelecionadoId}
               destinosSet={destinosSet}
               onSelecionarPeao={onSelecionarPeao}
+              estadoPeoes={estadoPeoes}
+              onComandoPeao={onComandoPeao}
+              alvosPendentesSet={alvosPendentesSet}
+              alvoFocadoKey={alvoFocadoKey}
+              aoFocarPendencia={aoFocarPendencia}
             />
             <Reserva
               reserva={estadoExibicao.reserva}
               estadoInteracao={estadoInteracao ?? estadoInteracaoVazio}
               onComando={onComando ?? noop}
+              estadoPeoes={estadoPeoes}
+              recebidaFocadaId={recebidaFocadaId}
+              onComandoPeao={onComandoPeao}
             />
             {peoesNaMesa.map((peao) => {
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)

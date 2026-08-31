@@ -1,14 +1,18 @@
 import {
   deveSuprimirCliquePorArrasto,
+  cicloAtivo,
+  ehComandoDePeao,
   haRecebidasPendentes,
   mapearCliqueNaPecaInicial,
   mapearCliqueNoPeao,
+  mapearCliqueNaReservaComCiclo,
   mapearEscolhaDeTipoDaRecebida,
   mapearEventoPeaoParaFeedback,
   mapearGirarRecebida,
   mapearMovimentacao,
   mapearPermanencia,
   mapearPosicionarRecebida,
+  rotearCliqueDeCelula,
   tiposDeCaminhoDisponiveisNaReserva,
 } from '../web/src/game/tabuleiro/interacaoPeoes'
 import { FLASH_BRANCO, FLASH_VERMELHO } from '../web/src/game/tabuleiro/interacao'
@@ -18,6 +22,7 @@ import type {
 } from '../web/src/game/tabuleiro/interacaoPeoes'
 import { criarEstadoExibicaoMock } from '../web/src/game/tabuleiro/mockExibicao'
 import type { Celula, PecaPosicionada, PeaoDaExibicao } from '../web/src/game/tabuleiro/contrato'
+import type { EstadoInteracaoTabuleiro } from '../web/src/game/tabuleiro/interacao'
 import type { ErroDoTabuleiroEvento } from '@flicker/shared'
 
 // ── Helpers de estado ──
@@ -34,6 +39,16 @@ function pecaPosicionada(
 
 function peao(peaoId: string, celula: Celula | null): PeaoDaExibicao {
   return { peaoId, cor: 'branco', celula }
+}
+
+/** Pendência do cliente (issue #91): pecaId null até o TIPO preencher. */
+function pendencia(
+  recebidaId: string,
+  bordaGeradora: 'norte' | 'leste' | 'sul' | 'oeste',
+  celulaAlvo: Celula,
+  pecaId: string | null = null,
+) {
+  return { recebidaId, bordaGeradora, celulaAlvo, pecaId }
 }
 
 const INICIAL = { linha: 3, coluna: 3 }
@@ -172,8 +187,8 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       recebidasPendentes: [
-        { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
-        { recebidaId: 'recebida-leste', bordaGeradora: 'leste', celulaAlvo: { linha: 3, coluna: 4 } },
+        pendencia('recebida-norte', 'norte', { linha: 2, coluna: 3 }),
+        pendencia('recebida-leste', 'leste', { linha: 3, coluna: 4 }),
       ],
     })
     expect(mapearEscolhaDeTipoDaRecebida(estado, 'recebida-norte', 'reta')).toEqual({
@@ -187,7 +202,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       recebidasPendentes: [
-        { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendencia('recebida-norte', 'norte', { linha: 2, coluna: 3 }),
       ],
       reserva: [
         { pecaId: 'reta-1', tipo: 'reta' },
@@ -211,14 +226,14 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
   it('tipos ofertados derivam da Reserva (dedupe, ordem canônica reta→T→cruz)', () => {
     expect(
       tiposDeCaminhoDisponiveisNaReserva([
-        { pecaId: 'a', tipo: 'inicial' },
-        { pecaId: 'b', tipo: 'T' },
-        { pecaId: 'c', tipo: 'reta' },
-        { pecaId: 'd', tipo: 'cruz' },
-        { pecaId: 'e', tipo: 'cruz' },
+        { tipo: 'inicial' },
+        { tipo: 'T' },
+        { tipo: 'reta' },
+        { tipo: 'cruz' },
+        { tipo: 'cruz' },
       ]),
     ).toEqual(['reta', 'T', 'cruz'])
-    expect(tiposDeCaminhoDisponiveisNaReserva([{ pecaId: 'a', tipo: 'inicial' }])).toEqual([])
+    expect(tiposDeCaminhoDisponiveisNaReserva([{ tipo: 'inicial' }])).toEqual([])
   })
 
   // ── AC 4: girar e posicionar a Recebida na célula vizinha, orientação livre ──
@@ -244,7 +259,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       recebidasPendentes: [
-        { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendencia('recebida-norte', 'norte', { linha: 2, coluna: 3 }),
       ],
       pecaSelecionadaId: 'reta-2',
     })
@@ -260,7 +275,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       recebidasPendentes: [
-        { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendencia('recebida-norte', 'norte', { linha: 2, coluna: 3 }),
       ],
       pecaSelecionadaId: 'reta-2',
     })
@@ -306,7 +321,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
   it('com Recebidas pendentes, permanência não emite comando (tudo posicionado antes)', () => {
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
       recebidasPendentes: [
-        { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendencia('recebida-norte', 'norte', { linha: 2, coluna: 3 }),
       ],
     })
     expect(mapearPermanencia(estado, INICIAL)).toBeNull()
@@ -344,7 +359,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
   it('com Recebidas pendentes, movimentação não emite comando (tudo posicionado antes)', () => {
     const estado = estadoComMock({
       recebidasPendentes: [
-        { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendencia('recebida-norte', 'norte', { linha: 2, coluna: 3 }),
       ],
     })
     // reta(3,4) é vizinha conectada, mas a pendência bloqueia mover (US 15).
@@ -364,7 +379,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       recebidasPendentes: [
-        { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendencia('recebida-norte', 'norte', { linha: 2, coluna: 3 }),
       ],
     })
     expect(haRecebidasPendentes(estado)).toBe(true)
@@ -378,7 +393,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       recebidasPendentes: [
-        { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendencia('recebida-norte', 'norte', { linha: 2, coluna: 3 }),
       ],
     })
     expect(mapearCliqueNoPeao(estado, 'peao-branco')).toBeNull()
@@ -458,5 +473,174 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(comandoSeNaoSuprimido).not.toBeNull()
     const comandoComSupressao = suprime ? null : comandoSeNaoSuprimido
     expect(comandoComSupressao).toBeNull()
+  })
+})
+
+describe('roteador do clique em célula (issue #91)', () => {
+  const ALVO_SEM_TIPO = { linha: 2, coluna: 3 }
+  const ALVO_TIPADO = { linha: 3, coluna: 4 }
+
+  /** Projeção ST-09 do estado de peões (o roteador não a usa no ciclo; fallback é do chamador). */
+  function estadoTabuleiro(estadoPeoes: EstadoInteracaoPeoes): EstadoInteracaoTabuleiro {
+    return {
+      reserva: estadoPeoes.reserva,
+      posicionadas: estadoPeoes.posicionadas,
+      pecaSelecionadaId: estadoPeoes.pecaSelecionadaId,
+      pecaEmManipulacaoId: null,
+    }
+  }
+
+  function estadoComPendencias(
+    opts: Partial<EstadoInteracaoPeoes> = {},
+  ): EstadoInteracaoPeoes {
+    return estadoBase({
+      peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [
+        pendencia('recebida-norte', 'norte', ALVO_SEM_TIPO),
+        pendencia('recebida-leste', 'leste', ALVO_TIPADO, 'reta-2'),
+      ],
+      ...opts,
+    })
+  }
+
+  // ── Com pendências: foco e encaixe com coerência tríplice ──
+
+  it('célula-alvo de pendência SEM tipo → focar a pendência (não emite comando)', () => {
+    const estado = estadoComPendencias({ pecaSelecionadaId: null })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),ALVO_SEM_TIPO)).toEqual({
+      focarPendencia: 'recebida-norte',
+    })
+  })
+
+  it('célula-alvo de pendência COM tipo e pecaId === pecaSelecionadaId → POSICIONAR_PECA', () => {
+    const estado = estadoComPendencias({ pecaSelecionadaId: 'reta-2' })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),ALVO_TIPADO)).toEqual({
+      ciclo: { type: 'POSICIONAR_PECA', pecaId: 'reta-2', celula: ALVO_TIPADO },
+    })
+  })
+
+  it('pendência tipada com pecaId ≠ pecaSelecionadaId → null (divergente)', () => {
+    const estado = estadoComPendencias({ pecaSelecionadaId: 't-1' })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),ALVO_TIPADO)).toBeNull()
+  })
+
+  it('célula não-alvo com pendências → null (alvos inválidos não reagem)', () => {
+    const estado = estadoComPendencias({ pecaSelecionadaId: 'reta-2' })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),{ linha: 0, coluna: 0 })).toBeNull()
+  })
+
+  it('caso stale: seleção apontando para peça de Reserva + alvo sem tipo → foca a pendência, não POSICIONAR_PECA', () => {
+    // pecaSelecionadaId 'reta-1' é peça de Reserva (sem Recebida em foco
+    // real); clicar o alvo de pendência sem tipo deve FOCAR — nunca emitir
+    // POSICIONAR_PECA com a peça da Reserva.
+    const estado = estadoComPendencias({ pecaSelecionadaId: 'reta-1' })
+    expect(estado.reserva.some((p) => p.pecaId === 'reta-1')).toBe(true)
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),ALVO_SEM_TIPO)).toEqual({
+      focarPendencia: 'recebida-norte',
+    })
+  })
+
+  // ── Sem pendências, com peão selecionado: permanecer / mover / posicionar ──
+
+  it('célula do próprio peão → PERMANECER', () => {
+    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
+    expect(cicloAtivo(estado)).toBe(true)
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),INICIAL)).toEqual({
+      ciclo: { type: 'PERMANECER', peaoId: 'peao-1-branco' },
+    })
+  })
+
+  it('destino conectado → MOVER_PEAO', () => {
+    const estado = estadoComMock()
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),{ linha: 3, coluna: 4 })).toEqual({
+      ciclo: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 4 } },
+    })
+  })
+
+  it('peão sobre a Mesa + Peça Inicial clicada → POSICIONAR_PEAO', () => {
+    const estado = estadoBase({ peaoSelecionadoId: 'peao-branco' })
+    expect(cicloAtivo(estado)).toBe(true)
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),INICIAL)).toEqual({
+      ciclo: { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: INICIAL },
+    })
+  })
+
+  it('peão selecionado, alvo inválido → null (sem reação)', () => {
+    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
+    // Célula vazia não conectada: não é o próprio peão, não é destino.
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),{ linha: 0, coluna: 0 })).toBeNull()
+  })
+
+  // ── Sem ciclo ativo: null (chamador aplica o fallback ST-09) ──
+
+  it('sem pendências e sem peão selecionado → null (fallback ST-09 no chamador)', () => {
+    const estado = estadoBase()
+    expect(cicloAtivo(estado)).toBe(false)
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),{ linha: 5, coluna: 5 })).toBeNull()
+  })
+
+  // ── Reserva com ciclo: escolha de tipo para a pendência focada ──
+
+  it('Reserva com pendências e foco → ESCOLHER_TIPO_DA_PECA_RECEBIDA', () => {
+    const estado = estadoComPendencias({ pecaSelecionadaId: null })
+    expect(
+      mapearCliqueNaReservaComCiclo(estado, estadoTabuleiro(estado),'recebida-norte', {
+        pecaId: 'reta-1',
+        tipo: 'reta',
+      }),
+    ).toEqual({
+      type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+      recebidaId: 'recebida-norte',
+      tipoDaPeca: 'reta',
+    })
+  })
+
+  it('Reserva com pendências SEM foco → null (não reage)', () => {
+    const estado = estadoComPendencias({ pecaSelecionadaId: null })
+    expect(
+      mapearCliqueNaReservaComCiclo(estado, estadoTabuleiro(estado),null, {
+        pecaId: 'reta-1',
+        tipo: 'reta',
+      }),
+    ).toBeNull()
+  })
+
+  it('Reserva com pendências e foco em pendência inexistente → null', () => {
+    const estado = estadoComPendencias({ pecaSelecionadaId: null })
+    expect(
+      mapearCliqueNaReservaComCiclo(estado, estadoTabuleiro(estado),'recebida-inexistente', {
+        pecaId: 'reta-1',
+        tipo: 'reta',
+      }),
+    ).toBeNull()
+  })
+
+  it('Reserva sem pendências mantém o ST-09 (SELECIONAR_PECA)', () => {
+    const estado = estadoBase({ pecaSelecionadaId: null })
+    expect(
+      mapearCliqueNaReservaComCiclo(estado, estadoTabuleiro(estado),null, {
+        pecaId: 'reta-1',
+        tipo: 'reta',
+      }),
+    ).toEqual({ type: 'SELECIONAR_PECA', pecaId: 'reta-1' })
+  })
+
+  it('Reserva com pendências e peça inicial clicada → null (tipo de caminho apenas)', () => {
+    const estado = estadoComPendencias({ pecaSelecionadaId: null })
+    expect(
+      mapearCliqueNaReservaComCiclo(estado, estadoTabuleiro(estado),'recebida-norte', {
+        pecaId: 'inicial-1',
+        tipo: 'inicial',
+      }),
+    ).toBeNull()
+  })
+
+  // ── Guard de comando (cena e espelho despacham pelo mesmo caminho) ──
+
+  it('ehComandoDePeao distingue comando do ciclo do comando do Tabuleiro', () => {
+    expect(ehComandoDePeao({ type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' })).toBe(true)
+    expect(ehComandoDePeao({ type: 'PERMANECER', peaoId: 'peao-branco' })).toBe(true)
+    expect(ehComandoDePeao({ type: 'SELECIONAR_PECA', pecaId: 'reta-1' })).toBe(false)
+    expect(ehComandoDePeao({ type: 'GIRAR_PECA', pecaId: 'reta-1', sentido: 'horario' })).toBe(false)
   })
 })

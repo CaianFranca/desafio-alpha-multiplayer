@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useState } from 'react'
+import { useCallback, useEffect, useReducer, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AmbienteDeJogo } from '../components/partida/AmbienteDeJogo'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
@@ -10,10 +10,17 @@ import { FlashOverlay } from '../components/partida/FlashOverlay'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
 import { criarEstadoInicialDoCliente, reduzirEvento, estadoDeExibicaoDoModelo } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente } from '../game/tabuleiro/reducao'
-import { mapearEventoParaFeedback, mapearGiro } from '../game/tabuleiro/interacao'
+import { mapearGiro } from '../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../game/tabuleiro/interacao'
 import { criarEstadoExibicaoMock } from '../game/tabuleiro/mockExibicao'
-import type { TabuleiroComandoDoCliente } from '@flicker/shared'
+import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
+import { useAuth } from '../state/useAuth'
+import type {
+  PartidaComandoDoCliente,
+  PeaoComandoDoCliente,
+  TabuleiroComandoDoCliente,
+} from '@flicker/shared'
 
 interface PartidaPageProps {
   estadoInicial?: EstadoDaTela
@@ -26,6 +33,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const serverId = searchParams.get('serverId')
   const partidaId = searchParams.get('partidaId')
   const temAlvo = Boolean(serverId && partidaId)
+
+  const { authState } = useAuth()
+  const jogadorId =
+    authState.status === 'authenticated' ? authState.jogador.id : null
 
   // ?partidaEstado é initialOnly e exclusivo de DEV — lido só no mount; após isso, estado interno (toolbar/retry) governa.
   // Prioridade: URL (DEV) > prop > default do hook. Gate DEV evita vazamento para produção (B2).
@@ -54,10 +65,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     onEvento: useCallback(
       (evento) => {
         despacharEvento(evento)
-        // Feedback: evento de sucesso → flash branco; rejeição → flash vermelho.
-        // Nova referência a cada evento garante reinício do timer no FlashOverlay.
-        const feedback = mapearEventoParaFeedback(evento)
-        setFlash(feedback === null ? null : { ...feedback })
+        // Feedback unificado: cobre eventos de tabuleiro e peão.
+        // Branco para aprovação/seleção; vermelho para ERRO_DO_TABULEIRO.
+        const feedback = mapearEventoPeaoParaFeedback(evento)
+        setFlash({ ...feedback })
       },
       [],
     ),
@@ -82,13 +93,48 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const estadoInteracao: EstadoDoTabuleiroNoCliente | null =
     temAlvo && estadoEmAndamento ? modelo : null
 
+  // ── Injeção única de jogadorId (issue #91) ──
+  // O canal da Partida exige jogadorId em TODOS os comandos (wire.ts do
+  // game-server): comandos sem o campo são rejeitados com DADOS_INVALIDOS.
+  // Ponto único de injeção para os comandos de tabuleiro (ST-09) e de peão
+  // (ST-10); o espalhamento sobre a união produz a união dos comandos de
+  // Partida com jogadorId (PartidaComandoDoCliente).
+  const enviarComJogador = useCallback(
+    (comando: TabuleiroComandoDoCliente | PeaoComandoDoCliente) => {
+      if (jogadorId === null) return
+      enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
+    },
+    [enviar, jogadorId],
+  )
+
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
       if (comando === null) return
-      enviar(comando)
+      enviarComJogador(comando)
     },
-    [enviar],
+    [enviarComJogador],
   )
+
+  // ── Comandos de Peão passam pelo mesmo ponto de injeção ──
+  const onComandoPeao = enviarComJogador
+
+  // ── Estado de interação dos peões (derivado do modelo) ──
+  const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
+    if (!temAlvo || !estadoEmAndamento) return null
+    return {
+      peoes: modelo.peoes,
+      posicionadas: modelo.posicionadas,
+      recebidasPendentes: modelo.recebidasPendentes,
+      peaoSelecionadoId: modelo.peaoSelecionadoId,
+      pecaSelecionadaId: modelo.pecaSelecionadaId,
+      reserva: modelo.reserva,
+    }
+  }, [temAlvo, estadoEmAndamento, modelo])
+
+  // ── Rejeição de peão (local) → flash vermelho ──
+  const onRejeicaoPeao = useCallback((feedback: FlashFeedback) => {
+    setFlash({ ...feedback })
+  }, [])
 
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao
@@ -98,9 +144,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const girar = useCallback(
     (sentido: 'horario' | 'anti_horario') => {
       if (pecaAlvoDeGiro === null) return
-      enviar(mapearGiro(pecaAlvoDeGiro, sentido))
+      enviarComJogador(mapearGiro(pecaAlvoDeGiro, sentido))
     },
-    [enviar, pecaAlvoDeGiro],
+    [enviarComJogador, pecaAlvoDeGiro],
   )
 
   useEffect(() => {
@@ -141,7 +187,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         bordaPx={bordaPx}
         estadoExibicao={estadoExibicao}
         estadoInteracao={estadoInteracao}
+        estadoInteracaoPeoes={estadoInteracaoPeoes}
         onComando={onComando}
+        onComandoPeao={onComandoPeao}
+        onRejeicaoPeao={onRejeicaoPeao}
+        peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
       />
       <PartidaOverlays estado={estado} onRetry={tentarNovamenteComConexao} />
       <FlashOverlay flash={flash} onClear={limparFlash} />
