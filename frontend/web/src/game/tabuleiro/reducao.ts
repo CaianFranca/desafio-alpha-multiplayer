@@ -18,9 +18,20 @@
  *     sequencial aqui reproduz esse encadeamento.
  *   - ERRO_DO_TABULEIRO chega só ao autor e não altera o estado do cliente
  *     (o flash vermelho é gerenciado pela camada de feedback, não pelo reducer).
+ *
+ * Ciclo do Peão (issue #91 — espelho do engine):
+ *   - Peões nascem seedados (`peao-${cor}`, sobre a Mesa) e o servidor move.
+ *   - Pendência de Recebimento carrega campo client-side `pecaId` (null até o
+ *     TIPO) e só sai da lista no PECA_POSICIONADA (encaixe na célula-alvo).
+ *   - TIPO consome a peça da Reserva (peoes.ts:367 do engine) e seleciona a
+ *     Recebida (pecaSelecionadaId) até o encaixe.
+ *   - PEAO_POSICIONADO re-seleciona o peão (Primeiro Turno, partida.ts:344);
+ *     PEAO_MOVIDO/PEAO_PERMANECEU limpam a seleção (mover/permanecer).
  */
 
 import {
+  CORES_DOS_PEOES,
+  chaveCelula,
   criarReservaInicial,
   type EstadoExibicaoTabuleiro,
   type Orientacao,
@@ -29,10 +40,10 @@ import {
   type PeaoDaExibicao,
   type TipoDaPeca,
 } from './contrato'
+import type { PendenciaNoCliente } from './interacaoPeoes'
 import type {
   TabuleiroEventoDoServidor,
   PeaoEventoDoServidor,
-  PendenciaDeRecebimento,
 } from '@flicker/shared'
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
@@ -43,8 +54,8 @@ export interface EstadoDoTabuleiroNoCliente {
   readonly pecaEmManipulacaoId: string | null
   /** Peões com posição autoritativa do servidor (issue #91). */
   readonly peoes: readonly PeaoDaExibicao[]
-  /** Recebidas aguardando escolha de tipo e encaixe. */
-  readonly recebidasPendentes: readonly PendenciaDeRecebimento[]
+  /** Recebidas aguardando escolha de tipo e encaixe (com pecaId client-side). */
+  readonly recebidasPendentes: readonly PendenciaNoCliente[]
   /** Peão selecionado no ciclo (vem do servidor via PEAO_SELECIONADO). */
   readonly peaoSelecionadoId: string | null
   /** Peças cujo tipo foi definido por ESCOLHER_TIPO_DA_PECA_RECEBIDA (chave = pecaId). */
@@ -58,7 +69,14 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
-    peoes: [],
+    // Seed dos peões (issue #91): ids determinísticos por cor, espelhando o
+    // engine (`peaoId: peao-${cor}`, `pecaId: null` na origem); os 4 nascem
+    // sobre a Mesa (celula: null) e o servidor confirma cada movimento.
+    peoes: CORES_DOS_PEOES.map((cor) => ({
+      peaoId: `peao-${cor}`,
+      cor,
+      celula: null,
+    })),
     recebidasPendentes: [],
     peaoSelecionadoId: null,
     pecasDeRecebimento: {},
@@ -144,6 +162,11 @@ export function reduzirEvento(
         // Encaixe abre a janela de Manipulação e limpa a Seleção.
         pecaSelecionadaId: null,
         pecaEmManipulacaoId: evento.pecaId,
+        // Encaixe na célula-alvo resolve a pendência correspondente (issue
+        // #91: a pendência só sai da lista quando a peça é POSICIONADA).
+        recebidasPendentes: estado.recebidasPendentes.filter(
+          (r) => chaveCelula(r.celulaAlvo) !== chaveCelula(evento.celula),
+        ),
       }
     }
     case 'MANIPULACAO_FINALIZADA':
@@ -158,25 +181,34 @@ export function reduzirEvento(
     case 'PEAO_SELECIONADO':
       return { ...estado, peaoSelecionadoId: evento.peaoId }
     case 'RECEBIMENTO_GERADO':
-      return { ...estado, recebidasPendentes: evento.recebidas }
+      // Pendências do wire ganham o campo client-side `pecaId` (null até o
+      // TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher).
+      return {
+        ...estado,
+        recebidasPendentes: evento.recebidas.map((r) => ({ ...r, pecaId: null })),
+      }
     case 'PEAO_POSICIONADO': {
       const peoes = estado.peoes.map((p) =>
         p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
       )
-      return { ...estado, peoes }
+      // Primeiro Turno: o engine re-seleciona o peão no `posicionar_peao`
+      // (partida.ts) — o cliente espelha a seleção explicitamente.
+      return { ...estado, peoes, peaoSelecionadoId: evento.peaoId }
     }
     case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO': {
-      // Remove a pendência correspondente e registra o tipo para que
-      // PECA_POSICIONADA posterior encontre o tipo (fora da Reserva).
+      // Espelha o engine (peoes.ts:367): a peça escolhida é CONSUMIDA da
+      // Reserva. A pendência PERMANECE na lista (agora tipada, com pecaId)
+      // até o encaixe (PECA_POSICIONADA). A seleção passa para a Recebida.
       return {
         ...estado,
+        reserva: estado.reserva.filter((p) => p.pecaId !== evento.pecaId),
         pecasDeRecebimento: {
           ...estado.pecasDeRecebimento,
           [evento.pecaId]: evento.tipoDaPeca,
         },
         pecaSelecionadaId: evento.pecaId,
-        recebidasPendentes: estado.recebidasPendentes.filter(
-          (r) => r.recebidaId !== evento.recebidaId,
+        recebidasPendentes: estado.recebidasPendentes.map((r) =>
+          r.recebidaId === evento.recebidaId ? { ...r, pecaId: evento.pecaId } : r,
         ),
       }
     }
@@ -184,11 +216,13 @@ export function reduzirEvento(
       const peoes = estado.peoes.map((p) =>
         p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
       )
-      return { ...estado, peoes }
+      // mover_peao no engine limpa o peaoSelecionadoId — o cliente espelha
+      // para não manter seleção fantasma.
+      return { ...estado, peoes, peaoSelecionadoId: null }
     }
     case 'PEAO_PERMANECEU':
-      // Permanência não altera o modelo — peão já está na posição correta.
-      return estado
+      // permanecer no engine limpa o peaoSelecionadoId (não altera posição).
+      return { ...estado, peaoSelecionadoId: null }
 
     default: {
       // Exaustividade: novo evento wire sem case falha em compilação.

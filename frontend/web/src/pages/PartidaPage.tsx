@@ -16,7 +16,11 @@ import { criarEstadoExibicaoMock } from '../game/tabuleiro/mockExibicao'
 import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import { useAuth } from '../state/useAuth'
-import type { TabuleiroComandoDoCliente } from '@flicker/shared'
+import type {
+  PartidaComandoDoCliente,
+  PeaoComandoDoCliente,
+  TabuleiroComandoDoCliente,
+} from '@flicker/shared'
 
 interface PartidaPageProps {
   estadoInicial?: EstadoDaTela
@@ -89,22 +93,30 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const estadoInteracao: EstadoDoTabuleiroNoCliente | null =
     temAlvo && estadoEmAndamento ? modelo : null
 
-  const onComando = useCallback(
-    (comando: TabuleiroComandoDoCliente | null) => {
-      if (comando === null) return
-      enviar(comando)
-    },
-    [enviar],
-  )
-
-  // ── Comandos de Peão: injeta jogadorId e envia pelo canal ──
-  const onComandoPeao = useCallback(
-    (comando: import('@flicker/shared').PeaoComandoDoCliente) => {
+  // ── Injeção única de jogadorId (issue #91) ──
+  // O canal da Partida exige jogadorId em TODOS os comandos (wire.ts do
+  // game-server): comandos sem o campo são rejeitados com DADOS_INVALIDOS.
+  // Ponto único de injeção para os comandos de tabuleiro (ST-09) e de peão
+  // (ST-10); o espalhamento sobre a união produz a união dos comandos de
+  // Partida com jogadorId (PartidaComandoDoCliente).
+  const enviarComJogador = useCallback(
+    (comando: TabuleiroComandoDoCliente | PeaoComandoDoCliente) => {
       if (jogadorId === null) return
-      enviar({ ...comando, jogadorId })
+      enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
     [enviar, jogadorId],
   )
+
+  const onComando = useCallback(
+    (comando: TabuleiroComandoDoCliente | null) => {
+      if (comando === null) return
+      enviarComJogador(comando)
+    },
+    [enviarComJogador],
+  )
+
+  // ── Comandos de Peão passam pelo mesmo ponto de injeção ──
+  const onComandoPeao = enviarComJogador
 
   // ── Estado de interação dos peões (derivado do modelo) ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
@@ -132,9 +144,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const girar = useCallback(
     (sentido: 'horario' | 'anti_horario') => {
       if (pecaAlvoDeGiro === null) return
-      enviar(mapearGiro(pecaAlvoDeGiro, sentido))
+      enviarComJogador(mapearGiro(pecaAlvoDeGiro, sentido))
     },
-    [enviar, pecaAlvoDeGiro],
+    [enviarComJogador, pecaAlvoDeGiro],
   )
 
   useEffect(() => {

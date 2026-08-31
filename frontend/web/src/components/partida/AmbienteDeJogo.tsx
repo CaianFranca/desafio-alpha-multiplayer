@@ -11,7 +11,7 @@ import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import type { EstadoExibicaoTabuleiro } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../../game/tabuleiro/interacao'
-import type { TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { PeaoComandoDoCliente, RecebidaId, TabuleiroComandoDoCliente } from '@flicker/shared'
 import {
   chaveCelula,
   destinosConectadosDoPeao,
@@ -21,7 +21,6 @@ import type { PeaoId } from '../../game/tabuleiro/contrato'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 import { mapearCliqueNoPeao } from '../../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
-import type { PeaoComandoDoCliente } from '@flicker/shared'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -80,26 +79,52 @@ export function AmbienteDeJogo({
   }
 
   // Clicar um peão seleciona (ou emite comando ao servidor se disponível);
-  // clicar destino inerte/Mesa/vazio desseleciona.
+  // clicar destino inerte/Mesa/vazio desseleciona. A seleção otimista acontece
+  // APÓS o mapeamento: rejeição (pendências bloqueando outro peão) não altera
+  // a seleção local (#91 — antes selecionava antes de mapear).
   const aoSelecionarPeao = useCallback(
     (peaoId: PeaoId) => {
-      setPeaoSelecionadoIdLocal(peaoId)
-
-      // Se há interação de peões e comando disponível, mapeia o clique.
       if (estadoInteracaoPeoes && onComandoPeao) {
         const resultado = mapearCliqueNoPeao(estadoInteracaoPeoes, peaoId)
+        if (resultado?.tipo === 'rejeicao') {
+          onRejeicaoPeao?.(resultado.rejeicao.feedback)
+          return
+        }
         if (resultado?.tipo === 'comando') {
           onComandoPeao(resultado.comando)
-        } else if (resultado?.tipo === 'rejeicao') {
-          onRejeicaoPeao?.(resultado.rejeicao.feedback)
         }
       }
+      setPeaoSelecionadoIdLocal(peaoId)
     },
     [estadoInteracaoPeoes, onComandoPeao, onRejeicaoPeao],
   )
   const aoDesselecionar = useCallback(() => {
     setPeaoSelecionadoIdLocal(null)
   }, [])
+
+  // ── Foco local de pendências de Recebimento (#91, decisão 1) ──
+  // Dono do foco: clicar célula-alvo de pendência SEM tipo foca a pendência;
+  // clicar peça da Reserva envia ESCOLHER_TIPO para a focada. O foco é
+  // validado contra as pendências vigentes (pendência resolvida/tipada ou
+  // lista vazia derrubam o foco — derivação, sem efeito de reset).
+  const [recebidaFocadaId, setRecebidaFocadaId] = useState<RecebidaId | null>(null)
+  const aoFocarPendencia = useCallback((recebidaId: RecebidaId) => {
+    setRecebidaFocadaId(recebidaId)
+  }, [])
+  const recebidasPendentes = estadoInteracaoPeoes?.recebidasPendentes ?? []
+  const focadaVigente =
+    recebidasPendentes.find(
+      (r) => r.recebidaId === recebidaFocadaId && r.pecaId === null,
+    ) ?? null
+  const recebidaFocadaVigenteId: RecebidaId | null = focadaVigente?.recebidaId ?? null
+  // Alvos de pendências ativas: mesmo padrão do destinosSet (chaves derivadas
+  // no pai, fonte única para cena e espelho DOM).
+  const alvosPendentesSet = new Set<string>(
+    recebidasPendentes.map((r) => chaveCelula(r.celulaAlvo)),
+  )
+  const alvoFocadoKey: string | null = focadaVigente
+    ? chaveCelula(focadaVigente.celulaAlvo)
+    : null
 
   const todasCelulas = todasAsCelulas()
   const ocupadasSet = new Set(
@@ -150,6 +175,12 @@ export function AmbienteDeJogo({
           destinosSet={destinosSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
+          estadoPeoes={estadoInteracaoPeoes}
+          onComandoPeao={onComandoPeao}
+          alvosPendentesSet={alvosPendentesSet}
+          alvoFocadoKey={alvoFocadoKey}
+          recebidaFocadaId={recebidaFocadaVigenteId}
+          aoFocarPendencia={aoFocarPendencia}
         />
       </Canvas>
       {estadoExibicao ? (
@@ -163,6 +194,14 @@ export function AmbienteDeJogo({
           destinosSet={destinosSet}
           aoSelecionarPeao={aoSelecionarPeao}
           aoDesselecionar={aoDesselecionar}
+          estadoInteracao={estadoInteracao}
+          estadoPeoes={estadoInteracaoPeoes}
+          onComando={onComando}
+          onComandoPeao={onComandoPeao}
+          recebidaFocadaId={recebidaFocadaVigenteId}
+          aoFocarPendencia={aoFocarPendencia}
+          alvosPendentesSet={alvosPendentesSet}
+          alvoFocadoKey={alvoFocadoKey}
         />
       ) : null}
     </div>

@@ -1,5 +1,6 @@
 /**
- * Interação pura do ciclo do Peão (issue #92 — ST-10).
+ * Interação pura do ciclo do Peão (issue #92 — ST-10; roteador de células e
+ * despacho unificado da cena/espelho na issue #91).
  *
  * Módulo 100% puro: mapeia cliques simples → comandos wire (UPPER_SNAKE em
  * `@flicker/shared`) e eventos de servidor → feedback visual (flash branco /
@@ -28,7 +29,8 @@
  */
 
 import { FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
-import type { FlashFeedback } from './interacao'
+import type { FlashFeedback, EstadoInteracaoTabuleiro } from './interacao'
+import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada, mapearCliqueNaReserva } from './interacao'
 import {
   chaveCelula,
   destinosConectadosDoPeao,
@@ -41,10 +43,11 @@ import type {
   PecaDeselecionadaEvento,
   PeaoComandoDoCliente,
   PeaoEventoDoServidor,
+  PendenciaDeRecebimento,
   PecaGiradaEvento,
   PecaPosicionadaEvento,
   PecaSelecionadaEvento,
-  PendenciaDeRecebimento,
+  RecebidaId,
   SentidoDeRotacao,
   TabuleiroComandoDoCliente,
   TipoDePecaDeCaminho,
@@ -56,11 +59,21 @@ import type {
 // a escolha das Recebidas e `pecaSelecionadaId` é a Recebida em foco (pecaId
 // chega no wire via TIPO_DA_PECA_RECEBIDA_ESCOLHIDO).
 
+/**
+ * Pendência no cliente (issue #91): campos do wire (`PendenciaDeRecebimento`)
+ * + campo client-side `pecaId` — null até o evento TIPO_DA_PECA_RECEBIDA_-
+ * ESCOLHIDO preencher (o wire não carrega o pecaId da pendência). A pendência
+ * só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
+ */
+export type PendenciaNoCliente = PendenciaDeRecebimento & {
+  readonly pecaId: string | null
+}
+
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]
   readonly posicionadas: readonly PecaPosicionada[]
   /** Recebidas aguardando escolha de tipo e encaixe (bloqueiam a seleção de outro Peão). */
-  readonly recebidasPendentes: readonly PendenciaDeRecebimento[]
+  readonly recebidasPendentes: readonly PendenciaNoCliente[]
   readonly peaoSelecionadoId: string | null
   /** Peça em sequência: após ESCOLHER_TIPO, o pecaId da Recebida em foco. */
   readonly pecaSelecionadaId: string | null
@@ -248,6 +261,171 @@ export function mapearMovimentacao(
   )
   if (!conectada) return null
   return { type: 'MOVER_PEAO', peaoId, celula }
+}
+
+// ── Roteador do clique em célula do Tabuleiro (issue #91) ──
+
+/**
+ * Resultado do clique em célula com o ciclo ativo: comando do ciclo (peão ou
+ * tabuleiro — POSICIONAR_PECA da Recebida), foco de uma pendência sem tipo,
+ * ou null (alvo inválido não reage; sem ciclo ativo o chamador aplica o
+ * fallback ST-09).
+ */
+export type ResultadoDeCliqueEmCelula =
+  | { readonly ciclo: PeaoComandoDoCliente | TabuleiroComandoDoCliente }
+  | { readonly focarPendencia: RecebidaId }
+  | null
+
+/** Ciclo ativo: há Recebidas pendentes OU peão selecionado (suprime o fallback ST-09). */
+export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
+  return haRecebidasPendentes(estado) || estado.peaoSelecionadoId !== null
+}
+
+/**
+ * Roteador puro do clique em célula durante o ciclo do Peão (issue #91).
+ * Tabela exata de prioridades:
+ *
+ * Com pendências:
+ *   - célula = célula-alvo de pendência SEM tipo (pecaId null) → focar
+ *     (foco local; troca de foco permitida).
+ *   - célula = célula-alvo de pendência COM tipo e pendência.pecaId ===
+ *     pecaSelecionadaId → POSICIONAR_PECA (encaixe; coerência tríplice:
+ *     célula-alvo + peça escolhida + peça em foco).
+ *   - demais (alvo tipado divergente da seleção, célula não-alvo) → null.
+ *
+ * Sem pendências, com peão selecionado:
+ *   - célula do próprio peão → PERMANECER.
+ *   - destino conectado → MOVER_PEAO.
+ *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO.
+ *   - demais → null.
+ *
+ * Sem ciclo ativo → null (o chamador aplica o fallback ST-09).
+ */
+export function rotearCliqueDeCelula(
+  estadoPeoes: EstadoInteracaoPeoes,
+  _estadoInteracao: EstadoInteracaoTabuleiro,
+  celula: Celula,
+): ResultadoDeCliqueEmCelula {
+  if (haRecebidasPendentes(estadoPeoes)) {
+    const pendencia = estadoPeoes.recebidasPendentes.find(
+      (r) => chaveCelula(r.celulaAlvo) === chaveCelula(celula),
+    )
+    if (!pendencia) return null
+    if (pendencia.pecaId === null) return { focarPendencia: pendencia.recebidaId }
+    // Pendência tipada: encaixe exige a peça escolhida em foco; seleção
+    // divergente (ex.: peça de Reserva selecionada — estado stale) → null.
+    if (pendencia.pecaId !== estadoPeoes.pecaSelecionadaId) return null
+    const encaixe = mapearPosicionarRecebida(estadoPeoes, celula)
+    // Não-null por construção (pecaSelecionadaId = pendência.pecaId ≠ null e
+    // célula = alvo da pendência); guardo por tipagem.
+    return encaixe === null ? null : { ciclo: encaixe }
+  }
+  if (estadoPeoes.peaoSelecionadoId !== null) {
+    const permanencia = mapearPermanencia(estadoPeoes, celula)
+    if (permanencia) return { ciclo: permanencia }
+    const movimento = mapearMovimentacao(estadoPeoes, celula)
+    if (movimento) return { ciclo: movimento }
+    // Peão ainda sobre a Mesa: primeiro posicionamento na Peça Inicial
+    // (mapearCliqueNaPecaInicial já exige peão sem célula).
+    const posicionamento = mapearCliqueNaPecaInicial(estadoPeoes, celula)
+    if (posicionamento) return { ciclo: posicionamento }
+    return null
+  }
+  return null
+}
+
+/**
+ * Fallback ST-09 para célula sem ciclo ativo: peça posicionada → finalização
+ * de manipulação (via SELECIONAR_PECA); célula vazia com seleção →
+ * POSICIONAR_PECA; demais → null.
+ */
+function fallbackST09ParaCelula(
+  estadoInteracao: EstadoInteracaoTabuleiro,
+  celula: Celula,
+): TabuleiroComandoDoCliente | null {
+  const chave = chaveCelula(celula)
+  const peca =
+    estadoInteracao.posicionadas.find(
+      (p) => chaveCelula(p.celula) === chave,
+    ) ?? null
+  return peca !== null
+    ? mapearCliqueNaPecaPosicionada(estadoInteracao, peca.pecaId)
+    : mapearCliqueNaCelula(estadoInteracao, celula)
+}
+
+// ── Despacho unificado (cena e espelho DOM usam o MESMO roteador) ──
+
+const TIPOS_DE_COMANDO_DE_PEAO: ReadonlySet<string> = new Set([
+  'SELECIONAR_PEAO',
+  'POSICIONAR_PEAO',
+  'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+  'MOVER_PEAO',
+  'PERMANECER',
+])
+
+/** Type guard: comando do ciclo do Peão (tipos wire disjuntos dos do Tabuleiro). */
+export function ehComandoDePeao(
+  comando: PeaoComandoDoCliente | TabuleiroComandoDoCliente,
+): comando is PeaoComandoDoCliente {
+  return TIPOS_DE_COMANDO_DE_PEAO.has(comando.type)
+}
+
+export interface DespachoDeCliqueEmCelula {
+  onComando?: (comando: TabuleiroComandoDoCliente | null) => void
+  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  onFocarPendencia?: (recebidaId: RecebidaId) => void
+}
+
+/**
+ * Despacha o clique em célula roteando por `rotearCliqueDeCelula`; com ciclo
+ * inativo, aplica o fallback ST-09 existente. Cena (Tabuleiro.tsx) e espelho
+ * DOM (TabuleiroMirrorDOM.tsx) compartilham esta função — fonte única.
+ */
+export function despacharCliqueDeCelula(
+  estadoPeoes: EstadoInteracaoPeoes | null,
+  estadoInteracao: EstadoInteracaoTabuleiro,
+  celula: Celula,
+  despacho: DespachoDeCliqueEmCelula,
+): void {
+  const resultado =
+    estadoPeoes !== null
+      ? rotearCliqueDeCelula(estadoPeoes, estadoInteracao, celula)
+      : null
+  if (resultado !== null) {
+    if ('focarPendencia' in resultado) {
+      despacho.onFocarPendencia?.(resultado.focarPendencia)
+      return
+    }
+    if (ehComandoDePeao(resultado.ciclo)) {
+      despacho.onComandoPeao?.(resultado.ciclo)
+    } else {
+      despacho.onComando?.(resultado.ciclo)
+    }
+    return
+  }
+  // Sem resultado do roteador: fallback ST-09 só quando o ciclo está inativo
+  // (alvos inválidos com ciclo ativo não reagem — decisão aprovada #91).
+  if (estadoPeoes !== null && cicloAtivo(estadoPeoes)) return
+  despacho.onComando?.(fallbackST09ParaCelula(estadoInteracao, celula))
+}
+
+/**
+ * Clique em peça da Reserva coerente com o ciclo: com Recebidas pendentes, a
+ * Reserva oferta o tipo da peça clicada para a pendência focada (foco ausente,
+ * foco inválido ou peça inicial → null); sem pendências, mantém o ST-09
+ * (mapearCliqueNaReserva → SELECIONAR_PECA).
+ */
+export function mapearCliqueNaReservaComCiclo(
+  estadoPeoes: EstadoInteracaoPeoes | null,
+  estadoInteracao: EstadoInteracaoTabuleiro,
+  recebidaFocadaId: RecebidaId | null,
+  peca: { readonly pecaId: string; readonly tipo: TipoDaPeca },
+): PeaoComandoDoCliente | TabuleiroComandoDoCliente | null {
+  if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) {
+    if (recebidaFocadaId === null || peca.tipo === 'inicial') return null
+    return mapearEscolhaDeTipoDaRecebida(estadoPeoes, recebidaFocadaId, peca.tipo)
+  }
+  return mapearCliqueNaReserva(estadoInteracao, peca.pecaId)
 }
 
 // ── Mapeamento evento → feedback visual ──

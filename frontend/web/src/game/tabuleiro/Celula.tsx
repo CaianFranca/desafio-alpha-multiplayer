@@ -34,6 +34,10 @@ interface CelulaProps {
   peao?: PeaoDaExibicao | null
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
   destinoValido?: boolean
+  /** Célula é alvo de pendência de Recebimento ativa (destaque sutil, #91). */
+  alvoPendente?: boolean
+  /** Célula é o alvo da pendência FOCADA (destaque distinto, #91). */
+  celulaFocada?: boolean
   peaoSelecionadoId?: PeaoId | null
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
@@ -53,18 +57,32 @@ export function Celula({
   onClick,
   peao,
   destinoValido = false,
+  alvoPendente = false,
+  celulaFocada = false,
   peaoSelecionadoId = null,
   onSelecionarPeao,
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
   const ocupada = Boolean(peca)
-  // Destino válido (vizinho conectado ao peão selecionado, #90) também oferece
-  // cursor pointer; compõe com o cursor da interação (#85).
-  const cursorEfetivo = destinoValido ? 'pointer' : cursor
+  // Destino válido (vizinho conectado ao peão selecionado, #90) e alvo de
+  // pendência (#91) também oferecem cursor pointer; compõe com o cursor da
+  // interação (#85).
+  const cursorEfetivo = destinoValido || alvoPendente ? 'pointer' : cursor
   const cursorHandlers = handlersDeCursor(cursorEfetivo)
   // Célula ocupada: clique só pela peça (evita disparo duplo plano+peca e
   // mapeamento indevido de POSICIONAR_PECA em célula ocupada). Plano fica inerte.
   const planeOnClick = ocupada ? undefined : onClick
+
+  // Destaques de pendência (#91): alvo ativo ganha tom aquecido sutil; o alvo
+  // FOCADO ganha tom frio distinto (foco local da escolha de tipo).
+  const corPlano = celulaFocada
+    ? '#2e6bd6'
+    : alvoPendente
+      ? '#6b5a33'
+      : ocupada
+        ? '#5e4e36'
+        : '#1b1915'
+  const opacidadePlano = celulaFocada ? 0.95 : ocupada ? 0.82 : 0.7
 
   return (
     <group position={pos}>
@@ -76,9 +94,9 @@ export function Celula({
       >
         <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
         <meshStandardMaterial
-          color={ocupada ? '#5e4e36' : '#1b1915'}
+          color={corPlano}
           transparent
-          opacity={ocupada ? 0.82 : 0.7}
+          opacity={opacidadePlano}
         />
       </mesh>
       <group position={[0, CELULA_Y_BORDA, 0]}>
