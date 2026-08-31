@@ -107,6 +107,9 @@ describe('partida conectada ao game-server (issue #85)', () => {
         type: 'GIRAR_PECA',
         pecaId: 'inicial-1',
         sentido: 'horario',
+        // Injeção única de jogadorId (issue #91): todo comando do canal da
+        // Partida carrega o jogador autenticado (mock-auth).
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
       })
     })
   })

@@ -8,8 +8,13 @@ import type {
 import { Celula } from './Celula'
 import { cursorParaCelula, cursorParaPecaPosicionada } from './interacao'
 import type { EstadoInteracaoTabuleiro } from './interacao'
-import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao'
-import type { TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { EstadoInteracaoPeoes } from './interacaoPeoes'
+import { despacharCliqueDeCelula } from './interacaoPeoes'
+import type {
+  PeaoComandoDoCliente,
+  RecebidaId,
+  TabuleiroComandoDoCliente,
+} from '@flicker/shared'
 
 interface TabuleiroProps {
   posicionadas: readonly PecaPosicionada[]
@@ -27,6 +32,16 @@ interface TabuleiroProps {
    */
   destinosSet?: ReadonlySet<PecaId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
+  /** Estado do ciclo do peão: com valor, cliques passam pelo roteador (#91). */
+  estadoPeoes?: EstadoInteracaoPeoes | null
+  /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
+  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  /** Chaves das células-alvo de pendências ativas (destaque, #91). */
+  alvosPendentesSet?: ReadonlySet<string>
+  /** Chave da célula-alvo da pendência FOCADA (destaque distinto, #91). */
+  alvoFocadoKey?: string | null
+  /** Foco de pendência sem tipo (foco local do AmbienteDeJogo). */
+  aoFocarPendencia?: (recebidaId: RecebidaId) => void
 }
 
 export function Tabuleiro({
@@ -37,6 +52,11 @@ export function Tabuleiro({
   peaoSelecionadoId = null,
   destinosSet = new Set<string>(),
   onSelecionarPeao,
+  estadoPeoes = null,
+  onComandoPeao,
+  alvosPendentesSet = new Set<string>(),
+  alvoFocadoKey = null,
+  aoFocarPendencia,
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
@@ -68,6 +88,10 @@ export function Tabuleiro({
           (estadoInteracao.pecaSelecionadaId === peca.pecaId ||
             estadoInteracao.pecaEmManipulacaoId === peca.pecaId)
         const peao = peoesPorChave.get(chave) ?? null
+        // Destaques de pendência (#91): alvos ativos aquecidos; o alvo da
+        // pendência FOCADA ganha tom distinto (destinoValido mantém o cursor).
+        const alvoPendente = alvosPendentesSet.has(chave)
+        const focada = chave === alvoFocadoKey
         return (
           <Celula
             key={chave}
@@ -76,16 +100,18 @@ export function Tabuleiro({
             cursor={cursor}
             pecaDestacada={destacada}
             onClick={() => {
-              // Clique na própria peça posicionada (fecha manipulação via
-              // SELECIONAR_PECA) ou em célula vazia com seleção (POSICIONAR_PECA).
-              const comando =
-                peca !== null
-                  ? mapearCliqueNaPecaPosicionada(estadoInteracao, peca.pecaId)
-                  : mapearCliqueNaCelula(estadoInteracao, celula)
-              onComando(comando)
+              // Roteador do ciclo (#91): foco de pendência, comando do ciclo
+              // (peão ou tabuleiro) ou fallback ST-09 (sem ciclo ativo).
+              despacharCliqueDeCelula(estadoPeoes, estadoInteracao, celula, {
+                onComando,
+                onComandoPeao,
+                onFocarPendencia: aoFocarPendencia,
+              })
             }}
             peao={peao}
             destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
+            alvoPendente={alvoPendente}
+            celulaFocada={focada}
             peaoSelecionadoId={peaoSelecionadoId}
             onSelecionarPeao={onSelecionarPeao}
           />

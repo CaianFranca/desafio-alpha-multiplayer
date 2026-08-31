@@ -56,11 +56,13 @@ export function paraSnapshotWire(
     })),
     recebidas: estado.tabuleiro.recebidas.map((recebida) => ({
       recebidaId: recebida.recebidaId,
-      bordaGeradora: recebida.bordaGeradora,
-      celulaAlvo: copiarCelula(recebida.celulaAlvo),
       pecaId: recebida.pecaId,
       tipo: recebida.tipo,
       orientacao: recebida.orientacao,
+      vaga: recebida.vaga,
+      celulaAlvo: recebida.celulaAlvo
+        ? copiarCelula(recebida.celulaAlvo)
+        : null,
     })),
     pecaSelecionadaId: estado.tabuleiro.pecaSelecionadaId,
     pecaEmManipulacaoId: estado.tabuleiro.pecaEmManipulacaoId,

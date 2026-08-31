@@ -30,6 +30,17 @@ export interface Celula {
 
 export type PecaId = string;
 
+// sync manual com engine.TipoDePecaDaCaixa — peças de caminho + especiais;
+// a Peça Inicial nunca entra na Caixa (ST-12 / issue #144).
+export type TipoDePecaDaCaixa =
+  | 'reta'
+  | 'T'
+  | 'cruz'
+  | 'gerador'
+  | 'sala_do_diretor'
+  | 'sala_medica'
+  | 'portao_de_saida';
+
 // --- Comandos cliente → servidor (4) ---
 
 export interface SelecionarPecaComando {

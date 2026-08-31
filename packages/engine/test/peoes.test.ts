@@ -5,10 +5,10 @@ import {
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   vizinhasConectadas,
+  type BordaCardinal,
   type ComandoDeTabuleiro,
   type CodigoDeErroDeTabuleiro,
   type EstadoDoTabuleiro,
-  type TipoDePecaDeCaminho,
 } from '../src/index.ts';
 
 const selecionar = (pecaId: string) =>
@@ -26,8 +26,8 @@ const selecionarPeao = (peaoId: string) =>
 const posicionarPeao = (peaoId: string, linha: number, coluna: number) =>
   ({ tipo: 'posicionar_peao', peaoId, celula: { linha, coluna } } as const);
 
-const escolherTipo = (recebidaId: string, tipoDaPeca: TipoDePecaDeCaminho) =>
-  ({ tipo: 'escolher_tipo_da_peca_recebida', recebidaId, tipoDaPeca } as const);
+const escolherVaga = (recebidaId: string, borda: BordaCardinal) =>
+  ({ tipo: 'escolher_vaga_da_peca_recebida', recebidaId, borda } as const);
 
 const moverPeao = (peaoId: string, linha: number, coluna: number) =>
   ({ tipo: 'mover_peao', peaoId, celula: { linha, coluna } } as const);
@@ -59,9 +59,11 @@ function codigoDaRejeicao(
 }
 
 // Peão branco selecionado sobre a Peça Inicial em (3,3), com as recebidas da
-// primeira sequência ainda pendentes (norte e leste vazias). O Recebimento é
-// montado via literal do estado: desde a ST-11, a seleção não gera mais
-// Recebimento — a geração das pendências pertence à camada da Partida.
+// primeira sequência ainda pendentes (vagas nulas). O Recebimento é montado
+// via literal do estado: desde a ST-11, a seleção não gera mais Recebimento —
+// a geração pertence à camada da Partida. Desde a #138, cada pendência já
+// carrega a Peça sorteada (reta-1 e t-1, retiradas da Caixa) e a vaga só é
+// fixada por escolher_vaga_da_peca_recebida.
 function estadoComRecebidasPendentes(): EstadoDoTabuleiro {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 3, 3));
@@ -70,36 +72,40 @@ function estadoComRecebidasPendentes(): EstadoDoTabuleiro {
   return {
     ...estado,
     peaoSelecionadoId: 'peao-branco',
+    caixa: estado.caixa.filter(
+      (peca) => peca.pecaId !== 'reta-1' && peca.pecaId !== 't-1',
+    ),
     recebidas: [
       {
-        recebidaId: 'recebida-inicial-1-norte',
-        bordaGeradora: 'norte',
-        celulaAlvo: { linha: 2, coluna: 3 },
-        pecaId: null,
-        tipo: null,
+        recebidaId: 'recebida-reta-1',
+        pecaId: 'reta-1',
+        tipo: 'reta',
         orientacao: 0,
+        vaga: null,
+        celulaAlvo: null,
       },
       {
-        recebidaId: 'recebida-inicial-1-leste',
-        bordaGeradora: 'leste',
-        celulaAlvo: { linha: 3, coluna: 4 },
-        pecaId: null,
-        tipo: null,
+        recebidaId: 'recebida-t-1',
+        pecaId: 't-1',
+        tipo: 'T',
         orientacao: 0,
+        vaga: null,
+        celulaAlvo: null,
       },
     ],
   };
 }
 
 // Peão branco selecionado sobre a Peça Inicial em (3,3), com as duas
-// recebidas da primeira sequência já resolvidas: reta-1 em (2,3) (norte,
-// orientação 0, conectada) e t-1 em (3,4) (leste, orientação 0, conectada).
-// O peão ainda está sobre a Peça Inicial, pronto para mover ou permanecer.
+// recebidas da primeira sequência já resolvidas: reta-1 em (2,3) (vaga norte,
+// orientação 0, conectada) e t-1 em (3,4) (vaga leste, orientação 0,
+// conectada). O peão ainda está sobre a Peça Inicial, pronto para mover ou
+// permanecer.
 function estadoComPendenciasResolvidas(): EstadoDoTabuleiro {
   let estado = estadoComRecebidasPendentes();
-  estado = aplicar(estado, escolherTipo('recebida-inicial-1-norte', 'reta'));
+  estado = aplicar(estado, escolherVaga('recebida-reta-1', 'norte'));
   estado = aplicar(estado, posicionar('reta-1', 2, 3));
-  estado = aplicar(estado, escolherTipo('recebida-inicial-1-leste', 'T'));
+  estado = aplicar(estado, escolherVaga('recebida-t-1', 'leste'));
   estado = aplicar(estado, posicionar('t-1', 3, 4));
   return estado;
 }
@@ -263,69 +269,140 @@ test('gerarRecebidas considera apenas células dentro da grade', () => {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 0, 0));
 
-  // A borda norte cai fora da grade; só o leste vazio gera pendência.
+  // A borda norte cai fora da grade; só o leste vazio vira vaga — e a
+  // quantidade de peças sorteadas segue as vagas disponíveis.
   const peca = estado.posicionadas.find((item) => item.pecaId === 'inicial-1');
   assert.ok(peca);
+  const sorteio = gerarRecebidas(estado, peca);
   assert.deepEqual(
-    gerarRecebidas(estado, peca).map((recebida) => recebida.recebidaId),
-    ['recebida-inicial-1-leste'],
+    sorteio.recebidas.map((recebida) => recebida.recebidaId),
+    ['recebida-reta-1'],
   );
-  assert.deepEqual(gerarRecebidas(estado, peca)[0].celulaAlvo, { linha: 0, coluna: 1 });
+  assert.equal(sorteio.recebidas[0].pecaId, 'reta-1');
+  assert.equal(sorteio.recebidas[0].vaga, null);
+  assert.equal(sorteio.recebidas[0].celulaAlvo, null);
+  assert.deepEqual(sorteio.eventos, [
+    { tipo: 'peca_sorteada', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0 },
+  ]);
+  assert.equal(sorteio.estado.caixa.length, estado.caixa.length - 1);
 });
 
-test('tipo da recebida é livre e consome a Caixa; peça inicial nunca é recebida', () => {
-  let parcial = estadoComRecebidasPendentes();
+test('o recebimento sorteia min(vagas, caixa) peças, uma a uma, e nunca é erro', () => {
+  const base = estadoComRecebidasPendentes();
+  const peca = base.posicionadas.find((item) => item.pecaId === 'inicial-1');
+  assert.ok(peca);
+
+  // Caixa insuficiente: com uma peça restante e duas vagas, o Jogador recebe
+  // apenas a restante — não é erro.
+  const comCaixaCurta: EstadoDoTabuleiro = {
+    ...base,
+    caixa: [{ pecaId: 'cruz-1', tipo: 'cruz', orientacao: 0 }],
+  };
+  const curto = gerarRecebidas(comCaixaCurta, peca);
+  assert.deepEqual(
+    curto.recebidas.map((recebida) => recebida.recebidaId),
+    ['recebida-cruz-1'],
+  );
+  assert.equal(curto.recebidas[0].tipo, 'cruz');
+  assert.deepEqual(curto.estado.caixa, []);
+
+  // Caixa vazia: zero pendências e nenhum evento — também não é erro.
+  const semCaixa: EstadoDoTabuleiro = { ...base, caixa: [] };
+  const vazio = gerarRecebidas(semCaixa, peca);
+  assert.deepEqual(vazio.recebidas, []);
+  assert.deepEqual(vazio.eventos, []);
+  assert.deepEqual(vazio.estado.caixa, []);
+});
+
+test('a mesma seed sorteia exatamente as mesmas peças no recebimento', () => {
+  const montar = () => {
+    let estado = aplicar(
+      estadoInicialDoTabuleiro({ seed: 20260831 }),
+      selecionar('inicial-1'),
+    );
+    estado = aplicar(estado, posicionar('inicial-1', 3, 3));
+    return estado;
+  };
+  const pecaPrimeira = montar().posicionadas.find(
+    (item) => item.pecaId === 'inicial-1',
+  );
+  const pecaSegunda = montar().posicionadas.find(
+    (item) => item.pecaId === 'inicial-1',
+  );
+  assert.ok(pecaPrimeira && pecaSegunda);
+  const primeiro = gerarRecebidas(montar(), pecaPrimeira);
+  const segundo = gerarRecebidas(montar(), pecaSegunda);
+  assert.deepEqual(primeiro.recebidas, segundo.recebidas);
+  assert.deepEqual(primeiro.eventos, segundo.eventos);
+});
+
+test('escolher vaga fixa a borda, deriva a célula-alvo e seleciona a peça sorteada', () => {
+  const estado = estadoComRecebidasPendentes();
 
   const escolha = aplicarComandoDeTabuleiro(
-    parcial,
-    escolherTipo('recebida-inicial-1-norte', 'cruz'),
+    estado,
+    escolherVaga('recebida-reta-1', 'norte'),
   );
   assert.equal(escolha.sucesso, true);
   if (!escolha.sucesso) return;
-  // A primeira cruz da Caixa é consumida e atribuída ao slot.
-  assert.ok(!escolha.estado.caixa.some((peca) => peca.pecaId === 'cruz-1'));
-  assert.equal(escolha.estado.recebidas[0].pecaId, 'cruz-1');
-  assert.equal(escolha.estado.recebidas[0].tipo, 'cruz');
-  assert.equal(escolha.estado.pecaSelecionadaId, 'cruz-1');
+  assert.equal(escolha.estado.recebidas[0].vaga, 'norte');
+  assert.deepEqual(escolha.estado.recebidas[0].celulaAlvo, { linha: 2, coluna: 3 });
+  assert.equal(escolha.estado.pecaSelecionadaId, 'reta-1');
+  // A Caixa já foi consumida no sorteio: a escolha da vaga não a reconsome.
+  assert.equal(escolha.estado.caixa.length, estado.caixa.length);
   assert.deepEqual(escolha.eventos, [
     {
-      tipo: 'tipo_da_peca_recebida_escolhido',
-      recebidaId: 'recebida-inicial-1-norte',
-      pecaId: 'cruz-1',
-      tipoDaPeca: 'cruz',
+      tipo: 'vaga_da_peca_recebida_escolhida',
+      recebidaId: 'recebida-reta-1',
+      borda: 'norte',
+      celulaAlvo: { linha: 2, coluna: 3 },
     },
   ]);
+});
 
-  // A peça inicial nunca é recebida: tipo fora de reta/T/cruz é rejeitado.
+test('vaga inválida, já escolhida ou reescolhida é rejeitada com DADOS_INVALIDOS', () => {
+  const estado = estadoComRecebidasPendentes();
+
+  // Borda não aberta da Peça sob o Peão (a inicial só abre norte e leste).
   assert.equal(
-    codigoDaRejeicao(
-      escolha.estado,
-      escolherTipo('recebida-inicial-1-leste', 'inicial' as TipoDePecaDeCaminho),
-    ),
+    codigoDaRejeicao(estado, escolherVaga('recebida-reta-1', 'sul')),
+    'DADOS_INVALIDOS',
+  );
+  // Borda fora do vocabulário fechado.
+  assert.equal(
+    codigoDaRejeicao(estado, escolherVaga('recebida-reta-1', 'diagonal' as BordaCardinal)),
+    'DADOS_INVALIDOS',
+  );
+
+  // Norte escolhido pela primeira pendência deixa de ser vaga: a segunda
+  // pendência não pode escolher a mesma borda (vaga já ocupada por outra
+  // pendência).
+  const comNorte = aplicar(estado, escolherVaga('recebida-reta-1', 'norte'));
+  assert.equal(
+    codigoDaRejeicao(comNorte, escolherVaga('recebida-t-1', 'norte')),
+    'DADOS_INVALIDOS',
+  );
+  // A própria pendência com vaga já escolhida não é reescolhível.
+  assert.equal(
+    codigoDaRejeicao(comNorte, escolherVaga('recebida-reta-1', 'leste')),
     'DADOS_INVALIDOS',
   );
 });
 
-test('caixa sem peças do tipo rejeita a escolha com CAIXA_ESGOTADA', () => {
+test('recebida só posiciona na célula-alvo da vaga escolhida, com orientação livre e sem exigência de conexão', () => {
   let estado = estadoComRecebidasPendentes();
-  estado = {
-    ...estado,
-    caixa: estado.caixa.filter((peca) => peca.tipo !== 'T'),
-  };
 
+  // Encaixe antes da escolha da vaga é rejeitado: a célula-alvo ainda não
+  // existe (ela deriva da vaga).
   assert.equal(
-    codigoDaRejeicao(estado, escolherTipo('recebida-inicial-1-norte', 'T')),
-    'CAIXA_ESGOTADA',
+    codigoDaRejeicao(estado, posicionar('t-1', 2, 3)),
+    'DADOS_INVALIDOS',
   );
-});
 
-test('recebida só posiciona na célula-alvo, com orientação livre e sem exigência de conexão', () => {
-  let estado = estadoComRecebidasPendentes();
-
-  // T escolhida e mantida na orientação 0 (bordas norte+leste+oeste): a borda
-  // sul, voltada à Peça geradora, está fechada — sem conexão, e mesmo assim o
-  // encaixe na célula-alvo é aceito.
-  estado = aplicar(estado, escolherTipo('recebida-inicial-1-norte', 'T'));
+  // T escolhida para a vaga norte e mantida na orientação 0 (bordas
+  // norte+leste+oeste): a borda sul, voltada à Peça geradora, está fechada —
+  // sem conexão, e mesmo assim o encaixe na célula-alvo é aceito.
+  estado = aplicar(estado, escolherVaga('recebida-t-1', 'norte'));
 
   const foraDoAlvo = aplicarComandoDeTabuleiro(estado, posicionar('t-1', 0, 0));
   assert.equal(foraDoAlvo.sucesso, false);
@@ -341,7 +418,7 @@ test('recebida só posiciona na célula-alvo, com orientação livre e sem exig�
 
   // Resolve a pendência restante com uma reta também sem conexão (reta 0° tem
   // bordas norte+sul; voltada à geradora fica a oeste, fechada).
-  estado = aplicar(estado, escolherTipo('recebida-inicial-1-leste', 'reta'));
+  estado = aplicar(estado, escolherVaga('recebida-reta-1', 'leste'));
   estado = aplicar(estado, posicionar('reta-1', 3, 4));
 
   // Nenhuma das vizinhas é conectada: movimentação rejeitada.
@@ -356,9 +433,8 @@ test('recebida só posiciona na célula-alvo, com orientação livre e sem exig�
 });
 
 test('girar recebida segue o padrão da seleção única', () => {
-  let estado = estadoComPendenciasResolvidas();
   let parcial = estadoComRecebidasPendentes();
-  parcial = aplicar(parcial, escolherTipo('recebida-inicial-1-norte', 'reta'));
+  parcial = aplicar(parcial, escolherVaga('recebida-reta-1', 'norte'));
 
   const giro = aplicarComandoDeTabuleiro(parcial, girar('reta-1'));
   assert.equal(giro.sucesso, true);
@@ -373,11 +449,11 @@ test('girar recebida segue o padrão da seleção única', () => {
     },
   ]);
   assert.equal(giro.estado.recebidas[0].orientacao, 90);
-  estado = giro.estado;
+  let estado = giro.estado;
 
-  // Escolhido o tipo da outra recebida, a seleção muda: girar a anterior é
+  // Escolhida a vaga da outra recebida, a seleção muda: girar a anterior é
   // rejeitado, mas o encaixe dela segue aceito (orientação é livre).
-  estado = aplicar(estado, escolherTipo('recebida-inicial-1-leste', 'cruz'));
+  estado = aplicar(estado, escolherVaga('recebida-t-1', 'leste'));
   assert.equal(codigoDaRejeicao(estado, girar('reta-1')), 'PECA_NAO_SELECIONADA');
   estado = aplicar(estado, posicionar('reta-1', 2, 3));
   assert.equal(estado.posicionadas.some(
@@ -388,19 +464,19 @@ test('girar recebida segue o padrão da seleção única', () => {
 test('recebida nasce com orientação 0; a caixa é opaca e não é manipulável', () => {
   let estado = estadoComRecebidasPendentes();
 
-  // A Caixa é opaca (ST-12): peça de caminho dentro dela não é selecionável
-  // nem girável — não existe "girar antes da escolha".
+  // A Caixa é opaca (ST-12): peça de caminho não é selecionável — e a
+  // Recebida só é girável depois de selecionada pela escolha da vaga.
   assert.equal(codigoDaRejeicao(estado, selecionar('reta-1')), 'PECA_NAO_ENCONTRADA');
-  assert.equal(codigoDaRejeicao(estado, girar('reta-1')), 'PECA_NAO_ENCONTRADA');
+  assert.equal(codigoDaRejeicao(estado, girar('reta-1')), 'PECA_NAO_SELECIONADA');
 
-  estado = aplicar(estado, escolherTipo('recebida-inicial-1-norte', 'reta'));
+  estado = aplicar(estado, escolherVaga('recebida-reta-1', 'norte'));
   assert.equal(estado.recebidas[0].pecaId, 'reta-1');
   assert.equal(estado.recebidas[0].orientacao, 0);
 });
 
 test('girar recebida posicionada vai pela janela de Manipulação, sem seleção', () => {
   let estado = estadoComRecebidasPendentes();
-  estado = aplicar(estado, escolherTipo('recebida-inicial-1-norte', 'reta'));
+  estado = aplicar(estado, escolherVaga('recebida-reta-1', 'norte'));
   estado = aplicar(estado, posicionar('reta-1', 2, 3));
 
   // O encaixe limpa a seleção e abre a Manipulação em reta-1; girar continua
@@ -460,20 +536,27 @@ test('sub-fluxo do recebimento fora de ordem é rejeitado sem órfar pendências
   assert.equal(pendentes.recebidas.length, 2);
   assert.equal(pendentes.peaoSelecionadoId, 'peao-branco');
 
-  // Escolha de tipo sem peão selecionado: estado construído diretamente — a
+  // Escolha de vaga sem peão selecionado: estado construído diretamente — a
   // fronteira pode receber comandos fora de ordem e o domínio defende a
   // sequência mesmo assim.
   const semSequencia: EstadoDoTabuleiro = { ...pendentes, peaoSelecionadoId: null };
   assert.equal(
-    codigoDaRejeicao(semSequencia, escolherTipo('recebida-inicial-1-norte', 'reta')),
+    codigoDaRejeicao(semSequencia, escolherVaga('recebida-reta-1', 'norte')),
     'PEAO_NAO_SELECIONADO',
   );
 
-  // Encaixe de recebida com tipo já escolhido, mas sem peão selecionado.
-  const comTipo = aplicar(pendentes, escolherTipo('recebida-inicial-1-norte', 'reta'));
-  const comTipoSemSequencia: EstadoDoTabuleiro = { ...comTipo, peaoSelecionadoId: null };
+  // Encaixe de recebida sem a vaga escolhida, com peão selecionado: a
+  // célula-alvo ainda não existe, então o encaixe é rejeitado.
   assert.equal(
-    codigoDaRejeicao(comTipoSemSequencia, posicionar('reta-1', 2, 3)),
+    codigoDaRejeicao(pendentes, posicionar('reta-1', 2, 3)),
+    'DADOS_INVALIDOS',
+  );
+
+  // Encaixe de recebida com a vaga já escolhida, mas sem peão selecionado.
+  const comVaga = aplicar(pendentes, escolherVaga('recebida-reta-1', 'norte'));
+  const comVagaSemSequencia: EstadoDoTabuleiro = { ...comVaga, peaoSelecionadoId: null };
+  assert.equal(
+    codigoDaRejeicao(comVagaSemSequencia, posicionar('reta-1', 2, 3)),
     'PEAO_NAO_SELECIONADO',
   );
 });
@@ -526,22 +609,23 @@ test('mover para peça ocupada por outro peão é rejeitado; destino conectado v
 
   // Recebimento de inicial-2 (180°: bordas sul+oeste) montado via literal
   // (ST-11): o sul aponta para a reta-1 ocupada e não vira pendência; o oeste
-  // tem célula vazia e fica pendente.
+  // tem célula vazia e fica pendente. A peça sorteada da pendência é cruz-1.
   estado = {
     ...estado,
     peaoSelecionadoId: 'peao-vermelho',
+    caixa: estado.caixa.filter((peca) => peca.pecaId !== 'cruz-1'),
     recebidas: [
       {
-        recebidaId: 'recebida-inicial-2-oeste',
-        bordaGeradora: 'oeste',
-        celulaAlvo: { linha: 1, coluna: 2 },
-        pecaId: null,
-        tipo: null,
+        recebidaId: 'recebida-cruz-1',
+        pecaId: 'cruz-1',
+        tipo: 'cruz',
         orientacao: 0,
+        vaga: null,
+        celulaAlvo: null,
       },
     ],
   };
-  estado = aplicar(estado, escolherTipo('recebida-inicial-2-oeste', 'cruz'));
+  estado = aplicar(estado, escolherVaga('recebida-cruz-1', 'oeste'));
   estado = aplicar(estado, posicionar('cruz-1', 1, 2));
 
   // (2,3) é vizinha conectada (sul da inicial-2 aberto, norte da reta-1
@@ -665,15 +749,18 @@ test('comandos inválidos de peões e recebidas são rejeitados com códigos fec
     'PEAO_NAO_SELECIONADO',
   );
 
-  // Recebidas inexistentes e tipos inválidos.
+  // Recebidas inexistentes e vagas inválidas.
   assert.equal(
-    codigoDaRejeicao(estado, escolherTipo('recebida-fantasma', 'reta')),
+    codigoDaRejeicao(estado, escolherVaga('recebida-fantasma', 'norte')),
     'RECEBIDA_NAO_ENCONTRADA',
   );
+  // Borda indisponível (inicial-1 ainda não posicionada: sem Peça sob o Peão,
+  // não há vagas a escolher) e borda fora do vocabulário.
+  const comPendencias = estadoComRecebidasPendentes();
   assert.equal(
     codigoDaRejeicao(
-      estado,
-      escolherTipo('recebida-inicial-1-norte', 'diagonal' as TipoDePecaDeCaminho),
+      comPendencias,
+      escolherVaga('recebida-reta-1', 'diagonal' as BordaCardinal),
     ),
     'DADOS_INVALIDOS',
   );
