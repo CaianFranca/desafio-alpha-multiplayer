@@ -60,6 +60,22 @@ _Avoid_: handoff, transição
 Jogador conectado, mas inativo durante a partida; pertence ao domínio da partida, não ao lobby.
 _Avoid_: ausente, inativo
 
+**Conexão à Partida**:
+Vínculo em tempo real entre um Jogador e o serviço da partida, pelo qual o Jogador percebe o estado da partida e envia Ações; a identidade do Jogador é derivada da Sessão autenticada do vínculo; em duplicidade, a conexão anterior é encerrada.
+_Avoid_: conexão, socket, canal
+
+**Ação**:
+Comando de jogo emitido por um Jogador pela Conexão à Partida e julgado pelo serviço da partida, resultando em Aprovação ou Recusa.
+_Avoid_: comando, input, jogada
+
+**Aprovação**:
+Julgamento positivo de uma Ação: aplica a mudança ao estado da partida e a reflete a todos os Jogadores conectados em tempo real.
+_Avoid_: validação, aceite
+
+**Recusa**:
+Julgamento negativo de uma Ação: o estado da partida não muda e o feedback vai apenas ao autor.
+_Avoid_: rejeição, erro
+
 ## Salas e Presença
 
 **Código de Sala**:
