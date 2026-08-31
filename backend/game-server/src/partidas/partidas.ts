@@ -2,9 +2,9 @@ import type { Redis } from 'ioredis';
 import type { MembroDaSala, OfertaDeEncaminhamento, PartidaId, ServerId } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
 import {
-  inicializarEstadoDoTabuleiro,
-  removerEstadoDoTabuleiro,
-} from './tabuleiro.ts';
+  inicializarEstadoDaPartida,
+  removerEstadoDaPartida,
+} from './estado.ts';
 
 export type EstadoDaPartida = 'preparada';
 
@@ -39,12 +39,17 @@ export async function criarPartidaPreparada(
 
   await redis.set(chaveDaPartida(partida.partidaId), JSON.stringify(partida), 'EX', partidaPreparadaTtlSegundos);
 
-  // Estado do tabuleiro nasce junto com a partida, com o mesmo TTL (issue #80).
-  // Rollback barato: se a inicialização do tabuleiro falhar, remove a partida
-  // recém-criada para não deixar partida órfã sem tabuleiro (que responderia
+  // Estado da partida nasce junto com a partida, com o mesmo TTL (issue #117).
+  // Rollback barato: se a inicialização do estado falhar, remove a partida
+  // recém-criada para não deixar partida órfã sem estado (que responderia
   // ESTADO_INDISPONIVEL para sempre).
   try {
-    await inicializarEstadoDoTabuleiro(redis, partida.partidaId, partidaPreparadaTtlSegundos);
+    await inicializarEstadoDaPartida(
+      redis,
+      partida.partidaId,
+      partidaPreparadaTtlSegundos,
+      oferta.roster.map((membro) => membro.jogadorId),
+    );
   } catch (erro) {
     await redis.del(chaveDaPartida(partida.partidaId));
     throw erro;
@@ -67,8 +72,8 @@ export async function existePartida(redis: Redis, partidaId: PartidaId): Promise
 
 export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promise<boolean> {
   const removida = (await redis.del(chaveDaPartida(partidaId))) === 1;
-  // Remove também o estado do tabuleiro associado (issue #80).
-  await removerEstadoDoTabuleiro(redis, partidaId);
+  // Remove também o estado da partida associado (issue #117).
+  await removerEstadoDaPartida(redis, partidaId);
   return removida;
 }
 

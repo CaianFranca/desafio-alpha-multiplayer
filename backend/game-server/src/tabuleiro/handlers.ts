@@ -24,9 +24,9 @@ import type {
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared';
-import { TabuleiroBroadcaster } from './broadcast.ts';
+import { PartidaBroadcaster } from '../partidas/broadcast.ts';
 import { ehComandoDoTabuleiro } from './validacao.ts';
-import { traduzirEventos } from './traducao.ts';
+import { traduzirEventos } from '../partidas/traducao.ts';
 import {
   obterEstadoDoTabuleiro,
   salvarEstadoDoTabuleiro,
@@ -34,12 +34,12 @@ import {
 
 export interface TabuleiroHandlersDeps {
   readonly redis: Redis;
-  readonly broadcaster: TabuleiroBroadcaster;
+  readonly broadcaster: PartidaBroadcaster;
 }
 
 export class TabuleiroHandlers {
   private readonly redis: Redis;
-  private readonly broadcaster: TabuleiroBroadcaster;
+  private readonly broadcaster: PartidaBroadcaster;
   // Serialização mononodo: uma cadeia de promessas por partidaId.
   private readonly cadeiasPorPartida: Map<string, Promise<unknown>> = new Map();
 

@@ -1,5 +1,4 @@
-// Broadcaster intra-processo do Tabuleiro e do ciclo de Peões (issues #80 e
-// #88).
+// Broadcaster intra-processo do canal de Partida (issue #117).
 //
 // Mononodo no MVP: sem Redis Pub/Sub. O `WebSocketServer` compartilha o loop
 // de eventos, então o fan-out é feito em memória. Espelha o princípio de
@@ -7,9 +6,9 @@
 // erros de `send` e remover sockets no `close`.
 
 import type { WebSocket } from 'ws';
-import type { SalaServerMessage, TabuleiroEventoDoServidor } from '@flicker/shared';
+import type { SalaServerMessage } from '@flicker/shared';
 
-export class TabuleiroBroadcaster {
+export class PartidaBroadcaster {
   private readonly partidaParaSockets: Map<string, Set<WebSocket>> = new Map();
   private readonly socketParaPartida: Map<WebSocket, string> = new Map();
 
@@ -65,7 +64,7 @@ export class TabuleiroBroadcaster {
   }
 
   /** Envia o evento apenas para o socket de origem (erros individuais). */
-  enviarParaSocket(socket: WebSocket, evento: TabuleiroEventoDoServidor): void {
+  enviarParaSocket(socket: WebSocket, evento: SalaServerMessage): void {
     if (socket.readyState !== socket.OPEN) {
       return;
     }

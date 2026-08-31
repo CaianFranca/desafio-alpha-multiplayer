@@ -1,9 +1,15 @@
-// Teste de integração do ciclo de Peões no game-server (issue #88).
+// Teste de integração do ciclo de Peões no game-server (issue #117).
 //
 // Sobe app+WS efêmeros com Redis real (localhost:6379) e exercita o fluxo
-// feliz do ciclo (selecionar → primeiro posicionamento + Recebimento →
-// escolher tipos + encaixar Recebidas → mover) e as rejeições do domínio com
-// código fechado do contrato wire (mesmo padrão do serviço de tabuleiro #80).
+// feliz do ciclo (Primeiro Turno: posicionar Peça Inicial + Peão com
+// Recebimento; Rodada 2: mover entre Peças e Permanecer) e as rejeições do
+// domínio com código fechado do contrato wire, tudo pelo canal de Partida
+// com o ator vindo do `jogadorId` da mensagem (ST-11).
+//
+// Os fluxos de turno normal (mover/permanecer) só existem a partir da Rodada
+// 2: `concluirQuatroPrimeirosTurnos` completa os quatro Primeiros Turnos via
+// WS (posições das Iniciais: (3,3), (0,0), (6,6), (6,0) — as Recebidas nunca
+// colidem entre si e consomem exatamente as 6 Retas da Reserva).
 //
 // As conexões passam pelo fluxo de admissão (issue #46): JWT de sessão +
 // sessão no Redis + roster da partida; o primeiro evento recebido é sempre
@@ -13,11 +19,6 @@
 // envia ADMISSAO_ACEITA logo no `handleUpgrade`, então o frame pode chegar
 // no mesmo pacote do handshake — o listener de mensagens precisa estar
 // anexado ANTES de aguardar o `open`, senão o evento se perde.
-//
-// Observação de domínio: o handler compõe o Recebimento no primeiro
-// posicionamento do Peão (sobre a Peça Inicial) e mantém o Peão selecionado
-// para a sequência — seam intermediário, substituído pelo canal de Partida
-// do #117 (turnos).
 
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -33,14 +34,26 @@ import type {
 } from '@flicker/shared';
 import { createApp } from '../src/app.ts';
 import { criarWebSocketServer } from '../src/ws/ws.ts';
-import { TabuleiroBroadcaster } from '../src/tabuleiro/broadcast.ts';
-import { TabuleiroHandlers } from '../src/tabuleiro/handlers.ts';
-import { obterEstadoDoTabuleiro } from '../src/partidas/tabuleiro.ts';
+import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
+import { PartidaHandlers } from '../src/partidas/handlers.ts';
+import { obterEstadoDaPartida } from '../src/partidas/estado.ts';
 
 const SERVER_ID = 'game-server-teste-peoes';
 const JWT_SECRET = 'test_secret_para_peoes';
 
 const redis = criarClienteRedis();
+
+// Cores canônicas dos 4 Peões, pela ordem de entrada (mesma do domínio).
+const PEAO_PELA_ORDEM = ['branco', 'vermelho', 'azul', 'amarelo'] as const;
+
+// Posições das Iniciais dos 4 Primeiros Turnos: as Recebidas geradas caem em
+// células sempre vazias e distintas (norte/leste da borda base da Inicial).
+const CELULAS_DAS_INICIAIS = [
+  { linha: 3, coluna: 3 },
+  { linha: 0, coluna: 0 },
+  { linha: 6, coluna: 6 },
+  { linha: 6, coluna: 0 },
+] as const;
 
 interface ServidorEfemero {
   readonly baseUrl: string;
@@ -54,10 +67,10 @@ async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
   const app = createApp(contexto);
   const server = http.createServer(app);
 
-  const broadcaster = new TabuleiroBroadcaster();
-  const handlers = new TabuleiroHandlers({ redis, broadcaster });
+  const broadcaster = new PartidaBroadcaster();
+  const handlers = new PartidaHandlers({ redis, broadcaster });
   const wss = criarWebSocketServer(server, contexto, {
-    tabuleiro: { redis, broadcaster, handlers },
+    partida: { broadcaster, handlers },
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -205,25 +218,25 @@ function enviar(ws: WebSocket, mensagem: unknown): void {
 }
 
 /**
- * Setup compartilhado: posiciona a Peça Inicial em (1,2) (célula interior,
- * para as bordas norte/leste caírem na grade) e encaixa o Peão branco sobre
- * ela — disparando o Recebimento de 2 pendências. Devolve as pendências
- * geradas; o handler mantém o Peão selecionado após o primeiro posicionamento
- * (seam do #88), então a sequência fica pronta para escolher os tipos.
+ * Setup compartilhado do Primeiro Turno: posiciona a Peça Inicial em (1,2)
+ * (célula interior, para as bordas norte/leste caírem na grade) e encaixa o
+ * Peão branco sobre ela — disparando o Recebimento de 2 pendências. Devolve
+ * as pendências geradas; o handler da Partida mantém o Peão selecionado
+ * após o primeiro posicionamento (ST-11), então a sequência fica pronta.
  */
 async function posicionarPeaoNaInicial(
   ws: WebSocket,
 ): Promise<Array<Record<string, unknown>>> {
-  enviar(ws, { type: 'SELECIONAR_PECA', pecaId: 'inicial-1' });
+  enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-1', pecaId: 'inicial-1' });
   const selecionada = await esperarEvento(ws, 'PECA_SELECIONADA');
   assert.equal(selecionada.pecaId, 'inicial-1');
 
-  enviar(ws, { type: 'POSICIONAR_PECA', pecaId: 'inicial-1', celula: { linha: 1, coluna: 2 } });
+  enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-1', pecaId: 'inicial-1', celula: { linha: 1, coluna: 2 } });
   const posicionada = await esperarEvento(ws, 'PECA_POSICIONADA');
   assert.equal(posicionada.pecaId, 'inicial-1');
   assert.deepEqual(posicionada.celula, { linha: 1, coluna: 2 });
 
-  enviar(ws, { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' });
+  enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
   const peaoSelecionado = await esperarEvento(ws, 'PEAO_SELECIONADO');
   assert.equal(peaoSelecionado.peaoId, 'peao-branco');
 
@@ -232,7 +245,7 @@ async function posicionarPeaoNaInicial(
   // comando, senão o segundo frame se perde no timing (ver cabeçalho).
   const peaoPosicionadoEspera = esperarEvento(ws, 'PEAO_POSICIONADO');
   const recebimentoEspera = esperarEvento(ws, 'RECEBIMENTO_GERADO');
-  enviar(ws, { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: { linha: 1, coluna: 2 } });
+  enviar(ws, { type: 'POSICIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 1, coluna: 2 } });
   const peaoPosicionado = await peaoPosicionadoEspera;
   assert.equal(peaoPosicionado.pecaId, 'inicial-1');
   const recebimento = await recebimentoEspera;
@@ -247,34 +260,83 @@ async function posicionarPeaoNaInicial(
 }
 
 /**
- * Setup compartilhado do fluxo feliz: posiciona o Peão branco sobre a Peça
- * Inicial (Recebimento de 2 pendências), escolhe `tipoDaPeca` para cada
- * pendência e encaixa cada Recebida na célula-alvo. Ao final o Peão branco
- * segue selecionado (seam #88), sem pendências.
+ * Primeiro Turno completo do jogador `<n>` via WS: Peça Inicial própria,
+ * Peão sobre ela (Recebimento automático), escolha do tipo + encaixe das
+ * Recebidas na célula-alvo e Encerramento do Turno. O jogador precisa estar
+ * ativo (a ordem dos testes garante a vez). As posições escolhidas geram
+ * Recebidas em células sempre vazias e consomem apenas Retas da Reserva.
  */
-async function prepararSequenciaDoPeao(
+async function concluirPrimeiroTurnoNoWs(
   ws: WebSocket,
-  tipoDaPeca = 'reta',
-): Promise<{ recebidas: Array<Record<string, unknown>>; pecas: string[] }> {
-  const recebidas = await posicionarPeaoNaInicial(ws);
+  jogador: number,
+  celula: { linha: number; coluna: number },
+): Promise<void> {
+  const jogadorId = `jogador-${jogador}`;
+  const pecaId = `inicial-${jogador}`;
+  const peaoId = `peao-${PEAO_PELA_ORDEM[jogador - 1]}`;
 
-  const pecas: string[] = [];
+  enviar(ws, { type: 'SELECIONAR_PECA', jogadorId, pecaId });
+  const selecionada = await esperarEvento(ws, 'PECA_SELECIONADA');
+  assert.equal(selecionada.pecaId, pecaId);
+
+  enviar(ws, { type: 'POSICIONAR_PECA', jogadorId, pecaId, celula });
+  const posicionada = await esperarEvento(ws, 'PECA_POSICIONADA');
+  assert.equal(posicionada.pecaId, pecaId);
+  assert.deepEqual(posicionada.celula, celula);
+
+  enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId, peaoId });
+  const peaoSelecionado = await esperarEvento(ws, 'PEAO_SELECIONADO');
+  assert.equal(peaoSelecionado.peaoId, peaoId);
+
+  // O encaixe emite PEAO_POSICIONADO e RECEBIMENTO_GERADO no mesmo broadcast;
+  // os dois listeners precisam estar anexados ANTES do comando (ver cabeçalho).
+  const peaoPosicionadoEspera = esperarEvento(ws, 'PEAO_POSICIONADO');
+  const recebimentoEspera = esperarEvento(ws, 'RECEBIMENTO_GERADO');
+  enviar(ws, { type: 'POSICIONAR_PEAO', jogadorId, peaoId, celula });
+  const peaoPosicionado = await peaoPosicionadoEspera;
+  assert.equal(peaoPosicionado.pecaId, pecaId);
+  const recebimento = await recebimentoEspera;
+  const recebidas = (recebimento.recebidas ?? []) as Array<Record<string, unknown>>;
+
   for (const recebida of recebidas) {
     const recebidaId = recebida.recebidaId as string;
-    enviar(ws, { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', recebidaId, tipoDaPeca });
+    const celulaAlvo = recebida.celulaAlvo as { linha: number; coluna: number };
+
+    enviar(ws, { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', jogadorId, recebidaId, tipoDaPeca: 'reta' });
     const escolhida = await esperarEvento(ws, 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO');
     assert.equal(escolhida.recebidaId, recebidaId);
-    assert.equal(escolhida.tipoDaPeca, tipoDaPeca);
-    const pecaId = escolhida.pecaId as string;
-    pecas.push(pecaId);
+    const pecaDoEncaixe = escolhida.pecaId as string;
 
-    enviar(ws, { type: 'POSICIONAR_PECA', pecaId, celula: recebida.celulaAlvo });
+    enviar(ws, { type: 'POSICIONAR_PECA', jogadorId, pecaId: pecaDoEncaixe, celula: celulaAlvo });
     const encaixada = await esperarEvento(ws, 'PECA_POSICIONADA');
-    assert.equal(encaixada.pecaId, pecaId);
-    assert.deepEqual(encaixada.celula, recebida.celulaAlvo);
+    assert.equal(encaixada.pecaId, pecaDoEncaixe);
+    assert.deepEqual(encaixada.celula, celulaAlvo);
   }
 
-  return { recebidas, pecas };
+  enviar(ws, { type: 'ENCERRAR_TURNO', jogadorId });
+  const encerrado = await esperarEvento(ws, 'TURNO_ENCERRADO');
+  assert.equal(encerrado.jogadorId, jogadorId);
+}
+
+/**
+ * Conecta os 4 jogadores e conclui os quatro Primeiros Turnos: a vez volta ao
+ * primeiro Jogador na Rodada 2 (turno normal). Devolve os sockets na ordem
+ * dos jogadores para os fluxos seguintes.
+ */
+async function concluirQuatroPrimeirosTurnos(
+  servidor: ServidorEfemero,
+  partidaId: string,
+): Promise<WebSocket[]> {
+  const sockets = [
+    await conectarPartida(servidor, partidaId, 1),
+    await conectarPartida(servidor, partidaId, 2),
+    await conectarPartida(servidor, partidaId, 3),
+    await conectarPartida(servidor, partidaId, 4),
+  ];
+  for (let jogador = 1; jogador <= 4; jogador++) {
+    await concluirPrimeiroTurnoNoWs(sockets[jogador - 1]!, jogador, CELULAS_DAS_INICIAIS[jogador - 1]!);
+  }
+  return sockets;
 }
 
 before(async () => {
@@ -294,44 +356,48 @@ after(async () => {
   }
 });
 
-test('fluxo feliz: ciclo do peão persiste no Redis (posiciona, resolve recebidas, move)', async () => {
+test('fluxo feliz: ciclo do peão persiste no Redis (Primeiro Turno + mover na Rodada 2)', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await conectarPartida(servidor, aceite.partidaId);
+    const sockets = await concluirQuatroPrimeirosTurnos(servidor, aceite.partidaId);
+    const ws = sockets[0]!;
 
     try {
-      const { recebidas, pecas } = await prepararSequenciaDoPeao(ws);
-      // A primeira Recebida (norte) consome 'reta-1'; a segunda (leste), 'reta-2'.
-      assert.equal(pecas[0], 'reta-1');
-      assert.equal(pecas[1], 'reta-2');
+      // Rodada 2, jogador-1 ativo: move o Peão branco da inicial-1 (3,3) para
+      // a reta-1 (2,3) — vizinha conectada pela borda norte da Inicial.
+      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
+      const selecionado = await esperarEvento(ws, 'PEAO_SELECIONADO');
+      assert.equal(selecionado.peaoId, 'peao-branco');
 
-      // Move o Peão para a Reta norte-sul em (0,2): a reta-1 tem a borda sul
-      // voltada para a norte da Peça Inicial em (1,2).
-      enviar(ws, { type: 'MOVER_PEAO', peaoId: 'peao-branco', celula: { linha: 0, coluna: 2 } });
+      enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 2, coluna: 3 } });
       const movido = await esperarEvento(ws, 'PEAO_MOVIDO');
       assert.equal(movido.peaoId, 'peao-branco');
       assert.equal(movido.pecaIdDe, 'inicial-1');
       assert.equal(movido.pecaIdPara, 'reta-1');
-      assert.deepEqual(movido.celula, { linha: 0, coluna: 2 });
+      assert.deepEqual(movido.celula, { linha: 2, coluna: 3 });
 
-      // Estado no Redis reflete o ciclo completo.
-      const estado = await obterEstadoDoTabuleiro(redis, aceite.partidaId);
-      assert.ok(estado !== null, 'estado do tabuleiro deve existir no Redis');
-      const peaoBranco = estado!.peoes.find((p) => p.peaoId === 'peao-branco');
+      // Estado no Redis reflete o ciclo completo, com a vez ainda de jogador-1.
+      const estado = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.ok(estado !== null, 'estado da partida deve existir no Redis');
+      assert.equal(estado!.jogadorAtivoId, 'jogador-1');
+      assert.equal(estado!.rodada, 2);
+      const peaoBranco = estado!.tabuleiro.peoes.find((p) => p.peaoId === 'peao-branco');
       assert.equal(peaoBranco?.pecaId, 'reta-1');
-      assert.equal(estado!.recebidas.length, 0);
-      const reserva = estado!.reserva.map((p) => p.pecaId);
+      assert.equal(estado!.tabuleiro.recebidas.length, 0);
+      const reserva = estado!.tabuleiro.reserva.map((p) => p.pecaId);
       assert.ok(!reserva.includes('reta-1'), 'reta-1 deve ter saído da reserva');
       assert.ok(!reserva.includes('reta-2'), 'reta-2 deve ter saído da reserva');
 
-      const porPeca = new Map(estado!.posicionadas.map((p) => [p.pecaId, p.celula]));
-      assert.deepEqual(porPeca.get('inicial-1'), { linha: 1, coluna: 2 });
-      assert.deepEqual(porPeca.get('reta-1'), { linha: 0, coluna: 2 });
-      assert.deepEqual(porPeca.get('reta-2'), { linha: 1, coluna: 3 });
+      const porPeca = new Map(estado!.tabuleiro.posicionadas.map((p) => [p.pecaId, p.celula]));
+      assert.deepEqual(porPeca.get('inicial-1'), { linha: 3, coluna: 3 });
+      assert.deepEqual(porPeca.get('reta-1'), { linha: 2, coluna: 3 });
+      assert.deepEqual(porPeca.get('reta-2'), { linha: 3, coluna: 4 });
     } finally {
-      ws.close();
+      for (const socket of sockets) {
+        socket.close();
+      }
     }
 
     await deletePartida(servidor.baseUrl, aceite.partidaId);
@@ -345,20 +411,24 @@ test('rejeição: mover para peça não conectada responde ERRO_DO_TABULEIRO MOV
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await conectarPartida(servidor, aceite.partidaId);
+    const sockets = await concluirQuatroPrimeirosTurnos(servidor, aceite.partidaId);
+    const ws = sockets[0]!;
 
     try {
-      await prepararSequenciaDoPeao(ws);
+      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
+      await esperarEvento(ws, 'PEAO_SELECIONADO');
 
-      // Reta-2 (1,3) é norte-sul: não tem borda oeste para a leste da Peça
-      // Inicial — não é vizinha conectada; mover para ela rejeita.
-      enviar(ws, { type: 'MOVER_PEAO', peaoId: 'peao-branco', celula: { linha: 1, coluna: 3 } });
+      // A reta-2 (3,4) é norte-sul: não tem borda oeste para a leste da
+      // Peça Inicial em (3,3) — não é vizinha conectada; mover rejeita.
+      enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 3, coluna: 4 } });
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.codigo, 'MOVIMENTO_NAO_CONECTADO');
       assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
     } finally {
-      ws.close();
+      for (const socket of sockets) {
+        socket.close();
+      }
     }
 
     await deletePartida(servidor.baseUrl, aceite.partidaId);
@@ -372,24 +442,26 @@ test('rejeição: primeiro posicionamento fora da Peça Inicial responde ERRO_DO
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await conectarPartida(servidor, aceite.partidaId);
+    const ws1 = await conectarPartida(servidor, aceite.partidaId);
+    const ws2 = await conectarPartida(servidor, aceite.partidaId, 2);
 
     try {
-      await prepararSequenciaDoPeao(ws);
+      await concluirPrimeiroTurnoNoWs(ws1, 1, { linha: 3, coluna: 3 });
 
-      // Seleciona outro Peão e tenta posicioná-lo sobre a Reta-1 (0,2) — que
-      // não é a Peça Inicial.
-      enviar(ws, { type: 'SELECIONAR_PEAO', peaoId: 'peao-vermelho' });
-      const selecionado = await esperarEvento(ws, 'PEAO_SELECIONADO');
+      // Jogador-2, ativo no próprio Primeiro Turno, tenta encaixar o próprio
+      // Peão (vermelho) sobre a reta-1 (2,3) — que não é a Peça Inicial.
+      enviar(ws2, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho' });
+      const selecionado = await esperarEvento(ws2, 'PEAO_SELECIONADO');
       assert.equal(selecionado.peaoId, 'peao-vermelho');
 
-      enviar(ws, { type: 'POSICIONAR_PEAO', peaoId: 'peao-vermelho', celula: { linha: 0, coluna: 2 } });
-      const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      enviar(ws2, { type: 'POSICIONAR_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho', celula: { linha: 2, coluna: 3 } });
+      const erro = await esperarEvento(ws2, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.codigo, 'PECA_INICIAL_EXIGIDA');
       assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
     } finally {
-      ws.close();
+      ws1.close();
+      ws2.close();
     }
 
     await deletePartida(servidor.baseUrl, aceite.partidaId);
@@ -406,9 +478,10 @@ test('rejeição: comando de peão malformado responde ERRO_DO_TABULEIRO DADOS_I
     const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
-      // 'peaoId' com apenas espaços passa na guarda wire (string não vazia)
-      // mas o domínio rejeita com DADOS_INVALIDOS (identificador obrigatório).
-      enviar(ws, { type: 'SELECIONAR_PEAO', peaoId: '   ' });
+      // Sem o campo `peaoId` o comando falha a guarda wire
+      // (`ehComandoDaPartida`), que responde DADOS_INVALIDOS (fora do
+      // contrato fechado) antes de qualquer chamada ao domínio.
+      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1' });
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.codigo, 'DADOS_INVALIDOS');
@@ -423,34 +496,38 @@ test('rejeição: comando de peão malformado responde ERRO_DO_TABULEIRO DADOS_I
   }
 });
 
-test('fluxo feliz: permanecer encerra a sequência do peão (PEAO_PERMANECEU)', async () => {
+test('fluxo feliz: permanecer encerra o turno direto (PEAO_PERMANECEU)', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await conectarPartida(servidor, aceite.partidaId);
+    const sockets = await concluirQuatroPrimeirosTurnos(servidor, aceite.partidaId);
+    const ws = sockets[0]!;
 
     try {
-      // Escolha livre do tipo (AC3) fora do 'reta': consumir 'cruz-1' e
-      // 'cruz-2' da Reserva prova a liberdade do AC3 ponta a ponta.
-      const { pecas } = await prepararSequenciaDoPeao(ws, 'cruz');
-      assert.equal(pecas[0], 'cruz-1');
-      assert.equal(pecas[1], 'cruz-2');
+      // Rodada 2: o Peão branco segue na Peça do início do turno (inicial-1);
+      // permanecer trava a posição e encerra o turno sem Recebimento.
+      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
+      await esperarEvento(ws, 'PEAO_SELECIONADO');
 
-      enviar(ws, { type: 'PERMANECER', peaoId: 'peao-branco' });
+      enviar(ws, { type: 'PERMANECER', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       const permaneceu = await esperarEvento(ws, 'PEAO_PERMANECEU');
       assert.equal(permaneceu.peaoId, 'peao-branco');
       assert.equal(permaneceu.pecaId, 'inicial-1');
 
-      // Permanecer encerra a sequência: o Peão segue na mesma Peça e a
-      // seleção é limpa no estado persistido.
-      const estado = await obterEstadoDoTabuleiro(redis, aceite.partidaId);
-      assert.ok(estado !== null, 'estado do tabuleiro deve existir no Redis');
-      assert.equal(estado!.peaoSelecionadoId, null);
-      assert.equal(estado!.peoes.find((p) => p.peaoId === 'peao-branco')?.pecaId, 'inicial-1');
-      assert.equal(estado!.recebidas.length, 0);
+      // Permanecer encerra a sequência e passa a vez: o Peão segue na mesma
+      // Peça e a seleção é limpa no estado persistido.
+      const estado = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.ok(estado !== null, 'estado da partida deve existir no Redis');
+      assert.equal(estado!.tabuleiro.peaoSelecionadoId, null);
+      assert.equal(estado!.tabuleiro.peoes.find((p) => p.peaoId === 'peao-branco')?.pecaId, 'inicial-1');
+      assert.equal(estado!.tabuleiro.recebidas.length, 0);
+      assert.equal(estado!.jogadorAtivoId, 'jogador-2');
+      assert.equal(estado!.rodada, 2);
     } finally {
-      ws.close();
+      for (const socket of sockets) {
+        socket.close();
+      }
     }
 
     await deletePartida(servidor.baseUrl, aceite.partidaId);
@@ -459,30 +536,32 @@ test('fluxo feliz: permanecer encerra a sequência do peão (PEAO_PERMANECEU)', 
   }
 });
 
-test('rejeição: posicionar segundo peão sobre Peça ocupada responde ERRO_DO_TABULEIRO PECA_JA_TEM_PEAO', async () => {
+test('rejeição: posicionar peão sobre Peça ocupada responde ERRO_DO_TABULEIRO PECA_JA_TEM_PEAO', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
 
-    const ws = await conectarPartida(servidor, aceite.partidaId);
+    const ws1 = await conectarPartida(servidor, aceite.partidaId);
+    const ws2 = await conectarPartida(servidor, aceite.partidaId, 2);
 
     try {
-      await prepararSequenciaDoPeao(ws);
+      await concluirPrimeiroTurnoNoWs(ws1, 1, { linha: 3, coluna: 3 });
 
-      enviar(ws, { type: 'SELECIONAR_PEAO', peaoId: 'peao-vermelho' });
-      const selecionado = await esperarEvento(ws, 'PEAO_SELECIONADO');
+      // A inicial-1 (3,3) já abriga o Peão branco; o encaixe do primeiro
+      // posicionamento do vermelho sobre ela rejeita — mesmo sendo a Peça
+      // Inicial (a guarda do tipo passa antes da do Peão ocupante).
+      enviar(ws2, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho' });
+      const selecionado = await esperarEvento(ws2, 'PEAO_SELECIONADO');
       assert.equal(selecionado.peaoId, 'peao-vermelho');
 
-      // A Peça Inicial (1,2) já abriga o Peão branco; o primeiro
-      // posicionamento do vermelho sobre ela rejeita — mesmo sendo a Peça
-      // Inicial e o encaixe do vermelho.
-      enviar(ws, { type: 'POSICIONAR_PEAO', peaoId: 'peao-vermelho', celula: { linha: 1, coluna: 2 } });
-      const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      enviar(ws2, { type: 'POSICIONAR_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho', celula: { linha: 3, coluna: 3 } });
+      const erro = await esperarEvento(ws2, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.codigo, 'PECA_JA_TEM_PEAO');
       assert.ok(typeof erro.mensagem === 'string' && erro.mensagem.length > 0);
     } finally {
-      ws.close();
+      ws1.close();
+      ws2.close();
     }
 
     await deletePartida(servidor.baseUrl, aceite.partidaId);
@@ -491,7 +570,7 @@ test('rejeição: posicionar segundo peão sobre Peça ocupada responde ERRO_DO_
   }
 });
 
-test('rejeição: mover com pendências do Recebimento responde ERRO_DO_TABULEIRO PENDENCIA_NAO_RESOLVIDA', async () => {
+test('rejeição: encerrar com pendências do Recebimento responde ERRO_DO_TABULEIRO PENDENCIA_NAO_RESOLVIDA', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
@@ -499,11 +578,11 @@ test('rejeição: mover com pendências do Recebimento responde ERRO_DO_TABULEIR
     const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
-      // Interrompe a sequência com as 2 Recebidas em aberto e tenta mover: a
-      // pendência é rejeitada antes de qualquer checagem de conectividade.
+      // Primeiro Turno: encaixa o Peão na Inicial (2 Recebidas em aberto) e
+      // tenta encerrar o turno: a pendência bloqueia o avanço da vez.
       await posicionarPeaoNaInicial(ws);
 
-      enviar(ws, { type: 'MOVER_PEAO', peaoId: 'peao-branco', celula: { linha: 2, coluna: 2 } });
+      enviar(ws, { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' });
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.codigo, 'PENDENCIA_NAO_RESOLVIDA');
