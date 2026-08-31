@@ -22,6 +22,7 @@
 
 import {
   criarReservaInicial,
+  type EstadoExibicaoTabuleiro,
   type Orientacao,
   type PecaDaReserva,
   type PecaPosicionada,
@@ -147,6 +148,8 @@ export function reduzirEventos(
 /** Deriva o estado de exibição consumido pela cena a partir do modelo. */
 export function estadoDeExibicaoDoModelo(
   estado: EstadoDoTabuleiroNoCliente,
-): { reserva: readonly PecaDaReserva[]; posicionadas: readonly PecaPosicionada[] } {
-  return { reserva: estado.reserva, posicionadas: estado.posicionadas }
+): EstadoExibicaoTabuleiro {
+  // O modelo ainda não rastreia peões (conexão dos peões com o game-server é
+  // feature futura); exibição sem peões é o estado fiel ao modelo.
+  return { reserva: estado.reserva, posicionadas: estado.posicionadas, peoes: [] }
 }

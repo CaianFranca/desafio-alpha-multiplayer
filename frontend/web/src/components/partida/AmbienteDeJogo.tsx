@@ -17,8 +17,6 @@ import {
   todasAsCelulas,
 } from '../../game/tabuleiro/contrato'
 import type { PeaoId } from '../../game/tabuleiro/contrato'
-import { criarEstadoExibicaoMock } from '../../game/tabuleiro/mockExibicao'
-import type { EstadoDaTela } from './partidaTelaMachine'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
@@ -51,10 +49,7 @@ export function AmbienteDeJogo({
   estadoExibicao = null,
   estadoInteracao = null,
   onComando,
-  estado = null,
 }: AmbienteDeJogoProps) {
-  const estadoExibicao = estado === 'disponivel' ? criarEstadoExibicaoMock() : null
-
   // Seleção de peão: estado visual temporário da cena (issue #90). Não é
   // regra de jogo nem comando — a emissão de SELECIONAR_PEAO pertence à #92.
   const [peaoSelecionadoId, setPeaoSelecionadoId] = useState<PeaoId | null>(null)

@@ -31,7 +31,7 @@ interface TabuleiroProps {
 
 export function Tabuleiro({
   posicionadas,
-  estadoInteracao, 
+  estadoInteracao,
   onComando,
   peoes = [],
   peaoSelecionadoId = null,

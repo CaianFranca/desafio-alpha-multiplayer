@@ -65,6 +65,12 @@ interface AmbienteCenaProps {
   /** Estado de interação (seleção/manipulação) para cursor e destaques. */
   estadoInteracao?: EstadoInteracaoTabuleiro | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
+  peaoSelecionadoId?: PeaoId | null
+  /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
+  destinosSet?: ReadonlySet<PecaId>
+  onSelecionarPeao?: (peaoId: PeaoId) => void
+  /** Clique em área vazia (Mesa/chão) desseleciona o peão. */
+  onDesselecionar?: () => void
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -86,13 +92,6 @@ export function AmbienteCena({
   onSelecionarPeao,
   onDesselecionar,
 }: AmbienteCenaProps) {
-  peaoSelecionadoId?: PeaoId | null
-  /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
-  destinosSet?: ReadonlySet<PecaId>
-  onSelecionarPeao?: (peaoId: PeaoId) => void
-  /** Clique em área vazia (Mesa/chão) desseleciona o peão. */
-  onDesselecionar?: () => void
-  
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à reserva (-X). Índices preservam a ordem do estado.
   const peoesNaMesa = (estadoExibicao?.peoes ?? []).filter(

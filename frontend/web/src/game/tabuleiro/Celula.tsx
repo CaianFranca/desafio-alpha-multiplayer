@@ -21,7 +21,6 @@ import type {
 import { PeaoPlaceholder } from './PeaoPlaceholder'
 import { PecaPlaceholder } from './PecaPlaceholder'
 import { handlersDeCursor } from './cursor'
-import type { ThreeEvent } from '@react-three/fiber'
 
 interface CelulaProps {
   celula: CelulaTipo
@@ -49,8 +48,8 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
 export function Celula({
   celula,
   peca,
-  cursor = 'default', 
-  pecaDestacada = false, 
+  cursor = 'default',
+  pecaDestacada = false,
   onClick,
   peao,
   destinoValido = false,
@@ -59,29 +58,13 @@ export function Celula({
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
   const ocupada = Boolean(peca)
-  const cursorHandlers = handlersDeCursor(cursor)
+  // Destino válido (vizinho conectado ao peão selecionado, #90) também oferece
+  // cursor pointer; compõe com o cursor da interação (#85).
+  const cursorEfetivo = destinoValido ? 'pointer' : cursor
+  const cursorHandlers = handlersDeCursor(cursorEfetivo)
   // Célula ocupada: clique só pela peça (evita disparo duplo plano+peca e
   // mapeamento indevido de POSICIONAR_PECA em célula ocupada). Plano fica inerte.
   const planeOnClick = ocupada ? undefined : onClick
-
-  // Destino válido consome o clique: até a #92 (comandos) não há ação a
-  // executar; parar a propagação evita a desseleção por "clique fora".
-  // Peças não conectadas/ocupadas não recebem handler algum — não reagem ao
-  // cursor nem ao clique (AC #90).
-  const handlersDestino = destinoValido
-    ? {
-        onPointerOver: (e: ThreeEvent<PointerEvent>) => {
-          e.stopPropagation()
-          document.body.style.cursor = 'pointer'
-        },
-        onPointerOut: () => {
-          document.body.style.cursor = 'auto'
-        },
-        onClick: (e: ThreeEvent<MouseEvent>) => {
-          e.stopPropagation()
-        },
-      }
-    : {}
 
   return (
     <group position={pos}>
@@ -111,9 +94,10 @@ export function Celula({
           tipo={peca.tipo}
           orientacao={peca.orientacao}
           position={[0, PECA_Y, 0]}
-          destacada={pecaDestacada}
+          destacada={pecaDestacada || destinoValido}
+          cursor={cursorEfetivo}
           onClick={onClick}
-         />
+        />
       ) : null}
       {peao ? (
         <PeaoPlaceholder
