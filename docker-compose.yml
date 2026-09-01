@@ -6,6 +6,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-flicker}
       POSTGRES_USER: ${POSTGRES_USER:-flicker}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flicker_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -33,6 +35,8 @@ services:
     image: redis:7
     profiles: [db, backend, nginx, full]
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -54,6 +58,8 @@ services:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
+    ports:
+      - "${LOBBY_SERVER_PORT:-3001}:${LOBBY_SERVER_PORT:-3001}"
     volumes:
       - ./backend/lobby-server:/app/backend/lobby-server
       - ./packages/config:/app/packages/config
@@ -101,6 +107,8 @@ services:
         condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
+    ports:
+      - "${GAME_SERVER_PORT:-1234}:${GAME_SERVER_PORT:-1234}"
     volumes:
       - ./backend/game-server:/app/backend/game-server
       - ./packages/config:/app/packages/config

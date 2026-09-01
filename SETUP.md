@@ -57,11 +57,12 @@ está fora do escopo desta configuração. O NGINX já tem Dockerfile multi-stag
 estático do frontend e os arquivos de `frontend/web/media` montados como
 `frontend/web/media:ro` em `/usr/share/nginx/html/media`. Os perfis válidos
 são `db`, `backend`, `nginx` e `full` — não existe perfil `frontend` como
-serviço. Os serviços de aplicação e dados não publicam portas no host: a
-entrada externa única chega pelo NGINX em `http://localhost:8080` (`NGINX_PORT`,
-issue #9) e as validações HTTP podem ser feitas pelo host. O Compose mantém a
-porta interna `80` dentro da rede; o host usa `8080` por padrão (`NGINX_PORT`
-em `.env.example`).
+serviço. Os serviços de aplicação e dados também publicam portas diretas no
+host (PostgreSQL `5432`, Redis `6379`, lobby `3001`, game `1234`), úteis para
+dev e validação isolada; a entrada externa principal continua sendo o NGINX
+em `http://localhost:8080` (`NGINX_PORT`, issue #9). O Compose mantém a
+porta interna `80` do NGINX dentro da rede; o host usa `8080` por padrão
+(`NGINX_PORT` em `.env.example`).
 
 Crie o arquivo local de ambiente e suba o perfil completo:
 
@@ -105,14 +106,12 @@ Para validar o bootstrap do lobby-server e do game-server isoladamente, use:
 
 ```sh
 docker compose --profile backend up -d --build
-docker compose --profile backend exec lobby-server \
-  node -e "fetch('http://localhost:'+process.env.LOBBY_SERVER_PORT+'/health').then(r=>r.text()).then(console.log)"
-docker compose --profile backend exec game-server \
-  node -e "fetch('http://localhost:'+process.env.GAME_SERVER_PORT+'/health').then(r=>r.text()).then(console.log)"
+curl http://localhost:3001/health
+curl http://localhost:1234/health
 ```
 
-A validação `GET /health` permanece interna via `docker compose --profile backend exec`
-(ver bloco acima) e não é exposta pela entrada única do NGINX.
+A validação `GET /health` pode ser feita direto do host pelas portas
+publicadas (`3001`, `1234`) ou pela entrada do NGINX em `8080`.
 
 O serviço usa `NODE_ENV=development` por padrão no Compose, `PG_POOL_MAX=10` e
 a porta definida por `LOBBY_SERVER_PORT`. Em produção, configure explicitamente
@@ -120,18 +119,18 @@ a porta definida por `LOBBY_SERVER_PORT`. Em produção, configure explicitament
 os valores de desenvolvimento são rejeitados pelo `@flicker/config` nesse
 ambiente.
 
-### 2.1 Portas e rotas pela entrada única (NGINX 8080)
+### 2.1 Portas e rotas (NGINX 8080 como entrada externa)
 
-Portas — apenas o NGINX publica porta no host; os demais serviços são
-acessíveis só pela rede interna do Compose (sem `ports:`).
+Portas — além do NGINX, os serviços de aplicação e dados publicam portas
+diretas no host para desenvolvimento:
 
-| Host (`env`)          | Container                    | Serviço      | Observação                                           |
-| --------------------- | ---------------------------- | ------------ | ---------------------------------------------------- |
-| `8080` (`NGINX_PORT`) | `80`                         | NGINX        | entrada única do ambiente                            |
-| —                     | `3001` (`LOBBY_SERVER_PORT`) | lobby-server | interno, sem `ports:`                                |
-| —                     | `1234` (`GAME_SERVER_PORT`)  | game-server  | interno, sem `ports:` (legado documentado como 1234) |
-| —                     | `5432`                       | postgres     | interno, volume `postgres_data`                      |
-| —                     | `6379`                       | redis        | interno, volátil (`--save "" --appendonly no`)       |
+| Host (`env`)                       | Container                    | Serviço      | Observação                                      |
+| ---------------------------------- | ---------------------------- | ------------ | ----------------------------------------------- |
+| `8080` (`NGINX_PORT`)              | `80`                         | NGINX        | entrada externa principal do ambiente           |
+| `3001` (`LOBBY_SERVER_PORT`)       | `3001` (`LOBBY_SERVER_PORT`) | lobby-server | mesma porta no host e no container              |
+| `1234` (`GAME_SERVER_PORT`)        | `1234` (`GAME_SERVER_PORT`)  | game-server  | mesma porta no host e no container              |
+| `5432` (`POSTGRES_PORT`)           | `5432`                       | postgres     | volume `postgres_data`                          |
+| `6379` (`REDIS_PORT`)              | `6379`                       | redis        | volátil (`--save "" --appendonly no`)           |
 
 Rotas via NGINX (`infra/nginx/nginx.conf`):
 
