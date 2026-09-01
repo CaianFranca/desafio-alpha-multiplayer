@@ -30,7 +30,6 @@ const redis = criarClienteRedis();
 
 interface ServidorEfemero {
   readonly baseUrl: string;
-  readonly port: number;
   readonly wsUrl: (partidaId: string, token: string) => string;
   readonly fechar: () => Promise<void>;
 }
@@ -55,7 +54,6 @@ async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
   const port = endereco.port;
   return {
     baseUrl: `http://127.0.0.1:${port}`,
-    port,
     wsUrl: (partidaId: string, token: string) =>
       `ws://127.0.0.1:${port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${token}`,
     fechar: async () => {
@@ -163,9 +161,9 @@ async function conectarTardioComCelulas(
 
   const mensagem = await aceita;
   assert.equal(mensagem.jogadorId, `jogador-${jogador}`);
-  // Tardio recebe TURNO + CELULAS unicast via anunciarTurnoAtual
-  await turnoEspera;
-  const iluminadas = await celulasEspera;
+  // Tardio recebe TURNO + CELULAS unicast via anunciarTurnoAtual — ordem garantida, aguardar ambos
+  const [turno, iluminadas] = await Promise.all([turnoEspera, celulasEspera]);
+  void turno;
   const celulas = iluminadas.celulas as Array<{ linha: number; coluna: number }>;
   return { ws, celulas };
 }
@@ -251,10 +249,8 @@ async function posicionarPeaoEObterRecebidas(
   celula: { linha: number; coluna: number },
 ): Promise<Array<Record<string, unknown>>> {
   const jogadorId = `jogador-${jogadorN}`;
-  const peaoId = jogadorN === 1 ? 'peao-branco' : jogadorN === 2 ? 'peao-vermelho' : `peao-${jogadorN}`;
-  // Mapear cor canônica: branco, vermelho, azul, amarelo
   const corMap: Record<number, string> = { 1: 'peao-branco', 2: 'peao-vermelho', 3: 'peao-azul', 4: 'peao-amarelo' };
-  const peao = corMap[jogadorN] ?? peaoId;
+  const peao = corMap[jogadorN]!;
   enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId, peaoId: peao });
   await esperarEvento(ws, 'PEAO_SELECIONADO');
 
@@ -264,7 +260,7 @@ async function posicionarPeaoEObterRecebidas(
   await peaoPosicionadoEspera;
   const recebimento = await recebimentoEspera;
   const recebidas = recebimento.recebidas as Array<Record<string, unknown>>;
-  assert.equal(recebidas.length, 2);
+  assert.equal(recebidas.length, 2); // seed fixa: Inicial tem 2 vagas (norte/leste ou sul/leste após giro)
   return recebidas;
 }
 
@@ -408,11 +404,11 @@ test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da ilumin
         [ws3, 3, { linha: 1, coluna: 5 }],
         [ws4, 4, { linha: 5, coluna: 5 }],
       ] as const) {
-        await selecionarEPosicionarInicial(wsX as WebSocket, n as number, cel as { linha: number; coluna: number });
-        const rec = await posicionarPeaoEObterRecebidas(wsX as WebSocket, n as number, cel as { linha: number; coluna: number });
+        await selecionarEPosicionarInicial(wsX, n, cel);
+        const rec = await posicionarPeaoEObterRecebidas(wsX, n, cel);
         // Inicial interior: vagas norte/leste disponíveis (1,5) -> norte(0,5)/leste(1,6); (5,5) -> norte(4,5)/leste(5,6)
-        const bordas: Array<'norte' | 'leste'> = ['norte', 'leste'];
-        await resolverRecebidasComCelulaAlvo(wsX as WebSocket, n as number, rec, bordas as any);
+        const bordas: ReadonlyArray<'norte' | 'leste'> = ['norte', 'leste'] as const;
+        await resolverRecebidasComCelulaAlvo(wsX, n, rec, bordas as unknown as Array<'norte' | 'sul' | 'leste' | 'oeste'>);
         const prox = n === 3 ? 4 : 1;
         const rodada = n === 4 ? 2 : 1;
         const alvoWs = prox === 1 ? ws : prox === 4 ? ws4 : ws3;
@@ -494,7 +490,7 @@ test('rejeição: payload malformado, tipo inexistente e impersonation são reje
       enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-2' });
       const erro4 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro4.codigo, 'DADOS_INVALIDOS');
-      assert.ok((erro4.mensagem as string).toLowerCase().includes('ator'));
+      assert.match(erro4.mensagem as string, /ator/i);
       const estado4 = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.deepEqual(estado4, estadoAntes);
 

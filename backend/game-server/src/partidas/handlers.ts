@@ -126,7 +126,10 @@ export class PartidaHandlers {
    * Anuncia ao socket recém-admitido o turno corrente da partida
    * (`TURNO_INICIADO`) e, se houver iluminação estabelecida, replaya
    * `CELULAS_ILUMINADAS` em unicast (gap renato: tardio nunca recebia fog).
+   * Ordem garantida: TURNO_INICIADO → CELULAS_ILUMINADAS (se houver).
    * Só envia celulas (não posicionadas) para não vazar fog; sem regravar o estado.
+   * Chamado como `void` em `ws.ts:224` (fire-and-forget) — envio síncrono via
+   * broadcaster, não requer await.
    * Se o estado não existir (partida expirada/cancelada), nada é enviado.
    */
   async anunciarTurnoAtual(partidaId: string, socket: WebSocket): Promise<void> {

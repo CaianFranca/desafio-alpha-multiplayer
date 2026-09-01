@@ -114,6 +114,10 @@ export function traduzirEventos(
           pecasRemovidas: evento.pecasRemovidas,
         });
         break;
+      default: {
+        const _exaustivo: never = evento;
+        break;
+      }
     }
   }
   return saida;

@@ -696,6 +696,10 @@ function rejeitarDaPartida(
   };
 }
 
+/**
+ * Recalcula a iluminação ortogonal e aplica a limpeza no mesmo ponto definitivo.
+ * @mutates eventos — adiciona `celulas_iluminadas` (se mudou) e `limpeza_aplicada` (se houver remoção).
+ */
 function recalcularIluminacaoEAplicarLimpeza(
   estado: EstadoDaPartida,
   tabuleiro: EstadoDoTabuleiro,
