@@ -33,6 +33,12 @@ interface TabuleiroProps {
    * destacada e reage ao ponteiro; as demais permanecem inertes.
    */
   destinosSet?: ReadonlySet<PecaId>
+  /**
+   * Chaves das células iluminadas (`linha:coluna`) vindas do estado
+   * compartilhado (issue #151). Derivado uma vez no pai — mesma fonte do
+   * espelho DOM.
+   */
+  iluminadasSet?: ReadonlySet<string>
   onSelecionarPeao?: (peaoId: PeaoId) => void
   /** Estado do ciclo do peão: com valor, cliques passam pelo roteador (#91). */
   estadoPeoes?: EstadoInteracaoPeoes | null
@@ -56,6 +62,7 @@ export function Tabuleiro({
   peaoSelecionadoId = null,
   peaoAtivoId = null,
   destinosSet = new Set<string>(),
+  iluminadasSet = new Set<string>(),
   onSelecionarPeao,
   estadoPeoes = null,
   onComandoPeao,
@@ -98,6 +105,9 @@ export function Tabuleiro({
         // pendência FOCADA ganha tom distinto (destinoValido mantém o cursor).
         const alvoPendente = alvosPendentesSet.has(chave)
         const focada = chave === alvoFocadoKey
+        // Iluminada (issue #151): espelho do estado compartilhado; os destaques
+        // de interação acima têm prioridade maior no plano da célula.
+        const iluminada = iluminadasSet.has(chave)
         return (
           <Celula
             key={chave}
@@ -121,6 +131,7 @@ export function Tabuleiro({
             destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}
             celulaFocada={focada}
+            iluminada={iluminada}
             peaoSelecionadoId={peaoSelecionadoId}
             peaoAtivoId={peaoAtivoId}
             onSelecionarPeao={onSelecionarPeao}

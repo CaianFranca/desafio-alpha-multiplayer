@@ -43,5 +43,7 @@ export function criarEstadoExibicaoMock(): EstadoExibicaoTabuleiro {
     cor,
     celula: cor === 'branco' ? { linha: 3, coluna: 3 } : null,
   }))
-  return { reserva, posicionadas, peoes }
+  // O mock DEV não simula o canal de iluminação (#151): lista vazia mantém o
+  // contrato coerente com o inicial do reducer (criarEstadoInicialDoCliente).
+  return { reserva, posicionadas, peoes, celulasIluminadas: [] }
 }

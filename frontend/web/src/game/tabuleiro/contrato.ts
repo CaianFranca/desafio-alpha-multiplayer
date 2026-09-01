@@ -95,6 +95,11 @@ export interface EstadoExibicaoTabuleiro {
   readonly reserva: readonly PecaDaReserva[]
   readonly posicionadas: readonly PecaPosicionada[]
   readonly peoes: readonly PeaoDaExibicao[]
+  /**
+   * Células iluminadas espelhadas do estado compartilhado (issue #151);
+   * fonte única para a cena e para o espelho DOM.
+   */
+  readonly celulasIluminadas: readonly Celula[]
 }
 
 /** 4 Peões, um por cor; ordem espelha `CORES_DOS_PEOES` do engine. */

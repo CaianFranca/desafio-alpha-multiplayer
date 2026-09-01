@@ -51,20 +51,29 @@ import {
 } from './contrato'
 import type { PendenciaNoCliente } from './interacaoPeoes'
 import type {
-  TabuleiroEventoDoServidor,
+  Celula,
+  CelulasIluminadasWireEvento,
+  LimpezaAplicadaWireEvento,
   PeaoEventoDoServidor,
+  TabuleiroEventoDoServidor,
   PosicaoConfirmadaEvento,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
 } from '@flicker/shared'
 
-/** Eventos que o canal da Partida entrega ao redutor (tabuleiro, peões, turnos). */
+/**
+ * Eventos que o canal da Partida entrega ao redutor: tabuleiro (ST-09),
+ * peões/ciclo (ST-10), turnos (ST-11, issue #118) e iluminação/limpeza
+ * (issue #151). É o tipo roteado pelo socket e aceito pelo reducer.
+ */
 export type EventoDoJogoNoCliente =
   | TabuleiroEventoDoServidor
   | PeaoEventoDoServidor
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
   | PosicaoConfirmadaEvento
+  | CelulasIluminadasWireEvento
+  | LimpezaAplicadaWireEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -80,6 +89,12 @@ export interface EstadoDoTabuleiroNoCliente {
   readonly peaoSelecionadoId: string | null
   /** Peças cujo tipo foi definido por ESCOLHER_TIPO_DA_PECA_RECEBIDA (chave = pecaId). */
   readonly pecasDeRecebimento: Record<string, TipoDaPeca>
+  /**
+   * Células iluminadas espelhadas do estado compartilhado (issue #151).
+   * O motor é a autoridade: o cliente apenas substitui a lista inteira a
+   * cada evento CELULAS_ILUMINADAS — nunca recalcula iluminação.
+   */
+  readonly celulasIluminadas: readonly Celula[]
   /** Jogador Ativo da vez (TURNO_INICIADO; null entre turnos). */
   readonly jogadorAtivoId: string | null
   /** Rodada corrente (TURNO_INICIADO; rodada 1 = Primeiro Turno de todos). */
@@ -116,6 +131,8 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     recebidasPendentes: [],
     peaoSelecionadoId: null,
     pecasDeRecebimento: {},
+    // Sem iluminação até o primeiro CELULAS_ILUMINADAS do broadcast.
+    celulasIluminadas: [],
     // Turnos (issue #118): sem vez nem rodada até o primeiro TURNO_INICIADO.
     jogadorAtivoId: null,
     rodada: null,
@@ -169,8 +186,8 @@ function aprenderPeaoDoAtivo(
  * Aplica um evento do servidor ao estado do cliente, produzindo um novo
  * estado imutável. Eventos desconhecidos ou erro retornam o estado inalterado.
  *
- * Aceita eventos de tabuleiro (ST-09), de peões/ciclo (ST-10) e de turno
- * (ST-11).
+ * Aceita eventos de tabuleiro (ST-09), de peões/ciclo (ST-10), de turno
+ * (ST-11) e de iluminação/limpeza (issue #151).
  */
 export function reduzirEvento(
   estado: EstadoDoTabuleiroNoCliente,
@@ -334,6 +351,34 @@ export function reduzirEvento(
       // A Confirmação de Posição trava o peão do Jogador Ativo neste turno.
       return { ...estado, posicaoConfirmadaNoTurno: true }
 
+    // ── Iluminação / Limpeza (issue #151) ──
+    case 'CELULAS_ILUMINADAS':
+      // O cliente apenas espelha o estado compartilhado: o motor é a
+      // autoridade da iluminação, então a lista nova substitui a inteira.
+      return { ...estado, celulasIluminadas: evento.celulas }
+    case 'LIMPEZA_APLICADA': {
+      if (evento.pecasRemovidas.length === 0) return estado
+      const removidas = evento.pecasRemovidas
+      // Peças removidas saem da cena; como a ocupação é derivada de
+      // `posicionadas`, as células liberadas voltam a aceitar
+      // posicionamento/recebimento sem código adicional.
+      return {
+        ...estado,
+        posicionadas: estado.posicionadas.filter(
+          (p) => !removidas.includes(p.pecaId),
+        ),
+        // Seleção/Manipulação apontando para peça removida não pode sobreviver.
+        pecaSelecionadaId:
+          estado.pecaSelecionadaId !== null && removidas.includes(estado.pecaSelecionadaId)
+            ? null
+            : estado.pecaSelecionadaId,
+        pecaEmManipulacaoId:
+          estado.pecaEmManipulacaoId !== null && removidas.includes(estado.pecaEmManipulacaoId)
+            ? null
+            : estado.pecaEmManipulacaoId,
+      }
+    }
+
     default: {
       // Exaustividade: novo evento wire sem case falha em compilação.
       const _exaustivo: never = evento
@@ -357,5 +402,10 @@ export function reduzirEventos(
 export function estadoDeExibicaoDoModelo(
   estado: EstadoDoTabuleiroNoCliente,
 ): EstadoExibicaoTabuleiro {
-  return { reserva: estado.reserva, posicionadas: estado.posicionadas, peoes: estado.peoes }
+  return {
+    reserva: estado.reserva,
+    posicionadas: estado.posicionadas,
+    peoes: estado.peoes,
+    celulasIluminadas: estado.celulasIluminadas,
+  }
 }

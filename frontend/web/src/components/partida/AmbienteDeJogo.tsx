@@ -139,6 +139,12 @@ export function AmbienteDeJogo({
   const ocupadasSet = new Set(
     estadoExibicao?.posicionadas.map((p) => chaveCelula(p.celula)) ?? [],
   )
+  // Células iluminadas (issue #151): mesmo padrão de alvosPendentesSet/
+  // destinosSet — chave "linha:coluna" derivada uma vez no pai, fonte única
+  // para o destaque na cena e para data-iluminada no espelho DOM.
+  const iluminadasSet = new Set<string>(
+    (estadoExibicao?.celulasIluminadas ?? []).map((celula) => chaveCelula(celula)),
+  )
   // Destinos válidos do peão selecionado: mesmo conjunto deriva destaque/cursor
   // na cena e data-conectada no espelho DOM (fonte única de verdade). Após a
   // Confirmação de Posição os destinos somem — o peão está travado no turno
@@ -187,6 +193,7 @@ export function AmbienteDeJogo({
           peaoSelecionadoId={peaoSelecionadoIdLocal}
           peaoAtivoId={peaoAtivoId}
           destinosSet={destinosSet}
+          iluminadasSet={iluminadasSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
           estadoPeoes={estadoInteracaoPeoes}
@@ -202,6 +209,7 @@ export function AmbienteDeJogo({
         <TabuleiroMirrorDOM
           todasCelulas={todasCelulas}
           ocupadasSet={ocupadasSet}
+          iluminadasSet={iluminadasSet}
           reserva={estadoExibicao.reserva}
           posicionadas={estadoExibicao.posicionadas}
           peoes={estadoExibicao.peoes}
