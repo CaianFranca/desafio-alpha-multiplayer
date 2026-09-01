@@ -234,13 +234,23 @@ export function criarWebSocketServer(
           );
 
           if (transicao === null || (transicao.estado !== 'preparada' && transicao.estado !== 'em_andamento')) {
-            // Falha da transição com substituição em curso: restaura a conexão
-            // anterior como vigente (se ainda aberta) para que o `close` do
-            // socket novo não marque `em_reconexao` sobre uma conexão viva. Se
-            // a anterior já não está aberta, o `close` do novo marca
-            // `em_reconexao` — não há conexão viva, e é o estado correto.
-            if (conexaoAnterior !== null && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN) {
+            // Falha da transição: remove explicitamente a conexão nova do
+            // registro — o listener de `close` só é anexado no caminho de
+            // sucesso, então sem esta remoção a entrada ficaria órfã apontando
+            // para o socket falhado (review da PR #181). Depois restaura a
+            // anterior como vigente (se ainda aberta): o fechamento do socket
+            // novo não marca `em_reconexao` sobre uma conexão viva. Sem
+            // anterior aberta, o Jogador fica sem conexão viva e a presença é
+            // marcada `em_reconexao`.
+            const eraVigente = removerConexao(conexao);
+            const anteriorAberta = conexaoAnterior !== null
+              && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN;
+            if (anteriorAberta) {
               adicionarConexao(conexaoAnterior);
+            } else if (eraVigente) {
+              void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
+                console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
+              );
             }
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
