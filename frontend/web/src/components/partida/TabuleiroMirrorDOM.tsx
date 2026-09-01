@@ -177,7 +177,7 @@ export function TabuleiroMirrorDOM({
               key={r.recebidaId}
               data-testid="recebida-pendente"
               data-recebida-id={r.recebidaId}
-              data-celula-alvo={chaveCelula(r.celulaAlvo)}
+              data-celula-alvo={r.celulaAlvo !== null ? chaveCelula(r.celulaAlvo) : undefined}
               data-peca-id={r.pecaId ?? undefined}
               data-focada={r.recebidaId === recebidaFocadaId ? 'true' : 'false'}
               onClick={(e) => {

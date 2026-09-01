@@ -120,11 +120,16 @@ export function AmbienteDeJogo({
   // Alvos de pendências ativas: mesmo padrão do destinosSet (chaves derivadas
   // no pai, fonte única para cena e espelho DOM).
   const alvosPendentesSet = new Set<string>(
-    recebidasPendentes.map((r) => chaveCelula(r.celulaAlvo)),
+    recebidasPendentes
+      // Forma nova (#138): célula-alvo ainda indefinida (null) até a escolha
+      // da vaga — sem alvo a destacar nesta pendência.
+      .map((r) => (r.celulaAlvo !== null ? chaveCelula(r.celulaAlvo) : null))
+      .filter((k): k is string => k !== null),
   )
-  const alvoFocadoKey: string | null = focadaVigente
-    ? chaveCelula(focadaVigente.celulaAlvo)
-    : null
+  const alvoFocadoKey: string | null =
+    focadaVigente && focadaVigente.celulaAlvo !== null
+      ? chaveCelula(focadaVigente.celulaAlvo)
+      : null
 
   const todasCelulas = todasAsCelulas()
   const ocupadasSet = new Set(
