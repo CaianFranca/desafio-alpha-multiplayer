@@ -53,6 +53,8 @@ interface AmbienteDeJogoProps {
   onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /** Peão selecionado vindo do modelo/servidor (null = nenhum). */
   peaoSelecionadoIdServidor?: PeaoId | null
+  /** Peão do Jogador Ativo da vez (destaque, #118). */
+  peaoAtivoId?: PeaoId | null
 }
 
 export function AmbienteDeJogo({
@@ -64,6 +66,7 @@ export function AmbienteDeJogo({
   onComandoPeao,
   onRejeicaoPeao,
   peaoSelecionadoIdServidor = null,
+  peaoAtivoId = null,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade ──
   // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
@@ -118,7 +121,8 @@ export function AmbienteDeJogo({
     ) ?? null
   const recebidaFocadaVigenteId: RecebidaId | null = focadaVigente?.recebidaId ?? null
   // Alvos de pendências ativas: mesmo padrão do destinosSet (chaves derivadas
-  // no pai, fonte única para cena e espelho DOM).
+  // no pai, fonte única para cena e espelho DOM). Forma nova (#138): sem vaga
+  // escolhida, celulaAlvo é null — não gera alvo.
   const alvosPendentesSet = new Set<string>(
     recebidasPendentes
       // Forma nova (#138): célula-alvo ainda indefinida (null) até a escolha
@@ -142,9 +146,13 @@ export function AmbienteDeJogo({
     (estadoExibicao?.celulasIluminadas ?? []).map((celula) => chaveCelula(celula)),
   )
   // Destinos válidos do peão selecionado: mesmo conjunto deriva destaque/cursor
-  // na cena e data-conectada no espelho DOM (fonte única de verdade).
+  // na cena e data-conectada no espelho DOM (fonte única de verdade). Após a
+  // Confirmação de Posição os destinos somem — o peão está travado no turno
+  // (guard AC3 do roteador; a regra vive em um só lugar).
   const destinosSet = new Set<string>(
-    estadoExibicao && peaoSelecionadoIdLocal !== null
+    estadoExibicao &&
+      peaoSelecionadoIdLocal !== null &&
+      !estadoInteracaoPeoes?.posicaoConfirmadaNoTurno
       ? destinosConectadosDoPeao(
           estadoExibicao.posicionadas,
           estadoExibicao.peoes,
@@ -183,12 +191,14 @@ export function AmbienteDeJogo({
           estadoInteracao={estadoInteracao}
           onComando={onComando}
           peaoSelecionadoId={peaoSelecionadoIdLocal}
+          peaoAtivoId={peaoAtivoId}
           destinosSet={destinosSet}
           iluminadasSet={iluminadasSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
           estadoPeoes={estadoInteracaoPeoes}
           onComandoPeao={onComandoPeao}
+          onRejeicaoPeao={onRejeicaoPeao}
           alvosPendentesSet={alvosPendentesSet}
           alvoFocadoKey={alvoFocadoKey}
           recebidaFocadaId={recebidaFocadaVigenteId}
@@ -204,6 +214,7 @@ export function AmbienteDeJogo({
           posicionadas={estadoExibicao.posicionadas}
           peoes={estadoExibicao.peoes}
           peaoSelecionadoId={peaoSelecionadoIdLocal}
+          peaoAtivoId={peaoAtivoId}
           destinosSet={destinosSet}
           aoSelecionarPeao={aoSelecionarPeao}
           aoDesselecionar={aoDesselecionar}
@@ -211,6 +222,7 @@ export function AmbienteDeJogo({
           estadoPeoes={estadoInteracaoPeoes}
           onComando={onComando}
           onComandoPeao={onComandoPeao}
+          onRejeicaoPeao={onRejeicaoPeao}
           recebidaFocadaId={recebidaFocadaVigenteId}
           aoFocarPendencia={aoFocarPendencia}
           alvosPendentesSet={alvosPendentesSet}

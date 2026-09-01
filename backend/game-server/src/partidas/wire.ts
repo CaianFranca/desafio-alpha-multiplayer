@@ -3,10 +3,10 @@
 // O canal de Partida substitui o seam isolado de tabuleiro/Peões (issues #80
 // e #88): os mesmos 11 comandos agora viajam com o `jogadorId` da mensagem
 // (contrato do ST-11). O ator do dispatch, porém, é a sessão autenticada do
-// socket (#135) — o `handlers.ts` rejeita como impersonation qualquer comando
-// cujo `jogadorId` divirja da sessão, então o cliente não se autodeclara como
-// outrem. Comandos legacy de tabuleiro/Peões
-// sem `jogadorId` falham a guarda e viram `ERRO_DO_TABULEIRO {
+// socket (#155): o `jogadorId` do wire é vestigial no dispatch — segue
+// obrigatório só pela guarda de forma, e comandos com `jogadorId` alheio são
+// aplicados como a sessão, não rejeitados. Comandos legacy de
+// tabuleiro/Peões sem `jogadorId` falham a guarda e viram `ERRO_DO_TABULEIRO {
 // DADOS_INVALIDOS }`. A saída de erros é um conjunto fechado de códigos
 // sincronizado com `@flicker/shared`: os códigos do tabuleiro/Peões mais os 5
 // de Turno do ST-11.
@@ -126,9 +126,9 @@ export function ehComandoDaPartida(value: unknown): value is ComandoDaPartidaAce
 
 /**
  * Mapeia wire (UPPER_SNAKE com `jogadorId`) → domínio (snake). O ator nunca
- * viaja dentro do comando de domínio: o `handlers.ts` usa o `jogadorId` da
- * mensagem como ator (contrato do ST-11), que já foi validado como igual à
- * sessão autenticada na guarda de impersonation (#135).
+ * viaja dentro do comando de domínio: o `handlers.ts` usa a sessão
+ * autenticada do socket como ator (#155) — o `jogadorId` do wire é vestigial
+ * e não participa do mapeamento.
  */
 export function mapearComandoDaPartida(
   comando: ComandoDaPartidaAceito,

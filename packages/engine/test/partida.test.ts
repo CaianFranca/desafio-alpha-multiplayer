@@ -180,10 +180,10 @@ test('estadoInicialDaPartida monta o roster, a vez e o evento de abertura', () =
 
   const estado = resultado.estado;
   assert.deepEqual(estado.jogadores, [
-    { jogadorId: 'ana', ordem: 1, cor: 'branco', peaoId: 'peao-branco', primeiroTurnoPendente: true },
-    { jogadorId: 'bruno', ordem: 2, cor: 'vermelho', peaoId: 'peao-vermelho', primeiroTurnoPendente: true },
-    { jogadorId: 'carla', ordem: 3, cor: 'azul', peaoId: 'peao-azul', primeiroTurnoPendente: true },
-    { jogadorId: 'diogo', ordem: 4, cor: 'amarelo', peaoId: 'peao-amarelo', primeiroTurnoPendente: true },
+    { jogadorId: 'ana', ordem: 1, cor: 'branco', peaoId: 'peao-branco', primeiroTurnoPendente: true, sanidade: 3 },
+    { jogadorId: 'bruno', ordem: 2, cor: 'vermelho', peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3 },
+    { jogadorId: 'carla', ordem: 3, cor: 'azul', peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3 },
+    { jogadorId: 'diogo', ordem: 4, cor: 'amarelo', peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3 },
   ]);
   assert.equal(estado.jogadorAtivoId, 'ana');
   assert.equal(estado.rodada, 1);
@@ -394,7 +394,26 @@ test('recebimento com caixa vazia gera zero pendências e permite encerrar o tur
   let estado = partidaIniciada();
   estado = {
     ...estado,
-    tabuleiro: { ...estado.tabuleiro, caixa: [] },
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [],
+      // Término (issue #176): com a caixa vazia, a partida só segue com os
+      // objetivos atingíveis pela contagem — 3 geradores não ligados, sala
+      // do diretor e portão de saída, todos sob a iluminação dos peões.
+      // vermelho em (0,0) ilumina (0,0),(0,1),(1,0); branco em (3,3)
+      // ilumina a cruz em torno da inicial-1.
+      posicionadas: [
+        { pecaId: 'gerador-1', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 2, coluna: 3 } },
+        { pecaId: 'gerador-2', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 2 } },
+        { pecaId: 'gerador-3', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 4, coluna: 3 } },
+        { pecaId: 'sala-1', tipo: 'sala_do_diretor' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 4 } },
+        { pecaId: 'portao-1', tipo: 'portao_de_saida' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 1 } },
+        { pecaId: 'inicial-2', tipo: 'inicial' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 0 } },
+      ],
+      peoes: estado.tabuleiro.peoes.map((peao) =>
+        peao.cor === 'vermelho' ? { ...peao, pecaId: 'inicial-2' } : peao,
+      ),
+    },
   };
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');

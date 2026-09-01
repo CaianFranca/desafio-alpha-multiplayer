@@ -495,7 +495,17 @@ export function moverPeao(
     );
   }
 
-  if (estado.peoes.some((item) => item.pecaId === alvo.pecaId)) {
+  // Ocupação (issue #176): a peça de destino portao_de_saida aceita até 4
+  // peões (a reunião deles no Portão é condição de vitória); as demais
+  // peças continuam no máximo 1. Com 4 peões no jogo, o teto do portão é
+  // inalcançável — nenhum código de erro novo; peça comum ocupada segue
+  // PECA_JA_TEM_PEAO. O peão em movimento ainda aponta para a origem, então
+  // não se conta a si mesmo.
+  const ocupantes = estado.peoes.filter(
+    (item) => item.pecaId === alvo.pecaId,
+  ).length;
+  const teto = alvo.tipo === 'portao_de_saida' ? 4 : 1;
+  if (ocupantes >= teto) {
     return rejeitar('PECA_JA_TEM_PEAO', 'A Peça de destino já abriga outro Peão.');
   }
 

@@ -8,8 +8,8 @@
  * Padrão de `useSalaWebSocket`: reconexão simples (1s), fila de comandos
  * pendentes até o `open`, cleanup no unmount. Trata apenas `ADMISSAO_ACEITA`
  * (sinaliza que a partida ficou disponível) e eventos da partida
- * (`EventoDePartidaNoCliente` via callback — tabuleiro, peões/ciclo e
- * iluminação/limpeza da issue #151); mensagens desconhecidas são
+ * (`EventoDoCanalDaPartida` via callback — tabuleiro, peões/ciclo, turnos
+ * (ST-11) e iluminação/limpeza da issue #151); mensagens desconhecidas são
  * ignoradas (o socket pode receber PING/PONG ou eventos fora do escopo da
  * ST-09/10/11 sem quebrar o cliente).
  */
@@ -19,9 +19,29 @@ import type {
   AdmissaoAceitaEvento,
   PartidaComandoDoCliente,
   TabuleiroComandoDoCliente,
+  TabuleiroEventoDoServidor,
+  PeaoEventoDoServidor,
+  PosicaoConfirmadaEvento,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
+  CelulasIluminadasWireEvento,
+  LimpezaAplicadaWireEvento,
 } from '@flicker/shared'
-import type { EventoDePartidaNoCliente } from '../game/tabuleiro/reducao'
 import { buildGameWsUrl } from '../api/encaminhamento'
+
+/**
+ * Eventos que o canal da Partida entrega à página (issue #118): tabuleiro
+ * (ST-09), peões (ST-10), os três eventos de turno (ST-11) e iluminação/
+ * limpeza (issue #151) agora roteados.
+ */
+export type EventoDoCanalDaPartida =
+  | TabuleiroEventoDoServidor
+  | PeaoEventoDoServidor
+  | TurnoIniciadoEvento
+  | TurnoEncerradoEvento
+  | PosicaoConfirmadaEvento
+  | CelulasIluminadasWireEvento
+  | LimpezaAplicadaWireEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -38,9 +58,10 @@ interface UsePartidaWebSocketOptions {
   partidaId: string | null
   /**
    * Recebe cada evento do canal da partida em ordem de chegada do broadcast:
-   * tabuleiro (ST-09), peões/ciclo (ST-10) e iluminação/limpeza (issue #151).
+   * tabuleiro (ST-09), peões/ciclo (ST-10), turnos (ST-11) e iluminação/
+   * limpeza (issue #151).
    */
-  onEvento: (evento: EventoDePartidaNoCliente) => void
+  onEvento: (evento: EventoDoCanalDaPartida) => void
   onAdmissao: (evento: AdmissaoAceitaEvento) => void
   /** Chamado quando a conexão falha (WebSocket não pôde abrir). */
   onFalhaDeConexao: () => void
@@ -145,14 +166,16 @@ export function usePartidaWebSocket({
         case 'PEAO_PERMANECEU':
         case 'CELULAS_ILUMINADAS':
         case 'LIMPEZA_APLICADA':
-          // O grupo de cases acima é intencionalmente vazio (fall-through);
-          // Iluminação e Limpeza (issue #151) roteiam ao modelo no mesmo
-          // padrão dos demais eventos (o motor é autoridade; o cliente
-          // apenas espelha).
-          onEventoRef.current(data as EventoDePartidaNoCliente)
+        case 'TURNO_INICIADO':
+        case 'TURNO_ENCERRADO':
+        case 'POSICAO_CONFIRMADA':
+          // O grupo de cases acima é intencionalmente vazio (fall-through):
+          // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
+          // o cliente apenas espelha).
+          onEventoRef.current(data as EventoDoCanalDaPartida)
           return
         default:
-          // Evento desconhecido (ex.: PING/PONG, Turnos ST-11): ignora.
+          // Evento desconhecido (ex.: PING/PONG, snapshot ST-14): ignora.
           return
       }
     }

@@ -26,9 +26,14 @@
  * PERMANECER. Alvos inválidos não reagem (null); o arrasto permanece
  * reservado à câmera via `deveSuprimirCliquePorArrasto` (limiar 6px, ver
  * cameraLimites.ts).
+ *
+ * Guard pós-confirmação (AC3 — review #165): com `posicaoConfirmadaNoTurno`,
+ * os alvos que seriam válidos (permanecer/mover) retornam rejeição âmbar com
+ * motivo `posicao_confirmada` — espelhando o FORA_DA_VEZ do servidor; alvos
+ * inválidos seguem silenciosos (null).
  */
 
-import { FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
+import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
 import type { FlashFeedback, EstadoInteracaoTabuleiro } from './interacao'
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada, mapearCliqueNaReserva } from './interacao'
 import {
@@ -48,10 +53,13 @@ import type {
   PecaGiradaEvento,
   PecaPosicionadaEvento,
   PecaSelecionadaEvento,
+  PosicaoConfirmadaEvento,
   RecebidaId,
   SentidoDeRotacao,
   TabuleiroComandoDoCliente,
   TipoDePecaDeCaminho,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
 } from '@flicker/shared'
 
 // ── Estado mínimo para mapear interações ──
@@ -61,10 +69,11 @@ import type {
 // chega no wire via TIPO_DA_PECA_RECEBIDA_ESCOLHIDO).
 
 /**
- * Pendência no cliente (issue #91): campos do wire (`PendenciaDeRecebimento`)
- * + campo client-side `pecaId` — null até o evento TIPO_DA_PECA_RECEBIDA_-
- * ESCOLHIDO preencher (o wire não carrega o pecaId da pendência). A pendência
- * só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
+ * Pendência no cliente (issue #91): campos do wire + campo client-side
+ * `pecaId` — null até o evento TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher na
+ * forma LEGADA (ST-10); na forma NOVA (#138) o wire já traz o pecaId da peça
+ * sorteada e a celulaAlvo pode ser null (vaga ainda não escolhida). A
+ * pendência só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
 export type PendenciaNoCliente =
   // Legado ST-10 (@deprecated): borda geradora e célula-alvo fixas na criação,
@@ -84,20 +93,44 @@ export interface EstadoInteracaoPeoes {
   readonly pecaSelecionadaId: string | null
   /** Tipos de Peça de Caminho disponíveis para a escolha das Recebidas. */
   readonly reserva: readonly { readonly pecaId: string; readonly tipo: TipoDaPeca }[]
+  /** A posição do Peão do Jogador Ativo já foi confirmada neste turno (POSICAO_CONFIRMADA). */
+  readonly posicaoConfirmadaNoTurno: boolean
 }
 
-// ── Resultado do clique no Peão ──
+// ── Resultado de clique/ação do ciclo ──
 
 export interface RejeicaoDeInteracao {
-  readonly motivo: 'pendencia_nao_resolvida'
-  /** Feedback da rejeição local — sempre FLASH_VERMELHO (distinto do branco). */
+  readonly motivo: 'pendencia_nao_resolvida' | 'posicao_confirmada'
+  /**
+   * Feedback da rejeição local: FLASH_VERMELHO para pendências (erro real);
+   * FLASH_AMBAR com motivo próprio para ação pós-confirmação (espelha o
+   * FORA_DA_VEZ que o servidor responderia).
+   */
   readonly feedback: FlashFeedback
 }
 
-export type ResultadoDeCliqueNoPeao =
+/** Comando, rejeição com feedback ou nenhuma reação do ciclo do Peão. */
+export type ResultadoDeInteracaoDePeao =
   | { readonly tipo: 'comando'; readonly comando: PeaoComandoDoCliente }
   | { readonly tipo: 'rejeicao'; readonly rejeicao: RejeicaoDeInteracao }
   | null
+
+/** Resultado do clique no Peão (mesma forma do resultado do ciclo). */
+export type ResultadoDeCliqueNoPeao = ResultadoDeInteracaoDePeao
+
+/**
+ * Rejeição pós-confirmação: o comando seria válido, mas a posição do Peão já
+ * foi travada neste turno (AC3 — guard client-side do review #165). Âmbar
+ * com motivo próprio, distinto do vermelho de pendência (o servidor responde
+ * FORA_DA_VEZ nesta situação — partida.ts do engine).
+ */
+const REJEICAO_POSICAO_CONFIRMADA: ResultadoDeInteracaoDePeao & object = {
+  tipo: 'rejeicao',
+  rejeicao: {
+    motivo: 'posicao_confirmada',
+    feedback: { ...FLASH_AMBAR, motivo: 'posicao_confirmada' },
+  },
+}
 
 // ── Helpers de pendências / reserva ──
 
@@ -136,9 +169,11 @@ export function mapearCliqueNoPeao(
   if (!peao) return null
   if (peao.peaoId === estado.peaoSelecionadoId) {
     // Próprio Peão: permanência (AC 5) exige Peão posicionado e tudo
-    // posicionado; sobre a Mesa ou com Recebidas pendentes → null.
+    // posicionado; sobre a Mesa ou com Recebidas pendentes → null. Posição
+    // já confirmada neste turno → rejeição âmbar (AC3, review #165).
     if (peao.celula === null) return null
     if (haRecebidasPendentes(estado)) return null
+    if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
     return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
   }
   if (haRecebidasPendentes(estado)) {
@@ -231,32 +266,35 @@ export function mapearPosicionarRecebida(
 /**
  * Clique no próprio Peão ou na Peça sob ele (ambos na célula do Peão
  * selecionado) → PERMANECER. Exige tudo posicionado (US 15: recebidas
- * pendentes antes de permanecer → não reage). Fora da célula do Peão, Peão
- * não selecionado ou ainda sobre a Mesa → null (não reage).
+ * pendentes antes de permanecer → não reage). Posição já confirmada neste
+ * turno → rejeição âmbar (AC3). Fora da célula do Peão, Peão não selecionado
+ * ou ainda sobre a Mesa → null (não reage).
  */
 export function mapearPermanencia(
   estado: EstadoInteracaoPeoes,
   celula: Celula,
-): PeaoComandoDoCliente | null {
+): ResultadoDeInteracaoDePeao {
   const peaoId = estado.peaoSelecionadoId
   if (peaoId === null) return null
   if (haRecebidasPendentes(estado)) return null
   const peao = estado.peoes.find((p) => p.peaoId === peaoId)
   if (!peao || peao.celula === null) return null
   if (chaveCelula(peao.celula) !== chaveCelula(celula)) return null
-  return { type: 'PERMANECER', peaoId }
+  if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
+  return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
 }
 
 /**
  * Clique em Peça vizinha conectada destacada do Peão selecionado →
  * MOVER_PEAO. Exige tudo posicionado (US 15: recebidas pendentes antes de
- * mover → não reage). Destino não conectado, ocupado por outro Peão ou Peão
- * sem seleção/posicionado → null (alvos inválidos não reagem ao clique).
+ * mover → não reage). Posição já confirmada neste turno → rejeição âmbar
+ * (AC3). Destino não conectado, ocupado por outro Peão ou Peão sem
+ * seleção/posicionado → null (alvos inválidos não reagem ao clique).
  */
 export function mapearMovimentacao(
   estado: EstadoInteracaoPeoes,
   celula: Celula,
-): PeaoComandoDoCliente | null {
+): ResultadoDeInteracaoDePeao {
   const peaoId = estado.peaoSelecionadoId
   if (peaoId === null) return null
   if (haRecebidasPendentes(estado)) return null
@@ -269,21 +307,33 @@ export function mapearMovimentacao(
     (p) => chaveCelula(p.celula) === chaveCelula(celula),
   )
   if (!conectada) return null
-  return { type: 'MOVER_PEAO', peaoId, celula }
+  if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
+  return { tipo: 'comando', comando: { type: 'MOVER_PEAO', peaoId, celula } }
 }
 
 // ── Roteador do clique em célula do Tabuleiro (issue #91) ──
 
 /**
  * Resultado do clique em célula com o ciclo ativo: comando do ciclo (peão ou
- * tabuleiro — POSICIONAR_PECA da Recebida), foco de uma pendência sem tipo,
- * ou null (alvo inválido não reage; sem ciclo ativo o chamador aplica o
- * fallback ST-09).
+ * tabuleiro — POSICIONAR_PECA da Recebida), rejeição local com feedback
+ * (guard pós-confirmação, AC3), foco de uma pendência sem tipo, ou null
+ * (alvo inválido não reage; sem ciclo ativo o chamador aplica o fallback
+ * ST-09).
  */
 export type ResultadoDeCliqueEmCelula =
   | { readonly ciclo: PeaoComandoDoCliente | TabuleiroComandoDoCliente }
+  | { readonly rejeicao: RejeicaoDeInteracao }
   | { readonly focarPendencia: RecebidaId }
   | null
+
+/** Converte o resultado do mapeador do ciclo em resultado do roteador. */
+function resultadoDoMapeadorParaCelula(
+  resultado: Exclude<ResultadoDeInteracaoDePeao, null>,
+): Exclude<ResultadoDeCliqueEmCelula, null> {
+  return resultado.tipo === 'comando'
+    ? { ciclo: resultado.comando }
+    : { rejeicao: resultado.rejeicao }
+}
 
 /** Ciclo ativo: há Recebidas pendentes OU peão selecionado (suprime o fallback ST-09). */
 export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
@@ -303,8 +353,9 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *   - demais (alvo tipado divergente da seleção, célula não-alvo) → null.
  *
  * Sem pendências, com peão selecionado:
- *   - célula do próprio peão → PERMANECER.
- *   - destino conectado → MOVER_PEAO.
+ *   - célula do próprio peão → PERMANECER (ou rejeição âmbar se a posição já
+ *     foi confirmada — AC3).
+ *   - destino conectado → MOVER_PEAO (ou rejeição âmbar pós-confirmação).
  *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO.
  *   - demais → null.
  *
@@ -334,9 +385,9 @@ export function rotearCliqueDeCelula(
   }
   if (estadoPeoes.peaoSelecionadoId !== null) {
     const permanencia = mapearPermanencia(estadoPeoes, celula)
-    if (permanencia) return { ciclo: permanencia }
+    if (permanencia) return resultadoDoMapeadorParaCelula(permanencia)
     const movimento = mapearMovimentacao(estadoPeoes, celula)
-    if (movimento) return { ciclo: movimento }
+    if (movimento) return resultadoDoMapeadorParaCelula(movimento)
     // Peão ainda sobre a Mesa: primeiro posicionamento na Peça Inicial
     // (mapearCliqueNaPecaInicial já exige peão sem célula).
     const posicionamento = mapearCliqueNaPecaInicial(estadoPeoes, celula)
@@ -386,6 +437,8 @@ export interface DespachoDeCliqueEmCelula {
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
   onFocarPendencia?: (recebidaId: RecebidaId) => void
+  /** Rejeição local do ciclo (AC3): feedback para flash, sem comando enviado. */
+  onRejeicao?: (rejeicao: RejeicaoDeInteracao) => void
 }
 
 /**
@@ -406,6 +459,10 @@ export function despacharCliqueDeCelula(
   if (resultado !== null) {
     if ('focarPendencia' in resultado) {
       despacho.onFocarPendencia?.(resultado.focarPendencia)
+      return
+    }
+    if ('rejeicao' in resultado) {
+      despacho.onRejeicao?.(resultado.rejeicao)
       return
     }
     if (ehComandoDePeao(resultado.ciclo)) {
@@ -442,7 +499,8 @@ export function mapearCliqueNaReservaComCiclo(
 
 // ── Mapeamento evento → feedback visual ──
 
-/** Eventos do ciclo do Peão + reusos do Tabuleiro que chegam no mesmo canal. */
+/** Eventos do ciclo do Peão + reusos do Tabuleiro que chegam no mesmo canal,
+ * + eventos de turno (ST-11, issue #118) para o feedback unificado da página. */
 export type EventoDoCicloDoPeao =
   | PeaoEventoDoServidor
   | PecaSelecionadaEvento
@@ -451,14 +509,19 @@ export type EventoDoCicloDoPeao =
   | PecaGiradaEvento
   | ManipulacaoFinalizadaEvento
   | ErroDoTabuleiroEvento
+  | TurnoIniciadoEvento
+  | TurnoEncerradoEvento
+  | PosicaoConfirmadaEvento
 
 /**
- * Traduz evento do servidor em flash: aprovação/seleção → branco; rejeição
- * (ERRO_DO_TABULEIRO) → vermelho (distinto do branco, duração maior).
+ * Traduz evento do servidor em flash (issue #118): aprovação/seleção →
+ * branco; rejeição → vermelho, com motivo específico para pendências; ação
+ * fora da vez → âmbar (distinto do erro); Confirmação de Posição → branco;
+ * abertura/encerramento de turno → null (sem flash).
  */
 export function mapearEventoPeaoParaFeedback(
   evento: EventoDoCicloDoPeao,
-): FlashFeedback {
+): FlashFeedback | null {
   switch (evento.type) {
     case 'PEAO_SELECIONADO':
     case 'RECEBIMENTO_GERADO':
@@ -471,9 +534,19 @@ export function mapearEventoPeaoParaFeedback(
     case 'PECA_POSICIONADA':
     case 'PECA_GIRADA':
     case 'MANIPULACAO_FINALIZADA':
+    case 'POSICAO_CONFIRMADA':
       return FLASH_BRANCO
     case 'ERRO_DO_TABULEIRO':
+      if (evento.codigo === 'FORA_DA_VEZ') return FLASH_AMBAR
+      if (evento.codigo === 'PENDENCIA_NAO_RESOLVIDA') {
+        return { ...FLASH_VERMELHO, motivo: 'pendencia_nao_resolvida' }
+      }
       return FLASH_VERMELHO
+    case 'TURNO_INICIADO':
+    case 'TURNO_ENCERRADO':
+      // Passagem de vez não é flash: o destaque do ativo e o indicador de
+      // rodada comunicam a mudança (issue #118).
+      return null
     default: {
       // Exaustividade: novo evento wire sem case falha em compilação.
       const _exaustivo: never = evento

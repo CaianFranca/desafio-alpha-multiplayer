@@ -49,6 +49,7 @@ export type {
   CodigoDeErroDaPartida,
   ComandoDePartida,
   ConfirmarPosicaoDoPeaoComando,
+  DesfechoDaPartida,
   EncerrarTurnoComando,
   ErroDeDominioDaPartida,
   EstadoDaPartida,
@@ -56,6 +57,7 @@ export type {
   JogadorDaPartida,
   OperacaoBemSucedidaDaPartida,
   OperacaoRejeitadaDaPartida,
+  PartidaTerminadaEvento,
   PosicaoConfirmadaEvento,
   ResultadoDaPartida,
   TurnoEncerradoEvento,
@@ -141,6 +143,7 @@ export {
 
 export {
   aplicarComandoDePartida,
+  avaliarTerminoDaPartida,
   estadoInicialDaPartida,
 } from './partida.ts';
 

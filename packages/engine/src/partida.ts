@@ -10,6 +10,13 @@
 // Primeiro Turno e confirmar_posicao_do_peao) é gerado aqui, via
 // gerarRecebidas. Nenhum contrato wire, Redis ou Express vive aqui: domínio
 // puro e imutável.
+//
+// Término da Partida (issue #176): o estado carrega o Resultado
+// (DesfechoDaPartida | null — resultado !== null ≡ terminada), os contadores
+// globais de objetivos (geradoresLigados, cartaoDeAcessoObtido) e a sanidade
+// dos Jogadores. Toda Ação aprovada passa por UMA avaliação de término no
+// funil do dispatch (vitória antes da derrota); pós-término, qualquer
+// comando é recusado com PARTIDA_TERMINADA.
 
 import {
   aplicarComandoDeTabuleiro,
@@ -41,6 +48,10 @@ export interface JogadorDaPartida {
   // ST-11: o Primeiro Turno posiciona a própria Peça Inicial e o próprio
   // Peão; a flag só é concluída pelo Encerramento do Turno.
   readonly primeiroTurnoPendente: boolean;
+  // Término (issue #176): sanidade inicia em 3 e tem piso 0; Amedrontado ≡
+  // sanidade === 0. Nenhuma mecânica a reduz ainda — o campo é consumido
+  // pela avaliação do término (ST-15 reutiliza depois).
+  readonly sanidade: number;
 }
 
 // Estado da Partida: o Tabuleiro (com Seleção única, Manipulação, Recebidas e
@@ -58,12 +69,31 @@ export interface EstadoDaPartida {
   readonly pecaDoInicioDoTurnoId: string | null;
   readonly posicaoConfirmada: boolean;
   readonly celulasIluminadas: readonly Celula[];
+  // Término da Partida (issue #176): o Desfecho !== null é a própria
+  // condição "terminada" — sem flag duplicada. Os contadores globais de
+  // objetivos são atualizados APENAS na Confirmação de Posição (idempotente)
+  // e sobrevivem à Limpeza, que remove peças do Tabuleiro mas não conquistas.
+  readonly resultado: DesfechoDaPartida | null;
+  // pecaIds de geradores ligados (o contador deriva do length).
+  readonly geradoresLigados: readonly string[];
+  readonly cartaoDeAcessoObtido: boolean;
 }
 
 export interface ConfirmarPosicaoDoPeaoComando {
   readonly tipo: 'confirmar_posicao_do_peao';
   readonly peaoId: string;
 }
+
+// Desfecho da Partida (issue #176): vitória, ou derrota com motivo. A
+// vitória exige as TRÊS condições simultâneas — 3 geradores ligados, cartão
+// de acesso obtido e os 4 peões no mesmo Portão de Saída; a definição da
+// posição dos peões cobre apenas essa terceira condição.
+export type DesfechoDaPartida =
+  | { readonly tipo: 'vitoria' }
+  | {
+      readonly tipo: 'derrota';
+      readonly motivo: 'caixa_esgotada' | 'equipe_amedrontada';
+    };
 
 export interface EncerrarTurnoComando {
   readonly tipo: 'encerrar_turno';
@@ -97,12 +127,20 @@ export interface CelulasIluminadasEvento {
   readonly celulas: readonly Celula[];
 }
 
+// Término (issue #176): emitido no máximo uma vez, sempre como ÚLTIMO evento
+// do lote da Ação que consumou o desfecho.
+export interface PartidaTerminadaEvento {
+  readonly tipo: 'partida_terminada';
+  readonly desfecho: DesfechoDaPartida;
+}
+
 export type EventoDaPartida =
   | EventoDoTabuleiro
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
   | PosicaoConfirmadaEvento
-  | CelulasIluminadasEvento;
+  | CelulasIluminadasEvento
+  | PartidaTerminadaEvento;
 
 export type CodigoDeErroDaPartida =
   | CodigoDeErroDeTabuleiro
@@ -110,7 +148,8 @@ export type CodigoDeErroDaPartida =
   | 'PECA_INICIAL_INDISPONIVEL'
   | 'POSICAO_CONFIRMADA'
   | 'ENCERRAMENTO_INVALIDO'
-  | 'MOVIMENTO_INDISPONIVEL';
+  | 'MOVIMENTO_INDISPONIVEL'
+  | 'PARTIDA_TERMINADA';
 
 export interface ErroDeDominioDaPartida {
   readonly tipo: 'erro_de_dominio';
@@ -177,6 +216,7 @@ export function estadoInicialDaPartida(
         cor,
         peaoId: `peao-${cor}`,
         primeiroTurnoPendente: true,
+        sanidade: 3,
       };
     },
   );
@@ -189,6 +229,9 @@ export function estadoInicialDaPartida(
     pecaDoInicioDoTurnoId: null,
     posicaoConfirmada: false,
     celulasIluminadas: [],
+    resultado: null,
+    geradoresLigados: [],
+    cartaoDeAcessoObtido: false,
   };
   return sucessoDaPartida(estado, [
     { tipo: 'turno_iniciado', jogadorId: jogadores[0].jogadorId, rodada: 1 },
@@ -205,6 +248,16 @@ export function aplicarComandoDePartida(
     return { sucesso: false, erro: dadosInvalidos.erro };
   }
 
+  // Término (issue #176): Partida terminada recusa qualquer comando com
+  // código próprio — inclusive do Jogador Ativo — antes de qualquer
+  // roteamento.
+  if (estado.resultado !== null) {
+    return rejeitarDaPartida(
+      'PARTIDA_TERMINADA',
+      'A Partida já terminou; nenhum comando é aceito.',
+    );
+  }
+
   const jogadorAtivo = estado.jogadores.find(
     (jogador) => jogador.jogadorId === estado.jogadorAtivoId,
   );
@@ -216,6 +269,37 @@ export function aplicarComandoDePartida(
     );
   }
 
+  return funilarAvaliacaoDoTermino(
+    rotearComandoDaPartida(estado, comando, jogadorAtivo),
+  );
+}
+
+// Funil único de avaliação do término (issue #176): toda Ação bem-sucedida —
+// com todos os efeitos encadeados já aplicados (sorteio, Recebimento,
+// Limpeza) — passa por UMA avaliação antes de retornar. Havendo desfecho, o
+// estado novo carrega o resultado e o evento partida_terminada é anexado ao
+// FINAL do lote de eventos. Rejeições retornam intocadas.
+function funilarAvaliacaoDoTermino(
+  resultado: ResultadoDaPartida,
+): ResultadoDaPartida {
+  if (!resultado.sucesso) {
+    return resultado;
+  }
+  const avaliacao = avaliarTerminoDaPartida(resultado.estado);
+  if (avaliacao.evento === null) {
+    return resultado;
+  }
+  return sucessoDaPartida(avaliacao.estado, [
+    ...resultado.eventos,
+    avaliacao.evento,
+  ]);
+}
+
+function rotearComandoDaPartida(
+  estado: EstadoDaPartida,
+  comando: ComandoDePartida,
+  jogadorAtivo: JogadorDaPartida,
+): ResultadoDaPartida {
   switch (comando.tipo) {
     case 'selecionar_peca':
       return selecionarPecaDaPartida(estado, comando, jogadorAtivo);
@@ -536,12 +620,24 @@ function confirmarPosicaoDoPeao(
   }
   const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
+  // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
+  // forma idempotente — gerador ainda não ligado acrescenta o pecaId a
+  // geradoresLigados; sala_do_diretor obtém o cartão. A Permanência não
+  // confere, e a Limpeza (já aplicada acima) não revoga conquistas.
+  const geradoresLigados =
+    peca.tipo === 'gerador' && !estado.geradoresLigados.includes(peca.pecaId)
+      ? [...estado.geradoresLigados, peca.pecaId]
+      : estado.geradoresLigados;
+  const cartaoDeAcessoObtido =
+    estado.cartaoDeAcessoObtido || peca.tipo === 'sala_do_diretor';
   return sucessoDaPartida(
     {
       ...estado,
       tabuleiro: { ...tabuleiro, posicionadas: iluminacao.posicionadas },
       posicaoConfirmada: true,
       celulasIluminadas: iluminacao.celulasIluminadas,
+      geradoresLigados,
+      cartaoDeAcessoObtido,
     },
     eventos,
   );
@@ -642,6 +738,11 @@ function avancarVez(
     pecaDoInicioDoTurnoId: peaoDoProximo?.pecaId ?? null,
     posicaoConfirmada: false,
     celulasIluminadas: estado.celulasIluminadas,
+    // Término (issue #176): resultado, contadores de objetivos e a sanidade
+    // dos jogadores (que viaja com o roster) atravessam a Passagem de Vez.
+    resultado: estado.resultado,
+    geradoresLigados: estado.geradoresLigados,
+    cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
   };
   return sucessoDaPartida(novoEstado, [
     ...eventos,
@@ -684,6 +785,112 @@ function sucessoDaPartida(
   eventos: readonly EventoDaPartida[],
 ): OperacaoBemSucedidaDaPartida {
   return { sucesso: true, estado, eventos };
+}
+
+// Avaliação do término (issue #176): função pura, exportada como seam de
+// teste para cenários (amedrontado, caixa vazia) que nenhum comando produz
+// ainda. Um estado já terminado nunca reavalia — partida_terminada sai no
+// máximo uma vez (a guarda do dispatch impede comandos sobre estado
+// terminado, então o funil sempre avalia um estado vivo).
+export function avaliarTerminoDaPartida(
+  estado: EstadoDaPartida,
+): { estado: EstadoDaPartida; evento: PartidaTerminadaEvento | null } {
+  if (estado.resultado !== null) {
+    return { estado, evento: null };
+  }
+  const desfecho = desfechoDaPartida(estado);
+  if (desfecho === null) {
+    return { estado, evento: null };
+  }
+  return {
+    estado: { ...estado, resultado: desfecho },
+    evento: { tipo: 'partida_terminada', desfecho },
+  };
+}
+
+// Ordem de avaliação (issue #176): a vitória é avaliada ANTES da derrota —
+// quando vitória e derrota são verdadeiras no mesmo evento, prevalece a
+// vitória. Entre os motivos de derrota simultâneos, equipe_amedrontada
+// precede caixa_esgotada (desempate do mesmo evento).
+function desfechoDaPartida(estado: EstadoDaPartida): DesfechoDaPartida | null {
+  if (equipeVenceu(estado)) {
+    return { tipo: 'vitoria' };
+  }
+  if (estado.jogadores.every((jogador) => jogador.sanidade === 0)) {
+    return { tipo: 'derrota', motivo: 'equipe_amedrontada' };
+  }
+  if (caixaEsgotadaSemObjetivos(estado)) {
+    return { tipo: 'derrota', motivo: 'caixa_esgotada' };
+  }
+  return null;
+}
+
+// Vitória (issue #176): 3 geradores ligados, cartão obtido e TODOS os peões
+// sobre a MESMA peça posicionada do tipo portao_de_saida (mesmo pecaId não
+// nulo). Sobre os peões vale apenas a posição — estados dos jogadores (ex.:
+// sanidade 0) não os impedem de vencer.
+function equipeVenceu(estado: EstadoDaPartida): boolean {
+  if (estado.geradoresLigados.length < 3 || !estado.cartaoDeAcessoObtido) {
+    return false;
+  }
+  const peoes = estado.tabuleiro.peoes;
+  const referencia = peoes[0];
+  if (peoes.length !== 4 || !referencia || referencia.pecaId === null) {
+    return false;
+  }
+  return (
+    peoes.every((peao) => peao.pecaId === referencia.pecaId) &&
+    estado.tabuleiro.posicionadas.some(
+      (peca) =>
+        peca.pecaId === referencia.pecaId &&
+        peca.tipo === 'portao_de_saida',
+    )
+  );
+}
+
+// Derrota contável (issue #176), avaliada SOMENTE com a caixa vazia e SEM
+// análise de conectividade: falta peça especial para algum objetivo pendente —
+// (a) geradores não ligados em quantidade menor que os necessários
+//     (3 − geradoresLigados.length); geradores ligados removidos pela
+//     Limpeza seguem contados via geradoresLigados;
+// (b) cartão pendente e nenhuma sala_do_diretor disponível;
+// (c) nenhum portao_de_saida disponível.
+// "Disponível" cobre o tabuleiro (posicionadas) E as Recebidas pendentes — a
+// peça sorteada na mão do Jogador não falta: pendências não sobrevivem ao
+// Encerramento do Turno (PENDENCIA_NAO_RESOLVIDA), então ela sempre chega ao
+// Tabuleiro dentro do turno corrente. Contar só o tabuleiro terminaria a
+// partida no Recebimento da última peça especial, antes de o Jogador
+// posicioná-la.
+function caixaEsgotadaSemObjetivos(estado: EstadoDaPartida): boolean {
+  if (estado.tabuleiro.caixa.length > 0) {
+    return false;
+  }
+  const posicionadas = estado.tabuleiro.posicionadas;
+  const recebidas = estado.tabuleiro.recebidas;
+  const geradoresNaoLigados =
+    posicionadas.filter(
+      (peca) =>
+        peca.tipo === 'gerador' && !estado.geradoresLigados.includes(peca.pecaId),
+    ).length +
+    recebidas.filter(
+      (recebida) =>
+        recebida.tipo === 'gerador' &&
+        !estado.geradoresLigados.includes(recebida.pecaId),
+    ).length;
+  if (geradoresNaoLigados < 3 - estado.geradoresLigados.length) {
+    return true;
+  }
+  if (
+    !estado.cartaoDeAcessoObtido &&
+    !posicionadas.some((peca) => peca.tipo === 'sala_do_diretor') &&
+    !recebidas.some((recebida) => recebida.tipo === 'sala_do_diretor')
+  ) {
+    return true;
+  }
+  return (
+    !posicionadas.some((peca) => peca.tipo === 'portao_de_saida') &&
+    !recebidas.some((recebida) => recebida.tipo === 'portao_de_saida')
+  );
 }
 
 function rejeitarDaPartida(
