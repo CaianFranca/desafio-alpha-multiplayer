@@ -238,6 +238,7 @@ export class SalasRepo {
    * status='encaminhada' — garante idempotência ao nível do PG (segunda
    * chamada com status 'aberta' não altera nada).
    * Retorna true quando houve mutação, false quando já estava aberta.
+   * @deprecated usar reabrirSalaComMarkerAtomico para durabilidade PG+marker atômica
    */
   async reabrirSalaAtomico(salaId: string): Promise<boolean> {
     const resultado = await this.pool.query(
@@ -245,6 +246,39 @@ export class SalasRepo {
       [salaId],
     );
     return (resultado.rowCount ?? 0) === 1;
+  }
+
+  /**
+   * Reabre a sala e grava o marker de idempotência na mesma transação PG.
+   * Elimina a janela de crash entre UPDATE e INSERT (bloqueante #185):
+   *   UPDATE salas_historico + INSERT sala_reaberta_markers em BEGIN/COMMIT
+   * Retorna true quando houve mutação, false quando já estava aberta.
+   */
+  async reabrirSalaComMarkerAtomico(salaId: string): Promise<boolean> {
+    await this.garantirTabelaReabertaMarkers();
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const upd = await client.query(
+        `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
+        [salaId],
+      );
+      if ((upd.rowCount ?? 0) !== 1) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      await client.query(
+        `INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+        [salaId],
+      );
+      await client.query('COMMIT');
+      return true;
+    } catch (erro) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw erro;
+    } finally {
+      client.release();
+    }
   }
 
   private reabertaTabelaGarantida = false;

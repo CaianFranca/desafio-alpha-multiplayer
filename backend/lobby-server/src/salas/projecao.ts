@@ -222,10 +222,11 @@ export class SalasProjecao {
     await this.redis.del(chaveSalaChat(salaId));
   }
 
-  /** Limpa toda a projeção referente a uma sala (estado + codigo + chat). */
+  /** Limpa toda a projeção referente a uma sala (estado + codigo + chat + reaberta). */
   async limparSala(salaId: string, codigo: string): Promise<void> {
     await this.redis.del(chaveSalaEstado(salaId));
     await this.redis.del(chaveSalaCodigo(codigo));
+    await this.redis.del(`${PREFIXO_SALA}${salaId}${SUFIXO_REABERTA}`);
     await this.limparChat(salaId);
   }
 

@@ -3,7 +3,6 @@ import { requireServiceToken } from '../middleware/serviceToken.ts';
 import type { SalasContexto } from '../salas/index.ts';
 import { mapearSala } from '../salas/eventos.ts';
 import { serializarSala } from '../salas/projecao.ts';
-import { obterLinkBase } from '../salas/handlers.ts';
 
 export function criarRetornoRouter(contexto: SalasContexto): Router {
   const router = Router();
@@ -57,7 +56,9 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
 
         const status = salaBruta.status;
 
-        // Caminho idempotente: PG já está aberta. Requer marker Redis de reabertura prévia — evita que sala nunca encaminhada seja aceita.
+        // Caminho idempotente: PG já está aberta. Requer marker PG/Redis de reabertura prévia — evita que sala nunca encaminhada seja aceita.
+        // Com o fix atômico (UPDATE + INSERT marker em transação), crash entre UPDATE e marker não deixa mais sala aberta sem marker.
+        // Ainda assim recuperamos broadcast/projeção perdidos caso o crash tenha ocorrido após o COMMIT mas antes de Redis/broadcast.
         if (status !== 'encaminhada') {
           if (status === 'aberta') {
             const reabertaRedis = await contexto.projecao.foiReaberta(salaId);
@@ -75,13 +76,18 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
                   const salaWire = mapearSala(
                     salaDominio,
                     contexto.estado.apelidoPorJogadorId,
-                    contexto.handlers.handlersLinkBase ?? obterLinkBase(),
+                    contexto.handlers.handlersLinkBase,
                   );
+                  // Recupera projeção/markers/broadcast perdidos no crash após COMMIT
+                  await contexto.projecao.definirEstadoSala(salaId, serializarSala(salaDominio));
+                  await contexto.projecao.marcarReaberta(salaId);
+                  await contexto.repo.marcarReabertaPersistido(salaId);
+                  contexto.broadcast.enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaWire });
                   return { tipo: 'sucesso' as const, sala: salaWire, idempotente: true };
                 }
                 const proj = await contexto.projecao.obterEstadoSala(salaId);
                 if (proj) {
-                  const linkBase = contexto.handlers.handlersLinkBase ?? obterLinkBase();
+                  const linkBase = contexto.handlers.handlersLinkBase;
                   const salaWire = {
                     id: proj.id,
                     codigoDeSala: proj.codigo,
@@ -98,9 +104,14 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
                     convite: { codigoDeSala: proj.codigo, link: `${linkBase}/${proj.codigo}` },
                   } as const;
                   const { encaminhamento: _enc, ...salaSemEnc } = salaWire as typeof salaWire & { encaminhamento?: unknown };
-                  return { tipo: 'sucesso' as const, sala: salaSemEnc as unknown as ReturnType<typeof mapearSala>, idempotente: true };
+                  await contexto.projecao.marcarReaberta(salaId);
+                  await contexto.repo.marcarReabertaPersistido(salaId);
+                  // Projeção já existe, mas garante que encaminhamento não seja reenviado via broadcast futuro
+                  const salaSemEncTyped = salaSemEnc as unknown as ReturnType<typeof mapearSala>;
+                  contexto.broadcast.enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaSemEncTyped });
+                  return { tipo: 'sucesso' as const, sala: salaSemEncTyped, idempotente: true };
                 }
-                const linkBase = contexto.handlers.handlersLinkBase ?? obterLinkBase();
+                const linkBase = contexto.handlers.handlersLinkBase;
                 const salaWireMinima = {
                   id: salaBruta.id,
                   codigoDeSala: salaBruta.codigo,
@@ -116,7 +127,11 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
                   })),
                   convite: { codigoDeSala: salaBruta.codigo, link: `${linkBase}/${salaBruta.codigo}` },
                 } as const;
-                return { tipo: 'sucesso' as const, sala: salaWireMinima as unknown as ReturnType<typeof mapearSala>, idempotente: true };
+                await contexto.projecao.marcarReaberta(salaId);
+                await contexto.repo.marcarReabertaPersistido(salaId);
+                const salaMinimaTyped = salaWireMinima as unknown as ReturnType<typeof mapearSala>;
+                contexto.broadcast.enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaMinimaTyped });
+                return { tipo: 'sucesso' as const, sala: salaMinimaTyped, idempotente: true };
               }
             }
           }
@@ -143,7 +158,7 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
         }
 
-        // Aplicar comando no engine
+        // Aplicar comando no engine (valida estado consistente e encaminhada)
         const aplicado = contexto.estado.aplicar({ tipo: 'reabrir_sala', salaId });
         if (!aplicado.sucesso) {
           const codigo = aplicado.erro.codigo;
@@ -153,11 +168,18 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           if (codigo === 'SALA_NAO_ENCAMINHADA') {
             return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
           }
+          if (codigo === 'SALA_INCONSISTENTE') {
+            return { tipo: 'erro' as const, status: 409, codigo: 'SALA_INCONSISTENTE' };
+          }
           return { tipo: 'erro' as const, status: 400, codigo: 'DADOS_INVALIDOS' };
         }
 
-        // Persistência PG
-        await contexto.repo.reabrirSalaAtomico(salaId);
+        // Persistência PG atômica (UPDATE + INSERT marker na mesma transação) — elimina janela de crash
+        const reabriu = await contexto.repo.reabrirSalaComMarkerAtomico(salaId);
+        if (!reabriu) {
+          // rowCount 0: PG não flipou (concorrência ou status já não era encaminhada). Não commita memória.
+          return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
+        }
 
         contexto.estado.substituirEstado(aplicado.estado);
 
@@ -166,13 +188,12 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 404, codigo: 'SALA_NAO_ENCONTRADA' };
         }
 
-        // Projeção sem encaminhamento + markers de idempotência (Redis + PG para survive restart)
+        // Projeção sem encaminhamento + marker Redis (PG já gravado na transação)
         await contexto.projecao.definirEstadoSala(salaId, serializarSala(salaDominio));
         await contexto.projecao.marcarReaberta(salaId);
-        await contexto.repo.marcarReabertaPersistido(salaId);
 
         // Broadcast SALA_ATUALIZADA
-        const salaWire = mapearSala(salaDominio, contexto.estado.apelidoPorJogadorId, contexto.handlers.handlersLinkBase ?? obterLinkBase());
+        const salaWire = mapearSala(salaDominio, contexto.estado.apelidoPorJogadorId, contexto.handlers.handlersLinkBase);
         contexto.broadcast.enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaWire });
 
         return { tipo: 'sucesso' as const, sala: salaWire, idempotente: false };
@@ -183,6 +204,7 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           DADOS_INVALIDOS: 'Payload inválido.',
           SALA_NAO_ENCONTRADA: 'Sala não encontrada.',
           SALA_NAO_ENCAMINHADA: 'Sala não está encaminhada.',
+          SALA_INCONSISTENTE: 'Sala temporariamente inconsistente, tente novamente.',
         };
         res.status(resultadoOperacao.status).json({
           codigo: resultadoOperacao.codigo,
