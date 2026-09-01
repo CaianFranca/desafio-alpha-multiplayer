@@ -29,7 +29,10 @@
 //   switches exaustivos no frontend legado, intocado pela #138.)
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
-//   Erros: CodigoDeErroDaPartida alias de CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120) — FORA_DA_VEZ etc via ERRO_DO_TABULEIRO (SalaServerMessage via TabuleiroEventoDoServidor).
+//   shared type:'PARTIDA_TERMINADA' { resultado } <-> engine tipo:'partida_terminada' { desfecho } — issue #179
+//   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire); o
+//   motivo da derrota no engine fica interno — o contrato expõe apenas o par.)
+//   Erros: CodigoDeErroDaPartida alias de CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120) — FORA_DA_VEZ, PARTIDA_TERMINADA etc via ERRO_DO_TABULEIRO (SalaServerMessage via TabuleiroEventoDoServidor).
 //   shared type:UPPER_SNAKE no wire vs engine tipo:snake no domínio; campos em camelCase nos dois lados
 //
 // Reuso: importa PecaId de ./tabuleiro.ts e PeaoId de ./peoes.ts; não duplica tipos base.
@@ -190,7 +193,15 @@ export type { VagaDaPecaRecebidaEscolhidaEvento };
 
 // --- Snapshot wire (ST-14) — projeção tipada sem runtime ---
 
-export type EstadoDaPartidaWire = 'preparada' | 'em_andamento';
+// Resultado do término da Partida (issue #179): o par vitória/derrota do
+// glossário (CONTEXT.md); em evento simultâneo das condições, a vitória tem
+// prioridade — essa regra vive no engine, o wire só transporta o par.
+// Sufixo Wire: o engine já exporta um homônimo ResultadoDaPartida (o
+// resultado de operação de seus comandos) — a colisão nominal segue a
+// convenção do cabeçalho.
+export type ResultadoDaPartidaWire = 'vitoria' | 'derrota';
+
+export type EstadoDaPartidaWire = 'preparada' | 'em_andamento' | 'terminada';
 
 export type CorDoPeaoWire = 'branco' | 'vermelho' | 'azul' | 'amarelo';
 
@@ -261,6 +272,9 @@ export interface EstadoDaPartidaSnapshot {
   readonly posicaoConfirmada: boolean;
   readonly celulasIluminadas: readonly Celula[];
   readonly estado: EstadoDaPartidaWire;
+  // Término (issue #179): não nulo quando e somente quando estado === 'terminada' —
+  // preserva o Resultado no snapshot entregue a quem se conecta (recarregamento).
+  readonly resultado: ResultadoDaPartidaWire | null;
 }
 
 export interface PartidaIniciadaEvento {
@@ -283,6 +297,14 @@ export interface LimpezaAplicadaWireEvento {
   readonly pecasRemovidas: readonly PecaId[];
 }
 
+// Término da Partida (issue #179): broadcast com o Resultado no instante em
+// que o engine consome o desfecho; é o último evento do lote da Ação que
+// consumou o término.
+export interface PartidaTerminadaWireEvento {
+  readonly type: 'PARTIDA_TERMINADA';
+  readonly resultado: ResultadoDaPartidaWire;
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
@@ -292,7 +314,8 @@ export type PartidaEventoDoServidor =
   | PecaSorteadaEvento
   | VagaDaPecaRecebidaEscolhidaEvento
   | PartidaIniciadaEvento
-  | EstadoDaPartidaEvento;
+  | EstadoDaPartidaEvento
+  | PartidaTerminadaWireEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)
