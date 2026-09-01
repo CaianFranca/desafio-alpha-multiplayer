@@ -1,5 +1,5 @@
 #!/usr/bin/env -S npx tsx
-import WebSocket from 'ws';
+import WebSocket, { type ClientOptions } from 'ws';
 
 type Cookies = { access_token?: string; refresh_token?: string };
 
@@ -8,6 +8,20 @@ interface JogadorCredenciais {
   senha: string;
   apelido: string;
 }
+
+type MembroSala = {
+  id: string;
+  jogadorId: string;
+  prontidao: boolean;
+  apelido: string;
+  ordemDeEntrada: number;
+};
+
+type SalaWire = {
+  id: string;
+  codigoDeSala: string;
+  membros: MembroSala[];
+};
 
 const SENHA_PADRAO = 'senha_dev_123';
 const BASE_PADRAO = 'http://localhost:8080';
@@ -80,7 +94,7 @@ Opção C (padrão sem --emails):
   1) login com bot-teste-1..3@exemplo.local
   2) se 401 → register
   3) se 409 → login novamente
-  4) se falhar → conta efêmera bot-<timestamp>-<i>@exemplo.local
+  4) se falhar → conta efêmera bot-<timestamp>-<i>@exemplo.local (pode poluir contas; limpar manualmente)
 
 Exemplos:
   npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts ABCDEF
@@ -175,6 +189,7 @@ async function obterCredenciaisBot(
   const sufixo = `${Date.now()}-${indice}-${Math.random().toString(36).slice(2, 6)}`;
   const emailRand = `bot-${sufixo}@exemplo.local`;
   const apelidoRand = `bot-${sufixo}`.slice(0, 20);
+  log(`bot-${indice}`, `fallback efêmero ${emailRand} — pode poluir contas; limpar manualmente se falhar sempre`);
   const regRand = await tentarRegister(baseUrl, apelidoRand, emailRand, senha);
   if (regRand && 'cookies' in regRand && regRand.cookies.access_token) {
     log(`bot-${indice}`, `register efêmero ok (${regRand.jogador.apelido})`);
@@ -186,17 +201,27 @@ async function obterCredenciaisBot(
 function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: string, apelido: string, indice: number): WebSocket {
   const wsUrl = baseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') + '/ws/lobby';
   const headers: Record<string, string> = { Cookie: cookieHeader(cookies) };
-  const ws = new WebSocket(wsUrl, { headers } as never);
+  const wsOptions: ClientOptions = { headers };
+  const ws = new WebSocket(wsUrl, wsOptions);
   const prefix = `bot-${indice}(${apelido})`;
 
   let salaId: string | null = null;
   let membroId: string | null = null;
   let entrou = false;
   let prontoEnviado = false;
+  let prontoAgendado = false;
+  let tentativasEntrar = 0;
+  const MAX_TENTATIVAS_ENTRAR = 1;
+
+  function enviarEntrar(): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    tentativasEntrar++;
+    log(prefix, `WS conectado → ENTRAR_NA_SALA ${codigo} (tentativa ${tentativasEntrar})`);
+    ws.send(JSON.stringify({ type: 'ENTRAR_NA_SALA', codigoDeSala: codigo }));
+  }
 
   ws.on('open', () => {
-    log(prefix, `WS conectado → ENTRAR_NA_SALA ${codigo}`);
-    ws.send(JSON.stringify({ type: 'ENTRAR_NA_SALA', codigoDeSala: codigo }));
+    enviarEntrar();
   });
 
   ws.on('message', (data) => {
@@ -210,10 +235,15 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
     if (t === 'ERRO_DA_SALA') {
       const e = msg as { codigo: string; mensagem: string };
       log(prefix, `ERRO_DA_SALA ${e.codigo}: ${e.mensagem}`);
+      if (tentativasEntrar <= MAX_TENTATIVAS_ENTRAR) {
+        const delay = 500;
+        log(prefix, `retry ENTRAR_NA_SALA em ${delay}ms (single-shot com retry dev)`);
+        setTimeout(() => enviarEntrar(), delay);
+      }
       return;
     }
     if (t === 'SALA_ATUALIZADA' || t === 'MEMBRO_ENTROU' || t === 'PRONTIDAO_ATUALIZADA' || t === 'MEMBRO_SAIU' || t === 'MEMBRO_DESCONECTADO' || t === 'MEMBRO_RECONECTADO' || t === 'MEMBRO_EXPULSO' || t === 'ANFITRIAO_SUBSTITUIDO' || t === 'PARTIDA_PREPARANDO' || t === 'PARTIDA_DISPONIVEL' || t === 'PARTIDA_RECUSADA' || t === 'PARTIDA_FALHOU') {
-      const sala = (msg as { sala?: { id: string; codigoDeSala: string; membros: { id: string; jogadorId: string; prontidao: boolean; apelido: string }[] } }).sala;
+      const sala = (msg as { sala?: SalaWire }).sala;
       if (sala) {
         salaId = sala.id;
         const eu = sala.membros.find((m) => m.jogadorId === jogadorId);
@@ -221,15 +251,17 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
           membroId = eu.id;
           if (!entrou) {
             entrou = true;
-            log(prefix, `entrou ordem=${(eu as unknown as { ordemDeEntrada: number }).ordemDeEntrada ?? '?'} sala=${sala.codigoDeSala}`);
+            log(prefix, `entrou ordem=${eu.ordemDeEntrada ?? '?'} sala=${sala.codigoDeSala}`);
           }
-          if (!prontoEnviado && !eu.prontidao) {
-            prontoEnviado = true;
+          if (!eu.prontidao && !prontoAgendado) {
+            prontoAgendado = true;
             setTimeout(() => {
               if (ws.readyState === WebSocket.OPEN) {
                 log(prefix, '→ ALTERNAR_PRONTIDAO (ficar pronto)');
                 ws.send(JSON.stringify({ type: 'ALTERNAR_PRONTIDAO' }));
+                prontoEnviado = true;
               }
+              prontoAgendado = false;
             }, 300);
           } else if (eu.prontidao && prontoEnviado) {
             log(prefix, 'pronto=true confirmado');
@@ -254,13 +286,14 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
   });
 
   ws.on('close', (code, reason) => {
-    log(prefix, `WS close code=${code} reason=${reason.toString().slice(0, 100)}`);
+    log(prefix, `WS close code=${code} reason=${reason.toString().slice(0, 100)} (sem reconexão automática; servidor suporta reconexão 60s via ws.ts)`);
   });
 
   ws.on('error', (err) => {
     log(prefix, `WS error: ${err.message}`);
   });
 
+  void salaId;
   return ws;
 }
 
@@ -299,7 +332,7 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 150));
   }
 
-  log('main', '3 bots conectados, prontidão enviada. Permanecendo conectados — Ctrl+C para sair.');
+  log('main', '3 bots conectados, prontidão enviada. Permanecendo conectados — Ctrl+C para sair. (sem keep-alive ping/pong; /ws/lobby é convenção — servidor aceita qualquer path via new WebSocketServer({ server }) em src/ws/ws.ts:70)');
 
   const encerrar = () => {
     log('main', 'encerrando bots...');
