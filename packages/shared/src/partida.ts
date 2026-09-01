@@ -200,7 +200,9 @@ export type TipoDaPecaWire =
   | 'gerador'
   | 'sala_do_diretor'
   | 'sala_medica'
-  | 'portao_de_saida';
+  | 'portao_de_saida'
+  | 'vulto'
+  | 'espectro';
 
 export interface JogadorNoSnapshot {
   readonly jogadorId: string;

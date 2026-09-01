@@ -41,8 +41,9 @@ import type {
 export const LADO_DA_GRADE = 7;
 
 // Bordas abertas da Orientação base (0°), por tipo: Inicial norte+leste
-// (adjacentes), Reta norte+sul (opostas), T norte+leste+oeste, Cruz e as
-// Especiais (ST-12) todas as quatro abertas.
+// (adjacentes), Reta norte+sul (opostas), T norte+leste+oeste, Cruz, as
+// Especiais (ST-12) e os Monstros (ST-15 / issue #169) todas as quatro
+// abertas.
 const BORDAS_BASE: Record<TipoDaPeca, readonly BordaCardinal[]> = {
   inicial: ['norte', 'leste'],
   reta: ['norte', 'sul'],
@@ -52,6 +53,8 @@ const BORDAS_BASE: Record<TipoDaPeca, readonly BordaCardinal[]> = {
   sala_do_diretor: ['norte', 'leste', 'sul', 'oeste'],
   sala_medica: ['norte', 'leste', 'sul', 'oeste'],
   portao_de_saida: ['norte', 'leste', 'sul', 'oeste'],
+  vulto: ['norte', 'leste', 'sul', 'oeste'],
+  espectro: ['norte', 'leste', 'sul', 'oeste'],
 };
 
 const ORDEM_CANONICA_DAS_BORDAS: readonly BordaCardinal[] = [
@@ -93,6 +96,13 @@ export function bordasAbertas(
     bordas = bordas.map((borda) => ROTACAO_HORARIA_DA_BORDA[borda]);
   }
   return ORDEM_CANONICA_DAS_BORDAS.filter((borda) => bordas.includes(borda));
+}
+
+// Monstros (ST-15 / issue #169): categoria própria de peça da Caixa — não
+// entram em TipoDePecaEspecial. São sorteados e posicionados pelo fluxo do
+// Recebimento como peça comum, sem janela de Manipulação e sem aceitar Peão.
+export function ehPecaDeMonstro(tipo: TipoDaPeca): boolean {
+  return tipo === 'vulto' || tipo === 'espectro';
 }
 
 // Célula vizinha na direção da borda, ou null quando cai fora da grade.
@@ -495,6 +505,17 @@ export function moverPeao(
     );
   }
 
+  // Monstros (ST-15 / issue #169) não aceitam Peão: mesmo conectado, mover
+  // para um Monstro é rejeitado com o código fechado existente
+  // PECA_JA_TEM_PEAO (mesmo precedente da ocupação do Portão da issue #176);
+  // nenhum código de erro novo. O estado permanece inalterado.
+  if (ehPecaDeMonstro(alvo.tipo)) {
+    return rejeitar(
+      'PECA_JA_TEM_PEAO',
+      'A Peça de destino é um Monstro e não aceita Peão.',
+    );
+  }
+
   // Ocupação (issue #176): a peça de destino portao_de_saida aceita até 4
   // peões (a reunião deles no Portão é condição de vitória); as demais
   // peças continuam no máximo 1. Com 4 peões no jogo, o teto do portão é
@@ -573,7 +594,9 @@ export function permanecer(
 // geradora (ST-10). A Recebida sai da lista de pendências e a janela de
 // Manipulação da ST-09 abre como em qualquer Encaixe — girar a peça
 // posicionada vai pela janela, sem consultar a seleção. A seleção é limpa no
-// encaixe; a próxima escolha de vaga seleciona a próxima Recebida.
+// encaixe; a próxima escolha de vaga seleciona a próxima Recebida. Exceção
+// (ST-15 / issue #169): Monstros NÃO abrem janela de Manipulação —
+// pecaEmManipulacaoId permanece null no novo estado.
 export function posicionarRecebida(
   estado: EstadoDoTabuleiro,
   recebida: PecaRecebida,
@@ -626,7 +649,12 @@ export function posicionarRecebida(
     ),
     posicionadas: [...estado.posicionadas, posicionada],
     pecaSelecionadaId: null,
-    pecaEmManipulacaoId: posicionada.pecaId,
+    // Monstros (ST-15 / issue #169) não têm janela de Manipulação: o encaixe
+    // não abre a janela; Peças de caminho e Especiais mantêm o comportamento
+    // atual (abrem a janela da peça posicionada).
+    pecaEmManipulacaoId: ehPecaDeMonstro(posicionada.tipo)
+      ? null
+      : posicionada.pecaId,
   };
   return sucesso(novoEstado, [
     {

@@ -53,7 +53,7 @@ function peçaNasIniciais(estado: EstadoDoTabuleiro, pecaId: string) {
   return peca;
 }
 
-test('estado inicial tem 4 iniciais fora da caixa e a caixa de 71 peças de caminho', () => {
+test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças de caminho', () => {
   const estado = estadoInicialDoTabuleiro();
 
   // As 4 Peças Iniciais ficam fora da Caixa (ST-12).
@@ -68,7 +68,7 @@ test('estado inicial tem 4 iniciais fora da caixa e a caixa de 71 peças de cami
   }
 
   // Sem seed, a Caixa permanece na ordem de composição.
-  assert.equal(estado.caixa.length, 71);
+  assert.equal(estado.caixa.length, 83);
   const porTipo: Record<string, number> = {};
   for (const peca of estado.caixa) {
     porTipo[peca.tipo] = (porTipo[peca.tipo] ?? 0) + 1;
@@ -83,10 +83,12 @@ test('estado inicial tem 4 iniciais fora da caixa e a caixa de 71 peças de cami
     sala_do_diretor: 3,
     sala_medica: 4,
     portao_de_saida: 4,
+    vulto: 6,
+    espectro: 6,
   });
 
   const ids = new Set(estado.caixa.map((peca) => peca.pecaId));
-  assert.equal(ids.size, 71);
+  assert.equal(ids.size, 83);
   assert.ok(ids.has('reta-10'));
   assert.ok(ids.has('t-32'));
   assert.ok(ids.has('cruz-12'));
@@ -94,6 +96,8 @@ test('estado inicial tem 4 iniciais fora da caixa e a caixa de 71 peças de cami
   assert.ok(ids.has('sala-do-diretor-3'));
   assert.ok(ids.has('sala-medica-4'));
   assert.ok(ids.has('portao-de-saida-4'));
+  assert.ok(ids.has('vulto-6'));
+  assert.ok(ids.has('espectro-6'));
 
   assert.deepEqual(estado.posicionadas, []);
   assert.equal(estado.pecaSelecionadaId, null);

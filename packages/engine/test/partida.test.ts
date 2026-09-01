@@ -189,7 +189,7 @@ test('estadoInicialDaPartida monta o roster, a vez e o evento de abertura', () =
   assert.equal(estado.rodada, 1);
   assert.equal(estado.pecaDoInicioDoTurnoId, null);
   assert.equal(estado.posicaoConfirmada, false);
-  assert.equal(estado.tabuleiro.caixa.length, 71);
+  assert.equal(estado.tabuleiro.caixa.length, 83);
   assert.equal(estado.tabuleiro.iniciais.length, 4);
   assert.equal(estado.tabuleiro.peoes.length, 4);
   assert.deepEqual(resultado.eventos, [
