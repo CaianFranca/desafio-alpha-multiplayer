@@ -8,10 +8,10 @@ import { verificarAccess } from './jwt.ts';
 import { obterSessao } from './sessoes.ts';
 import { criarContextoDasSalas } from './salas/index.ts';
 
-const app = createApp();
-const server = http.createServer(app);
-
 const contextoSalas = criarContextoDasSalas();
+
+const app = createApp({ contextoSalas });
+const server = http.createServer(app);
 
 createWebSocketServer(server, { verificarAccess, obterSessao, contextoSalas });
 

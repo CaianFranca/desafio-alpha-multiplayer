@@ -232,6 +232,95 @@ export class SalasRepo {
     }
   }
 
+  /**
+   * Reabre a sala encaminhada: volta para 'aberta' e limpa server/partida.
+   * Usado no retorno da partida (issue #178). Só afeta linhas com
+   * status='encaminhada' — garante idempotência ao nível do PG (segunda
+   * chamada com status 'aberta' não altera nada).
+   * Retorna true quando houve mutação, false quando já estava aberta.
+   * @deprecated usar reabrirSalaComMarkerAtomico para durabilidade PG+marker atômica
+   */
+  async reabrirSalaAtomico(salaId: string): Promise<boolean> {
+    const resultado = await this.pool.query(
+      `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
+      [salaId],
+    );
+    return (resultado.rowCount ?? 0) === 1;
+  }
+
+  /**
+   * Reabre a sala e grava o marker de idempotência na mesma transação PG.
+   * Elimina a janela de crash entre UPDATE e INSERT (bloqueante #185):
+   *   UPDATE salas_historico + INSERT sala_reaberta_markers em BEGIN/COMMIT
+   * Retorna true quando houve mutação, false quando já estava aberta.
+   * Tabela criada via migration 20260902000000 (FK ON DELETE CASCADE).
+   */
+  async reabrirSalaComMarkerAtomico(salaId: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const upd = await client.query(
+        `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
+        [salaId],
+      );
+      if ((upd.rowCount ?? 0) !== 1) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      await client.query(
+        `INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+        [salaId],
+      );
+      await client.query('COMMIT');
+      return true;
+    } catch (erro) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw erro;
+    } finally {
+      client.release();
+    }
+  }
+
+  async marcarReabertaPersistido(salaId: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [salaId],
+    );
+  }
+
+  async foiReabertaPersistido(salaId: string): Promise<boolean> {
+    const r = await this.pool.query(`SELECT 1 FROM sala_reaberta_markers WHERE sala_id = $1 LIMIT 1`, [salaId]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  /** Registro bruto da sala (inclui encaminhada e aberta) — usado na revalidação do retorno (#178). */
+  async obterSalaBruta(
+    salaId: string,
+  ): Promise<{ id: string; codigo: string; anfitriaoId: string | null; status: StatusDaSala; serverId: string | null; partidaId: string | null } | null> {
+    const resultado = await this.pool.query<{
+      id: string;
+      codigo: string;
+      anfitriaoId: string | null;
+      status: string;
+      serverId: string | null;
+      partidaId: string | null;
+    }>(
+      `SELECT id, codigo_sala AS codigo, anfitriao_id AS "anfitriaoId", status, server_id AS "serverId", partida_id AS "partidaId"
+       FROM salas_historico WHERE id = $1 LIMIT 1`,
+      [salaId],
+    );
+    const linha = resultado.rows[0];
+    if (!linha) return null;
+    return {
+      id: linha.id,
+      codigo: linha.codigo,
+      anfitriaoId: linha.anfitriaoId,
+      status: linha.status as StatusDaSala,
+      serverId: linha.serverId ?? null,
+      partidaId: linha.partidaId ?? null,
+    };
+  }
+
   /** Obtém server/partida de uma sala encaminhada (null se não encaminhada). */
   async obterEncaminhamento(salaId: string): Promise<EncaminhamentoPersistido | null> {
     const resultado = await this.pool.query<{ server_id: string | null; partida_id: string | null }>(

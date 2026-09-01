@@ -135,6 +135,11 @@ export interface EncerrarSalaComando {
   readonly anfitriaoMembroId: string;
 }
 
+export interface ReabrirSalaComando {
+  readonly tipo: 'reabrir_sala';
+  readonly salaId: string;
+}
+
 export type Comando =
   | CriarSalaComando
   | EntrarNaSalaComando
@@ -151,7 +156,8 @@ export type Comando =
   | AceitarEncaminhamentoComando
   | RecusarEncaminhamentoComando
   | RegistrarFalhaDoEncaminhamentoComando
-  | EncerrarSalaComando;
+  | EncerrarSalaComando
+  | ReabrirSalaComando;
 
 export interface SalaCriadaEvento {
   readonly tipo: 'sala_criada';
@@ -268,6 +274,11 @@ export interface EncaminhamentoFalhouEvento {
   readonly salaId: string;
 }
 
+export interface SalaReabertaEvento {
+  readonly tipo: 'sala_reaberta';
+  readonly salaId: string;
+}
+
 export type EventoDeDominio =
   | SalaCriadaEvento
   | MembroAdmitidoEvento
@@ -286,7 +297,8 @@ export type EventoDeDominio =
   | EncaminhamentoIniciadoEvento
   | SalaEncaminhadaEvento
   | EncaminhamentoRecusadoEvento
-  | EncaminhamentoFalhouEvento;
+  | EncaminhamentoFalhouEvento
+  | SalaReabertaEvento;
 
 export type CodigoDeErro =
   | 'DADOS_INVALIDOS'
@@ -305,6 +317,7 @@ export type CodigoDeErro =
   | 'JOGADOR_NAO_BLOQUEADO'
   | 'SALA_INCONSISTENTE'
   | 'SALA_ENCAMINHADA'
+  | 'SALA_NAO_ENCAMINHADA'
   | 'ENCAMINHAMENTO_INVALIDO';
 
 export interface ErroDeDominio {
@@ -372,6 +385,8 @@ export function aplicarComando(
       return registrarFalhaDoEncaminhamento(estado, comando);
     case 'encerrar_sala':
       return encerrarSala(estado, comando);
+    case 'reabrir_sala':
+      return reabrirSala(estado, comando);
     default:
       return rejeitar('DADOS_INVALIDOS', 'O comando de domínio é inválido.');
   }
@@ -1223,6 +1238,49 @@ export function encerrarSala(
 
   return sucesso(substituirSala(estado, novaSala), [
     { tipo: 'sala_encerrada', salaId: sala.id, motivo: 'encerramento' },
+  ]);
+}
+
+export function reabrirSala(
+  estado: EstadoDoLobby,
+  comando: ReabrirSalaComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  if (sala.estado !== 'encaminhada') {
+    return rejeitar(
+      'SALA_NAO_ENCAMINHADA',
+      'A Sala não está encaminhada.',
+      { salaId: sala.id },
+    );
+  }
+
+  const novaSala: Sala = {
+    ...sala,
+    estado: 'aberta',
+    membros: sala.membros.map((membro) =>
+      membro.estado === 'ativo'
+        ? { ...membro, pronto: false }
+        : membro,
+    ),
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    { tipo: 'sala_reaberta', salaId: sala.id },
   ]);
 }
 

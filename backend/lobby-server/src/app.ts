@@ -1,11 +1,17 @@
 import express, { type Express } from 'express';
 import { authRouter } from './routes/auth.ts';
 import { gameServersRouter } from './routes/gameServers.ts';
+import { criarRetornoRouter } from './routes/retorno.ts';
 import { cookieMiddleware } from './middleware/cookie.ts';
 import { pool } from './config/pg.ts';
 import { redisClient } from './config/redis.ts';
+import type { SalasContexto } from './salas/index.ts';
 
-export function createApp(): Express {
+export interface CreateAppOpcoes {
+  readonly contextoSalas?: SalasContexto;
+}
+
+export function createApp(opcoes: CreateAppOpcoes = {}): Express {
   const app = express();
 
   app.use(express.json({ limit: '10kb' }));
@@ -24,6 +30,10 @@ export function createApp(): Express {
 
   app.use('/api/auth', authRouter);
   app.use('/api/game-servers', gameServersRouter);
+
+  if (opcoes.contextoSalas) {
+    app.use('/api/retorno', criarRetornoRouter(opcoes.contextoSalas));
+  }
 
   // Handler global para erros de body-parser — evita respostas HTML para a API (A6/A8).
   app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
