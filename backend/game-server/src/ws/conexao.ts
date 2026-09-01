@@ -8,27 +8,51 @@ export interface ConexaoDoJogador {
   readonly partidaId: PartidaId;
 }
 
-const conexoesPorPartida = new Map<PartidaId, Set<ConexaoDoJogador>>();
+// Registro único por Jogador dentro de cada Partida (issue #155): uma nova
+// Conexão à Partida do mesmo Jogador substitui a anterior, então a estrutura
+// é Map<partidaId, Map<jogadorId, ConexaoDoJogador>> — nunca há mais de uma
+// conexão vigente por Jogador.
+const conexoesPorPartida = new Map<PartidaId, Map<string, ConexaoDoJogador>>();
 
-export function adicionarConexao(conexao: ConexaoDoJogador): void {
-  let conjunto = conexoesPorPartida.get(conexao.partidaId);
-  if (conjunto === undefined) {
-    conjunto = new Set();
-    conexoesPorPartida.set(conexao.partidaId, conjunto);
+/**
+ * Registra a conexão como a vigente do Jogador na Partida e devolve a conexão
+ * anterior (`null` se não havia). Quem chama fica responsável por encerrar a
+ * conexão anterior (substituição de Conexão duplicada, #155) — ela já saiu do
+ * registro aqui.
+ */
+export function adicionarConexao(conexao: ConexaoDoJogador): ConexaoDoJogador | null {
+  let porJogador = conexoesPorPartida.get(conexao.partidaId);
+  if (porJogador === undefined) {
+    porJogador = new Map();
+    conexoesPorPartida.set(conexao.partidaId, porJogador);
   }
-  conjunto.add(conexao);
+  const anterior = porJogador.get(conexao.jogadorId) ?? null;
+  porJogador.set(conexao.jogadorId, conexao);
+  return anterior;
 }
 
-export function removerConexao(conexao: ConexaoDoJogador): void {
-  const conjunto = conexoesPorPartida.get(conexao.partidaId);
-  if (conjunto !== undefined) {
-    conjunto.delete(conexao);
-    if (conjunto.size === 0) {
-      conexoesPorPartida.delete(conexao.partidaId);
-    }
+/**
+ * Remove a conexão do registro. Retorna `true` apenas se a conexão fechada
+ * era a vigente do Jogador — o `close` usa isso para decidir se marca
+ * `em_reconexao`: quando a conexão já foi substituída (#155), a presença do
+ * Jogador permanece `conectado`.
+ */
+export function removerConexao(conexao: ConexaoDoJogador): boolean {
+  const porJogador = conexoesPorPartida.get(conexao.partidaId);
+  if (porJogador === undefined) {
+    return false;
   }
+  if (porJogador.get(conexao.jogadorId) !== conexao) {
+    return false;
+  }
+  porJogador.delete(conexao.jogadorId);
+  if (porJogador.size === 0) {
+    conexoesPorPartida.delete(conexao.partidaId);
+  }
+  return true;
 }
 
-export function obterConexoes(partidaId: PartidaId): ReadonlySet<ConexaoDoJogador> {
-  return conexoesPorPartida.get(partidaId) ?? new Set();
+/** Conexões vigentes da Partida, indexadas por `jogadorId`. */
+export function obterConexoes(partidaId: PartidaId): ReadonlyMap<string, ConexaoDoJogador> {
+  return conexoesPorPartida.get(partidaId) ?? new Map();
 }

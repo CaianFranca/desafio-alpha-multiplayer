@@ -2,8 +2,9 @@
 //
 // Verifica que os eventos CELULAS_ILUMINADAS e LIMPEZA_APLICADA chegam ao
 // cliente quando o motor emite celulas_iluminadas / limpeza_aplicada, que o
-// tardio recebe replay unicast, e que payload malformado / impersonation não
-// altera estado. Segue o padrão de turnos.test.ts: app+WS efêmeros com Redis real.
+// tardio recebe replay unicast, que payload malformado não altera estado e
+// que comando com `jogadorId` alheio é aplicado como a Sessão (#155). Segue o
+// padrão de turnos.test.ts: app+WS efêmeros com Redis real.
 
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -454,7 +455,7 @@ test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da ilumin
   }
 });
 
-test('rejeição: payload malformado, tipo inexistente e impersonation são rejeitados sem alterar estado', async () => {
+test('rejeição: payload malformado e tipo inexistente sem alterar estado; jogadorId alheio é aplicado como a Sessão (#155)', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
@@ -486,13 +487,16 @@ test('rejeição: payload malformado, tipo inexistente e impersonation são reje
       const estado3 = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.deepEqual(estado3, estadoAntes);
 
-      // 4) Impersonation: ws autentica como jogador-1 mas declara jogador-2
-      enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-2' });
-      const erro4 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
-      assert.equal(erro4.codigo, 'DADOS_INVALIDOS');
-      assert.match(erro4.mensagem as string, /ator/i);
+      // 4) Ator da Sessão (#155): ws autentica como jogador-1 mas declara
+      // jogador-2 no wire. O comando é aplicado como a Sessão — a vez é de
+      // jogador-1, então PECA_SELECIONADA confirma que o ator foi a Sessão
+      // (com o `jogadorId` do wire, seria FORA_DA_VEZ).
+      enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-1' });
+      const selecionada = await esperarEvento(ws, 'PECA_SELECIONADA');
+      assert.equal(selecionada.pecaId, 'inicial-1');
       const estado4 = await obterEstadoDaPartida(redis, aceite.partidaId);
-      assert.deepEqual(estado4, estadoAntes);
+      assert.ok(estado4 !== null);
+      assert.equal(estado4!.tabuleiro.pecaSelecionadaId, 'inicial-1');
 
       // Garantir que nenhum evento de iluminação/limpeza foi emitido indevidamente
       // (nenhum listener pendente; apenas checar que estado celulasIluminadas ainda vazio)

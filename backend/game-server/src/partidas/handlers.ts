@@ -3,12 +3,13 @@
 // Roteia os 11 comandos wire de Partida (`@flicker/shared`) para o domínio
 // (`@flicker/engine`) via `aplicarComandoDePartida`, persiste o novo estado
 // (tabuleiro + Turnos) no Redis e faz broadcast dos eventos traduzidos. O
-// ator do dispatch é a sessão autenticada do socket (passada por `ws.ts` como
-// `sessaoJogadorId`), não o `jogadorId` autodeclarado no wire: um comando cujo
-// `jogadorId` divirja da sessão é rejeitado como impersonation (#135). O
-// `jogadorId` do wire apenas precisa coincidir com a sessão — ele segue sendo
-// usado como ator no dispatch já com a igualdade garantida (contrato do ST-11).
-// Rejeições do domínio e comandos fora do contrato (incluindo
+// ator do dispatch é sempre a sessão autenticada do socket (passada por
+// `ws.ts` como `sessaoJogadorId`), nunca o `jogadorId` autodeclarado no wire:
+// o campo permanece obrigatório no contrato (guarda de forma) mas é vestigial
+// no dispatch — um comando cujo `jogadorId` do wire divirja da sessão é
+// aceito e aplicado como a sessão (issue #155), então o broadcast carrega a
+// identidade da Sessão por construção. Rejeições do domínio e comandos fora
+// do contrato (incluindo
 // o wire legacy de tabuleiro/Peões sem `jogadorId`) são roteadas ao
 // originador com `ERRO_DO_TABULEIRO`, usando o `codigo` fechado do domínio.
 // As mutações são serializadas por `partidaId` para evitar lost-update no
@@ -48,12 +49,11 @@ export class PartidaHandlers {
   /**
    * Despacho principal chamado por `ws.ts` em `'message'`. Espera a mensagem
    * já parseada e o `sessaoJogadorId` (a sessão autenticada do socket). A
-   * guarda `ehComandoDaPartida` confere o contrato de forma; depois uma checagem
-   * de impersonation garante que o `jogadorId` do wire coincide com a sessão,
-   * rejeitando o comando com `ERRO_DO_TABULEIRO { DADOS_INVALIDOS }` caso
-   * divirjam. Comandos fora do conjunto fechado também viram
-   * `ERRO_DO_TABULEIRO { DADOS_INVALIDOS }`. Erros inesperados viram
-   * `ERRO_DO_TABULEIRO` genérico + `console.error`.
+   * guarda `ehComandoDaPartida` confere o contrato de forma; o ator do
+   * dispatch é sempre a sessão — o `jogadorId` do wire é vestigial (#155) e
+   * comandos com `jogadorId` alheio são aplicados como a sessão. Comandos
+   * fora do conjunto fechado viram `ERRO_DO_TABULEIRO { DADOS_INVALIDOS }`.
+   * Erros inesperados viram `ERRO_DO_TABULEIRO` genérico + `console.error`.
    */
   async aplicarMensagem(
     socket: WebSocket,
@@ -66,19 +66,6 @@ export class PartidaHandlers {
         type: 'ERRO_DO_TABULEIRO',
         codigo: 'DADOS_INVALIDOS',
         mensagem: 'Comando fora do escopo da partida.',
-      });
-      return;
-    }
-
-    // Impersonation: a guarda acima confirma que é um comando válido de forma,
-    // mas o ator do dispatch precisa ser a sessão autenticada (`sessaoJogadorId`),
-    // não o `jogadorId` autodeclarado no wire. Se divergirem, rejeita antes de
-    // enfileirar/mapear/dispachar para não deixar o cliente se passar por outro.
-    if (mensagem.jogadorId !== sessaoJogadorId) {
-      this.broadcaster.enviarParaSocket(socket, {
-        type: 'ERRO_DO_TABULEIRO',
-        codigo: 'DADOS_INVALIDOS',
-        mensagem: 'Ator do comando não corresponde à sessão.',
       });
       return;
     }
@@ -97,10 +84,10 @@ export class PartidaHandlers {
       }
 
       const comando = mapearComandoDaPartida(mensagem);
-      // Ator = jogadorId do wire, que já foi validado como igual à sessão na
-      // guarda de impersonation acima; manter o jogadorId do wire (que o
-      // contrato ST-11 já carrega para o broadcast) é consistente.
-      const resultado = aplicarComandoDePartida(estado, comando, mensagem.jogadorId);
+      // Ator = sessão autenticada do socket (#155): o `jogadorId` do wire é
+      // vestigial no dispatch, então o broadcast carrega a identidade da
+      // Sessão mesmo quando o cliente declara outro `jogadorId`.
+      const resultado = aplicarComandoDePartida(estado, comando, sessaoJogadorId);
       if (!resultado.sucesso) {
         this.broadcaster.enviarParaSocket(socket, {
           type: 'ERRO_DO_TABULEIRO',

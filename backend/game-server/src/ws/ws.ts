@@ -17,9 +17,19 @@
 // pré-upgrade, não há comando a bufferizar: quando os listeners anexam, a
 // partida já está validada. PING/PONG responde sempre. Sem `deps`, o servidor
 // opera apenas em PING/PONG.
+//
+// Substituição de Conexão duplicada (issue #155): uma nova admissão do mesmo
+// Jogador na mesma Partida registra-se ANTES da transição de presença e só
+// então encerra a conexão anterior com `4409 CONEXAO_SUBSTITUIDA` — nunca há
+// janela sem conexão vigente, e um `close` do socket antigo durante a
+// transição não é tratado como desconexão real. O `close` da conexão
+// substituída NÃO marca `em_reconexao`: a presença do Jogador permanece
+// `conectado` porque o registro já aponta para a nova conexão (checagem de
+// vigência em `removerConexao`).
 
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
+import type { Redis } from 'ioredis';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import type {
   ServerMessage,
@@ -148,6 +158,35 @@ function isPing(value: unknown): boolean {
   );
 }
 
+/**
+ * Limpeza do registro de conexões quando a admissão falha — tanto no caminho
+ * de transição inválida (`transicao === null`) quanto no de exceção (ex.:
+ * Redis fora, review da PR #181). Remove a conexão nova do registro (o
+ * listener de `close` só é anexado no caminho de sucesso, então sem esta
+ * remoção a entrada ficaria órfã apontando para o socket falhado), restaura a
+ * conexão anterior como vigente quando ela ainda está aberta — preservando a
+ * presença `conectado` — e, sem anterior aberta, marca `em_reconexao` (não há
+ * conexão viva). A invariante "registro espelha a conexão vigente" precisa
+ * valer nos dois caminhos: reconexão/durabilidade e a tela da partida (#156)
+ * vão consumi-la.
+ */
+function limparAdmissaoFalha(
+  redis: Redis,
+  partidaId: PartidaId,
+  jogadorId: string,
+  conexao: ConexaoDoJogador,
+  conexaoAnterior: ConexaoDoJogador | null,
+): void {
+  const eraVigente = removerConexao(conexao);
+  if (conexaoAnterior !== null && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN) {
+    adicionarConexao(conexaoAnterior);
+  } else if (eraVigente) {
+    void marcarDesconexao(redis, partidaId, jogadorId).catch((err) =>
+      console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
+    );
+  }
+}
+
 export function criarWebSocketServer(
   server: Server,
   contexto: ContextoDoGameServer,
@@ -200,7 +239,30 @@ export function criarWebSocketServer(
       }
 
       wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
+        // Referências fora da IIFE: o `catch` externo precisa delas para
+        // aplicar a mesma limpeza do caminho de falha quando algo lançar
+        // durante a admissão (ex.: Redis fora) — review da PR #181.
+        let conexaoRegistrada: ConexaoDoJogador | null = null;
+        let conexaoAnterior: ConexaoDoJogador | null = null;
         void (async () => {
+          const conexao: ConexaoDoJogador = {
+            socket: ws,
+            jogadorId: sessao.jogadorId,
+            apelido: sessao.apelido,
+            partidaId,
+          };
+          // Substituição (#155): a nova conexão entra no registro ANTES da
+          // transição de presença e de a antiga ser encerrada —
+          // `adicionarConexao` devolve a anterior, que deixa de ser a vigente
+          // neste instante. Registrar antes da transição fecha a janela em que
+          // um `close` do socket antigo (queda de rede simultânea à nova
+          // admissão) seria tratado como desconexão real e sobrescreveria a
+          // presença recém-gravada com `em_reconexao`: durante o `await` da
+          // transição, o antigo já não é vigente e o `close` dele pula
+          // `marcarDesconexao`.
+          conexaoAnterior = adicionarConexao(conexao);
+          conexaoRegistrada = conexao;
+
           const transicao = await transicionarSeCompletoOuAtualizarPresenca(
             contexto.redis,
             partidaId,
@@ -208,6 +270,7 @@ export function criarWebSocketServer(
           );
 
           if (transicao === null || (transicao.estado !== 'preparada' && transicao.estado !== 'em_andamento')) {
+            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior);
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
             } catch {}
@@ -222,14 +285,6 @@ export function criarWebSocketServer(
             partidaId,
             estado: transicao.estado,
           } satisfies ServerMessage));
-
-          const conexao: ConexaoDoJogador = {
-            socket: ws,
-            jogadorId: sessao.jogadorId,
-            apelido: sessao.apelido,
-            partidaId,
-          };
-          adicionarConexao(conexao);
 
           // Admissão concluída após upgrade: transição atômica dentro do
           // callback garante que a partida só inicie com 4 sockets vivos
@@ -286,57 +341,89 @@ export function criarWebSocketServer(
             })();
           }
 
-        console.info('[ws] jogador admitido', {
-          jogadorId: sessao.jogadorId,
-          apelido: sessao.apelido,
-          partidaId,
-        });
-
-        ws.on('error', (error) => {
-          console.error('[ws] socket error:', error.message);
-        });
-
-        ws.on('message', (data: RawData) => {
-          const parsed = parsearMensagem(data);
-          if (parsed === null) {
-            return;
+          // Fechamento da conexão substituída (#155): acontece depois do
+          // ADMISSAO_ACEITA da nova (já enviado) e depois do registro dela no
+          // broadcaster — a antiga já saiu do registro, então seu `close`
+          // não marca `em_reconexao` (ver handler de `close` abaixo).
+          if (conexaoAnterior !== null) {
+            console.info('[ws] conexão substituída', {
+              jogadorId: sessao.jogadorId,
+              partidaId,
+            });
+            try {
+              conexaoAnterior.socket.close(4409, 'CONEXAO_SUBSTITUIDA');
+            } catch {
+              // Socket antigo já fechando ou fechado: nada a fazer.
+            }
           }
 
-          // PING/PONG responde sempre, mesmo com o canal de partida ativo.
-          if (isPing(parsed)) {
-            ws.send(JSON.stringify({ type: 'PONG' } satisfies ServerMessage));
-            return;
-          }
-
-          if (depsPartida === undefined) {
-            return;
-          }
-
-          // Comandos fora do contrato (guard em `handlers.ts`) também seguem
-          // para o handler: ele responde ERRO_DO_TABULEIRO DADOS_INVALIDOS ao
-          // originador — descartar aqui quebraria o contrato fechado do wire
-          // (issue #117) e o teste de guarda de peões.
-          // O ator do dispatch é a sessão autenticada (`sessao.jogadorId`),
-          // nunca o `jogadorId` autodeclarado no wire: o handler rejeita
-          // comandos cujo `jogadorId` divirja da sessão (impersonation, #135).
-          void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
-        });
-
-        ws.on('close', () => {
-          console.info('[ws] jogador desconectado', {
+          console.info('[ws] jogador admitido', {
             jogadorId: sessao.jogadorId,
+            apelido: sessao.apelido,
             partidaId,
           });
-          removerConexao(conexao);
-          if (depsPartida !== undefined) {
-            depsPartida.broadcaster.remover(ws);
-          }
-          void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
-            console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
-          );
-        });
+
+          ws.on('error', (error) => {
+            console.error('[ws] socket error:', error.message);
+          });
+
+          ws.on('message', (data: RawData) => {
+            const parsed = parsearMensagem(data);
+            if (parsed === null) {
+              return;
+            }
+
+            // PING/PONG responde sempre, mesmo com o canal de partida ativo.
+            if (isPing(parsed)) {
+              ws.send(JSON.stringify({ type: 'PONG' } satisfies ServerMessage));
+              return;
+            }
+
+            if (depsPartida === undefined) {
+              return;
+            }
+
+            // Comandos fora do contrato (guard em `handlers.ts`) também seguem
+            // para o handler: ele responde ERRO_DO_TABULEIRO DADOS_INVALIDOS ao
+            // originador — descartar aqui quebraria o contrato fechado do wire
+            // (issue #117) e o teste de guarda de peões.
+            // O ator do dispatch é a sessão autenticada (`sessao.jogadorId`),
+            // nunca o `jogadorId` autodeclarado no wire: o handler injeta a
+            // sessão como ator (#155) mesmo quando o `jogadorId` do wire
+            // diverge — o campo segue obrigatório só pela guarda de forma.
+            void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
+          });
+
+          ws.on('close', () => {
+            console.info('[ws] jogador desconectado', {
+              jogadorId: sessao.jogadorId,
+              partidaId,
+            });
+            // Só marca `em_reconexao` quando a conexão fechada era a vigente do
+            // Jogador: no fechamento por substituição (#155) a vigente já é a
+            // nova conexão, e a presença permanece `conectado`.
+            const eraVigente = removerConexao(conexao);
+            if (depsPartida !== undefined) {
+              depsPartida.broadcaster.remover(ws);
+            }
+            if (!eraVigente) {
+              return;
+            }
+            void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
+              console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
+            );
+          });
         })().catch((error) => {
           console.error('[ws] falha na transição pós-upgrade:', (error as Error).message);
+          // Exceção durante a admissão (ex.: Redis fora): a mesma limpeza do
+          // caminho de falha — sem ela, o socket novo ficaria registrado como
+          // vigente (morto) e a conexão antiga desregistrada (review #181).
+          if (conexaoRegistrada !== null) {
+            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexaoRegistrada, conexaoAnterior);
+          }
+          try {
+            ws.send(erroRejeitada('ERRO_INTERNO', 'falha na admissão da partida'));
+          } catch {}
           try { ws.close(1011, 'ERRO_INTERNO'); } catch {}
         });
       });
