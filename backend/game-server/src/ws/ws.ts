@@ -357,62 +357,62 @@ export function criarWebSocketServer(
             }
           }
 
-        console.info('[ws] jogador admitido', {
-          jogadorId: sessao.jogadorId,
-          apelido: sessao.apelido,
-          partidaId,
-        });
-
-        ws.on('error', (error) => {
-          console.error('[ws] socket error:', error.message);
-        });
-
-        ws.on('message', (data: RawData) => {
-          const parsed = parsearMensagem(data);
-          if (parsed === null) {
-            return;
-          }
-
-          // PING/PONG responde sempre, mesmo com o canal de partida ativo.
-          if (isPing(parsed)) {
-            ws.send(JSON.stringify({ type: 'PONG' } satisfies ServerMessage));
-            return;
-          }
-
-          if (depsPartida === undefined) {
-            return;
-          }
-
-          // Comandos fora do contrato (guard em `handlers.ts`) também seguem
-          // para o handler: ele responde ERRO_DO_TABULEIRO DADOS_INVALIDOS ao
-          // originador — descartar aqui quebraria o contrato fechado do wire
-          // (issue #117) e o teste de guarda de peões.
-          // O ator do dispatch é a sessão autenticada (`sessao.jogadorId`),
-          // nunca o `jogadorId` autodeclarado no wire: o handler injeta a
-          // sessão como ator (#155) mesmo quando o `jogadorId` do wire
-          // diverge — o campo segue obrigatório só pela guarda de forma.
-          void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
-        });
-
-        ws.on('close', () => {
-          console.info('[ws] jogador desconectado', {
+          console.info('[ws] jogador admitido', {
             jogadorId: sessao.jogadorId,
+            apelido: sessao.apelido,
             partidaId,
           });
-          // Só marca `em_reconexao` quando a conexão fechada era a vigente do
-          // Jogador: no fechamento por substituição (#155) a vigente já é a
-          // nova conexão, e a presença permanece `conectado`.
-          const eraVigente = removerConexao(conexao);
-          if (depsPartida !== undefined) {
-            depsPartida.broadcaster.remover(ws);
-          }
-          if (!eraVigente) {
-            return;
-          }
-          void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
-            console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
-          );
-        });
+
+          ws.on('error', (error) => {
+            console.error('[ws] socket error:', error.message);
+          });
+
+          ws.on('message', (data: RawData) => {
+            const parsed = parsearMensagem(data);
+            if (parsed === null) {
+              return;
+            }
+
+            // PING/PONG responde sempre, mesmo com o canal de partida ativo.
+            if (isPing(parsed)) {
+              ws.send(JSON.stringify({ type: 'PONG' } satisfies ServerMessage));
+              return;
+            }
+
+            if (depsPartida === undefined) {
+              return;
+            }
+
+            // Comandos fora do contrato (guard em `handlers.ts`) também seguem
+            // para o handler: ele responde ERRO_DO_TABULEIRO DADOS_INVALIDOS ao
+            // originador — descartar aqui quebraria o contrato fechado do wire
+            // (issue #117) e o teste de guarda de peões.
+            // O ator do dispatch é a sessão autenticada (`sessao.jogadorId`),
+            // nunca o `jogadorId` autodeclarado no wire: o handler injeta a
+            // sessão como ator (#155) mesmo quando o `jogadorId` do wire
+            // diverge — o campo segue obrigatório só pela guarda de forma.
+            void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
+          });
+
+          ws.on('close', () => {
+            console.info('[ws] jogador desconectado', {
+              jogadorId: sessao.jogadorId,
+              partidaId,
+            });
+            // Só marca `em_reconexao` quando a conexão fechada era a vigente do
+            // Jogador: no fechamento por substituição (#155) a vigente já é a
+            // nova conexão, e a presença permanece `conectado`.
+            const eraVigente = removerConexao(conexao);
+            if (depsPartida !== undefined) {
+              depsPartida.broadcaster.remover(ws);
+            }
+            if (!eraVigente) {
+              return;
+            }
+            void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
+              console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
+            );
+          });
         })().catch((error) => {
           console.error('[ws] falha na transição pós-upgrade:', (error as Error).message);
           // Exceção durante a admissão (ex.: Redis fora): a mesma limpeza do
