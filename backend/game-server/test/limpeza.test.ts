@@ -17,8 +17,8 @@
 // - Ausência de LIMPEZA em comandos que não mudam Iluminação
 //   (MOVER_PEAO, PERMANECER, ENCERRAR_TURNO, 2º CONFIRMAR)
 // - Cobertura de POSICIONAR_PEAO no Primeiro Turno (ausência explícita)
-// - Preservação das rejeições FORA_DA_VEZ e impersonation (DADOS_INVALIDOS)
-//   para MOVER_PEAO e CONFIRMAR além de SELECIONAR_PECA
+// - Preservação das rejeições FORA_DA_VEZ e de Peça/Peão alheios (ator = Sessão,
+//   #155) para MOVER_PEAO, CONFIRMAR e SELECIONAR_PECA
 // - Robustez de ausência via âncora positiva + janela de silêncio 600ms
 // - Derivação dinâmica de peca esperada removida (sem hard-coded frágil reta-2)
 
@@ -825,7 +825,7 @@ test('Limpeza: ENCERRAR_TURNO e POSICIONAR_PEAO no Primeiro Turno não emitem LI
 // Teste E — rejeições preservadas (FORA_DA_VEZ + impersonation)
 // ────────────────────────────────────────────────────────────────
 
-test('Limpeza: rejeições FORA_DA_VEZ e impersonation não alteram estado e não emitem LIMPEZA', async () => {
+test('Limpeza: rejeições FORA_DA_VEZ e jogadorId vestigial (ator da Sessão, #155) não alteram estado e não emitem LIMPEZA', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
@@ -868,33 +868,39 @@ test('Limpeza: rejeições FORA_DA_VEZ e impersonation não alteram estado e nã
       const estadoApos3 = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.deepEqual(estadoApos3, estadoAntes);
 
-      // E2: impersonation — ws1 autentica como jogador-1 mas declara jogador-2 via SELECIONAR_PECA
+      // E2: jogadorId no wire é vestigial (#155) — ws1 (Sessão jogador-1)
+      // declara jogador-2, mas o comando é aplicado como jogador-1, o Jogador
+      // Ativo: selecionar a inicial de jogador-2 no Primeiro Turno dele é
+      // PECA_INICIAL_INDISPONIVEL (se o jogadorId declarado fosse honrado, o
+      // ator seria jogador-2 e a recusa seria FORA_DA_VEZ — a diferença prova
+      // quem é o ator).
       const semLimpezaImp1 = esperarAusenciaComAncora(ws, 'LIMPEZA_APLICADA', 'ERRO_DO_TABULEIRO', 600);
       enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-2' });
       const erroImp1 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
-      assert.equal(erroImp1.codigo, 'DADOS_INVALIDOS');
+      assert.equal(erroImp1.codigo, 'PECA_INICIAL_INDISPONIVEL');
       const houveImp1 = await semLimpezaImp1;
-      assert.equal(houveImp1, false, 'impersonation SELECIONAR_PECA não deve emitir LIMPEZA');
+      assert.equal(houveImp1, false, 'SELECIONAR_PECA de Peça Inicial alheia não deve emitir LIMPEZA');
       const estadoAposImp1 = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.deepEqual(estadoAposImp1, estadoAntes);
 
-      // E2b: impersonation — MOVER_PEAO
+      // E2b: MOVER_PEAO do Peão de outro Jogador — o ator da Sessão
+      // (jogador-1) cai na guarda de elemento alheio: FORA_DA_VEZ.
       const semLimpezaImp2 = esperarAusenciaComAncora(ws, 'LIMPEZA_APLICADA', 'ERRO_DO_TABULEIRO', 600);
       enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho', celula: { linha: 1, coluna: 1 } });
       const erroImp2 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
-      assert.equal(erroImp2.codigo, 'DADOS_INVALIDOS');
+      assert.equal(erroImp2.codigo, 'FORA_DA_VEZ');
       const houveImp2 = await semLimpezaImp2;
-      assert.equal(houveImp2, false, 'impersonation MOVER_PEAO não deve emitir LIMPEZA');
+      assert.equal(houveImp2, false, 'MOVER_PEAO de Peão alheio não deve emitir LIMPEZA');
       const estadoAposImp2 = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.deepEqual(estadoAposImp2, estadoAntes);
 
-      // E2c: impersonation — CONFIRMAR
+      // E2c: CONFIRMAR do Peão de outro Jogador — mesma guarda de elemento alheio.
       const semLimpezaImp3 = esperarAusenciaComAncora(ws, 'LIMPEZA_APLICADA', 'ERRO_DO_TABULEIRO', 600);
       enviar(ws, { type: 'CONFIRMAR_POSICAO_DO_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho' });
       const erroImp3 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
-      assert.equal(erroImp3.codigo, 'DADOS_INVALIDOS');
+      assert.equal(erroImp3.codigo, 'FORA_DA_VEZ');
       const houveImp3 = await semLimpezaImp3;
-      assert.equal(houveImp3, false, 'impersonation CONFIRMAR não deve emitir LIMPEZA');
+      assert.equal(houveImp3, false, 'CONFIRMAR de Peão alheio não deve emitir LIMPEZA');
       const estadoAposImp3 = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.deepEqual(estadoAposImp3, estadoAntes);
 

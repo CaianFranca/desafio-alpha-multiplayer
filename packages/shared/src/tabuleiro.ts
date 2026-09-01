@@ -134,7 +134,10 @@ export type CodigoDeErroDoTabuleiro =
   | 'PECA_INICIAL_INDISPONIVEL'
   | 'POSICAO_CONFIRMADA'
   | 'ENCERRAMENTO_INVALIDO'
-  | 'MOVIMENTO_INDISPONIVEL';
+  | 'MOVIMENTO_INDISPONIVEL'
+  // Término da Partida (issue #179): recusa de qualquer comando de jogo
+  // pós-término; viaja pelo ERRO_DO_TABULEIRO como os demais códigos de Turno.
+  | 'PARTIDA_TERMINADA';
 
 export interface ErroDoTabuleiroEvento {
   readonly type: 'ERRO_DO_TABULEIRO';
