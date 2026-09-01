@@ -22,6 +22,15 @@ const moverPeao = (peaoId: string, linha: number, coluna: number) =>
 const confirmarPosicao = (peaoId: string) =>
   ({ tipo: 'confirmar_posicao_do_peao', peaoId } as const);
 
+const escolherVaga = (
+  recebidaId: string,
+  borda: 'norte' | 'leste' | 'sul' | 'oeste',
+) =>
+  ({ tipo: 'escolher_vaga_da_peca_recebida', recebidaId, borda } as const);
+
+const posicionarPeca = (pecaId: string, linha: number, coluna: number) =>
+  ({ tipo: 'posicionar_peca', pecaId, celula: { linha, coluna } } as const);
+
 const encerrarTurno = () => ({ tipo: 'encerrar_turno' } as const);
 
 function aplicar(
@@ -488,6 +497,126 @@ test('caixa vazia com objetivos atingíveis pela contagem: sem desfecho e Confir
   assert.ok(!resultado.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
   assert.ok(
     !resultado.eventos.some((evento) => evento.tipo === 'recebimento_gerado'),
+  );
+});
+
+test('caixa vazia: a última peça especial pendente na mão evita a derrota contável', () => {
+  // 2 geradores ligados (necessário: 1); NENHUM gerador não ligado no
+  // tabuleiro; a caixa contém uma única peça — um gerador — que o Recebimento
+  // da Confirmação sorteia e deixa pendente na mão do Jogador. Sem contar a
+  // pendência, a partida terminaria prematuramente; com ela, o Jogador
+  // posiciona a peça no mesmo turno e a partida segue.
+  const estado = construirEstado({
+    posicionadas: [
+      peca('inicial-1', 'inicial', 3, 3),
+      peca('reta-1', 'reta', 3, 2),
+      peca('sala-1', 'sala_do_diretor', 3, 1),
+      peca('portao-1', 'portao_de_saida', 4, 2),
+    ],
+    pecaDoPeao: 'reta-1',
+    caixa: [{ pecaId: 'gerador-4', tipo: 'gerador', orientacao: 0 }],
+    geradoresLigados: ['gerador-1', 'gerador-2'],
+  });
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  // Sem desfecho no Recebimento: o gerador pendente atende a contagem
+  // (1 não ligado disponível ≥ 1 necessário).
+  assert.equal(resultado.estado.resultado, null);
+  assert.ok(
+    !resultado.eventos.some((evento) => evento.tipo === 'partida_terminada'),
+  );
+  // A pendência está na mão do Jogador...
+  assert.deepEqual(
+    resultado.estado.tabuleiro.recebidas.map((recebida) => recebida.tipo),
+    ['gerador'],
+  );
+  // ...e ele a posiciona no mesmo turno; a partida segue.
+  const escolhida = aplicar(
+    resultado.estado,
+    escolherVaga('recebida-gerador-4', 'norte'),
+    'ana',
+  );
+  const encaixado = aplicarComandoDePartida(
+    escolhida,
+    posicionarPeca('gerador-4', 2, 2),
+    'ana',
+  );
+  assert.equal(encaixado.sucesso, true);
+  if (!encaixado.sucesso) return;
+  assert.deepEqual(encaixado.estado.tabuleiro.recebidas, []);
+  assert.ok(
+    encaixado.estado.tabuleiro.posicionadas.some(
+      (peca) => peca.pecaId === 'gerador-4',
+    ),
+  );
+  assert.equal(encaixado.estado.resultado, null);
+  assert.ok(
+    !encaixado.eventos.some((evento) => evento.tipo === 'partida_terminada'),
+  );
+});
+
+test('caixa vazia: a Sala do Diretor pendente na mão evita a derrota por cartão', () => {
+  // 3 geradores ligados, Portão presente, cartão pendente; a caixa tem uma
+  // última sala_do_diretor, sorteada pelo Recebimento e pendente na mão.
+  const estado = construirEstado({
+    posicionadas: [
+      peca('inicial-1', 'inicial', 3, 3),
+      peca('reta-1', 'reta', 3, 2),
+      peca('portao-1', 'portao_de_saida', 4, 2),
+    ],
+    pecaDoPeao: 'reta-1',
+    caixa: [{ pecaId: 'sala-2', tipo: 'sala_do_diretor', orientacao: 0 }],
+    geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+  });
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.resultado, null);
+  assert.ok(
+    !resultado.eventos.some((evento) => evento.tipo === 'partida_terminada'),
+  );
+  assert.deepEqual(
+    resultado.estado.tabuleiro.recebidas.map((recebida) => recebida.tipo),
+    ['sala_do_diretor'],
+  );
+});
+
+test('caixa vazia: o Portão de Saída pendente na mão evita a derrota por ausência de Portão', () => {
+  // 3 geradores ligados, cartão obtido; a caixa tem um último portao_de_saida,
+  // sorteado pelo Recebimento e pendente na mão.
+  const estado = construirEstado({
+    posicionadas: [
+      peca('inicial-1', 'inicial', 3, 3),
+      peca('reta-1', 'reta', 3, 2),
+    ],
+    pecaDoPeao: 'reta-1',
+    caixa: [{ pecaId: 'portao-2', tipo: 'portao_de_saida', orientacao: 0 }],
+    geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+    cartaoDeAcessoObtido: true,
+  });
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.resultado, null);
+  assert.ok(
+    !resultado.eventos.some((evento) => evento.tipo === 'partida_terminada'),
+  );
+  assert.deepEqual(
+    resultado.estado.tabuleiro.recebidas.map((recebida) => recebida.tipo),
+    ['portao_de_saida'],
   );
 });
 

@@ -849,32 +849,48 @@ function equipeVenceu(estado: EstadoDaPartida): boolean {
 }
 
 // Derrota contável (issue #176), avaliada SOMENTE com a caixa vazia e SEM
-// análise de conectividade: falta peça especial no tabuleiro para algum
-// objetivo pendente —
+// análise de conectividade: falta peça especial para algum objetivo pendente —
 // (a) geradores não ligados em quantidade menor que os necessários
 //     (3 − geradoresLigados.length); geradores ligados removidos pela
 //     Limpeza seguem contados via geradoresLigados;
-// (b) cartão pendente e nenhuma sala_do_diretor no tabuleiro;
-// (c) nenhum portao_de_saida no tabuleiro.
+// (b) cartão pendente e nenhuma sala_do_diretor disponível;
+// (c) nenhum portao_de_saida disponível.
+// "Disponível" cobre o tabuleiro (posicionadas) E as Recebidas pendentes — a
+// peça sorteada na mão do Jogador não falta: pendências não sobrevivem ao
+// Encerramento do Turno (PENDENCIA_NAO_RESOLVIDA), então ela sempre chega ao
+// Tabuleiro dentro do turno corrente. Contar só o tabuleiro terminaria a
+// partida no Recebimento da última peça especial, antes de o Jogador
+// posicioná-la.
 function caixaEsgotadaSemObjetivos(estado: EstadoDaPartida): boolean {
   if (estado.tabuleiro.caixa.length > 0) {
     return false;
   }
   const posicionadas = estado.tabuleiro.posicionadas;
-  const geradoresNaoLigados = posicionadas.filter(
-    (peca) =>
-      peca.tipo === 'gerador' && !estado.geradoresLigados.includes(peca.pecaId),
-  ).length;
+  const recebidas = estado.tabuleiro.recebidas;
+  const geradoresNaoLigados =
+    posicionadas.filter(
+      (peca) =>
+        peca.tipo === 'gerador' && !estado.geradoresLigados.includes(peca.pecaId),
+    ).length +
+    recebidas.filter(
+      (recebida) =>
+        recebida.tipo === 'gerador' &&
+        !estado.geradoresLigados.includes(recebida.pecaId),
+    ).length;
   if (geradoresNaoLigados < 3 - estado.geradoresLigados.length) {
     return true;
   }
   if (
     !estado.cartaoDeAcessoObtido &&
-    !posicionadas.some((peca) => peca.tipo === 'sala_do_diretor')
+    !posicionadas.some((peca) => peca.tipo === 'sala_do_diretor') &&
+    !recebidas.some((recebida) => recebida.tipo === 'sala_do_diretor')
   ) {
     return true;
   }
-  return !posicionadas.some((peca) => peca.tipo === 'portao_de_saida');
+  return (
+    !posicionadas.some((peca) => peca.tipo === 'portao_de_saida') &&
+    !recebidas.some((recebida) => recebida.tipo === 'portao_de_saida')
+  );
 }
 
 function rejeitarDaPartida(
