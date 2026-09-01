@@ -213,6 +213,10 @@ export class SalasHandlers {
     this.timeoutMs = deps.timeoutMs ?? 5000;
   }
 
+  get handlersLinkBase(): string {
+    return this.linkBase;
+  }
+
 /**
    * Despacho principal chamado pelo `ws.ts` em `'message'`. Espera uma
    * mensagem já parseada (JSON.parse feito pelo chamador para evitar
@@ -1648,6 +1652,21 @@ export class SalasHandlers {
       () => undefined,
     );
     return atual;
+  }
+
+  /** Exposto para o router de retorno (issue #178) compartilhar a mesma fila mononodo. */
+  async executarNaFila<T>(operacao: () => Promise<T>): Promise<T> {
+    let resultado: T;
+    let erro: unknown;
+    await this.enfileirarMutacao(async () => {
+      try {
+        resultado = await operacao();
+      } catch (e) {
+        erro = e;
+      }
+    });
+    if (erro !== undefined) throw erro;
+    return resultado! as T;
   }
 
   private fecharPorSessaoInvalida(socket: AuthenticatedWebSocket): void {

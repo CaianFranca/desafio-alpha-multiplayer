@@ -325,6 +325,11 @@ export function traduzirEventos(
         break;
       }
 
+      case 'sala_reaberta': {
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        break;
+      }
+
       default:
         break;
     }

@@ -232,6 +232,21 @@ export class SalasRepo {
     }
   }
 
+  /**
+   * Reabre a sala encaminhada: volta para 'aberta' e limpa server/partida.
+   * Usado no retorno da partida (issue #178). Só afeta linhas com
+   * status='encaminhada' — garante idempotência ao nível do PG (segunda
+   * chamada com status 'aberta' não altera nada).
+   * Retorna true quando houve mutação, false quando já estava aberta.
+   */
+  async reabrirSalaAtomico(salaId: string): Promise<boolean> {
+    const resultado = await this.pool.query(
+      `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
+      [salaId],
+    );
+    return (resultado.rowCount ?? 0) === 1;
+  }
+
   /** Obtém server/partida de uma sala encaminhada (null se não encaminhada). */
   async obterEncaminhamento(salaId: string): Promise<EncaminhamentoPersistido | null> {
     const resultado = await this.pool.query<{ server_id: string | null; partida_id: string | null }>(
