@@ -30,8 +30,9 @@ export interface Celula {
 
 export type PecaId = string;
 
-// sync manual com engine.TipoDePecaDaCaixa — peças de caminho + especiais;
-// a Peça Inicial nunca entra na Caixa (ST-12 / issue #144).
+// sync manual com engine.TipoDePecaDaCaixa — peças de caminho + especiais +
+// monstros (ST-15 / issue #169); a Peça Inicial nunca entra na Caixa
+// (ST-12 / issue #144).
 export type TipoDePecaDaCaixa =
   | 'reta'
   | 'T'
@@ -39,7 +40,9 @@ export type TipoDePecaDaCaixa =
   | 'gerador'
   | 'sala_do_diretor'
   | 'sala_medica'
-  | 'portao_de_saida';
+  | 'portao_de_saida'
+  | 'vulto'
+  | 'espectro';
 
 // --- Comandos cliente → servidor (4) ---
 
@@ -131,7 +134,10 @@ export type CodigoDeErroDoTabuleiro =
   | 'PECA_INICIAL_INDISPONIVEL'
   | 'POSICAO_CONFIRMADA'
   | 'ENCERRAMENTO_INVALIDO'
-  | 'MOVIMENTO_INDISPONIVEL';
+  | 'MOVIMENTO_INDISPONIVEL'
+  // Término da Partida (issue #179): recusa de qualquer comando de jogo
+  // pós-término; viaja pelo ERRO_DO_TABULEIRO como os demais códigos de Turno.
+  | 'PARTIDA_TERMINADA';
 
 export interface ErroDoTabuleiroEvento {
   readonly type: 'ERRO_DO_TABULEIRO';

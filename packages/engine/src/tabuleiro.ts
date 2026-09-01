@@ -34,6 +34,7 @@ import {
 export {
   LADO_DA_GRADE,
   bordasAbertas,
+  ehPecaDeMonstro,
   gerarRecebidas,
   validarTexto,
   vagasDisponiveis,
@@ -50,13 +51,26 @@ export type TipoDePecaEspecial =
   | 'sala_medica'
   | 'portao_de_saida';
 
-// Tipos que compõem a Caixa: caminho + especiais. A Peça Inicial nunca entra
-// na Caixa.
-export type TipoDePecaDaCaixa = TipoDePecaDeCaminho | TipoDePecaEspecial;
+// Peças de Monstro (ST-15 / issue #169): entram na Caixa como peça comum,
+// sorteadas e posicionadas pelo fluxo do Recebimento, com bordas abertas e
+// sem janela de Manipulação. Não aceitam Peão e são removidas pela limpeza
+// sem retorno à Caixa.
+export type TipoDePecaDeMonstro = 'vulto' | 'espectro';
+
+// Tipos que compõem a Caixa: caminho + especiais + monstros. A Peça Inicial
+// nunca entra na Caixa.
+export type TipoDePecaDaCaixa =
+  | TipoDePecaDeCaminho
+  | TipoDePecaEspecial
+  | TipoDePecaDeMonstro;
 
 // Todos os tipos de Peça do Tabuleiro: a Inicial (fora da Caixa) mais os
-// tipos da Caixa.
-export type TipoDaPeca = 'inicial' | TipoDePecaDeCaminho | TipoDePecaEspecial;
+// tipos da Caixa (incluindo monstros).
+export type TipoDaPeca =
+  | 'inicial'
+  | TipoDePecaDeCaminho
+  | TipoDePecaEspecial
+  | TipoDePecaDeMonstro;
 export type Orientacao = 0 | 90 | 180 | 270;
 export type SentidoDeRotacao = 'horario' | 'anti_horario';
 export type BordaCardinal = 'norte' | 'leste' | 'sul' | 'oeste';
@@ -124,10 +138,10 @@ export interface PecaRecebida {
 // (nova seleção, novo posicionamento ou clique na própria peça posicionada)
 // fecha a janela.
 export interface EstadoDoTabuleiro {
-  // Caixa da partida (ST-12): composição fixa de 71 peças de caminho e
-  // especiais, embaralhada uma única vez na criação do estado; consumo da
-  // primeira peça, sem reposição, pelo sorteio unitário (sortearDaCaixa) e
-  // pelo Recebimento (gerarRecebidas, issue #138).
+  // Caixa da partida (ST-12): composição fixa de 83 peças de caminho,
+  // especiais e monstros (ST-15 / issue #169), embaralhada uma única vez na
+  // criação do estado; consumo da primeira peça, sem reposição, pelo sorteio
+  // unitário (sortearDaCaixa) e pelo Recebimento (gerarRecebidas, issue #138).
   readonly caixa: readonly PecaDaCaixa[];
   // As 4 Peças Iniciais, fora da Caixa, encaixadas diretamente.
   readonly iniciais: readonly PecaInicial[];
@@ -366,8 +380,9 @@ const CORES_DOS_PEOES: readonly CorDoPeao[] = [
   'amarelo',
 ];
 
-// Composição fixa da Caixa (ST-12 / issue #144): 54 peças de caminho e 17
-// especiais, 71 no total. As 4 Peças Iniciais ficam fora da Caixa.
+// Composição fixa da Caixa (ST-12 / issue #144, ampliada pela ST-15 / issue
+// #169): 54 peças de caminho, 17 especiais e 12 monstros, 83 no total. As 4
+// Peças Iniciais ficam fora da Caixa.
 export const COMPOSICAO_DA_CAIXA: readonly {
   readonly tipo: TipoDePecaDaCaixa;
   readonly quantidade: number;
@@ -379,10 +394,13 @@ export const COMPOSICAO_DA_CAIXA: readonly {
   { tipo: 'sala_do_diretor', quantidade: 3 },
   { tipo: 'sala_medica', quantidade: 4 },
   { tipo: 'portao_de_saida', quantidade: 4 },
+  { tipo: 'vulto', quantidade: 6 },
+  { tipo: 'espectro', quantidade: 6 },
 ];
 
 // Ids determinísticos por tipo: reta-1..10, t-1..32, cruz-1..12,
-// gerador-1..6, sala-do-diretor-1..3, sala-medica-1..4, portao-de-saida-1..4.
+// gerador-1..6, sala-do-diretor-1..3, sala-medica-1..4, portao-de-saida-1..4,
+// vulto-1..6, espectro-1..6.
 const ID_DO_TIPO: Record<TipoDePecaDaCaixa, string> = {
   reta: 'reta',
   T: 't',
@@ -391,6 +409,8 @@ const ID_DO_TIPO: Record<TipoDePecaDaCaixa, string> = {
   sala_do_diretor: 'sala-do-diretor',
   sala_medica: 'sala-medica',
   portao_de_saida: 'portao-de-saida',
+  vulto: 'vulto',
+  espectro: 'espectro',
 };
 
 // Caixa na ordem de composição (sem embaralhar): determinismo preservado para
@@ -446,7 +466,7 @@ export interface EntradaDoEstadoDoTabuleiro {
   readonly seed?: number;
 }
 
-// Partida recém-preparada: Caixa com a composição fixa de 71 peças
+// Partida recém-preparada: Caixa com a composição fixa de 83 peças
 // (embaralhada quando a seed é fornecida) e as 4 Peças Iniciais fora dela.
 export function estadoInicialDoTabuleiro(
   entrada?: EntradaDoEstadoDoTabuleiro,

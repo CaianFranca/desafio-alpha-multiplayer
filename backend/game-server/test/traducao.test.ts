@@ -35,3 +35,36 @@ test('traduzirEventos preserva ordem e cobre ambos no mesmo batch', () => {
   assert.equal(saida[1]!.type, 'LIMPEZA_APLICADA');
   assert.equal(saida[2]!.type, 'TURNO_INICIADO');
 });
+
+test('traduzirEventos mapeia partida_terminada com vitoria para PARTIDA_TERMINADA', () => {
+  const eventos = [
+    { tipo: 'partida_terminada', desfecho: { tipo: 'vitoria' } },
+  ] as const satisfies readonly EventoDaPartida[];
+  const saida = traduzirEventos(eventos);
+  assert.equal(saida.length, 1);
+  assert.deepEqual(saida[0], { type: 'PARTIDA_TERMINADA', resultado: 'vitoria' });
+});
+
+test('traduzirEventos mapeia partida_terminada com derrota para PARTIDA_TERMINADA sem o motivo', () => {
+  // O motivo da derrota (caixa_esgotada/equipe_amedrontada) é interno ao
+  // domínio: o contrato wire expõe apenas o par vitória/derrota (#179).
+  const eventos = [
+    { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'caixa_esgotada' } },
+    { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'equipe_amedrontada' } },
+  ] as const satisfies readonly EventoDaPartida[];
+  const saida = traduzirEventos(eventos);
+  assert.equal(saida.length, 2);
+  assert.deepEqual(saida[0], { type: 'PARTIDA_TERMINADA', resultado: 'derrota' });
+  assert.deepEqual(saida[1], { type: 'PARTIDA_TERMINADA', resultado: 'derrota' });
+});
+
+test('traduzirEventos emite PARTIDA_TERMINADA como último evento do lote da Ação consumadora', () => {
+  const eventos = [
+    { tipo: 'posicao_confirmada', jogadorId: 'jogador-1', peaoId: 'peao-branco', pecaId: 'gerador-1' },
+    { tipo: 'turno_iniciado', jogadorId: 'jogador-2', rodada: 3 },
+    { tipo: 'partida_terminada', desfecho: { tipo: 'vitoria' } },
+  ] as const satisfies readonly EventoDaPartida[];
+  const saida = traduzirEventos(eventos);
+  assert.equal(saida.length, 3);
+  assert.equal(saida[saida.length - 1]!.type, 'PARTIDA_TERMINADA');
+});

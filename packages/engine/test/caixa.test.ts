@@ -17,12 +17,12 @@ function ordemDaCaixa(estado: EstadoDoTabuleiro): string[] {
   return estado.caixa.map((peca) => peca.pecaId);
 }
 
-test('a composição da caixa soma 71 peças com a proporção fixa do ST-12', () => {
+test('a composição da caixa soma 83 peças com a proporção fixa do ST-12', () => {
   const total = COMPOSICAO_DA_CAIXA.reduce(
     (soma, entrada) => soma + entrada.quantidade,
     0,
   );
-  assert.equal(total, 71);
+  assert.equal(total, 83);
   assert.deepEqual(
     COMPOSICAO_DA_CAIXA.map((entrada) => ({ ...entrada })),
     [
@@ -33,6 +33,8 @@ test('a composição da caixa soma 71 peças com a proporção fixa do ST-12', (
       { tipo: 'sala_do_diretor', quantidade: 3 },
       { tipo: 'sala_medica', quantidade: 4 },
       { tipo: 'portao_de_saida', quantidade: 4 },
+      { tipo: 'vulto', quantidade: 6 },
+      { tipo: 'espectro', quantidade: 6 },
     ],
   );
 });
@@ -40,7 +42,7 @@ test('a composição da caixa soma 71 peças com a proporção fixa do ST-12', (
 test('a caixa nasce com a composição fixa completa e ids determinísticos', () => {
   const estado = estadoInicial();
 
-  assert.equal(estado.caixa.length, 71);
+  assert.equal(estado.caixa.length, 83);
   const porTipo: Record<string, number> = {};
   for (const peca of estado.caixa) {
     porTipo[peca.tipo] = (porTipo[peca.tipo] ?? 0) + 1;
@@ -53,10 +55,12 @@ test('a caixa nasce com a composição fixa completa e ids determinísticos', ()
     sala_do_diretor: 3,
     sala_medica: 4,
     portao_de_saida: 4,
+    vulto: 6,
+    espectro: 6,
   });
 
   const ids = new Set(estado.caixa.map((peca) => peca.pecaId));
-  assert.equal(ids.size, 71);
+  assert.equal(ids.size, 83);
   for (const [tipo, quantidade] of [
     ['reta', 'reta'],
     ['T', 't'],
@@ -65,6 +69,8 @@ test('a caixa nasce com a composição fixa completa e ids determinísticos', ()
     ['sala_do_diretor', 'sala-do-diretor'],
     ['sala_medica', 'sala-medica'],
     ['portao_de_saida', 'portao-de-saida'],
+    ['vulto', 'vulto'],
+    ['espectro', 'espectro'],
   ] as const) {
     for (let indice = 1; indice <= porTipo[tipo]; indice++) {
       assert.ok(ids.has(`${quantidade}-${indice}`));
@@ -100,6 +106,8 @@ test('sem seed a caixa permanece na ordem de composição (determinismo dos test
     sala_do_diretor: 'sala-do-diretor',
     sala_medica: 'sala-medica',
     portao_de_saida: 'portao-de-saida',
+    vulto: 'vulto',
+    espectro: 'espectro',
   };
   const esperado: string[] = [];
   for (const entrada of COMPOSICAO_DA_CAIXA) {
@@ -130,6 +138,8 @@ test('a mesma seed produz exatamente a mesma ordem da caixa', () => {
     sala_do_diretor: 3,
     sala_medica: 4,
     portao_de_saida: 4,
+    vulto: 6,
+    espectro: 6,
   });
 });
 
@@ -199,7 +209,7 @@ test('o sorteio retira exatamente a primeira peça, sem reposição', () => {
       orientacao: segunda.orientacao,
     },
   ]);
-  // Nenhuma peça é reposta: 71 sorteados esvaziam a caixa com peças únicas.
+  // Nenhuma peça é reposta: 83 sorteados esvaziam a caixa com peças únicas.
   const idsSorteados = new Set<string>();
   let atual: EstadoDoTabuleiro = estado;
   while (atual.caixa.length > 0) {
@@ -213,7 +223,7 @@ test('o sorteio retira exatamente a primeira peça, sem reposição', () => {
     }
     atual = resultado.estado;
   }
-  assert.equal(idsSorteados.size, 71);
+  assert.equal(idsSorteados.size, 83);
 });
 
 test('a caixa esgotada rejeita o sorteio com CAIXA_ESGOTADA e preserva o estado', () => {

@@ -69,6 +69,11 @@ export function paraSnapshotWire(
     peaoSelecionadoId: estado.tabuleiro.peaoSelecionadoId,
   } as const;
 
+  // Normalização defensiva: estados persistidos por binário anterior à #176
+  // podem não ter o campo `resultado` no JSON — `?? null` evita tratá-lo como
+  // término.
+  const desfecho = estado.resultado ?? null;
+
   return {
     tabuleiro,
     jogadores,
@@ -77,6 +82,13 @@ export function paraSnapshotWire(
     pecaDoInicioDoTurnoId: estado.pecaDoInicioDoTurnoId,
     posicaoConfirmada: estado.posicaoConfirmada,
     celulasIluminadas: estado.celulasIluminadas.map(copiarCelula),
-    estado: estadoWire,
+    // Término (issue #179): o Resultado no estado do engine é a própria
+    // condição "terminada" — o snapshot o reflete para que quem se conecta
+    // (recarregamento) volte a ver o resultado, independente do estado da
+    // partida persistida reportado pela transição de presença. O wire
+    // transporta apenas o par vitória/derrota — o motivo da derrota fica
+    // interno ao domínio.
+    estado: desfecho !== null ? 'terminada' : estadoWire,
+    resultado: desfecho === null ? null : desfecho.tipo,
   };
 }
