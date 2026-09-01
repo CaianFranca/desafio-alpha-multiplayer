@@ -377,7 +377,7 @@ function posicionarPeaoDaPartida(
   // depois de travar o Peão e recalcular a Iluminação, antes de retornar. As
   // Recebidas caem na Vizinhança do Peão (sempre iluminadas) e não são
   // removidas. O estado é filtrado e o evento só sai quando há remoção.
-  const iluminacao = compararEmitirIluminacao(estado, tabuleiro, eventos);
+  const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   return sucessoDaPartida(
     { ...estado, tabuleiro: { ...tabuleiro, posicionadas: iluminacao.posicionadas }, celulasIluminadas: iluminacao.celulasIluminadas },
     eventos,
@@ -535,7 +535,7 @@ function confirmarPosicaoDoPeao(
     });
   }
   const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
-  const iluminacao = compararEmitirIluminacao(estado, tabuleiro, eventos);
+  const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   return sucessoDaPartida(
     {
       ...estado,
@@ -696,7 +696,7 @@ function rejeitarDaPartida(
   };
 }
 
-function compararEmitirIluminacao(
+function recalcularIluminacaoEAplicarLimpeza(
   estado: EstadoDaPartida,
   tabuleiro: EstadoDoTabuleiro,
   eventos: EventoDaPartida[],

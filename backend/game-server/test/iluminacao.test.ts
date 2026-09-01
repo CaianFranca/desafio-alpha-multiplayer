@@ -1,8 +1,9 @@
 // Teste de integração de Iluminação e Limpeza via wire (issue #150).
 //
 // Verifica que os eventos CELULAS_ILUMINADAS e LIMPEZA_APLICADA chegam ao
-// cliente quando o motor emite celulas_iluminadas / limpeza_aplicada. Segue o
-// padrão de turnos.test.ts: app+WS efêmeros com Redis real.
+// cliente quando o motor emite celulas_iluminadas / limpeza_aplicada, que o
+// tardio recebe replay unicast, e que payload malformado / impersonation não
+// altera estado. Segue o padrão de turnos.test.ts: app+WS efêmeros com Redis real.
 
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -20,6 +21,7 @@ import { createApp } from '../src/app.ts';
 import { criarWebSocketServer } from '../src/ws/ws.ts';
 import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
 import { PartidaHandlers } from '../src/partidas/handlers.ts';
+import { obterEstadoDaPartida } from '../src/partidas/estado.ts';
 
 const SERVER_ID = 'game-server-teste-iluminacao';
 const JWT_SECRET = 'test_secret_para_iluminacao';
@@ -143,6 +145,31 @@ async function conectarPartida(servidor: ServidorEfemero, partidaId: string, jog
   }
 }
 
+async function conectarTardioComCelulas(
+  servidor: ServidorEfemero,
+  partidaId: string,
+  jogador = 3,
+): Promise<{ ws: WebSocket; celulas: Array<{ linha: number; coluna: number }> }> {
+  const token = await tokenParaJogador(jogador);
+  const ws = new WebSocket(servidor.wsUrl(partidaId, token));
+  const aceita = esperarEvento(ws, 'ADMISSAO_ACEITA');
+  const celulasEspera = esperarEvento(ws, 'CELULAS_ILUMINADAS');
+  const turnoEspera = esperarEvento(ws, 'TURNO_INICIADO');
+
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
+  });
+
+  const mensagem = await aceita;
+  assert.equal(mensagem.jogadorId, `jogador-${jogador}`);
+  // Tardio recebe TURNO + CELULAS unicast via anunciarTurnoAtual
+  await turnoEspera;
+  const iluminadas = await celulasEspera;
+  const celulas = iluminadas.celulas as Array<{ linha: number; coluna: number }>;
+  return { ws, celulas };
+}
+
 function esperarEvento(
   ws: WebSocket,
   tipo: string,
@@ -196,6 +223,91 @@ async function esperarTurnoIniciado(
   }
 }
 
+// ── Helpers DRY do Primeiro Turno ──────────────────────────────
+
+async function selecionarEPosicionarInicial(
+  ws: WebSocket,
+  jogadorN: number,
+  celula: { linha: number; coluna: number },
+  opts?: { girarHorarioAntes?: boolean },
+): Promise<void> {
+  const jogadorId = `jogador-${jogadorN}`;
+  const pecaId = `inicial-${jogadorN}`;
+  enviar(ws, { type: 'SELECIONAR_PECA', jogadorId, pecaId });
+  await esperarEvento(ws, 'PECA_SELECIONADA');
+
+  if (opts?.girarHorarioAntes) {
+    enviar(ws, { type: 'GIRAR_PECA', jogadorId, pecaId, sentido: 'horario' });
+    await esperarEvento(ws, 'PECA_GIRADA');
+  }
+
+  enviar(ws, { type: 'POSICIONAR_PECA', jogadorId, pecaId, celula });
+  await esperarEvento(ws, 'PECA_POSICIONADA');
+}
+
+async function posicionarPeaoEObterRecebidas(
+  ws: WebSocket,
+  jogadorN: number,
+  celula: { linha: number; coluna: number },
+): Promise<Array<Record<string, unknown>>> {
+  const jogadorId = `jogador-${jogadorN}`;
+  const peaoId = jogadorN === 1 ? 'peao-branco' : jogadorN === 2 ? 'peao-vermelho' : `peao-${jogadorN}`;
+  // Mapear cor canônica: branco, vermelho, azul, amarelo
+  const corMap: Record<number, string> = { 1: 'peao-branco', 2: 'peao-vermelho', 3: 'peao-azul', 4: 'peao-amarelo' };
+  const peao = corMap[jogadorN] ?? peaoId;
+  enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId, peaoId: peao });
+  await esperarEvento(ws, 'PEAO_SELECIONADO');
+
+  const peaoPosicionadoEspera = esperarEvento(ws, 'PEAO_POSICIONADO');
+  const recebimentoEspera = esperarEvento(ws, 'RECEBIMENTO_GERADO');
+  enviar(ws, { type: 'POSICIONAR_PEAO', jogadorId, peaoId: peao, celula });
+  await peaoPosicionadoEspera;
+  const recebimento = await recebimentoEspera;
+  const recebidas = recebimento.recebidas as Array<Record<string, unknown>>;
+  assert.equal(recebidas.length, 2);
+  return recebidas;
+}
+
+async function resolverRecebidasComCelulaAlvo(
+  ws: WebSocket,
+  jogadorN: number,
+  recebidas: Array<Record<string, unknown>>,
+  bordas: Array<'norte' | 'sul' | 'leste' | 'oeste'>,
+): Promise<Array<{ pecaId: string; celulaAlvo: { linha: number; coluna: number } }>> {
+  const jogadorId = `jogador-${jogadorN}`;
+  const resolvidas: Array<{ pecaId: string; celulaAlvo: { linha: number; coluna: number } }> = [];
+  for (let i = 0; i < recebidas.length; i++) {
+    const r = recebidas[i]!;
+    const recebidaId = r.recebidaId as string;
+    const pecaId = r.pecaId as string;
+    const borda = bordas[i]!;
+    enviar(ws, { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', jogadorId, recebidaId, borda });
+    const escolhido = await esperarEvento(ws, 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO');
+    assert.equal(escolhido.recebidaId, recebidaId);
+    assert.equal(escolhido.borda, borda);
+    const celulaAlvo = escolhido.celulaAlvo as { linha: number; coluna: number };
+    assert.ok(celulaAlvo && typeof celulaAlvo.linha === 'number' && typeof celulaAlvo.coluna === 'number');
+    enviar(ws, { type: 'POSICIONAR_PECA', jogadorId, pecaId, celula: celulaAlvo });
+    await esperarEvento(ws, 'PECA_POSICIONADA');
+    resolvidas.push({ pecaId, celulaAlvo });
+  }
+  return resolvidas;
+}
+
+async function encerrarTurnoEAvancar(
+  wsOrigem: WebSocket,
+  wsAlvo: WebSocket,
+  jogadorOrigem: number,
+  proximoJogador: number,
+  rodadaEsperada: number,
+): Promise<void> {
+  const encerradoEspera = esperarEvento(wsOrigem, 'TURNO_ENCERRADO');
+  const iniciadoEspera = esperarTurnoIniciado(wsAlvo, `jogador-${proximoJogador}`, rodadaEsperada);
+  enviar(wsOrigem, { type: 'ENCERRAR_TURNO', jogadorId: `jogador-${jogadorOrigem}` });
+  await encerradoEspera;
+  await iniciadoEspera;
+}
+
 before(async () => {
   try {
     await redis.connect();
@@ -220,19 +332,11 @@ test('fluxo feliz: CELULAS_ILUMINADAS é recebido ao posicionar Peão no Primeir
     const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
-      // Selecionar Peça Inicial
-      enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-1', pecaId: 'inicial-1' });
-      await esperarEvento(ws, 'PECA_SELECIONADA');
+      await selecionarEPosicionarInicial(ws, 1, { linha: 3, coluna: 3 });
 
-      // Posicionar Peça em célula interior
-      enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-1', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 } });
-      await esperarEvento(ws, 'PECA_POSICIONADA');
-
-      // Selecionar Peão
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       await esperarEvento(ws, 'PEAO_SELECIONADO');
 
-      // Posicionar Peão — deve emitir CELULAS_ILUMINADAS junto com PEAO_POSICIONADO
       const iluminadasEspera = esperarEvento(ws, 'CELULAS_ILUMINADAS');
       const peaoPosicionadoEspera = esperarEvento(ws, 'PEAO_POSICIONADO');
       const recebimentoEspera = esperarEvento(ws, 'RECEBIMENTO_GERADO');
@@ -242,7 +346,6 @@ test('fluxo feliz: CELULAS_ILUMINADAS é recebido ao posicionar Peão no Primeir
       await recebimentoEspera;
       const iluminadas = await iluminadasEspera;
 
-      // Peão em (3,3) ilumina: (2,3),(3,2),(3,3),(3,4),(4,3)
       const celulas = iluminadas.celulas as Array<{ linha: number; coluna: number }>;
       assert.equal(celulas.length, 5);
       assert.ok(celulas.some((c) => c.linha === 3 && c.coluna === 3));
@@ -250,6 +353,18 @@ test('fluxo feliz: CELULAS_ILUMINADAS é recebido ao posicionar Peão no Primeir
       assert.ok(celulas.some((c) => c.linha === 4 && c.coluna === 3));
       assert.ok(celulas.some((c) => c.linha === 3 && c.coluna === 2));
       assert.ok(celulas.some((c) => c.linha === 3 && c.coluna === 4));
+
+      // Tardio: conectar jogador-3 após iluminação e verificar replay unicast
+      const { ws: wsTardio, celulas: tardioCelulas } = await conectarTardioComCelulas(servidor, aceite.partidaId, 3);
+      try {
+        assert.equal(tardioCelulas.length, 5);
+        assert.deepEqual(
+          [...tardioCelulas].sort((a, b) => a.linha - b.linha || a.coluna - b.coluna),
+          [...celulas].sort((a, b) => a.linha - b.linha || a.coluna - b.coluna),
+        );
+      } finally {
+        wsTardio.close();
+      }
     } finally {
       ws.close();
     }
@@ -260,113 +375,63 @@ test('fluxo feliz: CELULAS_ILUMINADAS é recebido ao posicionar Peão no Primeir
   }
 });
 
-test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da iluminação ao confirmar posição no rodada 2', async () => {
+test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da iluminação ao confirmar posição na rodada 2', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
     const ws = await conectarPartida(servidor, aceite.partidaId, 1);
     const ws2 = await conectarPartida(servidor, aceite.partidaId, 2);
+    const ws3 = await conectarPartida(servidor, aceite.partidaId, 3);
+    const ws4 = await conectarPartida(servidor, aceite.partidaId, 4);
 
     try {
       // ── Primeiro Turno de jogador-1 ──────────────────────────────
-      // Posicionar inicial-1 em (3,3) e peao-branco em (3,3).
-      // Iluminação de (3,3): (2,3),(3,2),(3,3),(3,4),(4,3).
-      enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-1', pecaId: 'inicial-1' });
-      await esperarEvento(ws, 'PECA_SELECIONADA');
-
-      enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-1', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 } });
-      await esperarEvento(ws, 'PECA_POSICIONADA');
-
-      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
-      await esperarEvento(ws, 'PEAO_SELECIONADO');
-
-      const recebimentoEspera = esperarEvento(ws, 'RECEBIMENTO_GERADO');
-      const peaoPosicionadoEspera = esperarEvento(ws, 'PEAO_POSICIONADO');
-      enviar(ws, { type: 'POSICIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 3, coluna: 3 } });
-      await peaoPosicionadoEspera;
-      const recebimento = await recebimentoEspera;
-      const recebidas = recebimento.recebidas as Array<Record<string, unknown>>;
-      assert.equal(recebidas.length, 2);
-
-      // Resolver recebidas: colocar a primeira em norte → (2,3) e a segunda em leste → (3,4).
-      for (let i = 0; i < recebidas.length; i++) {
-        const r = recebidas[i]!;
-        const recebidaId = r.recebidaId as string;
-        const pecaId = r.pecaId as string;
-        const borda = i === 0 ? 'norte' : 'leste';
-
-        enviar(ws, { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', jogadorId: 'jogador-1', recebidaId, borda });
-        await esperarEvento(ws, 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO');
-
-        // Calcular célula-alvo a partir da borda e da posição da peça geradora (3,3).
-        const celulaAlvo = borda === 'norte'
-          ? { linha: 2, coluna: 3 }
-          : { linha: 3, coluna: 4 };
-        enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-1', pecaId, celula: celulaAlvo });
-        await esperarEvento(ws, 'PECA_POSICIONADA');
-      }
-
-      // Encerrar turno → avança para jogador-2.
-      const encerradoEspera = esperarEvento(ws, 'TURNO_ENCERRADO');
-      const iniciadoEspera = esperarTurnoIniciado(ws, 'jogador-2', 1);
-      enviar(ws, { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' });
-      await encerradoEspera;
-      await iniciadoEspera;
+      await selecionarEPosicionarInicial(ws, 1, { linha: 3, coluna: 3 });
+      const recebidas = await posicionarPeaoEObterRecebidas(ws, 1, { linha: 3, coluna: 3 });
+      // Resolver usando celulaAlvo do evento VAGA (assert exato C1)
+      await resolverRecebidasComCelulaAlvo(ws, 1, recebidas, ['norte', 'leste']);
+      await encerrarTurnoEAvancar(ws, ws2, 1, 2, 1);
 
       // ── Primeiro Turno de jogador-2 ──────────────────────────────
-      // Posicionar inicial-2 em (0,0) e peao-vermelho em (0,0).
-      enviar(ws2, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-2' });
-      await esperarEvento(ws2, 'PECA_SELECIONADA');
+      // Inicial-2 em (0,0): girar horário antes para obter 2 vagas sul/leste (borda sul/leste)
+      await selecionarEPosicionarInicial(ws2, 2, { linha: 0, coluna: 0 }, { girarHorarioAntes: true });
+      const recebidas2 = await posicionarPeaoEObterRecebidas(ws2, 2, { linha: 0, coluna: 0 });
+      const resolvidas2 = await resolverRecebidasComCelulaAlvo(ws2, 2, recebidas2, ['sul', 'leste']);
+      // Validar que celulaAlvo corresponde a sul/leste de (0,0)
+      assert.deepEqual(resolvidas2[0]!.celulaAlvo, { linha: 1, coluna: 0 });
+      assert.deepEqual(resolvidas2[1]!.celulaAlvo, { linha: 0, coluna: 1 });
 
-      enviar(ws2, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-2', celula: { linha: 0, coluna: 0 } });
-      await esperarEvento(ws2, 'PECA_POSICIONADA');
+      await encerrarTurnoEAvancar(ws2, ws3, 2, 3, 1);
 
-      enviar(ws2, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho' });
-      await esperarEvento(ws2, 'PEAO_SELECIONADO');
-
-      const recebimento2Espera = esperarEvento(ws2, 'RECEBIMENTO_GERADO');
-      const peaoPosicionado2Espera = esperarEvento(ws2, 'PEAO_POSICIONADO');
-      enviar(ws2, { type: 'POSICIONAR_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho', celula: { linha: 0, coluna: 0 } });
-      await peaoPosicionado2Espera;
-      const recebimento2 = await recebimento2Espera;
-      const recebidas2 = recebimento2.recebidas as Array<Record<string, unknown>>;
-      assert.equal(recebidas2.length, 2);
-
-      for (let i = 0; i < recebidas2.length; i++) {
-        const r = recebidas2[i]!;
-        const recebidaId = r.recebidaId as string;
-        const pecaId = r.pecaId as string;
-        // Inicial em (0,0) com bordas sul/leste.
-        const borda = i === 0 ? 'sul' : 'leste';
-
-        enviar(ws2, { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', jogadorId: 'jogador-2', recebidaId, borda });
-        await esperarEvento(ws2, 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO');
-
-        const celulaAlvo = borda === 'sul'
-          ? { linha: 1, coluna: 0 }
-          : { linha: 0, coluna: 1 };
-        enviar(ws2, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-2', pecaId, celula: celulaAlvo });
-        await esperarEvento(ws2, 'PECA_POSICIONADA');
+      // ── Primeiro Turno de jogador-3 e 4 para avançar à rodada 2 ──
+      for (const [wsX, n, cel] of [
+        [ws3, 3, { linha: 1, coluna: 5 }],
+        [ws4, 4, { linha: 5, coluna: 5 }],
+      ] as const) {
+        await selecionarEPosicionarInicial(wsX as WebSocket, n as number, cel as { linha: number; coluna: number });
+        const rec = await posicionarPeaoEObterRecebidas(wsX as WebSocket, n as number, cel as { linha: number; coluna: number });
+        // Inicial interior: vagas norte/leste disponíveis (1,5) -> norte(0,5)/leste(1,6); (5,5) -> norte(4,5)/leste(5,6)
+        const bordas: Array<'norte' | 'leste'> = ['norte', 'leste'];
+        await resolverRecebidasComCelulaAlvo(wsX as WebSocket, n as number, rec, bordas as any);
+        const prox = n === 3 ? 4 : 1;
+        const rodada = n === 4 ? 2 : 1;
+        const alvoWs = prox === 1 ? ws : prox === 4 ? ws4 : ws3;
+        await encerrarTurnoEAvancar(wsX as WebSocket, alvoWs as WebSocket, n as number, prox, rodada);
       }
 
-      // Encerrar turno → avança para jogador-1, rodada 2.
-      const encerrado2Espera = esperarEvento(ws2, 'TURNO_ENCERRADO');
-      const iniciado2Espera = esperarTurnoIniciado(ws, 'jogador-1', 2);
-      enviar(ws2, { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-2' });
-      await encerrado2Espera;
-      await iniciado2Espera;
-
       // ── Rodada 2 de jogador-1 ────────────────────────────────────
-      // Selecionar peao-branco e movê-lo para (3,2) — onde está a reta
-      // posicionada. A nova iluminação de (3,2): (2,2),(3,1),(3,2),(3,3),(4,2).
-      // A peça em (3,4) fica FORA → limpeza deve removê-la.
+      // Mover peao-branco de (3,3) para (2,3) — onde está a reta-1 (norte). Nova iluminação de (2,3): (1,3),(2,2),(2,3),(2,4),(3,3)
+      // A peça em (3,4) (reta-2 leste) fica FORA → limpeza deve remover reta-2.
+      // mover deseleciona (ST-10); é preciso reselecionar antes de confirmar
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       await esperarEvento(ws, 'PEAO_SELECIONADO');
 
-      enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 3, coluna: 2 } });
+      enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 2, coluna: 3 } });
       await esperarEvento(ws, 'PEAO_MOVIDO');
 
-      // Confirmar posição → dispara limpeza.
+      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
+      await esperarEvento(ws, 'PEAO_SELECIONADO');
+
       const limpezaEspera = esperarEvento(ws, 'LIMPEZA_APLICADA');
       const posicaoConfirmadaEspera = esperarEvento(ws, 'POSICAO_CONFIRMADA');
       enviar(ws, { type: 'CONFIRMAR_POSICAO_DO_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
@@ -375,10 +440,16 @@ test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da ilumin
       const limpeza = await limpezaEspera;
       assert.equal(limpeza.type, 'LIMPEZA_APLICADA');
       const pecasRemovidas = limpeza.pecasRemovidas as string[];
-      assert.ok(pecasRemovidas.length > 0, 'esperava ao menos uma peça removida pela limpeza');
+      // Assert exato C1: reta-2 deve estar nas removidas (a peça a leste)
+      assert.ok(pecasRemovidas.includes('reta-2'), `esperava reta-2 nas removidas, got ${pecasRemovidas}`);
+      // Na iluminação (3,2), (3,4) está fora; reta-2 deve ser a única removida (ou ao menos contida)
+      assert.equal(pecasRemovidas.length, 1);
+      assert.deepEqual(pecasRemovidas, ['reta-2']);
     } finally {
       ws.close();
       ws2.close();
+      ws3.close();
+      ws4.close();
     }
 
     await deletePartida(servidor.baseUrl, aceite.partidaId);
@@ -386,18 +457,50 @@ test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da ilumin
     await servidor.fechar();
   }
 });
-test('rejeição: payload de tipo de mensagem inexistente como comando é rejeitado com ERRO_DO_TABULEIRO', async () => {
+
+test('rejeição: payload malformado, tipo inexistente e impersonation são rejeitados sem alterar estado', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
     const ws = await conectarPartida(servidor, aceite.partidaId);
 
     try {
-      // Enviar tipo que não existe como comando — o servidor deve rejeitar
+      // Capturar estado antes das rejeições
+      const estadoAntes = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.ok(estadoAntes !== null);
+
+      // 1) Tipo inexistente
       enviar(ws, { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] });
-      const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
-      assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
-      assert.equal(erro.codigo, 'DADOS_INVALIDOS');
+      const erro1 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro1.codigo, 'DADOS_INVALIDOS');
+      const estado1 = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.deepEqual(estado1, estadoAntes);
+
+      // 2) Payload malformado: celula fora da grade (linha 99)
+      enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-1', pecaId: 'inicial-1', celula: { linha: 99, coluna: 99 } });
+      const erro2 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro2.codigo, 'DADOS_INVALIDOS');
+      const estado2 = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.deepEqual(estado2, estadoAntes);
+
+      // 3) Payload malformado: falta campo obrigatório pecaId
+      enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-1' } as unknown as Record<string, unknown>);
+      const erro3 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro3.codigo, 'DADOS_INVALIDOS');
+      const estado3 = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.deepEqual(estado3, estadoAntes);
+
+      // 4) Impersonation: ws autentica como jogador-1 mas declara jogador-2
+      enviar(ws, { type: 'SELECIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-2' });
+      const erro4 = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro4.codigo, 'DADOS_INVALIDOS');
+      assert.ok((erro4.mensagem as string).toLowerCase().includes('ator'));
+      const estado4 = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.deepEqual(estado4, estadoAntes);
+
+      // Garantir que nenhum evento de iluminação/limpeza foi emitido indevidamente
+      // (nenhum listener pendente; apenas checar que estado celulasIluminadas ainda vazio)
+      assert.equal(estado4!.celulasIluminadas.length, 0);
     } finally {
       ws.close();
     }

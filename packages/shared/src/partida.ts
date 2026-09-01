@@ -188,21 +188,21 @@ export interface PecaSorteadaEvento {
 // borda e a célula-alvo da pendência e seleciona a Peça sorteada.
 export type { VagaDaPecaRecebidaEscolhidaEvento };
 
-export interface CelulasIluminadasEvento {
+export interface CelulasIluminadasWireEvento {
   readonly type: 'CELULAS_ILUMINADAS';
   readonly celulas: readonly Celula[];
 }
 
 export interface LimpezaAplicadaWireEvento {
   readonly type: 'LIMPEZA_APLICADA';
-  readonly pecasRemovidas: readonly string[];
+  readonly pecasRemovidas: readonly PecaId[];
 }
 
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
   | PosicaoConfirmadaEvento
-  | CelulasIluminadasEvento
+  | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
   | PecaSorteadaEvento
   | VagaDaPecaRecebidaEscolhidaEvento;
