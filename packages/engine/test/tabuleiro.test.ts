@@ -53,7 +53,7 @@ function peçaNasIniciais(estado: EstadoDoTabuleiro, pecaId: string) {
   return peca;
 }
 
-test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças de caminho', () => {
+test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças', () => {
   const estado = estadoInicialDoTabuleiro();
 
   // As 4 Peças Iniciais ficam fora da Caixa (ST-12).

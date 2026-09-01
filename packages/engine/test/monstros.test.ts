@@ -312,7 +312,7 @@ test('monstro encaixado não abre janela de Manipulação e não pode ser girado
   );
 });
 
-test('mover_peao para monstro conectado é rejeitado com PECA_JA_TEM_PEAO', () => {
+test('mover_peao para monstro é rejeitado com PECA_JA_TEM_PEAO (conectado ou não)', () => {
   let estado = aplicarTabuleiro(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicarTabuleiro(estado, posicionar('inicial-1', 3, 3));
   estado = aplicarTabuleiro(estado, selecionarPeao('peao-branco'));
@@ -355,6 +355,34 @@ test('mover_peao para monstro conectado é rejeitado com PECA_JA_TEM_PEAO', () =
     'A Peça de destino é um Monstro e não aceita Peão.',
   );
   assert.deepEqual(estado, antes);
+
+  // Monstro vizinho NÃO conectado (oeste da Inicial, borda fechada): a regra
+  // absoluta "Monstro não aceita Peão" vence a conexão — mesma rejeição.
+  const comMonstroOeste: EstadoDoTabuleiro = {
+    ...estado,
+    posicionadas: [
+      ...estado.posicionadas,
+      {
+        pecaId: 'espectro-1',
+        tipo: 'espectro',
+        orientacao: 0,
+        celula: { linha: 3, coluna: 2 },
+      },
+    ],
+  };
+  assert.ok(
+    !vizinhasConectadas(comMonstroOeste, 'inicial-1').some(
+      (peca) => peca.pecaId === 'espectro-1',
+    ),
+    'o Monstro a oeste deveria estar fora da conexão da Inicial',
+  );
+  const fora = aplicarComandoDeTabuleiro(
+    comMonstroOeste,
+    moverPeao('peao-branco', 3, 2),
+  );
+  assert.equal(fora.sucesso, false);
+  if (fora.sucesso) return;
+  assert.equal(fora.erro.codigo, 'PECA_JA_TEM_PEAO');
 });
 
 test('limpeza remove monstro fora da iluminação sem retorno à Caixa', () => {
