@@ -52,6 +52,14 @@ _Avoid_: sala de espera
 Jogo entre os quatro Jogadores de uma Sala, do Encaminhamento até a vitória ou derrota; estados: preparada, em andamento, terminada.
 _Avoid_: jogo, sessão
 
+**Resultado**:
+Vitória ou derrota declarada no término da Partida; em evento simultâneo das condições, a vitória tem prioridade.
+_Avoid_: desfecho, fim de jogo
+
+**Retorno à Sala**:
+Volta dos Jogadores à Sala de origem após o término da Partida; a Sala reabre com os mesmos Membros, mantendo a ordem de entrada e o Anfitrião, com a Prontidão redefinida.
+_Avoid_: retorno ao lobby, volta ao lobby
+
 **Encaminhamento**:
 Atividade iniciada pelo Anfitrião que leva uma Sala aberta com quatro Membros conectados e prontos a uma Partida; a composição congela somente quando o game-server aceita, e a recusa ou a falha mantém a Sala aberta.
 _Avoid_: handoff, transição
@@ -291,11 +299,11 @@ Peça Especial do sanatório que a equipe deve ativar; fica permanentemente liga
 _Avoid_: energia, fonte de luz
 
 **Cartão de Acesso**:
-Item obtido pela equipe na Sala do Diretor que libera a abertura do Portão de Saída.
+Item obtido pela equipe na Sala do Diretor; componente do Objetivo Global.
 _Avoid_: chave, cartão-chave
 
 **Portão de Saída**:
-Peça Especial por onde a equipe escapa; os quatro Jogadores devem se reunir nele para vencer; aceita até quatro peões simultaneamente.
+Peça Especial por onde a equipe escapa; a vitória exige os quatro peões reunidos nele; aceita até quatro peões simultaneamente.
 _Avoid_: saída, porta
 
 **Sala do Diretor**:
@@ -311,7 +319,7 @@ Estado de um Jogador que nega o próximo ataque de monstro; não acumulável; pe
 Efeito imediato concedido quando a posição de um peão é confirmada sobre uma Peça Especial.
 
 **Objetivo Global**:
-Condição de vitória acompanhada coletivamente pela equipe: geradores ligados e Cartão de Acesso obtido.
+Condição de vitória acompanhada coletivamente pela equipe: geradores ligados, Cartão de Acesso obtido e os quatro peões reunidos no Portão de Saída.
 
 **Peça**:
 Componente do tabuleiro posicionado pelos Jogadores durante a exploração; pode reconstruir o caminho do sanatório ou conceder conquistas (Peça Especial).
