@@ -65,6 +65,7 @@ function estadoBase(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPe
       { pecaId: 't-1', tipo: 'T' },
       { pecaId: 'cruz-1', tipo: 'cruz' },
     ],
+    posicaoConfirmadaNoTurno: false,
     ...opts,
   }
 }
@@ -94,6 +95,7 @@ function estadoComMock(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteraca
     peaoSelecionadoId: 'peao-1-branco',
     pecaSelecionadaId: null,
     reserva: [],
+    posicaoConfirmadaNoTurno: false,
     ...opts,
   }
 }
@@ -293,8 +295,8 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
   it('clique no próprio peão emite PERMANECER', () => {
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
     expect(mapearPermanencia(estado, INICIAL)).toEqual({
-      type: 'PERMANECER',
-      peaoId: 'peao-1-branco',
+      tipo: 'comando',
+      comando: { type: 'PERMANECER', peaoId: 'peao-1-branco' },
     })
   })
 
@@ -302,8 +304,8 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
     // Clique no mesh da Peça: mesma célula (3,3) da Peça sob o peão.
     expect(mapearPermanencia(estado, { linha: 3, coluna: 3 })).toEqual({
-      type: 'PERMANECER',
-      peaoId: 'peao-1-branco',
+      tipo: 'comando',
+      comando: { type: 'PERMANECER', peaoId: 'peao-1-branco' },
     })
   })
 
@@ -332,9 +334,8 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     // Cenário do mock: inicial(3,3)@0 conecta com reta(3,4)@90 → destino destacado.
     const estado = estadoComMock()
     expect(mapearMovimentacao(estado, { linha: 3, coluna: 4 })).toEqual({
-      type: 'MOVER_PEAO',
-      peaoId: 'peao-1-branco',
-      celula: { linha: 3, coluna: 4 },
+      tipo: 'comando',
+      comando: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 4 } },
     })
   })
 
@@ -371,6 +372,42 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const semSelecao: EstadoInteracaoPeoes = { ...estado, peaoSelecionadoId: null }
     expect(mapearMovimentacao(semSelecao, { linha: 3, coluna: 3 })).toBeNull()
     expect(mapearPermanencia(semSelecao, { linha: 3, coluna: 3 })).toBeNull()
+  })
+
+  // ── Guard AC3: alvos válidos são rejeitados com feedback pós-confirmação ──
+
+  const REJEITACAO_CONFIRMADA = {
+    tipo: 'rejeicao',
+    rejeicao: {
+      motivo: 'posicao_confirmada',
+      feedback: { ...FLASH_AMBAR, motivo: 'posicao_confirmada' },
+    },
+  } as const
+
+  it('movimentação em destino conectado pós-confirmação → rejeição âmbar (AC3, review #165)', () => {
+    const estado = estadoComMock({ posicaoConfirmadaNoTurno: true })
+    expect(mapearMovimentacao(estado, { linha: 3, coluna: 4 })).toEqual(REJEITACAO_CONFIRMADA)
+  })
+
+  it('permanência pós-confirmação → rejeição âmbar (AC3, review #165)', () => {
+    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
+      posicaoConfirmadaNoTurno: true,
+    })
+    expect(mapearPermanencia(estado, INICIAL)).toEqual(REJEITACAO_CONFIRMADA)
+  })
+
+  it('clique no próprio peão pós-confirmação → rejeição âmbar, não PERMANECER (AC3)', () => {
+    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
+      posicaoConfirmadaNoTurno: true,
+    })
+    expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toEqual(REJEITACAO_CONFIRMADA)
+  })
+
+  it('pós-confirmação, alvos inválidos seguem silenciosos (null, sem flash indevido)', () => {
+    const estado = estadoComMock({ posicaoConfirmadaNoTurno: true })
+    // cruz(3,5) não é destino conectado → null mesmo com a flag ligada.
+    expect(mapearMovimentacao(estado, { linha: 3, coluna: 5 })).toBeNull()
+    expect(mapearPermanencia(estado, { linha: 0, coluna: 0 })).toBeNull()
   })
 
   // ── AC 6: pendências bloqueiam outro peão com rejeição local ──
@@ -610,6 +647,16 @@ describe('roteador do clique em célula (issue #91)', () => {
     const estado = estadoComMock()
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),{ linha: 3, coluna: 4 })).toEqual({
       ciclo: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 4 } },
+    })
+  })
+
+  it('destino conectado pós-confirmação → roteador propaga a rejeição (AC3)', () => {
+    const estado = estadoComMock({ posicaoConfirmadaNoTurno: true })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado),{ linha: 3, coluna: 4 })).toEqual({
+      rejeicao: {
+        motivo: 'posicao_confirmada',
+        feedback: { ...FLASH_AMBAR, motivo: 'posicao_confirmada' },
+      },
     })
   })
 

@@ -187,6 +187,7 @@ export function AmbienteDeJogo({
           onDesselecionar={aoDesselecionar}
           estadoPeoes={estadoInteracaoPeoes}
           onComandoPeao={onComandoPeao}
+          onRejeicaoPeao={onRejeicaoPeao}
           alvosPendentesSet={alvosPendentesSet}
           alvoFocadoKey={alvoFocadoKey}
           recebidaFocadaId={recebidaFocadaVigenteId}
@@ -209,6 +210,7 @@ export function AmbienteDeJogo({
           estadoPeoes={estadoInteracaoPeoes}
           onComando={onComando}
           onComandoPeao={onComandoPeao}
+          onRejeicaoPeao={onRejeicaoPeao}
           recebidaFocadaId={recebidaFocadaVigenteId}
           aoFocarPendencia={aoFocarPendencia}
           alvosPendentesSet={alvosPendentesSet}

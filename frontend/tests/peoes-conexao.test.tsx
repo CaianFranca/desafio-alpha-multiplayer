@@ -285,4 +285,73 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
     // Issue #118: pendências não resolvidas carregam o motivo específico.
     expect(flash.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')
   })
+
+  it('pós-confirmação: clicar destino conectado NÃO envia MOVER_PEAO e pisca âmbar (AC3, review #165)', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    // Turno meu, rodada 2: peão posicionado na Inicial e movido à reta vizinha.
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'reta-1',
+        celula: { linha: 2, coluna: 3 },
+        orientacao: 0,
+      })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+      ws.simulateMessage({
+        type: 'PEAO_MOVIDO',
+        peaoId: 'peao-branco',
+        pecaIdDe: 'inicial-1',
+        pecaIdPara: 'reta-1',
+        celula: { linha: 2, coluna: 3 },
+      })
+    })
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
+
+    // Fase 'confirmar' → botão envia CONFIRMAR_POSICAO_DO_PEAO; servidor confirma.
+    await user.click(screen.getByTestId('botao-confirmar-posicao'))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'CONFIRMAR_POSICAO_DO_PEAO',
+      peaoId: 'peao-branco',
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'reta-1',
+      })
+    })
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
+
+    // Re-seleção aceita pelo servidor: a seleção volta ao peão confirmado.
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+
+    const comandosAntes = ws.sentMessages.length
+    await user.click(celulaDoEspelho(3, 3))
+
+    // Guard AC3: nenhum comando trafega e o feedback é âmbar com motivo
+    // específico (espelha o FORA_DA_VEZ que o servidor responderia).
+    expect(ws.sentMessages).toHaveLength(comandosAntes)
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('ambar')
+    expect(flash.getAttribute('data-motivo')).toBe('posicao_confirmada')
+  })
 })

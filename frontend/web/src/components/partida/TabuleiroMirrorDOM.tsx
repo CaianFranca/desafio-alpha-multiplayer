@@ -7,7 +7,7 @@ import type {
   PecaId,
   PecaPosicionada,
 } from '../../game/tabuleiro/contrato'
-import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
+import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
 import {
   despacharCliqueDeCelula,
@@ -40,6 +40,8 @@ interface TabuleiroMirrorDOMProps {
   estadoPeoes?: EstadoInteracaoPeoes | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
+  onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /** Recebida focada (validada pelo dono do foco, AmbienteDeJogo). */
   recebidaFocadaId?: RecebidaId | null
   aoFocarPendencia?: (recebidaId: RecebidaId) => void
@@ -76,6 +78,7 @@ export function TabuleiroMirrorDOM({
   estadoPeoes = null,
   onComando,
   onComandoPeao,
+  onRejeicaoPeao,
   recebidaFocadaId = null,
   aoFocarPendencia,
   alvosPendentesSet = new Set<string>(),
@@ -99,6 +102,9 @@ export function TabuleiroMirrorDOM({
       onComando,
       onComandoPeao,
       onFocarPendencia: aoFocarPendencia,
+      onRejeicao: onRejeicaoPeao
+        ? (rejeicao) => onRejeicaoPeao(rejeicao.feedback)
+        : undefined,
     })
   }
 

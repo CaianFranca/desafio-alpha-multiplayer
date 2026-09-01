@@ -26,6 +26,11 @@
  * PERMANECER. Alvos inválidos não reagem (null); o arrasto permanece
  * reservado à câmera via `deveSuprimirCliquePorArrasto` (limiar 6px, ver
  * cameraLimites.ts).
+ *
+ * Guard pós-confirmação (AC3 — review #165): com `posicaoConfirmadaNoTurno`,
+ * os alvos que seriam válidos (permanecer/mover) retornam rejeição âmbar com
+ * motivo `posicao_confirmada` — espelhando o FORA_DA_VEZ do servidor; alvos
+ * inválidos seguem silenciosos (null).
  */
 
 import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
@@ -88,20 +93,44 @@ export interface EstadoInteracaoPeoes {
   readonly pecaSelecionadaId: string | null
   /** Tipos de Peça de Caminho disponíveis para a escolha das Recebidas. */
   readonly reserva: readonly { readonly pecaId: string; readonly tipo: TipoDaPeca }[]
+  /** A posição do Peão do Jogador Ativo já foi confirmada neste turno (POSICAO_CONFIRMADA). */
+  readonly posicaoConfirmadaNoTurno: boolean
 }
 
-// ── Resultado do clique no Peão ──
+// ── Resultado de clique/ação do ciclo ──
 
 export interface RejeicaoDeInteracao {
-  readonly motivo: 'pendencia_nao_resolvida'
-  /** Feedback da rejeição local — sempre FLASH_VERMELHO (distinto do branco). */
+  readonly motivo: 'pendencia_nao_resolvida' | 'posicao_confirmada'
+  /**
+   * Feedback da rejeição local: FLASH_VERMELHO para pendências (erro real);
+   * FLASH_AMBAR com motivo próprio para ação pós-confirmação (espelha o
+   * FORA_DA_VEZ que o servidor responderia).
+   */
   readonly feedback: FlashFeedback
 }
 
-export type ResultadoDeCliqueNoPeao =
+/** Comando, rejeição com feedback ou nenhuma reação do ciclo do Peão. */
+export type ResultadoDeInteracaoDePeao =
   | { readonly tipo: 'comando'; readonly comando: PeaoComandoDoCliente }
   | { readonly tipo: 'rejeicao'; readonly rejeicao: RejeicaoDeInteracao }
   | null
+
+/** Resultado do clique no Peão (mesma forma do resultado do ciclo). */
+export type ResultadoDeCliqueNoPeao = ResultadoDeInteracaoDePeao
+
+/**
+ * Rejeição pós-confirmação: o comando seria válido, mas a posição do Peão já
+ * foi travada neste turno (AC3 — guard client-side do review #165). Âmbar
+ * com motivo próprio, distinto do vermelho de pendência (o servidor responde
+ * FORA_DA_VEZ nesta situação — partida.ts do engine).
+ */
+const REJEICAO_POSICAO_CONFIRMADA: ResultadoDeInteracaoDePeao & object = {
+  tipo: 'rejeicao',
+  rejeicao: {
+    motivo: 'posicao_confirmada',
+    feedback: { ...FLASH_AMBAR, motivo: 'posicao_confirmada' },
+  },
+}
 
 // ── Helpers de pendências / reserva ──
 
@@ -140,9 +169,11 @@ export function mapearCliqueNoPeao(
   if (!peao) return null
   if (peao.peaoId === estado.peaoSelecionadoId) {
     // Próprio Peão: permanência (AC 5) exige Peão posicionado e tudo
-    // posicionado; sobre a Mesa ou com Recebidas pendentes → null.
+    // posicionado; sobre a Mesa ou com Recebidas pendentes → null. Posição
+    // já confirmada neste turno → rejeição âmbar (AC3, review #165).
     if (peao.celula === null) return null
     if (haRecebidasPendentes(estado)) return null
+    if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
     return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
   }
   if (haRecebidasPendentes(estado)) {
@@ -235,32 +266,35 @@ export function mapearPosicionarRecebida(
 /**
  * Clique no próprio Peão ou na Peça sob ele (ambos na célula do Peão
  * selecionado) → PERMANECER. Exige tudo posicionado (US 15: recebidas
- * pendentes antes de permanecer → não reage). Fora da célula do Peão, Peão
- * não selecionado ou ainda sobre a Mesa → null (não reage).
+ * pendentes antes de permanecer → não reage). Posição já confirmada neste
+ * turno → rejeição âmbar (AC3). Fora da célula do Peão, Peão não selecionado
+ * ou ainda sobre a Mesa → null (não reage).
  */
 export function mapearPermanencia(
   estado: EstadoInteracaoPeoes,
   celula: Celula,
-): PeaoComandoDoCliente | null {
+): ResultadoDeInteracaoDePeao {
   const peaoId = estado.peaoSelecionadoId
   if (peaoId === null) return null
   if (haRecebidasPendentes(estado)) return null
   const peao = estado.peoes.find((p) => p.peaoId === peaoId)
   if (!peao || peao.celula === null) return null
   if (chaveCelula(peao.celula) !== chaveCelula(celula)) return null
-  return { type: 'PERMANECER', peaoId }
+  if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
+  return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
 }
 
 /**
  * Clique em Peça vizinha conectada destacada do Peão selecionado →
  * MOVER_PEAO. Exige tudo posicionado (US 15: recebidas pendentes antes de
- * mover → não reage). Destino não conectado, ocupado por outro Peão ou Peão
- * sem seleção/posicionado → null (alvos inválidos não reagem ao clique).
+ * mover → não reage). Posição já confirmada neste turno → rejeição âmbar
+ * (AC3). Destino não conectado, ocupado por outro Peão ou Peão sem
+ * seleção/posicionado → null (alvos inválidos não reagem ao clique).
  */
 export function mapearMovimentacao(
   estado: EstadoInteracaoPeoes,
   celula: Celula,
-): PeaoComandoDoCliente | null {
+): ResultadoDeInteracaoDePeao {
   const peaoId = estado.peaoSelecionadoId
   if (peaoId === null) return null
   if (haRecebidasPendentes(estado)) return null
@@ -273,21 +307,33 @@ export function mapearMovimentacao(
     (p) => chaveCelula(p.celula) === chaveCelula(celula),
   )
   if (!conectada) return null
-  return { type: 'MOVER_PEAO', peaoId, celula }
+  if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
+  return { tipo: 'comando', comando: { type: 'MOVER_PEAO', peaoId, celula } }
 }
 
 // ── Roteador do clique em célula do Tabuleiro (issue #91) ──
 
 /**
  * Resultado do clique em célula com o ciclo ativo: comando do ciclo (peão ou
- * tabuleiro — POSICIONAR_PECA da Recebida), foco de uma pendência sem tipo,
- * ou null (alvo inválido não reage; sem ciclo ativo o chamador aplica o
- * fallback ST-09).
+ * tabuleiro — POSICIONAR_PECA da Recebida), rejeição local com feedback
+ * (guard pós-confirmação, AC3), foco de uma pendência sem tipo, ou null
+ * (alvo inválido não reage; sem ciclo ativo o chamador aplica o fallback
+ * ST-09).
  */
 export type ResultadoDeCliqueEmCelula =
   | { readonly ciclo: PeaoComandoDoCliente | TabuleiroComandoDoCliente }
+  | { readonly rejeicao: RejeicaoDeInteracao }
   | { readonly focarPendencia: RecebidaId }
   | null
+
+/** Converte o resultado do mapeador do ciclo em resultado do roteador. */
+function resultadoDoMapeadorParaCelula(
+  resultado: Exclude<ResultadoDeInteracaoDePeao, null>,
+): Exclude<ResultadoDeCliqueEmCelula, null> {
+  return resultado.tipo === 'comando'
+    ? { ciclo: resultado.comando }
+    : { rejeicao: resultado.rejeicao }
+}
 
 /** Ciclo ativo: há Recebidas pendentes OU peão selecionado (suprime o fallback ST-09). */
 export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
@@ -307,8 +353,9 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *   - demais (alvo tipado divergente da seleção, célula não-alvo) → null.
  *
  * Sem pendências, com peão selecionado:
- *   - célula do próprio peão → PERMANECER.
- *   - destino conectado → MOVER_PEAO.
+ *   - célula do próprio peão → PERMANECER (ou rejeição âmbar se a posição já
+ *     foi confirmada — AC3).
+ *   - destino conectado → MOVER_PEAO (ou rejeição âmbar pós-confirmação).
  *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO.
  *   - demais → null.
  *
@@ -338,9 +385,9 @@ export function rotearCliqueDeCelula(
   }
   if (estadoPeoes.peaoSelecionadoId !== null) {
     const permanencia = mapearPermanencia(estadoPeoes, celula)
-    if (permanencia) return { ciclo: permanencia }
+    if (permanencia) return resultadoDoMapeadorParaCelula(permanencia)
     const movimento = mapearMovimentacao(estadoPeoes, celula)
-    if (movimento) return { ciclo: movimento }
+    if (movimento) return resultadoDoMapeadorParaCelula(movimento)
     // Peão ainda sobre a Mesa: primeiro posicionamento na Peça Inicial
     // (mapearCliqueNaPecaInicial já exige peão sem célula).
     const posicionamento = mapearCliqueNaPecaInicial(estadoPeoes, celula)
@@ -390,6 +437,8 @@ export interface DespachoDeCliqueEmCelula {
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
   onFocarPendencia?: (recebidaId: RecebidaId) => void
+  /** Rejeição local do ciclo (AC3): feedback para flash, sem comando enviado. */
+  onRejeicao?: (rejeicao: RejeicaoDeInteracao) => void
 }
 
 /**
@@ -410,6 +459,10 @@ export function despacharCliqueDeCelula(
   if (resultado !== null) {
     if ('focarPendencia' in resultado) {
       despacho.onFocarPendencia?.(resultado.focarPendencia)
+      return
+    }
+    if ('rejeicao' in resultado) {
+      despacho.onRejeicao?.(resultado.rejeicao)
       return
     }
     if (ehComandoDePeao(resultado.ciclo)) {
