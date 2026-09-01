@@ -156,6 +156,7 @@ export {
   bordasAbertas,
   calcularIluminacao,
   ehPecaDeMonstro,
+  ehPecaEspecial,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   sortearDaCaixa,

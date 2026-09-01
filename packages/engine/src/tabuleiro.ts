@@ -35,6 +35,7 @@ export {
   LADO_DA_GRADE,
   bordasAbertas,
   ehPecaDeMonstro,
+  ehPecaEspecial,
   gerarRecebidas,
   validarTexto,
   vagasDisponiveis,
