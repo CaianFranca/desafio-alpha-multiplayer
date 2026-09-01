@@ -37,9 +37,11 @@ import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
 import type { FlashFeedback, EstadoInteracaoTabuleiro } from './interacao'
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada, mapearCliqueNaReserva } from './interacao'
 import {
+  bordasAbertas,
   chaveCelula,
   destinosConectadosDoPeao,
   encontrarPecaNaCelula,
+  estaDentroDaGrade,
 } from './contrato'
 import type { Celula, PeaoDaExibicao, PecaPosicionada, TipoDaPeca } from './contrato'
 import type {
@@ -204,9 +206,8 @@ export function mapearCliqueNaPecaInicial(
 }
 
 /**
- * Escolha do tipo de cada Recebida pendente → ESCOLHER_TIPO_DA_PECA_RECEBIDA.
- * A oferta vem da Reserva: tipo sem peça disponível não gera comando (null);
- * a sequência exige Peão selecionado e a Recebida pendente existente.
+ * Escolha do tipo de cada Recebida pendente → ESCOLHER_TIPO_DA_PECA_RECEBIDA (legado ST-10).
+ * @deprecated #138 removeu escolha de tipo; mantido até limpeza #140/#143.
  */
 export function mapearEscolhaDeTipoDaRecebida(
   estado: EstadoInteracaoPeoes,
@@ -222,6 +223,66 @@ export function mapearEscolhaDeTipoDaRecebida(
     return null
   }
   return { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', recebidaId, tipoDaPeca }
+}
+
+const DESLOCAMENTO_DA_BORDA: Record<string, Celula> = {
+  norte: { linha: -1, coluna: 0 },
+  leste: { linha: 0, coluna: 1 },
+  sul: { linha: 1, coluna: 0 },
+  oeste: { linha: 0, coluna: -1 },
+}
+
+function celulaVizinhaNaBorda(celula: Celula, borda: string): Celula | null {
+  const d = DESLOCAMENTO_DA_BORDA[borda]
+  if (!d) return null
+  const vizinha = { linha: celula.linha + d.linha, coluna: celula.coluna + d.coluna }
+  if (!estaDentroDaGrade(vizinha)) return null
+  return vizinha
+}
+
+export function vagasDisponiveisDoPeao(
+  estado: EstadoInteracaoPeoes,
+): { borda: string; celula: Celula }[] {
+  const peaoId = estado.peaoSelecionadoId
+  if (peaoId === null) return []
+  const peao = estado.peoes.find((p) => p.peaoId === peaoId)
+  if (!peao || peao.celula === null) return []
+  const origem = encontrarPecaNaCelula(estado.posicionadas, peao.celula)
+  if (!origem) return []
+  const bordas = bordasAbertas(origem)
+  const jaEscolhidas = new Set(
+    estado.recebidasPendentes
+      .map((r) => (r as unknown as { vaga: string | null }).vaga)
+      .filter((v): v is string => v !== null),
+  )
+  const vagas: { borda: string; celula: Celula }[] = []
+  for (const borda of bordas) {
+    if (jaEscolhidas.has(borda)) continue
+    const celula = celulaVizinhaNaBorda(origem.celula, borda)
+    if (!celula || encontrarPecaNaCelula(estado.posicionadas, celula)) continue
+    vagas.push({ borda, celula })
+  }
+  return vagas
+}
+
+export function mapearEscolhaDeVagaDaRecebida(
+  estado: EstadoInteracaoPeoes,
+  recebidaId: string,
+  borda: string,
+): PeaoComandoDoCliente | null {
+  if (estado.peaoSelecionadoId === null) return null
+  const pendente = estado.recebidasPendentes.find(
+    (r) => r.recebidaId === recebidaId,
+  ) as unknown as { vaga: string | null } | undefined
+  if (!pendente) return null
+  if (pendente.vaga !== null) return null
+  const vagaValida = vagasDisponiveisDoPeao(estado).some((v) => v.borda === borda)
+  if (!vagaValida) return null
+  return {
+    type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+    recebidaId,
+    borda: borda as unknown as import('@flicker/shared').BordaCardinal,
+  }
 }
 
 /**
@@ -367,20 +428,34 @@ export function rotearCliqueDeCelula(
   celula: Celula,
 ): ResultadoDeCliqueEmCelula {
   if (haRecebidasPendentes(estadoPeoes)) {
+    const temVagaPendente = estadoPeoes.recebidasPendentes.some(
+      (r) => (r as unknown as { vaga: string | null }).vaga === null,
+    )
+    if (temVagaPendente) {
+      const vagas = vagasDisponiveisDoPeao(estadoPeoes)
+      const vaga = vagas.find((v) => chaveCelula(v.celula) === chaveCelula(celula))
+      if (vaga) {
+        const alvo = estadoPeoes.recebidasPendentes.find(
+          (r) => (r as unknown as { vaga: string | null }).vaga === null,
+        )
+        if (alvo) {
+          const comando = mapearEscolhaDeVagaDaRecebida(
+            estadoPeoes,
+            alvo.recebidaId,
+            vaga.borda,
+          )
+          if (comando) return { ciclo: comando }
+        }
+        return null
+      }
+    }
     const pendencia = estadoPeoes.recebidasPendentes.find(
-      (r) =>
-        // Forma nova (#138): célula-alvo ainda indefinida (null) até o sorteio
-        // fixar a vaga — não é encaixável por esta rota legada.
-        r.celulaAlvo !== null && chaveCelula(r.celulaAlvo) === chaveCelula(celula),
+      (r) => r.celulaAlvo !== null && chaveCelula(r.celulaAlvo) === chaveCelula(celula),
     )
     if (!pendencia) return null
     if (pendencia.pecaId === null) return { focarPendencia: pendencia.recebidaId }
-    // Pendência tipada: encaixe exige a peça escolhida em foco; seleção
-    // divergente (ex.: peça de Reserva selecionada — estado stale) → null.
     if (pendencia.pecaId !== estadoPeoes.pecaSelecionadaId) return null
     const encaixe = mapearPosicionarRecebida(estadoPeoes, celula)
-    // Não-null por construção (pecaSelecionadaId = pendência.pecaId ≠ null e
-    // célula = alvo da pendência); guardo por tipagem.
     return encaixe === null ? null : { ciclo: encaixe }
   }
   if (estadoPeoes.peaoSelecionadoId !== null) {
@@ -422,6 +497,7 @@ const TIPOS_DE_COMANDO_DE_PEAO: ReadonlySet<string> = new Set([
   'SELECIONAR_PEAO',
   'POSICIONAR_PEAO',
   'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+  'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
   'PERMANECER',
 ])
@@ -491,6 +567,10 @@ export function mapearCliqueNaReservaComCiclo(
   peca: { readonly pecaId: string; readonly tipo: TipoDaPeca },
 ): PeaoComandoDoCliente | TabuleiroComandoDoCliente | null {
   if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) {
+    const temSorteada = estadoPeoes.recebidasPendentes.some(
+      (r) => 'vaga' in r,
+    )
+    if (temSorteada) return null
     if (recebidaFocadaId === null || peca.tipo === 'inicial') return null
     if (peca.tipo !== 'reta' && peca.tipo !== 'T' && peca.tipo !== 'cruz') return null
     return mapearEscolhaDeTipoDaRecebida(estadoPeoes, recebidaFocadaId, peca.tipo)
@@ -513,6 +593,8 @@ export type EventoDoCicloDoPeao =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
   | PosicaoConfirmadaEvento
+  | import('@flicker/shared').VagaDaPecaRecebidaEscolhidaEvento
+  | import('@flicker/shared').PecaSorteadaEvento
 
 /**
  * Traduz evento do servidor em flash (issue #118): aprovação/seleção →
@@ -528,6 +610,7 @@ export function mapearEventoPeaoParaFeedback(
     case 'RECEBIMENTO_GERADO':
     case 'PEAO_POSICIONADO':
     case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO':
+    case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO':
     case 'PEAO_MOVIDO':
     case 'PEAO_PERMANECEU':
     case 'PECA_SELECIONADA':
@@ -537,6 +620,8 @@ export function mapearEventoPeaoParaFeedback(
     case 'MANIPULACAO_FINALIZADA':
     case 'POSICAO_CONFIRMADA':
       return FLASH_BRANCO
+    case 'PECA_SORTEADA':
+      return null
     case 'ERRO_DO_TABULEIRO':
       if (evento.codigo === 'FORA_DA_VEZ') return FLASH_AMBAR
       if (evento.codigo === 'PENDENCIA_NAO_RESOLVIDA') {

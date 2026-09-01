@@ -27,6 +27,8 @@ import type {
   LimpezaAplicadaWireEvento,
   PartidaIniciadaEvento,
   EstadoDaPartidaEvento,
+  PecaSorteadaEvento,
+  VagaDaPecaRecebidaEscolhidaEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 
@@ -44,6 +46,8 @@ export type EventoDoCanalDaPartida =
   | PosicaoConfirmadaEvento
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
+  | PecaSorteadaEvento
+  | VagaDaPecaRecebidaEscolhidaEvento
   | PartidaIniciadaEvento
   | EstadoDaPartidaEvento
 
@@ -170,6 +174,8 @@ export function usePartidaWebSocket({
         case 'PEAO_PERMANECEU':
         case 'CELULAS_ILUMINADAS':
         case 'LIMPEZA_APLICADA':
+        case 'PECA_SORTEADA':
+        case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO':
         case 'TURNO_INICIADO':
         case 'TURNO_ENCERRADO':
         case 'POSICAO_CONFIRMADA':
