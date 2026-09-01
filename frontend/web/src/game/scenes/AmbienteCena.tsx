@@ -11,7 +11,7 @@ import {
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Reserva } from '../tabuleiro/Reserva'
-import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
+import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../tabuleiro/interacaoPeoes'
 import type { PeaoComandoDoCliente, RecebidaId, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
@@ -67,6 +67,8 @@ interface AmbienteCenaProps {
   estadoInteracao?: EstadoInteracaoTabuleiro | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   peaoSelecionadoId?: PeaoId | null
+  /** Peão do Jogador Ativo da vez (destaque emissivo suave, #118). */
+  peaoAtivoId?: PeaoId | null
   /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
   destinosSet?: ReadonlySet<PecaId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
@@ -76,6 +78,8 @@ interface AmbienteCenaProps {
   estadoPeoes?: EstadoInteracaoPeoes | null
   /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
+  onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (destaque, #91). */
   alvosPendentesSet?: ReadonlySet<string>
   /** Chave da célula-alvo da pendência FOCADA (destaque distinto, #91). */
@@ -101,11 +105,13 @@ export function AmbienteCena({
   estadoInteracao = null,
   onComando,
   peaoSelecionadoId = null,
+  peaoAtivoId = null,
   destinosSet,
   onSelecionarPeao,
   onDesselecionar,
   estadoPeoes = null,
   onComandoPeao,
+  onRejeicaoPeao,
   alvosPendentesSet,
   alvoFocadoKey = null,
   recebidaFocadaId = null,
@@ -140,10 +146,12 @@ export function AmbienteCena({
               onComando={onComando ?? noop}
               peoes={estadoExibicao.peoes}
               peaoSelecionadoId={peaoSelecionadoId}
+              peaoAtivoId={peaoAtivoId}
               destinosSet={destinosSet}
               onSelecionarPeao={onSelecionarPeao}
               estadoPeoes={estadoPeoes}
               onComandoPeao={onComandoPeao}
+              onRejeicaoPeao={onRejeicaoPeao}
               alvosPendentesSet={alvosPendentesSet}
               alvoFocadoKey={alvoFocadoKey}
               aoFocarPendencia={aoFocarPendencia}
@@ -164,6 +172,7 @@ export function AmbienteCena({
                   cor={peao.cor}
                   position={peaoMesaParaMundo(indiceGlobal)}
                   selecionado={peao.peaoId === peaoSelecionadoId}
+                  ativo={peao.peaoId === peaoAtivoId}
                   aoClicar={
                     onSelecionarPeao
                       ? () => onSelecionarPeao(peao.peaoId)

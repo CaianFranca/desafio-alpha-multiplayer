@@ -7,7 +7,7 @@ import type {
   PecaId,
   PecaPosicionada,
 } from '../../game/tabuleiro/contrato'
-import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
+import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
 import {
   despacharCliqueDeCelula,
@@ -28,6 +28,8 @@ interface TabuleiroMirrorDOMProps {
   peoes: readonly PeaoDaExibicao[]
   /** Peão selecionado (estado visual local espelhado da cena, issue #90). */
   peaoSelecionadoId: PeaoId | null
+  /** Peão do Jogador Ativo da vez (data-ativo no espelho, #118). */
+  peaoAtivoId?: PeaoId | null
   /** PecaIds destinos válidos do peão selecionado (mesma fonte do destaque). */
   destinosSet: ReadonlySet<PecaId>
   aoSelecionarPeao?: (peaoId: PeaoId) => void
@@ -38,6 +40,8 @@ interface TabuleiroMirrorDOMProps {
   estadoPeoes?: EstadoInteracaoPeoes | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
+  onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /** Recebida focada (validada pelo dono do foco, AmbienteDeJogo). */
   recebidaFocadaId?: RecebidaId | null
   aoFocarPendencia?: (recebidaId: RecebidaId) => void
@@ -66,6 +70,7 @@ export function TabuleiroMirrorDOM({
   posicionadas,
   peoes,
   peaoSelecionadoId,
+  peaoAtivoId = null,
   destinosSet,
   aoSelecionarPeao,
   aoDesselecionar,
@@ -73,6 +78,7 @@ export function TabuleiroMirrorDOM({
   estadoPeoes = null,
   onComando,
   onComandoPeao,
+  onRejeicaoPeao,
   recebidaFocadaId = null,
   aoFocarPendencia,
   alvosPendentesSet = new Set<string>(),
@@ -96,6 +102,9 @@ export function TabuleiroMirrorDOM({
       onComando,
       onComandoPeao,
       onFocarPendencia: aoFocarPendencia,
+      onRejeicao: onRejeicaoPeao
+        ? (rejeicao) => onRejeicaoPeao(rejeicao.feedback)
+        : undefined,
     })
   }
 
@@ -196,6 +205,7 @@ export function TabuleiroMirrorDOM({
             data-cor={peao.cor}
             data-posicionado={peao.celula !== null ? 'true' : 'false'}
             data-selecionado={peao.peaoId === peaoSelecionadoId ? 'true' : 'false'}
+            data-ativo={peao.peaoId === peaoAtivoId ? 'true' : 'false'}
             onClick={(e) => {
               // stopPropagation: não deixar o clique chegar ao "clique fora"
               // da raiz, que desselecionaria na sequência.

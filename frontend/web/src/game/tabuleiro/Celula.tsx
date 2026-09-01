@@ -39,6 +39,8 @@ interface CelulaProps {
   /** Célula é o alvo da pendência FOCADA (destaque distinto, #91). */
   celulaFocada?: boolean
   peaoSelecionadoId?: PeaoId | null
+  /** Peão do Jogador Ativo da vez: destaque emissivo suave (#118). */
+  peaoAtivoId?: PeaoId | null
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
 
@@ -60,6 +62,7 @@ export function Celula({
   alvoPendente = false,
   celulaFocada = false,
   peaoSelecionadoId = null,
+  peaoAtivoId = null,
   onSelecionarPeao,
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
@@ -122,6 +125,7 @@ export function Celula({
           cor={peao.cor}
           position={[0, PEAO_Y, 0]}
           selecionado={peao.peaoId === peaoSelecionadoId}
+          ativo={peao.peaoId === peaoAtivoId}
           aoClicar={
             onSelecionarPeao
               ? () => onSelecionarPeao(peao.peaoId)

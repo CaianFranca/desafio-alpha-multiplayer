@@ -20,8 +20,22 @@ import type {
   TabuleiroComandoDoCliente,
   TabuleiroEventoDoServidor,
   PeaoEventoDoServidor,
+  PosicaoConfirmadaEvento,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
+
+/**
+ * Eventos que o canal da Partida entrega à página (issue #118): tabuleiro
+ * (ST-09), peões (ST-10) e os três eventos de turno (ST-11) agora roteados.
+ */
+export type EventoDoCanalDaPartida =
+  | TabuleiroEventoDoServidor
+  | PeaoEventoDoServidor
+  | TurnoIniciadoEvento
+  | TurnoEncerradoEvento
+  | PosicaoConfirmadaEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -36,8 +50,8 @@ export interface UsePartidaWebSocketReturn {
 interface UsePartidaWebSocketOptions {
   serverId: string | null
   partidaId: string | null
-  /** Recebe cada evento de tabuleiro ou peão em ordem de chegada do broadcast. */
-  onEvento: (evento: TabuleiroEventoDoServidor | PeaoEventoDoServidor) => void
+  /** Recebe cada evento de tabuleiro, peão ou turno em ordem de chegada do broadcast. */
+  onEvento: (evento: EventoDoCanalDaPartida) => void
   onAdmissao: (evento: AdmissaoAceitaEvento) => void
   /** Chamado quando a conexão falha (WebSocket não pôde abrir). */
   onFalhaDeConexao: () => void
@@ -140,10 +154,13 @@ export function usePartidaWebSocket({
         case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO':
         case 'PEAO_MOVIDO':
         case 'PEAO_PERMANECEU':
-          onEventoRef.current(data as TabuleiroEventoDoServidor | PeaoEventoDoServidor)
+        case 'TURNO_INICIADO':
+        case 'TURNO_ENCERRADO':
+        case 'POSICAO_CONFIRMADA':
+          onEventoRef.current(data as EventoDoCanalDaPartida)
           return
         default:
-          // Evento desconhecido (ex.: PING/PONG, Turnos ST-11): ignora.
+          // Evento desconhecido (ex.: PING/PONG, snapshot ST-14): ignora.
           return
       }
     }
