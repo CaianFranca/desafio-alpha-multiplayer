@@ -494,9 +494,9 @@ export function moverPeao(
     return rejeitar('CELULA_SEM_PECA', 'A Célula de destino não contém uma Peça.');
   }
 
-  // Monstros (ST-15 / issue #169) não aceitam Peão: a regra é absoluta e
-  // vence a conexão — mover para a célula de um Monstro é rejeitado antes da
-  // consulta de vizinhança, com o código fechado existente PECA_JA_TEM_PEAO
+  // Monstros (ST-15 / issue #169) não aceitam Peão: a regra é absoluta — a
+  // rejeição ocorre antes da consulta de vizinhança, aplicando-se mesmo a um
+  // Monstro fora da conexão — com o código fechado existente PECA_JA_TEM_PEAO
   // (mesmo precedente da ocupação do Portão da issue #176); nenhum código de
   // erro novo. O estado permanece inalterado.
   if (ehPecaDeMonstro(alvo.tipo)) {
