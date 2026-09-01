@@ -26,6 +26,7 @@ const PREFIXO_JOGADOR_SALA = 'lobby:jogador:';
 const SUFIXO_ESTADO = ':estado';
 const SUFIXO_SALA = ':sala';
 const SUFIXO_CHAT = ':chat';
+const SUFIXO_REABERTA = ':reaberta';
 
 export interface MembroEstadoProjecao {
   readonly id: string;
@@ -226,5 +227,15 @@ export class SalasProjecao {
     await this.redis.del(chaveSalaEstado(salaId));
     await this.redis.del(chaveSalaCodigo(codigo));
     await this.limparChat(salaId);
+  }
+
+  /** Marca que a sala já foi reaberta via retorno (#178) — idempotência persistida em Redis. */
+  async marcarReaberta(salaId: string): Promise<void> {
+    await this.redis.set(`${PREFIXO_SALA}${salaId}${SUFIXO_REABERTA}`, '1', 'EX', PROJECAO_TTL_SEGUNDOS);
+  }
+
+  async foiReaberta(salaId: string): Promise<boolean> {
+    const v = await this.redis.get(`${PREFIXO_SALA}${salaId}${SUFIXO_REABERTA}`);
+    return v !== null;
   }
 }

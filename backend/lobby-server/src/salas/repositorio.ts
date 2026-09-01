@@ -247,6 +247,61 @@ export class SalasRepo {
     return (resultado.rowCount ?? 0) === 1;
   }
 
+  private reabertaTabelaGarantida = false;
+  private async garantirTabelaReabertaMarkers(): Promise<void> {
+    if (this.reabertaTabelaGarantida) return;
+    await this.pool.query(
+      `CREATE TABLE IF NOT EXISTS sala_reaberta_markers (sala_id uuid PRIMARY KEY, criado_em timestamptz NOT NULL DEFAULT now())`,
+    );
+    this.reabertaTabelaGarantida = true;
+  }
+
+  async marcarReabertaPersistido(salaId: string): Promise<void> {
+    await this.garantirTabelaReabertaMarkers();
+    await this.pool.query(
+      `INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [salaId],
+    );
+  }
+
+  async foiReabertaPersistido(salaId: string): Promise<boolean> {
+    await this.garantirTabelaReabertaMarkers();
+    try {
+      const r = await this.pool.query(`SELECT 1 FROM sala_reaberta_markers WHERE sala_id = $1 LIMIT 1`, [salaId]);
+      return (r.rowCount ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Registro bruto da sala (inclui encaminhada e aberta) — usado na revalidação do retorno (#178). */
+  async obterSalaBruta(
+    salaId: string,
+  ): Promise<{ id: string; codigo: string; anfitriaoId: string | null; status: StatusDaSala; serverId: string | null; partidaId: string | null } | null> {
+    const resultado = await this.pool.query<{
+      id: string;
+      codigo: string;
+      anfitriaoId: string | null;
+      status: string;
+      serverId: string | null;
+      partidaId: string | null;
+    }>(
+      `SELECT id, codigo_sala AS codigo, anfitriao_id AS "anfitriaoId", status, server_id AS "serverId", partida_id AS "partidaId"
+       FROM salas_historico WHERE id = $1 LIMIT 1`,
+      [salaId],
+    );
+    const linha = resultado.rows[0];
+    if (!linha) return null;
+    return {
+      id: linha.id,
+      codigo: linha.codigo,
+      anfitriaoId: linha.anfitriaoId,
+      status: linha.status as StatusDaSala,
+      serverId: linha.serverId ?? null,
+      partidaId: linha.partidaId ?? null,
+    };
+  }
+
   /** Obtém server/partida de uma sala encaminhada (null se não encaminhada). */
   async obterEncaminhamento(salaId: string): Promise<EncaminhamentoPersistido | null> {
     const resultado = await this.pool.query<{ server_id: string | null; partida_id: string | null }>(
