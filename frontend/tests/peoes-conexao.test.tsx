@@ -289,6 +289,13 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
   it('pós-confirmação: clicar destino conectado NÃO envia MOVER_PEAO e pisca âmbar (AC3, review #165)', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
+    const pecaDoEspelho = (pecaId: string): HTMLElement => {
+      const peca = screen
+        .getAllByTestId('peca-posicionada')
+        .find((el) => el.getAttribute('data-peca-id') === pecaId)
+      if (!peca) throw new Error(`peça ${pecaId} não encontrada no espelho`)
+      return peca
+    }
 
     // Turno meu, rodada 2: peão posicionado na Inicial e movido à reta vizinha.
     act(() => {
@@ -312,6 +319,11 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
       })
+    })
+    // Controle: seleção ativa e SEM confirmação → destino conectado destacado.
+    expect(pecaDoEspelho('reta-1').getAttribute('data-conectada')).toBe('true')
+
+    act(() => {
       ws.simulateMessage({
         type: 'PEAO_MOVIDO',
         peaoId: 'peao-branco',
@@ -343,6 +355,8 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
     act(() => {
       ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
     })
+    // Destaques de destino somem após confirmar (AC3): nada conecta ao peão.
+    expect(pecaDoEspelho('inicial-1').getAttribute('data-conectada')).toBe('false')
 
     const comandosAntes = ws.sentMessages.length
     await user.click(celulaDoEspelho(3, 3))

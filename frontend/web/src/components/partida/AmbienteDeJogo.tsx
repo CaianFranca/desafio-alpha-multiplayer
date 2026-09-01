@@ -140,9 +140,13 @@ export function AmbienteDeJogo({
     estadoExibicao?.posicionadas.map((p) => chaveCelula(p.celula)) ?? [],
   )
   // Destinos válidos do peão selecionado: mesmo conjunto deriva destaque/cursor
-  // na cena e data-conectada no espelho DOM (fonte única de verdade).
+  // na cena e data-conectada no espelho DOM (fonte única de verdade). Após a
+  // Confirmação de Posição os destinos somem — o peão está travado no turno
+  // (guard AC3 do roteador; a regra vive em um só lugar).
   const destinosSet = new Set<string>(
-    estadoExibicao && peaoSelecionadoIdLocal !== null
+    estadoExibicao &&
+      peaoSelecionadoIdLocal !== null &&
+      !estadoInteracaoPeoes?.posicaoConfirmadaNoTurno
       ? destinosConectadosDoPeao(
           estadoExibicao.posicionadas,
           estadoExibicao.peoes,
