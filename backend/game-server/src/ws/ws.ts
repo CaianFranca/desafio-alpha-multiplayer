@@ -19,11 +19,13 @@
 // opera apenas em PING/PONG.
 //
 // Substituição de Conexão duplicada (issue #155): uma nova admissão do mesmo
-// Jogador na mesma Partida registra-se e só então encerra a conexão anterior
-// com `4409 CONEXAO_SUBSTITUIDA` — nunca há janela sem conexão vigente. O
-// `close` da conexão substituída NÃO marca `em_reconexao`: a presença do
-// Jogador permanece `conectado` porque o registro já aponta para a nova
-// conexão (checagem de vigência em `removerConexao`).
+// Jogador na mesma Partida registra-se ANTES da transição de presença e só
+// então encerra a conexão anterior com `4409 CONEXAO_SUBSTITUIDA` — nunca há
+// janela sem conexão vigente, e um `close` do socket antigo durante a
+// transição não é tratado como desconexão real. O `close` da conexão
+// substituída NÃO marca `em_reconexao`: a presença do Jogador permanece
+// `conectado` porque o registro já aponta para a nova conexão (checagem de
+// vigência em `removerConexao`).
 
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -208,6 +210,23 @@ export function criarWebSocketServer(
 
       wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
         void (async () => {
+          const conexao: ConexaoDoJogador = {
+            socket: ws,
+            jogadorId: sessao.jogadorId,
+            apelido: sessao.apelido,
+            partidaId,
+          };
+          // Substituição (#155): a nova conexão entra no registro ANTES da
+          // transição de presença e de a antiga ser encerrada —
+          // `adicionarConexao` devolve a anterior, que deixa de ser a vigente
+          // neste instante. Registrar antes da transição fecha a janela em que
+          // um `close` do socket antigo (queda de rede simultânea à nova
+          // admissão) seria tratado como desconexão real e sobrescreveria a
+          // presença recém-gravada com `em_reconexao`: durante o `await` da
+          // transição, o antigo já não é vigente e o `close` dele pula
+          // `marcarDesconexao`.
+          const conexaoAnterior = adicionarConexao(conexao);
+
           const transicao = await transicionarSeCompletoOuAtualizarPresenca(
             contexto.redis,
             partidaId,
@@ -215,6 +234,14 @@ export function criarWebSocketServer(
           );
 
           if (transicao === null || (transicao.estado !== 'preparada' && transicao.estado !== 'em_andamento')) {
+            // Falha da transição com substituição em curso: restaura a conexão
+            // anterior como vigente (se ainda aberta) para que o `close` do
+            // socket novo não marque `em_reconexao` sobre uma conexão viva. Se
+            // a anterior já não está aberta, o `close` do novo marca
+            // `em_reconexao` — não há conexão viva, e é o estado correto.
+            if (conexaoAnterior !== null && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN) {
+              adicionarConexao(conexaoAnterior);
+            }
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
             } catch {}
@@ -229,17 +256,6 @@ export function criarWebSocketServer(
             partidaId,
             estado: transicao.estado,
           } satisfies ServerMessage));
-
-          const conexao: ConexaoDoJogador = {
-            socket: ws,
-            jogadorId: sessao.jogadorId,
-            apelido: sessao.apelido,
-            partidaId,
-          };
-          // Substituição (#155): a nova conexão entra no registro ANTES de a
-          // antiga ser encerrada — `adicionarConexao` devolve a anterior, que
-          // deixa de ser a vigente neste instante.
-          const conexaoAnterior = adicionarConexao(conexao);
 
           // Admissão concluída após upgrade: transição atômica dentro do
           // callback garante que a partida só inicie com 4 sockets vivos
