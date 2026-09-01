@@ -13,7 +13,10 @@ import {
   type EstadoDaPartida,
 } from '@flicker/engine';
 
-function chaveDoEstadoDaPartida(partidaId: string): string {
+const TTL_NAO_EXISTE = -2;
+const TTL_SEM_EXPIRACAO = -1;
+
+export function chaveDoEstadoDaPartida(partidaId: string): string {
   return `game-server:partida-estado:${partidaId}`;
 }
 
@@ -60,19 +63,30 @@ export async function obterEstadoDaPartida(
  * estado, para que ele expire junto com a partida. Em vez de `KEEPTTL` (que,
  * se a chave tiver expirado entre o `obter` e o `salvar`, criaria a chave sem
  * TTL — um estado órfão que nunca expira, #135), consulta-se o TTL remanescente
- * e aplica-se `SET ... EX ttl`. Se a chave já expirou/inexiste (`ttl <= 0`),
- * a partida acabou e o estado não é repersistido.
+ * e aplica-se `SET ... EX ttl`. Se a chave já expirou/inexiste (`ttl === -2`),
+ * a partida acabou e o estado não é repersistido. Quando a partida está
+ * `em_andamento` (ST-14), o TTL é -1 (sem expiração) e o estado é repersistido
+ * sem TTL.
  */
 export async function salvarEstadoDaPartida(
   redis: Redis,
   partidaId: string,
   estado: EstadoDaPartida,
 ): Promise<void> {
-  const ttl = await redis.ttl(chaveDoEstadoDaPartida(partidaId));
-  if (ttl <= 0) {
+  const chave = chaveDoEstadoDaPartida(partidaId);
+  const ttl = await redis.ttl(chave);
+  if (ttl === TTL_NAO_EXISTE) {
     return;
   }
-  await redis.set(chaveDoEstadoDaPartida(partidaId), JSON.stringify(estado), 'EX', ttl);
+  if (ttl === TTL_SEM_EXPIRACAO) {
+    await redis.set(chave, JSON.stringify(estado));
+    return;
+  }
+  if (ttl > 0) {
+    await redis.set(chave, JSON.stringify(estado), 'EX', ttl);
+    return;
+  }
+  await redis.set(chave, JSON.stringify(estado));
 }
 
 /** Remove o estado da partida (usado no cancelamento da partida). */

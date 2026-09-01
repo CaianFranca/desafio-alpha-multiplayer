@@ -188,6 +188,91 @@ export interface PecaSorteadaEvento {
 // borda e a célula-alvo da pendência e seleciona a Peça sorteada.
 export type { VagaDaPecaRecebidaEscolhidaEvento };
 
+// --- Snapshot wire (ST-14) — projeção tipada sem runtime ---
+
+export type EstadoDaPartidaWire = 'preparada' | 'em_andamento';
+
+export type CorDoPeaoWire = 'branco' | 'vermelho' | 'azul' | 'amarelo';
+
+export type TipoDaPecaWire =
+  | 'inicial'
+  | TipoDePecaDeCaminho
+  | 'gerador'
+  | 'sala_do_diretor'
+  | 'sala_medica'
+  | 'portao_de_saida';
+
+export interface JogadorNoSnapshot {
+  readonly jogadorId: string;
+  readonly apelido: string;
+  readonly cor: CorDoPeaoWire;
+  readonly ordem: number;
+  readonly peaoId: PeaoId;
+  readonly primeiroTurnoPendente: boolean;
+}
+
+export interface PecaPosicionadaNoSnapshot {
+  readonly pecaId: PecaId;
+  readonly tipo: TipoDaPecaWire;
+  readonly orientacao: Orientacao;
+  readonly celula: Celula;
+}
+
+export interface PecaInicialNoSnapshot {
+  readonly pecaId: PecaId;
+  readonly tipo: 'inicial';
+  readonly orientacao: Orientacao;
+}
+
+export interface PeaoNoSnapshot {
+  readonly peaoId: PeaoId;
+  readonly cor: CorDoPeaoWire;
+  readonly pecaId: PecaId | null;
+}
+
+// No domínio pós-#138 o Recebimento sorteia as peças da Caixa: cada pendência
+// carrega a Peça sorteada (pecaId + tipo + orientação) e a vaga (com a
+// célula-alvo derivada dela) só é fixada pela escolha de vaga.
+export interface RecebidaNoSnapshot {
+  readonly recebidaId: RecebidaId;
+  readonly pecaId: PecaId;
+  readonly tipo: TipoDePecaDaCaixa;
+  readonly orientacao: Orientacao;
+  readonly vaga: BordaCardinal | null;
+  readonly celulaAlvo: Celula | null;
+}
+
+export interface TabuleiroNoSnapshot {
+  readonly posicionadas: readonly PecaPosicionadaNoSnapshot[];
+  readonly iniciais: readonly PecaInicialNoSnapshot[];
+  readonly peoes: readonly PeaoNoSnapshot[];
+  readonly recebidas: readonly RecebidaNoSnapshot[];
+  readonly pecaSelecionadaId: PecaId | null;
+  readonly pecaEmManipulacaoId: PecaId | null;
+  readonly peaoSelecionadoId: PeaoId | null;
+}
+
+export interface EstadoDaPartidaSnapshot {
+  readonly tabuleiro: TabuleiroNoSnapshot;
+  readonly jogadores: readonly JogadorNoSnapshot[];
+  readonly jogadorAtivoId: string;
+  readonly rodada: number;
+  readonly pecaDoInicioDoTurnoId: PecaId | null;
+  readonly posicaoConfirmada: boolean;
+  readonly celulasIluminadas: readonly Celula[];
+  readonly estado: EstadoDaPartidaWire;
+}
+
+export interface PartidaIniciadaEvento {
+  readonly type: 'PARTIDA_INICIADA';
+  readonly partidaId: string;
+}
+
+export interface EstadoDaPartidaEvento {
+  readonly type: 'ESTADO_DA_PARTIDA';
+  readonly snapshot: EstadoDaPartidaSnapshot;
+}
+
 export interface CelulasIluminadasWireEvento {
   readonly type: 'CELULAS_ILUMINADAS';
   readonly celulas: readonly Celula[];
@@ -205,7 +290,9 @@ export type PartidaEventoDoServidor =
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
   | PecaSorteadaEvento
-  | VagaDaPecaRecebidaEscolhidaEvento;
+  | VagaDaPecaRecebidaEscolhidaEvento
+  | PartidaIniciadaEvento
+  | EstadoDaPartidaEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

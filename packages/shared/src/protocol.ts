@@ -5,7 +5,11 @@ import type { SalaComandoDoCliente, SalaEventoDoServidor } from './sala.ts';
 import type { EncaminhamentoEventoDoServidor, PartidaId } from './encaminhamento.ts';
 import type { TabuleiroComandoDoCliente, TabuleiroEventoDoServidor } from './tabuleiro.ts';
 import type { PeaoComandoDoCliente, PeaoEventoDoServidor } from './peoes.ts';
-import type { PartidaComandoDoCliente, PartidaEventoDoServidor } from './partida.ts';
+import type {
+  EstadoDaPartidaWire,
+  PartidaComandoDoCliente,
+  PartidaEventoDoServidor,
+} from './partida.ts';
 
 export interface PingMessage {
   type: 'PING';
@@ -22,6 +26,7 @@ export interface AdmissaoAceitaEvento {
   readonly jogadorId: string;
   readonly apelido: string;
   readonly partidaId: PartidaId;
+  readonly estado: EstadoDaPartidaWire;
 }
 
 export type CodigoDeErroDeAdmissao =

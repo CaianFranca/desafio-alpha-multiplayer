@@ -29,7 +29,9 @@ import type {
   AdmissaoRejeitadaEvento,
 } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
-import { obterPartida, atualizarPresencaAtomica } from '../partidas/partidas.ts';
+import { marcarDesconexao, obterPartida, transicionarSeCompletoOuAtualizarPresenca } from '../partidas/partidas.ts';
+import { obterEstadoDaPartida } from '../partidas/estado.ts';
+import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
 import { adicionarConexao, removerConexao, type ConexaoDoJogador } from './conexao.ts';
 import { PartidaBroadcaster } from '../partidas/broadcast.ts';
@@ -186,7 +188,7 @@ export function criarWebSocketServer(
         return;
       }
 
-      if (partida.estado !== 'preparada') {
+      if (partida.estado !== 'preparada' && partida.estado !== 'em_andamento') {
         enviarErroNoSocket(socket, 404, erroRejeitada('PARTIDA_NAO_ENCONTRADA', 'partida não está no estado preparada'));
         return;
       }
@@ -197,32 +199,92 @@ export function criarWebSocketServer(
         return;
       }
 
-      await atualizarPresencaAtomica(contexto.redis, partidaId, sessao.jogadorId);
-
       wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
-        ws.send(JSON.stringify({
-          type: 'ADMISSAO_ACEITA',
-          jogadorId: sessao.jogadorId,
-          apelido: sessao.apelido,
-          partidaId,
-        } satisfies ServerMessage));
+        void (async () => {
+          const transicao = await transicionarSeCompletoOuAtualizarPresenca(
+            contexto.redis,
+            partidaId,
+            sessao.jogadorId,
+          );
 
-        const conexao: ConexaoDoJogador = {
-          socket: ws,
-          jogadorId: sessao.jogadorId,
-          apelido: sessao.apelido,
-          partidaId,
-        };
-        adicionarConexao(conexao);
+          if (transicao === null || (transicao.estado !== 'preparada' && transicao.estado !== 'em_andamento')) {
+            try {
+              ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
+            } catch {}
+            ws.close(1011, 'ERRO_INTERNO');
+            return;
+          }
 
-        // Admissão pré-upgrade concluída: a partida já é conhecida e validada.
-        // Com o canal de partida ativo, o socket entra no broadcaster, recebe
-        // o turno corrente e comandos válidos vão direto aos handlers
-        // (issue #117).
-        if (depsPartida !== undefined) {
-          depsPartida.broadcaster.registrar(partidaId, ws);
-          void depsPartida.handlers.anunciarTurnoAtual(partidaId, ws);
-        }
+          ws.send(JSON.stringify({
+            type: 'ADMISSAO_ACEITA',
+            jogadorId: sessao.jogadorId,
+            apelido: sessao.apelido,
+            partidaId,
+            estado: transicao.estado,
+          } satisfies ServerMessage));
+
+          const conexao: ConexaoDoJogador = {
+            socket: ws,
+            jogadorId: sessao.jogadorId,
+            apelido: sessao.apelido,
+            partidaId,
+          };
+          adicionarConexao(conexao);
+
+          // Admissão concluída após upgrade: transição atômica dentro do
+          // callback garante que a partida só inicie com 4 sockets vivos
+          // (ST-14). Ordem: ADMISSAO_ACEITA (já enviada) → PARTIDA_INICIADA
+          // broadcast (se 4ª admissão) → ESTADO_DA_PARTIDA unicast →
+          // anunciarTurnoAtual (TURNO_INICIADO). Snapshot e turno são unicast
+          // ao socket admitido; PARTIDA_INICIADA é broadcast a todos da partida
+          // e garantido mesmo se o snapshot falhar.
+          if (depsPartida !== undefined) {
+            depsPartida.broadcaster.registrar(partidaId, ws);
+            void (async () => {
+              if (transicao.iniciou) {
+                depsPartida.broadcaster.enviar(partidaId, {
+                  type: 'PARTIDA_INICIADA',
+                  partidaId,
+                });
+              }
+              try {
+                const [estadoEngine, partidaAtual] = await Promise.all([
+                  obterEstadoDaPartida(contexto.redis, partidaId),
+                  obterPartida(contexto.redis, partidaId),
+                ]);
+                if (estadoEngine !== null && partidaAtual !== null) {
+                  const snapshot = paraSnapshotWire(
+                    estadoEngine,
+                    partidaAtual.roster,
+                    transicao.estado,
+                  );
+                  depsPartida.broadcaster.enviarParaSocket(ws, {
+                    type: 'ESTADO_DA_PARTIDA',
+                    snapshot,
+                  });
+                } else {
+                  console.error('[ws] estado indisponível para snapshot', {
+                    partidaId,
+                    temEstado: estadoEngine !== null,
+                    temPartida: partidaAtual !== null,
+                  });
+                  depsPartida.broadcaster.enviarParaSocket(ws, {
+                    type: 'ERRO_DO_TABULEIRO',
+                    codigo: 'ESTADO_INDISPONIVEL',
+                    mensagem: 'Estado da partida indisponível para snapshot.',
+                  });
+                }
+              } catch (erro) {
+                console.error('[ws] falha ao enviar snapshot da partida:', (erro as Error).message);
+                depsPartida.broadcaster.enviarParaSocket(ws, {
+                  type: 'ERRO_DO_TABULEIRO',
+                  codigo: 'ESTADO_INDISPONIVEL',
+                  mensagem: 'Estado da partida indisponível para snapshot.',
+                });
+              }
+              await depsPartida.handlers.anunciarTurnoAtual(partidaId, ws);
+            })();
+          }
 
         console.info('[ws] jogador admitido', {
           jogadorId: sessao.jogadorId,
@@ -269,6 +331,13 @@ export function criarWebSocketServer(
           if (depsPartida !== undefined) {
             depsPartida.broadcaster.remover(ws);
           }
+          void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
+            console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
+          );
+        });
+        })().catch((error) => {
+          console.error('[ws] falha na transição pós-upgrade:', (error as Error).message);
+          try { ws.close(1011, 'ERRO_INTERNO'); } catch {}
         });
       });
     })().catch((error) => {
