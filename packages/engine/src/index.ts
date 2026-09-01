@@ -45,6 +45,7 @@ export type {
 } from './lobby.ts';
 
 export type {
+  CelulasIluminadasEvento,
   CodigoDeErroDaPartida,
   ComandoDePartida,
   ConfirmarPosicaoDoPeaoComando,

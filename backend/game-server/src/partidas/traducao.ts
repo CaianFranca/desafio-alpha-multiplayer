@@ -105,6 +105,19 @@ export function traduzirEventos(
           pecaId: evento.pecaId,
         });
         break;
+      case 'celulas_iluminadas':
+        saida.push({ type: 'CELULAS_ILUMINADAS', celulas: evento.celulas });
+        break;
+      case 'limpeza_aplicada':
+        saida.push({
+          type: 'LIMPEZA_APLICADA',
+          pecasRemovidas: evento.pecasRemovidas,
+        });
+        break;
+      default: {
+        const _exaustivo: never = evento;
+        break;
+      }
     }
   }
   return saida;

@@ -25,6 +25,7 @@ import {
   type EstadoDoTabuleiro,
   type EventoDoTabuleiro,
   type MoverPeaoComando,
+  type PecaPosicionada,
   type PecaRecebida,
   type PermanecerComando,
   type PosicionarPecaComando,
@@ -91,11 +92,17 @@ export interface PosicaoConfirmadaEvento {
   readonly pecaId: string;
 }
 
+export interface CelulasIluminadasEvento {
+  readonly tipo: 'celulas_iluminadas';
+  readonly celulas: readonly Celula[];
+}
+
 export type EventoDaPartida =
   | EventoDoTabuleiro
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
-  | PosicaoConfirmadaEvento;
+  | PosicaoConfirmadaEvento
+  | CelulasIluminadasEvento;
 
 export type CodigoDeErroDaPartida =
   | CodigoDeErroDeTabuleiro
@@ -370,16 +377,9 @@ function posicionarPeaoDaPartida(
   // depois de travar o Peão e recalcular a Iluminação, antes de retornar. As
   // Recebidas caem na Vizinhança do Peão (sempre iluminadas) e não são
   // removidas. O estado é filtrado e o evento só sai quando há remoção.
-  const celulasIluminadas = calcularIluminacao(tabuleiro);
-  const { posicionadas, removidas } = aplicarLimpeza(
-    tabuleiro,
-    celulasIluminadas,
-  );
-  if (removidas.length > 0) {
-    eventos.push({ tipo: 'limpeza_aplicada', pecasRemovidas: removidas });
-  }
+  const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   return sucessoDaPartida(
-    { ...estado, tabuleiro: { ...tabuleiro, posicionadas }, celulasIluminadas },
+    { ...estado, tabuleiro: { ...tabuleiro, posicionadas: iluminacao.posicionadas }, celulasIluminadas: iluminacao.celulasIluminadas },
     eventos,
   );
 }
@@ -535,20 +535,13 @@ function confirmarPosicaoDoPeao(
     });
   }
   const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
-  const celulasIluminadas = calcularIluminacao(tabuleiro);
-  const { posicionadas, removidas } = aplicarLimpeza(
-    tabuleiro,
-    celulasIluminadas,
-  );
-  if (removidas.length > 0) {
-    eventos.push({ tipo: 'limpeza_aplicada', pecasRemovidas: removidas });
-  }
+  const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   return sucessoDaPartida(
     {
       ...estado,
-      tabuleiro: { ...tabuleiro, posicionadas },
+      tabuleiro: { ...tabuleiro, posicionadas: iluminacao.posicionadas },
       posicaoConfirmada: true,
-      celulasIluminadas,
+      celulasIluminadas: iluminacao.celulasIluminadas,
     },
     eventos,
   );
@@ -701,4 +694,37 @@ function rejeitarDaPartida(
     sucesso: false,
     erro: { tipo: 'erro_de_dominio', codigo, mensagem },
   };
+}
+
+/**
+ * Recalcula a iluminação ortogonal e aplica a limpeza no mesmo ponto definitivo.
+ * @mutates eventos — adiciona `celulas_iluminadas` (se mudou) e `limpeza_aplicada` (se houver remoção).
+ */
+function recalcularIluminacaoEAplicarLimpeza(
+  estado: EstadoDaPartida,
+  tabuleiro: EstadoDoTabuleiro,
+  eventos: EventoDaPartida[],
+): { celulasIluminadas: readonly Celula[]; posicionadas: readonly PecaPosicionada[] } {
+  const celulasIluminadas = calcularIluminacao(tabuleiro);
+  if (!iluminacoesIguais(estado.celulasIluminadas, celulasIluminadas)) {
+    eventos.push({ tipo: 'celulas_iluminadas', celulas: celulasIluminadas });
+  }
+  const { posicionadas, removidas } = aplicarLimpeza(tabuleiro, celulasIluminadas);
+  if (removidas.length > 0) {
+    eventos.push({ tipo: 'limpeza_aplicada', pecasRemovidas: removidas });
+  }
+  return { celulasIluminadas, posicionadas };
+}
+
+// Pré-condição: ambos arrays devem vir do mesmo calcularIluminacao, que retorna
+// sort determinístico (linha, coluna). Comparação por índice é segura.
+function iluminacoesIguais(
+  a: readonly Celula[],
+  b: readonly Celula[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].linha !== b[i].linha || a[i].coluna !== b[i].coluna) return false;
+  }
+  return true;
 }
