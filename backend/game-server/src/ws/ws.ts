@@ -17,6 +17,13 @@
 // pré-upgrade, não há comando a bufferizar: quando os listeners anexam, a
 // partida já está validada. PING/PONG responde sempre. Sem `deps`, o servidor
 // opera apenas em PING/PONG.
+//
+// Substituição de Conexão duplicada (issue #155): uma nova admissão do mesmo
+// Jogador na mesma Partida registra-se e só então encerra a conexão anterior
+// com `4409 CONEXAO_SUBSTITUIDA` — nunca há janela sem conexão vigente. O
+// `close` da conexão substituída NÃO marca `em_reconexao`: a presença do
+// Jogador permanece `conectado` porque o registro já aponta para a nova
+// conexão (checagem de vigência em `removerConexao`).
 
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -229,7 +236,10 @@ export function criarWebSocketServer(
             apelido: sessao.apelido,
             partidaId,
           };
-          adicionarConexao(conexao);
+          // Substituição (#155): a nova conexão entra no registro ANTES de a
+          // antiga ser encerrada — `adicionarConexao` devolve a anterior, que
+          // deixa de ser a vigente neste instante.
+          const conexaoAnterior = adicionarConexao(conexao);
 
           // Admissão concluída após upgrade: transição atômica dentro do
           // callback garante que a partida só inicie com 4 sockets vivos
@@ -286,6 +296,22 @@ export function criarWebSocketServer(
             })();
           }
 
+          // Fechamento da conexão substituída (#155): acontece depois do
+          // ADMISSAO_ACEITA da nova (já enviado) e depois do registro dela no
+          // broadcaster — a antiga já saiu do registro, então seu `close`
+          // não marca `em_reconexao` (ver handler de `close` abaixo).
+          if (conexaoAnterior !== null) {
+            console.info('[ws] conexão substituída', {
+              jogadorId: sessao.jogadorId,
+              partidaId,
+            });
+            try {
+              conexaoAnterior.socket.close(4409, 'CONEXAO_SUBSTITUIDA');
+            } catch {
+              // Socket antigo já fechando/cerrado: nada a fazer.
+            }
+          }
+
         console.info('[ws] jogador admitido', {
           jogadorId: sessao.jogadorId,
           apelido: sessao.apelido,
@@ -317,8 +343,9 @@ export function criarWebSocketServer(
           // originador — descartar aqui quebraria o contrato fechado do wire
           // (issue #117) e o teste de guarda de peões.
           // O ator do dispatch é a sessão autenticada (`sessao.jogadorId`),
-          // nunca o `jogadorId` autodeclarado no wire: o handler rejeita
-          // comandos cujo `jogadorId` divirja da sessão (impersonation, #135).
+          // nunca o `jogadorId` autodeclarado no wire: o handler injeta a
+          // sessão como ator (#155) mesmo quando o `jogadorId` do wire
+          // diverge — o campo segue obrigatório só pela guarda de forma.
           void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
         });
 
@@ -327,9 +354,15 @@ export function criarWebSocketServer(
             jogadorId: sessao.jogadorId,
             partidaId,
           });
-          removerConexao(conexao);
+          // Só marca `em_reconexao` quando a conexão fechada era a vigente do
+          // Jogador: no fechamento por substituição (#155) a vigente já é a
+          // nova conexão, e a presença permanece `conectado`.
+          const eraVigente = removerConexao(conexao);
           if (depsPartida !== undefined) {
             depsPartida.broadcaster.remover(ws);
+          }
+          if (!eraVigente) {
+            return;
           }
           void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
             console.error('[ws] falha ao marcar desconexão:', (err as Error).message),

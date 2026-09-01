@@ -942,3 +942,114 @@ test('desconexão antes da 4ª admissão não inicia a partida', async () => {
     await servidor.fechar();
   }
 });
+
+/** Aguarda o primeiro frame do socket e confirma que é ADMISSAO_ACEITA. */
+function aguardarAdmissao(ws: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('timeout aguardando ADMISSAO_ACEITA')), 3000);
+    const onErro = (err: Error) => {
+      clearTimeout(timeout);
+      reject(err);
+    };
+    ws.once('message', (data) => {
+      clearTimeout(timeout);
+      ws.off('error', onErro);
+      try {
+        const msg = JSON.parse(data.toString()) as { type: string };
+        if (msg.type === 'ADMISSAO_ACEITA') {
+          resolve();
+        } else {
+          reject(new Error(`primeira mensagem não foi ADMISSAO_ACEITA: ${msg.type}`));
+        }
+      } catch (erro) {
+        reject(erro as Error);
+      }
+    });
+    ws.on('error', onErro);
+  });
+}
+
+test('conexão duplicada do mesmo jogador encerra a anterior (4409) sem corromper presença', async () => {
+  const servidor = await subirServidorComPartida();
+  const abertos: WebSocket[] = [];
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaComEstadoNoRedis(partidaId, roster);
+
+    // 1ª conexão de jogador-1 — permanece aberta para ser substituída.
+    const sessaoIdA = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoIdA, 'jogador-1');
+    const tokenA = criarJwt('jogador-1', 'Jogador 1', sessaoIdA);
+    const antigo = new WebSocket(`ws://127.0.0.1:${servidor.port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${tokenA}`);
+    abertos.push(antigo);
+    const fechamentoAntigo = new Promise<{ code: number | null; reason: string }>((resolve) => {
+      antigo.on('close', (code, reason) => resolve({ code, reason: reason.toString() }));
+    });
+    await aguardarAdmissao(antigo);
+
+    // 2ª conexão (duplicada) do mesmo jogador — sessão nova, mesmo Jogador.
+    const admissaoDoNovo: { recebida: boolean } = { recebida: false };
+    const sessaoIdB = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoIdB, 'jogador-1');
+    const tokenB = criarJwt('jogador-1', 'Jogador 1', sessaoIdB);
+    const novo = new WebSocket(`ws://127.0.0.1:${servidor.port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${tokenB}`);
+    abertos.push(novo);
+    const mensagensNovo: string[] = [];
+    novo.on('message', (data) => {
+      const texto = data.toString();
+      mensagensNovo.push(texto);
+      if ((JSON.parse(texto) as { type: string }).type === 'ADMISSAO_ACEITA') {
+        admissaoDoNovo.recebida = true;
+      }
+    });
+    await aguardarAdmissao(novo);
+
+    // A conexão anterior é encerrada com o código da substituição (#155) —
+    // e apenas depois de o novo socket ter recebido ADMISSAO_ACEITA.
+    const fecho = await Promise.race([
+      fechamentoAntigo,
+      new Promise<never>((_, rejeitar) =>
+        setTimeout(() => rejeitar(new Error('timeout aguardando fechamento da conexão antiga')), 3000)),
+    ]);
+    assert.equal(admissaoDoNovo.recebida, true, 'novo socket deve ter recebido ADMISSAO_ACEITA antes do fechamento do antigo');
+    assert.equal(fecho.code, 4409);
+    assert.equal(fecho.reason, 'CONEXAO_SUBSTITUIDA');
+
+    // Presença preservada: o fechamento da conexão substituída NÃO marca
+    // `em_reconexao` — o Jogador segue `conectado` pela nova conexão.
+    await new Promise((r) => setTimeout(r, 300));
+    const bruto = await redis.get(chaveDaPartida(partidaId));
+    assert.ok(bruto !== null, 'partida deveria existir no redis');
+    const partida = JSON.parse(bruto!) as { roster: MembroDaSala[] };
+    assert.equal(
+      partida.roster.find((m) => m.jogadorId === 'jogador-1')?.presenca,
+      'conectado',
+      'presença de jogador-1 deve permanecer conectado após a substituição',
+    );
+
+    // A nova conexão permanece viva e continua recebendo broadcast: completar
+    // as 4 admissões dispara PARTIDA_INICIADA em broadcast.
+    for (const n of [2, 3, 4]) {
+      const sessaoId = crypto.randomUUID();
+      await criarSessaoNoRedis(sessaoId, `jogador-${n}`);
+      const token = criarJwt(`jogador-${n}`, `Jogador ${n}`, sessaoId);
+      const ws = new WebSocket(`ws://127.0.0.1:${servidor.port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${token}`);
+      abertos.push(ws);
+      await aguardarAdmissao(ws);
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    const tiposNovo = mensagensNovo.map((m) => (JSON.parse(m) as { type: string }).type);
+    assert.ok(
+      tiposNovo.includes('PARTIDA_INICIADA'),
+      `novo socket deveria receber o broadcast PARTIDA_INICIADA; recebeu ${tiposNovo.join(', ')}`,
+    );
+    assert.ok(novo.readyState === WebSocket.OPEN, 'nova conexão deve permanecer aberta');
+  } finally {
+    for (const ws of abertos) {
+      try { ws.close(); } catch {}
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    await servidor.fechar();
+  }
+});
