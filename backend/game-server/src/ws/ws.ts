@@ -308,7 +308,7 @@ export function criarWebSocketServer(
             try {
               conexaoAnterior.socket.close(4409, 'CONEXAO_SUBSTITUIDA');
             } catch {
-              // Socket antigo já fechando/cerrado: nada a fazer.
+              // Socket antigo já fechando ou fechado: nada a fazer.
             }
           }
 
