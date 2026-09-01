@@ -21,7 +21,7 @@ export function transicao(_estado: EstadoDaTela, evento: EventoDaTela): EstadoDa
     case 'carregar':
       return 'carregando'
     case 'partidaPreparada':
-      return 'aguardando'
+      return _estado === 'disponivel' ? 'disponivel' : 'aguardando'
     case 'partidaEmAndamento':
       return 'disponivel'
     case 'falhar':

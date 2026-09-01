@@ -91,12 +91,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     onEvento: useCallback(
       (evento) => {
         if (evento.type === 'ESTADO_DA_PARTIDA') {
+          if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
           aplicarSnapshotNoModelo(evento.snapshot)
           return
         }
         if (evento.type === 'PARTIDA_INICIADA') {
           partidaEmAndamento()
           return
+        }
+        if (
+          evento.type === 'TURNO_INICIADO' ||
+          evento.type === 'TURNO_ENCERRADO' ||
+          evento.type === 'POSICAO_CONFIRMADA'
+        ) {
+          partidaEmAndamento()
         }
         despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
         // Feedback unificado: cobre eventos de tabuleiro, peão, turno (#118)
