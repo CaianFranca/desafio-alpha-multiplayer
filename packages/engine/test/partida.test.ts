@@ -252,6 +252,16 @@ test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático 
         { recebidaId: 'recebida-reta-2', pecaId: 'reta-2', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
       ],
     },
+    {
+      tipo: 'celulas_iluminadas',
+      celulas: [
+        { linha: 2, coluna: 3 },
+        { linha: 3, coluna: 2 },
+        { linha: 3, coluna: 3 },
+        { linha: 3, coluna: 4 },
+        { linha: 4, coluna: 3 },
+      ],
+    },
   ]);
   assert.equal(encaixeDoPeao.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   assert.equal(encaixeDoPeao.estado.tabuleiro.recebidas.length, 2);
@@ -524,6 +534,29 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
         { recebidaId: 'recebida-reta-7', pecaId: 'reta-7', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
       ],
     },
+    {
+      tipo: 'celulas_iluminadas',
+      celulas: [
+        // peao-vermelho em (0,0)
+        { linha: 0, coluna: 0 },
+        { linha: 0, coluna: 1 },
+        { linha: 1, coluna: 0 },
+        // peao-branco em (2,3)
+        { linha: 1, coluna: 3 },
+        { linha: 2, coluna: 2 },
+        { linha: 2, coluna: 3 },
+        { linha: 2, coluna: 4 },
+        { linha: 3, coluna: 3 },
+        // peao-amarelo em (6,0)
+        { linha: 5, coluna: 0 },
+        // peao-azul em (6,6)
+        { linha: 5, coluna: 6 },
+        { linha: 6, coluna: 0 },
+        { linha: 6, coluna: 1 },
+        { linha: 6, coluna: 5 },
+        { linha: 6, coluna: 6 },
+      ],
+    },
     // Limpeza: a reta-2 (3,4) ficou fora da iluminação da reta-1 (2,3).
     { tipo: 'limpeza_aplicada', pecasRemovidas: ['reta-2'] },
   ]);
@@ -767,6 +800,7 @@ test('iluminação: mover_peao não altera até confirmar_posicao_do_peao; perma
   // selecionar_peao não altera
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   assert.deepEqual(estado.celulasIluminadas, antes);
+
   // A Caixa é opaca (ST-12): selecionar peça de caminho direto dela é
   // rejeitado — e a rejeição preserva o estado e a iluminação.
   const sel = aplicarComandoDePartida(estado, selecionarPeca('cruz-1'), 'ana');
@@ -785,6 +819,7 @@ test('iluminação: mover_peao não altera até confirmar_posicao_do_peao; perma
   const pos = aplicarComandoDePartida(estado, posicionarPeca('cruz-1', 1, 1), 'ana');
   assert.equal(pos.sucesso, false);
   assert.equal(pos.erro.codigo, 'PECA_NAO_RECEBIDA');
+
   assert.deepEqual(estado.celulasIluminadas, antes);
   // Mover tentativo não altera
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
@@ -840,6 +875,7 @@ const temLimpeza = (eventos: readonly { readonly tipo: string }[]) =>
 
 test('limpeza: Primeiro Turno remove peça fora da iluminação sem retorno à Caixa', () => {
   let estado = partidaIniciada();
+  const caixaAntes = estado.tabuleiro.caixa.length;
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -862,7 +898,11 @@ test('limpeza: Primeiro Turno remove peça fora da iluminação sem retorno à C
     !resultado.estado.tabuleiro.posicionadas.some((p) => p.pecaId === 'fora-1'),
   );
   // Sem retorno à Caixa: a peça removida não volta para a caixa.
-  assert.equal(resultado.estado.tabuleiro.caixa.length, 71);
+  // caixaAntes é o tamanho antes de posicionarPeao; gerarRecebidas desenha
+  // peças da Caixa. Verifica que a limpeza não altera o resultado.
+  const recebimento = resultado.eventos.find((e) => e.tipo === 'recebimento_gerado');
+  const desenhadas = recebimento ? (recebimento.recebidas as readonly unknown[]).length : 0;
+  assert.equal(resultado.estado.tabuleiro.caixa.length, caixaAntes - desenhadas);
 });
 
 test('limpeza: Confirmação de Posição com mudança de peça remove peça fora da iluminação', () => {
@@ -955,6 +995,7 @@ test('limpeza: mover_peao, permanecer e encerrar_turno não emitem limpeza_aplic
 
 test('limpeza: remove só peças, preservando caixa, peões, jogadores e iluminação', () => {
   let estado = partidaIniciada();
+  const caixaAntes = estado.tabuleiro.caixa.length;
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -975,7 +1016,9 @@ test('limpeza: remove só peças, preservando caixa, peões, jogadores e ilumina
     tabuleiro.posicionadas.map((p) => p.pecaId),
     ['inicial-1'],
   );
-  assert.equal(tabuleiro.caixa.length, 71, 'Caixa intacta');
+  const recebimento = resultado.eventos.find((e) => e.tipo === 'recebimento_gerado');
+  const desenhadas = recebimento ? (recebimento.recebidas as readonly unknown[]).length : 0;
+  assert.equal(tabuleiro.caixa.length, caixaAntes - desenhadas, 'Caixa intacta');
   assert.equal(tabuleiro.peoes.length, 4, 'Peões intactos');
   assert.equal(jogadores.length, 4, 'Jogadores intactos');
   assert.equal(jogadores.filter((j) => j.jogadorId === estado.jogadorAtivoId).length, 1);

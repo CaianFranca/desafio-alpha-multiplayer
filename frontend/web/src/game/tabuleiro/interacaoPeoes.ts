@@ -71,8 +71,12 @@ import type {
  * pendência só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
 export type PendenciaNoCliente =
-  | (Omit<PendenciaDeRecebimento, 'pecaId'> & { readonly pecaId: string | null })
-  | (Omit<PendenciaDaPecaSorteada, 'pecaId'> & { readonly pecaId: string | null })
+  // Legado ST-10 (@deprecated): borda geradora e célula-alvo fixas na criação,
+  // com pecaId client-side preenchido por TIPO_DA_PECA_RECEBIDA_ESCOLHIDO.
+  | (PendenciaDeRecebimento & { readonly pecaId: string | null })
+  // Novo (#138): a peça já vem sorteada da Caixa (pecaId + tipo + vaga) e a
+  // célula-alvo deriva da vaga — pode estar null até ESCOLHER_VAGA_DA_PECA_RECEBIDA.
+  | PendenciaDaPecaSorteada
 
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]
@@ -219,6 +223,8 @@ export function mapearPosicionarRecebida(
   if (pecaId === null) return null
   const ehAlvoDePendencia = estado.recebidasPendentes.some(
     (pendencia) =>
+      // Forma nova (#138): célula-alvo ainda indefinida (null) até o sorteio
+      // fixar a vaga — não é encaixável por esta rota legada.
       pendencia.celulaAlvo !== null &&
       chaveCelula(pendencia.celulaAlvo) === chaveCelula(celula),
   )
@@ -316,8 +322,9 @@ export function rotearCliqueDeCelula(
   if (haRecebidasPendentes(estadoPeoes)) {
     const pendencia = estadoPeoes.recebidasPendentes.find(
       (r) =>
-        r.celulaAlvo !== null &&
-        chaveCelula(r.celulaAlvo) === chaveCelula(celula),
+        // Forma nova (#138): célula-alvo ainda indefinida (null) até o sorteio
+        // fixar a vaga — não é encaixável por esta rota legada.
+        r.celulaAlvo !== null && chaveCelula(r.celulaAlvo) === chaveCelula(celula),
     )
     if (!pendencia) return null
     if (pendencia.pecaId === null) return { focarPendencia: pendencia.recebidaId }

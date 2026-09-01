@@ -27,11 +27,15 @@
 //   PeaoEventoDoServidor/TabuleiroEventoDoServidor, porque são o contrato do
 //   canal de Partida — o canal alvo do ST-11 — e as uniões antigas têm
 //   switches exaustivos no frontend legado, intocado pela #138.)
+//   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
+//   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   Erros: CodigoDeErroDaPartida alias de CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120) — FORA_DA_VEZ etc via ERRO_DO_TABULEIRO (SalaServerMessage via TabuleiroEventoDoServidor).
 //   shared type:UPPER_SNAKE no wire vs engine tipo:snake no domínio; campos em camelCase nos dois lados
 //
 // Reuso: importa PecaId de ./tabuleiro.ts e PeaoId de ./peoes.ts; não duplica tipos base.
 // Sem runtime/validação/sem @flicker/engine — apenas DTOs.
+// Sufixo "Wire": eventos com homônimo em @flicker/engine recebem sufixo Wire
+// para evitar colisão nominal em consumers que importam ambos pacotes.
 
 import type {
   Celula,
@@ -151,7 +155,7 @@ export type PartidaComandoDoCliente =
   // Legado ST-10, fora do domínio desde a #138 (limpeza na #140/#143).
   | EscolherTipoDaPecaRecebidaPartidaComando;
 
-// --- Eventos servidor → cliente (3 + 2 da issue #138) ---
+// --- Eventos servidor → cliente (5 + 2 da issue #138) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';
@@ -184,10 +188,22 @@ export interface PecaSorteadaEvento {
 // borda e a célula-alvo da pendência e seleciona a Peça sorteada.
 export type { VagaDaPecaRecebidaEscolhidaEvento };
 
+export interface CelulasIluminadasWireEvento {
+  readonly type: 'CELULAS_ILUMINADAS';
+  readonly celulas: readonly Celula[];
+}
+
+export interface LimpezaAplicadaWireEvento {
+  readonly type: 'LIMPEZA_APLICADA';
+  readonly pecasRemovidas: readonly PecaId[];
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
   | PosicaoConfirmadaEvento
+  | CelulasIluminadasWireEvento
+  | LimpezaAplicadaWireEvento
   | PecaSorteadaEvento
   | VagaDaPecaRecebidaEscolhidaEvento;
 

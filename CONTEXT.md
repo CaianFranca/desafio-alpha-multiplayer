@@ -109,7 +109,7 @@ Local onde a partida acontece — o Sanatório Flicker of Sanity, cenário aband
 _Avoid_: hospital, asilo
 
 **Sanidade**:
-Estado mental dos personagens, degradado pela escuridão e pelos monstros ao longo da partida.
+Estado mental dos personagens, degradado pelos monstros ao longo da partida; cada Jogador inicia a partida com 3 pontos, com piso em zero.
 _Avoid_: saúde mental, lucidez
 
 **Ambiente de Jogo**:
@@ -197,7 +197,7 @@ _Avoid_: confirmação, travar
 ## Peões e Conexões
 
 **Peão**:
-Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até quatro; move-se entre peças conectadas; não é uma Peça.
+Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até quatro, e a peça com jogador precisando de Resgate, que aceita um peão a mais enquanto o afetado permanecer nela; move-se entre peças conectadas; não é uma Peça.
 _Avoid_: pawn, token, boneco
 
 **Conexão**:
@@ -245,6 +245,44 @@ _Avoid_: confirmação de movimento, travar posição
 **Encerramento do Turno**:
 Declaração explícita que conclui o turno e dispara a Passagem de Vez.
 _Avoid_: passar a vez, fim de turno
+
+## Monstros e Estados
+
+**Monstro**:
+Peça de Monstro que ameaça os jogadores durante a partida; tipos: O Vulto e O Espectro.
+_Avoid_: criatura, inimigo
+
+**Peça de Monstro**:
+Categoria de peça com quatro bordas abertas e sem janela de Manipulação, que não aceita peão e retransmite o Alcance como qualquer peça; a Composição inclui seis de cada tipo.
+_Avoid_: peça de criatura
+
+**Alcance**:
+Área efetiva de ataque de um Monstro a partir de sua peça: linhas retas ortogonais encadeadas por Conexões no Vulto; peças adjacentes conectadas no Espectro.
+_Avoid_: área de ataque, visão
+
+**Ataque**:
+Evento disparado pela Confirmação de Posição quando a mudança de posição altera o Alcance de um Monstro; atinge todos os peões dentro do Alcance e é negado pela Proteção.
+_Avoid_: golpe, dano, ofensiva
+
+**O Vulto**:
+Monstro cujo Alcance segue linhas retas ortogonais encadeadas por Conexões, independentemente da distância, e impõe Baixa Iluminação a quem é atingido.
+_Avoid_: sombra, entidade
+
+**O Espectro**:
+Monstro cujo Alcance cobre as peças adjacentes conectadas e faz quem é atingido perder 1 ponto de Sanidade.
+_Avoid_: fantasma, espírito
+
+**Baixa Iluminação**:
+Estado de um Jogador imposto pelo ataque do Vulto; seu peão ilumina apenas a própria célula e seu Recebimento fica reduzido a uma peça; encerrado apenas pelo Resgate.
+_Avoid_: escuridão, luz baixa
+
+**Amedrontado**:
+Estado de um Jogador com a Sanidade em zero; não realiza ações no seu turno; encerrado pelo Resgate, que restaura a Sanidade a 1 ponto.
+_Avoid_: apavorado, em pânico
+
+**Resgate**:
+Chegada do peão de um aliado, por Conexão, à peça de um jogador em Baixa Iluminação ou Amedrontado; remove os estados do afetado e, no caso do amedrontado, restaura a Sanidade a 1 ponto; a peça tolera um peão a mais enquanto houver afetado e fica com a Permanência bloqueada até um peão sair.
+_Avoid_: salvamento, cura
 
 ## Objetivos da Partida
 
