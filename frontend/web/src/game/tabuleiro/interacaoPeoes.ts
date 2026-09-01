@@ -492,6 +492,7 @@ export function mapearCliqueNaReservaComCiclo(
 ): PeaoComandoDoCliente | TabuleiroComandoDoCliente | null {
   if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) {
     if (recebidaFocadaId === null || peca.tipo === 'inicial') return null
+    if (peca.tipo !== 'reta' && peca.tipo !== 'T' && peca.tipo !== 'cruz') return null
     return mapearEscolhaDeTipoDaRecebida(estadoPeoes, recebidaFocadaId, peca.tipo)
   }
   return mapearCliqueNaReserva(estadoInteracao, peca.pecaId)

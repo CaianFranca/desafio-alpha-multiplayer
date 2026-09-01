@@ -19,6 +19,10 @@ const COR_POR_TIPO: Record<TipoDaPeca, string> = {
   reta: '#a5c7d9',
   T: '#c9a5d9',
   cruz: '#a5d9b6',
+  gerador: '#ff9f1c',
+  sala_do_diretor: '#e76f51',
+  sala_medica: '#a8ff60',
+  portao_de_saida: '#6c757d',
 }
 
 const COR_CAMINHO = '#111111'

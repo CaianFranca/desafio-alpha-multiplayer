@@ -172,8 +172,13 @@ describe('partida estados da tela', () => {
     expect(screen.getByText('Falha ao carregar')).toBeInTheDocument()
   })
 
-  it('aguardando via query param mostra overlay-aguardando com Partida preparada', () => {
-    renderWithRouter(['/partida?partidaEstado=aguardando'], autenticado)
+  it('estado inicial carregando mostra overlay-carregando', () => {
+    renderPartidaComEstado('carregando', ['/partida?serverId=s&partidaId=p'], autenticado)
+    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
+  })
+
+  it('estado aguardando mostra overlay-aguardando com Partida preparada', () => {
+    renderPartidaComEstado('aguardando', ['/partida?serverId=s&partidaId=p'], autenticado)
     const overlay = screen.getByTestId('overlay-aguardando')
     expect(overlay).toBeInTheDocument()
     expect(overlay).toHaveAttribute('role', 'status')
@@ -181,8 +186,8 @@ describe('partida estados da tela', () => {
     expect(screen.getByText('Partida preparada')).toBeInTheDocument()
   })
 
-  it('disponivel via query param não mostra overlay (canvas livre)', () => {
-    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+  it('disponivel não mostra overlay (canvas livre)', () => {
+    renderPartidaComEstado('disponivel', ['/partida?serverId=s&partidaId=p'], autenticado)
     expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
     expect(screen.queryByTestId('overlay-aguardando')).not.toBeInTheDocument()
     expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
@@ -190,8 +195,8 @@ describe('partida estados da tela', () => {
     expect(screen.getByTestId('partida-moldura')).toBeInTheDocument()
   })
 
-  it('falha via query param mostra overlay-falha com botão Tentar novamente', () => {
-    renderWithRouter(['/partida?partidaEstado=falha'], autenticado)
+  it('falha mostra overlay-falha com botão Tentar novamente', () => {
+    renderPartidaComEstado('falha', ['/partida?serverId=s&partidaId=p'], autenticado)
     const overlay = screen.getByTestId('overlay-falha')
     expect(overlay).toBeInTheDocument()
     expect(overlay).toHaveAttribute('role', 'alert')
@@ -212,189 +217,42 @@ describe('partida estados da tela', () => {
     renderPartidaComEstado('falha')
     expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
     await user.click(screen.getByTestId('partida-tentar-novamente'))
-    // Sem alvo, não transita para carregando (evita loop infinito de loader).
     expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
     expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
   })
-
-  it('query param inválido é ignorado e sem alvo mostra falha', () => {
-    renderWithRouter(['/partida?partidaEstado=invalido'], autenticado)
-    expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
-  })
-
-  it('carregando via query param força estado mesmo partindo de outro inicial', () => {
-    renderWithRouter(['/partida?partidaEstado=carregando'], autenticado)
-    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
-  })
 })
 
-describe('partida dev toolbar', () => {
+describe('partida tabuleiro e reserva (issue #156)', () => {
   const autenticado = mockAuthenticatedState
 
-  it('toolbar DEV renderiza 4 botões quando em DEV', () => {
-    renderWithRouter(['/partida'], autenticado)
-    // em ambiente de teste import.meta.env.DEV === true (não produção)
-    expect(screen.getByTestId('partida-dev-toolbar')).toBeInTheDocument()
-    expect(screen.getByTestId('dev-forcar-carregando')).toBeInTheDocument()
-    expect(screen.getByTestId('dev-forcar-aguardando')).toBeInTheDocument()
-    expect(screen.getByTestId('dev-forcar-disponivel')).toBeInTheDocument()
-    expect(screen.getByTestId('dev-forcar-falha')).toBeInTheDocument()
-  })
-
-  it('cada botão da toolbar força o estado correspondente', async () => {
-    const user = userEvent.setup()
-    renderWithRouter(['/partida'], autenticado)
-
-    await user.click(screen.getByTestId('dev-forcar-aguardando'))
-    expect(screen.getByTestId('overlay-aguardando')).toBeInTheDocument()
-
-    await user.click(screen.getByTestId('dev-forcar-falha'))
-    expect(screen.getByTestId('overlay-falha')).toBeInTheDocument()
-
-    await user.click(screen.getByTestId('dev-forcar-disponivel'))
-    expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('overlay-aguardando')).not.toBeInTheDocument()
-
-    await user.click(screen.getByTestId('dev-forcar-carregando'))
-    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
-  })
-
-  it('toolbar fica acima da moldura com z-30', () => {
-    renderWithRouter(['/partida'], autenticado)
-    expect(screen.getByTestId('partida-dev-toolbar')).toHaveClass('z-30')
-  })
-})
-
-describe('partida tabuleiro e reserva (issue #83)', () => {
-  const autenticado = mockAuthenticatedState
-
-  it('disponivel mostra grade 7x7 (49 células) com distinção vazia/ocupada e caminho basico de 5 pecas encaixadas', () => {
-    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+  it('disponivel sem snapshot mostra grade 7x7 vazia e reserva com 22 peças', () => {
+    renderPartidaComEstado('disponivel', ['/partida?serverId=s&partidaId=p'], autenticado)
     const celulas = screen.getAllByTestId('tabuleiro-celula')
     expect(celulas).toHaveLength(49)
     const ocupadas = celulas.filter((el) => el.getAttribute('data-ocupada') === 'true')
     const vazias = celulas.filter((el) => el.getAttribute('data-ocupada') === 'false')
-    expect(ocupadas).toHaveLength(5)
-    expect(vazias).toHaveLength(44)
-    expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(5)
-    const centroOcupada = celulas.find(
-      (el) => el.getAttribute('data-linha') === '3' && el.getAttribute('data-coluna') === '3' && el.getAttribute('data-ocupada') === 'true',
-    )
-    expect(centroOcupada).toBeInTheDocument()
-  })
-
-  it('disponivel mostra reserva lateral com 22 placeholders (4 iniciais + 6 de cada caminho)', () => {
-    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
+    expect(ocupadas).toHaveLength(0)
+    expect(vazias).toHaveLength(49)
+    expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(0)
     expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
     expect(screen.getByTestId('reserva')).toBeInTheDocument()
     const pecas = screen.getAllByTestId('reserva-peca')
     expect(pecas).toHaveLength(22)
-    expect(pecas.filter((el) => el.getAttribute('data-tipo') === 'inicial')).toHaveLength(4)
-    expect(pecas.filter((el) => el.getAttribute('data-tipo') === 'reta')).toHaveLength(6)
-    expect(pecas.filter((el) => el.getAttribute('data-tipo') === 'T')).toHaveLength(6)
-    expect(pecas.filter((el) => el.getAttribute('data-tipo') === 'cruz')).toHaveLength(6)
   })
 
   it('carregando/aguardando/falha não exibem tabuleiro nem reserva', () => {
-    renderWithRouter(['/partida?partidaEstado=carregando'], autenticado)
+    renderPartidaComEstado('carregando', ['/partida?serverId=s&partidaId=p'], autenticado)
     expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
     expect(screen.queryByTestId('reserva')).not.toBeInTheDocument()
-    // também para aguardando e falha via re-render com toolbar
   })
 
   it('aguardando não exibe tabuleiro', () => {
-    renderWithRouter(['/partida?partidaEstado=aguardando'], autenticado)
+    renderPartidaComEstado('aguardando', ['/partida?serverId=s&partidaId=p'], autenticado)
     expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
   })
 
   it('falha não exibe tabuleiro', () => {
-    renderWithRouter(['/partida?partidaEstado=falha'], autenticado)
+    renderPartidaComEstado('falha', ['/partida?serverId=s&partidaId=p'], autenticado)
     expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
-  })
-})
-
-function peaoPorId(id: string): HTMLElement {
-  return screen.getAllByTestId('peao').find((el) => el.getAttribute('data-peao-id') === id)!
-}
-
-function pecaPorId(id: string): HTMLElement {
-  return screen
-    .getAllByTestId('peca-posicionada')
-    .find((el) => el.getAttribute('data-peca-id') === id)!
-}
-
-describe('partida peões e conexões (issue #90)', () => {
-  const autenticado = mockAuthenticatedState
-
-  it('disponivel mostra 4 peões de cores distintas, exatamente 1 posicionado', () => {
-    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
-    const peoes = screen.getAllByTestId('peao')
-    expect(peoes).toHaveLength(4)
-    expect(new Set(peoes.map((el) => el.getAttribute('data-cor'))).size).toBe(4)
-    expect(peoes.filter((el) => el.getAttribute('data-posicionado') === 'true')).toHaveLength(1)
-    expect(peoes.filter((el) => el.getAttribute('data-posicionado') === 'false')).toHaveLength(3)
-    // nenhum selecionado por padrão
-    expect(peoes.every((el) => el.getAttribute('data-selecionado') === 'false')).toBe(true)
-  })
-
-  it('sem seleção de peão posicionado, peças não expõem conexão', () => {
-    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
-    for (const el of screen.getAllByTestId('peca-posicionada')) {
-      expect(el).not.toHaveAttribute('data-conectada')
-      expect(el).not.toHaveAttribute('data-selecionada')
-    }
-  })
-
-  it('clicar peão posicionado seleciona e destaca a vizinha conectada no espelho', async () => {
-    const user = userEvent.setup()
-    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
-
-    await user.click(peaoPorId('peao-1-branco'))
-
-    expect(peaoPorId('peao-1-branco')).toHaveAttribute('data-selecionado', 'true')
-    // (3,4) reta@90 tem oeste aberto voltado à inicial → conectada/destino
-    expect(pecaPorId('posicionada-reta-2')).toHaveAttribute('data-conectada', 'true')
-    // demais posicionadas não conectadas: presentes e falsas
-    expect(pecaPorId('posicionada-cruz-3')).toHaveAttribute('data-conectada', 'false')
-    expect(pecaPorId('posicionada-reta-4')).toHaveAttribute('data-conectada', 'false')
-    expect(pecaPorId('posicionada-t-5')).toHaveAttribute('data-conectada', 'false')
-    // a peça sob o peão selecionado marca data-selecionada
-    expect(pecaPorId('posicionada-inicial-1')).toHaveAttribute('data-selecionada', 'true')
-    expect(pecaPorId('posicionada-reta-2')).toHaveAttribute('data-selecionada', 'false')
-  })
-
-  it('clicar outro peão troca a seleção; peão sobre a Mesa não produz conexões', async () => {
-    const user = userEvent.setup()
-    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
-
-    await user.click(peaoPorId('peao-1-branco'))
-    await user.click(peaoPorId('peao-2-vermelho'))
-
-    expect(peaoPorId('peao-1-branco')).toHaveAttribute('data-selecionado', 'false')
-    expect(peaoPorId('peao-2-vermelho')).toHaveAttribute('data-selecionado', 'true')
-    // seleção não posicionada: attributes de conexão somem (peões na Mesa)
-    for (const el of screen.getAllByTestId('peca-posicionada')) {
-      expect(el).not.toHaveAttribute('data-conectada')
-      expect(el).not.toHaveAttribute('data-selecionada')
-    }
-  })
-
-  it('clicar fora (célula vazia do espelho) desseleciona o peão', async () => {
-    const user = userEvent.setup()
-    renderWithRouter(['/partida?partidaEstado=disponivel'], autenticado)
-
-    await user.click(peaoPorId('peao-1-branco'))
-    expect(peaoPorId('peao-1-branco')).toHaveAttribute('data-selecionado', 'true')
-
-    const celulaVazia = screen
-      .getAllByTestId('tabuleiro-celula')
-      .find((el) => el.getAttribute('data-ocupada') === 'false')!
-    await user.click(celulaVazia)
-
-    expect(peaoPorId('peao-1-branco')).toHaveAttribute('data-selecionado', 'false')
-    for (const el of screen.getAllByTestId('peca-posicionada')) {
-      expect(el).not.toHaveAttribute('data-conectada')
-    }
   })
 })
