@@ -114,6 +114,12 @@ export function traduzirEventos(
           pecasRemovidas: evento.pecasRemovidas,
         });
         break;
+      // Término (issue #176): o domínio emite partida_terminada, mas a
+      // tradução wire e a mensagem no @flicker/shared pertencem à integração
+      // (#140/#141 e #179) — reconhecido aqui apenas para manter a guarda de
+      // exaustividade sem propagar o evento ainda.
+      case 'partida_terminada':
+        break;
       default: {
         const _exaustivo: never = evento;
         break;
