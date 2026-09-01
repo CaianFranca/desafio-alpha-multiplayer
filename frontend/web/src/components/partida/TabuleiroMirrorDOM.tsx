@@ -23,6 +23,8 @@ import type {
 interface TabuleiroMirrorDOMProps {
   todasCelulas: readonly Celula[]
   ocupadasSet: ReadonlySet<string>
+  /** Chaves das células iluminadas (mesma fonte da cena, issue #151). */
+  iluminadasSet?: ReadonlySet<string>
   reserva: readonly PecaDaReserva[]
   posicionadas: readonly PecaPosicionada[]
   peoes: readonly PeaoDaExibicao[]
@@ -62,6 +64,7 @@ interface TabuleiroMirrorDOMProps {
 export function TabuleiroMirrorDOM({
   todasCelulas,
   ocupadasSet,
+  iluminadasSet = new Set<string>(),
   reserva,
   posicionadas,
   peoes,
@@ -126,6 +129,8 @@ export function TabuleiroMirrorDOM({
         const chave = chaveCelula(celula)
         const ocupada = ocupadasSet.has(chave)
         const alvoPendente = alvosPendentesSet.has(chave)
+        // Iluminação (issue #151): espelho DOM do MESMO set que ilumina a cena.
+        const iluminada = iluminadasSet.has(chave)
         return (
           <div
             key={chave}
@@ -135,6 +140,7 @@ export function TabuleiroMirrorDOM({
             data-coluna={celula.coluna}
             data-alvo-pendente={alvoPendente ? 'true' : undefined}
             data-focada={chave === alvoFocadoKey ? 'true' : undefined}
+            data-iluminada={iluminada ? 'true' : undefined}
             onClick={(e) => {
               aoClicarCelula(celula, e)
             }}

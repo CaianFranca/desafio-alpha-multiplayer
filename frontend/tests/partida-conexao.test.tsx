@@ -35,6 +35,16 @@ async function partidaDisponivel(entry: string) {
   return ws
 }
 
+function celulaDoEspelho(linha: number, coluna: number): HTMLElement {
+  const celula = screen.getAllByTestId('tabuleiro-celula').find(
+    (el) =>
+      el.getAttribute('data-linha') === String(linha) &&
+      el.getAttribute('data-coluna') === String(coluna),
+  )
+  if (!celula) throw new Error(`célula ${linha}:${coluna} não encontrada no espelho`)
+  return celula
+}
+
 afterEach(() => {
   MockWebSocket.clean()
 })
@@ -220,5 +230,111 @@ describe('partida conectada ao game-server (issue #85)', () => {
       ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
     })
     expect(screen.getByTestId('girar-horario')).toBeDisabled()
+  })
+})
+
+describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
+  it('CELULAS_ILUMINADAS distingue as células iluminadas no espelho DOM sem recarregar', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Estado inicial: nenhuma célula iluminada.
+    expect(
+      screen
+        .getAllByTestId('tabuleiro-celula')
+        .filter((el) => el.getAttribute('data-iluminada') === 'true'),
+    ).toHaveLength(0)
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'CELULAS_ILUMINADAS',
+        celulas: [
+          { linha: 2, coluna: 3 },
+          { linha: 4, coluna: 5 },
+        ],
+      }),
+    )
+
+    // data-iluminada="true" exatamente nas células certas (mesma fonte cena/espelho).
+    const iluminadas = screen
+      .getAllByTestId('tabuleiro-celula')
+      .filter((el) => el.getAttribute('data-iluminada') === 'true')
+    expect(iluminadas).toHaveLength(2)
+    expect(
+      iluminadas.map((el) => `${el.getAttribute('data-linha')}:${el.getAttribute('data-coluna')}`),
+    ).toEqual(['2:3', '4:5'])
+    // Iluminação NÃO produz flash (decisão do plano).
+    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    // Sem reload/reconexão: o mesmo socket atende tudo, nenhum comando enviado.
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(ws.sentMessages).toHaveLength(0)
+
+    // Evento seguinte substitui o conjunto inteiro (o cliente não acumula).
+    act(() =>
+      ws.simulateMessage({
+        type: 'CELULAS_ILUMINADAS',
+        celulas: [{ linha: 0, coluna: 0 }],
+      }),
+    )
+    const reIluminadas = screen
+      .getAllByTestId('tabuleiro-celula')
+      .filter((el) => el.getAttribute('data-iluminada') === 'true')
+    expect(reIluminadas).toHaveLength(1)
+    expect(reIluminadas[0]).toBe(celulaDoEspelho(0, 0))
+  })
+
+  it('LIMPEZA_APLICADA remove a peça da cena, libera a célula, produz flash único e aceita novo posicionamento sem recarregar', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Posiciona inicial-1 em 3:3 via broadcast (mesma via dos eventos de #85).
+    act(() =>
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      }),
+    )
+    await screen.findByTestId('peca-posicionada')
+    expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('true')
+
+    // Deixa o flash de aprovação do posicionamento expirar (isola o da Limpeza).
+    await waitFor(() =>
+      expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument(),
+    )
+
+    // A Limpeza chega pelo MESMO socket — sem recarregar página, sem reconectar.
+    act(() =>
+      ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] }),
+    )
+
+    // A peça removida some do espelho e a célula volta a estar livre.
+    await waitFor(() =>
+      expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument(),
+    )
+    expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
+
+    // Feedback: um ÚNICO flash (branco de aprovação) percebido via data-cor.
+    expect(screen.getAllByTestId('flash-overlay')).toHaveLength(1)
+    expect(screen.getByTestId('flash-overlay').getAttribute('data-cor')).toBe('branco')
+
+    // Célula liberada aceita novo posicionamento pela mesma via dos testes de
+    // interação: seleção via broadcast + clique no espelho → POSICIONAR_PECA no WS.
+    act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'reta-1' }))
+    await waitFor(() =>
+      expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument(),
+    )
+    const user = userEvent.setup()
+    await user.click(celulaDoEspelho(3, 3))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'POSICIONAR_PECA',
+        pecaId: 'reta-1',
+        celula: { linha: 3, coluna: 3 },
+        jogadorId: mockAuthenticatedState.jogador.id,
+      })
+    })
+    // A mesma conexão sobreviveu a todo o fluxo (nenhum socket novo).
+    expect(MockWebSocket.instances).toHaveLength(1)
   })
 })

@@ -85,6 +85,9 @@ describe('contrato do tabuleiro', () => {
     const mock = criarEstadoExibicaoMock()
     expect(mock.reserva).toHaveLength(22)
     expect(mock.posicionadas).toHaveLength(5)
+    // Contrato #151: o mock DEV nasce sem iluminação (o estado compartilhado é
+    // espelhado apenas pelo reducer com alvo de conexão).
+    expect(mock.celulasIluminadas).toEqual([])
     expect(mock.posicionadas[0]).toMatchObject({ celula: { linha: 3, coluna: 3 }, tipo: 'inicial', orientacao: 0 })
     expect(mock.posicionadas[1]).toMatchObject({ celula: { linha: 3, coluna: 4 }, tipo: 'reta', orientacao: 90 })
     expect(mock.posicionadas[2]).toMatchObject({ celula: { linha: 3, coluna: 5 }, tipo: 'cruz', orientacao: 0 })

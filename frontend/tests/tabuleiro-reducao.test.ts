@@ -4,6 +4,7 @@ import {
   reduzirEventos,
 } from '../web/src/game/tabuleiro/reducao'
 import { criarReservaInicial, TOTAL_RESERVA } from '../web/src/game/tabuleiro/contrato'
+import { mapearCliqueNaCelula } from '../web/src/game/tabuleiro/interacao'
 import type { TabuleiroEventoDoServidor } from '@flicker/shared'
 
 describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', () => {
@@ -301,5 +302,130 @@ describe('redução do ciclo do peão — espelho do engine (issue #91)', () => 
     expect(estado.posicionadas).toHaveLength(2)
     expect(estado.pecaSelecionadaId).toBeNull()
     expect(estado.pecaEmManipulacaoId).toBe('reta-1')
+  })
+})
+
+describe('iluminação e limpeza no cliente — espelho do estado compartilhado (issue #151)', () => {
+  it('estado inicial nasce sem células iluminadas', () => {
+    expect(criarEstadoInicialDoCliente().celulasIluminadas).toEqual([])
+  })
+
+  it('CELULAS_ILUMINADAS substitui a lista inteira (motor é a autoridade)', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'CELULAS_ILUMINADAS',
+      celulas: [
+        { linha: 1, coluna: 2 },
+        { linha: 3, coluna: 4 },
+      ],
+    })
+    expect(estado.celulasIluminadas).toEqual([
+      { linha: 1, coluna: 2 },
+      { linha: 3, coluna: 4 },
+    ])
+    // O evento seguinte NÃO acumula: substitui o conjunto anterior por inteiro.
+    estado = reduzirEvento(estado, {
+      type: 'CELULAS_ILUMINADAS',
+      celulas: [{ linha: 0, coluna: 6 }],
+    })
+    expect(estado.celulasIluminadas).toEqual([{ linha: 0, coluna: 6 }])
+    // Lista vazia apaga a iluminação.
+    estado = reduzirEvento(estado, { type: 'CELULAS_ILUMINADAS', celulas: [] })
+    expect(estado.celulasIluminadas).toEqual([])
+  })
+
+  it('LIMPEZA_APLICADA remove apenas as peças indicadas de posicionadas', () => {
+    let estado = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
+      { type: 'PECA_SELECIONADA', pecaId: 'reta-1' },
+      { type: 'PECA_POSICIONADA', pecaId: 'reta-1', celula: { linha: 3, coluna: 4 }, orientacao: 0 },
+    ])
+    expect(estado.posicionadas).toHaveLength(2)
+    estado = reduzirEvento(estado, { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['reta-1'] })
+    expect(estado.posicionadas.map((p) => p.pecaId)).toEqual(['inicial-1'])
+    // A peça removida NÃO volta para a Reserva (decisão do plano: só sai da cena).
+    expect(estado.reserva.some((p) => p.pecaId === 'reta-1')).toBe(false)
+  })
+
+  it('célula liberada pela Limpeza volta a ser alvo de posicionamento', () => {
+    const estado = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
+      { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] },
+      { type: 'PECA_SELECIONADA', pecaId: 'reta-2' },
+    ])
+    // Sem a Limpeza a célula estaria ocupada (nenhum comando); liberada, o
+    // clique na mesma célula mapeia POSICIONAR_PECA — ocupação é derivada de
+    // `posicionadas`, sem código extra.
+    const comando = mapearCliqueNaCelula(estado, { linha: 3, coluna: 3 })
+    expect(comando).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-2',
+      celula: { linha: 3, coluna: 3 },
+    })
+  })
+
+  it('Limpeza limpa Seleção e Manipulação quando a peça removida era a focada', () => {
+    // Manipulação aberta na peça removida (encaixe sem finalização).
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+      orientacao: 0,
+    })
+    expect(estado.pecaEmManipulacaoId).toBe('inicial-1')
+    estado = reduzirEvento(estado, { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] })
+    expect(estado.pecaEmManipulacaoId).toBeNull()
+
+    // Seleção ativa apontando para peça removida.
+    let selecionado = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
+      { type: 'PECA_SELECIONADA', pecaId: 'inicial-1' },
+    ])
+    expect(selecionado.pecaSelecionadaId).toBe('inicial-1')
+    selecionado = reduzirEvento(selecionado, {
+      type: 'LIMPEZA_APLICADA',
+      pecasRemovidas: ['inicial-1'],
+    })
+    expect(selecionado.pecaSelecionadaId).toBeNull()
+  })
+
+  it('seleção/manipulação de peça NÃO removida é preservada pela Limpeza', () => {
+    let estado = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
+      { type: 'PECA_SELECIONADA', pecaId: 'reta-1' },
+    ])
+    estado = reduzirEvento(estado, { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] })
+    expect(estado.pecaSelecionadaId).toBe('reta-1')
+    // Manipulação de outra peça permanece.
+    let comManipulacao = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'reta-2',
+      celula: { linha: 2, coluna: 2 },
+      orientacao: 0,
+    })
+    comManipulacao = reduzirEvento(comManipulacao, {
+      type: 'LIMPEZA_APLICADA',
+      pecasRemovidas: ['inicial-1'],
+    })
+    expect(comManipulacao.pecaEmManipulacaoId).toBe('reta-2')
+    expect(comManipulacao.posicionadas.map((p) => p.pecaId)).toEqual(['reta-2'])
+  })
+
+  it('LIMPEZA_APLICADA com lista vazia de removidas é no-op', () => {
+    const estado = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
+      { type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 1, coluna: 1 }] },
+    ])
+    expect(reduzirEvento(estado, { type: 'LIMPEZA_APLICADA', pecasRemovidas: [] })).toBe(estado)
+  })
+
+  it('iluminação e limpeza coexistem no mesmo lote sem interferência', () => {
+    const estado = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 0, coluna: 0 }] },
+      { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
+      { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] },
+      { type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 6, coluna: 6 }] },
+    ])
+    expect(estado.posicionadas).toEqual([])
+    expect(estado.celulasIluminadas).toEqual([{ linha: 6, coluna: 6 }])
   })
 })

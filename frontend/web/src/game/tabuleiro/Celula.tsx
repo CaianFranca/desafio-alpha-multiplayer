@@ -38,6 +38,11 @@ interface CelulaProps {
   alvoPendente?: boolean
   /** Célula é o alvo da pendência FOCADA (destaque distinto, #91). */
   celulaFocada?: boolean
+  /**
+   * Célula iluminada no estado compartilhado (issue #151). Tom sutil sobre a
+   * base; os destaques de seleção/pendência/ocupação têm prioridade maior.
+   */
+  iluminada?: boolean
   peaoSelecionadoId?: PeaoId | null
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
@@ -59,6 +64,7 @@ export function Celula({
   destinoValido = false,
   alvoPendente = false,
   celulaFocada = false,
+  iluminada = false,
   peaoSelecionadoId = null,
   onSelecionarPeao,
 }: CelulaProps) {
@@ -75,13 +81,17 @@ export function Celula({
 
   // Destaques de pendência (#91): alvo ativo ganha tom aquecido sutil; o alvo
   // FOCADO ganha tom frio distinto (foco local da escolha de tipo).
+  // Iluminação (#151): tom levemente mais claro que a base, aplicado só quando
+  // nenhum destaque de interação/ocupação vence (focada > pendente > ocupada).
   const corPlano = celulaFocada
     ? '#2e6bd6'
     : alvoPendente
       ? '#6b5a33'
       : ocupada
         ? '#5e4e36'
-        : '#1b1915'
+        : iluminada
+          ? '#3d3a30'
+          : '#1b1915'
   const opacidadePlano = celulaFocada ? 0.95 : ocupada ? 0.82 : 0.7
 
   return (

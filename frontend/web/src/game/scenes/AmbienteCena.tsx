@@ -69,6 +69,8 @@ interface AmbienteCenaProps {
   peaoSelecionadoId?: PeaoId | null
   /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
   destinosSet?: ReadonlySet<PecaId>
+  /** Chaves das células iluminadas (issue #151; derivado uma vez no pai). */
+  iluminadasSet?: ReadonlySet<string>
   onSelecionarPeao?: (peaoId: PeaoId) => void
   /** Clique em área vazia (Mesa/chão) desseleciona o peão. */
   onDesselecionar?: () => void
@@ -102,6 +104,7 @@ export function AmbienteCena({
   onComando,
   peaoSelecionadoId = null,
   destinosSet,
+  iluminadasSet,
   onSelecionarPeao,
   onDesselecionar,
   estadoPeoes = null,
@@ -141,6 +144,7 @@ export function AmbienteCena({
               peoes={estadoExibicao.peoes}
               peaoSelecionadoId={peaoSelecionadoId}
               destinosSet={destinosSet}
+              iluminadasSet={iluminadasSet}
               onSelecionarPeao={onSelecionarPeao}
               estadoPeoes={estadoPeoes}
               onComandoPeao={onComandoPeao}

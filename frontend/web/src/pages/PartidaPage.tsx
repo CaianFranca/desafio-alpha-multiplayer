@@ -10,7 +10,7 @@ import { FlashOverlay } from '../components/partida/FlashOverlay'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
 import { criarEstadoInicialDoCliente, reduzirEvento, estadoDeExibicaoDoModelo } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente } from '../game/tabuleiro/reducao'
-import { mapearGiro } from '../game/tabuleiro/interacao'
+import { mapearGiro, FLASH_BRANCO } from '../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../game/tabuleiro/interacao'
 import { criarEstadoExibicaoMock } from '../game/tabuleiro/mockExibicao'
 import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
@@ -65,8 +65,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     onEvento: useCallback(
       (evento) => {
         despacharEvento(evento)
-        // Feedback unificado: cobre eventos de tabuleiro e peão.
+        // Feedback unificado: cobre eventos de tabuleiro, peão e limpeza.
         // Branco para aprovação/seleção; vermelho para ERRO_DO_TABULEIRO.
+        if (evento.type === 'CELULAS_ILUMINADAS') {
+          // Iluminação (#151): estado espelhado do compartilhado — sem flash.
+          return
+        }
+        if (evento.type === 'LIMPEZA_APLICADA') {
+          // Limpeza (#151): um único flash de aprovação por evento.
+          setFlash({ ...FLASH_BRANCO })
+          return
+        }
         const feedback = mapearEventoPeaoParaFeedback(evento)
         setFlash({ ...feedback })
       },
