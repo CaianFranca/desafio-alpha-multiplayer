@@ -29,6 +29,7 @@
 
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
+import type { Redis } from 'ioredis';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import type {
   ServerMessage,
@@ -157,6 +158,35 @@ function isPing(value: unknown): boolean {
   );
 }
 
+/**
+ * Limpeza do registro de conexões quando a admissão falha — tanto no caminho
+ * de transição inválida (`transicao === null`) quanto no de exceção (ex.:
+ * Redis fora, review da PR #181). Remove a conexão nova do registro (o
+ * listener de `close` só é anexado no caminho de sucesso, então sem esta
+ * remoção a entrada ficaria órfã apontando para o socket falhado), restaura a
+ * conexão anterior como vigente quando ela ainda está aberta — preservando a
+ * presença `conectado` — e, sem anterior aberta, marca `em_reconexao` (não há
+ * conexão viva). A invariante "registro espelha a conexão vigente" precisa
+ * valer nos dois caminhos: reconexão/durabilidade e a tela da partida (#156)
+ * vão consumi-la.
+ */
+function limparAdmissaoFalha(
+  redis: Redis,
+  partidaId: PartidaId,
+  jogadorId: string,
+  conexao: ConexaoDoJogador,
+  conexaoAnterior: ConexaoDoJogador | null,
+): void {
+  const eraVigente = removerConexao(conexao);
+  if (conexaoAnterior !== null && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN) {
+    adicionarConexao(conexaoAnterior);
+  } else if (eraVigente) {
+    void marcarDesconexao(redis, partidaId, jogadorId).catch((err) =>
+      console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
+    );
+  }
+}
+
 export function criarWebSocketServer(
   server: Server,
   contexto: ContextoDoGameServer,
@@ -209,6 +239,11 @@ export function criarWebSocketServer(
       }
 
       wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
+        // Referências fora da IIFE: o `catch` externo precisa delas para
+        // aplicar a mesma limpeza do caminho de falha quando algo lançar
+        // durante a admissão (ex.: Redis fora) — review da PR #181.
+        let conexaoRegistrada: ConexaoDoJogador | null = null;
+        let conexaoAnterior: ConexaoDoJogador | null = null;
         void (async () => {
           const conexao: ConexaoDoJogador = {
             socket: ws,
@@ -225,7 +260,8 @@ export function criarWebSocketServer(
           // presença recém-gravada com `em_reconexao`: durante o `await` da
           // transição, o antigo já não é vigente e o `close` dele pula
           // `marcarDesconexao`.
-          const conexaoAnterior = adicionarConexao(conexao);
+          conexaoAnterior = adicionarConexao(conexao);
+          conexaoRegistrada = conexao;
 
           const transicao = await transicionarSeCompletoOuAtualizarPresenca(
             contexto.redis,
@@ -234,24 +270,7 @@ export function criarWebSocketServer(
           );
 
           if (transicao === null || (transicao.estado !== 'preparada' && transicao.estado !== 'em_andamento')) {
-            // Falha da transição: remove explicitamente a conexão nova do
-            // registro — o listener de `close` só é anexado no caminho de
-            // sucesso, então sem esta remoção a entrada ficaria órfã apontando
-            // para o socket falhado (review da PR #181). Depois restaura a
-            // anterior como vigente (se ainda aberta): o fechamento do socket
-            // novo não marca `em_reconexao` sobre uma conexão viva. Sem
-            // anterior aberta, o Jogador fica sem conexão viva e a presença é
-            // marcada `em_reconexao`.
-            const eraVigente = removerConexao(conexao);
-            const anteriorAberta = conexaoAnterior !== null
-              && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN;
-            if (anteriorAberta) {
-              adicionarConexao(conexaoAnterior);
-            } else if (eraVigente) {
-              void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
-                console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
-              );
-            }
+            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior);
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
             } catch {}
@@ -396,6 +415,15 @@ export function criarWebSocketServer(
         });
         })().catch((error) => {
           console.error('[ws] falha na transição pós-upgrade:', (error as Error).message);
+          // Exceção durante a admissão (ex.: Redis fora): a mesma limpeza do
+          // caminho de falha — sem ela, o socket novo ficaria registrado como
+          // vigente (morto) e a conexão antiga desregistrada (review #181).
+          if (conexaoRegistrada !== null) {
+            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexaoRegistrada, conexaoAnterior);
+          }
+          try {
+            ws.send(erroRejeitada('ERRO_INTERNO', 'falha na admissão da partida'));
+          } catch {}
           try { ws.close(1011, 'ERRO_INTERNO'); } catch {}
         });
       });

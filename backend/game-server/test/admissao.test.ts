@@ -1081,21 +1081,30 @@ function aguardarTipo(mensagens: readonly string[], tipo: string, timeoutMs = 30
 }
 
 /**
- * Cliente Redis que delega tudo ao cliente real, mas faz a `chamadaFalha`-ésima
- * chamada de `eval` (a transição de presença da admissão) devolver a mesma
- * resposta do script Lua quando a chave da partida não existe (`estado: ''`),
- * forçando `transicao === null` de forma determinística — deletar a chave do
- * Redis na janela entre as duas leituras do servidor seria racy.
+ * Cliente Redis que delega tudo ao cliente real, mas intercepta a
+ * `chamada`-ésima chamada de `eval` (a transição de presença da admissão) de
+ * forma determinística — deletar a chave do Redis na janela entre as duas
+ * leituras do servidor seria racy. Dois modos:
+ * - `estado_vazio`: devolve a mesma resposta do script Lua quando a chave da
+ *   partida não existe (`estado: ''`), forçando `transicao === null`;
+ * - `rejeicao`: rejeita a promessa (ex.: Redis fora), exercitando o caminho
+ *   de exceção do fluxo pós-upgrade.
  */
-function clienteRedisComFalhaNaTransicao(real: Redis, chamadaFalha: number): Redis {
+function clienteRedisComTransicaoInterceptada(
+  real: Redis,
+  chamada: number,
+  modo: 'estado_vazio' | 'rejeicao',
+): Redis {
   let chamadas = 0;
-  const respostaDeFalha = JSON.stringify({ mudou: false, completo: false, iniciou: false, estado: '' });
   const cliente: Redis = Object.create(real);
   const evalOriginal = real.eval.bind(real) as (...args: unknown[]) => Promise<unknown>;
   (cliente as { eval: unknown }).eval = (...args: unknown[]) => {
     chamadas += 1;
-    if (chamadas === chamadaFalha) {
-      return Promise.resolve(respostaDeFalha);
+    if (chamadas === chamada) {
+      if (modo === 'rejeicao') {
+        return Promise.reject(new Error('redis indisponível (simulado)'));
+      }
+      return Promise.resolve(JSON.stringify({ mudou: false, completo: false, iniciou: false, estado: '' }));
     }
     return evalOriginal(...args);
   };
@@ -1116,7 +1125,7 @@ function comTimeout<T>(promessa: Promise<T>, mensagem: string, ms = 3000): Promi
 }
 
 test('falha na transição após substituição restaura a conexão anterior e preserva presença', async () => {
-  const servidor = await subirServidorComPartida(clienteRedisComFalhaNaTransicao(redis, 2));
+  const servidor = await subirServidorComPartida(clienteRedisComTransicaoInterceptada(redis, 2, 'estado_vazio'));
   const abertos: WebSocket[] = [];
   try {
     const partidaId = crypto.randomUUID() as PartidaId;
@@ -1160,6 +1169,71 @@ test('falha na transição após substituição restaura a conexão anterior e p
     // 3ª conexão — prova externa do registro: a substituição fecha a ANTIGA
     // com 4409. Se o registro ainda apontasse para a conexão falhada, o 4409
     // iria para o socket morto e a antiga ficaria aberta.
+    const sessaoIdC = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoIdC, 'jogador-1');
+    const terceiro = new WebSocket(`ws://127.0.0.1:${servidor.port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${criarJwt('jogador-1', 'Jogador 1', sessaoIdC)}`);
+    abertos.push(terceiro);
+    const fechoAntigo = fechoDe(antigo);
+    await aguardarAdmissao(terceiro);
+    const fecho = await comTimeout(fechoAntigo, 'timeout aguardando fechamento da conexão antiga (3ª conexão)');
+    assert.equal(fecho.code, 4409);
+    assert.equal(fecho.reason, 'CONEXAO_SUBSTITUIDA');
+    assert.equal(terceiro.readyState, WebSocket.OPEN, 'a 3ª conexão deve permanecer aberta');
+  } finally {
+    for (const ws of abertos) {
+      try { ws.close(); } catch {}
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    await servidor.fechar();
+  }
+});
+
+test('exceção na transição após substituição restaura a conexão anterior e preserva presença', async () => {
+  const servidor = await subirServidorComPartida(clienteRedisComTransicaoInterceptada(redis, 2, 'rejeicao'));
+  const abertos: WebSocket[] = [];
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaComEstadoNoRedis(partidaId, roster);
+
+    // 1ª conexão de jogador-1 — transição real (eval nº 1): jogador conectado.
+    const sessaoIdA = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoIdA, 'jogador-1');
+    const antigo = new WebSocket(`ws://127.0.0.1:${servidor.port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${criarJwt('jogador-1', 'Jogador 1', sessaoIdA)}`);
+    abertos.push(antigo);
+    await aguardarAdmissao(antigo);
+
+    // 2ª conexão (duplicada) — a transição REJEITA (eval nº 2, Redis fora):
+    // o caminho de exceção (catch externo) deve aplicar a mesma limpeza do
+    // caminho de falha — restaurar a conexão antiga como vigente — e encerrar
+    // o socket novo com 1011.
+    const sessaoIdB = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoIdB, 'jogador-1');
+    const novo = new WebSocket(`ws://127.0.0.1:${servidor.port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${criarJwt('jogador-1', 'Jogador 1', sessaoIdB)}`);
+    abertos.push(novo);
+    const rejeicaoNovo = new Promise<string>((resolve) => {
+      novo.once('message', (data) => resolve(data.toString()));
+    });
+    const mensagemNovo = JSON.parse(await comTimeout(rejeicaoNovo, 'timeout aguardando ADMISSAO_REJEITADA no socket novo')) as { type: string };
+    assert.equal(mensagemNovo.type, 'ADMISSAO_REJEITADA');
+    const fechoNovo = await comTimeout(fechoDe(novo), 'timeout aguardando fechamento do socket novo');
+    assert.equal(fechoNovo.code, 1011);
+    assert.equal(fechoNovo.reason, 'ERRO_INTERNO');
+    assert.equal(antigo.readyState, WebSocket.OPEN, 'conexão antiga deve permanecer aberta após a restauração no caminho de exceção');
+
+    // Presença preservada: a restauração não marca `em_reconexao`.
+    const bruto = await redis.get(chaveDaPartida(partidaId));
+    assert.ok(bruto !== null, 'partida deveria existir no redis');
+    const partida = JSON.parse(bruto) as { roster: MembroDaSala[] };
+    assert.equal(
+      partida.roster.find((m) => m.jogadorId === 'jogador-1')?.presenca,
+      'conectado',
+      'presença de jogador-1 deve permanecer conectado após a exceção com restauração',
+    );
+
+    // 3ª conexão — prova externa do registro: a substituição fecha a ANTIGA
+    // com 4409. Se o registro ainda apontasse para a conexão falhada (exceção
+    // sem limpeza), o 4409 iria para o socket morto e a antiga ficaria aberta.
     const sessaoIdC = crypto.randomUUID();
     await criarSessaoNoRedis(sessaoIdC, 'jogador-1');
     const terceiro = new WebSocket(`ws://127.0.0.1:${servidor.port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${criarJwt('jogador-1', 'Jogador 1', sessaoIdC)}`);
