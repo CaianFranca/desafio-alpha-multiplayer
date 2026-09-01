@@ -111,27 +111,9 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
                   contexto.broadcast.enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaSemEncTyped });
                   return { tipo: 'sucesso' as const, sala: salaSemEncTyped, idempotente: true };
                 }
-                const linkBase = contexto.handlers.handlersLinkBase;
-                const salaWireMinima = {
-                  id: salaBruta.id,
-                  codigoDeSala: salaBruta.codigo,
-                  estado: 'aberta' as const,
-                  anfitriaoId: salaBruta.anfitriaoId,
-                  membros: membros.map((m) => ({
-                    id: `${salaId}-m${m.ordem}`,
-                    jogadorId: m.jogadorId,
-                    apelido: contexto.estado.apelidoPorJogadorId.get(m.jogadorId) ?? '',
-                    ordemDeEntrada: m.ordem,
-                    presenca: 'conectado' as const,
-                    prontidao: false,
-                  })),
-                  convite: { codigoDeSala: salaBruta.codigo, link: `${linkBase}/${salaBruta.codigo}` },
-                } as const;
-                await contexto.projecao.marcarReaberta(salaId);
-                await contexto.repo.marcarReabertaPersistido(salaId);
-                const salaMinimaTyped = salaWireMinima as unknown as ReturnType<typeof mapearSala>;
-                contexto.broadcast.enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaMinimaTyped });
-                return { tipo: 'sucesso' as const, sala: salaMinimaTyped, idempotente: true };
+                // Sem memória nem projeção não há dados reais de presença/prontidão para broadcastar.
+                // Dados fabricados com IDs sintéticos causariam divergência; retorno 503 para retry do game-server.
+                return { tipo: 'erro' as const, status: 503, codigo: 'ERRO_INTERNO' };
               }
             }
           }
@@ -205,6 +187,7 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           SALA_NAO_ENCONTRADA: 'Sala não encontrada.',
           SALA_NAO_ENCAMINHADA: 'Sala não está encaminhada.',
           SALA_INCONSISTENTE: 'Sala temporariamente inconsistente, tente novamente.',
+          ERRO_INTERNO: 'Erro interno.',
         };
         res.status(resultadoOperacao.status).json({
           codigo: resultadoOperacao.codigo,

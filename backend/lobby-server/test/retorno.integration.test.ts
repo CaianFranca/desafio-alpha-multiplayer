@@ -105,7 +105,12 @@ after(async()=>{
   await finalizarArquivoDeTeste();
 });
 beforeEach(async()=>{
-  await pool.query(`TRUNCATE TABLE membros_historico, membros, salas_historico, usuarios RESTART IDENTITY CASCADE`);
+  // sala_reaberta_markers depende de salas_historico via FK CASCADE (migration 20260902)
+  try {
+    await pool.query(`TRUNCATE TABLE membros_historico, membros, salas_historico, sala_reaberta_markers, usuarios RESTART IDENTITY CASCADE`);
+  } catch {
+    await pool.query(`TRUNCATE TABLE membros_historico, membros, salas_historico, usuarios RESTART IDENTITY CASCADE`);
+  }
   await redis.flushdb();
 });
 
@@ -362,6 +367,91 @@ test('payload inválido e sala não encontrada retornam 400/404', async()=>{
     // pode ser 409 porque não encaminhada
     assert.equal(r3.status,409);
     wsA.close(); await esperarClose(wsA).catch(()=>undefined);
+  }, {});
+});
+
+test('reidratação: retry com PG marker e Redis ausentes recria projeção e rebroadcast com 200', async()=>{
+  const ofertarStub=async ():Promise<AceiteDoEncaminhamento>=> ({partidaId:'p-reidrat', serverId:'s-reidrat'});
+  await comServidor(async ({baseUrl,wsUrl,contexto})=>{
+    const {wsA,wsB,wsC,wsD,salaId,a,b,c,d}=await montarSalaEncaminhada(baseUrl,wsUrl,null as any);
+    const token=assinarServiceToken();
+    const body={salaId, partidaId:'p-reidrat', serverId:'s-reidrat', resultado:'vitoria', jogadores:[a.id,b.id,c.id,d.id]};
+    const r1=await fetch(`${baseUrl}/api/retorno`,{method:'POST',headers:{'content-type':'application/json', Authorization:`Bearer ${token}`},body:JSON.stringify(body)});
+    assert.equal(r1.status,200);
+    for(const ws of [wsA,wsB,wsC,wsD]) await esperarTipo(ws,'SALA_ATUALIZADA',3000);
+    // Simula crash após COMMIT mas antes de persistir Redis/projeção: apaga Redis
+    await redis.del(`lobby:sala:${salaId}:estado`);
+    await redis.del(`lobby:sala:${salaId}:reaberta`);
+    // Verifica que projeção foi apagada mas PG marker persiste
+    const projAntes=await redis.get(`lobby:sala:${salaId}:estado`);
+    assert.equal(projAntes,null);
+    const markerPg=await pool.query(`SELECT 1 FROM sala_reaberta_markers WHERE sala_id=$1`,[salaId]);
+    assert.equal(markerPg.rowCount,1);
+    // Retry idempotente deve reidratar projeção/Redis e rebroadcastar 200
+    const r2=await fetch(`${baseUrl}/api/retorno`,{method:'POST',headers:{'content-type':'application/json', Authorization:`Bearer ${token}`},body:JSON.stringify(body)});
+    assert.equal(r2.status,200);
+    const j2=await r2.json() as {sala:Sala};
+    assert.equal(j2.sala.estado,'aberta');
+    const projDepois=await redis.get(`lobby:sala:${salaId}:estado`);
+    assert.ok(projDepois);
+    const reabertaRedis=await redis.get(`lobby:sala:${salaId}:reaberta`);
+    assert.equal(reabertaRedis,'1');
+    // rebroadcast deve ter sido enviado aos 4 clientes
+    for(const ws of [wsA,wsB,wsC,wsD]){
+      const ev=await esperarTipo(ws,'SALA_ATUALIZADA',3000) as SalaAtualizadaEvento;
+      assert.equal(ev.sala.estado,'aberta');
+    }
+    wsA.close(); wsB.close(); wsC.close(); wsD.close();
+    await Promise.all([wsA,wsB,wsC,wsD].map(ws=>esperarClose(ws).catch(()=>undefined)));
+  }, {ofertarEncaminhamento: ofertarStub});
+});
+
+test('atomicidade: flip PG e marker na mesma transação', async()=>{
+  const ofertarStub=async ():Promise<AceiteDoEncaminhamento>=> ({partidaId:'p-atom', serverId:'s-atom'});
+  await comServidor(async ({baseUrl,wsUrl})=>{
+    const {wsA,wsB,wsC,wsD,salaId,a,b,c,d}=await montarSalaEncaminhada(baseUrl,wsUrl,null as any);
+    const token=assinarServiceToken();
+    const body={salaId, partidaId:'p-atom', serverId:'s-atom', resultado:'vitoria', jogadores:[a.id,b.id,c.id,d.id]};
+    const r1=await fetch(`${baseUrl}/api/retorno`,{method:'POST',headers:{'content-type':'application/json', Authorization:`Bearer ${token}`},body:JSON.stringify(body)});
+    assert.equal(r1.status,200);
+    for(const ws of [wsA,wsB,wsC,wsD]) await esperarTipo(ws,'SALA_ATUALIZADA',3000);
+    // Verifica PG atomico: status aberta + marker existe
+    const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE id=$1`,[salaId]);
+    assert.equal(linha.rows[0].status,'aberta');
+    const marker=await pool.query(`SELECT 1 FROM sala_reaberta_markers WHERE sala_id=$1`,[salaId]);
+    assert.equal(marker.rowCount,1);
+    // Segunda chamada não duplica marker e não altera PG
+    const r2=await fetch(`${baseUrl}/api/retorno`,{method:'POST',headers:{'content-type':'application/json', Authorization:`Bearer ${token}`},body:JSON.stringify(body)});
+    assert.equal(r2.status,200);
+    const marker2=await pool.query(`SELECT count(*)::int as c FROM sala_reaberta_markers WHERE sala_id=$1`,[salaId]);
+    assert.equal(marker2.rows[0].c,1);
+    wsA.close(); wsB.close(); wsC.close(); wsD.close();
+    await Promise.all([wsA,wsB,wsC,wsD].map(ws=>esperarClose(ws).catch(()=>undefined)));
+  }, {ofertarEncaminhamento: ofertarStub});
+});
+
+test('sem memória nem projeção retorna 503 sem dados fabricados', async()=>{
+  await comServidor(async ({baseUrl})=>{
+    const token=assinarServiceToken();
+    // Cria sala diretamente no PG sem passar pelo engine (simula restart com memória vazia) + marker
+    const { randomUUID } = await import('node:crypto');
+    const salaId=randomUUID();
+    const codigo='ZZZ999';
+    const jogadorId=randomUUID();
+    // usuario
+    await pool.query(`INSERT INTO usuarios (id, apelido, email, senha_hash) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,[jogadorId, 'fantasma', `fantasma-${salaId}@ex.local`, 'hash']);
+    await pool.query(`INSERT INTO salas_historico (id, codigo_sala, status, anfitriao_id, server_id, partida_id) VALUES ($1,$2,'aberta', $3, NULL, NULL)`,[salaId, codigo, jogadorId]);
+    await pool.query(`INSERT INTO membros (sala_id, usuario_id, ordem_de_entrada, bloqueado) VALUES ($1,$2,1,false)`,[salaId, jogadorId]);
+    await pool.query(`INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,[salaId]);
+    // garante que Redis não tem projeção
+    await redis.del(`lobby:sala:${salaId}:estado`);
+    await redis.del(`lobby:sala:${salaId}:reaberta`);
+    // engine não tem a sala (foi inserida direto no PG), mas o endpoint verá PG aberta + marker e tentará reidratar
+    // sem salaDominio nem proj, deve retornar 503 (não fabricar wire)
+    const r=await fetch(`${baseUrl}/api/retorno`,{method:'POST',headers:{'content-type':'application/json', Authorization:`Bearer ${token}`},body:JSON.stringify({salaId, resultado:'vitoria', jogadores:[jogadorId]})});
+    assert.equal(r.status,503);
+    const j=await r.json() as {codigo:string};
+    assert.equal(j.codigo,'ERRO_INTERNO');
   }, {});
 });
 

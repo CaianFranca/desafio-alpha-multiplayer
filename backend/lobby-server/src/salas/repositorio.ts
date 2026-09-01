@@ -253,9 +253,9 @@ export class SalasRepo {
    * Elimina a janela de crash entre UPDATE e INSERT (bloqueante #185):
    *   UPDATE salas_historico + INSERT sala_reaberta_markers em BEGIN/COMMIT
    * Retorna true quando houve mutação, false quando já estava aberta.
+   * Tabela criada via migration 20260902000000 (FK ON DELETE CASCADE).
    */
   async reabrirSalaComMarkerAtomico(salaId: string): Promise<boolean> {
-    await this.garantirTabelaReabertaMarkers();
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -281,17 +281,7 @@ export class SalasRepo {
     }
   }
 
-  private reabertaTabelaGarantida = false;
-  private async garantirTabelaReabertaMarkers(): Promise<void> {
-    if (this.reabertaTabelaGarantida) return;
-    await this.pool.query(
-      `CREATE TABLE IF NOT EXISTS sala_reaberta_markers (sala_id uuid PRIMARY KEY, criado_em timestamptz NOT NULL DEFAULT now())`,
-    );
-    this.reabertaTabelaGarantida = true;
-  }
-
   async marcarReabertaPersistido(salaId: string): Promise<void> {
-    await this.garantirTabelaReabertaMarkers();
     await this.pool.query(
       `INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,
       [salaId],
@@ -299,13 +289,8 @@ export class SalasRepo {
   }
 
   async foiReabertaPersistido(salaId: string): Promise<boolean> {
-    await this.garantirTabelaReabertaMarkers();
-    try {
-      const r = await this.pool.query(`SELECT 1 FROM sala_reaberta_markers WHERE sala_id = $1 LIMIT 1`, [salaId]);
-      return (r.rowCount ?? 0) > 0;
-    } catch {
-      return false;
-    }
+    const r = await this.pool.query(`SELECT 1 FROM sala_reaberta_markers WHERE sala_id = $1 LIMIT 1`, [salaId]);
+    return (r.rowCount ?? 0) > 0;
   }
 
   /** Registro bruto da sala (inclui encaminhada e aberta) — usado na revalidação do retorno (#178). */
