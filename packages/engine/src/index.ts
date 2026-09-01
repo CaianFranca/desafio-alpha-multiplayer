@@ -115,6 +115,7 @@ export type {
   TipoDePecaDaCaixa,
   TipoDePecaDeCaminho,
   TipoDePecaEspecial,
+  TipoDePecaDeMonstro,
   VagaDaPecaRecebidaEscolhidaEvento,
 } from './tabuleiro.ts';
 
@@ -154,6 +155,7 @@ export {
   aplicarLimpeza,
   bordasAbertas,
   calcularIluminacao,
+  ehPecaDeMonstro,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   sortearDaCaixa,
