@@ -31,8 +31,12 @@ export async function inicializarEstadoDaPartida(
   partidaId: string,
   ttlSegundos: number,
   jogadoresEmOrdem: readonly string[],
+  seed?: number,
 ): Promise<void> {
-  const resultado = estadoInicialDaPartida(jogadoresEmOrdem);
+  const resultado = estadoInicialDaPartida(
+    jogadoresEmOrdem,
+    seed === undefined ? undefined : { seed },
+  );
   if (!resultado.sucesso) {
     throw new Error(
       `Falha ao inicializar o estado da partida: ${resultado.erro.codigo} — ${resultado.erro.mensagem}`,

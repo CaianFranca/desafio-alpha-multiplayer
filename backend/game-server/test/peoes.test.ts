@@ -269,15 +269,16 @@ async function posicionarPeaoNaInicial(
   const recebimento = await recebimentoEspera;
   const recebidas = recebimento.recebidas as Array<Record<string, unknown>>;
   assert.equal(recebidas.length, 2);
-  // Cada pendência já carrega a peça sorteada (ordem de composição da Caixa,
-  // sem seed: reta-1 e reta-2) e nasce sem vaga (issue #138).
-  assert.equal(recebidas[0]!.recebidaId, 'recebida-reta-1');
-  assert.equal(recebidas[0]!.pecaId, 'reta-1');
-  assert.equal(recebidas[0]!.tipoDaPeca, 'reta');
-  assert.equal(recebidas[0]!.vaga, null);
-  assert.equal(recebidas[0]!.celulaAlvo, null);
-  assert.equal(recebidas[1]!.recebidaId, 'recebida-reta-2');
-  assert.equal(recebidas[1]!.pecaId, 'reta-2');
+  // Cada pendência já carrega a peça sorteada (sorteio da Caixa, com seed
+  // aleatório no serviço — ordem não determinística) e nasce sem vaga (issue #138 / #139).
+  for (const r of recebidas) {
+    assert.ok(typeof r.recebidaId === 'string' && (r.recebidaId as string).startsWith('recebida-'));
+    assert.ok(typeof r.pecaId === 'string' && (r.pecaId as string).length > 0);
+    assert.equal(r.vaga, null);
+    assert.equal(r.celulaAlvo, null);
+  }
+  // Determinismo não é exigido do serviço (caixa embaralhada com seed no serviço).
+  assert.notEqual(recebidas[0]!.recebidaId, recebidas[1]!.recebidaId);
   return recebidas;
 }
 
@@ -400,8 +401,15 @@ test('fluxo feliz: ciclo do peão persiste no Redis (Primeiro Turno + mover na R
     const ws = sockets[0]!;
 
     try {
+      // Descobre dinamicamente quais peças ocupam as células ao norte/leste da inicial-1
+      const estadoAntes = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.ok(estadoAntes !== null);
+      const pecaNorte = estadoAntes!.tabuleiro.posicionadas.find((p) => p.celula.linha === 2 && p.celula.coluna === 3);
+      const pecaLeste = estadoAntes!.tabuleiro.posicionadas.find((p) => p.celula.linha === 3 && p.celula.coluna === 4);
+      assert.ok(pecaNorte, 'deve haver peça em (2,3) ao norte da inicial-1');
+      assert.ok(pecaLeste, 'deve haver peça em (3,4) ao leste da inicial-1');
       // Rodada 2, jogador-1 ativo: move o Peão branco da inicial-1 (3,3) para
-      // a reta-1 (2,3) — vizinha conectada pela borda norte da Inicial.
+      // a peça ao norte (2,3) — vizinha conectada pela borda norte da Inicial.
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       const selecionado = await esperarEvento(ws, 'PEAO_SELECIONADO');
       assert.equal(selecionado.peaoId, 'peao-branco');
@@ -410,7 +418,7 @@ test('fluxo feliz: ciclo do peão persiste no Redis (Primeiro Turno + mover na R
       const movido = await esperarEvento(ws, 'PEAO_MOVIDO');
       assert.equal(movido.peaoId, 'peao-branco');
       assert.equal(movido.pecaIdDe, 'inicial-1');
-      assert.equal(movido.pecaIdPara, 'reta-1');
+      assert.equal(movido.pecaIdPara, pecaNorte!.pecaId);
       assert.deepEqual(movido.celula, { linha: 2, coluna: 3 });
 
       // Estado no Redis reflete o ciclo completo, com a vez ainda de jogador-1.
@@ -419,16 +427,16 @@ test('fluxo feliz: ciclo do peão persiste no Redis (Primeiro Turno + mover na R
       assert.equal(estado!.jogadorAtivoId, 'jogador-1');
       assert.equal(estado!.rodada, 2);
       const peaoBranco = estado!.tabuleiro.peoes.find((p) => p.peaoId === 'peao-branco');
-      assert.equal(peaoBranco?.pecaId, 'reta-1');
+      assert.equal(peaoBranco?.pecaId, pecaNorte!.pecaId);
       assert.equal(estado!.tabuleiro.recebidas.length, 0);
       const caixa = estado!.tabuleiro.caixa.map((p) => p.pecaId);
-      assert.ok(!caixa.includes('reta-1'), 'reta-1 deve ter saído da caixa');
-      assert.ok(!caixa.includes('reta-2'), 'reta-2 deve ter saído da caixa');
+      assert.ok(!caixa.includes(pecaNorte!.pecaId), `${pecaNorte!.pecaId} deve ter saído da caixa`);
+      assert.ok(!caixa.includes(pecaLeste!.pecaId), `${pecaLeste!.pecaId} deve ter saído da caixa`);
 
       const porPeca = new Map(estado!.tabuleiro.posicionadas.map((p) => [p.pecaId, p.celula]));
       assert.deepEqual(porPeca.get('inicial-1'), { linha: 3, coluna: 3 });
-      assert.deepEqual(porPeca.get('reta-1'), { linha: 2, coluna: 3 });
-      assert.deepEqual(porPeca.get('reta-2'), { linha: 3, coluna: 4 });
+      assert.deepEqual(porPeca.get(pecaNorte!.pecaId), { linha: 2, coluna: 3 });
+      assert.deepEqual(porPeca.get(pecaLeste!.pecaId), { linha: 3, coluna: 4 });
     } finally {
       for (const socket of sockets) {
         socket.close();

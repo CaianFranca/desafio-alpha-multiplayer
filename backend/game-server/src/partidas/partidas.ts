@@ -52,11 +52,16 @@ export async function criarPartidaPreparada(
   // recém-criada para não deixar partida órfã sem estado (que responderia
   // ESTADO_INDISPONIVEL para sempre).
   try {
+    const seed =
+      typeof (globalThis.crypto as unknown as { randomInt?: (min: number, max: number) => number })?.randomInt === 'function'
+        ? (globalThis.crypto as unknown as { randomInt: (min: number, max: number) => number }).randomInt(0, 4294967296)
+        : Math.floor(Math.random() * 4294967296);
     await inicializarEstadoDaPartida(
       redis,
       partida.partidaId,
       partidaPreparadaTtlSegundos,
       oferta.roster.map((membro) => membro.jogadorId),
+      seed,
     );
   } catch (erro) {
     await redis.del(chaveDaPartida(partida.partidaId));

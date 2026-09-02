@@ -280,14 +280,14 @@ async function posicionarPeaoNaInicial(
   const recebimento = await recebimentoEspera;
   const recebidas = recebimento.recebidas as Array<Record<string, unknown>>;
   assert.equal(recebidas.length, 2);
-  // Cada pendência já carrega a peça sorteada (ordem de composição da Caixa,
-  // sem seed: reta-1 e reta-2) e nasce sem vaga (issue #138).
-  assert.equal(recebidas[0]!.recebidaId, 'recebida-reta-1');
-  assert.equal(recebidas[0]!.pecaId, 'reta-1');
-  assert.equal(recebidas[0]!.vaga, null);
-  assert.equal(recebidas[0]!.celulaAlvo, null);
-  assert.equal(recebidas[1]!.recebidaId, 'recebida-reta-2');
-  assert.equal(recebidas[1]!.pecaId, 'reta-2');
+  // Cada pendência já carrega a peça sorteada (sorteio da Caixa com seed no serviço) e nasce sem vaga (issue #138 / #139).
+  for (const r of recebidas) {
+    assert.ok(typeof r.recebidaId === 'string' && (r.recebidaId as string).startsWith('recebida-'));
+    assert.ok(typeof r.pecaId === 'string' && (r.pecaId as string).length > 0);
+    assert.equal(r.vaga, null);
+    assert.equal(r.celulaAlvo, null);
+  }
+  assert.notEqual(recebidas[0]!.recebidaId, recebidas[1]!.recebidaId);
   return recebidas;
 }
 

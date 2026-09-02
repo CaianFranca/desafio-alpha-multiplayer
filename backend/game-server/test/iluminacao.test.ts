@@ -417,9 +417,14 @@ test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da ilumin
       }
 
       // ── Rodada 2 de jogador-1 ────────────────────────────────────
-      // Mover peao-branco de (3,3) para (2,3) — onde está a reta-1 (norte). Nova iluminação de (2,3): (1,3),(2,2),(2,3),(2,4),(3,3)
-      // A peça em (3,4) (reta-2 leste) fica FORA → limpeza deve remover reta-2.
+      // Mover peao-branco de (3,3) para (2,3) — onde está a peça ao norte. Nova iluminação de (2,3): (1,3),(2,2),(2,3),(2,4),(3,3)
+      // A peça em (3,4) (leste da inicial) fica FORA → limpeza deve removê-la.
       // mover deseleciona (ST-10); é preciso reselecionar antes de confirmar
+      // Descobre dinamicamente qual peça está em (3,4) antes da limpeza
+      const estadoPreLimpeza = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.ok(estadoPreLimpeza !== null);
+      const pecaLeste = estadoPreLimpeza!.tabuleiro.posicionadas.find((p) => p.celula.linha === 3 && p.celula.coluna === 4);
+      assert.ok(pecaLeste, 'deve haver peça em (3,4) antes da limpeza');
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       await esperarEvento(ws, 'PEAO_SELECIONADO');
 
@@ -437,11 +442,11 @@ test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da ilumin
       const limpeza = await limpezaEspera;
       assert.equal(limpeza.type, 'LIMPEZA_APLICADA');
       const pecasRemovidas = limpeza.pecasRemovidas as string[];
-      // Assert exato C1: reta-2 deve estar nas removidas (a peça a leste)
-      assert.ok(pecasRemovidas.includes('reta-2'), `esperava reta-2 nas removidas, got ${pecasRemovidas}`);
-      // Na iluminação (3,2), (3,4) está fora; reta-2 deve ser a única removida (ou ao menos contida)
+      // A peça ao leste (3,4) deve estar nas removidas, seja qual for seu tipo embaralhado
+      assert.ok(pecasRemovidas.includes(pecaLeste!.pecaId), `esperava ${pecaLeste!.pecaId} nas removidas, got ${pecasRemovidas}`);
+      // Na iluminação (2,3), (3,4) está fora; a peça leste deve ser a única removida
       assert.equal(pecasRemovidas.length, 1);
-      assert.deepEqual(pecasRemovidas, ['reta-2']);
+      assert.deepEqual(pecasRemovidas, [pecaLeste!.pecaId]);
     } finally {
       ws.close();
       ws2.close();
