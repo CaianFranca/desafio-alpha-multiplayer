@@ -332,6 +332,16 @@ export interface AtaqueResolvidoWireEvento {
   readonly protegidos: readonly string[];
 }
 
+// Resgate (issue #171): chegada do aliado por conexão à peça do afetado.
+// Shape 1:1 com ResgateRealizadoEvento do domínio.
+export interface ResgateRealizadoWireEvento {
+  readonly type: 'RESGATE_REALIZADO';
+  readonly pecaId: PecaId;
+  readonly resgatadoJogadorId: string;
+  readonly resgatadorJogadorId: string;
+  readonly resgatadorPeaoId: PeaoId;
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
@@ -343,7 +353,8 @@ export type PartidaEventoDoServidor =
   | PartidaIniciadaEvento
   | EstadoDaPartidaEvento
   | PartidaTerminadaWireEvento
-  | AtaqueResolvidoWireEvento;
+  | AtaqueResolvidoWireEvento
+  | ResgateRealizadoWireEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

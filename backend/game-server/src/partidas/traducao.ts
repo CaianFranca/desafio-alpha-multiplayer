@@ -130,6 +130,17 @@ export function traduzirEventos(
           protegidos: evento.protegidos,
         });
         break;
+      // Resgate (issue #171): shape 1:1 com o domínio — wire follow-up #173
+      // pode refinar feedback, mas o broadcast já expõe o resgate.
+      case 'resgate_realizado':
+        saida.push({
+          type: 'RESGATE_REALIZADO',
+          pecaId: evento.pecaId,
+          resgatadoJogadorId: evento.resgatadoJogadorId,
+          resgatadorJogadorId: evento.resgatadorJogadorId,
+          resgatadorPeaoId: evento.resgatadorPeaoId,
+        });
+        break;
       default: {
         const _exaustivo: never = evento;
         break;
