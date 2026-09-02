@@ -123,6 +123,7 @@ export async function aplicarRetencaoDeTermino(
     ttlSegundos,
   );
   if (Number(aplicada) !== 1) {
+    console.warn('[estado] retenção negada — chave ausente', { partidaId, ttlSegundos });
     throw new Error(`Não foi possível aplicar a retenção da partida ${partidaId}: chave ausente`);
   }
 }

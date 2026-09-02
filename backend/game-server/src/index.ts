@@ -111,6 +111,9 @@ function encerrar(signal: string): void {
   if (encerrando) return;
   encerrando = true;
   console.log(`[game-server] ${signal} recebido, encerrando...`);
+  void handlers.drenarRetornosPendentes(5000).catch((err: unknown) => {
+    console.warn('[game-server] falha ao drenar retornos pendentes:', (err as Error).message);
+  });
   if (registroRetry) {
     clearTimeout(registroRetry);
     registroRetry = undefined;

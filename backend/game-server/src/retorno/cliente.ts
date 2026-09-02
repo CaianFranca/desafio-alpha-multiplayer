@@ -42,13 +42,27 @@ function assinarServiceToken(jwtSecret: string): string {
 }
 
 function ehRetentavel(status: number, codigo: unknown): boolean {
-  // Timeouts, rate limiting, 503 e 409 temporário são retentáveis.
   if (status === 408 || status === 429) return true;
   if (status === 503) return true;
   if (status === 409 && codigo === 'SALA_INCONSISTENTE') return true;
-  // 5xx genérico é transitório.
   if (status >= 500) return true;
   return false;
+}
+
+function extrairRetryAfterMs(headers: Headers | undefined): number | undefined {
+  if (!headers) return undefined;
+  const raw = headers.get('retry-after');
+  if (!raw) return undefined;
+  const segundos = Number(raw.trim());
+  if (Number.isFinite(segundos) && segundos >= 0) {
+    return segundos * 1000;
+  }
+  const data = Date.parse(raw);
+  if (Number.isFinite(data)) {
+    const diff = data - Date.now();
+    return diff > 0 ? diff : 0;
+  }
+  return undefined;
 }
 
 export function criarClienteDeRetorno(config: RetornoClienteConfig): (aviso: AvisoDeRetorno) => Promise<void> {
@@ -104,12 +118,21 @@ export function criarClienteDeRetorno(config: RetornoClienteConfig): (aviso: Avi
         }
 
         if (ehRetentavel(resposta.status, codigo)) {
+          const retryAfterMs = extrairRetryAfterMs(resposta.headers);
           console.warn('[retorno] falha retentável, reagendando', {
             salaId: aviso.salaId,
             status: resposta.status,
             codigo,
             tentativa,
+            retryAfterMs,
           });
+          const backoffMs = Math.min(backoffInicialMs * 2 ** (tentativa - 1), capMs);
+          const delayMs = retryAfterMs !== undefined ? Math.min(Math.max(backoffMs, retryAfterMs), capMs) : backoffMs;
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, delayMs);
+            timer.unref?.();
+          });
+          continue;
         } else {
           console.error('[retorno] rejeição definitiva, interrompendo retry', {
             salaId: aviso.salaId,

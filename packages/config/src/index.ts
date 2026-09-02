@@ -105,6 +105,9 @@ function parsePartidaPreparadaTtlSegundos(raw: string | undefined): number {
   if (Number.isInteger(parsed) && parsed > 0) {
     return parsed;
   }
+  if (raw !== undefined) {
+    console.warn(`[config] PARTIDA_PREPARADA_TTL_SEGUNDOS inválido "${raw}" — usando fallback ${DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS}`);
+  }
   return DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS;
 }
 
@@ -112,6 +115,9 @@ function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
   const parsed = Number(raw ?? DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS);
   if (Number.isInteger(parsed) && parsed > 0) {
     return parsed;
+  }
+  if (raw !== undefined) {
+    console.warn(`[config] PARTIDA_TERMINADA_TTL_SEGUNDOS inválido "${raw}" — usando fallback ${DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS}`);
   }
   return DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS;
 }

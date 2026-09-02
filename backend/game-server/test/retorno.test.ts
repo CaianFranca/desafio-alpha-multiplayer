@@ -101,6 +101,28 @@ test('callback de retorno repete respostas 408 e 429', async () => {
   }
 });
 
+test('callback de retorno honra Retry-After em resposta retentável', async () => {
+  let chamadas = 0;
+  const inicio = Date.now();
+  const cliente = criarClienteDeRetorno({
+    lobbyRetornoCallbackUrl: 'http://lobby.test/api/retorno',
+    jwtSecret: JWT_SECRET,
+    backoffInicialMs: 5,
+    buscarHttp: async () => {
+      chamadas += 1;
+      if (chamadas === 1) {
+        return new Response('{}', { status: 429, headers: { 'retry-after': '1' } });
+      }
+      return new Response('{}', { status: 200 });
+    },
+  });
+
+  await cliente(aviso);
+  assert.equal(chamadas, 2);
+  const duracao = Date.now() - inicio;
+  assert.ok(duracao >= 900, `Retry-After de 1s deveria atrasar o retry (duracao=${duracao}ms)`);
+});
+
 test('default do callback acompanha LOBBY_SERVER_PORT', () => {
   const portaAnterior = process.env.LOBBY_SERVER_PORT;
   const urlAnterior = process.env.LOBBY_RETORNO_CALLBACK_URL;

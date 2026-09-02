@@ -47,6 +47,7 @@ export class PartidaHandlers {
   private readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
   // Serialização mononodo: uma cadeia de promessas por partidaId.
   private readonly cadeiasPorPartida: Map<string, Promise<unknown>> = new Map();
+  private readonly retornosPendentes: Map<string, Promise<void>> = new Map();
 
   constructor(deps: PartidaHandlersDeps) {
     this.redis = deps.redis;
@@ -92,6 +93,16 @@ export class PartidaHandlers {
         return;
       }
 
+      // Captura antecipada dos metadados da partida para fallback do callback (B1).
+      let partidaPrevia: import('./partidas.ts').PartidaPreparada | null = null;
+      if (this.notificarRetorno !== undefined) {
+        try {
+          partidaPrevia = await obterPartida(this.redis, partidaId);
+        } catch {
+          partidaPrevia = null;
+        }
+      }
+
       const comando = mapearComandoDaPartida(mensagem);
       // Ator = sessão autenticada do socket (#155): o `jogadorId` do wire é
       // vestigial no dispatch, então o broadcast carrega a identidade da
@@ -113,24 +124,65 @@ export class PartidaHandlers {
       if (termino?.tipo === 'partida_terminada') {
         let aviso: AvisoDeRetorno | undefined;
         if (this.notificarRetorno !== undefined) {
-          try {
-            const partida = await obterPartida(this.redis, partidaId);
-            if (partida === null) {
-              console.error('[partida] não foi possível notificar retorno: partida não encontrada', { partidaId });
-            } else {
-              aviso = {
-                salaId: partida.salaId,
-                partidaId: partida.partidaId,
-                serverId: partida.serverId,
-                resultado: termino.desfecho.tipo,
-                jogadores: partida.roster.map((membro) => membro.jogadorId),
-              };
+          let partida: import('./partidas.ts').PartidaPreparada | null = null;
+          for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+            try {
+              partida = await obterPartida(this.redis, partidaId);
+              if (partida !== null) break;
+            } catch {
+              partida = null;
             }
-          } catch (erro: unknown) {
-            console.error('[partida] não foi possível preparar callback de retorno', {
-              partidaId,
-              erro,
-            });
+            if (partida === null && tentativa < 2) {
+              const atrasoMs = 100 * 2 ** tentativa;
+              await new Promise<void>((resolve) => {
+                const timer = setTimeout(resolve, atrasoMs);
+                timer.unref?.();
+              });
+            }
+          }
+          if (partida === null && partidaPrevia !== null) {
+            console.warn('[partida] usando metadados prévios para callback de retorno', { partidaId });
+            partida = partidaPrevia;
+          }
+          if (partida === null) {
+            console.error('[partida] não foi possível preparar callback de retorno após retries', { partidaId });
+            const atrasoMs = 1000;
+            setTimeout(() => {
+              void this.enfileirarMutacao(partidaId, async () => {
+                let partidaReagendada: import('./partidas.ts').PartidaPreparada | null = null;
+                try {
+                  partidaReagendada = await obterPartida(this.redis, partidaId);
+                } catch {}
+                if (partidaReagendada === null && partidaPrevia !== null) {
+                  partidaReagendada = partidaPrevia;
+                }
+                if (partidaReagendada === null || this.notificarRetorno === undefined) return;
+                const avisoReagendado: AvisoDeRetorno = {
+                  salaId: partidaReagendada.salaId,
+                  partidaId: partidaReagendada.partidaId,
+                  serverId: partidaReagendada.serverId,
+                  resultado: termino.desfecho.tipo,
+                  jogadores: partidaReagendada.roster.map((m) => m.jogadorId),
+                };
+                const promessa = this.notificarRetorno(avisoReagendado).catch((erro: unknown) => {
+                  console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
+                });
+                this.retornosPendentes.set(partidaId, promessa);
+                void promessa.finally(() => {
+                  if (this.retornosPendentes.get(partidaId) === promessa) {
+                    this.retornosPendentes.delete(partidaId);
+                  }
+                });
+              }).catch(() => undefined);
+            }, atrasoMs).unref?.();
+          } else {
+            aviso = {
+              salaId: partida.salaId,
+              partidaId: partida.partidaId,
+              serverId: partida.serverId,
+              resultado: termino.desfecho.tipo,
+              jogadores: partida.roster.map((membro) => membro.jogadorId),
+            };
           }
         }
 
@@ -143,16 +195,23 @@ export class PartidaHandlers {
         } catch (erro: unknown) {
           console.error('[partida] falha ao aplicar retenção do término', {
             partidaId,
+            ttlSegundos: this.partidaTerminadaTtlSegundos,
             erro,
           });
         }
 
         if (aviso !== undefined && this.notificarRetorno !== undefined) {
-          void this.notificarRetorno(aviso).catch((erro: unknown) => {
+          const promessa = this.notificarRetorno(aviso).catch((erro: unknown) => {
             console.error('[partida] callback de retorno terminou com erro', {
               partidaId,
               erro,
             });
+          });
+          this.retornosPendentes.set(partidaId, promessa);
+          void promessa.finally(() => {
+            if (this.retornosPendentes.get(partidaId) === promessa) {
+              this.retornosPendentes.delete(partidaId);
+            }
           });
         }
       }
@@ -212,6 +271,18 @@ export class PartidaHandlers {
       () => this.limparCadeia(partidaId, proxima),
     );
     return proxima;
+  }
+
+  async drenarRetornosPendentes(timeoutMs = 5000): Promise<void> {
+    const pendentes = [...this.retornosPendentes.values()];
+    if (pendentes.length === 0) return;
+    await Promise.race([
+      Promise.allSettled(pendentes),
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
   }
 
   private limparCadeia(partidaId: string, proxima: Promise<unknown>): void {

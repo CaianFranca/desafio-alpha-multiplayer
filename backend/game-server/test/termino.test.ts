@@ -454,6 +454,46 @@ test('Retenção do término falha sem impedir o callback ao lobby', async () =>
   await servidor.fechar();
 });
 
+test('Término real: recarregamento entrega snapshot terminada e recusa subsequente', async () => {
+  const servidor = await subirServidor(600, 30, async () => undefined);
+  const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+  const sockets = await Promise.all([
+    conectarPartida(servidor, aceite.partidaId, 1),
+    conectarPartida(servidor, aceite.partidaId, 2),
+    conectarPartida(servidor, aceite.partidaId, 3),
+    conectarPartida(servidor, aceite.partidaId, 4),
+  ]);
+
+  try {
+    await semearEstadoProntoParaVitoria(aceite.partidaId);
+    const terminados = sockets.map((socket) => esperarEvento(socket, 'PARTIDA_TERMINADA'));
+    enviar(sockets[0], { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' });
+    await Promise.all(terminados);
+
+    sockets[0].close();
+    await sleep(200);
+    const { ws: wsRecarregado, snapshot } = await reconectarPartida(servidor, aceite.partidaId, 1);
+    try {
+      const projecao = snapshot.snapshot as { estado: unknown; resultado: unknown };
+      assert.equal(projecao.estado, 'terminada');
+      assert.equal(projecao.resultado, 'vitoria');
+      enviar(wsRecarregado, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 0, coluna: 0 } });
+      const erro = await esperarEvento(wsRecarregado, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.codigo, 'PARTIDA_TERMINADA');
+    } finally {
+      wsRecarregado.close();
+    }
+  } finally {
+    for (const socket of sockets) {
+      try { socket.close(); } catch {}
+    }
+  }
+
+  await deletePartida(servidor.baseUrl, aceite.partidaId);
+  await servidor.fechar();
+});
+
 test('Retenção do término não aplica TTL parcial quando uma chave está ausente', async () => {
   const partidaId = `partida-retencao-${crypto.randomUUID()}`;
   const chavePartida = `game-server:partida:${partidaId}`;
