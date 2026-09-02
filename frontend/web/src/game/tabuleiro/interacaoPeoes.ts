@@ -48,6 +48,7 @@ import type {
   BordaCardinal,
   ErroDoTabuleiroEvento,
   ManipulacaoFinalizadaEvento,
+  Orientacao,
   PecaDeselecionadaEvento,
   PeaoComandoDoCliente,
   PeaoEventoDoServidor,
@@ -72,19 +73,31 @@ import type {
 // chega no wire via TIPO_DA_PECA_RECEBIDA_ESCOLHIDO).
 
 /**
- * Pendência no cliente (issue #91): campos do wire + campo client-side
- * `pecaId` — null até o evento TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher na
- * forma LEGADA (ST-10); na forma NOVA (#138) o wire já traz o pecaId da peça
- * sorteada e a celulaAlvo pode ser null (vaga ainda não escolhida). A
+ * Pendência no cliente (issue #91): campos do wire + campos client-side.
+ * Forma LEGADA (ST-10): `pecaId` é preenchido pelo evento
+ * TIPO_DA_PECA_RECEBIDA_ESCOLHIDO até o encaixe. Forma NOVA (#138): o wire já
+ * traz o pecaId da peça sorteada e a celulaAlvo pode ser null (vaga ainda não
+ * escolhida). `orientacao` é metadado client-side do GIRAR_PECA em foco — o
+ * snapshot não o popula (o cliente ignora fora da janela de manipulação). A
  * pendência só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
 export type PendenciaNoCliente =
   // Legado ST-10 (@deprecated): borda geradora e célula-alvo fixas na criação,
   // com pecaId client-side preenchido por TIPO_DA_PECA_RECEBIDA_ESCOLHIDO.
-  | (PendenciaDeRecebimento & { readonly pecaId: string | null })
+  | (PendenciaDeRecebimento & {
+      readonly pecaId: string | null
+      readonly orientacao?: Orientacao
+    })
   // Novo (#138): a peça já vem sorteada da Caixa (pecaId + tipo + vaga) e a
   // célula-alvo deriva da vaga — pode estar null até ESCOLHER_VAGA_DA_PECA_RECEBIDA.
-  | PendenciaDaPecaSorteada
+  | (PendenciaDaPecaSorteada & { readonly orientacao?: Orientacao })
+
+/** Type guard: forma nova (#138) — só ela declara o campo `vaga`. */
+export function ehPendenciaSorteada(
+  pendencia: PendenciaNoCliente,
+): pendencia is PendenciaDaPecaSorteada & { readonly orientacao?: Orientacao } {
+  return 'vaga' in pendencia
+}
 
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]

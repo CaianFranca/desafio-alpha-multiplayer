@@ -52,6 +52,7 @@ import {
   type TipoDaPeca,
 } from './contrato'
 import type { PendenciaNoCliente } from './interacaoPeoes'
+import { ehPendenciaSorteada } from './interacaoPeoes'
 import type {
   Celula,
   CelulasIluminadasWireEvento,
@@ -97,10 +98,10 @@ export interface EstadoDoTabuleiroNoCliente {
   /** Peças cujo tipo foi definido por ESCOLHER_TIPO_DA_PECA_RECEBIDA (chave = pecaId). */
   readonly pecasDeRecebimento: Record<string, TipoDaPeca>
   /**
-    * Células iluminadas espelhadas do estado compartilhado (issue #151).
-    * O motor é a autoridade: o cliente apenas substitui a lista inteira a
-    * cada evento CELULAS_ILUMINADAS — nunca recalcula iluminação.
-    */
+   * Células iluminadas espelhadas do estado compartilhado (issue #151).
+   * O motor é a autoridade: o cliente apenas substitui a lista inteira a
+   * cada evento CELULAS_ILUMINADAS — nunca recalcula iluminação.
+   */
   readonly celulasIluminadas: readonly Celula[]
   /** Jogador Ativo da vez (TURNO_INICIADO; null entre turnos). */
   readonly jogadorAtivoId: string | null
@@ -219,16 +220,14 @@ export function reduzirEvento(
         (p) => p.pecaId === evento.pecaId,
       )
       if (posicionada) return girarPosicionada(estado, evento.pecaId, evento.orientacao)
-      const pendente = estado.recebidasPendentes.some(
-        (r) => (r as unknown as { pecaId: string }).pecaId === evento.pecaId,
+      const temPendencia = estado.recebidasPendentes.some(
+        (r) => r.pecaId === evento.pecaId,
       )
-      if (pendente) {
+      if (temPendencia) {
         return {
           ...estado,
           recebidasPendentes: estado.recebidasPendentes.map((r) =>
-            (r as unknown as { pecaId: string }).pecaId === evento.pecaId
-              ? ({ ...r, orientacao: evento.orientacao } as unknown as PendenciaNoCliente)
-              : r,
+            r.pecaId === evento.pecaId ? { ...r, orientacao: evento.orientacao } : r,
           ),
         }
       }
@@ -238,11 +237,13 @@ export function reduzirEvento(
       const pecaNaReserva = estado.reserva.find(
         (p) => p.pecaId === evento.pecaId,
       )
-      const tipoDaPendencia = (
-        estado.recebidasPendentes.find((r) => r.pecaId === evento.pecaId) as
-          | { tipoDaPeca?: string }
-          | undefined
-      )?.tipoDaPeca as unknown as TipoDaPeca | undefined
+      const encontrada = estado.recebidasPendentes.find(
+        (r) => r.pecaId === evento.pecaId,
+      )
+      const tipoDaPendencia =
+        encontrada !== undefined && ehPendenciaSorteada(encontrada)
+          ? encontrada.tipoDaPeca
+          : undefined
       const tipo =
         pecaNaReserva?.tipo ??
         estado.pecasDeRecebimento[evento.pecaId] ??
@@ -286,17 +287,16 @@ export function reduzirEvento(
     case 'PEAO_SELECIONADO':
       return { ...estado, peaoSelecionadoId: evento.peaoId }
     case 'RECEBIMENTO_GERADO': {
-      const recebidasPendentes = evento.recebidas.map((r) =>
-        'bordaGeradora' in r ? { ...r, pecaId: null } : r,
-      ) as unknown as readonly PendenciaNoCliente[]
+      // União discriminada pelo campo exclusivo de cada forma: `bordaGeradora`
+      // só existe na forma legada (ST-10, @deprecated); a forma nova (#138) já
+      // vem como PendenciaDaPecaSorteada no wire e passa direto.
+      const recebidasPendentes: readonly PendenciaNoCliente[] = evento.recebidas.map(
+        (r) => ('bordaGeradora' in r ? { ...r, pecaId: null } : r),
+      )
       const pecasDeRecebimento = { ...estado.pecasDeRecebimento }
       for (const r of evento.recebidas) {
         if (!('bordaGeradora' in r)) {
-          const sorteada = r as unknown as {
-            pecaId: string
-            tipoDaPeca: string
-          }
-          pecasDeRecebimento[sorteada.pecaId] = sorteada.tipoDaPeca as unknown as TipoDaPeca
+          pecasDeRecebimento[r.pecaId] = r.tipoDaPeca
         }
       }
       return { ...estado, recebidasPendentes, pecasDeRecebimento }
@@ -307,18 +307,24 @@ export function reduzirEvento(
         ...estado,
         pecasDeRecebimento: {
           ...estado.pecasDeRecebimento,
-          [evento.pecaId]: evento.tipoDaPeca as unknown as TipoDaPeca,
+          [evento.pecaId]: evento.tipoDaPeca,
         },
       }
     case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO': {
-      const pendente = estado.recebidasPendentes.find(
+      const encontrada = estado.recebidasPendentes.find(
         (r) => r.recebidaId === evento.recebidaId,
-      ) as unknown as { pecaId: string; tipoDaPeca: string } | undefined
+      )
+      // A escolha de vaga (#138) só se aplica à forma sorteada; a pendência
+      // legada não tem vaga no domínio e é ignorada aqui.
+      const pendente =
+        encontrada !== undefined && ehPendenciaSorteada(encontrada)
+          ? encontrada
+          : undefined
       const pecasDeRecebimento =
         pendente && estado.pecasDeRecebimento[pendente.pecaId] === undefined
           ? {
               ...estado.pecasDeRecebimento,
-              [pendente.pecaId]: pendente.tipoDaPeca as unknown as TipoDaPeca,
+              [pendente.pecaId]: pendente.tipoDaPeca,
             }
           : estado.pecasDeRecebimento
       return {
@@ -326,12 +332,12 @@ export function reduzirEvento(
         pecasDeRecebimento,
         pecaSelecionadaId: pendente ? pendente.pecaId : estado.pecaSelecionadaId,
         recebidasPendentes: estado.recebidasPendentes.map((r) =>
-          r.recebidaId === evento.recebidaId
-            ? ({
+          r.recebidaId === evento.recebidaId && ehPendenciaSorteada(r)
+            ? {
                 ...r,
                 vaga: evento.borda,
                 celulaAlvo: evento.celulaAlvo,
-              } as unknown as PendenciaNoCliente)
+              }
             : r,
         ),
       }
