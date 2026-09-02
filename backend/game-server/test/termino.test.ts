@@ -19,6 +19,7 @@ import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
+import type { Redis } from 'ioredis';
 import { criarClienteRedis } from '@flicker/config';
 import type { AvisoDeRetorno } from '../src/retorno/cliente.ts';
 import type {
@@ -31,6 +32,8 @@ import { criarWebSocketServer } from '../src/ws/ws.ts';
 import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
 import { PartidaHandlers } from '../src/partidas/handlers.ts';
 import {
+  aplicarRetencaoDeTermino,
+  chaveDoEstadoDaPartida,
   obterEstadoDaPartida,
   salvarEstadoDaPartida,
 } from '../src/partidas/estado.ts';
@@ -50,6 +53,7 @@ async function subirServidor(
   ttlSegundos: number,
   partidaTerminadaTtlSegundos = 3600,
   notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>,
+  redisDoHandler: Redis = redis,
 ): Promise<ServidorEfemero> {
   const contexto = {
     redis,
@@ -64,7 +68,7 @@ async function subirServidor(
 
   const broadcaster = new PartidaBroadcaster();
   const handlers = new PartidaHandlers({
-    redis,
+    redis: redisDoHandler,
     broadcaster,
     partidaTerminadaTtlSegundos,
     notificarRetorno,
@@ -367,7 +371,7 @@ test('Termino: broadcast, retenção e callback acontecem no término real da pa
   const avisoPromise = new Promise<AvisoDeRetorno>((resolve) => {
     resolverAviso = resolve;
   });
-  const servidor = await subirServidor(ttlTerminada, ttlTerminada, async (aviso) => {
+  const servidor = await subirServidor(600, ttlTerminada, async (aviso) => {
     avisoRecebido = aviso;
     resolverAviso?.(aviso);
   });
@@ -388,12 +392,12 @@ test('Termino: broadcast, retenção e callback acontecem no término real da pa
     const eventos = await Promise.all(terminados);
     assert.deepEqual(eventos.map((evento) => evento.resultado), ['vitoria', 'vitoria', 'vitoria', 'vitoria']);
 
+    const aviso = await avisoPromise;
     const ttlPartida = await redis.ttl(`game-server:partida:${aceite.partidaId}`);
     const ttlEstado = await redis.ttl(`game-server:partida-estado:${aceite.partidaId}`);
     assert.ok(ttlPartida > 0 && ttlPartida <= ttlTerminada, `TTL da partida inválido: ${ttlPartida}`);
     assert.ok(ttlEstado > 0 && ttlEstado <= ttlTerminada, `TTL do estado inválido: ${ttlEstado}`);
 
-    const aviso = await avisoPromise;
     assert.equal(avisoRecebido, aviso);
     assert.deepEqual(aviso, {
       salaId: 'sala-1',
@@ -404,8 +408,64 @@ test('Termino: broadcast, retenção e callback acontecem no término real da pa
     });
   } finally {
     for (const socket of sockets) socket.close();
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+    await servidor.fechar();
+  }
+});
+
+test('Retenção do término falha sem impedir o callback ao lobby', async () => {
+  let callbackExecutado = false;
+  const redisComFalhaNaRetencao = new Proxy(redis, {
+    get(target, propriedade, receptor) {
+      if (propriedade === 'eval') {
+        return async () => {
+          throw new Error('Redis indisponível ao aplicar retenção');
+        };
+      }
+      return Reflect.get(target, propriedade, receptor);
+    },
+  }) as Redis;
+  const servidor = await subirServidor(600, 30, async () => {
+    callbackExecutado = true;
+  }, redisComFalhaNaRetencao);
+  const aceite = await criarPartidaViaPost(servidor.baseUrl);
+  const sockets = await Promise.all([
+    conectarPartida(servidor, aceite.partidaId, 1),
+    conectarPartida(servidor, aceite.partidaId, 2),
+    conectarPartida(servidor, aceite.partidaId, 3),
+    conectarPartida(servidor, aceite.partidaId, 4),
+  ]);
+
+  try {
+    await semearEstadoProntoParaVitoria(aceite.partidaId);
+    const terminado = esperarEvento(sockets[0], 'PARTIDA_TERMINADA');
+    enviar(sockets[0], { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' });
+    await terminado;
+
+    for (let tentativa = 0; tentativa < 20 && !callbackExecutado; tentativa += 1) {
+      await sleep(5);
+    }
+    assert.equal(callbackExecutado, true);
+  } finally {
+    for (const socket of sockets) socket.close();
   }
 
   await deletePartida(servidor.baseUrl, aceite.partidaId);
   await servidor.fechar();
+});
+
+test('Retenção do término não aplica TTL parcial quando uma chave está ausente', async () => {
+  const partidaId = `partida-retencao-${crypto.randomUUID()}`;
+  const chavePartida = `game-server:partida:${partidaId}`;
+  await redis.set(chavePartida, 'metadados');
+  try {
+    await assert.rejects(
+      aplicarRetencaoDeTermino(redis, partidaId, 30),
+      /chave ausente/,
+    );
+    assert.equal(await redis.ttl(chavePartida), -1);
+    assert.equal(await redis.exists(chaveDoEstadoDaPartida(partidaId)), 0);
+  } finally {
+    await redis.del(chavePartida, chaveDoEstadoDaPartida(partidaId));
+  }
 });

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import jwt from 'jsonwebtoken';
+import { getConfig } from '@flicker/config';
 import {
   criarClienteDeRetorno,
   type AvisoDeRetorno,
@@ -78,4 +79,39 @@ test('callback de retorno não repete rejeição definitiva', async () => {
   await cliente(aviso);
 
   assert.equal(chamadas, 1);
+});
+
+test('callback de retorno repete respostas 408 e 429', async () => {
+  for (const status of [408, 429]) {
+    let chamadas = 0;
+    const cliente = criarClienteDeRetorno({
+      lobbyRetornoCallbackUrl: 'http://lobby.test/api/retorno',
+      jwtSecret: JWT_SECRET,
+      backoffInicialMs: 5,
+      buscarHttp: async () => {
+        chamadas += 1;
+        return chamadas === 1
+          ? new Response('{}', { status })
+          : new Response('{}', { status: 200 });
+      },
+    });
+
+    await cliente(aviso);
+    assert.equal(chamadas, 2, `status ${status} deveria ser retentável`);
+  }
+});
+
+test('default do callback acompanha LOBBY_SERVER_PORT', () => {
+  const portaAnterior = process.env.LOBBY_SERVER_PORT;
+  const urlAnterior = process.env.LOBBY_RETORNO_CALLBACK_URL;
+  process.env.LOBBY_SERVER_PORT = '4321';
+  delete process.env.LOBBY_RETORNO_CALLBACK_URL;
+  try {
+    assert.equal(getConfig().lobbyRetornoCallbackUrl, 'http://localhost:4321/api/retorno');
+  } finally {
+    if (portaAnterior === undefined) delete process.env.LOBBY_SERVER_PORT;
+    else process.env.LOBBY_SERVER_PORT = portaAnterior;
+    if (urlAnterior === undefined) delete process.env.LOBBY_RETORNO_CALLBACK_URL;
+    else process.env.LOBBY_RETORNO_CALLBACK_URL = urlAnterior;
+  }
 });

@@ -42,7 +42,8 @@ function assinarServiceToken(jwtSecret: string): string {
 }
 
 function ehRetentavel(status: number, codigo: unknown): boolean {
-  // 503 e 409 SALA_INCONSISTENTE são explicitamente retentáveis pelo lobby.
+  // Timeouts, rate limiting, 503 e 409 temporário são retentáveis.
+  if (status === 408 || status === 429) return true;
   if (status === 503) return true;
   if (status === 409 && codigo === 'SALA_INCONSISTENTE') return true;
   // 5xx genérico é transitório.

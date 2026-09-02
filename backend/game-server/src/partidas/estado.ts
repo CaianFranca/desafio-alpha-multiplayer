@@ -16,6 +16,17 @@ import {
 const TTL_NAO_EXISTE = -2;
 const TTL_SEM_EXPIRACAO = -1;
 
+const SCRIPT_APLICAR_RETENCAO_DE_TERMINO = `
+local partidaExiste = redis.call('EXISTS', KEYS[1])
+local estadoExiste = redis.call('EXISTS', KEYS[2])
+if partidaExiste == 0 or estadoExiste == 0 then
+  return 0
+end
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[2], ARGV[1])
+return 1
+`.trim();
+
 export function chaveDoEstadoDaPartida(partidaId: string): string {
   return `game-server:partida-estado:${partidaId}`;
 }
@@ -101,8 +112,19 @@ export async function aplicarRetencaoDeTermino(
   partidaId: string,
   ttlSegundos: number,
 ): Promise<void> {
-  await redis.expire(`game-server:partida:${partidaId}`, ttlSegundos);
-  await redis.expire(chaveDoEstadoDaPartida(partidaId), ttlSegundos);
+  if (!Number.isInteger(ttlSegundos) || ttlSegundos <= 0) {
+    throw new Error(`TTL de retenção inválido para a partida ${partidaId}`);
+  }
+  const aplicada = await redis.eval(
+    SCRIPT_APLICAR_RETENCAO_DE_TERMINO,
+    2,
+    `game-server:partida:${partidaId}`,
+    chaveDoEstadoDaPartida(partidaId),
+    ttlSegundos,
+  );
+  if (Number(aplicada) !== 1) {
+    throw new Error(`Não foi possível aplicar a retenção da partida ${partidaId}: chave ausente`);
+  }
 }
 
 /** Remove o estado da partida (usado no cancelamento da partida). */

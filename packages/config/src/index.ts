@@ -43,7 +43,6 @@ const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
-const DEFAULT_LOBBY_RETORNO_CALLBACK_URL = 'http://localhost:3001/api/retorno';
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -117,8 +116,7 @@ function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
   return DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS;
 }
 
-function parseLobbyRetornoCallbackUrl(raw: string | undefined): string {
-  const fallback = DEFAULT_LOBBY_RETORNO_CALLBACK_URL;
+function parseLobbyRetornoCallbackUrl(raw: string | undefined, fallback: string): string {
   if (raw === undefined || raw.trim().length === 0) {
     return fallback;
   }
@@ -239,6 +237,7 @@ export function getConfig(): Config {
   );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
+    `http://localhost:${lobbyServerPort}/api/retorno`,
   );
 
   const postgres = {

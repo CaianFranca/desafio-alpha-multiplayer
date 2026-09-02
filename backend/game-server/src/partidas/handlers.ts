@@ -111,30 +111,49 @@ export class PartidaHandlers {
 
       const termino = resultado.eventos.find((evento) => evento.tipo === 'partida_terminada');
       if (termino?.tipo === 'partida_terminada') {
-        await aplicarRetencaoDeTermino(
-          this.redis,
-          partidaId,
-          this.partidaTerminadaTtlSegundos,
-        );
+        let aviso: AvisoDeRetorno | undefined;
         if (this.notificarRetorno !== undefined) {
-          const partida = await obterPartida(this.redis, partidaId);
-          if (partida === null) {
-            console.error('[partida] não foi possível notificar retorno: partida não encontrada', { partidaId });
-          } else {
-            const aviso: AvisoDeRetorno = {
-              salaId: partida.salaId,
-              partidaId: partida.partidaId,
-              serverId: partida.serverId,
-              resultado: termino.desfecho.tipo,
-              jogadores: partida.roster.map((membro) => membro.jogadorId),
-            };
-            void this.notificarRetorno(aviso).catch((erro: unknown) => {
-              console.error('[partida] callback de retorno terminou com erro', {
-                partidaId,
-                erro,
-              });
+          try {
+            const partida = await obterPartida(this.redis, partidaId);
+            if (partida === null) {
+              console.error('[partida] não foi possível notificar retorno: partida não encontrada', { partidaId });
+            } else {
+              aviso = {
+                salaId: partida.salaId,
+                partidaId: partida.partidaId,
+                serverId: partida.serverId,
+                resultado: termino.desfecho.tipo,
+                jogadores: partida.roster.map((membro) => membro.jogadorId),
+              };
+            }
+          } catch (erro: unknown) {
+            console.error('[partida] não foi possível preparar callback de retorno', {
+              partidaId,
+              erro,
             });
           }
+        }
+
+        try {
+          await aplicarRetencaoDeTermino(
+            this.redis,
+            partidaId,
+            this.partidaTerminadaTtlSegundos,
+          );
+        } catch (erro: unknown) {
+          console.error('[partida] falha ao aplicar retenção do término', {
+            partidaId,
+            erro,
+          });
+        }
+
+        if (aviso !== undefined && this.notificarRetorno !== undefined) {
+          void this.notificarRetorno(aviso).catch((erro: unknown) => {
+            console.error('[partida] callback de retorno terminou com erro', {
+              partidaId,
+              erro,
+            });
+          });
         }
       }
     }).catch((erro: unknown) => {
