@@ -30,8 +30,9 @@ import {
   obterEstadoDaPartida,
   salvarEstadoDaPartida,
 } from './estado.ts';
-import { obterPartida } from './partidas.ts';
+import { obterPartida, type PartidaPreparada } from './partidas.ts';
 import type { AvisoDeRetorno } from '../retorno/cliente.ts';
+import { sleep } from '../utils/sleep.ts';
 
 export interface PartidaHandlersDeps {
   readonly redis: Redis;
@@ -48,6 +49,7 @@ export class PartidaHandlers {
   // Serialização mononodo: uma cadeia de promessas por partidaId.
   private readonly cadeiasPorPartida: Map<string, Promise<unknown>> = new Map();
   private readonly retornosPendentes: Map<string, Promise<void>> = new Map();
+  private readonly callbacksEnviados: Set<string> = new Set();
 
   constructor(deps: PartidaHandlersDeps) {
     this.redis = deps.redis;
@@ -133,11 +135,7 @@ export class PartidaHandlers {
               partida = null;
             }
             if (partida === null && tentativa < 2) {
-              const atrasoMs = 100 * 2 ** tentativa;
-              await new Promise<void>((resolve) => {
-                const timer = setTimeout(resolve, atrasoMs);
-                timer.unref?.();
-              });
+              await sleep(100 * 2 ** tentativa);
             }
           }
           if (partida === null && partidaPrevia !== null) {
@@ -146,10 +144,12 @@ export class PartidaHandlers {
           }
           if (partida === null) {
             console.error('[partida] não foi possível preparar callback de retorno após retries', { partidaId });
+            if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
             const atrasoMs = 1000;
             setTimeout(() => {
               void this.enfileirarMutacao(partidaId, async () => {
-                let partidaReagendada: import('./partidas.ts').PartidaPreparada | null = null;
+                if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
+                let partidaReagendada: PartidaPreparada | null = null;
                 try {
                   partidaReagendada = await obterPartida(this.redis, partidaId);
                 } catch {}
@@ -157,32 +157,18 @@ export class PartidaHandlers {
                   partidaReagendada = partidaPrevia;
                 }
                 if (partidaReagendada === null || this.notificarRetorno === undefined) return;
-                const avisoReagendado: AvisoDeRetorno = {
-                  salaId: partidaReagendada.salaId,
-                  partidaId: partidaReagendada.partidaId,
-                  serverId: partidaReagendada.serverId,
-                  resultado: termino.desfecho.tipo,
-                  jogadores: partidaReagendada.roster.map((m) => m.jogadorId),
-                };
+                const avisoReagendado = this.montarAviso(partidaReagendada, termino.desfecho.tipo);
+                this.callbacksEnviados.add(partidaId);
                 const promessa = this.notificarRetorno(avisoReagendado).catch((erro: unknown) => {
                   console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
                 });
-                this.retornosPendentes.set(partidaId, promessa);
-                void promessa.finally(() => {
-                  if (this.retornosPendentes.get(partidaId) === promessa) {
-                    this.retornosPendentes.delete(partidaId);
-                  }
-                });
+                this.rastrearRetorno(partidaId, promessa);
               }).catch(() => undefined);
             }, atrasoMs).unref?.();
           } else {
-            aviso = {
-              salaId: partida.salaId,
-              partidaId: partida.partidaId,
-              serverId: partida.serverId,
-              resultado: termino.desfecho.tipo,
-              jogadores: partida.roster.map((membro) => membro.jogadorId),
-            };
+            if (this.callbacksEnviados.has(partidaId)) return;
+            aviso = this.montarAviso(partida, termino.desfecho.tipo);
+            this.callbacksEnviados.add(partidaId);
           }
         }
 
@@ -207,12 +193,7 @@ export class PartidaHandlers {
               erro,
             });
           });
-          this.retornosPendentes.set(partidaId, promessa);
-          void promessa.finally(() => {
-            if (this.retornosPendentes.get(partidaId) === promessa) {
-              this.retornosPendentes.delete(partidaId);
-            }
-          });
+          this.rastrearRetorno(partidaId, promessa);
         }
       }
     }).catch((erro: unknown) => {
@@ -271,6 +252,25 @@ export class PartidaHandlers {
       () => this.limparCadeia(partidaId, proxima),
     );
     return proxima;
+  }
+
+  private montarAviso(partida: PartidaPreparada, resultado: 'vitoria' | 'derrota'): AvisoDeRetorno {
+    return {
+      salaId: partida.salaId,
+      partidaId: partida.partidaId,
+      serverId: partida.serverId,
+      resultado,
+      jogadores: partida.roster.map((m) => m.jogadorId),
+    };
+  }
+
+  private rastrearRetorno(partidaId: string, promessa: Promise<void>): void {
+    this.retornosPendentes.set(partidaId, promessa);
+    void promessa.finally(() => {
+      if (this.retornosPendentes.get(partidaId) === promessa) {
+        this.retornosPendentes.delete(partidaId);
+      }
+    });
   }
 
   async drenarRetornosPendentes(timeoutMs = 5000): Promise<void> {

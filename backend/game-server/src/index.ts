@@ -48,7 +48,6 @@ const handlers = new PartidaHandlers({
   notificarRetorno: criarClienteDeRetorno({
     lobbyRetornoCallbackUrl,
     jwtSecret,
-    buscarHttp: contexto.buscarHttp,
   }),
 });
 

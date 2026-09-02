@@ -8,6 +8,4 @@ export interface ContextoDoGameServer {
   readonly partidaPreparadaTtlSegundos: number;
   readonly partidaTerminadaTtlSegundos?: number;
   readonly lobbyRetornoCallbackUrl?: string;
-  /** Injetável nos testes — espelho do fetch injetável do lobby-server. */
-  readonly buscarHttp?: typeof fetch;
 }

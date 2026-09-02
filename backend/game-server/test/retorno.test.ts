@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { getConfig } from '@flicker/config';
 import {
   criarClienteDeRetorno,
+  extrairRetryAfterMs,
   type AvisoDeRetorno,
 } from '../src/retorno/cliente.ts';
 
@@ -102,12 +103,13 @@ test('callback de retorno repete respostas 408 e 429', async () => {
 });
 
 test('callback de retorno honra Retry-After em resposta retentável', async () => {
+  const sleeps: number[] = [];
   let chamadas = 0;
-  const inicio = Date.now();
   const cliente = criarClienteDeRetorno({
     lobbyRetornoCallbackUrl: 'http://lobby.test/api/retorno',
     jwtSecret: JWT_SECRET,
     backoffInicialMs: 5,
+    sleep: async (ms) => { sleeps.push(ms); },
     buscarHttp: async () => {
       chamadas += 1;
       if (chamadas === 1) {
@@ -119,8 +121,17 @@ test('callback de retorno honra Retry-After em resposta retentável', async () =
 
   await cliente(aviso);
   assert.equal(chamadas, 2);
-  const duracao = Date.now() - inicio;
-  assert.ok(duracao >= 900, `Retry-After de 1s deveria atrasar o retry (duracao=${duracao}ms)`);
+  assert.ok(sleeps[0] >= 1000, `Retry-After de 1s deveria atrasar o retry (sleep=${sleeps[0]}ms)`);
+});
+
+test('extrairRetryAfterMs cobre segundos, http-date e inválido', () => {
+  assert.equal(extrairRetryAfterMs(new Headers({ 'retry-after': '1' })), 1000);
+  assert.equal(extrairRetryAfterMs(new Headers({ 'retry-after': '120' })), 120000);
+  assert.equal(extrairRetryAfterMs(new Headers({ 'retry-after': 'invalido' })), undefined);
+  assert.equal(extrairRetryAfterMs(undefined), undefined);
+  const futuro = new Date(Date.now() + 5000).toUTCString();
+  const parsed = extrairRetryAfterMs(new Headers({ 'retry-after': futuro }));
+  assert.ok(parsed !== undefined && parsed >= 4000 && parsed <= 6000, `http-date deveria dar ~5000ms, veio ${parsed}`);
 });
 
 test('default do callback acompanha LOBBY_SERVER_PORT', () => {

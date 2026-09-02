@@ -31,9 +31,9 @@ import { createApp } from '../src/app.ts';
 import { criarWebSocketServer } from '../src/ws/ws.ts';
 import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
 import { PartidaHandlers } from '../src/partidas/handlers.ts';
+import { chaveDoEstadoDaPartida } from '../src/partidas/chaves.ts';
 import {
   aplicarRetencaoDeTermino,
-  chaveDoEstadoDaPartida,
   obterEstadoDaPartida,
   salvarEstadoDaPartida,
 } from '../src/partidas/estado.ts';
@@ -393,8 +393,9 @@ test('Termino: broadcast, retenção e callback acontecem no término real da pa
     assert.deepEqual(eventos.map((evento) => evento.resultado), ['vitoria', 'vitoria', 'vitoria', 'vitoria']);
 
     const aviso = await avisoPromise;
-    const ttlPartida = await redis.ttl(`game-server:partida:${aceite.partidaId}`);
-    const ttlEstado = await redis.ttl(`game-server:partida-estado:${aceite.partidaId}`);
+    const { chaveDaPartida } = await import('../src/partidas/chaves.ts');
+    const ttlPartida = await redis.ttl(chaveDaPartida(aceite.partidaId));
+    const ttlEstado = await redis.ttl(chaveDoEstadoDaPartida(aceite.partidaId));
     assert.ok(ttlPartida > 0 && ttlPartida <= ttlTerminada, `TTL da partida inválido: ${ttlPartida}`);
     assert.ok(ttlEstado > 0 && ttlEstado <= ttlTerminada, `TTL do estado inválido: ${ttlEstado}`);
 
@@ -496,7 +497,8 @@ test('Término real: recarregamento entrega snapshot terminada e recusa subseque
 
 test('Retenção do término não aplica TTL parcial quando uma chave está ausente', async () => {
   const partidaId = `partida-retencao-${crypto.randomUUID()}`;
-  const chavePartida = `game-server:partida:${partidaId}`;
+  const { chaveDaPartida: chaveDaPartidaHelper } = await import('../src/partidas/chaves.ts');
+  const chavePartida = chaveDaPartidaHelper(partidaId);
   await redis.set(chavePartida, 'metadados');
   try {
     await assert.rejects(

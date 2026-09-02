@@ -6,9 +6,7 @@
 // nos testes aponta para um fake HTTP server. Retentativa contínua com backoff
 // crescente (cap 30s) até o lobby aceitar.
 
-import jwt from 'jsonwebtoken';
-
-const SERVICE_TOKEN_AUDIENCE = 'flicker-service';
+import { assinarServiceToken } from '@flicker/config';
 const BACKOFF_INICIAL_MS_DEFAULT = 1000;
 const BACKOFF_CAP_MS = 30000;
 const TIMEOUT_DA_TENTATIVA_MS_DEFAULT = 5000;
@@ -31,14 +29,8 @@ export interface RetornoClienteConfig {
   readonly capMs?: number;
   /** Timeout de cada request — evita uma tentativa presa indefinidamente. */
   readonly timeoutMs?: number;
-}
-
-function assinarServiceToken(jwtSecret: string): string {
-  return jwt.sign(
-    { sub: 'flicker-service', role: 'service' },
-    jwtSecret,
-    { algorithm: 'HS256', audience: SERVICE_TOKEN_AUDIENCE, expiresIn: '1h' },
-  );
+  /** Injetável nos testes para tornar Retry-After determinístico. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 function ehRetentavel(status: number, codigo: unknown): boolean {
@@ -49,7 +41,7 @@ function ehRetentavel(status: number, codigo: unknown): boolean {
   return false;
 }
 
-function extrairRetryAfterMs(headers: Headers | undefined): number | undefined {
+export function extrairRetryAfterMs(headers: Headers | undefined): number | undefined {
   if (!headers) return undefined;
   const raw = headers.get('retry-after');
   if (!raw) return undefined;
@@ -70,6 +62,7 @@ export function criarClienteDeRetorno(config: RetornoClienteConfig): (aviso: Avi
   const backoffInicialMs = config.backoffInicialMs ?? BACKOFF_INICIAL_MS_DEFAULT;
   const capMs = config.capMs ?? BACKOFF_CAP_MS;
   const timeoutMs = config.timeoutMs ?? TIMEOUT_DA_TENTATIVA_MS_DEFAULT;
+  const sleep = config.sleep ?? ((ms: number) => new Promise<void>((resolve) => { const t = setTimeout(resolve, ms); t.unref?.(); }));
 
   return async (aviso: AvisoDeRetorno): Promise<void> => {
     const payload = {
@@ -128,10 +121,7 @@ export function criarClienteDeRetorno(config: RetornoClienteConfig): (aviso: Avi
           });
           const backoffMs = Math.min(backoffInicialMs * 2 ** (tentativa - 1), capMs);
           const delayMs = retryAfterMs !== undefined ? Math.min(Math.max(backoffMs, retryAfterMs), capMs) : backoffMs;
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, delayMs);
-            timer.unref?.();
-          });
+          await sleep(delayMs);
           continue;
         } else {
           console.error('[retorno] rejeição definitiva, interrompendo retry', {
@@ -154,10 +144,7 @@ export function criarClienteDeRetorno(config: RetornoClienteConfig): (aviso: Avi
       }
 
       const delayMs = Math.min(backoffInicialMs * 2 ** (tentativa - 1), capMs);
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, delayMs);
-        timer.unref?.();
-      });
+      await sleep(delayMs);
     }
   };
 }

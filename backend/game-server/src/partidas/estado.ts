@@ -27,9 +27,9 @@ redis.call('EXPIRE', KEYS[2], ARGV[1])
 return 1
 `.trim();
 
-export function chaveDoEstadoDaPartida(partidaId: string): string {
-  return `game-server:partida-estado:${partidaId}`;
-}
+import { chaveDaPartida, chaveDoEstadoDaPartida } from './chaves.ts';
+
+export { chaveDaPartida, chaveDoEstadoDaPartida };
 
 /**
  * Grava o estado inicial da partida no Redis com o TTL da partida preparada.

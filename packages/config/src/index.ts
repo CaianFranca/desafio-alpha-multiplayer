@@ -100,26 +100,23 @@ function parsePoolMax(raw: string | undefined): number {
   return DEFAULT_PG_POOL_MAX;
 }
 
-function parsePartidaPreparadaTtlSegundos(raw: string | undefined): number {
-  const parsed = Number(raw ?? DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS);
+function parseTtlSegundos(raw: string | undefined, fallback: number, label: string): number {
+  const parsed = Number(raw ?? fallback);
   if (Number.isInteger(parsed) && parsed > 0) {
     return parsed;
   }
   if (raw !== undefined) {
-    console.warn(`[config] PARTIDA_PREPARADA_TTL_SEGUNDOS inválido "${raw}" — usando fallback ${DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS}`);
+    console.warn(`[config] ${label} inválido "${raw}" — usando fallback ${fallback}`);
   }
-  return DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS;
+  return fallback;
+}
+
+function parsePartidaPreparadaTtlSegundos(raw: string | undefined): number {
+  return parseTtlSegundos(raw, DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS, 'PARTIDA_PREPARADA_TTL_SEGUNDOS');
 }
 
 function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
-  const parsed = Number(raw ?? DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS);
-  if (Number.isInteger(parsed) && parsed > 0) {
-    return parsed;
-  }
-  if (raw !== undefined) {
-    console.warn(`[config] PARTIDA_TERMINADA_TTL_SEGUNDOS inválido "${raw}" — usando fallback ${DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS}`);
-  }
-  return DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS;
+  return parseTtlSegundos(raw, DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS, 'PARTIDA_TERMINADA_TTL_SEGUNDOS');
 }
 
 function parseLobbyRetornoCallbackUrl(raw: string | undefined, fallback: string): string {
@@ -182,6 +179,8 @@ export function createRedisClientOptions(redis: Config['redis']): { host: string
     maxRetriesPerRequest: null,
   };
 }
+
+export * from './serviceToken.js';
 
 export function criarClienteRedis(): Redis {
   const { redis } = getConfig();
