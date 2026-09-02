@@ -3,9 +3,10 @@ import {
   reduzirEvento,
   reduzirEventos,
 } from '../web/src/game/tabuleiro/reducao'
+import { aplicarSnapshot } from '../web/src/game/tabuleiro/snapshot'
 import { criarReservaInicial, TOTAL_RESERVA } from '../web/src/game/tabuleiro/contrato'
 import { mapearCliqueNaCelula } from '../web/src/game/tabuleiro/interacao'
-import type { TabuleiroEventoDoServidor } from '@flicker/shared'
+import type { EstadoDaPartidaSnapshot, TabuleiroEventoDoServidor } from '@flicker/shared'
 
 describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', () => {
   it('estado inicial é determinístico: reserva completa e grade vazia', () => {
@@ -575,5 +576,87 @@ describe('redução dos turnos no cliente — fase, rodada e mapa aprendido (iss
       mensagem: 'Não é a sua vez.',
     })
     expect(estado).toBe(antes)
+  })
+})
+
+describe('snapshot no modelo do cliente — projeção autoritativa (issue #156, PR #189)', () => {
+  function snapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): EstadoDaPartidaSnapshot {
+    return {
+      tabuleiro: {
+        posicionadas: [],
+        iniciais: [],
+        peoes: [],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+      },
+      jogadores: [],
+      jogadorAtivoId: 'jogador-1',
+      rodada: 2,
+      pecaDoInicioDoTurnoId: null,
+      posicaoConfirmada: false,
+      celulasIluminadas: [],
+      estado: 'em_andamento',
+      ...overrides,
+    }
+  }
+
+  it('aplicarSnapshot mapeia recebidas à forma #138 sem campos extraprotocolo', () => {
+    const snapshot = snapshotBase({
+      tabuleiro: {
+        posicionadas: [],
+        iniciais: [],
+        peoes: [],
+        recebidas: [
+          {
+            recebidaId: 'r1',
+            pecaId: 'reta-1',
+            tipo: 'reta',
+            orientacao: 90,
+            vaga: null,
+            celulaAlvo: null,
+          },
+        ],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+      },
+    })
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
+    // PendenciaDaPecaSorteada exata: orientacao do snapshot não é copiada
+    // para a pendência (o cliente a ignora fora da Reserva).
+    expect(estado.recebidasPendentes).toEqual([
+      {
+        recebidaId: 'r1',
+        pecaId: 'reta-1',
+        tipoDaPeca: 'reta',
+        vaga: null,
+        celulaAlvo: null,
+      },
+    ])
+    expect(estado.pecasDeRecebimento['reta-1']).toBe('reta')
+  })
+
+  it('aplicarSnapshot preserva movimentouNoTurno (late-join no meio do turno)', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'TURNO_INICIADO',
+      jogadorId: 'jogador-1',
+      rodada: 2,
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_MOVIDO',
+      peaoId: 'peao-branco',
+      pecaIdDe: 'inicial-1',
+      pecaIdPara: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+    })
+    expect(estado.movimentouNoTurno).toBe(true)
+    // Snapshot não carrega a fase de movimento: re-sincronizar não pode
+    // sobrescrevê-la (senão o cliente perde 'confirmar' na fase do turno).
+    const reaplicado = aplicarSnapshot(estado, snapshotBase())
+    expect(reaplicado.movimentouNoTurno).toBe(true)
+    // posicaoConfirmada vem do snapshot (o campo existe na wire).
+    expect(reaplicado.posicaoConfirmadaNoTurno).toBe(false)
   })
 })

@@ -33,7 +33,7 @@ export function aplicarSnapshot(
 ): EstadoDoTabuleiroNoCliente {
   const posicionadas: readonly PecaPosicionada[] = snapshot.tabuleiro.posicionadas.map((p) => ({
     pecaId: p.pecaId,
-    tipo: p.tipo as unknown as TipoDaPeca,
+    tipo: p.tipo,
     orientacao: p.orientacao,
     celula: { linha: p.celula.linha, coluna: p.celula.coluna },
   }))
@@ -46,37 +46,36 @@ export function aplicarSnapshot(
     const celula = peao.pecaId !== null ? (mapPos.get(peao.pecaId) ?? null) : null
     return {
       peaoId: peao.peaoId,
-      cor: peao.cor as unknown as CorDoPeao,
+      cor: peao.cor,
       celula: celula ? { linha: celula.linha, coluna: celula.coluna } : null,
     }
   })
 
+  // Pos-#138 toda Recebida do snapshot e da forma sorteada: map direto para
+  // PendenciaDaPecaSorteada, sem cast. `orientacao` do snapshot nao e copiado
+  // — nao faz parte da pendencia; o cliente a ignora fora da Reserva.
   const recebidasPendentes: readonly PendenciaNoCliente[] = snapshot.tabuleiro.recebidas.map(
-    (r) =>
-      ({
-        recebidaId: r.recebidaId,
-        pecaId: r.pecaId,
-        tipoDaPeca: r.tipo as unknown as string,
-        vaga: r.vaga,
-        celulaAlvo: r.celulaAlvo
-          ? { linha: r.celulaAlvo.linha, coluna: r.celulaAlvo.coluna }
-          : null,
-        // orientacao do snapshot não faz parte de PendenciaNoCliente, mas fica
-        // disponível via cast se necessário; o cliente ignora.
-        orientacao: r.orientacao,
-      }) as unknown as PendenciaNoCliente,
+    (r): PendenciaNoCliente => ({
+      recebidaId: r.recebidaId,
+      pecaId: r.pecaId,
+      tipoDaPeca: r.tipo,
+      vaga: r.vaga,
+      celulaAlvo: r.celulaAlvo
+        ? { linha: r.celulaAlvo.linha, coluna: r.celulaAlvo.coluna }
+        : null,
+    }),
   )
 
   const peaoPorJogador: Record<string, string> = {}
   const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao }> = {}
   for (const j of snapshot.jogadores) {
     peaoPorJogador[j.jogadorId] = j.peaoId
-    jogadorPorId[j.jogadorId] = { apelido: j.apelido, cor: j.cor as unknown as CorDoPeao }
+    jogadorPorId[j.jogadorId] = { apelido: j.apelido, cor: j.cor }
   }
 
   const pecasDeRecebimento: Record<string, TipoDaPeca> = { ...estado.pecasDeRecebimento }
   for (const r of snapshot.tabuleiro.recebidas) {
-    pecasDeRecebimento[r.pecaId] = r.tipo as unknown as TipoDaPeca
+    pecasDeRecebimento[r.pecaId] = r.tipo
   }
 
   const celulasIluminadas: readonly Celula[] = snapshot.celulasIluminadas.map((c) => ({
@@ -96,7 +95,10 @@ export function aplicarSnapshot(
     celulasIluminadas,
     jogadorAtivoId: snapshot.jogadorAtivoId,
     rodada: snapshot.rodada,
-    movimentouNoTurno: false,
+    // A wire do snapshot não carrega a fase de movimento do turno: re-
+    // sincronizar não pode sobrescrever o que os deltas já aprenderam
+    // (late-join no meio do turno perderia a fase 'confirmar').
+    movimentouNoTurno: estado.movimentouNoTurno,
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
     peaoPorJogador,
     jogadorPorId,
