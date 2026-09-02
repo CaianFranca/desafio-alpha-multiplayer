@@ -858,11 +858,11 @@ function avancarVez(
     const novoEstado: EstadoDaPartida = {
       tabuleiro: tabuleiroLimpo,
       jogadores: estado.jogadores,
-      jogadorAtivoId: ordenados[indiceProximo].jogadorId,
-      rodada: rodadaCandidata,
+      jogadorAtivoId: ordenados[0].jogadorId,
+      rodada: estado.rodada,
       pecaDoInicioDoTurnoId:
         estado.tabuleiro.peoes.find(
-          (item) => item.peaoId === ordenados[indiceProximo].peaoId,
+          (item) => item.peaoId === ordenados[0].peaoId,
         )?.pecaId ?? null,
       posicaoConfirmada: false,
       celulasIluminadas: estado.celulasIluminadas,
@@ -1120,7 +1120,7 @@ function reaplicarIluminacaoSeBaixaNova(
   }
   const estadoParaSegunda: EstadoDaPartida = {
     ...estadoAntes,
-    celulasIluminadas: iluminacaoAntes.celulasIluminadas,
+    celulasIluminadas: estadoAntes.celulasIluminadas,
     jogadores: jogadoresAposAtaque,
   };
   return recalcularIluminacaoEAplicarLimpeza(
