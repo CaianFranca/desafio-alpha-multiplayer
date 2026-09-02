@@ -248,22 +248,28 @@ export interface RecebimentoGerado {
   readonly eventos: EventoDoTabuleiro[];
 }
 
-// Recebimento (ST-12 / issue #138): sorteia N = min(vagas, caixa) peças da
-// Caixa — uma a uma, consumindo a primeira peça restante N vezes — e cria uma
-// pendência por peça sorteada, sem vaga: a escolha da vaga de cada peça é o
-// comando escolher_vaga_da_peca_recebida. Caixa vazia ou insuficiente NÃO é
-// erro: N apenas diminui (o Jogador recebe as restantes; sem Caixa, nenhuma).
-// Exportada para a camada da Partida (ST-11), que decide quando o Recebimento
-// acontece. O consumo da primeira peça espelha a primitiva sortearDaCaixa
-// (tabuleiro.ts) — a dependência em runtime é única (tabuleiro.ts → peoes.ts),
-// então o sorteio é refeito aqui em sequência.
+// Recebimento (ST-12 / issue #138, refinado pela ST-15 / issue #170): sorteia
+// N = min(vagas, caixa, baixa?1:Inf) peças da Caixa — uma a uma, consumindo a
+// primeira peça restante N vezes — e cria uma pendência por peça sorteada, sem
+// vaga: a escolha da vaga de cada peça é o comando
+// escolher_vaga_da_peca_recebida. Baixa Iluminação (issue #170) limita o
+// Recebimento a no máximo 1 peça; sem vaga ou caixa esgotada, 0. Caixa vazia ou
+// insuficiente NÃO é erro: N apenas diminui (o Jogador recebe as restantes;
+// sem Caixa, nenhuma). Exportada para a camada da Partida (ST-11), que decide
+// quando o Recebimento acontece. O consumo da primeira peça espelha a primitiva
+// sortearDaCaixa (tabuleiro.ts) — a dependência em runtime é única
+// (tabuleiro.ts → peoes.ts), então o sorteio é refeito aqui em sequência.
 export function gerarRecebidas(
   estado: EstadoDoTabuleiro,
   peca: PecaPosicionada,
+  emBaixaIluminacao = false,
 ): RecebimentoGerado {
+  const vagas = vagasDisponiveis(estado, peca);
+  const limiteBaixa = emBaixaIluminacao ? 1 : vagas.length;
   const quantidade = Math.min(
-    vagasDisponiveis(estado, peca).length,
+    vagas.length,
     estado.caixa.length,
+    limiteBaixa,
   );
   const eventos: EventoDoTabuleiro[] = [];
   let caixa = estado.caixa;

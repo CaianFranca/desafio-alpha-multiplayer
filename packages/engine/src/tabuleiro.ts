@@ -534,17 +534,26 @@ export function vizinhos(celula: Celula): Celula[] {
   );
 }
 
-// Iluminação (ST-13 / ADR-0005): união ortogonal das células dos Peões —
-// célula do Peão + 4 vizinhas por vizinhos() — compartilhada, com vazias
-// inclusas. Pura, independente de conexões/bordasAbertas, determinística
-// (ordenada linha asc, coluna asc) e defensiva contra pecaId órfão.
-export function calcularIluminacao(tabuleiro: EstadoDoTabuleiro): readonly Celula[] {
+// Iluminação (ST-13 / ADR-0005, refinada pela ST-15 / issue #170): união
+// ortogonal das células dos Peões — célula do Peão + 4 vizinhas por
+// vizinhos() — compartilhada, com vazias inclusas. Jogador em Baixa
+// Iluminação (issue #170) ilumina apenas a própria célula. Pura,
+// independente de conexões/bordasAbertas, determinística (ordenada linha asc,
+// coluna asc) e defensiva contra pecaId órfão. O segundo parâmetro lista os
+// peaoIds em Baixa; ausente ≡ nenhum.
+export function calcularIluminacao(
+  tabuleiro: EstadoDoTabuleiro,
+  peaoIdsEmBaixa: readonly string[] = [],
+): readonly Celula[] {
+  const emBaixa = new Set(peaoIdsEmBaixa);
   const mapa = new Map<string, Celula>();
   for (const peao of tabuleiro.peoes) {
     if (peao.pecaId === null) continue;
     const peca = tabuleiro.posicionadas.find((item) => item.pecaId === peao.pecaId);
     if (!peca) continue;
-    const celulas: Celula[] = [peca.celula, ...vizinhos(peca.celula)];
+    const celulas: Celula[] = emBaixa.has(peao.peaoId)
+      ? [peca.celula]
+      : [peca.celula, ...vizinhos(peca.celula)];
     for (const celula of celulas) {
       const chave = `${celula.linha},${celula.coluna}`;
       if (!mapa.has(chave)) {

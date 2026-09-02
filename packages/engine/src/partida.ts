@@ -63,14 +63,19 @@ export interface JogadorDaPartida {
   // Peão; a flag só é concluída pelo Encerramento do Turno.
   readonly primeiroTurnoPendente: boolean;
   // Término (issue #176): sanidade inicia em 3 e tem piso 0; Amedrontado ≡
-  // sanidade === 0. Nenhuma mecânica a reduz ainda — o campo é consumido
-  // pela avaliação do término (ST-15 reutiliza depois).
+  // sanidade === 0. ST-15 / issue #170 aplica as penalidades do Ataque.
   readonly sanidade: number;
   // Ataque (issue #172): Proteção concedida pela Sala Médica na Confirmação
   // de Posição. Não acumulável (no máximo um escudo) e consumida UMA única
   // vez por resolução, negando todos os ataques simultâneos contra o
   // Jogador; permanece até ser consumida.
   readonly protegido: boolean;
+  // ST-15 / issue #170: estados impostos pelos Monstros. Baixa Iluminação
+  // (Vulto) reduz a Iluminação do peão à própria célula e o Recebimento a
+  // 1 peça; Amedrontado (Espectro ao zerar sanidade) faz o turno ser
+  // auto-pulado. Encerram apenas pelo Resgate (fora do escopo da #170).
+  readonly emBaixaIluminacao: boolean;
+  readonly amedrontado: boolean;
 }
 
 // Estado da Partida: o Tabuleiro (com Seleção única, Manipulação, Recebidas e
@@ -244,6 +249,8 @@ export function estadoInicialDaPartida(
         primeiroTurnoPendente: true,
         sanidade: 3,
         protegido: false,
+        emBaixaIluminacao: false,
+        amedrontado: false,
       };
     },
   );
@@ -468,9 +475,10 @@ function posicionarPeaoDaPartida(
   // Invariante do fluxo: no Primeiro Turno o encaixe aceito deixa o Peão sobre
   // uma Peça; sem Peça, o Recebimento simplesmente não é gerado. O Recebimento
   // sorteia as peças da Caixa (#138) — peca_sorteada por peça — e cria as
-  // pendências sem vaga.
+  // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
+  const emBaixa = ator.emBaixaIluminacao ?? false;
   const sorteio = peca
-    ? gerarRecebidas(resultado.estado, peca)
+    ? gerarRecebidas(resultado.estado, peca, emBaixa)
     : { estado: resultado.estado, recebidas: [], eventos: [] as EventoDoTabuleiro[] };
 
   // O Peão segue selecionado: a sequência (escolher a vaga de cada peça e
@@ -493,14 +501,28 @@ function posicionarPeaoDaPartida(
   // removidas. O estado é filtrado e o evento só sai quando há remoção.
   // Ataque (issue #172): resolvido logo após a Limpeza — Monstro removido
   // não ataca e tem a entrada podada do snapshot.
+  // ST-15 / issue #170: se o Ataque impôs Baixa Iluminação nova, a Iluminação
+  // é recalculada e a Limpeza reaplicada no MESMO gatilho.
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
   const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
+  const { celulasIluminadas, posicionadas: posicionadasFinais } =
+    reaplicarIluminacaoSeBaixaNova(
+      estado,
+      ataque.jogadores,
+      tabuleiroPosLimpeza,
+      iluminacao,
+      eventos,
+    );
+  const tabuleiroFinal: EstadoDoTabuleiro = {
+    ...tabuleiroPosLimpeza,
+    posicionadas: posicionadasFinais,
+  };
   return sucessoDaPartida(
     {
       ...estado,
-      tabuleiro: tabuleiroPosLimpeza,
-      celulasIluminadas: iluminacao.celulasIluminadas,
+      tabuleiro: tabuleiroFinal,
+      celulasIluminadas,
       peoesNoAlcance: ataque.peoesNoAlcance,
       jogadores: ataque.jogadores,
     },
@@ -641,8 +663,9 @@ function confirmarPosicaoDoPeao(
   }
 
   // O Recebimento sorteia as peças da Caixa (#138): peca_sorteada por peça e
-  // pendências sem vaga.
-  const sorteio = gerarRecebidas(estado.tabuleiro, peca);
+  // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
+  const emBaixa = ator.emBaixaIluminacao ?? false;
+  const sorteio = gerarRecebidas(estado.tabuleiro, peca, emBaixa);
   const eventos: EventoDaPartida[] = [
     {
       tipo: 'posicao_confirmada',
@@ -664,10 +687,23 @@ function confirmarPosicaoDoPeao(
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
   const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
+  const { celulasIluminadas, posicionadas: posicionadasPosAtaque } =
+    reaplicarIluminacaoSeBaixaNova(
+      estado,
+      ataque.jogadores,
+      tabuleiroPosLimpeza,
+      iluminacao,
+      eventos,
+    );
+  const tabuleiroFinal: EstadoDoTabuleiro = {
+    ...tabuleiroPosLimpeza,
+    posicionadas: posicionadasPosAtaque,
+  };
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a
   // geradoresLigados; sala_do_diretor obtém o cartão. A Permanência não
-  // confere, e a Limpeza (já aplicada acima) não revoga conquistas.
+  // confere, e a Limpeza (já aplicada acima, incluindo a segunda se houve
+  // Baixa nova) não revoga conquistas.
   const geradoresLigados =
     peca.tipo === 'gerador' && !estado.geradoresLigados.includes(peca.pecaId)
       ? [...estado.geradoresLigados, peca.pecaId]
@@ -679,6 +715,8 @@ function confirmarPosicaoDoPeao(
   // não é consumida pelo ataque do MESMO gatilho (permanece para o próximo,
   // CONTEXT.md) e quem já a tinha e a consumiu no ataque do gatilho volta a
   // protegido: true (não acumulável — no máximo um escudo). Idempotente.
+  // A Proteção restaurada não interfere nas penalidades já aplicadas do
+  // gatilho (Baixa/sanidade), que respeitaram o consumo anterior.
   const jogadores = peca.tipo === 'sala_medica'
     ? ataque.jogadores.map((jogador) =>
         jogador.jogadorId === ator.jogadorId
@@ -689,9 +727,9 @@ function confirmarPosicaoDoPeao(
   return sucessoDaPartida(
     {
       ...estado,
-      tabuleiro: tabuleiroPosLimpeza,
+      tabuleiro: tabuleiroFinal,
       posicaoConfirmada: true,
-      celulasIluminadas: iluminacao.celulasIluminadas,
+      celulasIluminadas,
       peoesNoAlcance: ataque.peoesNoAlcance,
       geradoresLigados,
       cartaoDeAcessoObtido,
@@ -751,6 +789,11 @@ function encerrarTurnoDaPartida(
 // A Passagem de Vez encerra a janela de Manipulação em aberto: o fechamento é
 // efeito do avanço, então o manipulacao_finalizada precede o turno_iniciado
 // (sem duplicar quando o fechamento já veio nos eventos do Tabuleiro).
+// ST-15 / issue #170: jogador Amedrontado (sanidade 0 / amedrontado true) tem
+// o turno auto-pulado — o avanço pula silenciosamente amedrontados e emite
+// apenas turno_iniciado do próximo não-amedrontado. Se todos estiverem
+// amedrontados, mantém o turno no primeiro da ordem e deixa
+// avaliarTerminoDaPartida decidir a derrota.
 function avancarVez(
   estado: EstadoDaPartida,
   eventos: readonly EventoDaPartida[],
@@ -760,14 +803,6 @@ function avancarVez(
   );
   const indiceAtivo = ordenados.findIndex(
     (jogador) => jogador.jogadorId === estado.jogadorAtivoId,
-  );
-  const indiceProximo = (indiceAtivo + 1) % ordenados.length;
-  const proximo = ordenados[indiceProximo];
-  const rodada =
-    indiceProximo === 0 ? estado.rodada + 1 : estado.rodada;
-
-  const peaoDoProximo = estado.tabuleiro.peoes.find(
-    (item) => item.peaoId === proximo.peaoId,
   );
   const pecaEmManipulacaoId = estado.tabuleiro.pecaEmManipulacaoId;
   const jaFinalizada =
@@ -782,34 +817,89 @@ function avancarVez(
       ? [{ tipo: 'manipulacao_finalizada', pecaId: pecaEmManipulacaoId }]
       : [];
 
+  const tabuleiroLimpo: EstadoDoTabuleiro = {
+    ...estado.tabuleiro,
+    pecaSelecionadaId: null,
+    pecaEmManipulacaoId: null,
+    peaoSelecionadoId: null,
+    recebidas: [],
+  };
+
+  // Busca circular do próximo não-amedrontado, reutilizando ordenados.
+  let indiceProximo = (indiceAtivo + 1) % ordenados.length;
+  let rodadaCandidata =
+    indiceProximo === 0 ? estado.rodada + 1 : estado.rodada;
+  let tentativas = 0;
+  let alvo: (typeof ordenados)[number] | null = null;
+  let rodadaAlvo = rodadaCandidata;
+  while (tentativas < ordenados.length) {
+    const candidato = ordenados[indiceProximo];
+    const jogadorObj = estado.jogadores.find(
+      (j) => j.jogadorId === candidato.jogadorId,
+    );
+    const ehAmedrontado =
+      jogadorObj !== undefined &&
+      (jogadorObj.amedrontado ?? jogadorObj.sanidade === 0) === true;
+    if (!ehAmedrontado) {
+      alvo = candidato;
+      rodadaAlvo = rodadaCandidata;
+      break;
+    }
+    // Pula amedrontado silenciosamente (sem emitir turno_iniciado/encerrado).
+    indiceProximo = (indiceProximo + 1) % ordenados.length;
+    rodadaCandidata =
+      indiceProximo === 0 ? rodadaCandidata + 1 : rodadaCandidata;
+    tentativas++;
+  }
+
+  // Se todos amedrontados, alvo permanece null — mantém estado sem novo turno
+  // e deixa o funil de término decidir (equipe_amedrontada).
+  if (alvo === null) {
+    const novoEstado: EstadoDaPartida = {
+      tabuleiro: tabuleiroLimpo,
+      jogadores: estado.jogadores,
+      jogadorAtivoId: ordenados[0].jogadorId,
+      rodada: estado.rodada,
+      pecaDoInicioDoTurnoId:
+        estado.tabuleiro.peoes.find(
+          (item) => item.peaoId === ordenados[0].peaoId,
+        )?.pecaId ?? null,
+      posicaoConfirmada: false,
+      celulasIluminadas: estado.celulasIluminadas,
+      resultado: estado.resultado,
+      geradoresLigados: estado.geradoresLigados,
+      cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
+      peoesNoAlcance: estado.peoesNoAlcance,
+    };
+    const eventosFinais: readonly EventoDaPartida[] = [
+      ...eventos,
+      ...fechamentoDaManipulacao,
+    ];
+    return sucessoDaPartida(novoEstado, eventosFinais);
+  }
+
+  const peaoDoAlvo = tabuleiroLimpo.peoes.find(
+    (item) => item.peaoId === alvo.peaoId,
+  );
   const novoEstado: EstadoDaPartida = {
-    tabuleiro: {
-      ...estado.tabuleiro,
-      pecaSelecionadaId: null,
-      pecaEmManipulacaoId: null,
-      peaoSelecionadoId: null,
-      recebidas: [],
-    },
+    tabuleiro: tabuleiroLimpo,
     jogadores: estado.jogadores,
-    jogadorAtivoId: proximo.jogadorId,
-    rodada,
-    pecaDoInicioDoTurnoId: peaoDoProximo?.pecaId ?? null,
+    jogadorAtivoId: alvo.jogadorId,
+    rodada: rodadaAlvo,
+    pecaDoInicioDoTurnoId: peaoDoAlvo?.pecaId ?? null,
     posicaoConfirmada: false,
     celulasIluminadas: estado.celulasIluminadas,
-    // Término (issue #176): resultado, contadores de objetivos e a sanidade
-    // dos jogadores (que viaja com o roster) atravessam a Passagem de Vez.
-    // Ataque (issue #172): o snapshot do Alcance também — a base do delta é
-    // o último gatilho, mesmo que tenha sido no turno anterior.
     resultado: estado.resultado,
     geradoresLigados: estado.geradoresLigados,
     cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
     peoesNoAlcance: estado.peoesNoAlcance,
   };
-  return sucessoDaPartida(novoEstado, [
+  const eventosFinais: readonly EventoDaPartida[] = [
     ...eventos,
     ...fechamentoDaManipulacao,
-    { tipo: 'turno_iniciado', jogadorId: proximo.jogadorId, rodada },
-  ]);
+    { tipo: 'turno_iniciado', jogadorId: alvo.jogadorId, rodada: rodadaAlvo },
+  ];
+  return sucessoDaPartida(novoEstado, eventosFinais);
 }
 
 function delegarAoTabuleiro(
@@ -966,14 +1056,23 @@ function rejeitarDaPartida(
 
 /**
  * Recalcula a iluminação ortogonal e aplica a limpeza no mesmo ponto definitivo.
+ * ST-15 / issue #170: peões em Baixa Iluminação iluminam apenas a própria
+ * célula — a lista de peaoIds em baixa é derivada do roster quando não
+ * informada, ou injetada explicitamente para o segundo cálculo do gatilho.
  * @mutates eventos — adiciona `celulas_iluminadas` (se mudou) e `limpeza_aplicada` (se houver remoção).
  */
 function recalcularIluminacaoEAplicarLimpeza(
   estado: EstadoDaPartida,
   tabuleiro: EstadoDoTabuleiro,
   eventos: EventoDaPartida[],
+  peaoIdsEmBaixa?: readonly string[],
 ): { celulasIluminadas: readonly Celula[]; posicionadas: readonly PecaPosicionada[] } {
-  const celulasIluminadas = calcularIluminacao(tabuleiro);
+  const baixa =
+    peaoIdsEmBaixa ??
+    estado.jogadores
+      .filter((jogador) => (jogador.emBaixaIluminacao ?? false))
+      .map((jogador) => jogador.peaoId);
+  const celulasIluminadas = calcularIluminacao(tabuleiro, baixa);
   if (!iluminacoesIguais(estado.celulasIluminadas, celulasIluminadas)) {
     eventos.push({ tipo: 'celulas_iluminadas', celulas: celulasIluminadas });
   }
@@ -984,9 +1083,61 @@ function recalcularIluminacaoEAplicarLimpeza(
   return { celulasIluminadas, posicionadas };
 }
 
+function peoesEmBaixa(jogadores: readonly JogadorDaPartida[]): readonly string[] {
+  return jogadores
+    .filter((jogador) => (jogador.emBaixaIluminacao ?? false))
+    .map((jogador) => jogador.peaoId);
+}
+
+function houveBaixaNova(
+  antes: readonly string[],
+  depois: readonly string[],
+): boolean {
+  const antesSet = new Set(antes);
+  return depois.some((peaoId) => !antesSet.has(peaoId));
+}
+
+function reaplicarIluminacaoSeBaixaNova(
+  estadoAntes: EstadoDaPartida,
+  jogadoresAposAtaque: readonly JogadorDaPartida[],
+  tabuleiroPosLimpeza: EstadoDoTabuleiro,
+  iluminacaoAntes: { celulasIluminadas: readonly Celula[]; posicionadas: readonly PecaPosicionada[] },
+  eventos: EventoDaPartida[],
+): { celulasIluminadas: readonly Celula[]; posicionadas: readonly PecaPosicionada[] } {
+  const baixaAntes = peoesEmBaixa(estadoAntes.jogadores);
+  const baixaDepois = peoesEmBaixa(jogadoresAposAtaque);
+  if (!houveBaixaNova(baixaAntes, baixaDepois)) {
+    return iluminacaoAntes;
+  }
+  // Remove a celulas_iluminadas intermediária já emitida no mesmo lote para
+  // evitar iluminação transitória incorreta ao cliente (o lote deve refletir
+  // apenas a iluminação final com Baixa).
+  for (let i = eventos.length - 1; i >= 0; i--) {
+    if (eventos[i].tipo === 'celulas_iluminadas') {
+      eventos.splice(i, 1);
+      break;
+    }
+  }
+  const estadoParaSegunda: EstadoDaPartida = {
+    ...estadoAntes,
+    celulasIluminadas: estadoAntes.celulasIluminadas,
+    jogadores: jogadoresAposAtaque,
+  };
+  return recalcularIluminacaoEAplicarLimpeza(
+    estadoParaSegunda,
+    { ...tabuleiroPosLimpeza, posicionadas: iluminacaoAntes.posicionadas } as EstadoDoTabuleiro,
+    eventos,
+    baixaDepois,
+  );
+}
+
 /**
- * Resolução do Ataque (issue #172) no gatilho — sempre sobre o tabuleiro
- * PÓS-Limpeza: Monstro removido não ataca e tem a entrada podada do snapshot.
+ * Resolução do Ataque (issue #172, estados issue #170) no gatilho — sempre
+ * sobre o tabuleiro PÓS-Limpeza: Monstro removido não ataca e tem a entrada
+ * podada do snapshot. ST-15 / issue #170 aplica as penalidades APÓS o consumo
+ * da Proteção: Vulto → emBaixaIluminacao (idempotente), Espectro →
+ * sanidade-1 com piso 0 → amedrontado; jogador já amedrontado é imune a novo
+ * Espectro; protegido nega a penalidade do MESMO gatilho.
  * @mutates eventos — adiciona `ataque_resolvido` quando ao menos um Monstro
  * dispara (mesmo que ninguém seja atingido).
  */
@@ -1015,7 +1166,7 @@ function resolverAtaqueNoGatilho(
   // Consumo da Proteção (issue #172): apenas os Jogadores que negaram algum
   // ataque nesta resolução; sem consumo, o roster segue intocado.
   const consumidos = new Set(resolucao.protegidosConsumidos);
-  const jogadores =
+  let jogadores: readonly JogadorDaPartida[] =
     consumidos.size === 0
       ? estado.jogadores
       : estado.jogadores.map((jogador) =>
@@ -1023,6 +1174,86 @@ function resolverAtaqueNoGatilho(
             ? { ...jogador, protegido: false }
             : jogador,
         );
+
+  // Penalidades ST-15 / issue #170: respeitam a Proteção já consumida e a
+  // imunidade do Amedrontado. Mesmo jogador atingido por ambos os tipos recebe
+  // ambas as penalidades no mesmo gatilho.
+  if (resolucao.evento !== null) {
+    const alvos = new Set(
+      resolucao.evento.atacantes.flatMap((atacante) => atacante.peoesNoAlcance),
+    );
+    const peoesProtegidos = new Set<string>();
+    for (const jogador of estado.jogadores) {
+      if ((jogador.protegido ?? false) && alvos.has(jogador.peaoId)) {
+        peoesProtegidos.add(jogador.peaoId);
+      }
+    }
+    const vultoAtingidos = new Set<string>();
+    const espectroAtingidos = new Set<string>();
+    for (const atacante of resolucao.evento.atacantes) {
+      const efetivos = atacante.peoesNoAlcance.filter(
+        (peaoId) => !peoesProtegidos.has(peaoId),
+      );
+      for (const peaoId of efetivos) {
+        if (atacante.tipo === 'vulto') vultoAtingidos.add(peaoId);
+        else if (atacante.tipo === 'espectro') espectroAtingidos.add(peaoId);
+      }
+    }
+    if (vultoAtingidos.size > 0 || espectroAtingidos.size > 0) {
+      let mudou = false;
+      const proximoJogadores = jogadores.map((jogador) => {
+        const hitVulto = vultoAtingidos.has(jogador.peaoId);
+        const hitEspectro = espectroAtingidos.has(jogador.peaoId);
+        if (!hitVulto && !hitEspectro) return jogador;
+        const jaEmBaixa = jogador.emBaixaIluminacao ?? false;
+        const jaAmedrontado =
+          (jogador.amedrontado ?? false) || jogador.sanidade === 0;
+        let novoEmBaixa = jaEmBaixa;
+        let novaSanidade = jogador.sanidade;
+        let novoAmedrontado = jaAmedrontado;
+        if (hitVulto && !jaEmBaixa) {
+          novoEmBaixa = true;
+          mudou = true;
+        }
+        if (hitEspectro) {
+          if (jaAmedrontado) {
+            // Imune: novo Espectro não tem efeito adicional (piso já 0).
+          } else {
+            novaSanidade = Math.max(0, jogador.sanidade - 1);
+            if (novaSanidade !== jogador.sanidade) mudou = true;
+            if (novaSanidade === 0 && !jaAmedrontado) {
+              novoAmedrontado = true;
+              mudou = true;
+            }
+          }
+        }
+        if (
+          novoEmBaixa !== jaEmBaixa ||
+          novaSanidade !== jogador.sanidade ||
+          novoAmedrontado !== jaAmedrontado
+        ) {
+          return {
+            ...jogador,
+            emBaixaIluminacao: novoEmBaixa,
+            sanidade: novaSanidade,
+            amedrontado: novoAmedrontado,
+          };
+        }
+        return jogador;
+      });
+      if (mudou) {
+        jogadores = proximoJogadores;
+      }
+    }
+  }
+
+  // Normalização retrocompatível para estados persistidos sem os campos novos.
+  jogadores = jogadores.map((jogador) => ({
+    ...jogador,
+    emBaixaIluminacao: jogador.emBaixaIluminacao ?? false,
+    amedrontado: jogador.amedrontado ?? jogador.sanidade === 0,
+  }));
+
   return { peoesNoAlcance: resolucao.peoesNoAlcance, jogadores };
 }
 
