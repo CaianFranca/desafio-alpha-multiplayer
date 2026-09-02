@@ -1,0 +1,139 @@
+// Cliente de callback de retorno ao lobby (issue #177, ADR-0006).
+//
+// Disparado uma vez por término (evento `partida_terminada`), entrega ao lobby
+// o resultado e os jogadores para reabertura da sala. Espelho do fetch
+// injetável do lobby (`ofertarEncaminhamento`): o `fetch` vem do contexto e
+// nos testes aponta para um fake HTTP server. Retentativa contínua com backoff
+// crescente (cap 30s) até o lobby aceitar.
+
+import jwt from 'jsonwebtoken';
+
+const SERVICE_TOKEN_AUDIENCE = 'flicker-service';
+const BACKOFF_INICIAL_MS_DEFAULT = 1000;
+const BACKOFF_CAP_MS = 30000;
+const TIMEOUT_DA_TENTATIVA_MS_DEFAULT = 5000;
+
+export interface AvisoDeRetorno {
+  readonly salaId: string;
+  readonly partidaId: string;
+  readonly serverId: string;
+  readonly resultado: 'vitoria' | 'derrota';
+  readonly jogadores: readonly string[];
+}
+
+export interface RetornoClienteConfig {
+  readonly lobbyRetornoCallbackUrl: string;
+  readonly jwtSecret: string;
+  /** Injetável nos testes — default é o fetch global. */
+  readonly buscarHttp?: typeof fetch;
+  /** Delay inicial do backoff em ms — injetável para testes rápidos. */
+  readonly backoffInicialMs?: number;
+  readonly capMs?: number;
+  /** Timeout de cada request — evita uma tentativa presa indefinidamente. */
+  readonly timeoutMs?: number;
+}
+
+function assinarServiceToken(jwtSecret: string): string {
+  return jwt.sign(
+    { sub: 'flicker-service', role: 'service' },
+    jwtSecret,
+    { algorithm: 'HS256', audience: SERVICE_TOKEN_AUDIENCE, expiresIn: '1h' },
+  );
+}
+
+function ehRetentavel(status: number, codigo: unknown): boolean {
+  // 503 e 409 SALA_INCONSISTENTE são explicitamente retentáveis pelo lobby.
+  if (status === 503) return true;
+  if (status === 409 && codigo === 'SALA_INCONSISTENTE') return true;
+  // 5xx genérico é transitório.
+  if (status >= 500) return true;
+  return false;
+}
+
+export function criarClienteDeRetorno(config: RetornoClienteConfig): (aviso: AvisoDeRetorno) => Promise<void> {
+  const buscarHttp = config.buscarHttp ?? fetch;
+  const backoffInicialMs = config.backoffInicialMs ?? BACKOFF_INICIAL_MS_DEFAULT;
+  const capMs = config.capMs ?? BACKOFF_CAP_MS;
+  const timeoutMs = config.timeoutMs ?? TIMEOUT_DA_TENTATIVA_MS_DEFAULT;
+
+  return async (aviso: AvisoDeRetorno): Promise<void> => {
+    const payload = {
+      salaId: aviso.salaId,
+      partidaId: aviso.partidaId,
+      serverId: aviso.serverId,
+      resultado: aviso.resultado,
+      jogadores: [...aviso.jogadores],
+    };
+
+    let tentativa = 0;
+
+    while (true) {
+      tentativa += 1;
+      const token = assinarServiceToken(config.jwtSecret);
+      const abortController = new AbortController();
+      const timeout = setTimeout(() => abortController.abort(), timeoutMs);
+
+      try {
+        const resposta = await buscarHttp(config.lobbyRetornoCallbackUrl, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+          signal: abortController.signal,
+        });
+
+        if (resposta.ok) {
+          console.info('[retorno] callback aceito', {
+            salaId: aviso.salaId,
+            partidaId: aviso.partidaId,
+            resultado: aviso.resultado,
+            tentativa,
+          });
+          return;
+        }
+
+        let codigo: unknown;
+        try {
+          const corpo = (await resposta.json()) as { codigo?: unknown };
+          codigo = corpo.codigo;
+        } catch {
+          codigo = undefined;
+        }
+
+        if (ehRetentavel(resposta.status, codigo)) {
+          console.warn('[retorno] falha retentável, reagendando', {
+            salaId: aviso.salaId,
+            status: resposta.status,
+            codigo,
+            tentativa,
+          });
+        } else {
+          console.error('[retorno] rejeição definitiva, interrompendo retry', {
+            salaId: aviso.salaId,
+            partidaId: aviso.partidaId,
+            status: resposta.status,
+            codigo,
+            tentativa,
+          });
+          return;
+        }
+      } catch (erro) {
+        console.warn('[retorno] erro de rede, reagendando', {
+          salaId: aviso.salaId,
+          tentativa,
+          erro: (erro as Error).message,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const delayMs = Math.min(backoffInicialMs * 2 ** (tentativa - 1), capMs);
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delayMs);
+        timer.unref?.();
+      });
+    }
+  };
+}

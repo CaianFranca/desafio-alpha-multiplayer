@@ -26,24 +26,33 @@ import {
   paraCodigoDaPartidaWire,
 } from './wire.ts';
 import {
+  aplicarRetencaoDeTermino,
   obterEstadoDaPartida,
   salvarEstadoDaPartida,
 } from './estado.ts';
+import { obterPartida } from './partidas.ts';
+import type { AvisoDeRetorno } from '../retorno/cliente.ts';
 
 export interface PartidaHandlersDeps {
   readonly redis: Redis;
   readonly broadcaster: PartidaBroadcaster;
+  readonly partidaTerminadaTtlSegundos?: number;
+  readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
 }
 
 export class PartidaHandlers {
   private readonly redis: Redis;
   private readonly broadcaster: PartidaBroadcaster;
+  private readonly partidaTerminadaTtlSegundos: number;
+  private readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
   // Serialização mononodo: uma cadeia de promessas por partidaId.
   private readonly cadeiasPorPartida: Map<string, Promise<unknown>> = new Map();
 
   constructor(deps: PartidaHandlersDeps) {
     this.redis = deps.redis;
     this.broadcaster = deps.broadcaster;
+    this.partidaTerminadaTtlSegundos = deps.partidaTerminadaTtlSegundos ?? 3600;
+    this.notificarRetorno = deps.notificarRetorno;
   }
 
   /**
@@ -99,6 +108,35 @@ export class PartidaHandlers {
 
       await salvarEstadoDaPartida(this.redis, partidaId, resultado.estado);
       this.broadcaster.enviar(partidaId, ...traduzirEventos(resultado.eventos));
+
+      const termino = resultado.eventos.find((evento) => evento.tipo === 'partida_terminada');
+      if (termino?.tipo === 'partida_terminada') {
+        await aplicarRetencaoDeTermino(
+          this.redis,
+          partidaId,
+          this.partidaTerminadaTtlSegundos,
+        );
+        if (this.notificarRetorno !== undefined) {
+          const partida = await obterPartida(this.redis, partidaId);
+          if (partida === null) {
+            console.error('[partida] não foi possível notificar retorno: partida não encontrada', { partidaId });
+          } else {
+            const aviso: AvisoDeRetorno = {
+              salaId: partida.salaId,
+              partidaId: partida.partidaId,
+              serverId: partida.serverId,
+              resultado: termino.desfecho.tipo,
+              jogadores: partida.roster.map((membro) => membro.jogadorId),
+            };
+            void this.notificarRetorno(aviso).catch((erro: unknown) => {
+              console.error('[partida] callback de retorno terminou com erro', {
+                partidaId,
+                erro,
+              });
+            });
+          }
+        }
+      }
     }).catch((erro: unknown) => {
       console.error('[partida] erro inesperado ao processar comando:', erro);
       this.broadcaster.enviarParaSocket(socket, {

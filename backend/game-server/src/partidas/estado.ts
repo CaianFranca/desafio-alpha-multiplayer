@@ -66,7 +66,8 @@ export async function obterEstadoDaPartida(
  * e aplica-se `SET ... EX ttl`. Se a chave já expirou/inexiste (`ttl === -2`),
  * a partida acabou e o estado não é repersistido. Quando a partida está
  * `em_andamento` (ST-14), o TTL é -1 (sem expiração) e o estado é repersistido
- * sem TTL.
+ * sem TTL. Ao terminar, `aplicarRetencaoDeTermino` substitui esse estado
+ * persistente por uma janela finita de retenção.
  */
 export async function salvarEstadoDaPartida(
   redis: Redis,
@@ -87,6 +88,21 @@ export async function salvarEstadoDaPartida(
     return;
   }
   await redis.set(chave, JSON.stringify(estado));
+}
+
+/**
+ * Aplica a política de retenção do término (issue #177): fixa um TTL finito
+ * nas duas chaves da partida (metadados + estado) para que o resultado
+ * sobreviva ao recarregamento dentro da janela, mas não viva para sempre
+ * como o `PERSIST` do ST-14.
+ */
+export async function aplicarRetencaoDeTermino(
+  redis: Redis,
+  partidaId: string,
+  ttlSegundos: number,
+): Promise<void> {
+  await redis.expire(`game-server:partida:${partidaId}`, ttlSegundos);
+  await redis.expire(chaveDoEstadoDaPartida(partidaId), ttlSegundos);
 }
 
 /** Remove o estado da partida (usado no cancelamento da partida). */

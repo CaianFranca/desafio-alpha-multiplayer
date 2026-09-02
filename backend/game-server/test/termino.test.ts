@@ -20,6 +20,7 @@ import { type AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { criarClienteRedis } from '@flicker/config';
+import type { AvisoDeRetorno } from '../src/retorno/cliente.ts';
 import type {
   AceiteDoEncaminhamento,
   MembroDaSala,
@@ -45,13 +46,29 @@ interface ServidorEfemero {
   readonly fechar: () => Promise<void>;
 }
 
-async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
-  const contexto = { redis, serverId: SERVER_ID, jwtSecret: JWT_SECRET, partidaPreparadaTtlSegundos: ttlSegundos };
+async function subirServidor(
+  ttlSegundos: number,
+  partidaTerminadaTtlSegundos = 3600,
+  notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>,
+): Promise<ServidorEfemero> {
+  const contexto = {
+    redis,
+    serverId: SERVER_ID,
+    jwtSecret: JWT_SECRET,
+    partidaPreparadaTtlSegundos: ttlSegundos,
+    partidaTerminadaTtlSegundos,
+    lobbyRetornoCallbackUrl: 'http://localhost:3001/api/retorno',
+  };
   const app = createApp(contexto);
   const server = http.createServer(app);
 
   const broadcaster = new PartidaBroadcaster();
-  const handlers = new PartidaHandlers({ redis, broadcaster });
+  const handlers = new PartidaHandlers({
+    redis,
+    broadcaster,
+    partidaTerminadaTtlSegundos,
+    notificarRetorno,
+  });
   const wss = criarWebSocketServer(server, contexto, {
     partida: { broadcaster, handlers },
   });
@@ -191,6 +208,32 @@ async function semearTermino(
   await salvarEstadoDaPartida(redis, partidaId, { ...estado, resultado });
 }
 
+async function semearEstadoProntoParaVitoria(partidaId: string): Promise<void> {
+  const estado = await obterEstadoDaPartida(redis, partidaId);
+  assert.ok(estado !== null, 'estado da partida deve existir antes da semeadura da vitória');
+
+  const pecaDoPortao = {
+    pecaId: 'portao-de-teste',
+    tipo: 'portao_de_saida' as const,
+    orientacao: 0 as const,
+    celula: { linha: 3, coluna: 3 },
+  };
+
+  await salvarEstadoDaPartida(redis, partidaId, {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [pecaDoPortao],
+      peoes: estado.tabuleiro.peoes.map((peao) => ({
+        ...peao,
+        pecaId: pecaDoPortao.pecaId,
+      })),
+    },
+    geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+    cartaoDeAcessoObtido: true,
+  });
+}
+
 function esperarEvento(
   ws: WebSocket,
   tipo: string,
@@ -311,6 +354,56 @@ test('Termino: comando de jogo pós-término é recusado com PARTIDA_TERMINADA',
     ws2.close();
     ws3.close();
     ws4.close();
+  }
+
+  await deletePartida(servidor.baseUrl, aceite.partidaId);
+  await servidor.fechar();
+});
+
+test('Termino: broadcast, retenção e callback acontecem no término real da partida', async () => {
+  const ttlTerminada = 30;
+  let avisoRecebido: AvisoDeRetorno | undefined;
+  let resolverAviso: ((aviso: AvisoDeRetorno) => void) | undefined;
+  const avisoPromise = new Promise<AvisoDeRetorno>((resolve) => {
+    resolverAviso = resolve;
+  });
+  const servidor = await subirServidor(ttlTerminada, ttlTerminada, async (aviso) => {
+    avisoRecebido = aviso;
+    resolverAviso?.(aviso);
+  });
+  const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+  const sockets = await Promise.all([
+    conectarPartida(servidor, aceite.partidaId, 1),
+    conectarPartida(servidor, aceite.partidaId, 2),
+    conectarPartida(servidor, aceite.partidaId, 3),
+    conectarPartida(servidor, aceite.partidaId, 4),
+  ]);
+
+  try {
+    await semearEstadoProntoParaVitoria(aceite.partidaId);
+    const terminados = sockets.map((socket) => esperarEvento(socket, 'PARTIDA_TERMINADA'));
+    enviar(sockets[0], { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' });
+
+    const eventos = await Promise.all(terminados);
+    assert.deepEqual(eventos.map((evento) => evento.resultado), ['vitoria', 'vitoria', 'vitoria', 'vitoria']);
+
+    const ttlPartida = await redis.ttl(`game-server:partida:${aceite.partidaId}`);
+    const ttlEstado = await redis.ttl(`game-server:partida-estado:${aceite.partidaId}`);
+    assert.ok(ttlPartida > 0 && ttlPartida <= ttlTerminada, `TTL da partida inválido: ${ttlPartida}`);
+    assert.ok(ttlEstado > 0 && ttlEstado <= ttlTerminada, `TTL do estado inválido: ${ttlEstado}`);
+
+    const aviso = await avisoPromise;
+    assert.equal(avisoRecebido, aviso);
+    assert.deepEqual(aviso, {
+      salaId: 'sala-1',
+      partidaId: aceite.partidaId,
+      serverId: SERVER_ID,
+      resultado: 'vitoria',
+      jogadores: ['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4'],
+    });
+  } finally {
+    for (const socket of sockets) socket.close();
   }
 
   await deletePartida(servidor.baseUrl, aceite.partidaId);
