@@ -124,54 +124,6 @@ export class PartidaHandlers {
 
       const termino = resultado.eventos.find((evento) => evento.tipo === 'partida_terminada');
       if (termino?.tipo === 'partida_terminada') {
-        let aviso: AvisoDeRetorno | undefined;
-        if (this.notificarRetorno !== undefined) {
-          let partida: import('./partidas.ts').PartidaPreparada | null = null;
-          for (let tentativa = 0; tentativa < 3; tentativa += 1) {
-            try {
-              partida = await obterPartida(this.redis, partidaId);
-              if (partida !== null) break;
-            } catch {
-              partida = null;
-            }
-            if (partida === null && tentativa < 2) {
-              await sleep(100 * 2 ** tentativa);
-            }
-          }
-          if (partida === null && partidaPrevia !== null) {
-            console.warn('[partida] usando metadados prévios para callback de retorno', { partidaId });
-            partida = partidaPrevia;
-          }
-          if (partida === null) {
-            console.error('[partida] não foi possível preparar callback de retorno após retries', { partidaId });
-            if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
-            const atrasoMs = 1000;
-            setTimeout(() => {
-              void this.enfileirarMutacao(partidaId, async () => {
-                if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
-                let partidaReagendada: PartidaPreparada | null = null;
-                try {
-                  partidaReagendada = await obterPartida(this.redis, partidaId);
-                } catch {}
-                if (partidaReagendada === null && partidaPrevia !== null) {
-                  partidaReagendada = partidaPrevia;
-                }
-                if (partidaReagendada === null || this.notificarRetorno === undefined) return;
-                const avisoReagendado = this.montarAviso(partidaReagendada, termino.desfecho.tipo);
-                this.callbacksEnviados.add(partidaId);
-                const promessa = this.notificarRetorno(avisoReagendado).catch((erro: unknown) => {
-                  console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
-                });
-                this.rastrearRetorno(partidaId, promessa);
-              }).catch(() => undefined);
-            }, atrasoMs).unref?.();
-          } else {
-            if (this.callbacksEnviados.has(partidaId)) return;
-            aviso = this.montarAviso(partida, termino.desfecho.tipo);
-            this.callbacksEnviados.add(partidaId);
-          }
-        }
-
         try {
           await aplicarRetencaoDeTermino(
             this.redis,
@@ -184,6 +136,88 @@ export class PartidaHandlers {
             ttlSegundos: this.partidaTerminadaTtlSegundos,
             erro,
           });
+        }
+
+        let aviso: AvisoDeRetorno | undefined;
+        if (this.notificarRetorno !== undefined) {
+          if (this.callbacksEnviados.has(partidaId) || this.retornosPendentes.has(partidaId)) {
+            // Já há callback em voo ou enviado — retenção já aplicada acima, apenas evita duplicar aviso
+          } else {
+            let partida: import('./partidas.ts').PartidaPreparada | null = null;
+            for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+              try {
+                partida = await obterPartida(this.redis, partidaId);
+                if (partida !== null) break;
+              } catch {
+                partida = null;
+              }
+              if (partida === null && tentativa < 2) {
+                await sleep(100 * 2 ** tentativa);
+              }
+            }
+            if (partida === null && partidaPrevia !== null) {
+              console.warn('[partida] usando metadados prévios para callback de retorno', { partidaId });
+              partida = partidaPrevia;
+            }
+            if (partida === null) {
+              console.error('[partida] não foi possível preparar callback de retorno após retries', { partidaId });
+              const atrasoMs = 1000;
+              setTimeout(() => {
+                void this.enfileirarMutacao(partidaId, async () => {
+                  if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
+                  let partidaReagendada: PartidaPreparada | null = null;
+                  for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+                    try {
+                      partidaReagendada = await obterPartida(this.redis, partidaId);
+                      if (partidaReagendada !== null) break;
+                    } catch {}
+                    if (partidaReagendada === null && tentativa < 2) {
+                      await sleep(100 * 2 ** tentativa);
+                    }
+                  }
+                  if (partidaReagendada === null && partidaPrevia !== null) {
+                    partidaReagendada = partidaPrevia;
+                  }
+                  if (partidaReagendada === null) {
+                    console.error('[partida] reagendamento ainda sem metadados, reagendando novamente', { partidaId });
+                    const reatrasoMs = 2000;
+                    setTimeout(() => {
+                      void this.enfileirarMutacao(partidaId, async () => {
+                        let partidaReagendada2: PartidaPreparada | null = null;
+                        try {
+                          partidaReagendada2 = await obterPartida(this.redis, partidaId);
+                        } catch {}
+                        if (partidaReagendada2 === null && partidaPrevia !== null) {
+                          partidaReagendada2 = partidaPrevia;
+                        }
+                        if (partidaReagendada2 === null || this.notificarRetorno === undefined) {
+                          console.error('[partida] callback ainda sem metadados após segundo reagendamento', { partidaId });
+                          return;
+                        }
+                        const avisoReagendado2 = this.montarAviso(partidaReagendada2, termino.desfecho.tipo);
+                        this.callbacksEnviados.add(partidaId);
+                        const promessa2 = this.notificarRetorno(avisoReagendado2).catch((erro: unknown) => {
+                          console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
+                        });
+                        this.rastrearRetorno(partidaId, promessa2);
+                      }).catch(() => undefined);
+                    }, reatrasoMs).unref?.();
+                    return;
+                  }
+                  if (this.notificarRetorno === undefined) return;
+                  const avisoReagendado = this.montarAviso(partidaReagendada, termino.desfecho.tipo);
+                  this.callbacksEnviados.add(partidaId);
+                  const promessa = this.notificarRetorno(avisoReagendado).catch((erro: unknown) => {
+                    console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
+                  });
+                  this.rastrearRetorno(partidaId, promessa);
+                }).catch(() => undefined);
+              }, atrasoMs).unref?.();
+            } else {
+              aviso = this.montarAviso(partida, termino.desfecho.tipo);
+              this.callbacksEnviados.add(partidaId);
+            }
+          }
         }
 
         if (aviso !== undefined && this.notificarRetorno !== undefined) {

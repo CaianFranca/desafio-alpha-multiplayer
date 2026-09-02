@@ -134,6 +134,58 @@ test('extrairRetryAfterMs cobre segundos, http-date e inválido', () => {
   assert.ok(parsed !== undefined && parsed >= 4000 && parsed <= 6000, `http-date deveria dar ~5000ms, veio ${parsed}`);
 });
 
+test('callback de retorno retenta erro de rede com backoff', async () => {
+  const sleeps: number[] = [];
+  let chamadas = 0;
+  const cliente = criarClienteDeRetorno({
+    lobbyRetornoCallbackUrl: 'http://lobby.test/api/retorno',
+    jwtSecret: JWT_SECRET,
+    backoffInicialMs: 5,
+    sleep: async (ms) => { sleeps.push(ms); },
+    buscarHttp: async () => {
+      chamadas += 1;
+      if (chamadas === 1) {
+        throw new Error('ECONNREFUSED');
+      }
+      return new Response('{}', { status: 200 });
+    },
+  });
+
+  await cliente(aviso);
+  assert.equal(chamadas, 2);
+  assert.equal(sleeps.length, 1);
+  assert.ok(sleeps[0] >= 5, `backoff de rede deveria ser >=5ms, veio ${sleeps[0]}`);
+});
+
+test('callback de retorno respeita cap de 30s no backoff exponencial', async () => {
+  const sleeps: number[] = [];
+  let chamadas = 0;
+  const cliente = criarClienteDeRetorno({
+    lobbyRetornoCallbackUrl: 'http://lobby.test/api/retorno',
+    jwtSecret: JWT_SECRET,
+    backoffInicialMs: 1000,
+    capMs: 30000,
+    sleep: async (ms) => { sleeps.push(ms); },
+    buscarHttp: async () => {
+      chamadas += 1;
+      if (chamadas <= 10) {
+        return new Response('{}', { status: 503 });
+      }
+      return new Response('{}', { status: 200 });
+    },
+  });
+
+  await cliente(aviso);
+  assert.equal(chamadas, 11);
+  assert.equal(sleeps.length, 10);
+  // 1000,2000,4000,8000,16000,30000,30000,30000,30000,30000
+  assert.equal(Math.max(...sleeps), 30000);
+  assert.ok(sleeps[5] === 30000 && sleeps[9] === 30000, 'cap de 30s deveria ser respeitado');
+  for (let i = 1; i < sleeps.length; i++) {
+    assert.ok(sleeps[i] >= sleeps[i - 1] || sleeps[i] === 30000, 'backoff deveria ser crescente até o cap');
+  }
+});
+
 test('default do callback acompanha LOBBY_SERVER_PORT', () => {
   const portaAnterior = process.env.LOBBY_SERVER_PORT;
   const urlAnterior = process.env.LOBBY_RETORNO_CALLBACK_URL;
