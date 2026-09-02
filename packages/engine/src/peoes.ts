@@ -265,10 +265,11 @@ export function gerarRecebidas(
   emBaixaIluminacao = false,
 ): RecebimentoGerado {
   const vagas = vagasDisponiveis(estado, peca);
+  const limiteBaixa = emBaixaIluminacao ? 1 : vagas.length;
   const quantidade = Math.min(
     vagas.length,
     estado.caixa.length,
-    emBaixaIluminacao ? 1 : Infinity,
+    limiteBaixa,
   );
   const eventos: EventoDoTabuleiro[] = [];
   let caixa = estado.caixa;

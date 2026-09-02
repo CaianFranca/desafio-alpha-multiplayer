@@ -506,35 +506,14 @@ function posicionarPeaoDaPartida(
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
   const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
-  // Segundo cálculo de Iluminação/Limpeza se houve Baixa nova (issue #170).
-  let celulasIluminadas = iluminacao.celulasIluminadas;
-  let posicionadasFinais = tabuleiroPosLimpeza.posicionadas;
-  const baixaAntes = new Set(
-    estado.jogadores
-      .filter((j) => (j.emBaixaIluminacao ?? false))
-      .map((j) => j.peaoId),
-  );
-  const baixaDepois = new Set(
-    ataque.jogadores
-      .filter((j) => (j.emBaixaIluminacao ?? false))
-      .map((j) => j.peaoId),
-  );
-  const houveBaixaNova = [...baixaDepois].some((peaoId) => !baixaAntes.has(peaoId));
-  if (houveBaixaNova) {
-    const estadoParaSegundaIluminacao: EstadoDaPartida = {
-      ...estado,
-      celulasIluminadas,
-      jogadores: ataque.jogadores,
-    };
-    const segunda = recalcularIluminacaoEAplicarLimpeza(
-      estadoParaSegundaIluminacao,
-      { ...tabuleiroPosLimpeza, posicionadas: posicionadasFinais } as EstadoDoTabuleiro,
+  const { celulasIluminadas, posicionadas: posicionadasFinais } =
+    reaplicarIluminacaoSeBaixaNova(
+      estado,
+      ataque.jogadores,
+      tabuleiroPosLimpeza,
+      iluminacao,
       eventos,
-      [...baixaDepois],
     );
-    celulasIluminadas = segunda.celulasIluminadas;
-    posicionadasFinais = segunda.posicionadas;
-  }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
     posicionadas: posicionadasFinais,
@@ -708,39 +687,14 @@ function confirmarPosicaoDoPeao(
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
   const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
-  // ST-15 / issue #170: se o Ataque impôs Baixa Iluminação nova, a Iluminação
-  // é recalculada e a Limpeza reaplicada no MESMO gatilho (antes das
-  // conquistas, que já ocorreram no tabuleiro pós-limpeza).
-  let celulasIluminadas = iluminacao.celulasIluminadas;
-  let posicionadasPosAtaque = tabuleiroPosLimpeza.posicionadas;
-  const baixaAntes = new Set(
-    estado.jogadores
-      .filter((j) => (j.emBaixaIluminacao ?? false))
-      .map((j) => j.peaoId),
-  );
-  const baixaDepoisAtaque = new Set(
-    ataque.jogadores
-      .filter((j) => (j.emBaixaIluminacao ?? false))
-      .map((j) => j.peaoId),
-  );
-  const houveBaixaNova = [...baixaDepoisAtaque].some(
-    (peaoId) => !baixaAntes.has(peaoId),
-  );
-  if (houveBaixaNova) {
-    const estadoParaSegundaIluminacao: EstadoDaPartida = {
-      ...estado,
-      celulasIluminadas,
-      jogadores: ataque.jogadores,
-    };
-    const segunda = recalcularIluminacaoEAplicarLimpeza(
-      estadoParaSegundaIluminacao,
-      { ...tabuleiroPosLimpeza, posicionadas: posicionadasPosAtaque } as EstadoDoTabuleiro,
+  const { celulasIluminadas, posicionadas: posicionadasPosAtaque } =
+    reaplicarIluminacaoSeBaixaNova(
+      estado,
+      ataque.jogadores,
+      tabuleiroPosLimpeza,
+      iluminacao,
       eventos,
-      [...baixaDepoisAtaque],
     );
-    celulasIluminadas = segunda.celulasIluminadas;
-    posicionadasPosAtaque = segunda.posicionadas;
-  }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
     posicionadas: posicionadasPosAtaque,
@@ -836,9 +790,10 @@ function encerrarTurnoDaPartida(
 // efeito do avanço, então o manipulacao_finalizada precede o turno_iniciado
 // (sem duplicar quando o fechamento já veio nos eventos do Tabuleiro).
 // ST-15 / issue #170: jogador Amedrontado (sanidade 0 / amedrontado true) tem
-// o turno auto-pulado — o avanço entra em loop, emitindo turno_encerrado para
-// cada amedrontado pulado e turno_iniciado para o seguinte, até encontrar um
-// não-amedrontado ou percorrer o roster inteiro (derrota equipe_amedrontada).
+// o turno auto-pulado — o avanço pula silenciosamente amedrontados e emite
+// apenas turno_iniciado do próximo não-amedrontado. Se todos estiverem
+// amedrontados, mantém o turno no primeiro da ordem e deixa
+// avaliarTerminoDaPartida decidir a derrota.
 function avancarVez(
   estado: EstadoDaPartida,
   eventos: readonly EventoDaPartida[],
@@ -848,14 +803,6 @@ function avancarVez(
   );
   const indiceAtivo = ordenados.findIndex(
     (jogador) => jogador.jogadorId === estado.jogadorAtivoId,
-  );
-  const indiceProximo = (indiceAtivo + 1) % ordenados.length;
-  const proximo = ordenados[indiceProximo];
-  const rodada =
-    indiceProximo === 0 ? estado.rodada + 1 : estado.rodada;
-
-  const peaoDoProximo = estado.tabuleiro.peoes.find(
-    (item) => item.peaoId === proximo.peaoId,
   );
   const pecaEmManipulacaoId = estado.tabuleiro.pecaEmManipulacaoId;
   const jaFinalizada =
@@ -870,77 +817,88 @@ function avancarVez(
       ? [{ tipo: 'manipulacao_finalizada', pecaId: pecaEmManipulacaoId }]
       : [];
 
-  let novoEstado: EstadoDaPartida = {
-    tabuleiro: {
-      ...estado.tabuleiro,
-      pecaSelecionadaId: null,
-      pecaEmManipulacaoId: null,
-      peaoSelecionadoId: null,
-      recebidas: [],
-    },
+  const tabuleiroLimpo: EstadoDoTabuleiro = {
+    ...estado.tabuleiro,
+    pecaSelecionadaId: null,
+    pecaEmManipulacaoId: null,
+    peaoSelecionadoId: null,
+    recebidas: [],
+  };
+
+  // Busca circular do próximo não-amedrontado, reutilizando ordenados.
+  let indiceProximo = (indiceAtivo + 1) % ordenados.length;
+  let rodadaCandidata =
+    indiceProximo === 0 ? estado.rodada + 1 : estado.rodada;
+  let tentativas = 0;
+  let alvo: (typeof ordenados)[number] | null = null;
+  let rodadaAlvo = rodadaCandidata;
+  while (tentativas < ordenados.length) {
+    const candidato = ordenados[indiceProximo];
+    const jogadorObj = estado.jogadores.find(
+      (j) => j.jogadorId === candidato.jogadorId,
+    );
+    const ehAmedrontado =
+      jogadorObj !== undefined &&
+      (jogadorObj.amedrontado ?? jogadorObj.sanidade === 0) === true;
+    if (!ehAmedrontado) {
+      alvo = candidato;
+      rodadaAlvo = rodadaCandidata;
+      break;
+    }
+    // Pula amedrontado silenciosamente (sem emitir turno_iniciado/encerrado).
+    indiceProximo = (indiceProximo + 1) % ordenados.length;
+    rodadaCandidata =
+      indiceProximo === 0 ? rodadaCandidata + 1 : rodadaCandidata;
+    tentativas++;
+  }
+
+  // Se todos amedrontados, alvo permanece null — mantém estado sem novo turno
+  // e deixa o funil de término decidir (equipe_amedrontada).
+  if (alvo === null) {
+    const novoEstado: EstadoDaPartida = {
+      tabuleiro: tabuleiroLimpo,
+      jogadores: estado.jogadores,
+      jogadorAtivoId: ordenados[indiceProximo].jogadorId,
+      rodada: rodadaCandidata,
+      pecaDoInicioDoTurnoId:
+        estado.tabuleiro.peoes.find(
+          (item) => item.peaoId === ordenados[indiceProximo].peaoId,
+        )?.pecaId ?? null,
+      posicaoConfirmada: false,
+      celulasIluminadas: estado.celulasIluminadas,
+      resultado: estado.resultado,
+      geradoresLigados: estado.geradoresLigados,
+      cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
+      peoesNoAlcance: estado.peoesNoAlcance,
+    };
+    const eventosFinais: readonly EventoDaPartida[] = [
+      ...eventos,
+      ...fechamentoDaManipulacao,
+    ];
+    return sucessoDaPartida(novoEstado, eventosFinais);
+  }
+
+  const peaoDoAlvo = tabuleiroLimpo.peoes.find(
+    (item) => item.peaoId === alvo.peaoId,
+  );
+  const novoEstado: EstadoDaPartida = {
+    tabuleiro: tabuleiroLimpo,
     jogadores: estado.jogadores,
-    jogadorAtivoId: proximo.jogadorId,
-    rodada,
-    pecaDoInicioDoTurnoId: peaoDoProximo?.pecaId ?? null,
+    jogadorAtivoId: alvo.jogadorId,
+    rodada: rodadaAlvo,
+    pecaDoInicioDoTurnoId: peaoDoAlvo?.pecaId ?? null,
     posicaoConfirmada: false,
     celulasIluminadas: estado.celulasIluminadas,
-    // Término (issue #176): resultado, contadores de objetivos e a sanidade
-    // dos jogadores (que viaja com o roster) atravessam a Passagem de Vez.
-    // Ataque (issue #172): o snapshot do Alcance também — a base do delta é
-    // o último gatilho, mesmo que tenha sido no turno anterior.
     resultado: estado.resultado,
     geradoresLigados: estado.geradoresLigados,
     cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
     peoesNoAlcance: estado.peoesNoAlcance,
   };
-  let eventosFinais: readonly EventoDaPartida[] = [
+  const eventosFinais: readonly EventoDaPartida[] = [
     ...eventos,
     ...fechamentoDaManipulacao,
-    { tipo: 'turno_iniciado', jogadorId: proximo.jogadorId, rodada },
+    { tipo: 'turno_iniciado', jogadorId: alvo.jogadorId, rodada: rodadaAlvo },
   ];
-
-  // Auto-pulo do Amedrontado (issue #170): loop até não-amedrontado.
-  let iteracoes = 0;
-  while (iteracoes < estado.jogadores.length) {
-    const ativo = novoEstado.jogadores.find(
-      (j) => j.jogadorId === novoEstado.jogadorAtivoId,
-    );
-    if (!ativo) break;
-    const ehAmedrontado =
-      (ativo.amedrontado ?? ativo.sanidade === 0) === true;
-    if (!ehAmedrontado) break;
-    // O turno do amedrontado é iniciado e imediatamente encerrado.
-    eventosFinais = [
-      ...eventosFinais,
-      { tipo: 'turno_encerrado', jogadorId: ativo.jogadorId },
-    ];
-    const ordenadosLoop = [...novoEstado.jogadores].sort(
-      (a, b) => a.ordem - b.ordem,
-    );
-    const idxAtivo = ordenadosLoop.findIndex(
-      (j) => j.jogadorId === novoEstado.jogadorAtivoId,
-    );
-    const idxProx = (idxAtivo + 1) % ordenadosLoop.length;
-    const prox = ordenadosLoop[idxProx];
-    const rodadaProx =
-      idxProx === 0 ? novoEstado.rodada + 1 : novoEstado.rodada;
-    const peaoProx = novoEstado.tabuleiro.peoes.find(
-      (item) => item.peaoId === prox.peaoId,
-    );
-    novoEstado = {
-      ...novoEstado,
-      jogadorAtivoId: prox.jogadorId,
-      rodada: rodadaProx,
-      pecaDoInicioDoTurnoId: peaoProx?.pecaId ?? null,
-      posicaoConfirmada: false,
-    };
-    eventosFinais = [
-      ...eventosFinais,
-      { tipo: 'turno_iniciado', jogadorId: prox.jogadorId, rodada: rodadaProx },
-    ];
-    iteracoes++;
-  }
-
   return sucessoDaPartida(novoEstado, eventosFinais);
 }
 
@@ -1125,6 +1083,54 @@ function recalcularIluminacaoEAplicarLimpeza(
   return { celulasIluminadas, posicionadas };
 }
 
+function peoesEmBaixa(jogadores: readonly JogadorDaPartida[]): readonly string[] {
+  return jogadores
+    .filter((jogador) => (jogador.emBaixaIluminacao ?? false))
+    .map((jogador) => jogador.peaoId);
+}
+
+function houveBaixaNova(
+  antes: readonly string[],
+  depois: readonly string[],
+): boolean {
+  const antesSet = new Set(antes);
+  return depois.some((peaoId) => !antesSet.has(peaoId));
+}
+
+function reaplicarIluminacaoSeBaixaNova(
+  estadoAntes: EstadoDaPartida,
+  jogadoresAposAtaque: readonly JogadorDaPartida[],
+  tabuleiroPosLimpeza: EstadoDoTabuleiro,
+  iluminacaoAntes: { celulasIluminadas: readonly Celula[]; posicionadas: readonly PecaPosicionada[] },
+  eventos: EventoDaPartida[],
+): { celulasIluminadas: readonly Celula[]; posicionadas: readonly PecaPosicionada[] } {
+  const baixaAntes = peoesEmBaixa(estadoAntes.jogadores);
+  const baixaDepois = peoesEmBaixa(jogadoresAposAtaque);
+  if (!houveBaixaNova(baixaAntes, baixaDepois)) {
+    return iluminacaoAntes;
+  }
+  // Remove a celulas_iluminadas intermediária já emitida no mesmo lote para
+  // evitar iluminação transitória incorreta ao cliente (o lote deve refletir
+  // apenas a iluminação final com Baixa).
+  for (let i = eventos.length - 1; i >= 0; i--) {
+    if (eventos[i].tipo === 'celulas_iluminadas') {
+      eventos.splice(i, 1);
+      break;
+    }
+  }
+  const estadoParaSegunda: EstadoDaPartida = {
+    ...estadoAntes,
+    celulasIluminadas: iluminacaoAntes.celulasIluminadas,
+    jogadores: jogadoresAposAtaque,
+  };
+  return recalcularIluminacaoEAplicarLimpeza(
+    estadoParaSegunda,
+    { ...tabuleiroPosLimpeza, posicionadas: iluminacaoAntes.posicionadas } as EstadoDoTabuleiro,
+    eventos,
+    baixaDepois,
+  );
+}
+
 /**
  * Resolução do Ataque (issue #172, estados issue #170) no gatilho — sempre
  * sobre o tabuleiro PÓS-Limpeza: Monstro removido não ataca e tem a entrada
@@ -1194,9 +1200,6 @@ function resolverAtaqueNoGatilho(
       }
     }
     if (vultoAtingidos.size > 0 || espectroAtingidos.size > 0) {
-      const peaoParaJogador = new Map(
-        jogadores.map((jogador) => [jogador.peaoId, jogador] as const),
-      );
       let mudou = false;
       const proximoJogadores = jogadores.map((jogador) => {
         const hitVulto = vultoAtingidos.has(jogador.peaoId);
