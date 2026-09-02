@@ -16,12 +16,12 @@ export function isEstadoDaTela(value: unknown): value is EstadoDaTela {
   return typeof value === 'string' && (estadosValidos as readonly string[]).includes(value)
 }
 
-export function transicao(_estado: EstadoDaTela, evento: EventoDaTela): EstadoDaTela {
+export function transicao(estado: EstadoDaTela, evento: EventoDaTela): EstadoDaTela {
   switch (evento.type) {
     case 'carregar':
       return 'carregando'
     case 'partidaPreparada':
-      return _estado === 'disponivel' ? 'disponivel' : 'aguardando'
+      return estado === 'disponivel' ? 'disponivel' : 'aguardando'
     case 'partidaEmAndamento':
       return 'disponivel'
     case 'falhar':
@@ -31,6 +31,6 @@ export function transicao(_estado: EstadoDaTela, evento: EventoDaTela): EstadoDa
     case 'forcar':
       return evento.estado
     default:
-      return _estado
+      return estado
   }
 }
