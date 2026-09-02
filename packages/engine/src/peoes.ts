@@ -106,7 +106,9 @@ export function ehPecaDeMonstro(tipo: TipoDaPeca): boolean {
 }
 
 // Célula vizinha na direção da borda, ou null quando cai fora da grade.
-function celulaVizinhaNaBorda(
+// Exportada para o Alcance do Vulto (monstros.ts / issue #172), que caminha
+// raios retos passo a passo com a mesma primitiva de vizinhança.
+export function celulaVizinhaNaBorda(
   celula: Celula,
   borda: BordaCardinal,
 ): Celula | null {

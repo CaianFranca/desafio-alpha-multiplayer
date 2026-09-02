@@ -5,11 +5,11 @@
 // Posição. O dispatch aplicarComandoDePartida segue o padrão dos dispatches
 // existentes (aplicarComando do lobby e aplicarComandoDeTabuleiro): valida o
 // ator, roteia o comando e produz eventos de domínio ou rejeições com códigos
-// fechados. A dependência em runtime é única — partida.ts → tabuleiro.ts →
-// peoes.ts — e o Recebimento do Peão já posicionado (posicionar_peao do
-// Primeiro Turno e confirmar_posicao_do_peao) é gerado aqui, via
-// gerarRecebidas. Nenhum contrato wire, Redis ou Express vive aqui: domínio
-// puro e imutável.
+// fechados. A dependência em runtime é única — partida.ts → monstros.ts →
+// tabuleiro.ts → peoes.ts — e o Recebimento do Peão já posicionado
+// (posicionar_peao do Primeiro Turno e confirmar_posicao_do_peao) é gerado
+// aqui, via gerarRecebidas. Nenhum contrato wire, Redis ou Express vive aqui:
+// domínio puro e imutável.
 //
 // Término da Partida (issue #176): o estado carrega o Resultado
 // (DesfechoDaPartida | null — resultado !== null ≡ terminada), os contadores
@@ -17,6 +17,16 @@
 // dos Jogadores. Toda Ação aprovada passa por UMA avaliação de término no
 // funil do dispatch (vitória antes da derrota); pós-término, qualquer
 // comando é recusado com PARTIDA_TERMINADA.
+//
+// Ataque dos Monstros (issue #172): nos dois gatilhos definitivos — o
+// posicionamento do Peão do Primeiro Turno e a Confirmação de Posição com
+// mudança de Peça — o Ataque é resolvido APÓS a Iluminação e a Limpeza
+// (monstros.ts), comparando os peões no Alcance de cada Monstro com o
+// snapshot anterior (peoesNoAlcance). Mover, Permanecer, Encerrar o Turno e
+// o posicionamento de peças NUNCA disparam: a movimentação desfeita não
+// altera o snapshot e não gera Ataque. A Proteção concedida pela Sala Médica
+// na Confirmação não é consumida pelo Ataque do MESMO gatilho — permanece
+// para o próximo (CONTEXT.md: "permanece até ser consumida").
 
 import {
   aplicarComandoDeTabuleiro,
@@ -39,6 +49,10 @@ import {
   type PosicionarPeaoComando,
   type SelecionarPecaComando,
 } from './tabuleiro.ts';
+import {
+  resolverAtaques,
+  type AtaqueResolvidoEvento,
+} from './monstros.ts';
 
 export interface JogadorDaPartida {
   readonly jogadorId: string;
@@ -52,6 +66,11 @@ export interface JogadorDaPartida {
   // sanidade === 0. Nenhuma mecânica a reduz ainda — o campo é consumido
   // pela avaliação do término (ST-15 reutiliza depois).
   readonly sanidade: number;
+  // Ataque (issue #172): Proteção concedida pela Sala Médica na Confirmação
+  // de Posição. Não acumulável (no máximo um escudo) e consumida UMA única
+  // vez por resolução, negando todos os ataques simultâneos contra o
+  // Jogador; permanece até ser consumida.
+  readonly protegido: boolean;
 }
 
 // Estado da Partida: o Tabuleiro (com Seleção única, Manipulação, Recebidas e
@@ -77,6 +96,12 @@ export interface EstadoDaPartida {
   // pecaIds de geradores ligados (o contador deriva do length).
   readonly geradoresLigados: readonly string[];
   readonly cartaoDeAcessoObtido: boolean;
+  // Ataque (issue #172): snapshot dos peões dentro do Alcance de cada Monstro
+  // no último gatilho (posicionamento do Peão do Primeiro Turno ou
+  // Confirmação de Posição com mudança de Peça) — a base do delta que dispara
+  // o Ataque. Chave = pecaId do Monstro; valor = peaoIds. Monstros removidos
+  // pela Limpeza têm a entrada podada no gatilho seguinte.
+  readonly peoesNoAlcance: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface ConfirmarPosicaoDoPeaoComando {
@@ -140,6 +165,7 @@ export type EventoDaPartida =
   | TurnoEncerradoEvento
   | PosicaoConfirmadaEvento
   | CelulasIluminadasEvento
+  | AtaqueResolvidoEvento
   | PartidaTerminadaEvento;
 
 export type CodigoDeErroDaPartida =
@@ -217,6 +243,7 @@ export function estadoInicialDaPartida(
         peaoId: `peao-${cor}`,
         primeiroTurnoPendente: true,
         sanidade: 3,
+        protegido: false,
       };
     },
   );
@@ -232,6 +259,9 @@ export function estadoInicialDaPartida(
     resultado: null,
     geradoresLigados: [],
     cartaoDeAcessoObtido: false,
+    // Nenhum Monstro posicionado na abertura: o snapshot do Alcance começa
+    // vazio (issue #172).
+    peoesNoAlcance: {},
   };
   return sucessoDaPartida(estado, [
     { tipo: 'turno_iniciado', jogadorId: jogadores[0].jogadorId, rodada: 1 },
@@ -461,9 +491,19 @@ function posicionarPeaoDaPartida(
   // depois de travar o Peão e recalcular a Iluminação, antes de retornar. As
   // Recebidas caem na Vizinhança do Peão (sempre iluminadas) e não são
   // removidas. O estado é filtrado e o evento só sai quando há remoção.
+  // Ataque (issue #172): resolvido logo após a Limpeza — Monstro removido
+  // não ataca e tem a entrada podada do snapshot.
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
+  const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
+  const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
   return sucessoDaPartida(
-    { ...estado, tabuleiro: { ...tabuleiro, posicionadas: iluminacao.posicionadas }, celulasIluminadas: iluminacao.celulasIluminadas },
+    {
+      ...estado,
+      tabuleiro: tabuleiroPosLimpeza,
+      celulasIluminadas: iluminacao.celulasIluminadas,
+      peoesNoAlcance: ataque.peoesNoAlcance,
+      jogadores: ataque.jogadores,
+    },
     eventos,
   );
 }
@@ -619,7 +659,11 @@ function confirmarPosicaoDoPeao(
     });
   }
   const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
+  // Limpeza e Ataque (issue #172) na mesma ordem do Primeiro Turno:
+  // Iluminação → Limpeza → Ataque → atualização do snapshot do Alcance.
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
+  const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
+  const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a
   // geradoresLigados; sala_do_diretor obtém o cartão. A Permanência não
@@ -630,14 +674,28 @@ function confirmarPosicaoDoPeao(
       : estado.geradoresLigados;
   const cartaoDeAcessoObtido =
     estado.cartaoDeAcessoObtido || peca.tipo === 'sala_do_diretor';
+  // Proteção (issue #172): a Sala Médica sob o Peão na Confirmação concede a
+  // Proteção ao ator, APÓS a resolução do Ataque — a proteção recém-concedida
+  // não é consumida pelo ataque do MESMO gatilho (permanece para o próximo,
+  // CONTEXT.md) e quem já a tinha e a consumiu no ataque do gatilho volta a
+  // protegido: true (não acumulável — no máximo um escudo). Idempotente.
+  const jogadores = peca.tipo === 'sala_medica'
+    ? ataque.jogadores.map((jogador) =>
+        jogador.jogadorId === ator.jogadorId
+          ? { ...jogador, protegido: true }
+          : jogador,
+      )
+    : ataque.jogadores;
   return sucessoDaPartida(
     {
       ...estado,
-      tabuleiro: { ...tabuleiro, posicionadas: iluminacao.posicionadas },
+      tabuleiro: tabuleiroPosLimpeza,
       posicaoConfirmada: true,
       celulasIluminadas: iluminacao.celulasIluminadas,
+      peoesNoAlcance: ataque.peoesNoAlcance,
       geradoresLigados,
       cartaoDeAcessoObtido,
+      jogadores,
     },
     eventos,
   );
@@ -740,9 +798,12 @@ function avancarVez(
     celulasIluminadas: estado.celulasIluminadas,
     // Término (issue #176): resultado, contadores de objetivos e a sanidade
     // dos jogadores (que viaja com o roster) atravessam a Passagem de Vez.
+    // Ataque (issue #172): o snapshot do Alcance também — a base do delta é
+    // o último gatilho, mesmo que tenha sido no turno anterior.
     resultado: estado.resultado,
     geradoresLigados: estado.geradoresLigados,
     cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
+    peoesNoAlcance: estado.peoesNoAlcance,
   };
   return sucessoDaPartida(novoEstado, [
     ...eventos,
@@ -921,6 +982,48 @@ function recalcularIluminacaoEAplicarLimpeza(
     eventos.push({ tipo: 'limpeza_aplicada', pecasRemovidas: removidas });
   }
   return { celulasIluminadas, posicionadas };
+}
+
+/**
+ * Resolução do Ataque (issue #172) no gatilho — sempre sobre o tabuleiro
+ * PÓS-Limpeza: Monstro removido não ataca e tem a entrada podada do snapshot.
+ * @mutates eventos — adiciona `ataque_resolvido` quando ao menos um Monstro
+ * dispara (mesmo que ninguém seja atingido).
+ */
+function resolverAtaqueNoGatilho(
+  estado: EstadoDaPartida,
+  tabuleiro: EstadoDoTabuleiro,
+  eventos: EventoDaPartida[],
+): {
+  peoesNoAlcance: Readonly<Record<string, readonly string[]>>;
+  jogadores: readonly JogadorDaPartida[];
+} {
+  const resolucao = resolverAtaques(
+    tabuleiro,
+    // Acesso defensivo: estados de binários anteriores persistidos em Redis
+    // sem os campos novos (mesmo padrão de resultado ?? null).
+    estado.peoesNoAlcance ?? {},
+    estado.jogadores.map((jogador) => ({
+      jogadorId: jogador.jogadorId,
+      peaoId: jogador.peaoId,
+      protegido: jogador.protegido ?? false,
+    })),
+  );
+  if (resolucao.evento !== null) {
+    eventos.push(resolucao.evento);
+  }
+  // Consumo da Proteção (issue #172): apenas os Jogadores que negaram algum
+  // ataque nesta resolução; sem consumo, o roster segue intocado.
+  const consumidos = new Set(resolucao.protegidosConsumidos);
+  const jogadores =
+    consumidos.size === 0
+      ? estado.jogadores
+      : estado.jogadores.map((jogador) =>
+          consumidos.has(jogador.jogadorId)
+            ? { ...jogador, protegido: false }
+            : jogador,
+        );
+  return { peoesNoAlcance: resolucao.peoesNoAlcance, jogadores };
 }
 
 // Pré-condição: ambos arrays devem vir do mesmo calcularIluminacao, que retorna

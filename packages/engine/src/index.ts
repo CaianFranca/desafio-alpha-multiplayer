@@ -64,6 +64,16 @@ export type {
   TurnoIniciadoEvento,
 } from './partida.ts';
 
+// Alcance e Ataque dos Monstros (issue #172): a camada da Partida importa a
+// resolução (monstros.ts → tabuleiro.ts, sem ciclos); os tipos do evento
+// ataque_resolvido vivem no módulo e reentram na união EventoDaPartida.
+export type {
+  AtacanteDoAlcance,
+  AtaqueResolvidoEvento,
+  JogadorAlvoDoAtaque,
+  ResolucaoDeAtaques,
+} from './monstros.ts';
+
 // Tipo de retorno de gerarRecebidas (declarado em peoes.ts, que não pode
 // importar de tabuleiro.ts em runtime): estado com a Caixa consumida +
 // pendências sorteadas + eventos peca_sorteada.
@@ -147,6 +157,11 @@ export {
   avaliarTerminoDaPartida,
   estadoInicialDaPartida,
 } from './partida.ts';
+
+export {
+  calcularAlcance,
+  resolverAtaques,
+} from './monstros.ts';
 
 export {
   COMPOSICAO_DA_CAIXA,
