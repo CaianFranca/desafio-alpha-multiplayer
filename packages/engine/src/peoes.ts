@@ -105,6 +105,23 @@ export function ehPecaDeMonstro(tipo: TipoDaPeca): boolean {
   return tipo === 'vulto' || tipo === 'espectro';
 }
 
+// Peças especiais (ST-12 / issue #142): gerador, sala do diretor, sala médica
+// e portão de saída — sorteadas e posicionadas pela mesma mecânica das demais
+// peças, com quatro bordas abertas e sem janela de Manipulação. O Portão de
+// Saída aceita até 4 peões como exceção à regra de 1 por peça.
+export function ehPecaEspecial(tipo: TipoDaPeca): boolean {
+  return (
+    tipo === 'gerador' ||
+    tipo === 'sala_do_diretor' ||
+    tipo === 'sala_medica' ||
+    tipo === 'portao_de_saida'
+  );
+}
+
+function ehPortaoDeSaida(tipo: TipoDaPeca): boolean {
+  return tipo === 'portao_de_saida';
+}
+
 // Célula vizinha na direção da borda, ou null quando cai fora da grade.
 function celulaVizinhaNaBorda(
   celula: Celula,
@@ -325,7 +342,11 @@ export function posicionarPeao(
     );
   }
 
-  if (estado.peoes.some((item) => item.pecaId === peca.pecaId)) {
+  const ocupantesNaPeca = estado.peoes.filter(
+    (item) => item.pecaId === peca.pecaId,
+  ).length;
+  const tetoPosicionar = ehPortaoDeSaida(peca.tipo) ? 4 : 1;
+  if (ocupantesNaPeca >= tetoPosicionar) {
     return rejeitar('PECA_JA_TEM_PEAO', 'A Peça já abriga outro Peão.');
   }
 
@@ -347,7 +368,7 @@ export function posicionarPeao(
   );
 }
 
-// Escolha da vaga (issue #138): o Jogador escolhe, POR peça sorteada, a vaga
+ // Escolha da vaga (issue #138): o Jogador escolhe, POR peça sorteada, a vaga
 // que ela ocupa — uma borda aberta da Peça sob o Peão com célula vizinha
 // vazia, ainda não escolhida por outra pendência. Fixa a borda e a célula-alvo
 // da pendência e seleciona a Peça sorteada (mesmo padrão da escolha do tipo
@@ -517,7 +538,7 @@ export function moverPeao(
     );
   }
 
-  // Ocupação (issue #176): a peça de destino portao_de_saida aceita até 4
+  // Ocupação (issue #142 + #176): a peça de destino portao_de_saida aceita até 4
   // peões (a reunião deles no Portão é condição de vitória); as demais
   // peças continuam no máximo 1. Com 4 peões no jogo, o teto do portão é
   // inalcançável — nenhum código de erro novo; peça comum ocupada segue
@@ -526,7 +547,7 @@ export function moverPeao(
   const ocupantes = estado.peoes.filter(
     (item) => item.pecaId === alvo.pecaId,
   ).length;
-  const teto = alvo.tipo === 'portao_de_saida' ? 4 : 1;
+  const teto = ehPortaoDeSaida(alvo.tipo) ? 4 : 1;
   if (ocupantes >= teto) {
     return rejeitar('PECA_JA_TEM_PEAO', 'A Peça de destino já abriga outro Peão.');
   }
@@ -596,8 +617,9 @@ export function permanecer(
 // Manipulação da ST-09 abre como em qualquer Encaixe — girar a peça
 // posicionada vai pela janela, sem consultar a seleção. A seleção é limpa no
 // encaixe; a próxima escolha de vaga seleciona a próxima Recebida. Exceção
-// (ST-15 / issue #169): Monstros NÃO abrem janela de Manipulação —
-// pecaEmManipulacaoId permanece null no novo estado.
+// (ST-12 / issue #142 e ST-15 / issue #169): Peças Especiais e Monstros NÃO
+// abrem janela de Manipulação — pecaEmManipulacaoId permanece null no novo
+// estado.
 export function posicionarRecebida(
   estado: EstadoDoTabuleiro,
   recebida: PecaRecebida,
@@ -650,12 +672,13 @@ export function posicionarRecebida(
     ),
     posicionadas: [...estado.posicionadas, posicionada],
     pecaSelecionadaId: null,
-    // Monstros (ST-15 / issue #169) não têm janela de Manipulação: o encaixe
-    // não abre a janela; Peças de caminho e Especiais mantêm o comportamento
-    // atual (abrem a janela da peça posicionada).
-    pecaEmManipulacaoId: ehPecaDeMonstro(posicionada.tipo)
-      ? null
-      : posicionada.pecaId,
+    // Peças Especiais (ST-12 / issue #142) e Monstros (ST-15 / issue #169) não
+    // têm janela de Manipulação: o encaixe não abre a janela; apenas Peças de
+    // caminho abrem a janela da peça posicionada.
+    pecaEmManipulacaoId:
+      ehPecaEspecial(posicionada.tipo) || ehPecaDeMonstro(posicionada.tipo)
+        ? null
+        : posicionada.pecaId,
   };
   return sucesso(novoEstado, [
     {
