@@ -59,6 +59,7 @@ export type {
   OperacaoRejeitadaDaPartida,
   PartidaTerminadaEvento,
   PosicaoConfirmadaEvento,
+  ResgateRealizadoEvento,
   ResultadoDaPartida,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
