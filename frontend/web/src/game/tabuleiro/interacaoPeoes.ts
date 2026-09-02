@@ -45,6 +45,7 @@ import {
 } from './contrato'
 import type { Celula, PeaoDaExibicao, PecaPosicionada, TipoDaPeca } from './contrato'
 import type {
+  BordaCardinal,
   ErroDoTabuleiroEvento,
   ManipulacaoFinalizadaEvento,
   PecaDeselecionadaEvento,
@@ -225,24 +226,32 @@ export function mapearEscolhaDeTipoDaRecebida(
   return { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', recebidaId, tipoDaPeca }
 }
 
-const DESLOCAMENTO_DA_BORDA: Record<string, Celula> = {
+const DESLOCAMENTO_DA_BORDA: Record<BordaCardinal, Celula> = {
   norte: { linha: -1, coluna: 0 },
   leste: { linha: 0, coluna: 1 },
   sul: { linha: 1, coluna: 0 },
   oeste: { linha: 0, coluna: -1 },
 }
 
-function celulaVizinhaNaBorda(celula: Celula, borda: string): Celula | null {
+function celulaVizinhaNaBorda(celula: Celula, borda: BordaCardinal): Celula | null {
   const d = DESLOCAMENTO_DA_BORDA[borda]
-  if (!d) return null
   const vizinha = { linha: celula.linha + d.linha, coluna: celula.coluna + d.coluna }
   if (!estaDentroDaGrade(vizinha)) return null
   return vizinha
 }
 
+/**
+ * Vaga da pendência (forma nova #138): `null` até a escolha, `BordaCardinal`
+ * depois. A forma legada (ST-10, @deprecated) não carrega o campo — `undefined`
+ * distingue "sem vaga" (#138) de "forma legada" sem interpretar o campo.
+ */
+export function getVaga(pendencia: PendenciaNoCliente): BordaCardinal | null | undefined {
+  return 'vaga' in pendencia ? pendencia.vaga : undefined
+}
+
 export function vagasDisponiveisDoPeao(
   estado: EstadoInteracaoPeoes,
-): { borda: string; celula: Celula }[] {
+): { borda: BordaCardinal; celula: Celula }[] {
   const peaoId = estado.peaoSelecionadoId
   if (peaoId === null) return []
   const peao = estado.peoes.find((p) => p.peaoId === peaoId)
@@ -250,12 +259,12 @@ export function vagasDisponiveisDoPeao(
   const origem = encontrarPecaNaCelula(estado.posicionadas, peao.celula)
   if (!origem) return []
   const bordas = bordasAbertas(origem)
-  const jaEscolhidas = new Set(
+  const jaEscolhidas = new Set<BordaCardinal>(
     estado.recebidasPendentes
-      .map((r) => (r as unknown as { vaga: string | null }).vaga)
-      .filter((v): v is string => v !== null),
+      .map(getVaga)
+      .filter((v): v is BordaCardinal => v !== null && v !== undefined),
   )
-  const vagas: { borda: string; celula: Celula }[] = []
+  const vagas: { borda: BordaCardinal; celula: Celula }[] = []
   for (const borda of bordas) {
     if (jaEscolhidas.has(borda)) continue
     const celula = celulaVizinhaNaBorda(origem.celula, borda)
@@ -268,20 +277,20 @@ export function vagasDisponiveisDoPeao(
 export function mapearEscolhaDeVagaDaRecebida(
   estado: EstadoInteracaoPeoes,
   recebidaId: string,
-  borda: string,
+  borda: BordaCardinal,
 ): PeaoComandoDoCliente | null {
   if (estado.peaoSelecionadoId === null) return null
   const pendente = estado.recebidasPendentes.find(
     (r) => r.recebidaId === recebidaId,
-  ) as unknown as { vaga: string | null } | undefined
+  )
   if (!pendente) return null
-  if (pendente.vaga !== null) return null
+  if (getVaga(pendente) !== null) return null
   const vagaValida = vagasDisponiveisDoPeao(estado).some((v) => v.borda === borda)
   if (!vagaValida) return null
   return {
     type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
     recebidaId,
-    borda: borda as unknown as import('@flicker/shared').BordaCardinal,
+    borda,
   }
 }
 
@@ -429,14 +438,14 @@ export function rotearCliqueDeCelula(
 ): ResultadoDeCliqueEmCelula {
   if (haRecebidasPendentes(estadoPeoes)) {
     const temVagaPendente = estadoPeoes.recebidasPendentes.some(
-      (r) => (r as unknown as { vaga: string | null }).vaga === null,
+      (r) => getVaga(r) === null,
     )
     if (temVagaPendente) {
       const vagas = vagasDisponiveisDoPeao(estadoPeoes)
       const vaga = vagas.find((v) => chaveCelula(v.celula) === chaveCelula(celula))
       if (vaga) {
         const alvo = estadoPeoes.recebidasPendentes.find(
-          (r) => (r as unknown as { vaga: string | null }).vaga === null,
+          (r) => getVaga(r) === null,
         )
         if (alvo) {
           const comando = mapearEscolhaDeVagaDaRecebida(
@@ -567,8 +576,11 @@ export function mapearCliqueNaReservaComCiclo(
   peca: { readonly pecaId: string; readonly tipo: TipoDaPeca },
 ): PeaoComandoDoCliente | TabuleiroComandoDoCliente | null {
   if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) {
+    // Forma nova (#138): o campo `vaga` existe na pendência (getVaga !==
+    // undefined). A peça já vem sorteada, então a escolha de tipo legada
+    // (ESCOLHER_TIPO) não se aplica — null bloqueia a rota sem sinal sonoro.
     const temSorteada = estadoPeoes.recebidasPendentes.some(
-      (r) => 'vaga' in r,
+      (r) => getVaga(r) !== undefined,
     )
     if (temSorteada) return null
     if (recebidaFocadaId === null || peca.tipo === 'inicial') return null
