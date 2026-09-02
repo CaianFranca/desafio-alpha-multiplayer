@@ -13,7 +13,6 @@
 
 import type {
   CodigoDeErroDoTabuleiro,
-  EscolherTipoDaPecaRecebidaPartidaComando,
   PartidaComandoDoCliente,
 } from '@flicker/shared';
 import type {
@@ -22,13 +21,9 @@ import type {
 } from '@flicker/engine';
 
 // Comandos aceitos no wire do canal de Partida: a forma legada de escolha de
-// tipo (ST-10) saiu do domínio na #138 e não é mais aceita — o tipo shared
-// permanece na união só até a limpeza do wire (#140/#143), então o guard
-// estreita a união ao devolver o tipo aceito.
-export type ComandoDaPartidaAceito = Exclude<
-  PartidaComandoDoCliente,
-  EscolherTipoDaPecaRecebidaPartidaComando
->;
+// tipo (ST-10) saiu do domínio na #138 e foi removida da união wire na limpeza
+// da #140 — a união compartilhada já é exatamente o conjunto aceito.
+export type ComandoDaPartidaAceito = PartidaComandoDoCliente;
 
 const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'SELECIONAR_PECA',
@@ -77,7 +72,8 @@ function ehCelulaValida(valor: unknown): boolean {
  * o `jogadorId` (obrigatório em todos os comandos) e os campos esperados de
  * cada variante; retorna `false` para qualquer mensagem fora do contrato —
  * incluindo os comandos legacy de tabuleiro/Peões sem `jogadorId` e o comando
- * legado de escolha de tipo, fora do domínio desde a #138.
+ * legado de escolha de tipo, fora do domínio desde a #138 e do wire desde a
+ * #140.
  */
 export function ehComandoDaPartida(value: unknown): value is ComandoDaPartidaAceito {
   if (typeof value !== 'object' || value === null) {
@@ -180,7 +176,6 @@ const CODIGOS_DA_PARTIDA_WIRE: ReadonlySet<string> = new Set([
   'ESTADO_INDISPONIVEL',
   'PECA_NAO_ENCONTRADA',
   'PECA_NAO_SELECIONADA',
-  'RESERVA_ESGOTADA',
   'CAIXA_ESGOTADA',
   'CELULA_NAO_ENCONTRADA',
   'CELULA_JA_OCUPADA',

@@ -107,13 +107,12 @@ export interface ManipulacaoFinalizadaEvento {
 
 // A união cobre também as rejeições de Peões/ciclo (ST-10) e Turnos (ST-11).
 // CAIXA_ESGOTADA entra pela ST-12 (issue #144) como adição; RESERVA_ESGOTADA
-// permanece no wire até a limpeza da sync (#140).
+// foi removido do wire na limpeza da sync (#140) — o domínio já não o emite.
 export type CodigoDeErroDoTabuleiro =
   | CodigoDeErroComum
   | 'ESTADO_INDISPONIVEL'
   | 'PECA_NAO_ENCONTRADA'
   | 'PECA_NAO_SELECIONADA'
-  | 'RESERVA_ESGOTADA'
   | 'CAIXA_ESGOTADA'
   | 'CELULA_NAO_ENCONTRADA'
   | 'CELULA_JA_OCUPADA'

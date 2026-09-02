@@ -12,7 +12,6 @@
 //   shared type:'SELECIONAR_PEAO' + jogadorId <-> engine tipo:'selecionar_peao' + ator
 //   shared type:'POSICIONAR_PEAO' + jogadorId <-> engine tipo:'posicionar_peao' + ator
 //   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' + jogadorId <-> engine tipo:'escolher_vaga_da_peca_recebida' + ator — issue #138
-//   shared type:'ESCOLHER_TIPO_DA_PECA_RECEBIDA' + jogadorId <-> engine tipo:'escolher_tipo_da_peca_recebida' + ator — legado ST-10, removido do domínio pela #138 (limpeza wire na #140/#143)
 //   shared type:'MOVER_PEAO' + jogadorId <-> engine tipo:'mover_peao' + ator
 //   shared type:'PERMANECER' + jogadorId <-> engine tipo:'permanecer' + ator
 //   shared type:'CONFIRMAR_POSICAO_DO_PEAO' + jogadorId <-> engine tipo:'confirmar_posicao_do_peao' + ator
@@ -99,20 +98,6 @@ export interface PosicionarPeaoPartidaComando {
   readonly celula: Celula;
 }
 
-/**
- * Escolha do tipo da Recebida (legado ST-10).
- *
- * @deprecated O domínio #138 removeu a escolha de tipo: o cliente escolhe a
- * VAGA de cada peça já sorteada (EscolherVagaDaPecaRecebidaPartidaComando).
- * Permanece na união até a limpeza do wire legado (#140/#143).
- */
-export interface EscolherTipoDaPecaRecebidaPartidaComando {
-  readonly type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA';
-  readonly jogadorId: string;
-  readonly recebidaId: RecebidaId;
-  readonly tipoDaPeca: TipoDePecaDeCaminho;
-}
-
 // Escolha da vaga (issue #138): uma escolha POR peça sorteada — a borda
 // indicada deve ser uma vaga disponível da Peça sob o Peão selecionado.
 export interface EscolherVagaDaPecaRecebidaPartidaComando {
@@ -157,9 +142,7 @@ export type PartidaComandoDoCliente =
   | MoverPeaoPartidaComando
   | PermanecerPartidaComando
   | ConfirmarPosicaoDoPeaoComando
-  | EncerrarTurnoComando
-  // Legado ST-10, fora do domínio desde a #138 (limpeza na #140/#143).
-  | EscolherTipoDaPecaRecebidaPartidaComando;
+  | EncerrarTurnoComando;
 
 // --- Eventos servidor → cliente (5 + 2 da issue #138) ---
 
