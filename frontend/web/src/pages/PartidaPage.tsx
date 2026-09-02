@@ -99,13 +99,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           partidaEmAndamento()
           return
         }
-        if (
-          evento.type === 'TURNO_INICIADO' ||
-          evento.type === 'TURNO_ENCERRADO' ||
-          evento.type === 'POSICAO_CONFIRMADA'
-        ) {
-          partidaEmAndamento()
-        }
+        // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
+        // ESTADO_DA_PARTIDA (em_andamento): eventos de turno avulsos não
+        // abrem o tabuleiro sem snapshot — descreve a própria PR.
         despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
         // Feedback unificado: cobre eventos de tabuleiro, peão, turno (#118)
         // e limpeza (#151). Branco para aprovação/seleção; vermelho para

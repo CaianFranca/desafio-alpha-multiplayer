@@ -581,6 +581,37 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     expect(screen.queryByTestId('overlay-aguardando')).not.toBeInTheDocument()
   })
 
+  it('TURNO_INICIADO/POSICAO_CONFIRMADA avulsos não promovem a tela (só snapshot/PARTIDA_INICIADA)', async () => {
+    renderPartidaNaRota('/partida?serverId=s&partidaId=p')
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+        apelido: 'JogadorTeste',
+        partidaId: 'p',
+        estado: 'preparada',
+      }),
+    )
+    expect(await screen.findByTestId('overlay-aguardando')).toBeInTheDocument()
+
+    // Promoção secundária por turno foi removida da descrição da PR: eventos
+    // de turno sem snapshot/ESTADO_DA_PARTIDA não podem abrir o tabuleiro.
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 1 }))
+    act(() => ws.simulateMessage({ type: 'TURNO_ENCERRADO', jogadorId: 'jogador-2' }))
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+        pecaId: 'inicial-2',
+      }),
+    )
+    expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
+    expect(screen.getByTestId('overlay-aguardando')).toBeInTheDocument()
+  })
+
   it('admissão em_andamento vai direto para disponivel', async () => {
     renderPartidaNaRota('/partida?serverId=s&partidaId=p')
     await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
