@@ -580,9 +580,7 @@ function moverPeaoDaPartida(
   // Guarda defensiva: monstro nunca aceita peão — rejeita antes de qualquer
   // exceção de ocupação (mesmo que contivesse afetado em estado artesanal).
   if (destino && ehPecaDeMonstro(destino.tipo)) {
-    // Delega para manter código de erro canônico do domínio base.
-    const resultadoMonstro = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
-    if (!resultadoMonstro.sucesso) return { sucesso: false, erro: resultadoMonstro.erro };
+    return rejeitarDaPartida('PECA_JA_TEM_PEAO', 'A Peça de destino é um Monstro e não aceita Peão.');
   }
 
   // Precedência: conexão antes de ocupação — garante que sem conexão o erro
