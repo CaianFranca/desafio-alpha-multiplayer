@@ -40,11 +40,8 @@ const escolherVaga = (recebidaId: string, borda: BordaCardinal) =>
 const moverPeao = (peaoId: string, linha: number, coluna: number) =>
   ({ tipo: 'mover_peao', peaoId, celula: { linha, coluna } } as const);
 
-const girar = (pecaId: string) =>
-  ({ tipo: 'girar_peca', pecaId, sentido: 'horario' } as const);
-
-const confirmarPosicao = (peaoId: string) =>
-  ({ tipo: 'confirmar_posicao_do_peao', peaoId } as const);
+const girar = (pecaId: string, sentido: 'horario' | 'anti_horario' = 'horario') =>
+  ({ tipo: 'girar_peca', pecaId, sentido } as const);
 
 const encerrarTurno = () => ({ tipo: 'encerrar_turno' } as const);
 
@@ -306,6 +303,43 @@ for (const [tipo, pecaId] of [
   });
 }
 
+test('peça especial recebida pode ser girada antes do encaixe e a orientação é preservada no peca_posicionada', () => {
+  for (const [tipo, pecaId] of [
+    ['gerador', 'gerador-1'],
+    ['sala_do_diretor', 'sala-do-diretor-1'],
+    ['sala_medica', 'sala-medica-1'],
+    ['portao_de_saida', 'portao-de-saida-1'],
+  ] as const) {
+    let estado = estadoComEspecialPendente(tipo, pecaId);
+    estado = aplicarTabuleiro(estado, escolherVaga(`recebida-${pecaId}`, 'norte'));
+    // Giro horário: 0 -> 90 (recebida segue padrão da seleção única, sem janela)
+    const giro = aplicarComandoDeTabuleiro(estado, girar(pecaId, 'horario'));
+    assert.equal(giro.sucesso, true);
+    if (!giro.sucesso) continue;
+    assert.equal(giro.eventos[0].tipo, 'peca_girada');
+    if (giro.eventos[0].tipo !== 'peca_girada') continue;
+    assert.equal(giro.eventos[0].orientacao, 90);
+    assert.equal(giro.estado.recebidas[0].orientacao, 90);
+    estado = giro.estado;
+    // Anti-horário volta a 0
+    const giroVolta = aplicarComandoDeTabuleiro(estado, girar(pecaId, 'anti_horario'));
+    assert.equal(giroVolta.sucesso, true);
+    if (!giroVolta.sucesso) continue;
+    assert.equal(giroVolta.estado.recebidas[0].orientacao, 0);
+    estado = giroVolta.estado;
+    // Gira novamente e encaixa: evento reflete orientação girada
+    estado = aplicarTabuleiro(estado, girar(pecaId, 'horario'));
+    const encaixe = aplicarComandoDeTabuleiro(estado, posicionar(pecaId, 2, 3));
+    assert.equal(encaixe.sucesso, true);
+    if (!encaixe.sucesso) continue;
+    assert.equal(encaixe.eventos[0].tipo, 'peca_posicionada');
+    if (encaixe.eventos[0].tipo !== 'peca_posicionada') continue;
+    assert.equal(encaixe.eventos[0].orientacao, 90);
+    assert.equal(encaixe.estado.posicionadas.find((p) => p.pecaId === pecaId)?.orientacao, 90);
+    assert.equal(encaixe.estado.pecaEmManipulacaoId, null);
+  }
+});
+
 test('fluxo via partida: sorteio da sala_do_diretor e posicionamento na célula-alvo', () => {
   const inicio = estadoInicialDaPartida(JOGADORES);
   assert.equal(inicio.sucesso, true);
@@ -433,9 +467,10 @@ test('portao_de_saida aceita 2º/3º/4º peão; 5º é rejeitado com PECA_JA_TEM
   const ocupantesPortao = estado.tabuleiro.peoes.filter((peao) => peao.pecaId === 'portao-1').length;
   assert.equal(ocupantesPortao, 4);
 
-  // 5º peão tentando entrar no Portão lotado -> PECA_JA_TEM_PEAO (via domínio puro,
-  // pois a camada da Partida exige peão do ator; o domínio puro valida o teto).
-  // Via tabuleiro puro: portão com 4 ocupantes rejeita o 5º.
+  // Defesa sintética: portão já com 4 ocupantes reais (azul/branco/amarelo/vermelho).
+  // O 5º peão é artificial (peao-extra) só para provar que o teto 4 é rígido no
+  // domínio puro — em partida real só existem 4 peões, então este cenário nunca
+  // ocorre, mas o domínio deve rejeitar mesmo assim.
   const tabuleiroCheio: EstadoDoTabuleiro = {
     ...estadoInicialDoTabuleiro(),
     posicionadas: [

@@ -7,7 +7,7 @@
   "types": "src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/engine.test.ts test/tabuleiro.test.ts test/peoes.test.ts test/partida.test.ts test/caixa.test.ts test/monstros.test.ts test/termino.test.ts test/lobby.reabertura.test.ts test/pecas-especiais.test.ts"
+    "test": "tsx --test test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
