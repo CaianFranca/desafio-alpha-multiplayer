@@ -32,6 +32,7 @@ import {
   aplicarComandoDeTabuleiro,
   aplicarLimpeza,
   calcularIluminacao,
+  ehPecaDeMonstro,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   validarTexto,
@@ -570,34 +571,46 @@ function moverPeaoDaPartida(
     );
   }
 
-  // Exceção de ocupação (issue #171): peça com afetado tolera +1 peão.
-  // Guarda dinâmica ANTES de delegar, sem tocar peoes.ts com roster.
   const destino = estado.tabuleiro.posicionadas.find(
     (peca) =>
       peca.celula.linha === comando.celula.linha &&
       peca.celula.coluna === comando.celula.coluna,
   );
+
+  // Guarda defensiva: monstro nunca aceita peão — rejeita antes de qualquer
+  // exceção de ocupação (mesmo que contivesse afetado em estado artesanal).
+  if (destino && ehPecaDeMonstro(destino.tipo)) {
+    // Delega para manter código de erro canônico do domínio base.
+    const resultadoMonstro = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
+    if (!resultadoMonstro.sucesso) return { sucesso: false, erro: resultadoMonstro.erro };
+  }
+
+  // Precedência: conexão antes de ocupação — garante que sem conexão o erro
+  // seja MOVIMENTO_NAO_CONECTADO e não PECA_JA_TEM_PEAO mascarado.
+  const origemPeao = estado.tabuleiro.peoes.find((item) => item.peaoId === comando.peaoId);
+  const origemPecaId = origemPeao?.pecaId ?? null;
+  if (destino && origemPecaId !== null) {
+    const origem = estado.tabuleiro.posicionadas.find((peca) => peca.pecaId === origemPecaId);
+    if (origem) {
+      const conectadas = vizinhasConectadas(estado.tabuleiro, origem.pecaId);
+      const ehConectada = conectadas.some((peca) => peca.pecaId === destino.pecaId);
+      if (!ehConectada) {
+        const resultadoConexao = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
+        if (!resultadoConexao.sucesso) return { sucesso: false, erro: resultadoConexao.erro };
+      }
+    }
+  }
+
+  // Exceção de ocupação (issue #171): peça com afetado tolera +1 peão.
   if (destino) {
+    const teto = tetoOcupacao(destino, estado);
     const ocupantes = estado.tabuleiro.peoes.filter(
       (peao) => peao.pecaId === destino.pecaId,
     ).length;
-    const ehPortao = destino.tipo === 'portao_de_saida';
-    const tetoNormal = ehPortao ? 4 : 1;
-    const temAfetado = estado.jogadores.some((jogador) => {
-      const peao = estado.tabuleiro.peoes.find((item) => item.peaoId === jogador.peaoId);
-      return (
-        peao?.pecaId === destino.pecaId &&
-        ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
-      );
-    });
-    const teto = temAfetado ? tetoNormal + 1 : tetoNormal;
     if (ocupantes >= teto) {
       return rejeitarDaPartida('PECA_JA_TEM_PEAO', 'A Peça de destino já abriga outro Peão.');
     }
   }
-
-  const origemPeao = estado.tabuleiro.peoes.find((item) => item.peaoId === comando.peaoId);
-  const origemPecaId = origemPeao?.pecaId ?? null;
 
   const resultadoTab = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
   let tabuleiroNovo: EstadoDoTabuleiro;
@@ -609,19 +622,10 @@ function moverPeaoDaPartida(
     // o movimento manualmente (evita tocar peoes.ts com roster e mantém a
     // dependência unidirecional partida→tabuleiro→peoes).
     if (resultadoTab.erro.codigo === 'PECA_JA_TEM_PEAO' && destino) {
+      const teto = tetoOcupacao(destino, estado);
       const ocupantes = estado.tabuleiro.peoes.filter(
         (peao) => peao.pecaId === destino.pecaId,
       ).length;
-      const ehPortao = destino.tipo === 'portao_de_saida';
-      const tetoNormal = ehPortao ? 4 : 1;
-      const temAfetado = estado.jogadores.some((jogador) => {
-        const peao = estado.tabuleiro.peoes.find((item) => item.peaoId === jogador.peaoId);
-        return (
-          peao?.pecaId === destino.pecaId &&
-          ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
-        );
-      });
-      const teto = temAfetado ? tetoNormal + 1 : tetoNormal;
       if (ocupantes < teto) {
         const origem = origemPecaId
           ? estado.tabuleiro.posicionadas.find((peca) => peca.pecaId === origemPecaId)
@@ -634,6 +638,10 @@ function moverPeaoDaPartida(
         // guardas, mas reforçamos por segurança).
         const conectadas = vizinhasConectadas(estado.tabuleiro, origem.pecaId);
         if (!conectadas.some((peca) => peca.pecaId === destino.pecaId)) {
+          return { sucesso: false, erro: resultadoTab.erro };
+        }
+        // Defesa monstro já validada acima, mas reforça aqui para fallback artesanal.
+        if (ehPecaDeMonstro(destino.tipo)) {
           return { sucesso: false, erro: resultadoTab.erro };
         }
         const peoes = estado.tabuleiro.peoes.map((item) =>
@@ -716,6 +724,12 @@ function moverPeaoDaPartida(
     origemPecaId !== pecaIdPara
   ) {
     pecasEmPeriodoDeGraca = pecasEmPeriodoDeGraca.filter((id) => id !== origemPecaId);
+  }
+  // Poda stale: se a peça graçada não existe mais no tabuleiro (ex.: limpeza
+  // defensiva), remove da lista para não reter ID órfão.
+  if (pecasEmPeriodoDeGraca.length > 0) {
+    const idsPosicionadas = new Set(tabuleiroNovo.posicionadas.map((peca) => peca.pecaId));
+    pecasEmPeriodoDeGraca = pecasEmPeriodoDeGraca.filter((id) => idsPosicionadas.has(id));
   }
 
   const estadoNovo: EstadoDaPartida = {
@@ -1446,6 +1460,23 @@ function resolverAtaqueNoGatilho(
   }));
 
   return { peoesNoAlcance: resolucao.peoesNoAlcance, jogadores };
+}
+
+// Resgate (issue #171): helpers de ocupação — extraídos para DRY entre guarda
+// pré-delegação e fallback manual.
+function temAfetadoNaPeca(pecaId: string, estado: EstadoDaPartida): boolean {
+  return estado.jogadores.some((jogador) => {
+    const peao = estado.tabuleiro.peoes.find((item) => item.peaoId === jogador.peaoId);
+    return (
+      peao?.pecaId === pecaId &&
+      ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
+    );
+  });
+}
+
+function tetoOcupacao(peca: PecaPosicionada, estado: EstadoDaPartida): number {
+  const tetoNormal = peca.tipo === 'portao_de_saida' ? 4 : 1;
+  return temAfetadoNaPeca(peca.pecaId, estado) ? tetoNormal + 1 : tetoNormal;
 }
 
 // Pré-condição: ambos arrays devem vir do mesmo calcularIluminacao, que retorna
