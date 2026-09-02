@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   aplicarComandoDePartida,
+  avaliarTerminoDaPartida,
   calcularIluminacao,
   estadoInicialDaPartida,
   type BordaCardinal,
@@ -85,6 +86,10 @@ function forcarAnaAtiva(s: EstadoDaPartida): EstadoDaPartida {
   return { ...s, jogadorAtivoId: 'ana', pecaDoInicioDoTurnoId: peaoAna.pecaId, posicaoConfirmada: false };
 }
 
+function peoesEmBaixa(jogadores: readonly { peaoId: string; emBaixaIluminacao?: boolean }[]): readonly string[] {
+  return jogadores.filter(j => (j.emBaixaIluminacao ?? false)).map(j => j.peaoId);
+}
+
 test('cada jogador inicia com 3 de sanidade; piso zero e imune quando amedrontado', () => {
   const e = iniciado();
   for (const j of e.jogadores) {
@@ -133,8 +138,17 @@ test('cada jogador inicia com 3 de sanidade; piso zero e imune quando amedrontad
 
 test('vulto impõe Baixa Iluminação: iluminação própria célula e limpeza reflete sem duplicata', () => {
   let s = rodada2();
+  // peca-isca em 0,3 iluminada só por ana antes do confirmar: ana sobre vulto-x em 1,3 ilumina 0,3 ao norte
+  s = comPeca(s, 'peca-isca', 'reta', 0, 0, 3);
   s = comPeca(s, 'vulto-x', 'vulto', 0, 1, 3);
+  s = comPeaoSobre(s, 'peao-branco', 'vulto-x');
   s = forcarAnaAtiva(s);
+  // verifica iluminada só por ana antes do confirmar
+  const ilumAntes = calcularIluminacao(s.tabuleiro, peoesEmBaixa(s.jogadores));
+  assert.ok(ilumAntes.some(c => c.linha === 0 && c.coluna === 3), 'peca-isca deve estar iluminada antes');
+  const tabSemAna = { ...s.tabuleiro, peoes: s.tabuleiro.peoes.filter(p => p.peaoId !== 'peao-branco') } as any;
+  const ilumOutros = calcularIluminacao(tabSemAna, peoesEmBaixa(s.jogadores));
+  assert.equal(ilumOutros.some(c => c.linha === 0 && c.coluna === 3), false, 'peca-isca iluminada só por ana antes');
   s = aplicar(s, selecionarPeao('peao-branco'), 'ana');
   s = aplicar(s, moverPeao('peao-branco', 2, 3), 'ana');
   s = aplicar(s, selecionarPeao('peao-branco'), 'ana');
@@ -146,6 +160,11 @@ test('vulto impõe Baixa Iluminação: iluminação própria célula e limpeza r
   const ilum = r.estado.celulasIluminadas;
   assert.ok(ilum.some(c => c.linha === 2 && c.coluna === 3));
   assert.equal(ilum.some(c => c.linha === 1 && c.coluna === 3), false);
+  // segunda limpeza (reaplicarIluminacaoSeBaixaNova) deve ter removido peca-isca, que ficou fora da nova iluminação restrita
+  const limpezaEventos = r.eventos.filter(e => e.tipo === 'limpeza_aplicada') as any[];
+  const contemIsca = limpezaEventos.some(e => (e.pecasRemovidas as readonly string[]).includes('peca-isca'));
+  assert.ok(contemIsca, 'limpeza_aplicada deve conter peca-isca');
+  assert.equal(r.estado.tabuleiro.posicionadas.some(p => p.pecaId === 'peca-isca'), false, 'peca-isca removida');
   const celEvents = r.eventos.filter(e => e.tipo === 'celulas_iluminadas');
   assert.equal(celEvents.length, 1);
 });
@@ -205,7 +224,7 @@ test('em Baixa Recebimento é 1; sem vaga ou caixa esgotada 0', () => {
 
 test('em Baixa Movimentação e Permanência permanecem normais', () => {
   let s = rodada2();
-  // Garante destino iluminado por outro peão: peça em 3,4 mantida por peão-azul
+  // Garante destino iluminado por outro peão: peça em 3,4 mantida por peão-azul (prepara antes do ataque, sem recriar)
   s = comPeca(s, 'dest-34', 'reta', 90, 3, 4);
   s = comPeaoSobre(s, 'peao-azul', 'dest-34');
   s = comPeca(s, 'vulto-x', 'vulto', 0, 1, 3);
@@ -217,17 +236,8 @@ test('em Baixa Movimentação e Permanência permanecem normais', () => {
   assert.equal(r.sucesso, true);
   if (!r.sucesso) return;
   s = resolverRecebidas(r.estado, 'ana');
-  // Re-injeta destino caso tenha sido removido pela segunda limpeza (baixa)
-  if (!s.tabuleiro.posicionadas.some(p => p.pecaId === 'dest-34')) {
-    s = comPeca(s, 'dest-34', 'reta', 90, 3, 4);
-    s = comPeaoSobre(s, 'peao-azul', 'dest-34');
-  }
   s = aplicar(s, encerrar(), 'ana');
   s = forcarAnaAtiva(s);
-  // Destino 3,3 (inicial-1) pode ter sido removida; recria se necessário e garante conexão (inicial-1 norte aberto)
-  if (!s.tabuleiro.posicionadas.some(p => p.celula.linha === 3 && p.celula.coluna === 3)) {
-    s = comPeca(s, 'inicial-1', 'inicial', 0, 3, 3);
-  }
   s = aplicar(s, selecionarPeao('peao-branco'), 'ana');
   const mv = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
   assert.equal(mv.sucesso, true);
@@ -255,7 +265,10 @@ test('espectro drena, amedrontado auto-pula mantendo iluminação', () => {
   const ana = r.estado.jogadores.find(j => j.jogadorId === 'ana')!;
   assert.equal(ana.sanidade, 0);
   assert.equal(ana.amedrontado, true);
-  const ilum = calcularIluminacao(r.estado.tabuleiro, []);
+  assert.equal(ana.emBaixaIluminacao, false);
+  const baixa = peoesEmBaixa(r.estado.jogadores);
+  assert.equal(baixa.length, 0);
+  const ilum = calcularIluminacao(r.estado.tabuleiro, baixa);
   assert.ok(ilum.some(c => c.linha === 1 && c.coluna === 3));
   let s2 = resolverRecebidas(r.estado, 'ana');
   const enc = aplicarComandoDePartida(s2, encerrar(), 'ana');
@@ -263,6 +276,49 @@ test('espectro drena, amedrontado auto-pula mantendo iluminação', () => {
   if (!enc.sucesso) return;
   assert.notEqual(enc.estado.jogadorAtivoId, 'ana');
   assert.equal(enc.estado.jogadorAtivoId, 'bruno');
+});
+
+test('amedrontado pula 2 seguidos: ana e bruno amedrontados -> carla com 1 turno_iniciado', () => {
+  let s = rodada2();
+  // ana e bruno amedrontados (sanidade 0)
+  s = comJogador(s, 'ana', { sanidade: 0, amedrontado: true });
+  s = comJogador(s, 'bruno', { sanidade: 0, amedrontado: true });
+  // força carla a ser o próximo não-amedrontado após ana encerrar
+  // prepara ana como ativa com posição já confirmada e sem pendências para permitir encerrar
+  const peaoAna = s.tabuleiro.peoes.find(p => p.peaoId === 'peao-branco')!;
+  s = { ...s, jogadorAtivoId: 'ana', pecaDoInicioDoTurnoId: peaoAna.pecaId, posicaoConfirmada: true, tabuleiro: { ...s.tabuleiro, recebidas: [] } };
+  const r = aplicarComandoDePartida(s, encerrar(), 'ana');
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  assert.equal(r.estado.jogadorAtivoId, 'carla');
+  const iniciados = r.eventos.filter(e => e.tipo === 'turno_iniciado');
+  assert.equal(iniciados.length, 1);
+  assert.equal((iniciados[0] as any).jogadorId, 'carla');
+  // garante que pulados não emitiram turno_iniciado
+  assert.equal(iniciados.some(e => (e as any).jogadorId === 'ana'), false);
+  assert.equal(iniciados.some(e => (e as any).jogadorId === 'bruno'), false);
+});
+
+test('todos amedrontados -> avaliarTerminoDaPartida equipe_amedrontada sem turno_iniciado', () => {
+  let s = rodada2();
+  for (const j of JOGADORES) s = comJogador(s, j, { sanidade: 0, amedrontado: true });
+  // estado com todos amedrontados deve ser derrota equipe_amedrontada
+  const aval = avaliarTerminoDaPartida(s);
+  assert.notEqual(aval.evento, null);
+  assert.equal(aval.evento!.desfecho.tipo, 'derrota');
+  assert.equal((aval.evento!.desfecho as any).motivo, 'equipe_amedrontada');
+  // avancarVez com todos amedrontados não deve emitir turno_iniciado
+  const peaoAna = s.tabuleiro.peoes.find(p => p.peaoId === 'peao-branco')!;
+  const sEnc: EstadoDaPartida = { ...s, jogadorAtivoId: 'ana', pecaDoInicioDoTurnoId: peaoAna.pecaId, posicaoConfirmada: true, tabuleiro: { ...s.tabuleiro, recebidas: [] } };
+  const r = aplicarComandoDePartida(sEnc, encerrar(), 'ana');
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  const iniciados = r.eventos.filter(e => e.tipo === 'turno_iniciado');
+  assert.equal(iniciados.length, 0, 'nenhum turno_iniciado quando todos amedrontados');
+  // funil deve transformar em partida_terminada equipe_amedrontada
+  const term = r.eventos.filter(e => e.tipo === 'partida_terminada');
+  assert.equal(term.length, 1);
+  assert.equal((term[0] as any).desfecho.motivo, 'equipe_amedrontada');
 });
 
 test('ataque simultâneo de vulto+espectro com proteção consome uma vez', () => {
