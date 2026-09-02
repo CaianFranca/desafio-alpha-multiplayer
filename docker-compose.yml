@@ -128,6 +128,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       GAME_SERVER_PORT: ${GAME_SERVER_PORT:-1234}
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me}
+      PARTIDA_TERMINADA_TTL_SEGUNDOS: ${PARTIDA_TERMINADA_TTL_SEGUNDOS:-3600}
+      LOBBY_RETORNO_CALLBACK_URL: ${LOBBY_RETORNO_CALLBACK_URL:-http://lobby-server:3001/api/retorno}
       NODE_ENV: ${NODE_ENV:-development}
       PG_POOL_MAX: ${PG_POOL_MAX:-10}
     healthcheck:

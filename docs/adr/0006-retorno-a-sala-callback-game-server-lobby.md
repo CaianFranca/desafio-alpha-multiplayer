@@ -40,6 +40,10 @@ resultado, no seu ritmo, enquanto a transição da sala no servidor já acontece
   game-server; o jogador que recarrega a página volta a ver o resultado e
   retorna quando quiser, sem coordenação entre clientes.
 
+## Exceção — falhas definitivas não são retentadas
+
+Falhas retentáveis (rede/timeout, `5xx`, `503`, `408`, `429` com `Retry-After` e `409 SALA_INCONSISTENTE`) são retomadas com backoff até `200`. Falhas definitivas (`400 DADOS_INVALIDOS`, `404 SALA_NAO_ENCONTRADA`, `409 SALA_NAO_ENCAMINHADA`) indicam revalidação do lobby (`encaminhada + partidaId/serverId/membros`, `backend/lobby-server/src/routes/retorno.ts:50-163` e `reabrirSalaComMarkerAtomico` em `salas/repositorio.ts:258` com idempotência via `sala_reaberta_markers`): o payload nunca se tornará válido sozinho, então o cliente encerra o retry com `console.error` em vez de loop infinito. Essa exceção garante diagnóstico visível e evita DDoS self-inflicted sobre o lobby; a sala permanece `encaminhada` e requer reconciliação externa. Ver contrato de #178.
+
 ## Alternativas consideradas
 
 - **Lobby consulta o game-server (poll)** — rejeitada: o lobby não sabe

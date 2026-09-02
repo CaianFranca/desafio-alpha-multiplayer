@@ -13,6 +13,8 @@ export interface Config {
   sessionAccessTtlSeconds: number;
   sessionRefreshTtlSeconds: number;
   partidaPreparadaTtlSegundos: number;
+  partidaTerminadaTtlSegundos: number;
+  lobbyRetornoCallbackUrl: string;
   postgres: {
     host: string;
     port: number;
@@ -40,6 +42,7 @@ const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
 const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
+const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -97,12 +100,38 @@ function parsePoolMax(raw: string | undefined): number {
   return DEFAULT_PG_POOL_MAX;
 }
 
-function parsePartidaPreparadaTtlSegundos(raw: string | undefined): number {
-  const parsed = Number(raw ?? DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS);
+function parseTtlSegundos(raw: string | undefined, fallback: number, label: string): number {
+  const parsed = Number(raw ?? fallback);
   if (Number.isInteger(parsed) && parsed > 0) {
     return parsed;
   }
-  return DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS;
+  if (raw !== undefined) {
+    console.warn(`[config] ${label} inválido "${raw}" — usando fallback ${fallback}`);
+  }
+  return fallback;
+}
+
+function parsePartidaPreparadaTtlSegundos(raw: string | undefined): number {
+  return parseTtlSegundos(raw, DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS, 'PARTIDA_PREPARADA_TTL_SEGUNDOS');
+}
+
+function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
+  return parseTtlSegundos(raw, DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS, 'PARTIDA_TERMINADA_TTL_SEGUNDOS');
+}
+
+function parseLobbyRetornoCallbackUrl(raw: string | undefined, fallback: string): string {
+  if (raw === undefined || raw.trim().length === 0) {
+    return fallback;
+  }
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('protocolo não suportado');
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    throw new Error('LOBBY_RETORNO_CALLBACK_URL deve ser uma URL HTTP(S) válida');
+  }
 }
 
 function parseSessionAccessTtlSeconds(raw: string | undefined): number {
@@ -150,6 +179,8 @@ export function createRedisClientOptions(redis: Config['redis']): { host: string
     maxRetriesPerRequest: null,
   };
 }
+
+export * from './serviceToken.js';
 
 export function criarClienteRedis(): Redis {
   const { redis } = getConfig();
@@ -205,6 +236,13 @@ export function getConfig(): Config {
   const poolMax = parsePoolMax(process.env.PG_POOL_MAX);
   const partidaPreparadaTtlSegundos = parsePartidaPreparadaTtlSegundos(
     process.env.PARTIDA_PREPARADA_TTL_SEGUNDOS as string | undefined,
+  );
+  const partidaTerminadaTtlSegundos = parsePartidaTerminadaTtlSegundos(
+    process.env.PARTIDA_TERMINADA_TTL_SEGUNDOS as string | undefined,
+  );
+  const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
+    process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
+    `http://localhost:${lobbyServerPort}/api/retorno`,
   );
 
   const postgres = {
@@ -267,6 +305,8 @@ export function getConfig(): Config {
     sessionAccessTtlSeconds,
     sessionRefreshTtlSeconds,
     partidaPreparadaTtlSegundos,
+    partidaTerminadaTtlSegundos,
+    lobbyRetornoCallbackUrl,
     postgres,
     redis,
     gameServerHeartbeatIntervalMs,

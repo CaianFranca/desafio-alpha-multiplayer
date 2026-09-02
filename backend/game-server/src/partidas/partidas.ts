@@ -1,8 +1,8 @@
 import type { Redis } from 'ioredis';
 import type { MembroDaSala, OfertaDeEncaminhamento, PartidaId, ServerId } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
+import { chaveDaPartida, chaveDoEstadoDaPartida } from './chaves.ts';
 import {
-  chaveDoEstadoDaPartida,
   inicializarEstadoDaPartida,
   removerEstadoDaPartida,
 } from './estado.ts';
@@ -19,9 +19,7 @@ export interface PartidaPreparada {
   readonly criadaEm: string;
 }
 
-export function chaveDaPartida(partidaId: PartidaId): string {
-  return `game-server:partida:${partidaId}`;
-}
+export { chaveDaPartida, chaveDoEstadoDaPartida };
 
 export async function criarPartidaPreparada(
   contexto: ContextoDoGameServer,

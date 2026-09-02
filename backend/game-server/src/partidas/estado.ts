@@ -16,9 +16,20 @@ import {
 const TTL_NAO_EXISTE = -2;
 const TTL_SEM_EXPIRACAO = -1;
 
-export function chaveDoEstadoDaPartida(partidaId: string): string {
-  return `game-server:partida-estado:${partidaId}`;
-}
+const SCRIPT_APLICAR_RETENCAO_DE_TERMINO = `
+local partidaExiste = redis.call('EXISTS', KEYS[1])
+local estadoExiste = redis.call('EXISTS', KEYS[2])
+if partidaExiste == 0 or estadoExiste == 0 then
+  return 0
+end
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[2], ARGV[1])
+return 1
+`.trim();
+
+import { chaveDaPartida, chaveDoEstadoDaPartida } from './chaves.ts';
+
+export { chaveDaPartida, chaveDoEstadoDaPartida };
 
 /**
  * Grava o estado inicial da partida no Redis com o TTL da partida preparada.
@@ -66,7 +77,8 @@ export async function obterEstadoDaPartida(
  * e aplica-se `SET ... EX ttl`. Se a chave já expirou/inexiste (`ttl === -2`),
  * a partida acabou e o estado não é repersistido. Quando a partida está
  * `em_andamento` (ST-14), o TTL é -1 (sem expiração) e o estado é repersistido
- * sem TTL.
+ * sem TTL. Ao terminar, `aplicarRetencaoDeTermino` substitui esse estado
+ * persistente por uma janela finita de retenção.
  */
 export async function salvarEstadoDaPartida(
   redis: Redis,
@@ -87,6 +99,33 @@ export async function salvarEstadoDaPartida(
     return;
   }
   await redis.set(chave, JSON.stringify(estado));
+}
+
+/**
+ * Aplica a política de retenção do término (issue #177): fixa um TTL finito
+ * nas duas chaves da partida (metadados + estado) para que o resultado
+ * sobreviva ao recarregamento dentro da janela, mas não viva para sempre
+ * como o `PERSIST` do ST-14.
+ */
+export async function aplicarRetencaoDeTermino(
+  redis: Redis,
+  partidaId: string,
+  ttlSegundos: number,
+): Promise<void> {
+  if (!Number.isInteger(ttlSegundos) || ttlSegundos <= 0) {
+    throw new Error(`TTL de retenção inválido para a partida ${partidaId}`);
+  }
+  const aplicada = await redis.eval(
+    SCRIPT_APLICAR_RETENCAO_DE_TERMINO,
+    2,
+    `game-server:partida:${partidaId}`,
+    chaveDoEstadoDaPartida(partidaId),
+    ttlSegundos,
+  );
+  if (Number(aplicada) !== 1) {
+    console.warn('[estado] retenção negada — chave ausente', { partidaId, ttlSegundos });
+    throw new Error(`Não foi possível aplicar a retenção da partida ${partidaId}: chave ausente`);
+  }
 }
 
 /** Remove o estado da partida (usado no cancelamento da partida). */
