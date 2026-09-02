@@ -180,10 +180,10 @@ test('estadoInicialDaPartida monta o roster, a vez e o evento de abertura', () =
 
   const estado = resultado.estado;
   assert.deepEqual(estado.jogadores, [
-    { jogadorId: 'ana', ordem: 1, cor: 'branco', peaoId: 'peao-branco', primeiroTurnoPendente: true, sanidade: 3 },
-    { jogadorId: 'bruno', ordem: 2, cor: 'vermelho', peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3 },
-    { jogadorId: 'carla', ordem: 3, cor: 'azul', peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3 },
-    { jogadorId: 'diogo', ordem: 4, cor: 'amarelo', peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3 },
+    { jogadorId: 'ana', ordem: 1, cor: 'branco', peaoId: 'peao-branco', primeiroTurnoPendente: true, sanidade: 3, protegido: false },
+    { jogadorId: 'bruno', ordem: 2, cor: 'vermelho', peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, protegido: false },
+    { jogadorId: 'carla', ordem: 3, cor: 'azul', peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, protegido: false },
+    { jogadorId: 'diogo', ordem: 4, cor: 'amarelo', peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, protegido: false },
   ]);
   assert.equal(estado.jogadorAtivoId, 'ana');
   assert.equal(estado.rodada, 1);

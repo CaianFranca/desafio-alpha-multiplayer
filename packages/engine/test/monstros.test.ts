@@ -5,16 +5,24 @@ import {
   aplicarComandoDePartida,
   aplicarComandoDeTabuleiro,
   bordasAbertas,
+  calcularAlcance,
   ehPecaDeMonstro,
   estadoInicialDaPartida,
   estadoInicialDoTabuleiro,
+  resolverAtaques,
   vizinhasConectadas,
+  type AtaqueResolvidoEvento,
   type BordaCardinal,
   type CodigoDeErroDeTabuleiro,
   type ComandoDePartida,
   type ComandoDeTabuleiro,
   type EstadoDaPartida,
   type EstadoDoTabuleiro,
+  type EventoDaPartida,
+  type JogadorAlvoDoAtaque,
+  type Orientacao,
+  type PecaPosicionada,
+  type TipoDaPeca,
 } from '../src/index.ts';
 
 const JOGADORES = ['ana', 'bruno', 'carla', 'diogo'];
@@ -39,6 +47,14 @@ const moverPeao = (peaoId: string, linha: number, coluna: number) =>
 
 const girar = (pecaId: string) =>
   ({ tipo: 'girar_peca', pecaId, sentido: 'horario' } as const);
+
+const confirmarPosicao = (peaoId: string) =>
+  ({ tipo: 'confirmar_posicao_do_peao', peaoId } as const);
+
+const encerrarTurno = () => ({ tipo: 'encerrar_turno' } as const);
+
+const permanecer = (peaoId: string) =>
+  ({ tipo: 'permanecer', peaoId } as const);
 
 function aplicarTabuleiro(
   estado: EstadoDoTabuleiro,
@@ -137,6 +153,163 @@ function comMonstroFora(
       ],
     },
   };
+}
+
+// --- Fixtures do Alcance e do Ataque (issue #172) ---
+
+// Peça posicionada avulsa para montar a topologia do Alcance à mão (mesmo
+// padrão de peoes.test.ts nos testes de Conexão).
+const peca = (
+  pecaId: string,
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  linha: number,
+  coluna: number,
+): PecaPosicionada => ({
+  pecaId,
+  tipo,
+  orientacao,
+  celula: { linha, coluna },
+});
+
+// Injetor de peça posicionada com orientação explícita (padrão de comMonstroFora).
+function comPeca(
+  estado: EstadoDaPartida,
+  pecaId: string,
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  linha: number,
+  coluna: number,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId, tipo, orientacao, celula: { linha, coluna } },
+      ],
+    },
+  };
+}
+
+// Reposiciona um Peão sobre a Peça indicada por injeção de estado: a camada
+// da Partida só desloca peões por Conexão; os fixtures de ataque precisam
+// pará-los diretamente sobre as peças do cenário.
+function comPeaoSobre(
+  estado: EstadoDaPartida,
+  peaoId: string,
+  pecaId: string,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      peoes: estado.tabuleiro.peoes.map((peao) =>
+        peao.peaoId === peaoId ? { ...peao, pecaId } : peao,
+      ),
+    },
+  };
+}
+
+// Extrai o ataque_resolvido do lote (undefined quando o gatilho não disparou).
+function ataqueDoLote(
+  eventos: readonly EventoDaPartida[],
+): AtaqueResolvidoEvento | undefined {
+  const ataque = eventos.find((evento) => evento.tipo === 'ataque_resolvido');
+  return ataque?.tipo === 'ataque_resolvido' ? ataque : undefined;
+}
+
+function partidaIniciada(): EstadoDaPartida {
+  const resultado = estadoInicialDaPartida(JOGADORES);
+  if (!resultado.sucesso) {
+    throw new Error('roster válido deveria iniciar a Partida');
+  }
+  return resultado.estado;
+}
+
+const jogadorAtivo = (estado: EstadoDaPartida) => {
+  const jogador = estado.jogadores.find(
+    (item) => item.jogadorId === estado.jogadorAtivoId,
+  );
+  if (!jogador) {
+    throw new Error('Partida sem Jogador Ativo');
+  }
+  return jogador;
+};
+
+// Resolve as pendências do Recebimento (mesmo padrão de partida.test.ts):
+// primeira borda canônica ainda disponível para a vaga, encaixe na célula-alvo.
+function resolverRecebidas(estado: EstadoDaPartida, ator: string): EstadoDaPartida {
+  while (estado.tabuleiro.recebidas.length > 0) {
+    const pendente = estado.tabuleiro.recebidas[0];
+    let resolvida: EstadoDaPartida | undefined;
+    for (const borda of ['norte', 'leste', 'sul', 'oeste'] as const) {
+      const resultado = aplicarComandoDePartida(
+        estado,
+        escolherVaga(pendente.recebidaId, borda),
+        ator,
+      );
+      if (resultado.sucesso) {
+        resolvida = resultado.estado;
+        break;
+      }
+    }
+    if (!resolvida) {
+      throw new Error(
+        `nenhuma vaga disponível para a pendência ${pendente.recebidaId}`,
+      );
+    }
+    estado = resolvida;
+    const escolhida = estado.tabuleiro.recebidas.find(
+      (item) => item.recebidaId === pendente.recebidaId,
+    );
+    if (!escolhida || escolhida.celulaAlvo === null) {
+      throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+    }
+    estado = aplicar(
+      estado,
+      posicionar(
+        escolhida.pecaId,
+        escolhida.celulaAlvo.linha,
+        escolhida.celulaAlvo.coluna,
+      ),
+      ator,
+    );
+  }
+  return estado;
+}
+
+// Primeiro Turno completo do Jogador Ativo (sem giros): Peça Inicial, Peão,
+// Recebimento resolvido e Encerramento.
+function concluirPrimeiroTurno(
+  estado: EstadoDaPartida,
+  celula: { linha: number; coluna: number },
+): EstadoDaPartida {
+  const ator = estado.jogadorAtivoId;
+  const jogador = jogadorAtivo(estado);
+  const pecaId = `inicial-${jogador.ordem}`;
+  estado = aplicar(estado, selecionar(pecaId), ator);
+  estado = aplicar(estado, posicionar(pecaId, celula.linha, celula.coluna), ator);
+  estado = aplicar(estado, selecionarPeao(jogador.peaoId), ator);
+  estado = aplicar(
+    estado,
+    posicionarPeao(jogador.peaoId, celula.linha, celula.coluna),
+    ator,
+  );
+  estado = resolverRecebidas(estado, ator);
+  return aplicar(estado, encerrarTurno(), ator);
+}
+
+// Partida em rodada 2 (vez de ana): peões em (3,3), (0,0), (6,6) e (6,0);
+// reta-1..6 encaixadas nas vagas dos Primeiros Turnos.
+function partidaEmRodada2(): EstadoDaPartida {
+  let estado = partidaIniciada();
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
+  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 0 });
+  return estado;
 }
 
 test('a composição da caixa inclui 6 vultos e 6 espectros entre as demais', () => {
@@ -428,4 +601,490 @@ test('limpeza remove monstro fora da iluminação sem retorno à Caixa', () => {
     resultado.estado.tabuleiro.caixa.length,
     caixaAntes - desenhadas,
   );
+});
+
+// --- Alcance (issue #172) ---
+
+test('alcance do vulto: raios retos ortogonais encadeados por Conexão, distância ilimitada, com retransmissão de monstro (critério 1)', () => {
+  const tabuleiro: EstadoDoTabuleiro = {
+    ...estadoInicialDoTabuleiro(),
+    posicionadas: [
+      peca('vulto-x', 'vulto', 0, 3, 3),
+      // norte: encadeia três peças até a borda da grade interromper.
+      peca('reta-n1', 'reta', 0, 2, 3),
+      peca('reta-n2', 'reta', 0, 1, 3),
+      peca('reta-n3', 'reta', 0, 0, 3),
+      // leste: o Espectro retransmite o raio como qualquer peça.
+      peca('espectro-e', 'espectro', 0, 3, 4),
+      peca('reta-l1', 'reta', 90, 3, 5),
+      peca('reta-l2', 'reta', 90, 3, 6),
+      // sul: a célula vazia (5,3) interrompe; reta-s2 fica fora.
+      peca('reta-s1', 'reta', 0, 4, 3),
+      peca('reta-s2', 'reta', 0, 6, 3),
+      // oeste: a Inicial conecta (leste aberto) mas sua borda oeste é
+      // fechada — o raio para nela; reta-o1 fica fora.
+      peca('inicial-o', 'inicial', 0, 3, 2),
+      peca('reta-o1', 'reta', 90, 3, 1),
+      // diagonais ao vulto: nunca entram.
+      peca('reta-d1', 'reta', 0, 2, 2),
+      peca('reta-d2', 'reta', 0, 4, 4),
+    ],
+  };
+  // Ordem determinística: por direção (norte, leste, sul, oeste) e distância.
+  assert.deepEqual(
+    calcularAlcance(tabuleiro, 'vulto-x').map((peca) => peca.pecaId),
+    [
+      'reta-n1',
+      'reta-n2',
+      'reta-n3',
+      'espectro-e',
+      'reta-l1',
+      'reta-l2',
+      'reta-s1',
+      'inicial-o',
+    ],
+  );
+});
+
+test('calcularAlcance: peça inexistente ou não-monstro tem alcance vazio', () => {
+  const tabuleiro: EstadoDoTabuleiro = {
+    ...estadoInicialDoTabuleiro(),
+    posicionadas: [peca('reta-1', 'reta', 0, 3, 3)],
+  };
+  assert.deepEqual(calcularAlcance(tabuleiro, 'reta-1'), []);
+  assert.deepEqual(calcularAlcance(tabuleiro, 'fantasma'), []);
+});
+
+test('alcance do espectro: apenas peças adjacentes conectadas nas quatro direções ortogonais (critério 2)', () => {
+  const tabuleiro: EstadoDoTabuleiro = {
+    ...estadoInicialDoTabuleiro(),
+    posicionadas: [
+      peca('espectro-x', 'espectro', 0, 3, 3),
+      // norte e leste conectam (borda oposta aberta).
+      peca('reta-n', 'reta', 0, 2, 3),
+      peca('t-l', 'T', 0, 3, 4),
+      // sul: o T girado 180° tem a borda norte fechada — não conecta.
+      peca('t-s', 'T', 180, 4, 3),
+      // oeste conecta.
+      peca('reta-o', 'reta', 90, 3, 2),
+      // distância 2 e diagonais ficam fora.
+      peca('reta-far', 'reta', 0, 1, 3),
+      peca('cruz-d1', 'cruz', 0, 2, 2),
+      peca('cruz-d2', 'cruz', 0, 2, 4),
+      peca('cruz-d3', 'cruz', 0, 4, 4),
+    ],
+  };
+  assert.deepEqual(
+    calcularAlcance(tabuleiro, 'espectro-x').map((peca) => peca.pecaId),
+    ['reta-n', 't-l', 'reta-o'],
+  );
+});
+
+// --- Ataque (issue #172) ---
+
+test('ataque é avaliado apenas nos gatilhos: mover, a movimentação desfeita e permanecer não disparam (critério 3)', () => {
+  let estado = partidaEmRodada2();
+  // Espectro ao norte de reta-1 (2,3): mover para lá entra no alcance.
+  estado = comPeca(estado, 'espectro-x', 'espectro', 0, 1, 3);
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+
+  // Movimentação tentativa (desfazível até a confirmação): nenhum ataque.
+  const ida = aplicarComandoDePartida(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  assert.equal(ida.sucesso, true);
+  if (!ida.sucesso) return;
+  assert.equal(ataqueDoLote(ida.eventos), undefined);
+  estado = ida.estado;
+
+  // Desfeita pela conexão simétrica: nenhum ataque no retorno.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const volta = aplicarComandoDePartida(estado, moverPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(volta.sucesso, true);
+  if (!volta.sucesso) return;
+  assert.equal(ataqueDoLote(volta.eventos), undefined);
+  estado = volta.estado;
+
+  // Permanência encerra o turno direto, sem gatilho e sem ataque.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const permanencia = aplicarComandoDePartida(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  assert.equal(ataqueDoLote(permanencia.eventos), undefined);
+  // O snapshot do Alcance nunca chegou a ser avaliado.
+  assert.deepEqual(permanencia.estado.peoesNoAlcance, {});
+});
+
+test('ataque: entrada no alcance atinge todos os peões de jogadores dentro dele (critério 4)', () => {
+  let estado = partidaEmRodada2();
+  // Espectro em (1,3): reta-y (0,3) ao norte e reta-1 (2,3) ao sul conectadas.
+  estado = comPeca(estado, 'espectro-x', 'espectro', 0, 1, 3);
+  estado = comPeca(estado, 'reta-y', 'reta', 0, 0, 3);
+  // Bruno (vermelho) já está dentro do alcance, parado sobre a reta-y.
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'reta-y');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+
+  const confirmado = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmado.sucesso, true);
+  if (!confirmado.sucesso) return;
+  const ataque = ataqueDoLote(confirmado.eventos);
+  assert.ok(ataque, 'a confirmação com entrada no alcance deveria disparar o ataque');
+  if (!ataque) return;
+  assert.deepEqual(ataque.atacantes, [
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco', 'peao-vermelho'] },
+  ]);
+  // Todos os peões de jogadores dentro do alcance são atingidos — não só o
+  // que entrou.
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco', 'peao-vermelho']);
+  assert.deepEqual(ataque.protegidos, []);
+  assert.deepEqual(confirmado.estado.peoesNoAlcance, {
+    'espectro-x': ['peao-branco', 'peao-vermelho'],
+  });
+});
+
+test('ataque: saída do alcance dispara sem atingir quem saiu e atingindo quem permanece (critério 4)', () => {
+  let estado = partidaEmRodada2();
+  // Espectro em (0,3): t-x (1,3) ao sul e reta-y (0,4) a leste conectadas;
+  // reta-z (1,4) conecta à t-x para a saída de bruno.
+  estado = comPeca(estado, 'espectro-x', 'espectro', 0, 0, 3);
+  estado = comPeca(estado, 't-x', 'T', 90, 1, 3);
+  estado = comPeca(estado, 'reta-y', 'reta', 90, 0, 4);
+  estado = comPeca(estado, 'reta-z', 'reta', 90, 1, 4);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 't-x');
+  estado = comPeaoSobre(estado, 'peao-azul', 'reta-y');
+
+  // Gatilho 1 (ana em reta-1, fora do alcance): atinge os dois peões no alcance.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const primeiro = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(primeiro.sucesso, true);
+  if (!primeiro.sucesso) return;
+  const ataque1 = ataqueDoLote(primeiro.eventos);
+  assert.ok(ataque1, 'o primeiro gatilho deveria avaliar o alcance');
+  if (!ataque1) return;
+  assert.deepEqual(ataque1.peoesAtingidos, ['peao-vermelho', 'peao-azul']);
+  estado = primeiro.estado;
+
+  estado = resolverRecebidas(estado, 'ana');
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+
+  // Gatilho 2 (bruno sai do alcance): dispara, não atinge quem saiu e atinge
+  // quem permanece (azul).
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  estado = aplicar(estado, moverPeao('peao-vermelho', 1, 4), 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const segundo = aplicarComandoDePartida(estado, confirmarPosicao('peao-vermelho'), 'bruno');
+  assert.equal(segundo.sucesso, true);
+  if (!segundo.sucesso) return;
+  const ataque2 = ataqueDoLote(segundo.eventos);
+  assert.ok(ataque2, 'a saída do alcance deveria disparar o ataque');
+  if (!ataque2) return;
+  assert.deepEqual(ataque2.atacantes, [
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-azul'] },
+  ]);
+  assert.deepEqual(ataque2.peoesAtingidos, ['peao-azul']);
+  assert.deepEqual(segundo.estado.peoesNoAlcance, { 'espectro-x': ['peao-azul'] });
+});
+
+test('ataque: saída com ninguém restante ainda dispara o ataque (critério 4 — mesmo que ninguém)', () => {
+  let estado = partidaEmRodada2();
+  estado = comPeca(estado, 'espectro-x', 'espectro', 0, 0, 3);
+  estado = comPeca(estado, 't-x', 'T', 90, 1, 3);
+  estado = comPeca(estado, 'reta-z', 'reta', 90, 1, 4);
+  // reta-luz (0,2) ilumina o espectro de FORA do alcance (leste fechado).
+  estado = comPeca(estado, 'reta-luz', 'reta', 0, 0, 2);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 't-x');
+  estado = comPeaoSobre(estado, 'peao-azul', 'reta-luz');
+
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const primeiro = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(primeiro.sucesso, true);
+  if (!primeiro.sucesso) return;
+  const ataque1 = ataqueDoLote(primeiro.eventos);
+  assert.ok(ataque1);
+  if (!ataque1) return;
+  assert.deepEqual(ataque1.peoesAtingidos, ['peao-vermelho']);
+  estado = primeiro.estado;
+
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+
+  // Bruno sai e não sobra ninguém no alcance: o ataque dispara mesmo assim.
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  estado = aplicar(estado, moverPeao('peao-vermelho', 1, 4), 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const segundo = aplicarComandoDePartida(estado, confirmarPosicao('peao-vermelho'), 'bruno');
+  assert.equal(segundo.sucesso, true);
+  if (!segundo.sucesso) return;
+  const ataque2 = ataqueDoLote(segundo.eventos);
+  assert.ok(ataque2, 'a saída deveria disparar o ataque mesmo sem atingidos');
+  if (!ataque2) return;
+  assert.deepEqual(ataque2.atacantes, [
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: [] },
+  ]);
+  assert.deepEqual(ataque2.peoesAtingidos, []);
+  assert.deepEqual(segundo.estado.peoesNoAlcance, { 'espectro-x': [] });
+});
+
+test('posicionamento de peça que estende o alcance não dispara; o peão parado é atingido no próximo gatilho, de qualquer peão (critério 5)', () => {
+  let estado = partidaEmRodada2();
+  // Vulto em (0,3) com o raio sul bloqueado pela célula vazia (1,3); azul
+  // ilumina o vulto de (0,2), fora do alcance dele (leste da luz fechado).
+  estado = comPeca(estado, 'vulto-x', 'vulto', 0, 0, 3);
+  estado = comPeca(estado, 'reta-luz', 'reta', 0, 0, 2);
+  estado = comPeaoSobre(estado, 'peao-azul', 'reta-luz');
+
+  // Gatilho 1 (ana confirma em reta-1): raio bloqueado — sem ataque.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const confirmado = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmado.sucesso, true);
+  if (!confirmado.sucesso) return;
+  assert.equal(ataqueDoLote(confirmado.eventos), undefined);
+  assert.deepEqual(confirmado.estado.peoesNoAlcance, { 'vulto-x': [] });
+  estado = confirmado.estado;
+
+  // O Recebimento (reta-7, vaga norte) encaixa em (1,3) e estende o raio do
+  // vulto até reta-1 — onde o peão de ana está PARADO. Escolha de vaga e
+  // encaixe não são gatilhos: nenhum ataque.
+  const recebida = estado.tabuleiro.recebidas[0];
+  assert.equal(recebida.pecaId, 'reta-7');
+  const escolha = aplicarComandoDePartida(
+    estado,
+    escolherVaga(recebida.recebidaId, 'norte'),
+    'ana',
+  );
+  assert.equal(escolha.sucesso, true);
+  if (!escolha.sucesso) return;
+  assert.equal(ataqueDoLote(escolha.eventos), undefined);
+  const encaixe = aplicarComandoDePartida(escolha.estado, posicionar('reta-7', 1, 3), 'ana');
+  assert.equal(encaixe.sucesso, true);
+  if (!encaixe.sucesso) return;
+  assert.equal(ataqueDoLote(encaixe.eventos), undefined);
+  estado = encaixe.estado;
+
+  // Ana encerra o turno (o encaixe não é gatilho); bruno e Carla encerram sem
+  // gatilho (Permanência); o próximo gatilho vem do peão de diogo — "de
+  // qualquer peão".
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  estado = aplicar(estado, permanecer('peao-vermelho'), 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-azul'), 'carla');
+  estado = aplicar(estado, permanecer('peao-azul'), 'carla');
+  estado = aplicar(estado, selecionarPeao('peao-amarelo'), 'diogo');
+  estado = aplicar(estado, moverPeao('peao-amarelo', 5, 0), 'diogo');
+  estado = aplicar(estado, selecionarPeao('peao-amarelo'), 'diogo');
+  const gatilho = aplicarComandoDePartida(estado, confirmarPosicao('peao-amarelo'), 'diogo');
+  assert.equal(gatilho.sucesso, true);
+  if (!gatilho.sucesso) return;
+  const ataque = ataqueDoLote(gatilho.eventos);
+  assert.ok(ataque, 'o peão parado deveria ser atingido no próximo gatilho');
+  if (!ataque) return;
+  assert.deepEqual(ataque.atacantes, [
+    { pecaId: 'vulto-x', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] },
+  ]);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  assert.deepEqual(gatilho.estado.peoesNoAlcance, { 'vulto-x': ['peao-branco'] });
+});
+
+test('ataques simultâneos de vulto e espectro resolvem juntos; a Proteção é consumida uma única vez (critério 6)', () => {
+  const tabuleiro: EstadoDoTabuleiro = {
+    ...estadoInicialDoTabuleiro(),
+    posicionadas: [
+      peca('vulto-x', 'vulto', 0, 0, 3),
+      peca('reta-a', 'reta', 0, 1, 3),
+      peca('espectro-x', 'espectro', 0, 3, 3),
+      peca('reta-b', 'reta', 0, 4, 3),
+    ],
+    peoes: [
+      { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'reta-a' },
+      { peaoId: 'peao-azul', cor: 'azul', pecaId: 'reta-b' },
+    ],
+  };
+  const jogadores: readonly JogadorAlvoDoAtaque[] = [
+    { jogadorId: 'bruno', peaoId: 'peao-vermelho', protegido: true },
+    { jogadorId: 'carla', peaoId: 'peao-azul', protegido: false },
+  ];
+
+  const resolucao = resolverAtaques(tabuleiro, {}, jogadores);
+  assert.ok(resolucao.evento);
+  if (!resolucao.evento) return;
+  // Dois atacantes no MESMO evento: Vulto e Espectro resolvem juntos.
+  assert.deepEqual(resolucao.evento.atacantes, [
+    { pecaId: 'vulto-x', tipo: 'vulto', peoesNoAlcance: ['peao-vermelho'] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-azul'] },
+  ]);
+  // A Proteção de bruno nega o ataque do Vulto e é consumida UMA única vez;
+  // carla (sem Proteção) é atingida normalmente.
+  assert.deepEqual(resolucao.evento.peoesAtingidos, ['peao-azul']);
+  assert.deepEqual(resolucao.evento.protegidos, ['bruno']);
+  assert.deepEqual(resolucao.protegidosConsumidos, ['bruno']);
+  // Snapshot atualizado para o próximo gatilho.
+  assert.deepEqual(resolucao.peoesNoAlcance, {
+    'vulto-x': ['peao-vermelho'],
+    'espectro-x': ['peao-azul'],
+  });
+});
+
+test('resolverAtaques: a Proteção de jogador fora dos atacantes não é consumida', () => {
+  const tabuleiro: EstadoDoTabuleiro = {
+    ...estadoInicialDoTabuleiro(),
+    posicionadas: [
+      peca('espectro-x', 'espectro', 0, 3, 3),
+      peca('reta-b', 'reta', 0, 4, 3),
+      peca('reta-c', 'reta', 0, 5, 5),
+    ],
+    peoes: [
+      { peaoId: 'peao-azul', cor: 'azul', pecaId: 'reta-b' },
+      { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'reta-c' },
+    ],
+  };
+  const jogadores: readonly JogadorAlvoDoAtaque[] = [
+    { jogadorId: 'bruno', peaoId: 'peao-vermelho', protegido: true },
+    { jogadorId: 'carla', peaoId: 'peao-azul', protegido: false },
+  ];
+
+  const resolucao = resolverAtaques(tabuleiro, {}, jogadores);
+  assert.ok(resolucao.evento);
+  if (!resolucao.evento) return;
+  // O ataque acontece (azul entrou no alcance), mas bruno não é alvo:
+  // a Proteção dele permanece até ser consumida.
+  assert.deepEqual(resolucao.evento.peoesAtingidos, ['peao-azul']);
+  assert.deepEqual(resolucao.evento.protegidos, []);
+  assert.deepEqual(resolucao.protegidosConsumidos, []);
+});
+
+test('confirmação sobre a sala médica concede a Proteção após o ataque do gatilho, que a consome no seguinte (critério 6)', () => {
+  let estado = partidaEmRodada2();
+  // Espectro em (0,3) com escada-1 (0,4) e a Sala Médica (1,3) conectadas;
+  // vermelho parado na escada-1.
+  estado = comPeca(estado, 'espectro-x', 'espectro', 0, 0, 3);
+  estado = comPeca(estado, 'sala-x', 'sala_medica', 0, 1, 3);
+  estado = comPeca(estado, 'escada-1', 'reta', 90, 0, 4);
+  estado = comPeca(estado, 'escada-2', 'reta', 90, 0, 5);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'escada-1');
+
+  // Ana passa por reta-1 e confirma SOBRE a Sala Médica — dentro do alcance
+  // do espectro: o ataque do gatilho a atinge (a Proteção ainda não existe)
+  // e a Sala Médica concede a Proteção DEPOIS da resolução.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const confirmado = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmado.sucesso, true);
+  if (!confirmado.sucesso) return;
+  const ataque1 = ataqueDoLote(confirmado.eventos);
+  assert.ok(ataque1, 'a confirmação dentro do alcance deveria disparar o ataque');
+  if (!ataque1) return;
+  assert.deepEqual(ataque1.peoesAtingidos, ['peao-branco', 'peao-vermelho']);
+  assert.deepEqual(ataque1.protegidos, []);
+  const ana = confirmado.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.protegido, true);
+  estado = confirmado.estado;
+
+  estado = resolverRecebidas(estado, 'ana');
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+
+  // Bruno sai do alcance (escada-1 → escada-2): o ataque dispara, mira ana
+  // (que permanece) e a Proteção a nega — consumida uma única vez.
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  estado = aplicar(estado, moverPeao('peao-vermelho', 0, 5), 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const segundo = aplicarComandoDePartida(estado, confirmarPosicao('peao-vermelho'), 'bruno');
+  assert.equal(segundo.sucesso, true);
+  if (!segundo.sucesso) return;
+  const ataque2 = ataqueDoLote(segundo.eventos);
+  assert.ok(ataque2, 'a saída deveria disparar o ataque contra quem permanece');
+  if (!ataque2) return;
+  assert.deepEqual(ataque2.atacantes, [
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'] },
+  ]);
+  assert.deepEqual(ataque2.peoesAtingidos, []);
+  assert.deepEqual(ataque2.protegidos, ['ana']);
+  const anaDepois = segundo.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(anaDepois?.protegido, false);
+});
+
+test('posicionar monstro não dispara ataque, mesmo com peão no alcance; o próximo gatilho atinge (critério 7)', () => {
+  const inicio = estadoInicialDaPartida(JOGADORES);
+  assert.equal(inicio.sucesso, true);
+  if (!inicio.sucesso) return;
+  let estado = comVultoPrimeiroNaCaixa(inicio.estado);
+  estado = aplicar(estado, selecionar('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionar('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+
+  // Gatilho do Primeiro Turno: o vulto ainda está na Caixa — sem ataque.
+  const encaixeDoPeao = aplicarComandoDePartida(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(encaixeDoPeao.sucesso, true);
+  if (!encaixeDoPeao.sucesso) return;
+  assert.equal(ataqueDoLote(encaixeDoPeao.eventos), undefined);
+  estado = encaixeDoPeao.estado;
+
+  // O vulto é encaixado ao norte da Inicial: o peão fica DENTRO do alcance
+  // (conectados) e ainda assim o encaixe do monstro não dispara ataque.
+  estado = aplicar(estado, escolherVaga('recebida-vulto-1', 'norte'), 'ana');
+  const encaixeDoMonstro = aplicarComandoDePartida(estado, posicionar('vulto-1', 2, 3), 'ana');
+  assert.equal(encaixeDoMonstro.sucesso, true);
+  if (!encaixeDoMonstro.sucesso) return;
+  assert.equal(ataqueDoLote(encaixeDoMonstro.eventos), undefined);
+  estado = encaixeDoMonstro.estado;
+
+  estado = resolverRecebidas(estado, 'ana');
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+
+  // O próximo gatilho (Peão do Primeiro Turno de bruno) avalia o alcance: o
+  // peão de ana, que já estava no alcance desde o encaixe, é atingido.
+  estado = aplicar(estado, selecionar('inicial-2'), 'bruno');
+  estado = aplicar(estado, posicionar('inicial-2', 0, 0), 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const gatilho = aplicarComandoDePartida(estado, posicionarPeao('peao-vermelho', 0, 0), 'bruno');
+  assert.equal(gatilho.sucesso, true);
+  if (!gatilho.sucesso) return;
+  const ataque = ataqueDoLote(gatilho.eventos);
+  assert.ok(ataque, 'o próximo gatilho deveria atingir o peão no alcance');
+  if (!ataque) return;
+  assert.deepEqual(ataque.atacantes, [
+    { pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] },
+  ]);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  assert.deepEqual(gatilho.estado.peoesNoAlcance, { 'vulto-1': ['peao-branco'] });
+});
+
+test('estado persistido sem os campos novos não quebra a resolução do ataque (binário anterior)', () => {
+  let estado = partidaEmRodada2();
+  estado = comPeca(estado, 'espectro-x', 'espectro', 0, 1, 3);
+  // Simula o JSON de um binário anterior à #172: sem peoesNoAlcance no estado
+  // e sem protegido nos jogadores.
+  let antigo = {
+    ...estado,
+    peoesNoAlcance: undefined,
+    jogadores: estado.jogadores.map((jogador) => ({
+      jogadorId: jogador.jogadorId,
+      ordem: jogador.ordem,
+      cor: jogador.cor,
+      peaoId: jogador.peaoId,
+      primeiroTurnoPendente: jogador.primeiroTurnoPendente,
+      sanidade: jogador.sanidade,
+    })),
+  } as unknown as EstadoDaPartida;
+
+  antigo = aplicar(antigo, selecionarPeao('peao-branco'), 'ana');
+  antigo = aplicar(antigo, moverPeao('peao-branco', 2, 3), 'ana');
+  antigo = aplicar(antigo, selecionarPeao('peao-branco'), 'ana');
+  const confirmado = aplicarComandoDePartida(antigo, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmado.sucesso, true);
+  if (!confirmado.sucesso) return;
+  const ataque = ataqueDoLote(confirmado.eventos);
+  assert.ok(ataque, 'o ataque deveria resolver normalmente no estado antigo');
+  if (!ataque) return;
+  // Snapshot ausente é tratado como vazio e ninguém como protegido.
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  assert.deepEqual(ataque.protegidos, []);
+  assert.deepEqual(confirmado.estado.peoesNoAlcance, { 'espectro-x': ['peao-branco'] });
 });

@@ -32,6 +32,9 @@
 //   shared type:'PARTIDA_TERMINADA' { resultado } <-> engine tipo:'partida_terminada' { desfecho } — issue #179
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire); o
 //   motivo da derrota no engine fica interno — o contrato expõe apenas o par.)
+//   shared type:'ATAQUE_RESOLVIDO' { atacantes, peoesAtingidos, protegidos } <-> engine tipo:'ataque_resolvido' idem — issue #172
+//   (Shape 1:1 com o evento de domínio; o refinamento do wire/feedback —
+//   celular de penalidades, feedback ao cliente — é da issue #173.)
 //   Erros: CodigoDeErroDaPartida alias de CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120) — FORA_DA_VEZ, PARTIDA_TERMINADA etc via ERRO_DO_TABULEIRO (SalaServerMessage via TabuleiroEventoDoServidor).
 //   shared type:UPPER_SNAKE no wire vs engine tipo:snake no domínio; campos em camelCase nos dois lados
 //
@@ -307,6 +310,28 @@ export interface PartidaTerminadaWireEvento {
   readonly resultado: ResultadoDaPartidaWire;
 }
 
+// Um Monstro que disparou no gatilho, com os peões dentro do Alcance atual
+// (inclusive os de Jogadores protegidos — o ataque contra eles é negado).
+export interface AtacanteNoAlcance {
+  readonly pecaId: PecaId;
+  readonly tipo: 'vulto' | 'espectro';
+  readonly peoesNoAlcance: readonly PeaoId[];
+}
+
+// Ataque dos Monstros (issue #172): broadcast nos gatilhos definitivos da
+// Partida (posicionamento do Peão do Primeiro Turno e Confirmação de Posição
+// com mudança de peça) quando ao menos um Monstro dispara — mesmo que ninguém
+// seja atingido. Shape 1:1 com o evento de domínio; a aplicação das
+// penalidades e o refinamento do feedback são das issues #170/#173.
+export interface AtaqueResolvidoWireEvento {
+  readonly type: 'ATAQUE_RESOLVIDO';
+  readonly atacantes: readonly AtacanteNoAlcance[];
+  // Peões atingidos finais (pós-Proteção), na ordem canônica dos Peões.
+  readonly peoesAtingidos: readonly PeaoId[];
+  // Jogadores cuja Proteção foi consumida nesta resolução (ordem do roster).
+  readonly protegidos: readonly string[];
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
@@ -317,7 +342,8 @@ export type PartidaEventoDoServidor =
   | VagaDaPecaRecebidaEscolhidaEvento
   | PartidaIniciadaEvento
   | EstadoDaPartidaEvento
-  | PartidaTerminadaWireEvento;
+  | PartidaTerminadaWireEvento
+  | AtaqueResolvidoWireEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

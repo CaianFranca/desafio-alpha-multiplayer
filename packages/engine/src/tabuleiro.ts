@@ -34,6 +34,7 @@ import {
 export {
   LADO_DA_GRADE,
   bordasAbertas,
+  celulaVizinhaNaBorda,
   ehPecaDeMonstro,
   ehPecaEspecial,
   gerarRecebidas,
