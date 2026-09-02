@@ -120,6 +120,16 @@ export function traduzirEventos(
       case 'partida_terminada':
         saida.push({ type: 'PARTIDA_TERMINADA', resultado: evento.desfecho.tipo });
         break;
+      // Ataque dos Monstros (issue #172): shape 1:1 com o evento de domínio —
+      // o refinamento do wire/feedback é da issue #173.
+      case 'ataque_resolvido':
+        saida.push({
+          type: 'ATAQUE_RESOLVIDO',
+          atacantes: evento.atacantes,
+          peoesAtingidos: evento.peoesAtingidos,
+          protegidos: evento.protegidos,
+        });
+        break;
       default: {
         const _exaustivo: never = evento;
         break;
