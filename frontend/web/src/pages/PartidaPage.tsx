@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AmbienteDeJogo } from '../components/partida/AmbienteDeJogo'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
@@ -20,6 +20,7 @@ import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import { HEX_COR_PEAO } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
+import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
@@ -65,8 +66,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const { authState } = useAuth()
   const jogadorId =
     authState.status === 'authenticated' ? authState.jogador.id : null
+  const navigate = useNavigate()
+  const codigoDeSala = useSalaCodigoOptional()
 
-  const { estado, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, falhar } =
+  const { estado, resultado, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
     usePartidaTela({
       estadoInicial: !temAlvo ? 'falha' : estadoInicial,
       loader,
@@ -84,21 +87,35 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   )
   const [flash, setFlash] = useState<FlashFeedback | null>(null)
 
-  // ── Conexão do canal da partida (#156) ──
+  // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, conectar: reconectarSocket, desconectar } = usePartidaWebSocket({
     serverId,
     partidaId,
     onEvento: useCallback(
       (evento) => {
+        if (evento.type === 'PARTIDA_TERMINADA') {
+          // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante tela
+          // Limpa estados pendentes de interação: flash de erro não deve permanecer
+          setFlash(null)
+          partidaTerminada(evento.resultado)
+          return
+        }
         if (evento.type === 'ESTADO_DA_PARTIDA') {
-          if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
           aplicarSnapshotNoModelo(evento.snapshot)
+          if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
+            setFlash(null)
+            partidaTerminada(evento.snapshot.resultado)
+            return
+          }
+          if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
           return
         }
         if (evento.type === 'PARTIDA_INICIADA') {
           partidaEmAndamento()
           return
         }
+        // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
+        if (emResultadoRef.current) return
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
         // ESTADO_DA_PARTIDA (em_andamento): eventos de turno avulsos não
         // abrem o tabuleiro sem snapshot — descreve a própria PR.
@@ -119,12 +136,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         )
         if (feedback !== null) setFlash({ ...feedback })
       },
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada],
     ),
     onAdmissao: useCallback(
       (evento) => {
         if (evento.estado === 'preparada') partidaPreparada()
-        else partidaEmAndamento()
+        else if (evento.estado === 'terminada') {
+          // ADMISSAO_ACEITA não carrega resultado (shared/protocol.ts); o
+          // snapshot ESTADO_DA_PARTIDA terminada que chega em seguida é a
+          // fonte da verdade — não adivinhar 'derrota' aqui (vitória viraria derrota)
+          return
+        } else partidaEmAndamento()
       },
       [partidaPreparada, partidaEmAndamento],
     ),
@@ -132,19 +154,31 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   })
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
+  const emResultado = estado === 'resultado'
+  const emResultadoRef = useRef(emResultado)
+  useEffect(() => {
+    emResultadoRef.current = emResultado
+  }, [emResultado])
 
-  // Estado de exibição: exclusivamente do modelo quando disponível (sem mock)
-  const estadoExibicao = estadoEmAndamento ? estadoDeExibicaoDoModelo(modelo) : null
+  // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
+  const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
   const estadoInteracao: EstadoDoTabuleiroNoCliente | null =
     estadoEmAndamento ? modelo : null
 
-  // ── Injeção única de jogadorId (issue #91) ──
+  const voltarASala = useCallback(() => {
+    desconectar()
+    if (codigoDeSala) navigate(`/sala/${codigoDeSala}`)
+    else navigate('/salas/criar')
+  }, [desconectar, navigate, codigoDeSala])
+
+  // ── Injeção única de jogadorId (issue #91) — bloqueada após término ──
   const enviarComJogador = useCallback(
     (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
+      if (emResultado) return
       enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
-    [enviar, jogadorId],
+    [enviar, jogadorId, emResultado],
   )
 
   const onComando = useCallback(
@@ -158,8 +192,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Comandos de Peão passam pelo mesmo ponto de injeção ──
   const onComandoPeao = enviarComJogador
 
-  // ── Estado de interação dos peões (derivado do modelo) ──
+  // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
+    if (emResultado) return null
     if (!temAlvo || !estadoEmAndamento) return null
     return {
       peoes: modelo.peoes,
@@ -177,8 +212,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     setFlash({ ...feedback })
   }, [])
 
-  // ── Turnos (issue #118): vez, rodada, fase e peão do Jogador Ativo ──
-  const minhaVez = jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+  // ── Turnos (issue #118): vez, rodada, fase e peão do Jogador Ativo — nulo em resultado ──
+  const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
   const peaoProprioId =
     jogadorId !== null ? (modelo.peaoPorJogador[jogadorId] ?? null) : null
   const peaoAtivoId =
@@ -275,9 +310,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
       />
-      <PartidaOverlays estado={estado} onRetry={tentarNovamenteComConexao} />
+      <PartidaOverlays estado={estado} resultado={resultado} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       <FlashOverlay flash={flash} onClear={limparFlash} />
-      {estadoEmAndamento && modelo.rodada !== null ? (
+      {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
         <div
           data-testid="indicador-rodada"
           className="pointer-events-none absolute right-4 top-4 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
@@ -285,7 +320,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           Rodada {modelo.rodada}
         </div>
       ) : null}
-      {estadoEmAndamento && jogadorAtivoDados ? (
+      {(estadoEmAndamento || emResultado) && jogadorAtivoDados ? (
         <div
           data-testid="chip-jogador-ativo"
           data-cor={jogadorAtivoDados.cor}

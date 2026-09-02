@@ -10,3 +10,8 @@ export function useSalaWebSocketContext(): UseSalaWebSocketReturn {
   }
   return value
 }
+
+export function useSalaCodigoOptional(): string | null {
+  const ctx = useContext(SalaWebSocketContext)
+  return ctx?.sala?.codigoDeSala ?? null
+}
