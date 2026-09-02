@@ -7,6 +7,7 @@ import { redisClient } from './config/redis.ts';
 import { PartidaBroadcaster } from './partidas/broadcast.ts';
 import { PartidaHandlers } from './partidas/handlers.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
+import { criarClienteDeRetorno } from './retorno/cliente.ts';
 import {
   iniciarHeartbeat,
   pararHeartbeat,
@@ -16,15 +17,39 @@ import {
   type HeartbeatHandle,
 } from './redis/registro.ts';
 
-const { gameServerPort, partidaPreparadaTtlSegundos, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, gameServerId: configServerId, jwtSecret } = getConfig();
+const {
+  gameServerPort,
+  partidaPreparadaTtlSegundos,
+  partidaTerminadaTtlSegundos,
+  lobbyRetornoCallbackUrl,
+  gameServerHeartbeatIntervalMs,
+  gameServerHeartbeatTtlMs,
+  gameServerId: configServerId,
+  jwtSecret,
+} = getConfig();
 const serverId: ServerId = resolverServerId(configServerId) as ServerId;
-const contexto: ContextoDoGameServer = { redis: redisClient, serverId, jwtSecret, partidaPreparadaTtlSegundos };
+const contexto: ContextoDoGameServer = {
+  redis: redisClient,
+  serverId,
+  jwtSecret,
+  partidaPreparadaTtlSegundos,
+  partidaTerminadaTtlSegundos,
+  lobbyRetornoCallbackUrl,
+};
 const app = createApp(contexto);
 
 const server = http.createServer(app);
 
 const broadcaster = new PartidaBroadcaster();
-const handlers = new PartidaHandlers({ redis: redisClient, broadcaster });
+const handlers = new PartidaHandlers({
+  redis: redisClient,
+  broadcaster,
+  partidaTerminadaTtlSegundos,
+  notificarRetorno: criarClienteDeRetorno({
+    lobbyRetornoCallbackUrl,
+    jwtSecret,
+  }),
+});
 
 criarWebSocketServer(server, contexto, {
   partida: { broadcaster, handlers },
@@ -85,6 +110,9 @@ function encerrar(signal: string): void {
   if (encerrando) return;
   encerrando = true;
   console.log(`[game-server] ${signal} recebido, encerrando...`);
+  void handlers.drenarRetornosPendentes(5000).catch((err: unknown) => {
+    console.warn('[game-server] falha ao drenar retornos pendentes:', (err as Error).message);
+  });
   if (registroRetry) {
     clearTimeout(registroRetry);
     registroRetry = undefined;

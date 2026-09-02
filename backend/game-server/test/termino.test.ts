@@ -19,7 +19,9 @@ import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
+import type { Redis } from 'ioredis';
 import { criarClienteRedis } from '@flicker/config';
+import type { AvisoDeRetorno } from '../src/retorno/cliente.ts';
 import type {
   AceiteDoEncaminhamento,
   MembroDaSala,
@@ -29,7 +31,9 @@ import { createApp } from '../src/app.ts';
 import { criarWebSocketServer } from '../src/ws/ws.ts';
 import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
 import { PartidaHandlers } from '../src/partidas/handlers.ts';
+import { chaveDoEstadoDaPartida } from '../src/partidas/chaves.ts';
 import {
+  aplicarRetencaoDeTermino,
   obterEstadoDaPartida,
   salvarEstadoDaPartida,
 } from '../src/partidas/estado.ts';
@@ -45,13 +49,30 @@ interface ServidorEfemero {
   readonly fechar: () => Promise<void>;
 }
 
-async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
-  const contexto = { redis, serverId: SERVER_ID, jwtSecret: JWT_SECRET, partidaPreparadaTtlSegundos: ttlSegundos };
+async function subirServidor(
+  ttlSegundos: number,
+  partidaTerminadaTtlSegundos = 3600,
+  notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>,
+  redisDoHandler: Redis = redis,
+): Promise<ServidorEfemero> {
+  const contexto = {
+    redis,
+    serverId: SERVER_ID,
+    jwtSecret: JWT_SECRET,
+    partidaPreparadaTtlSegundos: ttlSegundos,
+    partidaTerminadaTtlSegundos,
+    lobbyRetornoCallbackUrl: 'http://localhost:3001/api/retorno',
+  };
   const app = createApp(contexto);
   const server = http.createServer(app);
 
   const broadcaster = new PartidaBroadcaster();
-  const handlers = new PartidaHandlers({ redis, broadcaster });
+  const handlers = new PartidaHandlers({
+    redis: redisDoHandler,
+    broadcaster,
+    partidaTerminadaTtlSegundos,
+    notificarRetorno,
+  });
   const wss = criarWebSocketServer(server, contexto, {
     partida: { broadcaster, handlers },
   });
@@ -191,6 +212,32 @@ async function semearTermino(
   await salvarEstadoDaPartida(redis, partidaId, { ...estado, resultado });
 }
 
+async function semearEstadoProntoParaVitoria(partidaId: string): Promise<void> {
+  const estado = await obterEstadoDaPartida(redis, partidaId);
+  assert.ok(estado !== null, 'estado da partida deve existir antes da semeadura da vitória');
+
+  const pecaDoPortao = {
+    pecaId: 'portao-de-teste',
+    tipo: 'portao_de_saida' as const,
+    orientacao: 0 as const,
+    celula: { linha: 3, coluna: 3 },
+  };
+
+  await salvarEstadoDaPartida(redis, partidaId, {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [pecaDoPortao],
+      peoes: estado.tabuleiro.peoes.map((peao) => ({
+        ...peao,
+        pecaId: pecaDoPortao.pecaId,
+      })),
+    },
+    geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+    cartaoDeAcessoObtido: true,
+  });
+}
+
 function esperarEvento(
   ws: WebSocket,
   tipo: string,
@@ -315,4 +362,152 @@ test('Termino: comando de jogo pós-término é recusado com PARTIDA_TERMINADA',
 
   await deletePartida(servidor.baseUrl, aceite.partidaId);
   await servidor.fechar();
+});
+
+test('Termino: broadcast, retenção e callback acontecem no término real da partida', async () => {
+  const ttlTerminada = 30;
+  let avisoRecebido: AvisoDeRetorno | undefined;
+  let resolverAviso: ((aviso: AvisoDeRetorno) => void) | undefined;
+  const avisoPromise = new Promise<AvisoDeRetorno>((resolve) => {
+    resolverAviso = resolve;
+  });
+  const servidor = await subirServidor(600, ttlTerminada, async (aviso) => {
+    avisoRecebido = aviso;
+    resolverAviso?.(aviso);
+  });
+  const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+  const sockets = await Promise.all([
+    conectarPartida(servidor, aceite.partidaId, 1),
+    conectarPartida(servidor, aceite.partidaId, 2),
+    conectarPartida(servidor, aceite.partidaId, 3),
+    conectarPartida(servidor, aceite.partidaId, 4),
+  ]);
+
+  try {
+    await semearEstadoProntoParaVitoria(aceite.partidaId);
+    const terminados = sockets.map((socket) => esperarEvento(socket, 'PARTIDA_TERMINADA'));
+    enviar(sockets[0], { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' });
+
+    const eventos = await Promise.all(terminados);
+    assert.deepEqual(eventos.map((evento) => evento.resultado), ['vitoria', 'vitoria', 'vitoria', 'vitoria']);
+
+    const aviso = await avisoPromise;
+    const { chaveDaPartida } = await import('../src/partidas/chaves.ts');
+    const ttlPartida = await redis.ttl(chaveDaPartida(aceite.partidaId));
+    const ttlEstado = await redis.ttl(chaveDoEstadoDaPartida(aceite.partidaId));
+    assert.ok(ttlPartida > 0 && ttlPartida <= ttlTerminada, `TTL da partida inválido: ${ttlPartida}`);
+    assert.ok(ttlEstado > 0 && ttlEstado <= ttlTerminada, `TTL do estado inválido: ${ttlEstado}`);
+
+    assert.equal(avisoRecebido, aviso);
+    assert.deepEqual(aviso, {
+      salaId: 'sala-1',
+      partidaId: aceite.partidaId,
+      serverId: SERVER_ID,
+      resultado: 'vitoria',
+      jogadores: ['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4'],
+    });
+  } finally {
+    for (const socket of sockets) socket.close();
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+    await servidor.fechar();
+  }
+});
+
+test('Retenção do término falha sem impedir o callback ao lobby', async () => {
+  let callbackExecutado = false;
+  const redisComFalhaNaRetencao = new Proxy(redis, {
+    get(target, propriedade, receptor) {
+      if (propriedade === 'eval') {
+        return async () => {
+          throw new Error('Redis indisponível ao aplicar retenção');
+        };
+      }
+      return Reflect.get(target, propriedade, receptor);
+    },
+  }) as Redis;
+  const servidor = await subirServidor(600, 30, async () => {
+    callbackExecutado = true;
+  }, redisComFalhaNaRetencao);
+  const aceite = await criarPartidaViaPost(servidor.baseUrl);
+  const sockets = await Promise.all([
+    conectarPartida(servidor, aceite.partidaId, 1),
+    conectarPartida(servidor, aceite.partidaId, 2),
+    conectarPartida(servidor, aceite.partidaId, 3),
+    conectarPartida(servidor, aceite.partidaId, 4),
+  ]);
+
+  try {
+    await semearEstadoProntoParaVitoria(aceite.partidaId);
+    const terminado = esperarEvento(sockets[0], 'PARTIDA_TERMINADA');
+    enviar(sockets[0], { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' });
+    await terminado;
+
+    for (let tentativa = 0; tentativa < 20 && !callbackExecutado; tentativa += 1) {
+      await sleep(5);
+    }
+    assert.equal(callbackExecutado, true);
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+
+  await deletePartida(servidor.baseUrl, aceite.partidaId);
+  await servidor.fechar();
+});
+
+test('Término real: recarregamento entrega snapshot terminada e recusa subsequente', async () => {
+  const servidor = await subirServidor(600, 30, async () => undefined);
+  const aceite = await criarPartidaViaPost(servidor.baseUrl);
+
+  const sockets = await Promise.all([
+    conectarPartida(servidor, aceite.partidaId, 1),
+    conectarPartida(servidor, aceite.partidaId, 2),
+    conectarPartida(servidor, aceite.partidaId, 3),
+    conectarPartida(servidor, aceite.partidaId, 4),
+  ]);
+
+  try {
+    await semearEstadoProntoParaVitoria(aceite.partidaId);
+    const terminados = sockets.map((socket) => esperarEvento(socket, 'PARTIDA_TERMINADA'));
+    enviar(sockets[0], { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' });
+    await Promise.all(terminados);
+
+    sockets[0].close();
+    await sleep(200);
+    const { ws: wsRecarregado, snapshot } = await reconectarPartida(servidor, aceite.partidaId, 1);
+    try {
+      const projecao = snapshot.snapshot as { estado: unknown; resultado: unknown };
+      assert.equal(projecao.estado, 'terminada');
+      assert.equal(projecao.resultado, 'vitoria');
+      enviar(wsRecarregado, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 0, coluna: 0 } });
+      const erro = await esperarEvento(wsRecarregado, 'ERRO_DO_TABULEIRO');
+      assert.equal(erro.codigo, 'PARTIDA_TERMINADA');
+    } finally {
+      wsRecarregado.close();
+    }
+  } finally {
+    for (const socket of sockets) {
+      try { socket.close(); } catch {}
+    }
+  }
+
+  await deletePartida(servidor.baseUrl, aceite.partidaId);
+  await servidor.fechar();
+});
+
+test('Retenção do término não aplica TTL parcial quando uma chave está ausente', async () => {
+  const partidaId = `partida-retencao-${crypto.randomUUID()}`;
+  const { chaveDaPartida: chaveDaPartidaHelper } = await import('../src/partidas/chaves.ts');
+  const chavePartida = chaveDaPartidaHelper(partidaId);
+  await redis.set(chavePartida, 'metadados');
+  try {
+    await assert.rejects(
+      aplicarRetencaoDeTermino(redis, partidaId, 30),
+      /chave ausente/,
+    );
+    assert.equal(await redis.ttl(chavePartida), -1);
+    assert.equal(await redis.exists(chaveDoEstadoDaPartida(partidaId)), 0);
+  } finally {
+    await redis.del(chavePartida, chaveDoEstadoDaPartida(partidaId));
+  }
 });
