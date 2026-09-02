@@ -7,8 +7,8 @@ import { usePartidaTela } from '../components/partida/usePartidaTela'
 import type { EstadoDaTela } from '../components/partida/partidaTelaMachine'
 import { FlashOverlay } from '../components/partida/FlashOverlay'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
+import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
 import {
-  aplicarSnapshot,
   criarEstadoInicialDoCliente,
   reduzirEvento,
   estadoDeExibicaoDoModelo,

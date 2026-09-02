@@ -42,7 +42,6 @@ import {
   CORES_DOS_PEOES,
   chaveCelula,
   criarReservaInicial,
-  type Celula as CelulaContrato,
   type CorDoPeao,
   type EstadoExibicaoTabuleiro,
   type Orientacao,
@@ -56,7 +55,6 @@ import { ehPendenciaSorteada } from './interacaoPeoes'
 import type {
   Celula,
   CelulasIluminadasWireEvento,
-  EstadoDaPartidaSnapshot,
   LimpezaAplicadaWireEvento,
   PeaoEventoDoServidor,
   TabuleiroEventoDoServidor,
@@ -467,90 +465,6 @@ export function reduzirEventos(
   eventos: readonly EventoDoJogoNoCliente[],
 ): EstadoDoTabuleiroNoCliente {
   return eventos.reduce(reduzirEvento, estado)
-}
-
-/**
- * Projeção somente leitura do snapshot wire para o modelo do cliente
- * (issue #156, ST-14). Mapeia o estado exibido — posicionadas, peões,
- * celulasIluminadas, pecaSelecionadaId/pecaEmManipulacaoId/peaoSelecionadoId,
- * recebidas→recebidasPendentes, jogadores→peaoPorJogador+ jogadorPorId,
- * jogadorAtivoId/rodada/posicaoConfirmada — preservando a reserva.
- * Sem recalcular iluminação/limpeza: o motor é autoridade.
- */
-export function aplicarSnapshot(
-  estado: EstadoDoTabuleiroNoCliente,
-  snapshot: EstadoDaPartidaSnapshot,
-): EstadoDoTabuleiroNoCliente {
-  const posicionadas: readonly PecaPosicionada[] = snapshot.tabuleiro.posicionadas.map((p) => ({
-    pecaId: p.pecaId,
-    tipo: p.tipo as unknown as TipoDaPeca,
-    orientacao: p.orientacao,
-    celula: { linha: p.celula.linha, coluna: p.celula.coluna },
-  }))
-
-  const mapPos = new Map<string, CelulaContrato>(
-    posicionadas.map((p) => [p.pecaId, p.celula] as const),
-  )
-
-  const peoes: readonly PeaoDaExibicao[] = snapshot.tabuleiro.peoes.map((peao) => {
-    const celula = peao.pecaId !== null ? (mapPos.get(peao.pecaId) ?? null) : null
-    return {
-      peaoId: peao.peaoId,
-      cor: peao.cor as unknown as CorDoPeao,
-      celula: celula ? { linha: celula.linha, coluna: celula.coluna } : null,
-    }
-  })
-
-  const recebidasPendentes: readonly PendenciaNoCliente[] = snapshot.tabuleiro.recebidas.map(
-    (r) =>
-      ({
-        recebidaId: r.recebidaId,
-        pecaId: r.pecaId,
-        tipoDaPeca: r.tipo as unknown as string,
-        vaga: r.vaga,
-        celulaAlvo: r.celulaAlvo
-          ? { linha: r.celulaAlvo.linha, coluna: r.celulaAlvo.coluna }
-          : null,
-        // orientacao do snapshot não faz parte de PendenciaNoCliente, mas fica
-        // disponível via cast se necessário; o cliente ignora.
-        orientacao: r.orientacao,
-      }) as unknown as PendenciaNoCliente,
-  )
-
-  const peaoPorJogador: Record<string, string> = {}
-  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao }> = {}
-  for (const j of snapshot.jogadores) {
-    peaoPorJogador[j.jogadorId] = j.peaoId
-    jogadorPorId[j.jogadorId] = { apelido: j.apelido, cor: j.cor as unknown as CorDoPeao }
-  }
-
-  const pecasDeRecebimento: Record<string, TipoDaPeca> = { ...estado.pecasDeRecebimento }
-  for (const r of snapshot.tabuleiro.recebidas) {
-    pecasDeRecebimento[r.pecaId] = r.tipo as unknown as TipoDaPeca
-  }
-
-  const celulasIluminadas: readonly Celula[] = snapshot.celulasIluminadas.map((c) => ({
-    linha: c.linha,
-    coluna: c.coluna,
-  }))
-
-  return {
-    reserva: estado.reserva,
-    posicionadas,
-    pecaSelecionadaId: snapshot.tabuleiro.pecaSelecionadaId,
-    pecaEmManipulacaoId: snapshot.tabuleiro.pecaEmManipulacaoId,
-    peoes,
-    recebidasPendentes,
-    peaoSelecionadoId: snapshot.tabuleiro.peaoSelecionadoId,
-    pecasDeRecebimento,
-    celulasIluminadas,
-    jogadorAtivoId: snapshot.jogadorAtivoId,
-    rodada: snapshot.rodada,
-    movimentouNoTurno: false,
-    posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
-    peaoPorJogador,
-    jogadorPorId,
-  }
 }
 
 /** Deriva o estado de exibição consumido pela cena a partir do modelo. */
