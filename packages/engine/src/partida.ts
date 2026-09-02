@@ -35,6 +35,7 @@ import {
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   validarTexto,
+  vizinhasConectadas,
   type Celula,
   type ComandoDeTabuleiro,
   type CorDoPeao,
@@ -107,6 +108,10 @@ export interface EstadoDaPartida {
   // o Ataque. Chave = pecaId do Monstro; valor = peaoIds. Monstros removidos
   // pela Limpeza têm a entrada podada no gatilho seguinte.
   readonly peoesNoAlcance: Readonly<Record<string, readonly string[]>>;
+  // Resgate (issue #171): peças em período de graça — Permanência bloqueada
+  // até saída de um peão. Retrocompatível: estados antigos persistem sem o
+  // campo (acesso via ?? []).
+  readonly pecasEmPeriodoDeGraca: readonly string[];
 }
 
 export interface ConfirmarPosicaoDoPeaoComando {
@@ -157,6 +162,16 @@ export interface CelulasIluminadasEvento {
   readonly celulas: readonly Celula[];
 }
 
+// Resgate (issue #171): um único resgate remove todos os estados do
+// afetado presente na peça; amedrontado→sanidade 1, baixa→sanidade inalterada.
+export interface ResgateRealizadoEvento {
+  readonly tipo: 'resgate_realizado';
+  readonly pecaId: string;
+  readonly resgatadoJogadorId: string;
+  readonly resgatadorJogadorId: string;
+  readonly resgatadorPeaoId: string;
+}
+
 // Término (issue #176): emitido no máximo uma vez, sempre como ÚLTIMO evento
 // do lote da Ação que consumou o desfecho.
 export interface PartidaTerminadaEvento {
@@ -171,6 +186,7 @@ export type EventoDaPartida =
   | PosicaoConfirmadaEvento
   | CelulasIluminadasEvento
   | AtaqueResolvidoEvento
+  | ResgateRealizadoEvento
   | PartidaTerminadaEvento;
 
 export type CodigoDeErroDaPartida =
@@ -269,6 +285,7 @@ export function estadoInicialDaPartida(
     // Nenhum Monstro posicionado na abertura: o snapshot do Alcance começa
     // vazio (issue #172).
     peoesNoAlcance: {},
+    pecasEmPeriodoDeGraca: [],
   };
   return sucessoDaPartida(estado, [
     { tipo: 'turno_iniciado', jogadorId: jogadores[0].jogadorId, rodada: 1 },
@@ -525,6 +542,7 @@ function posicionarPeaoDaPartida(
       celulasIluminadas,
       peoesNoAlcance: ataque.peoesNoAlcance,
       jogadores: ataque.jogadores,
+      pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
     },
     eventos,
   );
@@ -551,7 +569,163 @@ function moverPeaoDaPartida(
       'A posição do Peão já foi confirmada; encerre o turno.',
     );
   }
-  return delegarAoTabuleiro(estado, comando);
+
+  // Exceção de ocupação (issue #171): peça com afetado tolera +1 peão.
+  // Guarda dinâmica ANTES de delegar, sem tocar peoes.ts com roster.
+  const destino = estado.tabuleiro.posicionadas.find(
+    (peca) =>
+      peca.celula.linha === comando.celula.linha &&
+      peca.celula.coluna === comando.celula.coluna,
+  );
+  if (destino) {
+    const ocupantes = estado.tabuleiro.peoes.filter(
+      (peao) => peao.pecaId === destino.pecaId,
+    ).length;
+    const ehPortao = destino.tipo === 'portao_de_saida';
+    const tetoNormal = ehPortao ? 4 : 1;
+    const temAfetado = estado.jogadores.some((jogador) => {
+      const peao = estado.tabuleiro.peoes.find((item) => item.peaoId === jogador.peaoId);
+      return (
+        peao?.pecaId === destino.pecaId &&
+        ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
+      );
+    });
+    const teto = temAfetado ? tetoNormal + 1 : tetoNormal;
+    if (ocupantes >= teto) {
+      return rejeitarDaPartida('PECA_JA_TEM_PEAO', 'A Peça de destino já abriga outro Peão.');
+    }
+  }
+
+  const origemPeao = estado.tabuleiro.peoes.find((item) => item.peaoId === comando.peaoId);
+  const origemPecaId = origemPeao?.pecaId ?? null;
+
+  const resultadoTab = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
+  let tabuleiroNovo: EstadoDoTabuleiro;
+  let eventosTab: readonly EventoDoTabuleiro[];
+  let pecaIdPara: string | null = null;
+
+  if (!resultadoTab.sucesso) {
+    // Se a rejeição foi por ocupação mas a exceção de resgate permite, realiza
+    // o movimento manualmente (evita tocar peoes.ts com roster e mantém a
+    // dependência unidirecional partida→tabuleiro→peoes).
+    if (resultadoTab.erro.codigo === 'PECA_JA_TEM_PEAO' && destino) {
+      const ocupantes = estado.tabuleiro.peoes.filter(
+        (peao) => peao.pecaId === destino.pecaId,
+      ).length;
+      const ehPortao = destino.tipo === 'portao_de_saida';
+      const tetoNormal = ehPortao ? 4 : 1;
+      const temAfetado = estado.jogadores.some((jogador) => {
+        const peao = estado.tabuleiro.peoes.find((item) => item.peaoId === jogador.peaoId);
+        return (
+          peao?.pecaId === destino.pecaId &&
+          ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
+        );
+      });
+      const teto = temAfetado ? tetoNormal + 1 : tetoNormal;
+      if (ocupantes < teto) {
+        const origem = origemPecaId
+          ? estado.tabuleiro.posicionadas.find((peca) => peca.pecaId === origemPecaId)
+          : undefined;
+        if (!origem || origemPecaId === null) {
+          return { sucesso: false, erro: resultadoTab.erro };
+        }
+        // Revalida Conexão para garantir que o resgate exige Conexão (o erro
+        // de ocupação em peoes só ocorre após passar na conexão e demais
+        // guardas, mas reforçamos por segurança).
+        const conectadas = vizinhasConectadas(estado.tabuleiro, origem.pecaId);
+        if (!conectadas.some((peca) => peca.pecaId === destino.pecaId)) {
+          return { sucesso: false, erro: resultadoTab.erro };
+        }
+        const peoes = estado.tabuleiro.peoes.map((item) =>
+          item.peaoId === comando.peaoId ? { ...item, pecaId: destino.pecaId } : item,
+        );
+        tabuleiroNovo = { ...estado.tabuleiro, peoes, peaoSelecionadoId: null };
+        eventosTab = [
+          {
+            tipo: 'peao_movido',
+            peaoId: comando.peaoId,
+            pecaIdDe: origem.pecaId,
+            pecaIdPara: destino.pecaId,
+            celula: comando.celula,
+          },
+        ];
+        pecaIdPara = destino.pecaId;
+      } else {
+        return { sucesso: false, erro: resultadoTab.erro };
+      }
+    } else {
+      return { sucesso: false, erro: resultadoTab.erro };
+    }
+  } else {
+    tabuleiroNovo = resultadoTab.estado;
+    eventosTab = resultadoTab.eventos;
+    const movEvento = eventosTab.find((evento) => evento.tipo === 'peao_movido') as
+      | { pecaIdPara: string }
+      | undefined;
+    pecaIdPara = movEvento?.pecaIdPara ?? destino?.pecaId ?? null;
+  }
+
+  // Resgate + período de graça atômico após mover sucesso.
+  // O resgate é por aliado: exclui o próprio ator (movimento próprio não
+  // resgata a si mesmo).
+  const afetadosNoDestino = estado.jogadores.filter((jogador) => {
+    if (jogador.jogadorId === ator.jogadorId) return false;
+    const peao = tabuleiroNovo.peoes.find((item) => item.peaoId === jogador.peaoId);
+    return (
+      peao?.pecaId === pecaIdPara &&
+      ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
+    );
+  });
+
+  let jogadoresNovos: readonly JogadorDaPartida[] = estado.jogadores;
+  const eventosResgate: EventoDaPartida[] = [];
+
+  if (afetadosNoDestino.length > 0 && pecaIdPara !== null) {
+    jogadoresNovos = estado.jogadores.map((jogador) => {
+      const ehAfetado = afetadosNoDestino.some((item) => item.jogadorId === jogador.jogadorId);
+      if (!ehAfetado) return jogador;
+      const eraAmedrontado = (jogador.amedrontado ?? jogador.sanidade === 0) === true;
+      const novaSanidade = eraAmedrontado ? 1 : jogador.sanidade;
+      return {
+        ...jogador,
+        emBaixaIluminacao: false,
+        amedrontado: false,
+        sanidade: novaSanidade,
+      };
+    });
+    for (const afetado of afetadosNoDestino) {
+      eventosResgate.push({
+        tipo: 'resgate_realizado',
+        pecaId: pecaIdPara,
+        resgatadoJogadorId: afetado.jogadorId,
+        resgatadorJogadorId: ator.jogadorId,
+        resgatadorPeaoId: comando.peaoId,
+      });
+    }
+  }
+
+  let pecasEmPeriodoDeGraca = [...(estado.pecasEmPeriodoDeGraca ?? [])];
+  if (afetadosNoDestino.length > 0 && pecaIdPara !== null) {
+    if (!pecasEmPeriodoDeGraca.includes(pecaIdPara)) {
+      pecasEmPeriodoDeGraca = [...pecasEmPeriodoDeGraca, pecaIdPara];
+    }
+  }
+  if (
+    origemPecaId !== null &&
+    pecasEmPeriodoDeGraca.includes(origemPecaId) &&
+    origemPecaId !== pecaIdPara
+  ) {
+    pecasEmPeriodoDeGraca = pecasEmPeriodoDeGraca.filter((id) => id !== origemPecaId);
+  }
+
+  const estadoNovo: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: tabuleiroNovo,
+    jogadores: jogadoresNovos,
+    pecasEmPeriodoDeGraca,
+  };
+
+  return sucessoDaPartida(estadoNovo, [...eventosTab, ...eventosResgate]);
 }
 
 // ST-11: a Permanência vale apenas com o Peão na Peça do início do turno —
@@ -576,6 +750,20 @@ function permanecerNaPartida(
     return rejeitarDaPartida(
       'POSICAO_CONFIRMADA',
       'A posição do Peão já foi confirmada; encerre o turno.',
+    );
+  }
+
+  // Período de graça (issue #171): Permanência bloqueada na peça resgatada até
+  // saída de um peão.
+  const peaoAntes = estado.tabuleiro.peoes.find((item) => item.peaoId === comando.peaoId);
+  if (
+    peaoAntes !== undefined &&
+    peaoAntes.pecaId !== null &&
+    (estado.pecasEmPeriodoDeGraca ?? []).includes(peaoAntes.pecaId)
+  ) {
+    return rejeitarDaPartida(
+      'ENCERRAMENTO_INVALIDO',
+      'A Permanência está bloqueada na peça em período de graça até que um peão saia.',
     );
   }
 
@@ -734,6 +922,7 @@ function confirmarPosicaoDoPeao(
       geradoresLigados,
       cartaoDeAcessoObtido,
       jogadores,
+      pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
     },
     eventos,
   );
@@ -870,6 +1059,7 @@ function avancarVez(
       geradoresLigados: estado.geradoresLigados,
       cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
       peoesNoAlcance: estado.peoesNoAlcance,
+      pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
     };
     const eventosFinais: readonly EventoDaPartida[] = [
       ...eventos,
@@ -893,6 +1083,7 @@ function avancarVez(
     geradoresLigados: estado.geradoresLigados,
     cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
     peoesNoAlcance: estado.peoesNoAlcance,
+    pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
   };
   const eventosFinais: readonly EventoDaPartida[] = [
     ...eventos,
