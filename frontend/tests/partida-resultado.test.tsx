@@ -58,8 +58,7 @@ function renderPartidaResultado(entry: string, codigoSala: string | null) {
     router,
     ...render(
       <AuthProvider initialState={mockAuthenticatedState}>
-        {/* @ts-expect-error provider typing */}
-        <SalaWebSocketContext.Provider value={mockCtx}>
+        <SalaWebSocketContext.Provider value={mockCtx as unknown as UseSalaWebSocketReturn}>
           <RouterProvider router={router} />
         </SalaWebSocketContext.Provider>
       </AuthProvider>,
