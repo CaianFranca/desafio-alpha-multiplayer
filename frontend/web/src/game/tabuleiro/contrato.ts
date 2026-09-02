@@ -189,8 +189,8 @@ const BORDAS_BASE: Record<TipoDaPeca, readonly BordaCardinal[]> = {
   cruz: ['norte', 'leste', 'sul', 'oeste'],
   gerador: ['norte', 'leste', 'sul', 'oeste'],
   sala_do_diretor: ['norte', 'leste', 'sul', 'oeste'],
-  sala_medica: ['norte', 'sul'],
-  portao_de_saida: ['sul'],
+  sala_medica: ['norte', 'leste', 'sul', 'oeste'],
+  portao_de_saida: ['norte', 'leste', 'sul', 'oeste'],
 }
 
 const ORDEM_CANONICA: readonly BordaCardinal[] = ['norte', 'leste', 'sul', 'oeste']
@@ -203,7 +203,7 @@ const ROTACAO_HORARIA: Record<BordaCardinal, BordaCardinal> = {
 }
 
 export function bordasAbertas(peca: Pick<PecaDaReserva, 'tipo' | 'orientacao'>): BordaCardinal[] {
-  let bordas = BORDAS_BASE[peca.tipo] as BordaCardinal[]
+  let bordas = BORDAS_BASE[peca.tipo]
   const passos = (peca.orientacao / 90) % 4
   for (let i = 0; i < passos; i++) {
     bordas = bordas.map((b) => ROTACAO_HORARIA[b])
