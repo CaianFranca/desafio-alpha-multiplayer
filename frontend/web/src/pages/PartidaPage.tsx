@@ -1,24 +1,29 @@
-import { useCallback, useEffect, useReducer, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AmbienteDeJogo } from '../components/partida/AmbienteDeJogo'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
-import { PartidaDevToolbar } from '../components/partida/PartidaDevToolbar'
 import { usePartidaTela } from '../components/partida/usePartidaTela'
-import { isEstadoDaTela, type EstadoDaTela } from '../components/partida/partidaTelaMachine'
+import type { EstadoDaTela } from '../components/partida/partidaTelaMachine'
 import { FlashOverlay } from '../components/partida/FlashOverlay'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
-import { criarEstadoInicialDoCliente, reduzirEvento, estadoDeExibicaoDoModelo } from '../game/tabuleiro/reducao'
+import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
+import {
+  criarEstadoInicialDoCliente,
+  reduzirEvento,
+  estadoDeExibicaoDoModelo,
+} from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente } from '../game/tabuleiro/reducao'
 import { mapearGiro, FLASH_BRANCO } from '../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../game/tabuleiro/interacao'
-import { criarEstadoExibicaoMock } from '../game/tabuleiro/mockExibicao'
 import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
+import { HEX_COR_PEAO } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
+  EstadoDaPartidaSnapshot,
   PartidaComandoDoCliente,
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
@@ -32,6 +37,20 @@ type ComandoDoCanal =
   | Omit<ConfirmarPosicaoDoPeaoComando, 'jogadorId'>
   | Omit<EncerrarTurnoComando, 'jogadorId'>
 
+type AcaoDoModelo =
+  | { type: 'EVENTO'; evento: Parameters<typeof reduzirEvento>[1] }
+  | { type: 'APLICAR_SNAPSHOT'; snapshot: EstadoDaPartidaSnapshot }
+
+function reduzirModelo(
+  estado: EstadoDoTabuleiroNoCliente,
+  acao: AcaoDoModelo,
+): EstadoDoTabuleiroNoCliente {
+  if (acao.type === 'APLICAR_SNAPSHOT') {
+    return aplicarSnapshot(estado, acao.snapshot)
+  }
+  return reduzirEvento(estado, acao.evento)
+}
+
 interface PartidaPageProps {
   estadoInicial?: EstadoDaTela
   loader?: () => Promise<unknown>
@@ -39,7 +58,6 @@ interface PartidaPageProps {
 
 export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const [searchParams] = useSearchParams()
-  const param = searchParams.get('partidaEstado')
   const serverId = searchParams.get('serverId')
   const partidaId = searchParams.get('partidaId')
   const temAlvo = Boolean(serverId && partidaId)
@@ -48,78 +66,79 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const jogadorId =
     authState.status === 'authenticated' ? authState.jogador.id : null
 
-  // ?partidaEstado é initialOnly e exclusivo de DEV — lido só no mount; após isso, estado interno (toolbar/retry) governa.
-  // Prioridade: URL (DEV) > prop > default do hook. Gate DEV evita vazamento para produção (B2).
-  const estadoViaUrl =
-    import.meta.env.DEV && isEstadoDaTela(param) ? (param as EstadoDaTela) : null
-  const estadoInicialEfetivo = estadoViaUrl ?? estadoInicial
-  const { estado, carregar, tentarNovamente, partidaEmAndamento, falhar, forcarEstado } = usePartidaTela({
-      estadoInicial:
-        // Sem alvo (fora do gate DEV) o estado inicial é falha: não há canal para conectar.
-        !temAlvo && estadoViaUrl === null ? 'falha' : estadoInicialEfetivo,
+  const { estado, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, falhar } =
+    usePartidaTela({
+      estadoInicial: !temAlvo ? 'falha' : estadoInicial,
       loader,
     })
 
-  // ── Modelo local do tabuleiro (deltas aplicados por evento do broadcast) ──
-  const [modelo, despacharEvento] = useReducer(
-    reduzirEvento,
-    undefined,
-    criarEstadoInicialDoCliente,
+  // ── Modelo local do tabuleiro (deltas + snapshot) ──
+  const [modelo, despachar] = useReducer(reduzirModelo, undefined, criarEstadoInicialDoCliente)
+  const despacharEvento = useCallback(
+    (evento: Parameters<typeof reduzirEvento>[1]) => despachar({ type: 'EVENTO', evento }),
+    [],
+  )
+  const aplicarSnapshotNoModelo = useCallback(
+    (snapshot: EstadoDaPartidaSnapshot) => despachar({ type: 'APLICAR_SNAPSHOT', snapshot }),
+    [],
   )
   const [flash, setFlash] = useState<FlashFeedback | null>(null)
 
-  // ── Conexão do canal da partida (#85) ──
+  // ── Conexão do canal da partida (#156) ──
   const { enviar, conectar: reconectarSocket, desconectar } = usePartidaWebSocket({
     serverId,
     partidaId,
     onEvento: useCallback(
       (evento) => {
-        despacharEvento(evento)
+        if (evento.type === 'ESTADO_DA_PARTIDA') {
+          if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
+          aplicarSnapshotNoModelo(evento.snapshot)
+          return
+        }
+        if (evento.type === 'PARTIDA_INICIADA') {
+          partidaEmAndamento()
+          return
+        }
+        // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
+        // ESTADO_DA_PARTIDA (em_andamento): eventos de turno avulsos não
+        // abrem o tabuleiro sem snapshot — descreve a própria PR.
+        despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
         // Feedback unificado: cobre eventos de tabuleiro, peão, turno (#118)
         // e limpeza (#151). Branco para aprovação/seleção; vermelho para
         // ERRO_DO_TABULEIRO (motivo específico para pendências); âmbar para
         // FORA_DA_VEZ; TURNO_INICIADO/TURNO_ENCERRADO não geram flash (null).
         if (evento.type === 'CELULAS_ILUMINADAS') {
-          // Iluminação (#151): estado espelhado do compartilhado — sem flash.
           return
         }
         if (evento.type === 'LIMPEZA_APLICADA') {
-          // Limpeza (#151): um único flash de aprovação por evento.
           setFlash({ ...FLASH_BRANCO })
           return
         }
-        const feedback = mapearEventoPeaoParaFeedback(evento)
+        const feedback = mapearEventoPeaoParaFeedback(
+          evento as Parameters<typeof mapearEventoPeaoParaFeedback>[0],
+        )
         if (feedback !== null) setFlash({ ...feedback })
       },
-      [],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento],
     ),
-    onAdmissao: useCallback(() => partidaEmAndamento(), [partidaEmAndamento]),
+    onAdmissao: useCallback(
+      (evento) => {
+        if (evento.estado === 'preparada') partidaPreparada()
+        else partidaEmAndamento()
+      },
+      [partidaPreparada, partidaEmAndamento],
+    ),
     onFalhaDeConexao: useCallback(() => falhar(), [falhar]),
   })
 
-  const noAlvo = !temAlvo
-
-  // No alvo, o estado de tela é dirigido pelo canal WS. Fora dele (produção
-  // sem `?partidaEstado`), a página já começa em 'falha' — sem recarregar.
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
 
-  // Estado de exibição do Ambiente de Jogo: DEV sem alvo usa o mock; com alvo
-  // o modelo do cliente (deltas). Não-DEV sem alvo não monta cena (estado falha).
-  const estadoExibicao =
-    temAlvo && estadoEmAndamento
-      ? estadoDeExibicaoDoModelo(modelo)
-      : noAlvo && estado === 'disponivel'
-        ? criarEstadoExibicaoMock()
-        : null
+  // Estado de exibição: exclusivamente do modelo quando disponível (sem mock)
+  const estadoExibicao = estadoEmAndamento ? estadoDeExibicaoDoModelo(modelo) : null
   const estadoInteracao: EstadoDoTabuleiroNoCliente | null =
-    temAlvo && estadoEmAndamento ? modelo : null
+    estadoEmAndamento ? modelo : null
 
   // ── Injeção única de jogadorId (issue #91) ──
-  // O canal da Partida exige jogadorId em TODOS os comandos (wire.ts do
-  // game-server): comandos sem o campo são rejeitados com DADOS_INVALIDOS.
-  // Ponto único de injeção para os comandos de tabuleiro (ST-09) e de peão
-  // (ST-10); o espalhamento sobre a união produz a união dos comandos de
-  // Partida com jogadorId (PartidaComandoDoCliente).
   const enviarComJogador = useCallback(
     (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
@@ -159,9 +178,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [])
 
   // ── Turnos (issue #118): vez, rodada, fase e peão do Jogador Ativo ──
-  // A vez só existe com jogador autenticado e TURNO_INICIADO recebido; o peão
-  // próprio/vivo vem do mapa aprendido peaoPorJogador (null = ainda não
-  // aprendido — degradação até o primeiro evento de peão do jogador).
   const minhaVez = jogadorId !== null && modelo.jogadorAtivoId === jogadorId
   const peaoProprioId =
     jogadorId !== null ? (modelo.peaoPorJogador[jogadorId] ?? null) : null
@@ -171,13 +187,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       : null
   const peaoProprioPosicionado =
     peaoProprioId !== null &&
-    modelo.peoes.some(
-      (p) => p.peaoId === peaoProprioId && p.celula !== null,
-    )
-  // Fase do turno → botão visível. Confirmado → Encerrar. Primeiro Turno
-  // (rodada 1) não tem Permanecer/Confirmar: coloca o peão e as Recebidas,
-  // então Encerra (colocação completa = peão posicionado e sem pendências).
-  // Turno normal: movimentou → Confirmar Posição; senão → Permanecer.
+    modelo.peoes.some((p) => p.peaoId === peaoProprioId && p.celula !== null)
   type FaseDoTurno = 'permanecer' | 'confirmar' | 'encerrar' | null
   const faseDoTurno: FaseDoTurno = !minhaVez
     ? null
@@ -190,6 +200,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         : modelo.movimentouNoTurno
           ? 'confirmar'
           : 'permanecer'
+
+  // ── Chip Jogador Ativo (apelido/cor do snapshot, #156) ──
+  const jogadorAtivoDados =
+    modelo.jogadorAtivoId !== null ? modelo.jogadorPorId[modelo.jogadorAtivoId] ?? null : null
 
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao
@@ -222,8 +236,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       falhar()
       return
     }
-    // Usa tentarNovamente para honrar loader (loader?.catch(falhar)) quando fornecido;
-    // cai para carregar quando sem loader. Mantém sem alvo em falha.
     if (loader) {
       tentarNovamente()
     } else {
@@ -235,9 +247,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const limparFlash = useCallback(() => setFlash(null), [])
 
   // ── Comandos de turno (issue #118) — todos via enviarComJogador ──
-  // Botões que dependem de peaoId não disparam sem os dados resolvidos;
-  // Encerrar não depende de peaoId e permanece habilitado com pendências
-  // (o servidor rejeita com PENDENCIA_NAO_RESOLVIDA sem passar a vez).
   const permanecerNoTurno = useCallback(() => {
     if (peaoProprioId === null) return
     enviarComJogador({ type: 'PERMANECER', peaoId: peaoProprioId })
@@ -253,7 +262,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [enviarComJogador])
   const [bordaPx, setBordaPx] = useState(0)
 
-  // Acoplado ao header de App.tsx (5rem); remover/trocar por h-screen quando Partida deixar de ser filha de App
   return (
     <div className="relative min-h-[calc(100vh-5rem)] w-full overflow-hidden">
       <AmbienteDeJogo
@@ -269,8 +277,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       />
       <PartidaOverlays estado={estado} onRetry={tentarNovamenteComConexao} />
       <FlashOverlay flash={flash} onClear={limparFlash} />
-      {/* Indicador discreto de rodada (issue #118): escondido até o primeiro
-          TURNO_INICIADO; colisão evitada com a moldura (canto direito). */}
       {estadoEmAndamento && modelo.rodada !== null ? (
         <div
           data-testid="indicador-rodada"
@@ -279,9 +285,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           Rodada {modelo.rodada}
         </div>
       ) : null}
-      {/* Botões por fase do turno (issue #118): só na minha vez; canto
-          direito-inferior para não colidir com os controles de giro nem com a
-          PartidaDevToolbar (ambos centralizados). */}
+      {estadoEmAndamento && jogadorAtivoDados ? (
+        <div
+          data-testid="chip-jogador-ativo"
+          data-cor={jogadorAtivoDados.cor}
+          className="pointer-events-none absolute left-4 top-4 z-30 flex items-center gap-2 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-100"
+          style={{ borderLeft: `4px solid ${HEX_COR_PEAO[jogadorAtivoDados.cor] ?? '#fff'}` }}
+        >
+          <span>{jogadorAtivoDados.apelido}</span>
+        </div>
+      ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (
         <div
           data-testid="controles-de-turno"
@@ -347,7 +360,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         </div>
       ) : null}
       <PartidaMoldura onBordaChange={setBordaPx} />
-      <PartidaDevToolbar onForcar={forcarEstado} />
     </div>
   )
 }

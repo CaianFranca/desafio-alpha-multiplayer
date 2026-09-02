@@ -16,7 +16,7 @@ import type {
   PecaPosicionada,
 } from '../web/src/game/tabuleiro/contrato'
 import { LARGURA_MESA } from '../web/src/game/ambiente/contrato'
-import { criarEstadoExibicaoMock } from '../web/src/game/tabuleiro/mockExibicao'
+import { criarEstadoExibicaoMock } from './helpers/mockExibicao'
 
 // ── Helpers ──
 

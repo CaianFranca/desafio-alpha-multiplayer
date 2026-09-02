@@ -6,6 +6,7 @@ import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { vi } from 'vitest'
+import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 function renderPartidaNaRota(entry: string) {
   const router = createMemoryRouter(
@@ -19,6 +20,38 @@ function renderPartidaNaRota(entry: string) {
   )
 }
 
+function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): EstadoDaPartidaSnapshot {
+  return {
+    tabuleiro: {
+      posicionadas: [],
+      iniciais: [],
+      peoes: [
+        { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
+        { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: null },
+        { peaoId: 'peao-azul', cor: 'azul', pecaId: null },
+        { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+      ],
+      recebidas: [],
+      pecaSelecionadaId: null,
+      pecaEmManipulacaoId: null,
+      peaoSelecionadoId: null,
+    },
+    jogadores: [
+      { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: true },
+      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true },
+      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true },
+      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true },
+    ],
+    jogadorAtivoId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+    rodada: 1,
+    pecaDoInicioDoTurnoId: null,
+    posicaoConfirmada: false,
+    celulasIluminadas: [],
+    estado: 'em_andamento',
+    ...overrides,
+  }
+}
+
 async function partidaDisponivel(entry: string) {
   renderPartidaNaRota(entry)
   await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
@@ -26,9 +59,10 @@ async function partidaDisponivel(entry: string) {
   act(() =>
     ws.simulateMessage({
       type: 'ADMISSAO_ACEITA',
-      jogadorId: 'jogador-1',
-      apelido: 'Ana',
+      jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+      apelido: 'JogadorTeste',
       partidaId: 'partida-1',
+      estado: 'em_andamento',
     }),
   )
   await screen.findByTestId('tabuleiro')
@@ -56,7 +90,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
     expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
   })
 
-  it('admissão aceita leva de carregando para disponível (cena montada)', async () => {
+  it('admissão aceita em_andamento leva de carregando para disponível (cena montada)', async () => {
     renderPartidaNaRota('/partida?serverId=server-1&partidaId=partida-1')
     expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
 
@@ -68,6 +102,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
         jogadorId: 'jogador-1',
         apelido: 'Ana',
         partidaId: 'partida-1',
+        estado: 'em_andamento',
       }),
     )
 
@@ -230,6 +265,23 @@ describe('partida conectada ao game-server (issue #85)', () => {
       ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
     })
     expect(screen.getByTestId('girar-horario')).toBeDisabled()
+  })
+
+  it('envia apenas comandos Partida com jogadorId (hook restrito)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+    act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' }))
+    const user = userEvent.setup()
+    // Tenta posicionar via clique vazio -> deve enviar POSICIONAR_PECA com jogadorId
+    const celula = celulaDoEspelho(3, 3)
+    await user.click(celula)
+    await waitFor(() => {
+      const parsed = ws.sentMessages.map((m) => JSON.parse(m))
+      expect(parsed.length).toBeGreaterThan(0)
+      for (const cmd of parsed) {
+        expect(cmd.jogadorId).toBe('5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90')
+        expect(typeof cmd.type).toBe('string')
+      }
+    })
   })
 })
 
@@ -503,5 +555,153 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
     const ambar = await screen.findByTestId('flash-overlay')
     expect(ambar.getAttribute('data-cor')).toBe('ambar')
     expect(ambar.getAttribute('data-motivo')).toBe('fora_da_vez')
+  })
+})
+
+describe('partida snapshot e admissão por estado (issue #156)', () => {
+  it('admissão preparada leva para aguardando; PARTIDA_INICIADA promove para disponivel', async () => {
+    renderPartidaNaRota('/partida?serverId=s&partidaId=p')
+    expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+        apelido: 'JogadorTeste',
+        partidaId: 'p',
+        estado: 'preparada',
+      }),
+    )
+    expect(await screen.findByTestId('overlay-aguardando')).toBeInTheDocument()
+    expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
+
+    act(() => ws.simulateMessage({ type: 'PARTIDA_INICIADA', partidaId: 'p' }))
+    expect(await screen.findByTestId('tabuleiro')).toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-aguardando')).not.toBeInTheDocument()
+  })
+
+  it('TURNO_INICIADO/POSICAO_CONFIRMADA avulsos não promovem a tela (só snapshot/PARTIDA_INICIADA)', async () => {
+    renderPartidaNaRota('/partida?serverId=s&partidaId=p')
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+        apelido: 'JogadorTeste',
+        partidaId: 'p',
+        estado: 'preparada',
+      }),
+    )
+    expect(await screen.findByTestId('overlay-aguardando')).toBeInTheDocument()
+
+    // Promoção secundária por turno foi removida da descrição da PR: eventos
+    // de turno sem snapshot/ESTADO_DA_PARTIDA não podem abrir o tabuleiro.
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 1 }))
+    act(() => ws.simulateMessage({ type: 'TURNO_ENCERRADO', jogadorId: 'jogador-2' }))
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+        pecaId: 'inicial-2',
+      }),
+    )
+    expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
+    expect(screen.getByTestId('overlay-aguardando')).toBeInTheDocument()
+  })
+
+  it('admissão em_andamento vai direto para disponivel', async () => {
+    renderPartidaNaRota('/partida?serverId=s&partidaId=p')
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+        apelido: 'JogadorTeste',
+        partidaId: 'p',
+        estado: 'em_andamento',
+      }),
+    )
+    expect(await screen.findByTestId('tabuleiro')).toBeInTheDocument()
+  })
+
+  it('ESTADO_DA_PARTIDA popula tabuleiro e chip do jogador ativo', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+
+    const snapshot = criarSnapshotBase({
+      tabuleiro: {
+        posicionadas: [
+          { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+          { pecaId: 'reta-1', tipo: 'reta', orientacao: 0, celula: { linha: 3, coluna: 4 } },
+        ],
+        iniciais: [],
+        peoes: [
+          { peaoId: 'peao-branco', cor: 'branco', pecaId: 'inicial-1' },
+          { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: null },
+          { peaoId: 'peao-azul', cor: 'azul', pecaId: null },
+          { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+        ],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+      },
+      jogadores: [
+        { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false },
+        { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true },
+        { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true },
+        { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true },
+      ],
+      jogadorAtivoId: 'jogador-2',
+      rodada: 2,
+      celulasIluminadas: [{ linha: 3, coluna: 3 }],
+    })
+
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
+
+    // Duas peças posicionadas
+    expect(await screen.findAllByTestId('peca-posicionada')).toHaveLength(2)
+    // Chip com apelido do ativo (Ana / vermelho)
+    const chip = await screen.findByTestId('chip-jogador-ativo')
+    expect(chip).toHaveTextContent('Ana')
+    expect(chip.getAttribute('data-cor')).toBe('vermelho')
+    // Indicador de rodada vindo do snapshot
+    expect(screen.getByTestId('indicador-rodada')).toHaveTextContent('Rodada 2')
+    // Peão ativo marcado no espelho
+    const peaoVermelho = screen.getAllByTestId('peao').find((el) => el.getAttribute('data-peao-id') === 'peao-vermelho')
+    expect(peaoVermelho?.getAttribute('data-ativo')).toBe('true')
+  })
+
+  it('TURNO_INICIADO atualiza chip via snapshot jogadores + TURNO', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    const snapshot = criarSnapshotBase()
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
+    expect((await screen.findByTestId('chip-jogador-ativo')).textContent).toBe('JogadorTeste')
+
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
+    // TURNO_INICIADO muda jogadorAtivoId mas chip lê do snapshot map + estado atualizado via evento
+    // Como nosso snapshot já tinha jogador-2? Actually snapshot had branco active; TURNO muda para vermelho
+    // O chip deve refletir Ana após o evento
+    await waitFor(() => expect(screen.getByTestId('chip-jogador-ativo')).toHaveTextContent('Ana'))
+  })
+
+  it('sem TURNO nem snapshot chip não aparece em aguardando', async () => {
+    renderPartidaNaRota('/partida?serverId=s&partidaId=p')
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+        apelido: 'JogadorTeste',
+        partidaId: 'p',
+        estado: 'preparada',
+      }),
+    )
+    expect(await screen.findByTestId('overlay-aguardando')).toBeInTheDocument()
+    expect(screen.queryByTestId('chip-jogador-ativo')).not.toBeInTheDocument()
   })
 })

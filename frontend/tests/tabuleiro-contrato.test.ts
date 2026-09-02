@@ -19,8 +19,8 @@ import {
   todasAsCelulas,
   validarDimensoes,
 } from '../web/src/game/tabuleiro/contrato'
-import { criarEstadoExibicaoMock } from '../web/src/game/tabuleiro/mockExibicao'
 import { LARGURA_MESA } from '../web/src/game/ambiente/contrato'
+import { criarEstadoExibicaoMock } from './helpers/mockExibicao'
 
 describe('contrato do tabuleiro', () => {
   it('grade fixa 7x7 conforme ADR-0004', () => {

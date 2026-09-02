@@ -18,7 +18,6 @@ import { useCallback, useEffect, useRef } from 'react'
 import type {
   AdmissaoAceitaEvento,
   PartidaComandoDoCliente,
-  TabuleiroComandoDoCliente,
   TabuleiroEventoDoServidor,
   PeaoEventoDoServidor,
   PosicaoConfirmadaEvento,
@@ -26,13 +25,18 @@ import type {
   TurnoIniciadoEvento,
   CelulasIluminadasWireEvento,
   LimpezaAplicadaWireEvento,
+  PartidaIniciadaEvento,
+  EstadoDaPartidaEvento,
+  PecaSorteadaEvento,
+  VagaDaPecaRecebidaEscolhidaEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 
 /**
- * Eventos que o canal da Partida entrega à página (issue #118): tabuleiro
- * (ST-09), peões (ST-10), os três eventos de turno (ST-11) e iluminação/
- * limpeza (issue #151) agora roteados.
+ * Eventos que o canal da Partida entrega à página (issue #156): tabuleiro
+ * (ST-09), peões (ST-10), os três eventos de turno (ST-11), iluminação/
+ * limpeza (issue #151) e os dois novos do snapshot (PARTIDA_INICIADA e
+ * ESTADO_DA_PARTIDA) agora roteados exclusivamente pelo contrato de Partida.
  */
 export type EventoDoCanalDaPartida =
   | TabuleiroEventoDoServidor
@@ -42,15 +46,19 @@ export type EventoDoCanalDaPartida =
   | PosicaoConfirmadaEvento
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
+  | PecaSorteadaEvento
+  | VagaDaPecaRecebidaEscolhidaEvento
+  | PartidaIniciadaEvento
+  | EstadoDaPartidaEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
   desconectar: () => void
   /**
-   * Envia comando pelo canal (fila até o open). Aceita comandos de tabuleiro
-   * (legacy, sem jogadorId) e comandos de peão (com jogadorId injetado).
+   * Envia comando pelo canal (fila até o open). Apenas PartidaComandoDoCliente
+   * com jogadorId — legado Tabuleiro/Peao sem jogadorId removido (#156).
    */
-  enviar: (comando: TabuleiroComandoDoCliente | PartidaComandoDoCliente) => void
+  enviar: (comando: PartidaComandoDoCliente) => void
 }
 
 interface UsePartidaWebSocketOptions {
@@ -83,7 +91,7 @@ export function usePartidaWebSocket({
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   // Comandos enfileirados enquanto o socket ainda não está aberto (handshake).
-  const comandosPendentesRef = useRef<(TabuleiroComandoDoCliente | PartidaComandoDoCliente)[]>([])
+  const comandosPendentesRef = useRef<PartidaComandoDoCliente[]>([])
   // Booleano de montado para impedir setState/reconexão após unmount.
   const montadoRef = useRef(true)
   // Refs dos callbacks: estáveis por instância, sem recriar o efeito.
@@ -166,9 +174,13 @@ export function usePartidaWebSocket({
         case 'PEAO_PERMANECEU':
         case 'CELULAS_ILUMINADAS':
         case 'LIMPEZA_APLICADA':
+        case 'PECA_SORTEADA':
+        case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO':
         case 'TURNO_INICIADO':
         case 'TURNO_ENCERRADO':
         case 'POSICAO_CONFIRMADA':
+        case 'PARTIDA_INICIADA':
+        case 'ESTADO_DA_PARTIDA':
           // O grupo de cases acima é intencionalmente vazio (fall-through):
           // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
           // o cliente apenas espelha).
@@ -221,7 +233,7 @@ export function usePartidaWebSocket({
     encerrarConexao()
   }, [encerrarConexao])
 
-  const enviar = useCallback((comando: TabuleiroComandoDoCliente | PartidaComandoDoCliente) => {
+  const enviar = useCallback((comando: PartidaComandoDoCliente) => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(comando))

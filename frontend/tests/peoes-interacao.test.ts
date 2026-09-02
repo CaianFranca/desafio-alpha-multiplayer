@@ -20,8 +20,8 @@ import type {
   EstadoInteracaoPeoes,
   EventoDoCicloDoPeao,
 } from '../web/src/game/tabuleiro/interacaoPeoes'
-import { criarEstadoExibicaoMock } from '../web/src/game/tabuleiro/mockExibicao'
 import type { Celula, PecaPosicionada, PeaoDaExibicao } from '../web/src/game/tabuleiro/contrato'
+import { criarEstadoExibicaoMock } from './helpers/mockExibicao'
 import type { EstadoInteracaoTabuleiro } from '../web/src/game/tabuleiro/interacao'
 import type { ErroDoTabuleiroEvento } from '@flicker/shared'
 

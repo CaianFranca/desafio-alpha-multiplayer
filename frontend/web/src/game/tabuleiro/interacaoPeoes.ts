@@ -37,14 +37,18 @@ import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
 import type { FlashFeedback, EstadoInteracaoTabuleiro } from './interacao'
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada, mapearCliqueNaReserva } from './interacao'
 import {
+  bordasAbertas,
   chaveCelula,
   destinosConectadosDoPeao,
   encontrarPecaNaCelula,
+  estaDentroDaGrade,
 } from './contrato'
 import type { Celula, PeaoDaExibicao, PecaPosicionada, TipoDaPeca } from './contrato'
 import type {
+  BordaCardinal,
   ErroDoTabuleiroEvento,
   ManipulacaoFinalizadaEvento,
+  Orientacao,
   PecaDeselecionadaEvento,
   PeaoComandoDoCliente,
   PeaoEventoDoServidor,
@@ -69,19 +73,31 @@ import type {
 // chega no wire via TIPO_DA_PECA_RECEBIDA_ESCOLHIDO).
 
 /**
- * Pendência no cliente (issue #91): campos do wire + campo client-side
- * `pecaId` — null até o evento TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher na
- * forma LEGADA (ST-10); na forma NOVA (#138) o wire já traz o pecaId da peça
- * sorteada e a celulaAlvo pode ser null (vaga ainda não escolhida). A
+ * Pendência no cliente (issue #91): campos do wire + campos client-side.
+ * Forma LEGADA (ST-10): `pecaId` é preenchido pelo evento
+ * TIPO_DA_PECA_RECEBIDA_ESCOLHIDO até o encaixe. Forma NOVA (#138): o wire já
+ * traz o pecaId da peça sorteada e a celulaAlvo pode ser null (vaga ainda não
+ * escolhida). `orientacao` é metadado client-side do GIRAR_PECA em foco — o
+ * snapshot não o popula (o cliente ignora fora da janela de manipulação). A
  * pendência só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
 export type PendenciaNoCliente =
   // Legado ST-10 (@deprecated): borda geradora e célula-alvo fixas na criação,
   // com pecaId client-side preenchido por TIPO_DA_PECA_RECEBIDA_ESCOLHIDO.
-  | (PendenciaDeRecebimento & { readonly pecaId: string | null })
+  | (PendenciaDeRecebimento & {
+      readonly pecaId: string | null
+      readonly orientacao?: Orientacao
+    })
   // Novo (#138): a peça já vem sorteada da Caixa (pecaId + tipo + vaga) e a
   // célula-alvo deriva da vaga — pode estar null até ESCOLHER_VAGA_DA_PECA_RECEBIDA.
-  | PendenciaDaPecaSorteada
+  | (PendenciaDaPecaSorteada & { readonly orientacao?: Orientacao })
+
+/** Type guard: forma nova (#138) — só ela declara o campo `vaga`. */
+export function ehPendenciaSorteada(
+  pendencia: PendenciaNoCliente,
+): pendencia is PendenciaDaPecaSorteada & { readonly orientacao?: Orientacao } {
+  return 'vaga' in pendencia
+}
 
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]
@@ -204,9 +220,8 @@ export function mapearCliqueNaPecaInicial(
 }
 
 /**
- * Escolha do tipo de cada Recebida pendente → ESCOLHER_TIPO_DA_PECA_RECEBIDA.
- * A oferta vem da Reserva: tipo sem peça disponível não gera comando (null);
- * a sequência exige Peão selecionado e a Recebida pendente existente.
+ * Escolha do tipo de cada Recebida pendente → ESCOLHER_TIPO_DA_PECA_RECEBIDA (legado ST-10).
+ * @deprecated #138 removeu escolha de tipo; mantido até limpeza #140/#143.
  */
 export function mapearEscolhaDeTipoDaRecebida(
   estado: EstadoInteracaoPeoes,
@@ -222,6 +237,74 @@ export function mapearEscolhaDeTipoDaRecebida(
     return null
   }
   return { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', recebidaId, tipoDaPeca }
+}
+
+const DESLOCAMENTO_DA_BORDA: Record<BordaCardinal, Celula> = {
+  norte: { linha: -1, coluna: 0 },
+  leste: { linha: 0, coluna: 1 },
+  sul: { linha: 1, coluna: 0 },
+  oeste: { linha: 0, coluna: -1 },
+}
+
+function celulaVizinhaNaBorda(celula: Celula, borda: BordaCardinal): Celula | null {
+  const d = DESLOCAMENTO_DA_BORDA[borda]
+  const vizinha = { linha: celula.linha + d.linha, coluna: celula.coluna + d.coluna }
+  if (!estaDentroDaGrade(vizinha)) return null
+  return vizinha
+}
+
+/**
+ * Vaga da pendência (forma nova #138): `null` até a escolha, `BordaCardinal`
+ * depois. A forma legada (ST-10, @deprecated) não carrega o campo — `undefined`
+ * distingue "sem vaga" (#138) de "forma legada" sem interpretar o campo.
+ */
+export function getVaga(pendencia: PendenciaNoCliente): BordaCardinal | null | undefined {
+  return 'vaga' in pendencia ? pendencia.vaga : undefined
+}
+
+export function vagasDisponiveisDoPeao(
+  estado: EstadoInteracaoPeoes,
+): { borda: BordaCardinal; celula: Celula }[] {
+  const peaoId = estado.peaoSelecionadoId
+  if (peaoId === null) return []
+  const peao = estado.peoes.find((p) => p.peaoId === peaoId)
+  if (!peao || peao.celula === null) return []
+  const origem = encontrarPecaNaCelula(estado.posicionadas, peao.celula)
+  if (!origem) return []
+  const bordas = bordasAbertas(origem)
+  const jaEscolhidas = new Set<BordaCardinal>(
+    estado.recebidasPendentes
+      .map(getVaga)
+      .filter((v): v is BordaCardinal => v !== null && v !== undefined),
+  )
+  const vagas: { borda: BordaCardinal; celula: Celula }[] = []
+  for (const borda of bordas) {
+    if (jaEscolhidas.has(borda)) continue
+    const celula = celulaVizinhaNaBorda(origem.celula, borda)
+    if (!celula || encontrarPecaNaCelula(estado.posicionadas, celula)) continue
+    vagas.push({ borda, celula })
+  }
+  return vagas
+}
+
+export function mapearEscolhaDeVagaDaRecebida(
+  estado: EstadoInteracaoPeoes,
+  recebidaId: string,
+  borda: BordaCardinal,
+): PeaoComandoDoCliente | null {
+  if (estado.peaoSelecionadoId === null) return null
+  const pendente = estado.recebidasPendentes.find(
+    (r) => r.recebidaId === recebidaId,
+  )
+  if (!pendente) return null
+  if (getVaga(pendente) !== null) return null
+  const vagaValida = vagasDisponiveisDoPeao(estado).some((v) => v.borda === borda)
+  if (!vagaValida) return null
+  return {
+    type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+    recebidaId,
+    borda,
+  }
 }
 
 /**
@@ -367,20 +450,34 @@ export function rotearCliqueDeCelula(
   celula: Celula,
 ): ResultadoDeCliqueEmCelula {
   if (haRecebidasPendentes(estadoPeoes)) {
+    const temVagaPendente = estadoPeoes.recebidasPendentes.some(
+      (r) => getVaga(r) === null,
+    )
+    if (temVagaPendente) {
+      const vagas = vagasDisponiveisDoPeao(estadoPeoes)
+      const vaga = vagas.find((v) => chaveCelula(v.celula) === chaveCelula(celula))
+      if (vaga) {
+        const alvo = estadoPeoes.recebidasPendentes.find(
+          (r) => getVaga(r) === null,
+        )
+        if (alvo) {
+          const comando = mapearEscolhaDeVagaDaRecebida(
+            estadoPeoes,
+            alvo.recebidaId,
+            vaga.borda,
+          )
+          if (comando) return { ciclo: comando }
+        }
+        return null
+      }
+    }
     const pendencia = estadoPeoes.recebidasPendentes.find(
-      (r) =>
-        // Forma nova (#138): célula-alvo ainda indefinida (null) até o sorteio
-        // fixar a vaga — não é encaixável por esta rota legada.
-        r.celulaAlvo !== null && chaveCelula(r.celulaAlvo) === chaveCelula(celula),
+      (r) => r.celulaAlvo !== null && chaveCelula(r.celulaAlvo) === chaveCelula(celula),
     )
     if (!pendencia) return null
     if (pendencia.pecaId === null) return { focarPendencia: pendencia.recebidaId }
-    // Pendência tipada: encaixe exige a peça escolhida em foco; seleção
-    // divergente (ex.: peça de Reserva selecionada — estado stale) → null.
     if (pendencia.pecaId !== estadoPeoes.pecaSelecionadaId) return null
     const encaixe = mapearPosicionarRecebida(estadoPeoes, celula)
-    // Não-null por construção (pecaSelecionadaId = pendência.pecaId ≠ null e
-    // célula = alvo da pendência); guardo por tipagem.
     return encaixe === null ? null : { ciclo: encaixe }
   }
   if (estadoPeoes.peaoSelecionadoId !== null) {
@@ -422,6 +519,7 @@ const TIPOS_DE_COMANDO_DE_PEAO: ReadonlySet<string> = new Set([
   'SELECIONAR_PEAO',
   'POSICIONAR_PEAO',
   'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
+  'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
   'PERMANECER',
 ])
@@ -491,7 +589,15 @@ export function mapearCliqueNaReservaComCiclo(
   peca: { readonly pecaId: string; readonly tipo: TipoDaPeca },
 ): PeaoComandoDoCliente | TabuleiroComandoDoCliente | null {
   if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) {
+    // Forma nova (#138): o campo `vaga` existe na pendência (getVaga !==
+    // undefined). A peça já vem sorteada, então a escolha de tipo legada
+    // (ESCOLHER_TIPO) não se aplica — null bloqueia a rota sem sinal sonoro.
+    const temSorteada = estadoPeoes.recebidasPendentes.some(
+      (r) => getVaga(r) !== undefined,
+    )
+    if (temSorteada) return null
     if (recebidaFocadaId === null || peca.tipo === 'inicial') return null
+    if (peca.tipo !== 'reta' && peca.tipo !== 'T' && peca.tipo !== 'cruz') return null
     return mapearEscolhaDeTipoDaRecebida(estadoPeoes, recebidaFocadaId, peca.tipo)
   }
   return mapearCliqueNaReserva(estadoInteracao, peca.pecaId)
@@ -512,6 +618,8 @@ export type EventoDoCicloDoPeao =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
   | PosicaoConfirmadaEvento
+  | import('@flicker/shared').VagaDaPecaRecebidaEscolhidaEvento
+  | import('@flicker/shared').PecaSorteadaEvento
 
 /**
  * Traduz evento do servidor em flash (issue #118): aprovação/seleção →
@@ -527,6 +635,7 @@ export function mapearEventoPeaoParaFeedback(
     case 'RECEBIMENTO_GERADO':
     case 'PEAO_POSICIONADO':
     case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO':
+    case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO':
     case 'PEAO_MOVIDO':
     case 'PEAO_PERMANECEU':
     case 'PECA_SELECIONADA':
@@ -536,6 +645,8 @@ export function mapearEventoPeaoParaFeedback(
     case 'MANIPULACAO_FINALIZADA':
     case 'POSICAO_CONFIRMADA':
       return FLASH_BRANCO
+    case 'PECA_SORTEADA':
+      return null
     case 'ERRO_DO_TABULEIRO':
       if (evento.codigo === 'FORA_DA_VEZ') return FLASH_AMBAR
       if (evento.codigo === 'PENDENCIA_NAO_RESOLVIDA') {

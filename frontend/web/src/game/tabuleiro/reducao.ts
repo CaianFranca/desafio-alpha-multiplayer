@@ -42,6 +42,7 @@ import {
   CORES_DOS_PEOES,
   chaveCelula,
   criarReservaInicial,
+  type CorDoPeao,
   type EstadoExibicaoTabuleiro,
   type Orientacao,
   type PecaDaReserva,
@@ -50,12 +51,15 @@ import {
   type TipoDaPeca,
 } from './contrato'
 import type { PendenciaNoCliente } from './interacaoPeoes'
+import { ehPendenciaSorteada } from './interacaoPeoes'
 import type {
   Celula,
   CelulasIluminadasWireEvento,
   LimpezaAplicadaWireEvento,
   PeaoEventoDoServidor,
   TabuleiroEventoDoServidor,
+  PecaSorteadaEvento,
+  VagaDaPecaRecebidaEscolhidaEvento,
   PosicaoConfirmadaEvento,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
@@ -74,6 +78,8 @@ export type EventoDoJogoNoCliente =
   | PosicaoConfirmadaEvento
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
+  | PecaSorteadaEvento
+  | VagaDaPecaRecebidaEscolhidaEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -104,13 +110,18 @@ export interface EstadoDoTabuleiroNoCliente {
   /** A posição do peão do Jogador Ativo já foi confirmada (POSICAO_CONFIRMADA). */
   readonly posicaoConfirmadaNoTurno: boolean
   /**
-   * Mapa aprendido jogadorId→peaoId (issue #118): cada evento de peão dentro
-   * da janela do turno (TURNO_INICIADO→TURNO_ENCERRADO) atribui o peão ao
-   * Jogador Ativo — turnos são serializados, então o dono é o ativo. Sem
-   * eventos ainda (início da rodada 1), a consulta fica indefinida e o
-   * destaque/buttons degradam a null (substituído pelo snapshot #154/#156).
-   */
+    * Mapa aprendido jogadorId→peaoId (issue #118): cada evento de peão dentro
+    * da janela do turno (TURNO_INICIADO→TURNO_ENCERRADO) atribui o peão ao
+    * Jogador Ativo — turnos são serializados, então o dono é o ativo. Sem
+    * eventos ainda (início da rodada 1), a consulta fica indefinida e o
+    * destaque/buttons degradam a null (substituído pelo snapshot #154/#156).
+    */
   readonly peaoPorJogador: Readonly<Record<string, string>>
+  /**
+    * Dicionário jogadorId → dados de exibição (apelido/cor) derivado do
+    * snapshot (issue #156). Fonte única para o chip de Jogador Ativo.
+    */
+  readonly jogadorPorId: Readonly<Record<string, { apelido: string; cor: CorDoPeao }>>
 }
 
 /** Estado inicial determinístico do cliente (deltas a partir do zero). */
@@ -139,6 +150,7 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     movimentouNoTurno: false,
     posicaoConfirmadaNoTurno: false,
     peaoPorJogador: {},
+    jogadorPorId: {},
   }
 }
 
@@ -202,23 +214,38 @@ export function reduzirEvento(
         ? { ...estado, pecaSelecionadaId: null }
         : estado
     case 'PECA_GIRADA': {
-      // Gira na posicionada se a peça estiver posicionada (janela de
-      // Manipulação), senão na Reserva (seleção ativa).
       const posicionada = estado.posicionadas.some(
         (p) => p.pecaId === evento.pecaId,
       )
-      return posicionada
-        ? girarPosicionada(estado, evento.pecaId, evento.orientacao)
-        : girarNaReserva(estado, evento.pecaId, evento.orientacao)
+      if (posicionada) return girarPosicionada(estado, evento.pecaId, evento.orientacao)
+      const temPendencia = estado.recebidasPendentes.some(
+        (r) => r.pecaId === evento.pecaId,
+      )
+      if (temPendencia) {
+        return {
+          ...estado,
+          recebidasPendentes: estado.recebidasPendentes.map((r) =>
+            r.pecaId === evento.pecaId ? { ...r, orientacao: evento.orientacao } : r,
+          ),
+        }
+      }
+      return girarNaReserva(estado, evento.pecaId, evento.orientacao)
     }
     case 'PECA_POSICIONADA': {
-      // PECA_POSICIONADA não traz `tipo`; preserva o da Reserva ou do
-      // recebimento (peças recebidas vêm de fora da Reserva).
       const pecaNaReserva = estado.reserva.find(
         (p) => p.pecaId === evento.pecaId,
       )
-      const tipo = pecaNaReserva?.tipo
-        ?? estado.pecasDeRecebimento[evento.pecaId]
+      const encontrada = estado.recebidasPendentes.find(
+        (r) => r.pecaId === evento.pecaId,
+      )
+      const tipoDaPendencia =
+        encontrada !== undefined && ehPendenciaSorteada(encontrada)
+          ? encontrada.tipoDaPeca
+          : undefined
+      const tipo =
+        pecaNaReserva?.tipo ??
+        estado.pecasDeRecebimento[evento.pecaId] ??
+        tipoDaPendencia
       if (tipo === undefined) return estado
       const posicionada: PecaPosicionada = {
         pecaId: evento.pecaId,
@@ -257,28 +284,66 @@ export function reduzirEvento(
     // ── Eventos de Peão / Ciclo (ST-10) ──
     case 'PEAO_SELECIONADO':
       return { ...estado, peaoSelecionadoId: evento.peaoId }
-    case 'RECEBIMENTO_GERADO':
-      // Pendências do wire ganham o campo client-side `pecaId`: null até o
-      // TIPO_DA_PECA_RECEBIDA_ESCOLHIDO preencher na forma LEGADA (ST-10);
-      // na forma NOVA (#138) o wire já traz o pecaId da peça sorteada —
-      // preservado (a vaga/célula-alvo pode ainda ser null).
+    case 'RECEBIMENTO_GERADO': {
+      // União discriminada pelo campo exclusivo de cada forma: `bordaGeradora`
+      // só existe na forma legada (ST-10, @deprecated); a forma nova (#138) já
+      // vem como PendenciaDaPecaSorteada no wire e passa direto.
+      const recebidasPendentes: readonly PendenciaNoCliente[] = evento.recebidas.map(
+        (r) => ('bordaGeradora' in r ? { ...r, pecaId: null } : r),
+      )
+      const pecasDeRecebimento = { ...estado.pecasDeRecebimento }
+      for (const r of evento.recebidas) {
+        if (!('bordaGeradora' in r)) {
+          pecasDeRecebimento[r.pecaId] = r.tipoDaPeca
+        }
+      }
+      return { ...estado, recebidasPendentes, pecasDeRecebimento }
+    }
+    case 'PECA_SORTEADA':
+      if (estado.pecasDeRecebimento[evento.pecaId] !== undefined) return estado
       return {
         ...estado,
-        recebidasPendentes: evento.recebidas.map((r) =>
-          // Legado ST-10: o wire não carrega o pecaId da pendência — o campo
-          // client-side nasce null até TIPO_DA_PECA_RECEBIDA_ESCOLHIDO. Forma
-          // nova (#138, PendenciaDaPecaSorteada): a peça já vem sorteada, sem
-          // sobrescrever o pecaId.
-          'bordaGeradora' in r ? { ...r, pecaId: null } : r,
+        pecasDeRecebimento: {
+          ...estado.pecasDeRecebimento,
+          [evento.pecaId]: evento.tipoDaPeca,
+        },
+      }
+    case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO': {
+      const encontrada = estado.recebidasPendentes.find(
+        (r) => r.recebidaId === evento.recebidaId,
+      )
+      // A escolha de vaga (#138) só se aplica à forma sorteada; a pendência
+      // legada não tem vaga no domínio e é ignorada aqui.
+      const pendente =
+        encontrada !== undefined && ehPendenciaSorteada(encontrada)
+          ? encontrada
+          : undefined
+      const pecasDeRecebimento =
+        pendente && estado.pecasDeRecebimento[pendente.pecaId] === undefined
+          ? {
+              ...estado.pecasDeRecebimento,
+              [pendente.pecaId]: pendente.tipoDaPeca,
+            }
+          : estado.pecasDeRecebimento
+      return {
+        ...estado,
+        pecasDeRecebimento,
+        pecaSelecionadaId: pendente ? pendente.pecaId : estado.pecaSelecionadaId,
+        recebidasPendentes: estado.recebidasPendentes.map((r) =>
+          r.recebidaId === evento.recebidaId && ehPendenciaSorteada(r)
+            ? {
+                ...r,
+                vaga: evento.borda,
+                celulaAlvo: evento.celulaAlvo,
+              }
+            : r,
         ),
       }
+    }
     case 'PEAO_POSICIONADO': {
       const peoes = estado.peoes.map((p) =>
         p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
       )
-      // Primeiro Turno: o engine re-seleciona o peão no `posicionar_peao`
-      // (partida.ts) — o cliente espelha a seleção explicitamente.
-      // A janela do turno atribui o peão ao Jogador Ativo (issue #118).
       return {
         ...estado,
         peoes,
@@ -328,24 +393,28 @@ export function reduzirEvento(
         peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
       }
 
-    // ── Eventos de Turno (ST-11, issue #118) ──
     case 'TURNO_INICIADO':
-      // Novo turno: seta a vez e a rodada, reseta a fase (movimentou/confirmado).
       return {
         ...estado,
         jogadorAtivoId: evento.jogadorId,
         rodada: evento.rodada,
         movimentouNoTurno: false,
         posicaoConfirmadaNoTurno: false,
+        peaoSelecionadoId: null,
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        recebidasPendentes: [],
       }
     case 'TURNO_ENCERRADO':
-      // Limpeza mínima: a vez cai até o próximo TURNO_INICIADO; a rodada e o
-      // mapa aprendido jogadorId→peaoId preservam o contexto entre turnos.
       return {
         ...estado,
         jogadorAtivoId: null,
         movimentouNoTurno: false,
         posicaoConfirmadaNoTurno: false,
+        peaoSelecionadoId: null,
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        recebidasPendentes: [],
       }
     case 'POSICAO_CONFIRMADA':
       // A Confirmação de Posição trava o peão do Jogador Ativo neste turno.

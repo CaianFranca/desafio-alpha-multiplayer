@@ -52,7 +52,15 @@ export type PecaId = string
 
 // ── Tipos de domínio visual (espelha engine/shared) ──
 
-export type TipoDaPeca = 'inicial' | 'reta' | 'T' | 'cruz'
+export type TipoDaPeca =
+  | 'inicial'
+  | 'reta'
+  | 'T'
+  | 'cruz'
+  | 'gerador'
+  | 'sala_do_diretor'
+  | 'sala_medica'
+  | 'portao_de_saida'
 export type Orientacao = 0 | 90 | 180 | 270
 export type BordaCardinal = 'norte' | 'leste' | 'sul' | 'oeste'
 
@@ -179,6 +187,10 @@ const BORDAS_BASE: Record<TipoDaPeca, readonly BordaCardinal[]> = {
   reta: ['norte', 'sul'],
   T: ['norte', 'leste', 'oeste'],
   cruz: ['norte', 'leste', 'sul', 'oeste'],
+  gerador: ['norte', 'leste', 'sul', 'oeste'],
+  sala_do_diretor: ['norte', 'leste', 'sul', 'oeste'],
+  sala_medica: ['norte', 'leste', 'sul', 'oeste'],
+  portao_de_saida: ['norte', 'leste', 'sul', 'oeste'],
 }
 
 const ORDEM_CANONICA: readonly BordaCardinal[] = ['norte', 'leste', 'sul', 'oeste']
@@ -191,7 +203,7 @@ const ROTACAO_HORARIA: Record<BordaCardinal, BordaCardinal> = {
 }
 
 export function bordasAbertas(peca: Pick<PecaDaReserva, 'tipo' | 'orientacao'>): BordaCardinal[] {
-  let bordas = BORDAS_BASE[peca.tipo] as BordaCardinal[]
+  let bordas = BORDAS_BASE[peca.tipo]
   const passos = (peca.orientacao / 90) % 4
   for (let i = 0; i < passos; i++) {
     bordas = bordas.map((b) => ROTACAO_HORARIA[b])
