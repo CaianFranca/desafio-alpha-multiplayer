@@ -87,6 +87,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   )
   const [flash, setFlash] = useState<FlashFeedback | null>(null)
 
+  const estadoEmAndamento = temAlvo && estado === 'disponivel'
+  const emResultado = estado === 'resultado'
+  const emResultadoRef = useRef(emResultado)
+  useEffect(() => {
+    emResultadoRef.current = emResultado
+  }, [emResultado])
+
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, conectar: reconectarSocket, desconectar } = usePartidaWebSocket({
     serverId,
@@ -114,6 +121,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           partidaEmAndamento()
           return
         }
+        if (evento.type === 'ATAQUE_RESOLVIDO') return
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
         if (emResultadoRef.current) return
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
@@ -152,13 +160,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     ),
     onFalhaDeConexao: useCallback(() => falhar(), [falhar]),
   })
-
-  const estadoEmAndamento = temAlvo && estado === 'disponivel'
-  const emResultado = estado === 'resultado'
-  const emResultadoRef = useRef(emResultado)
-  useEffect(() => {
-    emResultadoRef.current = emResultado
-  }, [emResultado])
 
   // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
   const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
