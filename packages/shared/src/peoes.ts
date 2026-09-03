@@ -32,9 +32,9 @@
 // (issue #138) e girar a Recebida roteia pelo pecaId sem exigir seleção
 // prévia.
 //
-// O wire legado da ST-10 (EscolherTipoDaPecaRecebidaComando,
-// TipoDaPecaRecebidaEscolhidoEvento, PendenciaDeRecebimento) saiu do domínio
-// na #138 e foi removido daqui na limpeza da #140/#143.
+// O wire legado da ST-10 (comando e evento de escolha de tipo, e a pendência
+// com borda geradora fixa na criação) saiu do domínio na #138 e foi removido
+// daqui na limpeza da #140/#143.
 
 import type { Celula, PecaId, TipoDePecaDaCaixa } from './tabuleiro.ts';
 
