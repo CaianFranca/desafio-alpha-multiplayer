@@ -19,6 +19,7 @@ import type {
   RecebidaId,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
+import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 
 interface TabuleiroMirrorDOMProps {
   todasCelulas: readonly Celula[]
@@ -51,6 +52,8 @@ interface TabuleiroMirrorDOMProps {
   alvosPendentesSet?: ReadonlySet<string>
   /** Chave da célula-alvo da pendência FOCADA. */
   alvoFocadoKey?: string | null
+  /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
+  sanidadePorPeao?: SanidadePorPeao
 }
 
 /**
@@ -86,6 +89,7 @@ export function TabuleiroMirrorDOM({
   aoFocarPendencia,
   alvosPendentesSet = new Set<string>(),
   alvoFocadoKey = null,
+  sanidadePorPeao = {},
 }: TabuleiroMirrorDOMProps) {
   // Mesma derivação pura usada pela cena: resolve a peça sob o peão selecionado
   // (null quando o peão está sobre a Mesa ou sem peça → sem conexões destacadas).
@@ -203,23 +207,29 @@ export function TabuleiroMirrorDOM({
           ))
         : null}
       <div data-testid="peoes">
-        {peoes.map((peao) => (
-          <div
-            key={peao.peaoId}
-            data-testid="peao"
-            data-peao-id={peao.peaoId}
-            data-cor={peao.cor}
-            data-posicionado={peao.celula !== null ? 'true' : 'false'}
-            data-selecionado={peao.peaoId === peaoSelecionadoId ? 'true' : 'false'}
-            data-ativo={peao.peaoId === peaoAtivoId ? 'true' : 'false'}
-            onClick={(e) => {
-              // stopPropagation: não deixar o clique chegar ao "clique fora"
-              // da raiz, que desselecionaria na sequência.
-              e.stopPropagation()
-              aoSelecionarPeao?.(peao.peaoId)
-            }}
-          />
-        ))}
+        {peoes.map((peao) => {
+          const percepcao = sanidadePorPeao[peao.peaoId]
+          return (
+            <div
+              key={peao.peaoId}
+              data-testid="peao"
+              data-peao-id={peao.peaoId}
+              data-cor={peao.cor}
+              data-posicionado={peao.celula !== null ? 'true' : 'false'}
+              data-selecionado={peao.peaoId === peaoSelecionadoId ? 'true' : 'false'}
+              data-ativo={peao.peaoId === peaoAtivoId ? 'true' : 'false'}
+              data-sanidade={percepcao ? String(percepcao.sanidade) : undefined}
+              data-em-baixa={percepcao?.emBaixaIluminacao ? 'true' : undefined}
+              data-amedrontado={percepcao?.amedrontado ? 'true' : undefined}
+              onClick={(e) => {
+                // stopPropagation: não deixar o clique chegar ao "clique fora"
+                // da raiz, que desselecionaria na sequência.
+                e.stopPropagation()
+                aoSelecionarPeao?.(peao.peaoId)
+              }}
+            />
+          )
+        })}
       </div>
     </div>
   )
