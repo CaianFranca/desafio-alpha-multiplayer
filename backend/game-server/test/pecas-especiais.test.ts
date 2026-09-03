@@ -170,21 +170,32 @@ function esperarEvento(ws: WebSocket, tipo: string, timeoutMs = 5000): Promise<R
   });
 }
 
-// Coleta eventos WS por tipo durante uma janela curta (para capturar PECA_SORTEADA + RECEBIMENTO_GERADO).
-function coletarEventos(ws: WebSocket, tipos: readonly string[], janelaMs = 800): Promise<Record<string, unknown>[]> {
-  return new Promise((resolve) => {
+// Aguarda N eventos WS do mesmo tipo (listener único que conta); rejeita se a
+// quantidade não for atingida na janela — sem tolerar zero eventos.
+function esperarEventos(ws: WebSocket, tipo: string, quantidade: number, timeoutMs = 5000): Promise<Record<string, unknown>[]> {
+  return new Promise((resolve, reject) => {
     const coletados: Record<string, unknown>[] = [];
+    const timer = setTimeout(() => {
+      ws.removeListener('message', onMensagem);
+      reject(new Error(`timeout aguardando ${quantidade} eventos WS '${tipo}' (recebidos ${coletados.length})`));
+    }, timeoutMs);
     function onMensagem(data: unknown): void {
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse((data as Buffer).toString()) as Record<string, unknown>;
-        if (tipos.includes(parsed.type as string)) coletados.push(parsed);
-      } catch {}
+        parsed = JSON.parse((data as Buffer).toString());
+      } catch {
+        return;
+      }
+      if (typeof parsed === 'object' && parsed !== null && (parsed as { type?: unknown }).type === tipo) {
+        coletados.push(parsed as Record<string, unknown>);
+        if (coletados.length === quantidade) {
+          clearTimeout(timer);
+          ws.removeListener('message', onMensagem);
+          resolve(coletados);
+        }
+      }
     }
     ws.on('message', onMensagem);
-    setTimeout(() => {
-      ws.removeListener('message', onMensagem);
-      resolve(coletados);
-    }, janelaMs);
   });
 }
 
@@ -295,8 +306,8 @@ test('sorteio unitário via serviço: RECEBIMENTO_GERADO com vaga null e PECA_SO
 
     const ws = await conectarPartida(servidor, aceite.partidaId, 1);
     try {
-      // Listener antecipado para capturar PECA_SORTEADA + RECEBIMENTO_GERADO no mesmo broadcast
-      const sorteadasPromise = coletarEventos(ws, ['PECA_SORTEADA'], 1500);
+      // Listeners antecipados (antes do envio): um PECA_SORTEADA por peça sorteada.
+      const sorteadasPromise = esperarEventos(ws, 'PECA_SORTEADA', 2, 5000);
       const recebimentoPromise = esperarEvento(ws, 'RECEBIMENTO_GERADO', 5000);
       enviar(ws, { type: 'POSICIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 3, coluna: 3 } });
       const recebimento = await recebimentoPromise;
@@ -314,14 +325,14 @@ test('sorteio unitário via serviço: RECEBIMENTO_GERADO com vaga null e PECA_SO
       assert.ok(ids.includes('sala-do-diretor-1'));
 
       const sorteadas = await sorteadasPromise;
-      // Pode haver 0 se o coletor perdeu a janela; tolera 0 ou 2, mas verifica forma quando houver
-      if (sorteadas.length > 0) {
-        assert.equal(sorteadas.length, 2);
-        for (const ev of sorteadas) {
-          assert.ok(typeof ev.pecaId === 'string');
-          assert.ok(['gerador', 'sala_do_diretor', 'sala_medica', 'portao_de_saida', 'reta', 'T', 'cruz', 'vulto', 'espectro'].includes(ev.tipoDaPeca as string));
-        }
+      // Um evento PECA_SORTEADA por peça sorteada, sem tolerar zero.
+      assert.equal(sorteadas.length, 2);
+      for (const ev of sorteadas) {
+        assert.ok(typeof ev.pecaId === 'string');
+        assert.ok(['gerador', 'sala_do_diretor', 'sala_medica', 'portao_de_saida', 'reta', 'T', 'cruz', 'vulto', 'espectro'].includes(ev.tipoDaPeca as string));
       }
+      // As sorteadas correspondem às recebidas (mesmas peças, sem reposição).
+      assert.deepEqual(sorteadas.map((ev) => ev.pecaId).sort(), ids);
 
       // Escolha da vaga é por peça: cada ESCOLHER_VAGA fixa uma pendência
       const primeira = recebidas[0]!;
