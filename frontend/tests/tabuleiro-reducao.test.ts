@@ -159,6 +159,66 @@ describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', 
     expect(estado.pecaEmManipulacaoId).toBe('reta-1')
   })
 
+  it('PECA_POSICIONADA de Especial não abre a janela de Manipulação (revisão #199)', () => {
+    // Espelha o engine posicionarRecebida (peoes.ts:683-689): Especiais e
+    // Monstros NÃO têm janela. O delta também não pode abrir — antes abria
+    // para qualquer tipo (a janela que o giro da bandeja/botões consome).
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [
+        {
+          recebidaId: 'r1',
+          pecaId: 'gerador-1',
+          tipoDaPeca: 'gerador',
+          vaga: 'norte',
+          celulaAlvo: { linha: 2, coluna: 3 },
+        },
+      ],
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'gerador-1',
+      celula: { linha: 2, coluna: 3 },
+      orientacao: 0,
+    })
+    // A peça entra no tabuleiro e resolve a pendência normalmente…
+    expect(estado.posicionadas.map((p) => [p.pecaId, p.tipo])).toEqual([['gerador-1', 'gerador']])
+    expect(estado.recebidasPendentes).toEqual([])
+    // …mas a janela de Manipulação permanece fechada.
+    expect(estado.pecaEmManipulacaoId).toBeNull()
+  })
+
+  it('PECA_POSICIONADA de Monstro não abre a janela; de caminho abre (revisão #199)', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PECA_SORTEADA',
+      pecaId: 'vulto-1',
+      tipoDaPeca: 'vulto',
+      orientacao: 0,
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'vulto-1',
+      celula: { linha: 1, coluna: 1 },
+      orientacao: 0,
+    })
+    expect(estado.posicionadas.map((p) => p.tipo)).toEqual(['vulto'])
+    expect(estado.pecaEmManipulacaoId).toBeNull()
+    // Contraste: peça de caminho (cruz) abre a janela no mesmo caminho de delta.
+    estado = reduzirEvento(estado, {
+      type: 'PECA_SORTEADA',
+      pecaId: 'cruz-1',
+      tipoDaPeca: 'cruz',
+      orientacao: 0,
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'cruz-1',
+      celula: { linha: 1, coluna: 2 },
+      orientacao: 0,
+    })
+    expect(estado.pecaEmManipulacaoId).toBe('cruz-1')
+  })
+
   it('PECA_POSICIONADA de peça sem tipo conhecido é no-op', () => {
     const estado = criarEstadoInicialDoCliente()
     const depois = reduzirEvento(estado, {

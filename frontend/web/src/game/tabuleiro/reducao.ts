@@ -14,7 +14,9 @@
  *     Inicial da mesa ou da pendência sorteada da Caixa ao encaixar (ver
  *     `traducao.ts` do game-server).
  *   - Novo posicionamento abre a janela de Manipulação (`pecaEmManipulacaoId`)
- *     e limpa a Seleção.
+ *     e limpa a Seleção — exceto Especiais e Monstros, que não têm janela
+ *     (`abreJanelaDeManipulacao`, espelho do engine peoes.ts:622-630/683-689;
+ *     revisão PR #199).
  *   - Nova Seleção com Manipulação em aberto emite [manipulacao_finalizada,
  *     peca_selecionada] em ordem — o broadcast preserva a ordem; a aplicação
  *     sequencial aqui reproduz esse encadeamento.
@@ -43,6 +45,7 @@
 
 import {
   CORES_DOS_PEOES,
+  abreJanelaDeManipulacao,
   chaveCelula,
   criarIniciaisDaMesa,
   type CorDoPeao,
@@ -263,9 +266,12 @@ export function reduzirEvento(
           ? estado.iniciais.filter((p) => p.pecaId !== evento.pecaId)
           : estado.iniciais,
         posicionadas: [...estado.posicionadas, posicionada],
-        // Encaixe abre a janela de Manipulação e limpa a Seleção.
+        // Encaixe limpa a Seleção e abre a janela de Manipulação apenas para
+        // peças com janela: Especiais e Monstros não abrem (espelha o engine
+        // posicionarRecebida, peoes.ts:622-630/683-689 — o delta
+        // PECA_POSICIONADA não carrega tipo, mas o modelo local o conhece).
         pecaSelecionadaId: null,
-        pecaEmManipulacaoId: evento.pecaId,
+        pecaEmManipulacaoId: abreJanelaDeManipulacao(tipo) ? evento.pecaId : null,
         // Encaixe na célula-alvo resolve a pendência correspondente (issue
         // #91: a pendência só sai da lista quando a peça é POSICIONADA).
         recebidasPendentes: estado.recebidasPendentes.filter(

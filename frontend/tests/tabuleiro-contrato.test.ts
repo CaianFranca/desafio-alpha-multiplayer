@@ -16,6 +16,7 @@ import {
   COLUNAS_INICIAIS,
   QUANTIDADE_INICIAIS,
   ESPACAMENTO_INICIAIS,
+  abreJanelaDeManipulacao,
   criarIniciaisDaMesa,
   bordasAbertas,
   celulaParaMundo,
@@ -138,5 +139,24 @@ describe('contrato do tabuleiro', () => {
     expect(mx).toBeCloseTo(POSICAO_INICIAIS[0] + lx)
     expect(my).toBe(ALTURA_ZONA_CAIXA)
     expect(mz).toBeCloseTo(POSICAO_INICIAIS[2] + lz)
+  })
+
+  it('abreJanelaDeManipulacao: caminho/inicial sim, especiais e monstros não (revisão #199)', () => {
+    // Espelha engine peoes.ts:622-630/683-689 (posicionarRecebida): só peças
+    // de caminho (e a Inicial, encaixe direto na mesa) têm janela.
+    expect(abreJanelaDeManipulacao('inicial')).toBe(true)
+    for (const tipo of ['reta', 'T', 'cruz'] as const) {
+      expect(abreJanelaDeManipulacao(tipo)).toBe(true)
+    }
+    for (const tipo of [
+      'gerador',
+      'sala_do_diretor',
+      'sala_medica',
+      'portao_de_saida',
+      'vulto',
+      'espectro',
+    ] as const) {
+      expect(abreJanelaDeManipulacao(tipo)).toBe(false)
+    }
   })
 })

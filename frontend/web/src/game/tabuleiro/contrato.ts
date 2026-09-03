@@ -97,6 +97,34 @@ export type TipoDaPeca =
 export type Orientacao = 0 | 90 | 180 | 270
 export type BordaCardinal = 'norte' | 'leste' | 'sul' | 'oeste'
 
+// ── Janela de Manipulação por tipo (revisão PR #199; espelho do engine) ──
+//
+// Apenas Peças de caminho (e a Inicial, com encaixe direto na mesa) abrem a
+// janela de Manipulação no encaixe — espelha `posicionarRecebida` do engine
+// (packages/engine/src/peoes.ts:622-630 e 683-689): Especiais (ST-12/#142) e
+// Monstros (ST-15/#169) NÃO têm janela; o reducer deve refletir isso também
+// no caminho de deltas (PECA_POSICIONADA), não só no snapshot.
+// Record exaustivo por tipo: um novo `TipoDaPeca` sem regra declarada quebra
+// o typecheck — a decisão fica explícita na compilação (padrão da PR #200).
+
+const JANELA_DE_MANIPULACAO_POR_TIPO: Record<TipoDaPeca, boolean> = {
+  inicial: true,
+  reta: true,
+  T: true,
+  cruz: true,
+  gerador: false,
+  sala_do_diretor: false,
+  sala_medica: false,
+  portao_de_saida: false,
+  vulto: false,
+  espectro: false,
+}
+
+/** O encaixe de uma peça deste tipo abre a janela de Manipulação? */
+export function abreJanelaDeManipulacao(tipo: TipoDaPeca): boolean {
+  return JANELA_DE_MANIPULACAO_POR_TIPO[tipo]
+}
+
 export interface Celula {
   readonly linha: number
   readonly coluna: number
