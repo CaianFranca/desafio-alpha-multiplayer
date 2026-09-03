@@ -35,6 +35,7 @@ function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): Es
       pecaSelecionadaId: null,
       pecaEmManipulacaoId: null,
       peaoSelecionadoId: null,
+      pecasRestantesNaCaixa: 83,
     },
     jogadores: [
       { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: true },
@@ -51,6 +52,8 @@ function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): Es
     // Explícito: o spread de overrides é Partial e pode não cobrir o campo,
     // deixando `resultado` undefined na cópia (quebra o typecheck em tsc -b).
     resultado: null,
+    geradoresLigados: [],
+    cartaoDeAcessoObtido: false,
     ...overrides,
   }
 }
@@ -651,6 +654,7 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
         pecaSelecionadaId: null,
         pecaEmManipulacaoId: null,
         peaoSelecionadoId: null,
+        pecasRestantesNaCaixa: 57,
       },
       jogadores: [
         { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false },

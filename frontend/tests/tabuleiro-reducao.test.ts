@@ -590,6 +590,7 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
         pecaSelecionadaId: null,
         pecaEmManipulacaoId: null,
         peaoSelecionadoId: null,
+        pecasRestantesNaCaixa: 83,
       },
       jogadores: [],
       jogadorAtivoId: 'jogador-1',
@@ -601,6 +602,8 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
       // Explícito: o spread de overrides é Partial e pode não cobrir o campo,
       // deixando `resultado` undefined na cópia (quebra o typecheck em tsc -b).
       resultado: null,
+      geradoresLigados: [],
+      cartaoDeAcessoObtido: false,
       ...overrides,
     }
   }
@@ -624,6 +627,7 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
         pecaSelecionadaId: null,
         pecaEmManipulacaoId: null,
         peaoSelecionadoId: null,
+        pecasRestantesNaCaixa: 83,
       },
     })
     const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)

@@ -1,4 +1,5 @@
-// Teste unitário da projeção engine→wire do snapshot (ST-14 + término #179).
+// Teste unitário da projeção engine→wire do snapshot (ST-14 + término #179 +
+// contagem da Caixa e objetivos #145).
 //
 // Padrão de traducao.test.ts: chamada direta da função pura, sem servidor
 // nem Redis. Cobre a derivação do estado `terminada` e a projeção do
@@ -67,4 +68,50 @@ test('paraSnapshotWire deriva terminada mesmo com estado wire preparada repassad
   );
   assert.equal(snapshot.estado, 'terminada');
   assert.equal(snapshot.resultado, 'derrota');
+});
+
+// Contagem da Caixa e contadores de objetivo no snapshot (issue #145).
+test('paraSnapshotWire projeta contagem da Caixa e objetivos zerados no estado inicial', () => {
+  const estado = estadoDaPartida();
+  const snapshot = paraSnapshotWire(estado, roster(), 'em_andamento');
+  // Espelho do comprimento da Caixa no domínio (83 peças: ST-12/#144 + ST-15/#169).
+  assert.equal(snapshot.tabuleiro.pecasRestantesNaCaixa, estado.tabuleiro.caixa.length);
+  assert.ok(snapshot.tabuleiro.pecasRestantesNaCaixa > 0);
+  assert.deepEqual(snapshot.geradoresLigados, []);
+  assert.equal(snapshot.cartaoDeAcessoObtido, false);
+});
+
+test('paraSnapshotWire espelha geradores ligados por pecaId e cartão obtido', () => {
+  const snapshot = paraSnapshotWire(
+    {
+      ...estadoDaPartida(),
+      geradoresLigados: ['gerador-1', 'gerador-2'],
+      cartaoDeAcessoObtido: true,
+    },
+    roster(),
+    'em_andamento',
+  );
+  // O wire é o espelho exato do engine: readonly string[] de pecaIds, sem
+  // deriva de contagem no servidor — a deduplicação/monotonicidade vivem no
+  // engine e o cliente apenas projeta.
+  assert.deepEqual(snapshot.geradoresLigados, ['gerador-1', 'gerador-2']);
+  assert.equal(snapshot.cartaoDeAcessoObtido, true);
+});
+
+test('paraSnapshotWire normaliza estados Redis antigos sem os campos de objetivo', () => {
+  // Simula JSON persistido por binário anterior à #145/#176: os campos
+  // simplesmente não existem no objeto parseado (mesmo acesso `as
+  // EstadoDaPartida` de partidas/estado.ts, que não valida o shape).
+  const estado = estadoDaPartida();
+  const bruto = JSON.stringify({
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, caixa: undefined },
+    geradoresLigados: undefined,
+    cartaoDeAcessoObtido: undefined,
+  });
+  const antigo = JSON.parse(bruto) as EstadoDaPartida;
+  const snapshot = paraSnapshotWire(antigo, roster(), 'em_andamento');
+  assert.equal(snapshot.tabuleiro.pecasRestantesNaCaixa, 0);
+  assert.deepEqual(snapshot.geradoresLigados, []);
+  assert.equal(snapshot.cartaoDeAcessoObtido, false);
 });

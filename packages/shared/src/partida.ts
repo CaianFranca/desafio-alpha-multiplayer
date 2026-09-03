@@ -36,6 +36,13 @@
 //   celular de penalidades, feedback ao cliente — é da issue #173.)
 //   Erros: CodigoDeErroDaPartida alias de CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120) — FORA_DA_VEZ, PARTIDA_TERMINADA etc via ERRO_DO_TABULEIRO (SalaServerMessage via TabuleiroEventoDoServidor).
 //   shared type:UPPER_SNAKE no wire vs engine tipo:snake no domínio; campos em camelCase nos dois lados
+//   Snapshot (issue #145): EstadoDaPartidaSnapshot.tabuleiro.pecasRestantesNaCaixa
+//   <-> engine tabuleiro.caixa.length (projeção em game-server snapshot.ts);
+//   EstadoDaPartidaSnapshot.geradoresLigados <-> engine geradoresLigados
+//   (espelho exato: readonly string[] de pecaIds);
+//   EstadoDaPartidaSnapshot.cartaoDeAcessoObtido <-> engine cartaoDeAcessoObtido.
+//   Sync manual: o engine não conhece o wire; novos contadores de objetivo
+//   exigem estender as duas pontas à mão (projeção + modelo do cliente).
 //
 // Reuso: importa PecaId de ./tabuleiro.ts e PeaoId de ./peoes.ts; não duplica tipos base.
 // Sem runtime/validação/sem @flicker/engine — apenas DTOs.
@@ -249,6 +256,11 @@ export interface TabuleiroNoSnapshot {
   readonly pecaSelecionadaId: PecaId | null;
   readonly pecaEmManipulacaoId: PecaId | null;
   readonly peaoSelecionadoId: PeaoId | null;
+  // Contagem da Caixa no HUD (issue #145, spec pai ST-12 #137): projeção de
+  // engine tabuleiro.caixa.length. Ao vivo o cliente deriva por decremento em
+  // PECA_SORTEADA (id inédito); o snapshot é a baseline que reconcilia
+  // reconexões sem recarregamento.
+  readonly pecasRestantesNaCaixa: number;
 }
 
 export interface EstadoDaPartidaSnapshot {
@@ -263,6 +275,12 @@ export interface EstadoDaPartidaSnapshot {
   // Término (issue #179): não nulo quando e somente quando estado === 'terminada' —
   // preserva o Resultado no snapshot entregue a quem se conecta (recarregamento).
   readonly resultado: ResultadoDaPartidaWire | null;
+  // Conquistas / Objetivos Globais (issue #145, glossário CONTEXT.md):
+  // baseline dos contadores de chip na moldura. `geradoresLigados` é o espelho
+  // exato do engine (pecaIds das Peças Gerador já ligadas — packages/engine/
+  // src/partida.ts); `cartaoDeAcessoObtido` é monotônico: Limpeza não revoga.
+  readonly geradoresLigados: readonly string[];
+  readonly cartaoDeAcessoObtido: boolean;
 }
 
 export interface PartidaIniciadaEvento {

@@ -67,6 +67,12 @@ export function paraSnapshotWire(
     pecaSelecionadaId: estado.tabuleiro.pecaSelecionadaId,
     pecaEmManipulacaoId: estado.tabuleiro.pecaEmManipulacaoId,
     peaoSelecionadoId: estado.tabuleiro.peaoSelecionadoId,
+    // Contagem da Caixa no HUD (issue #145): projeção do comprimento da Caixa
+    // do engine. Normalização defensiva (`?.`/`?? 0`): estados Redis
+    // persistidos por binário anterior podem não trazer o campo materializado
+    // (JSON.parse as EstadoDaPartida não valida o shape) — padrão do `?? null`
+    // do `resultado` abaixo.
+    pecasRestantesNaCaixa: estado.tabuleiro.caixa?.length ?? 0,
   } as const;
 
   // Normalização defensiva: estados persistidos por binário anterior à #176
@@ -90,5 +96,11 @@ export function paraSnapshotWire(
     // interno ao domínio.
     estado: desfecho !== null ? 'terminada' : estadoWire,
     resultado: desfecho === null ? null : desfecho.tipo,
+    // Conquistas/Objetivos Globais (issue #145): espelho dos contadores do
+    // engine para os chips da moldura. Normalização defensiva contra estados
+    // Redis antigos sem os campos (mesmo padrão do `resultado`): `?? []` e
+    // `?? false`.
+    geradoresLigados: estado.geradoresLigados ?? [],
+    cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido ?? false,
   };
 }
