@@ -18,7 +18,7 @@ import { mapearGiro, FLASH_BRANCO } from '../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../game/tabuleiro/interacao'
 import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
-import { HEX_COR_PEAO } from '../game/tabuleiro/contrato'
+import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import type {
   ConfirmarPosicaoDoPeaoComando,
@@ -285,6 +285,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           Rodada {modelo.rodada}
         </div>
       ) : null}
+      {estadoEmAndamento && modelo.pecasRestantesNaCaixa !== null ? (
+        // Contagem da Caixa no HUD (issue #145): baseline do snapshot +
+        // decremento ao vivo em PECA_SORTEADA. Oculta enquanto null (antes do
+        // primeiro ESTADO_DA_PARTIDA nunca se mostra contagem inventada).
+        <div
+          data-testid="contagem-caixa"
+          className="pointer-events-none absolute right-4 top-12 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
+        >
+          Caixa: {modelo.pecasRestantesNaCaixa}
+        </div>
+      ) : null}
       {estadoEmAndamento && jogadorAtivoDados ? (
         <div
           data-testid="chip-jogador-ativo"
@@ -293,6 +304,41 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           style={{ borderLeft: `4px solid ${HEX_COR_PEAO[jogadorAtivoDados.cor] ?? '#fff'}` }}
         >
           <span>{jogadorAtivoDados.apelido}</span>
+        </div>
+      ) : null}
+      {estadoEmAndamento ? (
+        // Chips de Objetivo Global na moldura (issue #145, spec pai ST-12):
+        // overlay IRMÃO sobre a moldura — o PartidaMoldura é decoração
+        // aria-hidden, os chips são informativos (aria-label) e nunca captam
+        // ponteiro. Fonte: modelo local (baseline do snapshot + derivação ao
+        // vivo pelos eventos existentes; sem novos eventos de conquista).
+        <div className="pointer-events-none absolute left-1/2 top-4 z-30 flex -translate-x-1/2 gap-2">
+          <div
+            data-testid="chip-geradores-ligados"
+            data-geradores={modelo.geradoresLigados.length}
+            aria-label={`Geradores ligados: ${modelo.geradoresLigados.length} de ${ALVO_GERADORES_LIGADOS}`}
+            className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
+              modelo.geradoresLigados.length >= ALVO_GERADORES_LIGADOS
+                ? 'text-amber-300'
+                : 'text-zinc-200'
+            }`}
+          >
+            Geradores {modelo.geradoresLigados.length}/{ALVO_GERADORES_LIGADOS}
+          </div>
+          <div
+            data-testid="chip-cartao-de-acesso"
+            data-obtido={modelo.cartaoDeAcessoObtido ? 'true' : 'false'}
+            aria-label={
+              modelo.cartaoDeAcessoObtido
+                ? 'Cartão de Acesso obtido'
+                : 'Cartão de Acesso ainda não obtido'
+            }
+            className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
+              modelo.cartaoDeAcessoObtido ? 'text-emerald-300' : 'text-zinc-500'
+            }`}
+          >
+            Cartão de Acesso
+          </div>
         </div>
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (

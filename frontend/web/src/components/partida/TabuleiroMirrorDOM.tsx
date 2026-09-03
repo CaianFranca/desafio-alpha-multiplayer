@@ -175,6 +175,9 @@ export function TabuleiroMirrorDOM({
           key={p.pecaId}
           data-testid="peca-posicionada"
           data-peca-id={p.pecaId}
+          // Tipo derivado do modelo local (AC1 issue #145): prova de que peças
+          // especiais entram no tabuleiro com o tipo correto no espelho DOM.
+          data-tipo={p.tipo}
           data-conectada={
             selecao ? (destinosSet.has(p.pecaId) ? 'true' : 'false') : undefined
           }
