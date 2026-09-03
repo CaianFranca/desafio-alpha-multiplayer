@@ -48,6 +48,7 @@ function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): Es
     posicaoConfirmada: false,
     celulasIluminadas: [],
     estado: 'em_andamento',
+    resultado: null,
     ...overrides,
   }
 }
@@ -113,7 +114,8 @@ describe('partida conectada ao game-server (issue #85)', () => {
   it('evento de posicionamento atualiza o espelho DOM sem recarregar', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
-    expect(screen.getAllByTestId('reserva-peca')).toHaveLength(22)
+    // Issue #143: a mesa nasce com as 4 Peças Iniciais (seed determinístico).
+    expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(4)
     expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(0)
 
     act(() =>
@@ -126,7 +128,8 @@ describe('partida conectada ao game-server (issue #85)', () => {
     )
 
     expect(await screen.findAllByTestId('peca-posicionada')).toHaveLength(1)
-    expect(screen.getAllByTestId('reserva-peca')).toHaveLength(21)
+    // A inicial encaixada sai da mesa sem recarregar.
+    expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(3)
   })
 
   it('rotação via botão DOM envia GIRAR_PECA para a peça em manipulação ao WS', async () => {
@@ -673,6 +676,48 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     // Peão ativo marcado no espelho
     const peaoVermelho = screen.getAllByTestId('peao').find((el) => el.getAttribute('data-peao-id') === 'peao-vermelho')
     expect(peaoVermelho?.getAttribute('data-ativo')).toBe('true')
+  })
+
+  it('ESTADO_DA_PARTIDA com iniciais reconstrói a mesa sem recarregar (issue #143)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+
+    // A mesa local nasce com o seed (4 iniciais); o snapshot é a autoridade:
+    // inicial-1 já foi posicionada e as demais carregam orientação própria.
+    expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(4)
+
+    const snapshot = criarSnapshotBase({
+      tabuleiro: {
+        posicionadas: [
+          { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+        ],
+        iniciais: [
+          { pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 },
+          { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 90 },
+          { pecaId: 'inicial-4', tipo: 'inicial', orientacao: 0 },
+        ],
+        peoes: [
+          { peaoId: 'peao-branco', cor: 'branco', pecaId: 'inicial-1' },
+          { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: null },
+          { peaoId: 'peao-azul', cor: 'azul', pecaId: null },
+          { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+        ],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+      },
+    })
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
+
+    // Reconstrução pela mesma conexão: sem socket novo, sem reload.
+    const iniciais = await screen.findAllByTestId('mesa-peca-inicial')
+    expect(iniciais.map((el) => el.getAttribute('data-peca-id'))).toEqual([
+      'inicial-2',
+      'inicial-3',
+      'inicial-4',
+    ])
+    expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(1)
+    expect(MockWebSocket.instances).toHaveLength(1)
   })
 
   it('TURNO_INICIADO atualiza chip via snapshot jogadores + TURNO', async () => {

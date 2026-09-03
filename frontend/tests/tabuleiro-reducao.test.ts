@@ -4,15 +4,32 @@ import {
   reduzirEventos,
 } from '../web/src/game/tabuleiro/reducao'
 import { aplicarSnapshot } from '../web/src/game/tabuleiro/snapshot'
-import { criarReservaInicial, TOTAL_RESERVA } from '../web/src/game/tabuleiro/contrato'
+import { criarIniciaisDaMesa, QUANTIDADE_INICIAIS } from '../web/src/game/tabuleiro/contrato'
 import { mapearCliqueNaCelula } from '../web/src/game/tabuleiro/interacao'
 import type { EstadoDaPartidaSnapshot, TabuleiroEventoDoServidor } from '@flicker/shared'
 
+// Pendência sorteada (#138) compartilhada nos cenários do ciclo.
+function pendenciaSorteada(
+  recebidaId: string,
+  pecaId: string,
+  tipoDaPeca: 'reta' | 'T' | 'cruz',
+  vaga: 'norte' | 'leste' | 'sul' | 'oeste' | null,
+  celulaAlvo: { linha: number; coluna: number } | null,
+) {
+  return { recebidaId, pecaId, tipoDaPeca, vaga, celulaAlvo }
+}
+
 describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', () => {
-  it('estado inicial é determinístico: reserva completa e grade vazia', () => {
+  it('estado inicial é determinístico: 4 iniciais na mesa e grade vazia (issue #143)', () => {
     const inicial = criarEstadoInicialDoCliente()
-    expect(inicial.reserva).toEqual(criarReservaInicial())
-    expect(inicial.reserva).toHaveLength(TOTAL_RESERVA)
+    expect(inicial.iniciais).toEqual(criarIniciaisDaMesa())
+    expect(inicial.iniciais).toHaveLength(QUANTIDADE_INICIAIS)
+    expect(inicial.iniciais.map((p) => p.pecaId)).toEqual([
+      'inicial-1',
+      'inicial-2',
+      'inicial-3',
+      'inicial-4',
+    ])
     expect(inicial.posicionadas).toEqual([])
     expect(inicial.pecaSelecionadaId).toBeNull()
     expect(inicial.pecaEmManipulacaoId).toBeNull()
@@ -44,15 +61,15 @@ describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', 
     expect(intocado.pecaSelecionadaId).toBe('inicial-1')
   })
 
-  it('PECA_GIRADA gira a peça na reserva quando não posicionada', () => {
+  it('PECA_GIRADA gira a Peça Inicial na mesa quando não posicionada (issue #143)', () => {
     const girada = reduzirEvento(criarEstadoInicialDoCliente(), {
       type: 'PECA_GIRADA',
-      pecaId: 't-3',
+      pecaId: 'inicial-2',
       orientacaoAnterior: 0,
       orientacao: 90,
       sentido: 'horario',
     })
-    const peca = girada.reserva.find((p) => p.pecaId === 't-3')
+    const peca = girada.iniciais.find((p) => p.pecaId === 'inicial-2')
     expect(peca?.orientacao).toBe(90)
   })
 
@@ -72,18 +89,45 @@ describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', 
       sentido: 'horario',
     })
     expect(estado.posicionadas.find((p) => p.pecaId === 'inicial-1')?.orientacao).toBe(180)
-    // A peça não pode estar na reserva depois de posicionada.
-    expect(estado.reserva.some((p) => p.pecaId === 'inicial-1')).toBe(false)
+    // A peça não pode estar na mesa depois de posicionada.
+    expect(estado.iniciais.some((p) => p.pecaId === 'inicial-1')).toBe(false)
   })
 
-  it('PECA_POSICIONADA consome da reserva, preserva o tipo e abre manipulação', () => {
+  it('PECA_GIRADA gira a pendência sorteada em foco (peça na bandeja, #143)', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [pendenciaSorteada('r1', 'reta-1', 'reta', null, null)],
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_GIRADA',
+      pecaId: 'reta-1',
+      orientacaoAnterior: 0,
+      orientacao: 90,
+      sentido: 'horario',
+    })
+    expect(estado.recebidasPendentes[0]?.orientacao).toBe(90)
+  })
+
+  it('PECA_GIRADA de peça desconhecida (fora da mesa/posicionadas/pendências) é no-op', () => {
+    const estado = criarEstadoInicialDoCliente()
+    const girada = reduzirEvento(estado, {
+      type: 'PECA_GIRADA',
+      pecaId: 'peca-inexistente',
+      orientacaoAnterior: 0,
+      orientacao: 90,
+      sentido: 'horario',
+    })
+    expect(girada).toBe(estado)
+  })
+
+  it('PECA_POSICIONADA consome da mesa (inicial), preserva o tipo e abre manipulação', () => {
     const estado = reduzirEvento(criarEstadoInicialDoCliente(), {
       type: 'PECA_POSICIONADA',
       pecaId: 'inicial-2',
       celula: { linha: 2, coluna: 4 },
       orientacao: 90,
     })
-    // PECA_POSICIONADA não traz 'tipo'; o reducer preserva o tipo da reserva.
+    // PECA_POSICIONADA não traz 'tipo'; o reducer preserva o tipo da mesa.
     expect(estado.posicionadas).toHaveLength(1)
     const posicionada = estado.posicionadas[0]!
     expect(posicionada).toEqual({
@@ -92,9 +136,39 @@ describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', 
       orientacao: 90,
       celula: { linha: 2, coluna: 4 },
     })
-    expect(estado.reserva.some((p) => p.pecaId === 'inicial-2')).toBe(false)
+    expect(estado.iniciais.some((p) => p.pecaId === 'inicial-2')).toBe(false)
+    expect(estado.iniciais).toHaveLength(QUANTIDADE_INICIAIS - 1)
     expect(estado.pecaSelecionadaId).toBeNull()
     expect(estado.pecaEmManipulacaoId).toBe('inicial-2')
+  })
+
+  it('PECA_POSICIONADA de peça sorteada usa o tipo da pendência e não toca as iniciais', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [pendenciaSorteada('r1', 'reta-1', 'reta', 'norte', { linha: 2, coluna: 3 })],
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+      orientacao: 0,
+    })
+    expect(estado.posicionadas.map((p) => [p.pecaId, p.tipo])).toEqual([['reta-1', 'reta']])
+    expect(estado.iniciais).toHaveLength(QUANTIDADE_INICIAIS)
+    expect(estado.recebidasPendentes).toEqual([])
+    expect(estado.pecaEmManipulacaoId).toBe('reta-1')
+  })
+
+  it('PECA_POSICIONADA de peça sem tipo conhecido é no-op', () => {
+    const estado = criarEstadoInicialDoCliente()
+    const depois = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'reta-9',
+      celula: { linha: 1, coluna: 1 },
+      orientacao: 0,
+    })
+    expect(depois).toBe(estado)
+    expect(depois.posicionadas).toEqual([])
   })
 
   it('MANIPULACAO_FINALIZADA fecha a janela aberta', () => {
@@ -128,15 +202,15 @@ describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', 
     const eventos: TabuleiroEventoDoServidor[] = [
       { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
       { type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' },
-      { type: 'PECA_SELECIONADA', pecaId: 'reta-1' },
+      { type: 'PECA_SELECIONADA', pecaId: 'inicial-2' },
     ]
     const estado = reduzirEventos(criarEstadoInicialDoCliente(), eventos)
     expect(estado.posicionadas).toHaveLength(1)
     expect(estado.pecaEmManipulacaoId).toBeNull()
-    expect(estado.pecaSelecionadaId).toBe('reta-1')
+    expect(estado.pecaSelecionadaId).toBe('inicial-2')
   })
 
-  it('sequência de posicionamentos acumula e remove da reserva', () => {
+  it('sequência de posicionamentos acumula e remove da mesa (iniciais)', () => {
     const eventos: TabuleiroEventoDoServidor[] = [
       { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 0 }, orientacao: 0 },
       { type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' },
@@ -145,14 +219,14 @@ describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', 
     ]
     const estado = reduzirEventos(criarEstadoInicialDoCliente(), eventos)
     expect(estado.posicionadas).toHaveLength(2)
-    expect(estado.reserva).toHaveLength(TOTAL_RESERVA - 2)
+    expect(estado.iniciais).toHaveLength(QUANTIDADE_INICIAIS - 2)
     expect(estado.posicionadas.some((p) => p.pecaId === 'inicial-1')).toBe(true)
     expect(estado.posicionadas.some((p) => p.pecaId === 'inicial-2')).toBe(true)
     expect(estado.pecaEmManipulacaoId).toBe('inicial-2')
   })
 })
 
-describe('redução do ciclo do peão — espelho do engine (issue #91)', () => {
+describe('redução do ciclo do peão — espelho do engine (issue #91, forma #138)', () => {
   it('estado inicial seeda os 4 peões com ids por cor, sobre a Mesa', () => {
     const inicial = criarEstadoInicialDoCliente()
     expect(inicial.peoes).toEqual([
@@ -173,16 +247,73 @@ describe('redução do ciclo do peão — espelho do engine (issue #91)', () => 
     expect(estado.peaoSelecionadoId).toBe('peao-branco')
   })
 
-  it('RECEBIMENTO_GERADO carrega as pendências com pecaId null (campo client-side)', () => {
+  it('RECEBIMENTO_GERADO (#138) passa as pendências sorteadas e semeia os tipos', () => {
+    const recebidas = [
+      pendenciaSorteada('r1', 'reta-1', 'reta', null, null),
+      pendenciaSorteada('r2', 't-1', 'T', null, null),
+    ]
     const estado = reduzirEvento(criarEstadoInicialDoCliente(), {
       type: 'RECEBIMENTO_GERADO',
+      recebidas,
+    })
+    expect(estado.recebidasPendentes).toEqual(recebidas)
+    expect(estado.pecasDeRecebimento['reta-1']).toBe('reta')
+    expect(estado.pecasDeRecebimento['t-1']).toBe('T')
+  })
+
+  it('VAGA_DA_PECA_RECEBIDA_ESCOLHIDO fixa vaga/célula-alvo, seleciona a peça e mantém as demais', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'RECEBIMENTO_GERADO',
       recebidas: [
-        { recebidaId: 'r1', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendenciaSorteada('r1', 'reta-1', 'reta', null, null),
+        pendenciaSorteada('r2', 't-1', 'T', null, null),
       ],
     })
-    expect(estado.recebidasPendentes).toEqual([
-      { recebidaId: 'r1', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 }, pecaId: null },
-    ])
+    estado = reduzirEvento(estado, {
+      type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
+      recebidaId: 'r1',
+      borda: 'norte',
+      celulaAlvo: { linha: 2, coluna: 3 },
+    })
+    expect(estado.recebidasPendentes[0]).toEqual(
+      pendenciaSorteada('r1', 'reta-1', 'reta', 'norte', { linha: 2, coluna: 3 }),
+    )
+    // A segunda pendência permanece intacta (sem vaga).
+    expect(estado.recebidasPendentes[1]).toEqual(pendenciaSorteada('r2', 't-1', 'T', null, null))
+    // A escolha da vaga seleciona a Peça sorteada (encaixe em foco, #138).
+    expect(estado.pecaSelecionadaId).toBe('reta-1')
+  })
+
+  it('PECA_POSICIONADA remove a pendência do alvo (por célula) e mantém as demais', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [
+        pendenciaSorteada('r1', 'reta-1', 'reta', 'norte', { linha: 2, coluna: 3 }),
+        pendenciaSorteada('r2', 't-1', 'T', 'leste', { linha: 3, coluna: 4 }),
+      ],
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+      orientacao: 0,
+    })
+    // Encaixe na célula-alvo (2,3) resolve APENAS a pendência daquele alvo.
+    expect(estado.recebidasPendentes.map((r) => r.recebidaId)).toEqual(['r2'])
+    expect(estado.posicionadas.some((p) => p.pecaId === 'reta-1')).toBe(true)
+  })
+
+  it('PECA_SORTEADA semeia o tipo da peça sorteada sem duplicar entrada existente', () => {
+    const inicial = criarEstadoInicialDoCliente()
+    const estado = reduzirEvento(inicial, {
+      type: 'PECA_SORTEADA',
+      pecaId: 'cruz-1',
+      tipoDaPeca: 'cruz',
+      orientacao: 90,
+    })
+    expect(estado.pecasDeRecebimento['cruz-1']).toBe('cruz')
+    // Repetição do sorteio não produz novo objeto (no-op por igualdade).
+    expect(reduzirEvento(estado, { type: 'PECA_SORTEADA', pecaId: 'cruz-1', tipoDaPeca: 'cruz', orientacao: 90 })).toBe(estado)
   })
 
   it('PEAO_POSICIONADO atualiza a célula e re-seleciona o peão (Primeiro Turno)', () => {
@@ -195,65 +326,6 @@ describe('redução do ciclo do peão — espelho do engine (issue #91)', () => 
     const peao = estado.peoes.find((p) => p.peaoId === 'peao-branco')
     expect(peao?.celula).toEqual({ linha: 3, coluna: 3 })
     expect(estado.peaoSelecionadoId).toBe('peao-branco')
-  })
-
-  it('TIPO_DA_PECA_RECEBIDA_ESCOLHIDO consome a peça da Reserva, tipa a pendência e a MANTÉM na lista', () => {
-    let estado = criarEstadoInicialDoCliente()
-    estado = reduzirEvento(estado, {
-      type: 'PEAO_SELECIONADO',
-      peaoId: 'peao-branco',
-    })
-    estado = reduzirEvento(estado, {
-      type: 'RECEBIMENTO_GERADO',
-      recebidas: [
-        { recebidaId: 'r1', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
-      ],
-    })
-    estado = reduzirEvento(estado, {
-      type: 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO',
-      recebidaId: 'r1',
-      pecaId: 'reta-1',
-      tipoDaPeca: 'reta',
-    })
-    // Peça consumida da Reserva (espelha peoes.ts:367 do engine).
-    expect(estado.reserva.some((p) => p.pecaId === 'reta-1')).toBe(false)
-    // Pendência PERMANECE, agora tipada com o pecaId client-side.
-    expect(estado.recebidasPendentes).toHaveLength(1)
-    expect(estado.recebidasPendentes[0]).toEqual({
-      recebidaId: 'r1',
-      bordaGeradora: 'norte',
-      celulaAlvo: { linha: 2, coluna: 3 },
-      pecaId: 'reta-1',
-    })
-    // Seleção passa para a Recebida (encaixe em foco).
-    expect(estado.pecaSelecionadaId).toBe('reta-1')
-    expect(estado.pecasDeRecebimento['reta-1']).toBe('reta')
-  })
-
-  it('PECA_POSICIONADA remove a pendência do alvo (por célula) e mantém as demais', () => {
-    let estado = criarEstadoInicialDoCliente()
-    estado = reduzirEvento(estado, {
-      type: 'RECEBIMENTO_GERADO',
-      recebidas: [
-        { recebidaId: 'r1', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
-        { recebidaId: 'r2', bordaGeradora: 'leste', celulaAlvo: { linha: 3, coluna: 4 } },
-      ],
-    })
-    estado = reduzirEvento(estado, {
-      type: 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO',
-      recebidaId: 'r1',
-      pecaId: 'reta-1',
-      tipoDaPeca: 'reta',
-    })
-    estado = reduzirEvento(estado, {
-      type: 'PECA_POSICIONADA',
-      pecaId: 'reta-1',
-      celula: { linha: 2, coluna: 3 },
-      orientacao: 0,
-    })
-    // Encaixe na célula-alvo (2,3) resolve APENAS a pendência daquele alvo.
-    expect(estado.recebidasPendentes.map((r) => r.recebidaId)).toEqual(['r2'])
-    expect(estado.posicionadas.some((p) => p.pecaId === 'reta-1')).toBe(true)
   })
 
   it('PEAO_MOVIDO atualiza a posição e limpa a seleção (sem seleção fantasma)', () => {
@@ -289,17 +361,17 @@ describe('redução do ciclo do peão — espelho do engine (issue #91)', () => 
     expect(estado.peaoSelecionadoId).toBeNull()
   })
 
-  it('lote encadeado do Primeiro Turno: pendências zeradas e peça fora da Reserva ao final', () => {
+  it('lote encadeado do Primeiro Turno (#138): pendências zeradas e iniciais consumidas ao final', () => {
     const estado = reduzirEventos(criarEstadoInicialDoCliente(), [
       { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
       { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
       { type: 'PEAO_POSICIONADO', peaoId: 'peao-branco', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 } },
-      { type: 'RECEBIMENTO_GERADO', recebidas: [{ recebidaId: 'r1', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } }] },
-      { type: 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO', recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta' },
+      { type: 'RECEBIMENTO_GERADO', recebidas: [pendenciaSorteada('r1', 'reta-1', 'reta', null, null)] },
+      { type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO', recebidaId: 'r1', borda: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
       { type: 'PECA_POSICIONADA', pecaId: 'reta-1', celula: { linha: 2, coluna: 3 }, orientacao: 0 },
     ])
     expect(estado.recebidasPendentes).toEqual([])
-    expect(estado.reserva.some((p) => p.pecaId === 'reta-1')).toBe(false)
+    expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-2', 'inicial-3', 'inicial-4'])
     expect(estado.posicionadas).toHaveLength(2)
     expect(estado.pecaSelecionadaId).toBeNull()
     expect(estado.pecaEmManipulacaoId).toBe('reta-1')
@@ -337,21 +409,22 @@ describe('iluminação e limpeza no cliente — espelho do estado compartilhado 
   it('LIMPEZA_APLICADA remove apenas as peças indicadas de posicionadas', () => {
     let estado = reduzirEventos(criarEstadoInicialDoCliente(), [
       { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
+      { type: 'PECA_SORTEADA', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0 },
       { type: 'PECA_SELECIONADA', pecaId: 'reta-1' },
       { type: 'PECA_POSICIONADA', pecaId: 'reta-1', celula: { linha: 3, coluna: 4 }, orientacao: 0 },
     ])
     expect(estado.posicionadas).toHaveLength(2)
     estado = reduzirEvento(estado, { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['reta-1'] })
     expect(estado.posicionadas.map((p) => p.pecaId)).toEqual(['inicial-1'])
-    // A peça removida NÃO volta para a Reserva (decisão do plano: só sai da cena).
-    expect(estado.reserva.some((p) => p.pecaId === 'reta-1')).toBe(false)
+    // A peça removida NÃO volta para a mesa (decisão do plano: só sai da cena).
+    expect(estado.iniciais.some((p) => p.pecaId === 'reta-1')).toBe(false)
   })
 
   it('célula liberada pela Limpeza volta a ser alvo de posicionamento', () => {
     const estado = reduzirEventos(criarEstadoInicialDoCliente(), [
       { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
       { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] },
-      { type: 'PECA_SELECIONADA', pecaId: 'reta-2' },
+      { type: 'PECA_SELECIONADA', pecaId: 'inicial-2' },
     ])
     // Sem a Limpeza a célula estaria ocupada (nenhum comando); liberada, o
     // clique na mesma célula mapeia POSICIONAR_PECA — ocupação é derivada de
@@ -359,7 +432,7 @@ describe('iluminação e limpeza no cliente — espelho do estado compartilhado 
     const comando = mapearCliqueNaCelula(estado, { linha: 3, coluna: 3 })
     expect(comando).toEqual({
       type: 'POSICIONAR_PECA',
-      pecaId: 'reta-2',
+      pecaId: 'inicial-2',
       celula: { linha: 3, coluna: 3 },
     })
   })
@@ -392,12 +465,15 @@ describe('iluminação e limpeza no cliente — espelho do estado compartilhado 
   it('seleção/manipulação de peça NÃO removida é preservada pela Limpeza', () => {
     let estado = reduzirEventos(criarEstadoInicialDoCliente(), [
       { type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 },
-      { type: 'PECA_SELECIONADA', pecaId: 'reta-1' },
+      { type: 'PECA_SELECIONADA', pecaId: 'inicial-2' },
     ])
     estado = reduzirEvento(estado, { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] })
-    expect(estado.pecaSelecionadaId).toBe('reta-1')
+    expect(estado.pecaSelecionadaId).toBe('inicial-2')
     // Manipulação de outra peça permanece.
-    let comManipulacao = reduzirEvento(criarEstadoInicialDoCliente(), {
+    let comManipulacao = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_SORTEADA', pecaId: 'reta-2', tipoDaPeca: 'reta', orientacao: 0 },
+    ])
+    comManipulacao = reduzirEvento(comManipulacao, {
       type: 'PECA_POSICIONADA',
       pecaId: 'reta-2',
       celula: { linha: 2, coluna: 2 },
@@ -598,11 +674,12 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
       posicaoConfirmada: false,
       celulasIluminadas: [],
       estado: 'em_andamento',
+      resultado: null,
       ...overrides,
     }
   }
 
-  it('aplicarSnapshot mapeia recebidas à forma #138 sem campos extraprotocolo', () => {
+  it('aplicarSnapshot mapeia recebidas à forma #138 com a orientação da peça sorteada', () => {
     const snapshot = snapshotBase({
       tabuleiro: {
         posicionadas: [],
@@ -624,8 +701,8 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
       },
     })
     const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
-    // PendenciaDaPecaSorteada exata: orientacao do snapshot não é copiada
-    // para a pendência (o cliente a ignora fora da Reserva).
+    // PendenciaDaPecaSorteada + orientacao copiada: a bandeja reexibe a
+    // corrente com a rotação correta ao recarregar (issue #143).
     expect(estado.recebidasPendentes).toEqual([
       {
         recebidaId: 'r1',
@@ -633,9 +710,38 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
         tipoDaPeca: 'reta',
         vaga: null,
         celulaAlvo: null,
+        orientacao: 90,
       },
     ])
     expect(estado.pecasDeRecebimento['reta-1']).toBe('reta')
+  })
+
+  it('aplicarSnapshot reconstrói as iniciais da mesa a partir do snapshot (issue #143)', () => {
+    const snapshot = snapshotBase({
+      tabuleiro: {
+        posicionadas: [
+          { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+        ],
+        iniciais: [
+          { pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 },
+          { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 90 },
+        ],
+        peoes: [],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+      },
+    })
+    // O seed local (4 iniciais, orientação 0) é SUBSTITUÍDO pela autoridade:
+    // inicial-1 saiu da mesa (posicionada) e inicial-4 sumiu (rejeitada no
+    // posicionamento de outro jogador — apenas o snapshot governa).
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
+    expect(estado.iniciais).toEqual([
+      { pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 },
+      { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 90 },
+    ])
+    expect(estado.posicionadas.map((p) => p.pecaId)).toEqual(['inicial-1'])
   })
 
   it('aplicarSnapshot preserva movimentouNoTurno (late-join no meio do turno)', () => {

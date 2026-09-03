@@ -222,10 +222,10 @@ describe('partida estados da tela', () => {
   })
 })
 
-describe('partida tabuleiro e reserva (issue #156)', () => {
+describe('partida tabuleiro e caixa (issue #156/#143)', () => {
   const autenticado = mockAuthenticatedState
 
-  it('disponivel sem snapshot mostra grade 7x7 vazia e reserva com 22 peças', () => {
+  it('disponivel sem snapshot mostra grade 7x7 vazia, Caixa com bandeja vazia e 4 iniciais', () => {
     renderPartidaComEstado('disponivel', ['/partida?serverId=s&partidaId=p'], autenticado)
     const celulas = screen.getAllByTestId('tabuleiro-celula')
     expect(celulas).toHaveLength(49)
@@ -235,15 +235,24 @@ describe('partida tabuleiro e reserva (issue #156)', () => {
     expect(vazias).toHaveLength(49)
     expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(0)
     expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
-    expect(screen.getByTestId('reserva')).toBeInTheDocument()
-    const pecas = screen.getAllByTestId('reserva-peca')
-    expect(pecas).toHaveLength(22)
+    expect(screen.getByTestId('caixa')).toBeInTheDocument()
+    // Bandeja de slot único sem corrente (nada sorteado).
+    expect(screen.queryAllByTestId('caixa-peca-sorteada')).toHaveLength(0)
+    // As 4 Peças Iniciais na mesa (ids do engine).
+    const pecas = screen.getAllByTestId('mesa-peca-inicial')
+    expect(pecas).toHaveLength(4)
+    expect(pecas.map((el) => el.getAttribute('data-peca-id'))).toEqual([
+      'inicial-1',
+      'inicial-2',
+      'inicial-3',
+      'inicial-4',
+    ])
   })
 
-  it('carregando/aguardando/falha não exibem tabuleiro nem reserva', () => {
+  it('carregando/aguardando/falha não exibem tabuleiro nem caixa', () => {
     renderPartidaComEstado('carregando', ['/partida?serverId=s&partidaId=p'], autenticado)
     expect(screen.queryByTestId('tabuleiro')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('reserva')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('caixa')).not.toBeInTheDocument()
   })
 
   it('aguardando não exibe tabuleiro', () => {

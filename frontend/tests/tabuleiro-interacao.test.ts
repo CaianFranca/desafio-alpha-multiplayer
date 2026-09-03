@@ -7,11 +7,11 @@ import {
   ehCelulaOcupada,
   mapearCliqueNaCelula,
   mapearCliqueNaPecaPosicionada,
-  mapearCliqueNaReserva,
   mapearEventoParaFeedback,
   mapearFinalizarManipulacao,
   mapearGiro,
 } from '../web/src/game/tabuleiro/interacao'
+import { mapearCliqueNaPecaDaMesa } from '../web/src/game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoTabuleiro } from '../web/src/game/tabuleiro/interacao'
 import type { Celula } from '../web/src/game/tabuleiro/contrato'
 import type { TabuleiroEventoDoServidor } from '@flicker/shared'
@@ -20,7 +20,7 @@ import type { TabuleiroEventoDoServidor } from '@flicker/shared'
 
 function estadoVazio(): EstadoInteracaoTabuleiro {
   return {
-    reserva: [{ pecaId: 'inicial-1' }, { pecaId: 'reta-1' }, { pecaId: 't-1' }],
+    iniciais: [{ pecaId: 'inicial-1' }, { pecaId: 'inicial-2' }, { pecaId: 'inicial-3' }],
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
@@ -37,7 +37,7 @@ function comPosicionada(
   opts?: Partial<EstadoInteracaoTabuleiro>,
 ): EstadoInteracaoTabuleiro {
   return {
-    reserva: [{ pecaId: 'inicial-2' }, { pecaId: 'reta-2' }],
+    iniciais: [{ pecaId: 'inicial-2' }, { pecaId: 'inicial-3' }],
     posicionadas: [{ pecaId, celula }],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: pecaId,
@@ -46,11 +46,11 @@ function comPosicionada(
 }
 
 describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
-  // ── Critério: clique em peça da reserva ──
+  // ── Critério: clique em peça da mesa (iniciais, issue #143) ──
 
-  it('clique simples em peça da reserva seleciona (emite SELECIONAR_PECA)', () => {
+  it('clique simples em Peça Inicial da mesa seleciona (emite SELECIONAR_PECA)', () => {
     const estado = estadoVazio()
-    expect(mapearCliqueNaReserva(estado, 'inicial-1')).toEqual({
+    expect(mapearCliqueNaPecaDaMesa(null, estado, 'inicial-1')).toEqual({
       type: 'SELECIONAR_PECA',
       pecaId: 'inicial-1',
     })
@@ -58,19 +58,24 @@ describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
 
   it('clicar em outra troca a seleção (sempre SELECIONAR_PECA com novo id)', () => {
     const estado = comSelecao('inicial-1')
-    expect(mapearCliqueNaReserva(estado, 'reta-1')).toEqual({
+    expect(mapearCliqueNaPecaDaMesa(null, estado, 'inicial-2')).toEqual({
       type: 'SELECIONAR_PECA',
-      pecaId: 'reta-1',
+      pecaId: 'inicial-2',
     })
   })
 
   it('clicar na peça selecionada desfaz (mesmo comando, servidor emite peca_deselecionada)', () => {
-    const estado = comSelecao('reta-1')
+    const estado = comSelecao('inicial-2')
     // Mesmo comando, sem ramo especial no cliente — validação no servidor.
-    expect(mapearCliqueNaReserva(estado, 'reta-1')).toEqual({
+    expect(mapearCliqueNaPecaDaMesa(null, estado, 'inicial-2')).toEqual({
       type: 'SELECIONAR_PECA',
-      pecaId: 'reta-1',
+      pecaId: 'inicial-2',
     })
+  })
+
+  it('clique em peça fora das iniciais da mesa não reage (null; roteador puro valida a identidade)', () => {
+    const estado = estadoVazio()
+    expect(mapearCliqueNaPecaDaMesa(null, estado, 'reta-9')).toBeNull()
   })
 
   // ── Critério: girar emite rotação 90° nos dois sentidos ──
@@ -88,11 +93,11 @@ describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
     })
   })
 
-  it('rotação na reserva e rotação na célula usam o mesmo mapeamento', () => {
-    const cmdReserva = mapearGiro('reta-1', 'horario')
+  it('rotação na mesa e rotação na célula usam o mesmo mapeamento', () => {
+    const cmdMesa = mapearGiro('inicial-3', 'horario')
     const estadoManip = comPosicionada('inicial-1', { linha: 3, coluna: 3 })
     const cmdCelula = mapearGiro(estadoManip.pecaEmManipulacaoId!, 'horario')
-    expect(cmdReserva.type).toBe('GIRAR_PECA')
+    expect(cmdMesa.type).toBe('GIRAR_PECA')
     expect(cmdCelula.type).toBe('GIRAR_PECA')
     expect(cmdCelula).toEqual({
       type: 'GIRAR_PECA',
@@ -114,7 +119,7 @@ describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
 
   it('célula ocupada não reage ao clique (retorna null)', () => {
     const estado: EstadoInteracaoTabuleiro = {
-      reserva: [{ pecaId: 'inicial-2' }],
+      iniciais: [{ pecaId: 'inicial-2' }],
       posicionadas: [{ pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 } }],
       pecaSelecionadaId: 'inicial-2',
       pecaEmManipulacaoId: null,
@@ -166,16 +171,16 @@ describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
       pecaSelecionadaId: null,
     })
     // Nova seleção: emite SELECIONAR_PECA; servidor fecha manipulação anterior.
-    expect(mapearCliqueNaReserva(estado, 'reta-1')).toEqual({
+    expect(mapearCliqueNaPecaDaMesa(null, estado, 'inicial-2')).toEqual({
       type: 'SELECIONAR_PECA',
-      pecaId: 'reta-1',
+      pecaId: 'inicial-2',
     })
   })
 
   it('novo posicionamento encerra a janela anterior (via POSICIONAR_PECA)', () => {
     // Estado com manipulação de inicial-1 e seleção de inicial-2
     const estado: EstadoInteracaoTabuleiro = {
-      reserva: [{ pecaId: 'inicial-2' }],
+      iniciais: [{ pecaId: 'inicial-2' }],
       posicionadas: [{ pecaId: 'inicial-1', celula: { linha: 2, coluna: 2 } }],
       pecaSelecionadaId: 'inicial-2',
       pecaEmManipulacaoId: 'inicial-1',
@@ -197,7 +202,7 @@ describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
 
   it('clique em peça posicionada fora de manipulação não emite comando', () => {
     const estado: EstadoInteracaoTabuleiro = {
-      reserva: [{ pecaId: 'inicial-2' }],
+      iniciais: [{ pecaId: 'inicial-2' }],
       posicionadas: [
         { pecaId: 'inicial-1', celula: { linha: 2, coluna: 2 } },
         { pecaId: 'inicial-2', celula: { linha: 5, coluna: 5 } },

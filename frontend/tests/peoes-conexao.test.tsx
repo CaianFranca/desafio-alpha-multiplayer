@@ -6,11 +6,12 @@ import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
 
-// Issue #91: conexão do frontend com o game-server para peões e ciclo.
-// O canal da Partida exige jogadorId em TODOS os comandos (wire.ts do
+// Issue #91 + #143: conexão do frontend com o game-server para peões, ciclo e
+// a Caixa sobre a mesa (forma #138: peça sorteada + escolha sequencial de
+// vaga). O canal da Partida exige jogadorId em TODOS os comandos (wire.ts do
 // game-server) — os cliques no espelho DOM trafegam pelo mesmo roteador da
-// cena (despacharCliqueDeCelula / mapearCliqueNaReservaComCiclo) e o
-// PartidaPage injeta o jogadorId num ponto único (enviarComJogador).
+// cena (despacharCliqueDeCelula / mapearCliqueNaPecaDaMesa) e o PartidaPage
+// injeta o jogadorId num ponto único (enviarComJogador).
 
 const JOGADOR_ID = mockAuthenticatedState.jogador.id
 
@@ -65,14 +66,6 @@ function celulaDoEspelho(linha: number, coluna: number): HTMLElement {
   return celula
 }
 
-function pecaDaReserva(pecaId: string): HTMLElement {
-  const peca = screen
-    .getAllByTestId('reserva-peca')
-    .find((el) => el.getAttribute('data-peca-id') === pecaId)
-  if (!peca) throw new Error(`peça ${pecaId} não encontrada na reserva do espelho`)
-  return peca
-}
-
 function pendenciaDoEspelho(recebidaId: string): HTMLElement {
   const pendencia = screen
     .getAllByTestId('recebida-pendente')
@@ -81,12 +74,36 @@ function pendenciaDoEspelho(recebidaId: string): HTMLElement {
   return pendencia
 }
 
+function pecaDaMesa(pecaId: string): HTMLElement {
+  const peca = screen
+    .getAllByTestId('mesa-peca-inicial')
+    .find((el) => el.getAttribute('data-peca-id') === pecaId)
+  if (!peca) throw new Error(`inicial ${pecaId} não encontrada na mesa do espelho`)
+  return peca
+}
+
+/** Peça exibida na bandeja de slot único da Caixa (null = bandeja vazia). */
+function pecaCorrenteDaBandeja(): HTMLElement | null {
+  const elementos = screen.queryAllByTestId('caixa-peca-sorteada')
+  expect(elementos.length).toBeLessThanOrEqual(1)
+  return elementos[0] ?? null
+}
+
+// Pendência na forma sorteada (#138) como chega no wire.
+function recebidaSorteada(
+  recebidaId: string,
+  pecaId: string,
+  tipoDaPeca: string,
+) {
+  return { recebidaId, pecaId, tipoDaPeca, vaga: null, celulaAlvo: null }
+}
+
 afterEach(() => {
   MockWebSocket.clean()
 })
 
-describe('partida conectada ao ciclo do peão (issue #91)', () => {
-  it('pós-admissão o espelho mostra os 4 peões seedados, sobre a Mesa (US 1 / AC 2)', async () => {
+describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
+  it('pós-admissão: espelho mostra os 4 peões seedados e as 4 iniciais na mesa (Caixa com bandeja vazia)', async () => {
     await partidaDisponivel()
     const peoes = screen.getAllByTestId('peao')
     expect(peoes).toHaveLength(4)
@@ -100,9 +117,13 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
       expect(peao.getAttribute('data-posicionado')).toBe('false')
       expect(peao.getAttribute('data-selecionado')).toBe('false')
     }
+    // Caixa sobre a mesa: 4 iniciais, sem corrente na bandeja (nada sorteado).
+    expect(screen.getByTestId('caixa')).toBeInTheDocument()
+    expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(4)
+    expect(pecaCorrenteDaBandeja()).toBeNull()
   })
 
-  it('fluxo feliz do ciclo: cada comando trafega com jogadorId (AC 1 / AC 2)', async () => {
+  it('fluxo feliz do ciclo (#138/#143): vaga sequencial, giro, encaixe — cada comando com jogadorId', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
@@ -115,6 +136,7 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
         orientacao: 0,
       })
     })
+    expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(3)
 
     // ── 1. Clique no peão → SELECIONAR_PEAO com jogadorId ──
     await user.click(peaoDoEspelho('branco'))
@@ -135,48 +157,44 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
       })
       ws.simulateMessage({
         type: 'RECEBIMENTO_GERADO',
-        recebidas: [
-          { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
-        ],
+        recebidas: [recebidaSorteada('recebida-1', 'reta-1', 'reta')],
       })
     })
 
-    // ── 2. Clique na célula-alvo da pendência SEM tipo → foco local (sem comando) ──
-    const alvo = celulaDoEspelho(2, 3)
-    expect(alvo.getAttribute('data-alvo-pendente')).toBe('true')
-    await user.click(alvo)
-    // Nenhum comando novo: foco é estado local.
-    expect(ws.sentMessages).toHaveLength(1)
-    expect(pendenciaDoEspelho('recebida-norte').getAttribute('data-focada')).toBe('true')
-    expect(alvo.getAttribute('data-focada')).toBe('true')
+    // ── 2. Bandeja exibe a corrente; vagas disponíveis destacadas (#143) ──
+    const corrente = pecaCorrenteDaBandeja()
+    expect(corrente).not.toBeNull()
+    expect(corrente!.getAttribute('data-peca-id')).toBe('reta-1')
+    expect(corrente!.getAttribute('data-tipo')).toBe('reta')
+    expect(celulaDoEspelho(2, 3).getAttribute('data-vaga')).toBe('true')
+    expect(celulaDoEspelho(3, 4).getAttribute('data-vaga')).toBe('true')
+    expect(celulaDoEspelho(0, 0).hasAttribute('data-vaga')).toBe(false)
 
-    // ── 3. Clique na peça da Reserva → ESCOLHER_TIPO_DA_PECA_RECEBIDA ──
-    await user.click(pecaDaReserva('reta-1'))
+    // ── 3. Clique na célula vazia vizinha → ESCOLHER_VAGA (primeira pendência) ──
+    await user.click(celulaDoEspelho(2, 3))
     expect(ultimoComando(ws)).toEqual({
-      type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
-      recebidaId: 'recebida-norte',
-      tipoDaPeca: 'reta',
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'recebida-1',
+      borda: 'norte',
       jogadorId: JOGADOR_ID,
     })
 
-    // ── 4. Servidor escolhe o tipo: peça consumida da Reserva, pendência tipada ──
+    // ── 4. Servidor fixa a vaga: alvo destacado, seleção na peça sorteada ──
     act(() => {
       ws.simulateMessage({
-        type: 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO',
-        recebidaId: 'recebida-norte',
-        pecaId: 'reta-1',
-        tipoDaPeca: 'reta',
+        type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
+        recebidaId: 'recebida-1',
+        borda: 'norte',
+        celulaAlvo: { linha: 2, coluna: 3 },
       })
     })
-    // As peças consumidas saem da Reserva sem recarregar (AC 2):
-    // 22 iniciais - inicial-1 (posicionada) - reta-1 (escolhida) = 20.
-    expect(screen.queryAllByTestId('reserva-peca')).toHaveLength(20)
-    expect(
-      screen
-        .getAllByTestId('reserva-peca')
-        .some((el) => el.getAttribute('data-peca-id') === 'reta-1'),
-    ).toBe(false)
-    expect(pendenciaDoEspelho('recebida-norte').getAttribute('data-peca-id')).toBe('reta-1')
+    // A peça saiu da bandeja (vaga definida, aguardando encaixe): sem corrente.
+    expect(pecaCorrenteDaBandeja()).toBeNull()
+    // A célula (2,3) deixou de ser vaga e virou alvo pendente.
+    expect(celulaDoEspelho(2, 3).hasAttribute('data-vaga')).toBe(false)
+    expect(celulaDoEspelho(2, 3).getAttribute('data-alvo-pendente')).toBe('true')
+    expect(pendenciaDoEspelho('recebida-1').getAttribute('data-peca-id')).toBe('reta-1')
+    expect(pendenciaDoEspelho('recebida-1').getAttribute('data-vaga')).toBe('norte')
 
     // ── 5. Servidor fecha a Manipulação da Inicial (finalização por clique) ──
     act(() => {
@@ -194,7 +212,7 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
       jogadorId: JOGADOR_ID,
     })
 
-    // ── 7. Clique no alvo da pendência tipada → POSICIONAR_PECA ──
+    // ── 7. Clique no alvo da pendência em foco → POSICIONAR_PECA ──
     await user.click(celulaDoEspelho(2, 3))
     expect(ultimoComando(ws)).toEqual({
       type: 'POSICIONAR_PECA',
@@ -215,6 +233,8 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
     })
     expect(screen.queryByTestId('recebida-pendente')).not.toBeInTheDocument()
     expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(2)
+    expect(screen.getByTestId('caixa')).toBeInTheDocument()
+    expect(pecaCorrenteDaBandeja()).toBeNull()
 
     // ── 9. Movimentação: destino conectado → MOVER_PEAO com jogadorId ──
     await user.click(celulaDoEspelho(2, 3))
@@ -242,6 +262,142 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
     expect(ws.sentMessages).toHaveLength(comandosAteAqui)
   })
 
+  it('bandeja de slot único: duas pendências, a corrente vira a próxima quando a atual ganha vaga (#143)', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    act(() => {
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [
+          recebidaSorteada('r1', 'reta-1', 'reta'),
+          recebidaSorteada('r2', 'cruz-1', 'cruz'),
+        ],
+      })
+    })
+
+    // Só a PRIMEIRA pendência é visível (slot único): a segunda fica escondida.
+    expect(screen.getAllByTestId('caixa-peca-sorteada')).toHaveLength(1)
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('reta-1')
+
+    // Escolhe vaga norte para r1 → a corrente passa a ser r2.
+    await user.click(celulaDoEspelho(2, 3))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r1',
+      borda: 'norte',
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
+        recebidaId: 'r1',
+        borda: 'norte',
+        celulaAlvo: { linha: 2, coluna: 3 },
+      })
+    })
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('cruz-1')
+
+    // Encaixa r1 (foco em reta-1): pendência some; r2 permanece corrente.
+    await user.click(celulaDoEspelho(2, 3))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'reta-1',
+        celula: { linha: 2, coluna: 3 },
+        orientacao: 0,
+      })
+    })
+    expect(screen.getAllByTestId('recebida-pendente')).toHaveLength(1)
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('cruz-1')
+
+    // Segunda corrente: vaga leste → encaixe → bandeja esvazia.
+    await user.click(celulaDoEspelho(3, 4))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r2',
+      borda: 'leste',
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
+        recebidaId: 'r2',
+        borda: 'leste',
+        celulaAlvo: { linha: 3, coluna: 4 },
+      })
+    })
+    expect(pecaCorrenteDaBandeja()).toBeNull()
+    await user.click(celulaDoEspelho(3, 4))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'cruz-1',
+      celula: { linha: 3, coluna: 4 },
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'cruz-1',
+        celula: { linha: 3, coluna: 4 },
+        orientacao: 0,
+      })
+    })
+    expect(screen.queryAllByTestId('recebida-pendente')).toHaveLength(0)
+    expect(pecaCorrenteDaBandeja()).toBeNull()
+  })
+
+  it('clique em Peça Inicial na mesa emite SELECIONAR_PECA com jogadorId (fallback ST-09, #143)', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    await user.click(pecaDaMesa('inicial-3'))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'SELECIONAR_PECA',
+      pecaId: 'inicial-3',
+      jogadorId: JOGADOR_ID,
+    })
+  })
+
+  it('com pendências, clique em Inicial da mesa não emite comando (bloqueio local silencioso)', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
+      })
+    })
+    await waitFor(() =>
+      expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument(),
+    )
+
+    const comandosAntes = ws.sentMessages.length
+    await user.click(pecaDaMesa('inicial-1'))
+    expect(ws.sentMessages).toHaveLength(comandosAntes)
+  })
+
   it('rejeição local: com pendências, clicar outro peão produz flash vermelho e NÃO envia comando (AC 3)', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
@@ -250,9 +406,7 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
       ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
       ws.simulateMessage({
         type: 'RECEBIMENTO_GERADO',
-        recebidas: [
-          { recebidaId: 'recebida-norte', bordaGeradora: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
-        ],
+        recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
       })
     })
     // Flash branco dos eventos expira sozinho.
@@ -286,6 +440,22 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
     expect(flash.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')
   })
 
+  it('CAIXA_ESGOTADA no ERRO_DO_TABULEIRO produz flash vermelho com motivo (issue #143)', async () => {
+    const ws = await partidaDisponivel()
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'ERRO_DO_TABULEIRO',
+        codigo: 'CAIXA_ESGOTADA',
+        mensagem: 'A Caixa está vazia.',
+      }),
+    )
+
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('vermelho')
+    expect(flash.getAttribute('data-motivo')).toBe('caixa_esgotada')
+  })
+
   it('pós-confirmação: clicar destino conectado NÃO envia MOVER_PEAO e pisca âmbar (AC3, review #165)', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
@@ -304,6 +474,12 @@ describe('partida conectada ao ciclo do peão (issue #91)', () => {
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+      ws.simulateMessage({
+        type: 'PECA_SORTEADA',
+        pecaId: 'reta-1',
+        tipoDaPeca: 'reta',
         orientacao: 0,
       })
       ws.simulateMessage({
