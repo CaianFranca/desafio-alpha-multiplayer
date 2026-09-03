@@ -299,6 +299,19 @@ export function mapearCliqueNaPecaDaBandeja(
   return { recebidaId: corrente.recebidaId }
 }
 
+/**
+ * A corrente da bandeja está puxada (pull vigente)? Derivação do estado
+ * LOCAL, fora do modelo autoritativo — fonte única do destaque emissivo
+ * (Caixa), do destaque de vaga (AmbienteDeJogo) e do `data-puxada` do
+ * espelho DOM. Mesma derivação de corrente do mapeador de pull (primeira
+ * pendência sem vaga); pull antigo (vaga escolhida ou pendência encaixada)
+ * não conta como vigente.
+ */
+export function puxadaVigenteNaBandeja(estado: EstadoInteracaoPeoes): boolean {
+  const corrente = estado.recebidasPendentes.find((r) => r.vaga === null)
+  return corrente !== undefined && estado.recebidaPuxadaId === corrente.recebidaId
+}
+
 export interface DespachoDeCliqueNaBandeja {
   /** Pull aceito: o chamador (React) persiste o id como estado visual local. */
   onPuxar?: (recebidaId: string) => void

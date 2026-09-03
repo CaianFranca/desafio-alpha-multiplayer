@@ -14,6 +14,7 @@ import {
   mapearMovimentacao,
   mapearPermanencia,
   mapearPosicionarRecebida,
+  puxadaVigenteNaBandeja,
   rotearCliqueDeCelula,
   vagasDisponiveisDoPeao,
 } from '../web/src/game/tabuleiro/interacaoPeoes'
@@ -895,6 +896,26 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
       recebidaPuxadaId: 'r1',
     })
     expect(mapearCliqueNaPecaDaBandeja(estado)).toBeNull()
+  })
+
+  it('puxadaVigenteNaBandeja: só a corrente sem vaga puxada conta como vigente', () => {
+    // Sem pull → não vigente.
+    const semPull = estadoBase({ recebidasPendentes: [pendSemVaga('r1', 'reta-1')] })
+    expect(puxadaVigenteNaBandeja(semPull)).toBe(false)
+    // Pull na corrente → vigente (fonte única do destaque emissivo, do
+    // destaque de vaga e do data-puxada do espelho).
+    expect(
+      puxadaVigenteNaBandeja({ ...semPull, recebidaPuxadaId: 'r1' }),
+    ).toBe(true)
+    // Pull antigo: a pendência puxada ganhou vaga — a corrente agora é outra.
+    const pullEncaminhado = estadoBase({
+      recebidasPendentes: [
+        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta', vaga: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        pendSemVaga('r2', 't-1', 'T'),
+      ],
+      recebidaPuxadaId: 'r1',
+    })
+    expect(puxadaVigenteNaBandeja(pullEncaminhado)).toBe(false)
   })
 
   it('sem pendência sem vaga não há o que puxar (vaga em aberto não puxa)', () => {

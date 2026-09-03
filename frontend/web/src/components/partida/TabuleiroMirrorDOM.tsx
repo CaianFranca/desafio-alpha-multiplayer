@@ -14,6 +14,7 @@ import {
   despacharCliqueDeCelula,
   despacharCliqueNaPecaDaBandeja,
   mapearCliqueNaPecaDaMesa,
+  puxadaVigenteNaBandeja,
 } from '../../game/tabuleiro/interacaoPeoes'
 import type {
   PeaoComandoDoCliente,
@@ -170,7 +171,7 @@ export function TabuleiroMirrorDOM({
               data-tipo={pecaCorrente.tipo}
               data-orientacao={pecaCorrente.orientacao}
               data-puxada={
-                estadoPeoes?.recebidaPuxadaId === pecaCorrente.recebidaId
+                estadoPeoes !== null && puxadaVigenteNaBandeja(estadoPeoes)
                   ? 'true'
                   : 'false'
               }

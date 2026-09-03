@@ -17,6 +17,7 @@ import {
   despacharCliqueNaPecaDaBandeja,
   mapearCliqueNaPecaDaBandeja,
   mapearCliqueNaPecaDaMesa,
+  puxadaVigenteNaBandeja,
 } from './interacaoPeoes'
 import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 
@@ -66,9 +67,11 @@ export function Caixa({
   // (inclui gate de espectador); o cursor espelha a clicabilidade na cena.
   const correntePuxavel =
     estadoPeoes !== null && mapearCliqueNaPecaDaBandeja(estadoPeoes) !== null
+  // Destaque emissivo: pull vigente na bandeja (mesmo predicado do espelho).
   const puxada =
     pecaCorrente !== null &&
-    estadoPeoes?.recebidaPuxadaId === pecaCorrente.recebidaId
+    estadoPeoes !== null &&
+    puxadaVigenteNaBandeja(estadoPeoes)
 
   return (
     <group>

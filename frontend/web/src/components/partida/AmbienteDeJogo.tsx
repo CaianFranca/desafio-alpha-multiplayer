@@ -19,7 +19,11 @@ import {
 } from '../../game/tabuleiro/contrato'
 import type { PeaoId } from '../../game/tabuleiro/contrato'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
-import { mapearCliqueNoPeao, vagasDisponiveisDoPeao } from '../../game/tabuleiro/interacaoPeoes'
+import {
+  mapearCliqueNoPeao,
+  puxadaVigenteNaBandeja,
+  vagasDisponiveisDoPeao,
+} from '../../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
@@ -120,7 +124,8 @@ export function AmbienteDeJogo({
   // `peaoSelecionadoIdLocal`): clicar a corrente "puxa" a peça, e só então o
   // clique em vaga escolhe a vaga para ela. O pull é consumido quando a
   // pendência sai da lista (encaixe, troca de turno) — a próxima corrente
-  // exige novo pull. Zeratada em update-de-render em fase, sem efeito.
+  // exige novo pull. O reset é um update-de-render na mesma fase (padrão
+  // do estado espelhado acima), sem efeito colateral.
   const [recebidaPuxadaId, setRecebidaPuxadaId] = useState<string | null>(null)
   if (
     recebidaPuxadaId !== null &&
@@ -154,12 +159,12 @@ export function AmbienteDeJogo({
       : null
   // O destaque de vaga segue o clique: só aparece com a corrente PUXADA
   // (alvo inválido sem pull não reage — padrão #91; espectador nunca puxa,
-  // logo nunca vê vaga destacada).
+  // logo nunca vê vaga destacada). A vigência do pull vem do predicado puro
+  // compartilhado com cena e espelho.
   const vagasSet = new Set<string>(
     estadoPeoesComPuxada !== null &&
       estadoPeoesComPuxada.peaoSelecionadoId !== null &&
-      corrente !== null &&
-      recebidaPuxadaId === corrente.recebidaId
+      puxadaVigenteNaBandeja(estadoPeoesComPuxada)
       ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
       : [],
   )
