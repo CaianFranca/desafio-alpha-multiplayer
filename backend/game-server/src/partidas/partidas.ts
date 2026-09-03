@@ -52,10 +52,8 @@ export async function criarPartidaPreparada(
   // recém-criada para não deixar partida órfã sem estado (que responderia
   // ESTADO_INDISPONIVEL para sempre).
   try {
-    const seed =
-      typeof (globalThis.crypto as unknown as { randomInt?: (min: number, max: number) => number })?.randomInt === 'function'
-        ? (globalThis.crypto as unknown as { randomInt: (min: number, max: number) => number }).randomInt(0, 4294967296)
-        : Math.floor(Math.random() * 4294967296);
+    // Seed aleatória via WebCrypto (mesma global do randomUUID acima).
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
     await inicializarEstadoDaPartida(
       redis,
       partida.partidaId,
