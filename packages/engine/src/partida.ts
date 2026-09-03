@@ -54,6 +54,7 @@ import {
 import {
   resolverAtaques,
   type AtaqueResolvidoEvento,
+  type EstadoResultanteDoAtaque,
 } from './monstros.ts';
 
 export interface JogadorDaPartida {
@@ -1341,6 +1342,9 @@ function reaplicarIluminacaoSeBaixaNova(
  * da Proteção: Vulto → emBaixaIluminacao (idempotente), Espectro →
  * sanidade-1 com piso 0 → amedrontado; jogador já amedrontado é imune a novo
  * Espectro; protegido nega a penalidade do MESMO gatilho.
+ * Issue #173: o evento ataque_resolvido sai do gatilho com `estadosAplicados`
+ * — o estado RESULTANTE de cada Jogador cujo roster mudou com as penalidades
+ * (imune e protegido não mudam, logo não aparecem; ataque sem alvos ⇒ []).
  * @mutates eventos — adiciona `ataque_resolvido` quando ao menos um Monstro
  * dispara (mesmo que ninguém seja atingido).
  */
@@ -1363,9 +1367,6 @@ function resolverAtaqueNoGatilho(
       protegido: jogador.protegido ?? false,
     })),
   );
-  if (resolucao.evento !== null) {
-    eventos.push(resolucao.evento);
-  }
   // Consumo da Proteção (issue #172): apenas os Jogadores que negaram algum
   // ataque nesta resolução; sem consumo, o roster segue intocado.
   const consumidos = new Set(resolucao.protegidosConsumidos);
@@ -1380,7 +1381,10 @@ function resolverAtaqueNoGatilho(
 
   // Penalidades ST-15 / issue #170: respeitam a Proteção já consumida e a
   // imunidade do Amedrontado. Mesmo jogador atingido por ambos os tipos recebe
-  // ambas as penalidades no mesmo gatilho.
+  // ambas as penalidades no mesmo gatilho. Issue #173: cada jogador cujo
+  // estado MUDOU acumula a entrada com o estado RESULTANTE — o consumo da
+  // Proteção não entra (vive em `protegidos` do evento).
+  let estadosAplicados: readonly EstadoResultanteDoAtaque[] = [];
   if (resolucao.evento !== null) {
     const alvos = new Set(
       resolucao.evento.atacantes.flatMap((atacante) => atacante.peoesNoAlcance),
@@ -1403,7 +1407,7 @@ function resolverAtaqueNoGatilho(
       }
     }
     if (vultoAtingidos.size > 0 || espectroAtingidos.size > 0) {
-      let mudou = false;
+      const acumulados: EstadoResultanteDoAtaque[] = [];
       const proximoJogadores = jogadores.map((jogador) => {
         const hitVulto = vultoAtingidos.has(jogador.peaoId);
         const hitEspectro = espectroAtingidos.has(jogador.peaoId);
@@ -1416,17 +1420,14 @@ function resolverAtaqueNoGatilho(
         let novoAmedrontado = jaAmedrontado;
         if (hitVulto && !jaEmBaixa) {
           novoEmBaixa = true;
-          mudou = true;
         }
         if (hitEspectro) {
           if (jaAmedrontado) {
             // Imune: novo Espectro não tem efeito adicional (piso já 0).
           } else {
             novaSanidade = Math.max(0, jogador.sanidade - 1);
-            if (novaSanidade !== jogador.sanidade) mudou = true;
             if (novaSanidade === 0 && !jaAmedrontado) {
               novoAmedrontado = true;
-              mudou = true;
             }
           }
         }
@@ -1435,6 +1436,14 @@ function resolverAtaqueNoGatilho(
           novaSanidade !== jogador.sanidade ||
           novoAmedrontado !== jaAmedrontado
         ) {
+          // Estado RESULTANTE do jogador (#173): o wire carrega o novo valor,
+          // não a delta — o cliente projeta direto no snapshot.
+          acumulados.push({
+            jogadorId: jogador.jogadorId,
+            emBaixaIluminacao: novoEmBaixa,
+            sanidade: novaSanidade,
+            amedrontado: novoAmedrontado,
+          });
           return {
             ...jogador,
             emBaixaIluminacao: novoEmBaixa,
@@ -1444,10 +1453,15 @@ function resolverAtaqueNoGatilho(
         }
         return jogador;
       });
-      if (mudou) {
+      if (acumulados.length > 0) {
         jogadores = proximoJogadores;
+        estadosAplicados = acumulados;
       }
     }
+    // Eco no wire (issue #173): o evento carrega os dados E o estado
+    // resultante das penalidades — vazio quando ninguém mudou (imune,
+    // protegido ou saída sem alvos).
+    eventos.push({ ...resolucao.evento, estadosAplicados });
   }
 
   // Normalização retrocompatível para estados persistidos sem os campos novos.
