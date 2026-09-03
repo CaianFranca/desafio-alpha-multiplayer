@@ -78,6 +78,8 @@ export type PecaId = string
 
 // ── Tipos de domínio visual (espelha engine/shared) ──
 
+// sync manual com engine.TipoDaPeca — caminho + especiais (ST-12) + monstros
+// (ST-15 / issue #169); sempre que o engine adicionar um tipo, espelhar aqui.
 export type TipoDaPeca =
   | 'inicial'
   | 'reta'
