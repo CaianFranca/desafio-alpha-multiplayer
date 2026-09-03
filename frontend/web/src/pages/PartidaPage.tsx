@@ -167,7 +167,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       recebidasPendentes: modelo.recebidasPendentes,
       peaoSelecionadoId: modelo.peaoSelecionadoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
-      reserva: modelo.reserva,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
     }
   }, [temAlvo, estadoEmAndamento, modelo])

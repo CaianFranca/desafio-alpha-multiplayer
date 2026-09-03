@@ -4,14 +4,15 @@
  *
  * O canal da Partida entrega `ESTADO_DA_PARTIDA` com o snapshot completo do
  * engine; `aplicarSnapshot` substitui o modelo local pelas projeções do wire e
- * preserva o que o snapshot não carrega (reserva e a fase de movimento do
- * turno em andamento). Sem recalcular iluminação/limpeza: o motor é a
- * autoridade.
+ * preserva o que o snapshot não carrega (a fase de movimento do turno em
+ * andamento). As Peças Iniciais da mesa vêm do próprio snapshot (#143).
+ * Sem recalcular iluminação/limpeza: o motor é a autoridade.
  */
 
 import type {
   Celula as CelulaContrato,
   CorDoPeao,
+  PecaDaMesa,
   PecaPosicionada,
   PeaoDaExibicao,
   TipoDaPeca,
@@ -22,10 +23,10 @@ import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 /**
  * Aplica um snapshot do servidor ao estado do cliente, produzindo um novo
- * estado. Mapeia posicionadas, peões, celulasIluminadas,
+ * estado. Mapeia posicionadas, iniciais, peões, celulasIluminadas,
  * pecaSelecionadaId/pecaEmManipulacaoId/peaoSelecionadoId,
  * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId e
- * jogadorAtivoId/rodada/posicaoConfirmada — preservando a reserva.
+ * jogadorAtivoId/rodada/posicaoConfirmada.
  */
 export function aplicarSnapshot(
   estado: EstadoDoTabuleiroNoCliente,
@@ -36,6 +37,14 @@ export function aplicarSnapshot(
     tipo: p.tipo,
     orientacao: p.orientacao,
     celula: { linha: p.celula.linha, coluna: p.celula.coluna },
+  }))
+
+  // Peças Iniciais ainda não encaixadas (issue #143): a lista do motor é a
+  // autoridade — recarregar reconstrói a mesa sem seed local.
+  const iniciais: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
+    pecaId: p.pecaId,
+    tipo: 'inicial' as const,
+    orientacao: p.orientacao,
   }))
 
   const mapPos = new Map<string, CelulaContrato>(
@@ -51,9 +60,9 @@ export function aplicarSnapshot(
     }
   })
 
-  // Pos-#138 toda Recebida do snapshot e da forma sorteada: map direto para
-  // PendenciaDaPecaSorteada, sem cast. `orientacao` do snapshot nao e copiado
-  // — nao faz parte da pendencia; o cliente a ignora fora da Reserva.
+  // Toda Recebida do snapshot é da forma sorteada (#138): map direto para
+  // PendenciaNoCliente, sem cast. `orientacao` da peça é copiado para que a
+  // bandeja da Caixa reexiba a corrente com a rotação correta ao recarregar.
   const recebidasPendentes: readonly PendenciaNoCliente[] = snapshot.tabuleiro.recebidas.map(
     (r): PendenciaNoCliente => ({
       recebidaId: r.recebidaId,
@@ -63,6 +72,7 @@ export function aplicarSnapshot(
       celulaAlvo: r.celulaAlvo
         ? { linha: r.celulaAlvo.linha, coluna: r.celulaAlvo.coluna }
         : null,
+      orientacao: r.orientacao,
     }),
   )
 
@@ -84,7 +94,7 @@ export function aplicarSnapshot(
   }))
 
   return {
-    reserva: estado.reserva,
+    iniciais,
     posicionadas,
     pecaSelecionadaId: snapshot.tabuleiro.pecaSelecionadaId,
     pecaEmManipulacaoId: snapshot.tabuleiro.pecaEmManipulacaoId,

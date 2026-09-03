@@ -8,10 +8,11 @@ import {
 } from '../../game/ambiente/contrato'
 import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
+import type { PecaCorrente } from '../../game/tabuleiro/Caixa'
 import type { EstadoExibicaoTabuleiro } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../../game/tabuleiro/interacao'
-import type { PeaoComandoDoCliente, RecebidaId, TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import {
   chaveCelula,
   destinosConectadosDoPeao,
@@ -19,8 +20,8 @@ import {
 } from '../../game/tabuleiro/contrato'
 import type { PeaoId } from '../../game/tabuleiro/contrato'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
-import { mapearCliqueNoPeao } from '../../game/tabuleiro/interacaoPeoes'
-import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
+import { mapearCliqueNoPeao, vagasDisponiveisDoPeao } from '../../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -38,7 +39,7 @@ interface AmbienteDeJogoProps {
   /**
    * Estado de exibição da cena. Antes era derivado de `criarEstadoExibicaoMock()`
    * quando o estado da tela era 'disponivel'; agora vem do modelo do cliente
-   * (reserva/posicionadas/peoes aplicados por evento) ou do mock DEV.
+   * (iniciais/posicionadas/peoes aplicados por evento) ou do mock DEV.
    */
   estadoExibicao?: EstadoExibicaoTabuleiro | null
   /** Estado de interação do tabuleiro (seleção/manipulação) para cursor e destaques. */
@@ -105,35 +106,35 @@ export function AmbienteDeJogo({
     setPeaoSelecionadoIdLocal(null)
   }, [])
 
-  // ── Foco local de pendências de Recebimento (#91, decisão 1) ──
-  // Dono do foco: clicar célula-alvo de pendência SEM tipo foca a pendência;
-  // clicar peça da Reserva envia ESCOLHER_TIPO para a focada. O foco é
-  // validado contra as pendências vigentes (pendência resolvida/tipada ou
-  // lista vazia derrubam o foco — derivação, sem efeito de reset).
-  const [recebidaFocadaId, setRecebidaFocadaId] = useState<RecebidaId | null>(null)
-  const aoFocarPendencia = useCallback((recebidaId: RecebidaId) => {
-    setRecebidaFocadaId(recebidaId)
-  }, [])
+  // ── Caixa sobre a mesa (issue #143): corrente da bandeja e vagas ──
+  // Pendências do ciclo (forma #138): a CORRENTE é a primeira sem vaga — a
+  // única exibida na bandeja de slot único. Vagas disponíveis derivam do
+  // mesmo roteador puro (`vagasDisponiveisDoPeao`) e destacam as células
+  // enquanto há pendência sem vaga — fonte única cena + espelho DOM.
   const recebidasPendentes = estadoInteracaoPeoes?.recebidasPendentes ?? []
-  const focadaVigente =
-    recebidasPendentes.find(
-      (r) => r.recebidaId === recebidaFocadaId && r.pecaId === null,
-    ) ?? null
-  const recebidaFocadaVigenteId: RecebidaId | null = focadaVigente?.recebidaId ?? null
-  // Alvos de pendências ativas: mesmo padrão do destinosSet (chaves derivadas
-  // no pai, fonte única para cena e espelho DOM). Forma nova (#138): sem vaga
-  // escolhida, celulaAlvo é null — não gera alvo.
   const alvosPendentesSet = new Set<string>(
     recebidasPendentes
-      // Forma nova (#138): célula-alvo ainda indefinida (null) até a escolha
-      // da vaga — sem alvo a destacar nesta pendência.
+      // Sem vaga escolhida, célula-alvo é null — sem alvo a destacar.
       .map((r) => (r.celulaAlvo !== null ? chaveCelula(r.celulaAlvo) : null))
       .filter((k): k is string => k !== null),
   )
-  const alvoFocadoKey: string | null =
-    focadaVigente && focadaVigente.celulaAlvo !== null
-      ? chaveCelula(focadaVigente.celulaAlvo)
+  const corrente: PendenciaNoCliente | null =
+    recebidasPendentes.find((r) => r.vaga === null) ?? null
+  const pecaCorrente: PecaCorrente | null =
+    corrente !== null
+      ? {
+          pecaId: corrente.pecaId,
+          tipo: corrente.tipoDaPeca,
+          orientacao: corrente.orientacao ?? 0,
+        }
       : null
+  const vagasSet = new Set<string>(
+    estadoInteracaoPeoes !== null &&
+      estadoInteracaoPeoes.peaoSelecionadoId !== null &&
+      corrente !== null
+      ? vagasDisponiveisDoPeao(estadoInteracaoPeoes).map((v) => chaveCelula(v.celula))
+      : [],
+  )
 
   const todasCelulas = todasAsCelulas()
   const ocupadasSet = new Set(
@@ -200,9 +201,8 @@ export function AmbienteDeJogo({
           onComandoPeao={onComandoPeao}
           onRejeicaoPeao={onRejeicaoPeao}
           alvosPendentesSet={alvosPendentesSet}
-          alvoFocadoKey={alvoFocadoKey}
-          recebidaFocadaId={recebidaFocadaVigenteId}
-          aoFocarPendencia={aoFocarPendencia}
+          vagasSet={vagasSet}
+          pecaCorrente={pecaCorrente}
         />
       </Canvas>
       {estadoExibicao ? (
@@ -210,7 +210,8 @@ export function AmbienteDeJogo({
           todasCelulas={todasCelulas}
           ocupadasSet={ocupadasSet}
           iluminadasSet={iluminadasSet}
-          reserva={estadoExibicao.reserva}
+          iniciais={estadoExibicao.iniciais}
+          pecaCorrente={pecaCorrente}
           posicionadas={estadoExibicao.posicionadas}
           peoes={estadoExibicao.peoes}
           peaoSelecionadoId={peaoSelecionadoIdLocal}
@@ -223,10 +224,8 @@ export function AmbienteDeJogo({
           onComando={onComando}
           onComandoPeao={onComandoPeao}
           onRejeicaoPeao={onRejeicaoPeao}
-          recebidaFocadaId={recebidaFocadaVigenteId}
-          aoFocarPendencia={aoFocarPendencia}
           alvosPendentesSet={alvosPendentesSet}
-          alvoFocadoKey={alvoFocadoKey}
+          vagasSet={vagasSet}
         />
       ) : null}
     </div>

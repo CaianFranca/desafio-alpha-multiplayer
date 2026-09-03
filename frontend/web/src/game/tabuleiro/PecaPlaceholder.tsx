@@ -9,7 +9,7 @@ interface PecaPlaceholderProps {
   position?: [number, number, number]
   /** Destaque visual da peça selecionada/em manipulação. */
   destacada?: boolean
-  /** Cursor do ponteiro ao pairar (reserva selecionável). */
+  /** Cursor do ponteiro ao pairar (peça da mesa selecionável). */
   cursor?: 'default' | 'pointer'
   onClick?: (event: ThreeEvent<MouseEvent>) => void
 }

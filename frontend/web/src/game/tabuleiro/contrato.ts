@@ -4,7 +4,8 @@
  * Usa a origem do ambiente ([0,0,0] no centro do plano superior da Mesa,
  * ver `game/ambiente/contrato.ts`) e é 100% puro: sem three.js/DOM.
  * Centraliza dimensões, mapeamento célula↔mundo e posições do tabuleiro e
- * da reserva sobre a Mesa.
+ * da zona da Caixa sobre a Mesa (issue #143: Caixa opaca + bandeja de sorteio
+ * de slot único + as 4 Peças Iniciais em grade 2×2).
  */
 
 import { LARGURA_MESA } from '../ambiente/contrato'
@@ -19,7 +20,7 @@ export const PROFUNDIDADE_TABULEIRO = LADO_DA_GRADE * TAMANHO_CELULA
 
 /** Altura acima do plano da Mesa para evitar z-fighting. */
 export const ALTURA_TABULEIRO = 0.02
-export const ALTURA_RESERVA = 0.02
+export const ALTURA_ZONA_CAIXA = 0.02
 
 /** Tabuleiro centralizado sobre a Mesa. */
 export const POSICAO_TABULEIRO: readonly [number, number, number] = [
@@ -28,17 +29,42 @@ export const POSICAO_TABULEIRO: readonly [number, number, number] = [
   0,
 ]
 
-/** Reserva lateral: offset +X a partir do centro. */
-export const OFFSET_RESERVA_X = 8.0
-export const POSICAO_RESERVA: readonly [number, number, number] = [
-  OFFSET_RESERVA_X,
-  ALTURA_RESERVA,
-  0,
-]
+// ── Zona da Caixa sobre a Mesa (issue #143) ──────────────────────────────
+// Região lateral +X, disposta de trás (−z) para frente (+z):
+//   CAIXA (bloco opaco fechada) → BANDEJA (1 slot com a peça corrente) →
+//   PEÇAS INICIAIS (4 peças em grade 2×2, clicáveis).
 
-/** Layout da reserva em grade local. */
-export const COLUNAS_RESERVA = 2
-export const ESPACAMENTO_RESERVA = 1.7
+/** Zona da Caixa: offset +X a partir do centro. */
+export const OFFSET_CAIXA_X = 8.0
+
+/** Caixa fechada e opaca: posição da base (centro da pegada) e dimensões. */
+export const POSICAO_CAIXA: readonly [number, number, number] = [
+  OFFSET_CAIXA_X,
+  ALTURA_ZONA_CAIXA,
+  -5.0,
+]
+export const CAIXA_LARGURA = 2.4
+export const CAIXA_PROFUNDIDADE = 1.8
+export const CAIXA_ALTURA = 0.7
+
+/** Bandejinha de slot único: a peça sorteada corrente fica sobre a base. */
+export const POSICAO_BANDEJA: readonly [number, number, number] = [
+  OFFSET_CAIXA_X,
+  ALTURA_ZONA_CAIXA,
+  0.0,
+]
+export const BANDEJA_LARGURA = 2.0
+export const BANDEJA_PROFUNDIDADE = 2.0
+
+/** Área das 4 Peças Iniciais em grade 2×2 na frente da bandeja. */
+export const POSICAO_INICIAIS: readonly [number, number, number] = [
+  OFFSET_CAIXA_X,
+  ALTURA_ZONA_CAIXA,
+  4.6,
+]
+export const COLUNAS_INICIAIS = 2
+export const QUANTIDADE_INICIAIS = 4
+export const ESPACAMENTO_INICIAIS = 1.7
 
 export const CELULA_INSET = TAMANHO_CELULA * 0.98
 export const ESPESSURA_BORDA = 0.04
@@ -74,9 +100,10 @@ export interface Celula {
   readonly coluna: number
 }
 
-export interface PecaDaReserva {
+/** Peça Inicial aguardando encaixe na mesa (issue #143; ids do engine). */
+export interface PecaDaMesa {
   readonly pecaId: PecaId
-  readonly tipo: TipoDaPeca
+  readonly tipo: 'inicial'
   readonly orientacao: Orientacao
 }
 
@@ -105,7 +132,8 @@ export interface PeaoDaExibicao {
 }
 
 export interface EstadoExibicaoTabuleiro {
-  readonly reserva: readonly PecaDaReserva[]
+  /** Peças Iniciais aguardando encaixe na mesa (issue #143). */
+  readonly iniciais: readonly PecaDaMesa[]
   readonly posicionadas: readonly PecaPosicionada[]
   readonly peoes: readonly PeaoDaExibicao[]
   /**
@@ -141,46 +169,28 @@ export const HEX_COR_PEAO: Record<CorDoPeao, string> = {
 export const PEAO_Y = PECA_Y + 0.14
 
 /**
- * Fileira dos peões não posicionados sobre a Mesa: lado oposto à reserva
- * (-X; reserva fica em +X). Altura y = 0 (plano superior da Mesa).
+ * Fileira dos peões não posicionados sobre a Mesa: lado oposto à zona da
+ * Caixa (-X; Caixa fica em +X). Altura y = 0 (plano superior da Mesa).
  */
 export const OFFSET_FILEIRA_PEOES_X = -8.0
-export const ESPACAMENTO_PEAO_MESA = ESPACAMENTO_RESERVA
+export const ESPACAMENTO_PEAO_MESA = 1.7
 
-// ── Composição inicial da reserva (4 + 6 + 6 + 6 = 22) ──
+// ── Composição inicial das Peças Iniciais na mesa (issue #143) ──
+// Espelha `estadoInicialDoTabuleiro()` do engine: as 4 iniciais (`inicial-1`
+// a `inicial-4`, orientação 0) nascem fora da Caixa, aguardando encaixe no
+// Primeiro Turno. O resto das peças vem sorteado da Caixa (nunca semeado).
 
-const COMPOSICAO_RESERVA: readonly { tipo: TipoDaPeca; quantidade: number }[] = [
-  { tipo: 'inicial', quantidade: 4 },
-  { tipo: 'reta', quantidade: 6 },
-  { tipo: 'T', quantidade: 6 },
-  { tipo: 'cruz', quantidade: 6 },
-]
-
-export const TOTAL_RESERVA = COMPOSICAO_RESERVA.reduce((s, e) => s + e.quantidade, 0)
-
-export function criarReservaInicial(): PecaDaReserva[] {
-  const reserva: PecaDaReserva[] = []
-  for (const entrada of COMPOSICAO_RESERVA) {
-    for (let i = 1; i <= entrada.quantidade; i++) {
-      reserva.push({
-        pecaId: `${entrada.tipo.toLowerCase()}-${i}`,
-        tipo: entrada.tipo,
-        orientacao: 0,
-      })
-    }
-  }
-  return reserva
+/** Semente determinística das 4 Peças Iniciais (mesmos ids do engine). */
+export function criarIniciaisDaMesa(): PecaDaMesa[] {
+  return [1, 2, 3, 4].map((ordem) => ({
+    pecaId: `inicial-${ordem}`,
+    tipo: 'inicial' as const,
+    orientacao: 0 as const,
+  }))
 }
 
 export function chaveCelula(celula: Celula): string {
   return `${celula.linha}:${celula.coluna}`
-}
-
-export function dimensaoReserva(linhas: number): { largura: number; profundidade: number } {
-  return {
-    largura: COLUNAS_RESERVA * ESPACAMENTO_RESERVA + 0.4,
-    profundidade: linhas * ESPACAMENTO_RESERVA + 0.4,
-  }
 }
 
 
@@ -210,7 +220,9 @@ const ROTACAO_HORARIA: Record<BordaCardinal, BordaCardinal> = {
   oeste: 'norte',
 }
 
-export function bordasAbertas(peca: Pick<PecaDaReserva, 'tipo' | 'orientacao'>): BordaCardinal[] {
+export function bordasAbertas(
+  peca: Pick<PecaPosicionada, 'tipo' | 'orientacao'>,
+): BordaCardinal[] {
   let bordas = BORDAS_BASE[peca.tipo]
   const passos = (peca.orientacao / 90) % 4
   for (let i = 0; i < passos; i++) {
@@ -246,20 +258,20 @@ export function mundoParaCelula(
   return { linha, coluna }
 }
 
-// ── Reserva: índice → mundo ──
+// ── Peças Iniciais: índice → local/mundo (grade 2×2 na frente da bandeja) ──
 
-export function reservaIndiceParaLocal(indice: number): [number, number, number] {
-  const linhas = Math.ceil(TOTAL_RESERVA / COLUNAS_RESERVA)
-  const col = indice % COLUNAS_RESERVA
-  const row = Math.floor(indice / COLUNAS_RESERVA)
-  const localX = (col - (COLUNAS_RESERVA - 1) / 2) * ESPACAMENTO_RESERVA
-  const localZ = (row - (linhas - 1) / 2) * ESPACAMENTO_RESERVA
+export function inicialIndiceParaLocal(indice: number): [number, number, number] {
+  const linhas = Math.ceil(QUANTIDADE_INICIAIS / COLUNAS_INICIAIS)
+  const col = indice % COLUNAS_INICIAIS
+  const row = Math.floor(indice / COLUNAS_INICIAIS)
+  const localX = (col - (COLUNAS_INICIAIS - 1) / 2) * ESPACAMENTO_INICIAIS
+  const localZ = (row - (linhas - 1) / 2) * ESPACAMENTO_INICIAIS
   return [localX, 0, localZ]
 }
 
-export function reservaIndiceParaMundo(indice: number): [number, number, number] {
-  const [lx, ly, lz] = reservaIndiceParaLocal(indice)
-  return [POSICAO_RESERVA[0] + lx, POSICAO_RESERVA[1] + ly, POSICAO_RESERVA[2] + lz]
+export function inicialIndiceParaMundo(indice: number): [number, number, number] {
+  const [lx, ly, lz] = inicialIndiceParaLocal(indice)
+  return [POSICAO_INICIAIS[0] + lx, POSICAO_INICIAIS[1] + ly, POSICAO_INICIAIS[2] + lz]
 }
 
 // ── Helpers de layout ──

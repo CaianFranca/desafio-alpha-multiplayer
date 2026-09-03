@@ -2,15 +2,17 @@
  * Redutor puro evento→estado do Tabuleiro no cliente (issue #85).
  *
  * O game-server não reenvia o histórico de posicionamentos a quem conecta
- * depois (as 4 conexões partem juntas do `PARTIDA_DISPONIVEL`). Assim o
- * cliente parte do estado inicial determinístico — `criarReservaInicial()`
- * (mesma composição e ids de `estadoInicialDoTabuleiro()` do engine) e
- * `posicionadas: []` — e aplica cada evento do broadcast em ordem ao modelo
- * local (deltas aditivos).
+ * depois (as 4 conexões partem juntas do `PARTIDA_DISPONIVEL`); desde a
+ * issue #156 o snapshot `ESTADO_DA_PARTIDA` fecha essa lacuna. Ainda assim o
+ * cliente parte do estado inicial determinístico — `criarIniciaisDaMesa()`
+ * (mesmos ids de `estadoInicialDoTabuleiro()` do engine) e `posicionadas: []`
+ * — e aplica cada evento do broadcast em ordem ao modelo local (deltas
+ * aditivos).
  *
  * Semântica alinhada ao engine (`packages/engine/src/tabuleiro.ts`):
- *   - PECA_POSICIONADA não traz `tipo` no wire → preserva o `tipo` da Reserva
- *     ao consumir a peça (ver `traducao.ts` do game-server).
+ *   - PECA_POSICIONADA não traz `tipo` no wire → preserva o `tipo` da Peça
+ *     Inicial da mesa ou da pendência sorteada da Caixa ao encaixar (ver
+ *     `traducao.ts` do game-server).
  *   - Novo posicionamento abre a janela de Manipulação (`pecaEmManipulacaoId`)
  *     e limpa a Seleção.
  *   - Nova Seleção com Manipulação em aberto emite [manipulacao_finalizada,
@@ -19,11 +21,12 @@
  *   - ERRO_DO_TABULEIRO chega só ao autor e não altera o estado do cliente
  *     (o flash vermelho é gerenciado pela camada de feedback, não pelo reducer).
  *
- * Ciclo do Peão (issue #91 — espelho do engine):
+ * Ciclo do Peão (issue #91 — espelho do engine; forma #138):
  *   - Peões nascem seedados (`peao-${cor}`, sobre a Mesa) e o servidor move.
- *   - Pendência de Recebimento carrega campo client-side `pecaId` (null até o
- *     TIPO) e só sai da lista no PECA_POSICIONADA (encaixe na célula-alvo).
- *   - TIPO consome a peça da Reserva (peoes.ts:367 do engine) e seleciona a
+ *   - Pendência de Recebimento nasce com a Peça sorteada da Caixa (pecaId +
+ *     tipo) e a vaga nula; só sai da lista no PECA_POSICIONADA (encaixe na
+ *     célula-alvo derivada da vaga escolhida).
+ *   - VAGA_DA_PECA_RECEBIDA_ESCOLHIDO fixa a vaga/célula-alvo e seleciona a
  *     Recebida (pecaSelecionadaId) até o encaixe.
  *   - PEAO_POSICIONADO re-seleciona o peão (Primeiro Turno, partida.ts:344);
  *     PEAO_MOVIDO/PEAO_PERMANECEU limpam a seleção (mover/permanecer).
@@ -41,17 +44,16 @@
 import {
   CORES_DOS_PEOES,
   chaveCelula,
-  criarReservaInicial,
+  criarIniciaisDaMesa,
   type CorDoPeao,
   type EstadoExibicaoTabuleiro,
   type Orientacao,
-  type PecaDaReserva,
+  type PecaDaMesa,
   type PecaPosicionada,
   type PeaoDaExibicao,
   type TipoDaPeca,
 } from './contrato'
 import type { PendenciaNoCliente } from './interacaoPeoes'
-import { ehPendenciaSorteada } from './interacaoPeoes'
 import type {
   Celula,
   CelulasIluminadasWireEvento,
@@ -83,17 +85,18 @@ export type EventoDoJogoNoCliente =
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
-  readonly reserva: readonly PecaDaReserva[]
+  /** Peças Iniciais na mesa aguardando encaixe (issue #143; ids do engine). */
+  readonly iniciais: readonly PecaDaMesa[]
   readonly posicionadas: readonly PecaPosicionada[]
   readonly pecaSelecionadaId: string | null
   readonly pecaEmManipulacaoId: string | null
   /** Peões com posição autoritativa do servidor (issue #91). */
   readonly peoes: readonly PeaoDaExibicao[]
-  /** Recebidas aguardando escolha de tipo e encaixe (com pecaId client-side). */
+  /** Recebidas aguardando escolha de vaga e encaixe (forma sorteada #138). */
   readonly recebidasPendentes: readonly PendenciaNoCliente[]
   /** Peão selecionado no ciclo (vem do servidor via PEAO_SELECIONADO). */
   readonly peaoSelecionadoId: string | null
-  /** Peças cujo tipo foi definido por ESCOLHER_TIPO_DA_PECA_RECEBIDA (chave = pecaId). */
+  /** Tipos sorteados da Caixa conhecidos (chave = pecaId; fonte do encaixe). */
   readonly pecasDeRecebimento: Record<string, TipoDaPeca>
   /**
    * Células iluminadas espelhadas do estado compartilhado (issue #151).
@@ -127,7 +130,7 @@ export interface EstadoDoTabuleiroNoCliente {
 /** Estado inicial determinístico do cliente (deltas a partir do zero). */
 export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
   return {
-    reserva: criarReservaInicial(),
+    iniciais: criarIniciaisDaMesa(),
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
@@ -154,14 +157,14 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
   }
 }
 
-function girarNaReserva(
+function girarNaMesa(
   estado: EstadoDoTabuleiroNoCliente,
   pecaId: string,
   orientacao: Orientacao,
 ): EstadoDoTabuleiroNoCliente {
   return {
     ...estado,
-    reserva: estado.reserva.map((p) =>
+    iniciais: estado.iniciais.map((p) =>
       p.pecaId === pecaId ? { ...p, orientacao } : p,
     ),
   }
@@ -221,43 +224,44 @@ export function reduzirEvento(
       const temPendencia = estado.recebidasPendentes.some(
         (r) => r.pecaId === evento.pecaId,
       )
-      if (temPendencia) {
-        return {
-          ...estado,
-          recebidasPendentes: estado.recebidasPendentes.map((r) =>
-            r.pecaId === evento.pecaId ? { ...r, orientacao: evento.orientacao } : r,
-          ),
-        }
-      }
-      return girarNaReserva(estado, evento.pecaId, evento.orientacao)
-    }
-    case 'PECA_POSICIONADA': {
-      const pecaNaReserva = estado.reserva.find(
-        (p) => p.pecaId === evento.pecaId,
-      )
-      const encontrada = estado.recebidasPendentes.find(
-        (r) => r.pecaId === evento.pecaId,
-      )
-      const tipoDaPendencia =
-        encontrada !== undefined && ehPendenciaSorteada(encontrada)
-          ? encontrada.tipoDaPeca
-          : undefined
-      const tipo =
-        pecaNaReserva?.tipo ??
-        estado.pecasDeRecebimento[evento.pecaId] ??
-        tipoDaPendencia
-      if (tipo === undefined) return estado
-      const posicionada: PecaPosicionada = {
-        pecaId: evento.pecaId,
-        tipo,
-        orientacao: evento.orientacao,
-        celula: evento.celula,
-      }
-      return {
-        ...estado,
-        reserva: pecaNaReserva
-          ? estado.reserva.filter((p) => p.pecaId !== evento.pecaId)
-          : estado.reserva,
+       if (temPendencia) {
+         return {
+           ...estado,
+           recebidasPendentes: estado.recebidasPendentes.map((r) =>
+             r.pecaId === evento.pecaId ? { ...r, orientacao: evento.orientacao } : r,
+           ),
+         }
+       }
+       // Peça Inicial na mesa: o giro atualiza a entrada local (issue #143).
+       if (estado.iniciais.some((p) => p.pecaId === evento.pecaId)) {
+         return girarNaMesa(estado, evento.pecaId, evento.orientacao)
+       }
+       // Peça desconhecida (ex.: da Caixa sem pendência local): sem efeito.
+       return estado
+     }
+     case 'PECA_POSICIONADA': {
+       const pecaNaMesa = estado.iniciais.find(
+         (p) => p.pecaId === evento.pecaId,
+       )
+       const encontrada = estado.recebidasPendentes.find(
+         (r) => r.pecaId === evento.pecaId,
+       )
+       const tipo =
+         pecaNaMesa?.tipo ??
+         estado.pecasDeRecebimento[evento.pecaId] ??
+         encontrada?.tipoDaPeca
+       if (tipo === undefined) return estado
+       const posicionada: PecaPosicionada = {
+         pecaId: evento.pecaId,
+         tipo,
+         orientacao: evento.orientacao,
+         celula: evento.celula,
+       }
+       return {
+         ...estado,
+         iniciais: pecaNaMesa
+           ? estado.iniciais.filter((p) => p.pecaId !== evento.pecaId)
+           : estado.iniciais,
         posicionadas: [...estado.posicionadas, posicionada],
         // Encaixe abre a janela de Manipulação e limpa a Seleção.
         pecaSelecionadaId: null,
@@ -266,8 +270,8 @@ export function reduzirEvento(
         // #91: a pendência só sai da lista quando a peça é POSICIONADA).
         recebidasPendentes: estado.recebidasPendentes.filter(
           (r) =>
-            // Forma nova (#138): célula-alvo indefinida (null) ainda não foi
-            // resolvida pelo encaixe — não sai da lista aqui.
+            // Célula-alvo ainda indefinida (vaga não escolhida): a pendência
+            // não foi resolvida por este encaixe — permanece na lista.
             r.celulaAlvo === null ||
             chaveCelula(r.celulaAlvo) !== chaveCelula(evento.celula),
         ),
@@ -285,17 +289,12 @@ export function reduzirEvento(
     case 'PEAO_SELECIONADO':
       return { ...estado, peaoSelecionadoId: evento.peaoId }
     case 'RECEBIMENTO_GERADO': {
-      // União discriminada pelo campo exclusivo de cada forma: `bordaGeradora`
-      // só existe na forma legada (ST-10, @deprecated); a forma nova (#138) já
-      // vem como PendenciaDaPecaSorteada no wire e passa direto.
-      const recebidasPendentes: readonly PendenciaNoCliente[] = evento.recebidas.map(
-        (r) => ('bordaGeradora' in r ? { ...r, pecaId: null } : r),
-      )
+      // Forma da #138: o wire já traz cada pendência com a Peça sorteada
+      // (pecaId + tipo) e a vaga nula — passa direto para o modelo.
+      const recebidasPendentes: readonly PendenciaNoCliente[] = evento.recebidas
       const pecasDeRecebimento = { ...estado.pecasDeRecebimento }
       for (const r of evento.recebidas) {
-        if (!('bordaGeradora' in r)) {
-          pecasDeRecebimento[r.pecaId] = r.tipoDaPeca
-        }
+        pecasDeRecebimento[r.pecaId] = r.tipoDaPeca
       }
       return { ...estado, recebidasPendentes, pecasDeRecebimento }
     }
@@ -309,15 +308,11 @@ export function reduzirEvento(
         },
       }
     case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO': {
-      const encontrada = estado.recebidasPendentes.find(
+      // A escolha da vaga (#138) fixa borda/célula-alvo e seleciona a Peça
+      // sorteada correspondente (encaixe em foco até o posicionamento).
+      const pendente = estado.recebidasPendentes.find(
         (r) => r.recebidaId === evento.recebidaId,
       )
-      // A escolha de vaga (#138) só se aplica à forma sorteada; a pendência
-      // legada não tem vaga no domínio e é ignorada aqui.
-      const pendente =
-        encontrada !== undefined && ehPendenciaSorteada(encontrada)
-          ? encontrada
-          : undefined
       const pecasDeRecebimento =
         pendente && estado.pecasDeRecebimento[pendente.pecaId] === undefined
           ? {
@@ -330,7 +325,7 @@ export function reduzirEvento(
         pecasDeRecebimento,
         pecaSelecionadaId: pendente ? pendente.pecaId : estado.pecaSelecionadaId,
         recebidasPendentes: estado.recebidasPendentes.map((r) =>
-          r.recebidaId === evento.recebidaId && ehPendenciaSorteada(r)
+          r.recebidaId === evento.recebidaId
             ? {
                 ...r,
                 vaga: evento.borda,
@@ -349,23 +344,6 @@ export function reduzirEvento(
         peoes,
         peaoSelecionadoId: evento.peaoId,
         peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
-      }
-    }
-    case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO': {
-      // Espelha o engine (peoes.ts:367): a peça escolhida é CONSUMIDA da
-      // Reserva. A pendência PERMANECE na lista (agora tipada, com pecaId)
-      // até o encaixe (PECA_POSICIONADA). A seleção passa para a Recebida.
-      return {
-        ...estado,
-        reserva: estado.reserva.filter((p) => p.pecaId !== evento.pecaId),
-        pecasDeRecebimento: {
-          ...estado.pecasDeRecebimento,
-          [evento.pecaId]: evento.tipoDaPeca,
-        },
-        pecaSelecionadaId: evento.pecaId,
-        recebidasPendentes: estado.recebidasPendentes.map((r) =>
-          r.recebidaId === evento.recebidaId ? { ...r, pecaId: evento.pecaId } : r,
-        ),
       }
     }
     case 'PEAO_MOVIDO': {
@@ -472,7 +450,7 @@ export function estadoDeExibicaoDoModelo(
   estado: EstadoDoTabuleiroNoCliente,
 ): EstadoExibicaoTabuleiro {
   return {
-    reserva: estado.reserva,
+    iniciais: estado.iniciais,
     posicionadas: estado.posicionadas,
     peoes: estado.peoes,
     celulasIluminadas: estado.celulasIluminadas,

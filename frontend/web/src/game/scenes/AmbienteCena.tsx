@@ -10,10 +10,10 @@ import {
   PROFUNDIDADE_MESA,
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
-import { Reserva } from '../tabuleiro/Reserva'
+import { Caixa, type PecaCorrente } from '../tabuleiro/Caixa'
 import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../tabuleiro/interacaoPeoes'
-import type { PeaoComandoDoCliente, RecebidaId, TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
 import type { PeaoId, PecaId, EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
@@ -76,7 +76,7 @@ interface AmbienteCenaProps {
   onSelecionarPeao?: (peaoId: PeaoId) => void
   /** Clique em área vazia (Mesa/chão) desseleciona o peão. */
   onDesselecionar?: () => void
-  /** Estado do ciclo do peão: roteia cliques em células/Reserva (#91). */
+  /** Estado do ciclo do peão: roteia cliques em células/peças da mesa (#91). */
   estadoPeoes?: EstadoInteracaoPeoes | null
   /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
@@ -84,18 +84,16 @@ interface AmbienteCenaProps {
   onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (destaque, #91). */
   alvosPendentesSet?: ReadonlySet<string>
-  /** Chave da célula-alvo da pendência FOCADA (destaque distinto, #91). */
-  alvoFocadoKey?: string | null
-  /** Recebida focada (validada pelo dono do foco, AmbienteDeJogo). */
-  recebidaFocadaId?: RecebidaId | null
-  /** Foco local de pendência sem tipo (dono: AmbienteDeJogo). */
-  aoFocarPendencia?: (recebidaId: RecebidaId) => void
+  /** Chaves das vagas disponíveis para a pendência corrente (destaque, #143). */
+  vagasSet?: ReadonlySet<string>
+  /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
+  pecaCorrente?: PecaCorrente | null
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
 // sem alvo não monta a cena; DEV sem alvo pode), componentes ficam inertes.
 const estadoInteracaoVazio: EstadoInteracaoTabuleiro = {
-  reserva: [],
+  iniciais: [],
   posicionadas: [],
   pecaSelecionadaId: null,
   pecaEmManipulacaoId: null,
@@ -116,12 +114,11 @@ export function AmbienteCena({
   onComandoPeao,
   onRejeicaoPeao,
   alvosPendentesSet,
-  alvoFocadoKey = null,
-  recebidaFocadaId = null,
-  aoFocarPendencia,
+  vagasSet,
+  pecaCorrente = null,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
-  // lado oposto à reserva (-X). Índices preservam a ordem do estado.
+  // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
   const peoesNaMesa = (estadoExibicao?.peoes ?? []).filter(
     (peao) => peao.celula === null,
   )
@@ -157,16 +154,14 @@ export function AmbienteCena({
               onComandoPeao={onComandoPeao}
               onRejeicaoPeao={onRejeicaoPeao}
               alvosPendentesSet={alvosPendentesSet}
-              alvoFocadoKey={alvoFocadoKey}
-              aoFocarPendencia={aoFocarPendencia}
+              vagasSet={vagasSet}
             />
-            <Reserva
-              reserva={estadoExibicao.reserva}
+            <Caixa
+              iniciais={estadoExibicao.iniciais}
+              pecaCorrente={pecaCorrente}
               estadoInteracao={estadoInteracao ?? estadoInteracaoVazio}
               onComando={onComando ?? noop}
               estadoPeoes={estadoPeoes}
-              recebidaFocadaId={recebidaFocadaId}
-              onComandoPeao={onComandoPeao}
             />
             {peoesNaMesa.map((peao) => {
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)

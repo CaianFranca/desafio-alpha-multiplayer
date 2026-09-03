@@ -1,0 +1,108 @@
+import {
+  BANDEJA_LARGURA,
+  BANDEJA_PROFUNDIDADE,
+  CAIXA_ALTURA,
+  CAIXA_LARGURA,
+  CAIXA_PROFUNDIDADE,
+  POSICAO_BANDEJA,
+  POSICAO_CAIXA,
+  POSICAO_INICIAIS,
+  inicialIndiceParaLocal,
+} from './contrato'
+import type { PecaDaMesa, PecaId, TipoDaPeca, Orientacao } from './contrato'
+import { PecaPlaceholder } from './PecaPlaceholder'
+import type { EstadoInteracaoTabuleiro } from './interacao'
+import type { EstadoInteracaoPeoes } from './interacaoPeoes'
+import { mapearCliqueNaPecaDaMesa } from './interacaoPeoes'
+import type { TabuleiroComandoDoCliente } from '@flicker/shared'
+
+/**
+ * A Peça sorteada corrente exibida na bandeja de slot único (issue #143).
+ * Identidade = pecaId; derivada da primeira pendência sem vaga (#138).
+ */
+export interface PecaCorrente {
+  readonly pecaId: PecaId
+  readonly tipo: TipoDaPeca
+  readonly orientacao: Orientacao
+}
+
+interface CaixaProps {
+  iniciais: readonly PecaDaMesa[]
+  /** Peça sorteada corrente para exibição na bandeja (null = sem corrente). */
+  pecaCorrente: PecaCorrente | null
+  /** Estado de interação para destaque da Inicial selecionada. */
+  estadoInteracao: EstadoInteracaoTabuleiro
+  onComando: (comando: TabuleiroComandoDoCliente | null) => void
+  /** Estado do ciclo: com pendências, o clique em Inicial fica silencioso (#143). */
+  estadoPeoes?: EstadoInteracaoPeoes | null
+}
+
+/**
+ * Caixa sobre a mesa (issue #143): substitui a ficção antiga das 22 peças
+ * expostas pela da Caixa — bloco fechado e opaco (o wire não expõe o
+ * conteúdo da Caixa), bandeja de SLOT ÚNICO com a peça sorteada CORRENTE
+ * (fluxo sequencial: uma peça por vez, do sorteio ao encaixe) e as 4 Peças
+ * Iniciais em grade 2×2, clicáveis (fallback ST-09 → SELECIONAR_PECA).
+ *
+ * A cena é projeção idempotente do estado: as Iniciais vêm de `iniciais`, a
+ * corrente de `pecaCorrente` (derivada no pai). Nenhuma regra vive aqui.
+ */
+export function Caixa({
+  iniciais,
+  pecaCorrente,
+  estadoInteracao,
+  onComando,
+  estadoPeoes = null,
+}: CaixaProps) {
+  return (
+    <group>
+      {/* Caixa fechada e opaca: bloco sólido sem conteúdo exposto. */}
+      <group position={[POSICAO_CAIXA[0], POSICAO_CAIXA[1], POSICAO_CAIXA[2]]}>
+        <mesh position={[0, CAIXA_ALTURA / 2, 0]}>
+          <boxGeometry args={[CAIXA_LARGURA, CAIXA_ALTURA, CAIXA_PROFUNDIDADE]} />
+          <meshStandardMaterial color="#241a12" />
+        </mesh>
+      </group>
+
+      {/* Bandeja de slot único com a peça sorteada corrente (some sem corrente). */}
+      <group position={[POSICAO_BANDEJA[0], POSICAO_BANDEJA[1], POSICAO_BANDEJA[2]]}>
+        <mesh position={[0, -0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[BANDEJA_LARGURA, BANDEJA_PROFUNDIDADE]} />
+          <meshStandardMaterial color="#1f1a18" transparent opacity={0.9} />
+        </mesh>
+        {pecaCorrente ? (
+          <PecaPlaceholder
+            tipo={pecaCorrente.tipo}
+            orientacao={pecaCorrente.orientacao}
+            position={[0, 0.02, 0]}
+          />
+        ) : null}
+      </group>
+
+      {/* Peças Iniciais na frente da bandeja, em grade 2×2, clicáveis (ST-09). */}
+      <group position={[POSICAO_INICIAIS[0], POSICAO_INICIAIS[1], POSICAO_INICIAIS[2]]}>
+        {iniciais.map((peca, indice) => {
+          const [lx, , lz] = inicialIndiceParaLocal(indice)
+          const destacada = estadoInteracao.pecaSelecionadaId === peca.pecaId
+          return (
+            <PecaPlaceholder
+              key={peca.pecaId}
+              tipo={peca.tipo}
+              orientacao={peca.orientacao}
+              position={[lx, 0.02, lz]}
+              destacada={destacada}
+              cursor="pointer"
+              onClick={() => {
+                // Clique em Inicial na mesa → SELECIONAR_PECA (roteador puro,
+                // compartilhado com o espelho DOM; silencioso com pendências).
+                onComando(
+                  mapearCliqueNaPecaDaMesa(estadoPeoes, estadoInteracao, peca.pecaId),
+                )
+              }}
+            />
+          )
+        })}
+      </group>
+    </group>
+  )
+}

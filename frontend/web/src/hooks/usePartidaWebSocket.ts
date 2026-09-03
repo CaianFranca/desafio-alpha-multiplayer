@@ -169,7 +169,6 @@ export function usePartidaWebSocket({
         case 'PEAO_SELECIONADO':
         case 'RECEBIMENTO_GERADO':
         case 'PEAO_POSICIONADO':
-        case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO':
         case 'PEAO_MOVIDO':
         case 'PEAO_PERMANECEU':
         case 'CELULAS_ILUMINADAS':
