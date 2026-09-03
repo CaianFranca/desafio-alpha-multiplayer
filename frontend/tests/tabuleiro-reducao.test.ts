@@ -598,6 +598,9 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
       posicaoConfirmada: false,
       celulasIluminadas: [],
       estado: 'em_andamento',
+      // Explícito: o spread de overrides é Partial e pode não cobrir o campo,
+      // deixando `resultado` undefined na cópia (quebra o typecheck em tsc -b).
+      resultado: null,
       ...overrides,
     }
   }

@@ -61,6 +61,11 @@ export type TipoDaPeca =
   | 'sala_do_diretor'
   | 'sala_medica'
   | 'portao_de_saida'
+  // Monstros (ST-15 / issue #169): entram no wire via TipoDaPecaWire; o
+  // espelho visual os recebe pelo mesmo tipo (issue #145 — paridade com o
+  // snapshot, sem janela de Manipulação).
+  | 'vulto'
+  | 'espectro'
 export type Orientacao = 0 | 90 | 180 | 270
 export type BordaCardinal = 'norte' | 'leste' | 'sul' | 'oeste'
 
@@ -191,6 +196,8 @@ const BORDAS_BASE: Record<TipoDaPeca, readonly BordaCardinal[]> = {
   sala_do_diretor: ['norte', 'leste', 'sul', 'oeste'],
   sala_medica: ['norte', 'leste', 'sul', 'oeste'],
   portao_de_saida: ['norte', 'leste', 'sul', 'oeste'],
+  vulto: ['norte', 'leste', 'sul', 'oeste'],
+  espectro: ['norte', 'leste', 'sul', 'oeste'],
 }
 
 const ORDEM_CANONICA: readonly BordaCardinal[] = ['norte', 'leste', 'sul', 'oeste']

@@ -48,6 +48,9 @@ function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): Es
     posicaoConfirmada: false,
     celulasIluminadas: [],
     estado: 'em_andamento',
+    // Explícito: o spread de overrides é Partial e pode não cobrir o campo,
+    // deixando `resultado` undefined na cópia (quebra o typecheck em tsc -b).
+    resultado: null,
     ...overrides,
   }
 }
