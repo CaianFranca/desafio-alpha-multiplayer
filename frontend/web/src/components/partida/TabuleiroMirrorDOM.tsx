@@ -12,6 +12,7 @@ import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../../game/tabulei
 import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
 import {
   despacharCliqueDeCelula,
+  despacharCliqueNaPecaDaBandeja,
   mapearCliqueNaPecaDaMesa,
 } from '../../game/tabuleiro/interacaoPeoes'
 import type {
@@ -46,6 +47,10 @@ interface TabuleiroMirrorDOMProps {
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
   /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
   onRejeicaoPeao?: (feedback: FlashFeedback) => void
+  /** Pull aceito na bandeja (fluxo #143/revisão #199) → estado local no pai. */
+  onPuxar?: (recebidaId: string) => void
+  /** Feedback local do pull (FLASH_BRANCO). */
+  onFeedback?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (mesma fonte da cena). */
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (#143, cena/espelho). */
@@ -84,6 +89,8 @@ export function TabuleiroMirrorDOM({
   onComando,
   onComandoPeao,
   onRejeicaoPeao,
+  onPuxar,
+  onFeedback,
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
 }: TabuleiroMirrorDOMProps) {
@@ -150,14 +157,31 @@ export function TabuleiroMirrorDOM({
         )
       })}
       {/* Caixa sobre a mesa (issue #143): bloco opaco (sem conteúdo exposto),
-          bandeja de slot único com a corrente e as Peças Iniciais clicáveis. */}
+          bandeja de slot único com a corrente (clicável para PUXAR — revisão
+          #199: mesmo despachador da cena; `data-puxada` expõe o estado local
+          para os testes sem WebGL) e as Peças Iniciais clicáveis. */}
       <div data-testid="caixa">
         <div data-testid="caixa-bandeja">
           {pecaCorrente ? (
             <div
               data-testid="caixa-peca-sorteada"
               data-peca-id={pecaCorrente.pecaId}
+              data-recebida-id={pecaCorrente.recebidaId}
               data-tipo={pecaCorrente.tipo}
+              data-orientacao={pecaCorrente.orientacao}
+              data-puxada={
+                estadoPeoes?.recebidaPuxadaId === pecaCorrente.recebidaId
+                  ? 'true'
+                  : 'false'
+              }
+              onClick={(e) => {
+                // stopPropagation: a raiz desseleciona ao clicar área inerte.
+                e.stopPropagation()
+                despacharCliqueNaPecaDaBandeja(estadoPeoes, {
+                  onPuxar,
+                  onFeedback,
+                })
+              }}
             />
           ) : null}
         </div>

@@ -119,8 +119,12 @@ export interface PecaPosicionada {
 /**
  * Peça sorteada corrente exibida na bandeja de slot único da Caixa (issue
  * #143). Identidade = pecaId; derivada da primeira pendência sem vaga (#138).
+ * `recebidaId` é a chave da pendência correspondente — o fluxo de puxar da
+ * revisão #199 referencia a corrente pelo `recebidaId` (o `pecaId` só entra
+ * em foco no engine após a escolha da vaga).
  */
 export interface PecaCorrente {
+  readonly recebidaId: string
   readonly pecaId: PecaId
   readonly tipo: TipoDaPeca
   readonly orientacao: Orientacao

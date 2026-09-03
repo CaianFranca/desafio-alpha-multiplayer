@@ -87,6 +87,13 @@ interface AmbienteCenaProps {
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
   /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
   onRejeicaoPeao?: (feedback: FlashFeedback) => void
+  /**
+   * Pull aceito na bandeja da Caixa (fluxo #143/revisão #199): estado local
+   * persistido no pai (AmbienteDeJogo), nunca viaja ao wire.
+   */
+  onPuxarPecaDaBandeja?: (recebidaId: string) => void
+  /** Feedback local do pull (FLASH_BRANCO) — o setter de flash da página. */
+  onFlash?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (destaque, #91). */
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (destaque, #143). */
@@ -118,6 +125,8 @@ export function AmbienteCena({
   estadoPeoes = null,
   onComandoPeao,
   onRejeicaoPeao,
+  onPuxarPecaDaBandeja,
+  onFlash,
   alvosPendentesSet,
   vagasSet,
   pecaCorrente = null,
@@ -167,6 +176,8 @@ export function AmbienteCena({
               estadoInteracao={estadoInteracao ?? estadoInteracaoVazio}
               onComando={onComando ?? noop}
               estadoPeoes={estadoPeoes}
+              onPuxar={onPuxarPecaDaBandeja}
+              onFeedback={onFlash}
             />
             {peoesNaMesa.map((peao) => {
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)

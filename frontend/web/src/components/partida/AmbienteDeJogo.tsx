@@ -51,6 +51,8 @@ interface AmbienteDeJogoProps {
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
   /** Callback de rejeição de peão (flash vermelho). */
   onRejeicaoPeao?: (feedback: FlashFeedback) => void
+  /** Feedback local do pull na bandeja (FLASH_BRANCO — fluxo #143/revisão #199). */
+  onFlash?: (feedback: FlashFeedback) => void
   /** Peão selecionado vindo do modelo/servidor (null = nenhum). */
   peaoSelecionadoIdServidor?: PeaoId | null
   /** Peão do Jogador Ativo da vez (destaque, #118). */
@@ -65,6 +67,7 @@ export function AmbienteDeJogo({
   onComando,
   onComandoPeao,
   onRejeicaoPeao,
+  onFlash,
   peaoSelecionadoIdServidor = null,
   peaoAtivoId = null,
 }: AmbienteDeJogoProps) {
@@ -111,6 +114,27 @@ export function AmbienteDeJogo({
   // mesmo roteador puro (`vagasDisponiveisDoPeao`) e destacam as células
   // enquanto há pendência sem vaga — fonte única cena + espelho DOM.
   const recebidasPendentes = estadoInteracaoPeoes?.recebidasPendentes ?? []
+
+  // ── Pull da bandeja (fluxo aprovado na revisão #199) ──
+  // Estado visual LOCAL, fora do modelo autoritativo (padrão
+  // `peaoSelecionadoIdLocal`): clicar a corrente "puxa" a peça, e só então o
+  // clique em vaga escolhe a vaga para ela. O pull é consumido quando a
+  // pendência sai da lista (encaixe, troca de turno) — a próxima corrente
+  // exige novo pull. Zeratada em update-de-render em fase, sem efeito.
+  const [recebidaPuxadaId, setRecebidaPuxadaId] = useState<string | null>(null)
+  if (
+    recebidaPuxadaId !== null &&
+    !recebidasPendentes.some((r) => r.recebidaId === recebidaPuxadaId)
+  ) {
+    setRecebidaPuxadaId(null)
+  }
+  // Estado do ciclo com o pull mesclado: roteador, cena e espelho veem a
+  // mesma fonte (o pull nunca vai ao wire — segue local até ESCOLHER_VAGA).
+  const estadoPeoesComPuxada: EstadoInteracaoPeoes | null =
+    estadoInteracaoPeoes !== null
+      ? { ...estadoInteracaoPeoes, recebidaPuxadaId }
+      : null
+
   const alvosPendentesSet = new Set<string>(
     recebidasPendentes
       // Sem vaga escolhida, célula-alvo é null — sem alvo a destacar.
@@ -122,18 +146,29 @@ export function AmbienteDeJogo({
   const pecaCorrente: PecaCorrente | null =
     corrente !== null
       ? {
+          recebidaId: corrente.recebidaId,
           pecaId: corrente.pecaId,
           tipo: corrente.tipoDaPeca,
           orientacao: corrente.orientacao ?? 0,
         }
       : null
+  // O destaque de vaga segue o clique: só aparece com a corrente PUXADA
+  // (alvo inválido sem pull não reage — padrão #91; espectador nunca puxa,
+  // logo nunca vê vaga destacada).
   const vagasSet = new Set<string>(
-    estadoInteracaoPeoes !== null &&
-      estadoInteracaoPeoes.peaoSelecionadoId !== null &&
-      corrente !== null
-      ? vagasDisponiveisDoPeao(estadoInteracaoPeoes).map((v) => chaveCelula(v.celula))
+    estadoPeoesComPuxada !== null &&
+      estadoPeoesComPuxada.peaoSelecionadoId !== null &&
+      corrente !== null &&
+      recebidaPuxadaId === corrente.recebidaId
+      ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
       : [],
   )
+
+  // O mapeador puro decide o pull (gate de espectador incluso); o pai só
+  // persiste o resultado como estado local e mostra o flash.
+  const aoPuxarPecaDaBandeja = useCallback((recebidaId: string) => {
+    setRecebidaPuxadaId(recebidaId)
+  }, [])
 
   const todasCelulas = todasAsCelulas()
   const ocupadasSet = new Set(
@@ -196,9 +231,11 @@ export function AmbienteDeJogo({
           iluminadasSet={iluminadasSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
-          estadoPeoes={estadoInteracaoPeoes}
+          estadoPeoes={estadoPeoesComPuxada}
           onComandoPeao={onComandoPeao}
           onRejeicaoPeao={onRejeicaoPeao}
+          onPuxarPecaDaBandeja={aoPuxarPecaDaBandeja}
+          onFlash={onFlash}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           pecaCorrente={pecaCorrente}
@@ -219,10 +256,12 @@ export function AmbienteDeJogo({
           aoSelecionarPeao={aoSelecionarPeao}
           aoDesselecionar={aoDesselecionar}
           estadoInteracao={estadoInteracao}
-          estadoPeoes={estadoInteracaoPeoes}
+          estadoPeoes={estadoPeoesComPuxada}
           onComando={onComando}
           onComandoPeao={onComandoPeao}
           onRejeicaoPeao={onRejeicaoPeao}
+          onPuxar={aoPuxarPecaDaBandeja}
+          onFeedback={onFlash}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
         />

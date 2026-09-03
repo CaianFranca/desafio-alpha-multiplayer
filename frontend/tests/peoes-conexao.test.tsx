@@ -89,6 +89,13 @@ function pecaCorrenteDaBandeja(): HTMLElement | null {
   return elementos[0] ?? null
 }
 
+/** Clique na corrente da bandeja → pull (estado local; nenhum comando de wire). */
+async function puxarCorrente(user: ReturnType<typeof userEvent.setup>) {
+  const corrente = pecaCorrenteDaBandeja()
+  if (!corrente) throw new Error('bandeja sem corrente para puxar')
+  await user.click(corrente)
+}
+
 // Pendência na forma sorteada (#138) como chega no wire.
 function recebidaSorteada(
   recebidaId: string,
@@ -123,9 +130,14 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(pecaCorrenteDaBandeja()).toBeNull()
   })
 
-  it('fluxo feliz do ciclo (#138/#143): vaga sequencial, giro, encaixe — cada comando com jogadorId', async () => {
+  it('fluxo feliz do ciclo (#138/#143 + pull #199): puxa, vaga, giro, encaixe — cada comando com jogadorId', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
+
+    // Vez do jogador local: donoDoCiclo habilita o pull na bandeja (#199).
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
 
     // ── Peça Inicial posicionada pelo servidor ──
     act(() => {
@@ -161,16 +173,28 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
       })
     })
 
-    // ── 2. Bandeja exibe a corrente; vagas disponíveis destacadas (#143) ──
+    // ── 2. Bandeja exibe a corrente; sem pull, vaga NÃO destaca nem reage ──
     const corrente = pecaCorrenteDaBandeja()
     expect(corrente).not.toBeNull()
     expect(corrente!.getAttribute('data-peca-id')).toBe('reta-1')
     expect(corrente!.getAttribute('data-tipo')).toBe('reta')
+    expect(corrente!.getAttribute('data-puxada')).toBe('false')
+    // Alvo inválido sem pull: clique na vaga fica silencioso (#199).
+    const comandosAntes = ws.sentMessages.length
+    await user.click(celulaDoEspelho(2, 3))
+    expect(ws.sentMessages).toHaveLength(comandosAntes)
+    expect(celulaDoEspelho(2, 3).hasAttribute('data-vaga')).toBe(false)
+
+    // ── 2b. Puxar a corrente (estado local, sem comando) destrava as vagas ──
+    await puxarCorrente(user)
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-puxada')).toBe('true')
     expect(celulaDoEspelho(2, 3).getAttribute('data-vaga')).toBe('true')
     expect(celulaDoEspelho(3, 4).getAttribute('data-vaga')).toBe('true')
     expect(celulaDoEspelho(0, 0).hasAttribute('data-vaga')).toBe(false)
+    // Puxar não emite comando de wire.
+    expect(ws.sentMessages).toHaveLength(comandosAntes)
 
-    // ── 3. Clique na célula vazia vizinha → ESCOLHER_VAGA (primeira pendência) ──
+    // ── 3. Clique na célula vazia vizinha → ESCOLHER_VAGA (para a puxada) ──
     await user.click(celulaDoEspelho(2, 3))
     expect(ultimoComando(ws)).toEqual({
       type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
@@ -267,6 +291,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     const user = userEvent.setup()
 
     act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
@@ -293,7 +318,8 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(screen.getAllByTestId('caixa-peca-sorteada')).toHaveLength(1)
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('reta-1')
 
-    // Escolhe vaga norte para r1 → a corrente passa a ser r2.
+    // Puxa a corrente e escolhe vaga norte para r1 → a corrente passa a ser r2.
+    await puxarCorrente(user)
     await user.click(celulaDoEspelho(2, 3))
     expect(ultimoComando(ws)).toEqual({
       type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
@@ -310,6 +336,8 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
       })
     })
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('cruz-1')
+    // A corrente nova exige novo pull: o da r1 não contemplates a r2 (#199).
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-puxada')).toBe('false')
 
     // Encaixa r1 (foco em reta-1): pendência some; r2 permanece corrente.
     await user.click(celulaDoEspelho(2, 3))
@@ -330,7 +358,8 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(screen.getAllByTestId('recebida-pendente')).toHaveLength(1)
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('cruz-1')
 
-    // Segunda corrente: vaga leste → encaixe → bandeja esvazia.
+    // Segunda corrente: puxar → vaga leste → encaixe → bandeja esvazia.
+    await puxarCorrente(user)
     await user.click(celulaDoEspelho(3, 4))
     expect(ultimoComando(ws)).toEqual({
       type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',

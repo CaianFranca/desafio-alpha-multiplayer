@@ -204,13 +204,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       peaoSelecionadoId: modelo.peaoSelecionadoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
+      // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
+      // bandeja continua pública (as pendências vêm do broadcast sem filtro).
+      donoDoCiclo: modelo.jogadorAtivoId === jogadorId,
     }
-  }, [temAlvo, estadoEmAndamento, modelo])
+  }, [temAlvo, estadoEmAndamento, modelo, jogadorId])
 
-  // ── Rejeição de peão (local) → flash vermelho ──
-  const onRejeicaoPeao = useCallback((feedback: FlashFeedback) => {
+  // ── Flash local (revisão #199): mesma fonte para o pull na bandeja; a
+  // rejeição de peão (vermelho/âmbar do roteador) segue o mesmo caminho. ──
+  const exibirFlash = useCallback((feedback: FlashFeedback) => {
     setFlash({ ...feedback })
   }, [])
+  const onRejeicaoPeao = exibirFlash
 
   // ── Turnos (issue #118): vez, rodada, fase e peão do Jogador Ativo — nulo em resultado ──
   const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
@@ -307,6 +312,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onComando={onComando}
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}
+        onFlash={exibirFlash}
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
       />

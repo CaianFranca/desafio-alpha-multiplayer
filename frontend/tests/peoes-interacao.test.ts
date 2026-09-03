@@ -1,8 +1,10 @@
 import {
   deveSuprimirCliquePorArrasto,
   cicloAtivo,
+  despacharCliqueNaPecaDaBandeja,
   ehComandoDePeao,
   haRecebidasPendentes,
+  mapearCliqueNaPecaDaBandeja,
   mapearCliqueNaPecaDaMesa,
   mapearCliqueNaPecaInicial,
   mapearCliqueNoPeao,
@@ -650,29 +652,48 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     })
   }
 
-  // ── Com pendências: escolha de vaga sequencial e encaixe com coerência ──
+  // ── Com pendências: pull da bandeja, escolha de vaga na puxada e encaixe ──
 
-  it('clique em vaga disponível atribui a PRIMEIRA pendência sem vaga (sequencial, decisão #143)', () => {
+  it('clique em vaga disponível SEM peça puxada é silencioso (fluxo #143/revisão #199)', () => {
     const estado = estadoComPendencias()
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toBeNull()
+  })
+
+  it('clique em vaga disponível atribui a vaga à peça PUXADA da bandeja', () => {
+    const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toEqual({
       ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
     })
   })
 
-  it('clique em outra vaga ainda vai para a primeira pendência (sem seleção manual de peça)', () => {
-    const estado = estadoComPendencias()
-    // (3,4) é a vaga leste; mesmo assim a pendência contemplada é r1.
-    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
-      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'leste' },
+  it('a vaga segue a puxada, não a ordem da lista (sem "primeira sem vaga" automática)', () => {
+    // As duas pendências estão sem vaga; a puxada é r2. O roteador contempla
+    // R2 — a regra antiga (primeira da lista) morreria aqui com r1.
+    const estado = estadoComPendencias({ recebidaPuxadaId: 'r2' })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toEqual({
+      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'norte' },
     })
   })
 
-  it('após a primeira vaga, a segunda pendência recebe a próxima escolha', () => {
+  it('pull antigo (pendência já com vaga) não contempla nova vaga — exige novo pull', () => {
     const estado = estadoComPendencias({
       recebidasPendentes: [
         pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE),
         pendencia('r2', 't-1', 'T', null, null),
       ],
+      recebidaPuxadaId: 'r1', // r1 já tem vaga: o pull foi consumido
+    })
+    // (3,4) é vaga válida para a corrente r2, mas r2 não foi puxada.
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toBeNull()
+  })
+
+  it('após a primeira vaga, a segunda pendência puxada recebe a próxima escolha', () => {
+    const estado = estadoComPendencias({
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE),
+        pendencia('r2', 't-1', 'T', null, null),
+      ],
+      recebidaPuxadaId: 'r2',
     })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
       ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
@@ -788,5 +809,82 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(ehComandoDePeao({ type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' })).toBe(true)
     expect(ehComandoDePeao({ type: 'SELECIONAR_PECA', pecaId: 'reta-1' })).toBe(false)
     expect(ehComandoDePeao({ type: 'GIRAR_PECA', pecaId: 'reta-1', sentido: 'horario' })).toBe(false)
+  })
+})
+
+describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
+  function pendSemVaga(
+    recebidaId: string,
+    pecaId: string,
+    tipoDaPeca: 'reta' | 'T' | 'cruz' = 'reta',
+  ): PendenciaNoCliente {
+    return { recebidaId, pecaId, tipoDaPeca, vaga: null, celulaAlvo: null }
+  }
+
+  it('clique na corrente da bandeja de slot único puxa a primeira pendência sem vaga', () => {
+    // Bandeja de slot único: mesmo com duas pendências, o clique na bandeja
+    // SEMPRE resolve a corrente (a primeira sem vaga) — não há fila.
+    const estado = estadoBase({
+      recebidasPendentes: [
+        pendSemVaga('r1', 'reta-1'),
+        pendSemVaga('r2', 't-1', 'T'),
+      ],
+    })
+    expect(mapearCliqueNaPecaDaBandeja(estado)).toEqual({ recebidaId: 'r1' })
+  })
+
+  it('espectador (donoDoCiclo=false) não puxa: clique silencioso', () => {
+    const estado = estadoBase({
+      recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
+      donoDoCiclo: false,
+    })
+    expect(mapearCliqueNaPecaDaBandeja(estado)).toBeNull()
+  })
+
+  it('re-clique na corrente já puxada é no-op (null)', () => {
+    const estado = estadoBase({
+      recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
+      recebidaPuxadaId: 'r1',
+    })
+    expect(mapearCliqueNaPecaDaBandeja(estado)).toBeNull()
+  })
+
+  it('sem pendência sem vaga não há o que puxar (vaga em aberto não puxa)', () => {
+    const estado = estadoBase({
+      recebidasPendentes: [
+        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta', vaga: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+      ],
+    })
+    expect(mapearCliqueNaPecaDaBandeja(estado)).toBeNull()
+  })
+
+  it('despacharCliqueNaPecaDaBandeja entrega pull + flash branco ao chamador', () => {
+    const estado = estadoBase({
+      recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
+    })
+    const puxados: string[] = []
+    const flashes: unknown[] = []
+    despacharCliqueNaPecaDaBandeja(estado, {
+      onPuxar: (id) => puxados.push(id),
+      onFeedback: (f) => flashes.push(f),
+    })
+    expect(puxados).toEqual(['r1'])
+    expect(flashes).toEqual([FLASH_BRANCO])
+  })
+
+  it('despachar com espectador ou sem corrente não reage (sem pull, sem flash)', () => {
+    const espectador = estadoBase({
+      recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
+      donoDoCiclo: false,
+    })
+    const semCorrente = estadoBase()
+    let chamou = 0
+    despacharCliqueNaPecaDaBandeja(espectador, {
+      onPuxar: () => chamou++,
+      onFeedback: () => chamou++,
+    })
+    despacharCliqueNaPecaDaBandeja(semCorrente, { onPuxar: () => chamou++ })
+    despacharCliqueNaPecaDaBandeja(null, { onPuxar: () => chamou++ })
+    expect(chamou).toBe(0)
   })
 })

@@ -28,9 +28,12 @@
  * reservado à câmera via `deveSuprimirCliquePorArrasto` (limiar 6px, ver
  * cameraLimites.ts).
  *
- * Atribuição de vaga sequencial (decisão #143): o clique numa célula vazia
- * vizinha disponível atribui a vaga à PRIMEIRA pendência ainda sem vaga — não
- * há seleção manual de qual peça recebe a vaga.
+ * Atribuição de vaga (decisão da issue #143 ajustada na revisão da PR #199):
+ * o jogador PUXA a peça corrente clicando na bandeja (estado local) e só
+ * então o clique numa célula vazia vizinha disponível atribui a vaga à peça
+ * PUXADA — não há mais "primeira pendência sem vaga" automática. Sem peça
+ * puxada, o clique de vaga é silencioso (padrão #91: alvos inválidos não
+ * reagem). Puxar é restrito ao dono do ciclo (espectador: clique mudo).
  *
  * Guard pós-confirmação (AC3 — review #165): com `posicaoConfirmadaNoTurno`,
  * os alvos que seriam válidos (permanecer/mover) retornam rejeição âmbar com
@@ -94,6 +97,20 @@ export interface EstadoInteracaoPeoes {
   readonly pecaSelecionadaId: string | null
   /** A posição do Peão do Jogador Ativo já foi confirmada neste turno (POSICAO_CONFIRMADA). */
   readonly posicaoConfirmadaNoTurno: boolean
+  /**
+   * Recebida "puxada" da bandeja (fluxo aprovado na revisão #199 da issue
+   * #143): estado visual LOCAL do jogador — fora do modelo autoritativo, no
+   * padrão `peaoSelecionadoIdLocal` (AmbienteDeJogo). Só com a corrente
+   * puxada o clique numa célula de vaga emite ESCOLHER_VAGA para ela.
+   */
+  readonly recebidaPuxadaId?: string | null
+  /**
+   * O jogador local é o dono do ciclo (`jogadorAtivoId === jogadorIdLocal`).
+   * Espectador (`false`) não puxa: o clique na bandeja fica silencioso, mas a
+   * bandeja CONTINUA pública (pendências vêm do broadcast). `undefined` =
+   * gate não avaliado (unidades puras sem identidade local).
+   */
+  readonly donoDoCiclo?: boolean
 }
 
 // ── Resultado de clique/ação do ciclo ──
@@ -252,6 +269,64 @@ export function mapearEscolhaDeVagaDaRecebida(
 }
 
 /**
+ * Resultado do clique na peça corrente da bandeja: o `recebidaId` a ser
+ * puxado (estado LOCAL do chamador — nenhum comando de wire; o pull não é
+ * regra do engine, é gesto de interação do cliente).
+ */
+export interface PuxadaDaBandeja {
+  readonly recebidaId: string
+}
+
+/**
+ * Clique na peça corrente da bandeja → "puxar" (fluxo aprovado na revisão
+ * #199 da issue #143). Regras:
+ *   - só a CORRENTE (primeira pendência sem vaga) é puxável;
+ *   - espectador (`donoDoCiclo === false`) não puxa — clique silencioso, a
+ *     bandeja continua pública (a corrente é exibida a todos);
+ *   - re-clique na já puxada é no-op (null), sem emissão repetida de flash;
+ *   - sem pendências correntes → null.
+ * O consumo do pull: com a vaga escolhida o engine move a peça para
+ * `pecaSelecionadaId` e a próxima corrente exige novo pull.
+ */
+export function mapearCliqueNaPecaDaBandeja(
+  estado: EstadoInteracaoPeoes,
+  puxadaAtual: string | null = estado.recebidaPuxadaId ?? null,
+): PuxadaDaBandeja | null {
+  if (estado.donoDoCiclo === false) return null
+  const corrente = estado.recebidasPendentes.find((r) => r.vaga === null)
+  if (corrente === undefined) return null
+  if (puxadaAtual === corrente.recebidaId) return null
+  return { recebidaId: corrente.recebidaId }
+}
+
+export interface DespachoDeCliqueNaBandeja {
+  /** Pull aceito: o chamador (React) persiste o id como estado visual local. */
+  onPuxar?: (recebidaId: string) => void
+  /**
+   * Feedback local do pull (FLASH_BRANCO). O destaque emissivo na peça é
+   * derivado do pull (`destacada` no padrão PecaPlaceholder), não daqui.
+   */
+  onFeedback?: (feedback: FlashFeedback) => void
+}
+
+/**
+ * Despacha o clique na peça da bandeja pelo MESMO mapeador puro (padrão
+ * `despacharCliqueDeCelula`): cena (Caixa.tsx) e espelho DOM
+ * (TabuleiroMirrorDOM.tsx) compartilham esta função — fonte única da regra
+ * de pull. Estado nulo ou clique inválido: nenhuma reação.
+ */
+export function despacharCliqueNaPecaDaBandeja(
+  estadoPeoes: EstadoInteracaoPeoes | null,
+  despacho: DespachoDeCliqueNaBandeja,
+): void {
+  if (estadoPeoes === null) return
+  const puxada = mapearCliqueNaPecaDaBandeja(estadoPeoes)
+  if (puxada === null) return
+  despacho.onPuxar?.(puxada.recebidaId)
+  despacho.onFeedback?.(FLASH_BRANCO)
+}
+
+/**
  * Giro da Recebida em foco (pecaId em pecaSelecionadaId, setado pela escolha
  * da vaga — #138) → GIRAR_PECA, orientação livre em passos de 90°. Sem
  * Recebida em foco → null.
@@ -367,12 +442,13 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
 
 /**
  * Roteador puro do clique em célula durante o ciclo do Peão (issue #91;
- * atribuição sequencial de vaga na issue #143). Tabela exata de prioridades:
+ * fluxo de puxar da revisão #199 da issue #143). Tabela exata de prioridades:
  *
  * Com pendências:
- *   - célula = vaga disponível e há pendência sem vaga → ESCOLHER_VAGA para a
- *     PRIMEIRA pendência sem vaga (decisão #143: sem seleção manual de qual
- *     peça recebe a vaga).
+ *   - célula = vaga disponível E há pendência PUXADA sem vaga →
+ *     ESCOLHER_VAGA para a recebida puxada (fluxo #143/revisão #199: a vaga
+ *     vai para a peça puxada da bandeja — sem puxada ativa, ou com a puxada
+ *     já encaminhada, o clique de vaga é silencioso).
  *   - célula = célula-alvo de pendência com pendência.pecaId ===
  *     pecaSelecionadaId → POSICIONAR_PECA (encaixe; coerência tripla:
  *     célula-alvo + vaga escolhida + peça em foco).
@@ -400,9 +476,17 @@ export function rotearCliqueDeCelula(
       const vagas = vagasDisponiveisDoPeao(estadoPeoes)
       const vaga = vagas.find((v) => chaveCelula(v.celula) === chaveCelula(celula))
       if (vaga) {
-        const alvo = estadoPeoes.recebidasPendentes.find(
-          (r) => r.vaga === null,
-        )
+        // A vaga vai para a peça PUXADA da bandeja (fluxo #143/revisão #199):
+        // a puxada precisa existir, seguir sem vaga e estar na lista — pull
+        // antigo (pendência encaixada ou vaga já encaminhada) não contempla
+        // nova peça: exige novo pull.
+        const puxadaId = estadoPeoes.recebidaPuxadaId ?? null
+        const alvo =
+          puxadaId !== null
+            ? estadoPeoes.recebidasPendentes.find(
+                (r) => r.recebidaId === puxadaId && r.vaga === null,
+              )
+            : undefined
         if (alvo) {
           const comando = mapearEscolhaDeVagaDaRecebida(
             estadoPeoes,
