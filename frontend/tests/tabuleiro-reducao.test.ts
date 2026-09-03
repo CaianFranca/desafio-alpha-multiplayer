@@ -598,6 +598,7 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
       posicaoConfirmada: false,
       celulasIluminadas: [],
       estado: 'em_andamento',
+      resultado: null,
       ...overrides,
     }
   }

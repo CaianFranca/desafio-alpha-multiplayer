@@ -23,6 +23,10 @@ const COR_POR_TIPO: Record<TipoDaPeca, string> = {
   sala_do_diretor: '#e76f51',
   sala_medica: '#a8ff60',
   portao_de_saida: '#6c757d',
+  // Cores provisórias (ST-15/#169 fora de escopo): neutras, definir na implementação
+  // visual dos monstros.
+  vulto: '#8a8a8a',
+  espectro: '#b0b0b0',
 }
 
 const COR_CAMINHO = '#111111'

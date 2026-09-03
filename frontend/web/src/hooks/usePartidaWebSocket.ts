@@ -29,6 +29,8 @@ import type {
   EstadoDaPartidaEvento,
   PecaSorteadaEvento,
   VagaDaPecaRecebidaEscolhidaEvento,
+  PartidaTerminadaWireEvento,
+  AtaqueResolvidoWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 
@@ -50,6 +52,8 @@ export type EventoDoCanalDaPartida =
   | VagaDaPecaRecebidaEscolhidaEvento
   | PartidaIniciadaEvento
   | EstadoDaPartidaEvento
+  | PartidaTerminadaWireEvento
+  | AtaqueResolvidoWireEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -181,6 +185,8 @@ export function usePartidaWebSocket({
         case 'POSICAO_CONFIRMADA':
         case 'PARTIDA_INICIADA':
         case 'ESTADO_DA_PARTIDA':
+        case 'PARTIDA_TERMINADA':
+        case 'ATAQUE_RESOLVIDO':
           // O grupo de cases acima é intencionalmente vazio (fall-through):
           // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
           // o cliente apenas espelha).
