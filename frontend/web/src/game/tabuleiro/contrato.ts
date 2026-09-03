@@ -114,6 +114,16 @@ export interface PecaPosicionada {
   readonly celula: Celula
 }
 
+/**
+ * Peça sorteada corrente exibida na bandeja de slot único da Caixa (issue
+ * #143). Identidade = pecaId; derivada da primeira pendência sem vaga (#138).
+ */
+export interface PecaCorrente {
+  readonly pecaId: PecaId
+  readonly tipo: TipoDaPeca
+  readonly orientacao: Orientacao
+}
+
 // ── Peões (issue #90 — ST-10) ──
 
 export type PeaoId = string

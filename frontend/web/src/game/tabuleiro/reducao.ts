@@ -224,44 +224,44 @@ export function reduzirEvento(
       const temPendencia = estado.recebidasPendentes.some(
         (r) => r.pecaId === evento.pecaId,
       )
-       if (temPendencia) {
-         return {
-           ...estado,
-           recebidasPendentes: estado.recebidasPendentes.map((r) =>
-             r.pecaId === evento.pecaId ? { ...r, orientacao: evento.orientacao } : r,
-           ),
-         }
-       }
-       // Peça Inicial na mesa: o giro atualiza a entrada local (issue #143).
-       if (estado.iniciais.some((p) => p.pecaId === evento.pecaId)) {
-         return girarNaMesa(estado, evento.pecaId, evento.orientacao)
-       }
-       // Peça desconhecida (ex.: da Caixa sem pendência local): sem efeito.
-       return estado
-     }
-     case 'PECA_POSICIONADA': {
-       const pecaNaMesa = estado.iniciais.find(
-         (p) => p.pecaId === evento.pecaId,
-       )
-       const encontrada = estado.recebidasPendentes.find(
-         (r) => r.pecaId === evento.pecaId,
-       )
-       const tipo =
-         pecaNaMesa?.tipo ??
-         estado.pecasDeRecebimento[evento.pecaId] ??
-         encontrada?.tipoDaPeca
-       if (tipo === undefined) return estado
-       const posicionada: PecaPosicionada = {
-         pecaId: evento.pecaId,
-         tipo,
-         orientacao: evento.orientacao,
-         celula: evento.celula,
-       }
-       return {
-         ...estado,
-         iniciais: pecaNaMesa
-           ? estado.iniciais.filter((p) => p.pecaId !== evento.pecaId)
-           : estado.iniciais,
+      if (temPendencia) {
+        return {
+          ...estado,
+          recebidasPendentes: estado.recebidasPendentes.map((r) =>
+            r.pecaId === evento.pecaId ? { ...r, orientacao: evento.orientacao } : r,
+          ),
+        }
+      }
+      // Peça Inicial na mesa: o giro atualiza a entrada local (issue #143).
+      if (estado.iniciais.some((p) => p.pecaId === evento.pecaId)) {
+        return girarNaMesa(estado, evento.pecaId, evento.orientacao)
+      }
+      // Peça desconhecida (ex.: da Caixa sem pendência local): sem efeito.
+      return estado
+    }
+    case 'PECA_POSICIONADA': {
+      const pecaNaMesa = estado.iniciais.find(
+        (p) => p.pecaId === evento.pecaId,
+      )
+      const encontrada = estado.recebidasPendentes.find(
+        (r) => r.pecaId === evento.pecaId,
+      )
+      const tipo =
+        pecaNaMesa?.tipo ??
+        estado.pecasDeRecebimento[evento.pecaId] ??
+        encontrada?.tipoDaPeca
+      if (tipo === undefined) return estado
+      const posicionada: PecaPosicionada = {
+        pecaId: evento.pecaId,
+        tipo,
+        orientacao: evento.orientacao,
+        celula: evento.celula,
+      }
+      return {
+        ...estado,
+        iniciais: pecaNaMesa
+          ? estado.iniciais.filter((p) => p.pecaId !== evento.pecaId)
+          : estado.iniciais,
         posicionadas: [...estado.posicionadas, posicionada],
         // Encaixe abre a janela de Manipulação e limpa a Seleção.
         pecaSelecionadaId: null,

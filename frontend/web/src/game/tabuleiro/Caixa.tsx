@@ -9,22 +9,12 @@ import {
   POSICAO_INICIAIS,
   inicialIndiceParaLocal,
 } from './contrato'
-import type { PecaDaMesa, PecaId, TipoDaPeca, Orientacao } from './contrato'
+import type { PecaCorrente, PecaDaMesa } from './contrato'
 import { PecaPlaceholder } from './PecaPlaceholder'
 import type { EstadoInteracaoTabuleiro } from './interacao'
 import type { EstadoInteracaoPeoes } from './interacaoPeoes'
 import { mapearCliqueNaPecaDaMesa } from './interacaoPeoes'
 import type { TabuleiroComandoDoCliente } from '@flicker/shared'
-
-/**
- * A Peça sorteada corrente exibida na bandeja de slot único (issue #143).
- * Identidade = pecaId; derivada da primeira pendência sem vaga (#138).
- */
-export interface PecaCorrente {
-  readonly pecaId: PecaId
-  readonly tipo: TipoDaPeca
-  readonly orientacao: Orientacao
-}
 
 interface CaixaProps {
   iniciais: readonly PecaDaMesa[]
@@ -56,11 +46,16 @@ export function Caixa({
 }: CaixaProps) {
   return (
     <group>
-      {/* Caixa fechada e opaca: bloco sólido sem conteúdo exposto. */}
+      {/* Caixa fechada e opaca: bloco solido com tampo rotulado (identifica a
+          Caixa na mesa), sem nenhum conteudo exposto (decisao 2, #143). */}
       <group position={[POSICAO_CAIXA[0], POSICAO_CAIXA[1], POSICAO_CAIXA[2]]}>
         <mesh position={[0, CAIXA_ALTURA / 2, 0]}>
           <boxGeometry args={[CAIXA_LARGURA, CAIXA_ALTURA, CAIXA_PROFUNDIDADE]} />
           <meshStandardMaterial color="#241a12" />
+        </mesh>
+        <mesh position={[0, CAIXA_ALTURA + 0.02, 0]}>
+          <boxGeometry args={[CAIXA_LARGURA * 0.92, 0.04, CAIXA_PROFUNDIDADE * 0.92]} />
+          <meshStandardMaterial color="#3b2c1c" />
         </mesh>
       </group>
 

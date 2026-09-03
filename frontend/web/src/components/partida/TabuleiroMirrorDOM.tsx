@@ -3,11 +3,11 @@ import type {
   Celula,
   PeaoDaExibicao,
   PeaoId,
+  PecaCorrente,
   PecaDaMesa,
   PecaId,
   PecaPosicionada,
 } from '../../game/tabuleiro/contrato'
-import type { PecaCorrente } from '../../game/tabuleiro/Caixa'
 import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
 import {

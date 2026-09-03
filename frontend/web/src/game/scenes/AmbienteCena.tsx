@@ -10,13 +10,18 @@ import {
   PROFUNDIDADE_MESA,
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
-import { Caixa, type PecaCorrente } from '../tabuleiro/Caixa'
+import { Caixa } from '../tabuleiro/Caixa'
 import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../tabuleiro/interacaoPeoes'
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
-import type { PeaoId, PecaId, EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
+import type {
+  PeaoId,
+  PecaId,
+  PecaCorrente,
+  EstadoExibicaoTabuleiro,
+} from '../tabuleiro/contrato'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa

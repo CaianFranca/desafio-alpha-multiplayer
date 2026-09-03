@@ -57,7 +57,7 @@ export interface PendenciaDaPecaSorteada {
   readonly celulaAlvo: Celula | null;
 }
 
-// --- Comandos cliente → servidor (4) ---
+// --- Comandos cliente → servidor (5) ---
 // girar/posicionar da Peça Recebida usam GirarPecaComando / PosicionarPecaComando de ./tabuleiro.ts.
 
 export interface SelecionarPeaoComando {
@@ -98,7 +98,7 @@ export type PeaoComandoDoCliente =
   | MoverPeaoComando
   | PermanecerComando;
 
-// --- Eventos servidor → cliente (5) ---
+// --- Eventos servidor → cliente (6) ---
 // Reusos do ciclo via TabuleiroEventoDoServidor (SalaServerMessage), sem
 // redefinição aqui: peca_selecionada, peca_deselecionada, peca_girada,
 // peca_posicionada, manipulacao_finalizada e erro_do_tabuleiro.
