@@ -11,8 +11,11 @@
 // diferente ⇒ o Monstro ataca, atingindo todos os peões dentro do Alcance
 // atual, negado pela Proteção (consumida uma única vez por resolução,
 // negando todos os ataques simultâneos contra o mesmo Jogador). A aplicação
-// das penalidades (Baixa Iluminação, perda de Sanidade) é da issue #170 —
-// o evento ataque_resolvido carrega os dados, não os efeitos.
+// das penalidades (Baixa Iluminação, perda de Sanidade) é da issue #170 e o
+// eco no wire é da issue #173: o evento carrega também `estadosAplicados` —
+// o estado RESULTANTE de cada Jogador cujo roster mudou com as penalidades
+// do gatilho (preenchido pela camada da Partida, que conhece o roster; a
+// resolução pura abaixo o emite vazio).
 //
 // Sem ciclos: a dependência em runtime é única — partida.ts → monstros.ts →
 // tabuleiro.ts → peoes.ts. Nenhum contrato wire, Redis ou Express vive aqui:
@@ -122,17 +125,31 @@ export interface AtacanteDoAlcance {
   readonly peoesNoAlcance: readonly string[];
 }
 
+// Estado resultante das penalidades (issue #173) para um Jogador atingido
+// cujo roster mudou no gatilho: Baixa Iluminação (Vulto), sanidade drenada
+// com piso 0 e Amedrontado (Espectro). Jogador imune (já Amedrontado) e
+// Jogador protegido NÃO entram — seu estado não mudou.
+export interface EstadoResultanteDoAtaque {
+  readonly jogadorId: string;
+  readonly emBaixaIluminacao: boolean;
+  readonly sanidade: number;
+  readonly amedrontado: boolean;
+}
+
 // Ataque (issue #172): emitido nos gatilhos definitivos da Partida quando ao
 // menos um Monstro dispara — mesmo que ninguém seja atingido (saída do
 // alcance com zero restantes). atacantes: apenas os Monstros com delta; os
 // peoesAtingidos são os finais (pós-Proteção); protegidos: os Jogadores cuja
-// Proteção foi consumida nesta resolução. A aplicação das penalidades é da
-// issue #170.
+// Proteção foi consumida nesta resolução. estadosAplicados (issue #173):
+// estado resultante das penalidades por Jogador mudado — vazio aqui (a
+// aplicação das penalidades é da camada da Partida, issue #170, que anexa
+// os estados resultantes ao emitir o evento no lote).
 export interface AtaqueResolvidoEvento {
   readonly tipo: 'ataque_resolvido';
   readonly atacantes: readonly AtacanteDoAlcance[];
   readonly peoesAtingidos: readonly string[];
   readonly protegidos: readonly string[];
+  readonly estadosAplicados: readonly EstadoResultanteDoAtaque[];
 }
 
 export interface ResolucaoDeAtaques {
@@ -219,6 +236,9 @@ export function resolverAtaques(
       atacantes,
       peoesAtingidos,
       protegidos: protegidosConsumidos,
+      // Preenchido pela camada da Partida (issue #173): a resolução pura não
+      // conhece sanidade/estados do roster — apenas quem foi atingido.
+      estadosAplicados: [],
     },
     peoesNoAlcance,
     protegidosConsumidos,

@@ -120,14 +120,16 @@ export function traduzirEventos(
       case 'partida_terminada':
         saida.push({ type: 'PARTIDA_TERMINADA', resultado: evento.desfecho.tipo });
         break;
-      // Ataque dos Monstros (issue #172): shape 1:1 com o evento de domínio —
-      // o refinamento do wire/feedback é da issue #173.
+      // Ataque dos Monstros (issues #172/#173): shape 1:1 com o evento de
+      // domínio — estadosAplicados carrega o estado resultante das
+      // penalidades por Jogador mudado (eco do feedback da #173).
       case 'ataque_resolvido':
         saida.push({
           type: 'ATAQUE_RESOLVIDO',
           atacantes: evento.atacantes,
           peoesAtingidos: evento.peoesAtingidos,
           protegidos: evento.protegidos,
+          estadosAplicados: evento.estadosAplicados,
         });
         break;
       // Resgate (issue #171): shape 1:1 com o domínio — wire follow-up #173
