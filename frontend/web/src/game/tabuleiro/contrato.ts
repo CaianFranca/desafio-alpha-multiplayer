@@ -131,18 +131,25 @@ export const ALVO_GERADORES_LIGADOS = 3
  * com encaixe direto e NÃO abrem a janela de Manipulação — espelho exato do
  * engine (packages/engine/src/peoes.ts, posicionarRecebida: apenas Peças de
  * caminho abrem a janela). Usado pelo reducer no PECA_POSICIONADA (AC1 #145).
+ * Record exaustivo por tipo (padrão do módulo): adicionar um novo
+ * `TipoDaPeca` sem declarar a regra aqui quebra o typecheck — a decisão fica
+ * explícita na compilação, não silenciosa em runtime.
  */
-const SEM_JANELA_DE_MANIPULACAO: ReadonlySet<TipoDaPeca> = new Set<TipoDaPeca>([
-  'gerador',
-  'sala_do_diretor',
-  'sala_medica',
-  'portao_de_saida',
-  'vulto',
-  'espectro',
-])
+const JANELA_DE_MANIPULACAO_POR_TIPO: Record<TipoDaPeca, boolean> = {
+  inicial: true,
+  reta: true,
+  T: true,
+  cruz: true,
+  gerador: false,
+  sala_do_diretor: false,
+  sala_medica: false,
+  portao_de_saida: false,
+  vulto: false,
+  espectro: false,
+}
 
 export function abreJanelaDeManipulacao(tipo: TipoDaPeca): boolean {
-  return !SEM_JANELA_DE_MANIPULACAO.has(tipo)
+  return JANELA_DE_MANIPULACAO_POR_TIPO[tipo]
 }
 
 export const CORES_DOS_PEOES: readonly CorDoPeao[] = [

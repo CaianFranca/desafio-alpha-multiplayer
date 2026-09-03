@@ -315,6 +315,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         <div className="pointer-events-none absolute left-1/2 top-4 z-30 flex -translate-x-1/2 gap-2">
           <div
             data-testid="chip-geradores-ligados"
+            role="status"
             data-geradores={modelo.geradoresLigados.length}
             aria-label={`Geradores ligados: ${modelo.geradoresLigados.length} de ${ALVO_GERADORES_LIGADOS}`}
             className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
@@ -327,6 +328,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           </div>
           <div
             data-testid="chip-cartao-de-acesso"
+            role="status"
             data-obtido={modelo.cartaoDeAcessoObtido ? 'true' : 'false'}
             aria-label={
               modelo.cartaoDeAcessoObtido
