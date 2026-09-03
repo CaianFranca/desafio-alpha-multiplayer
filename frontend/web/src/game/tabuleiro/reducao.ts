@@ -53,10 +53,12 @@ import {
 import type { PendenciaNoCliente } from './interacaoPeoes'
 import { ehPendenciaSorteada } from './interacaoPeoes'
 import type {
+  AtaqueResolvidoWireEvento,
   Celula,
   CelulasIluminadasWireEvento,
   LimpezaAplicadaWireEvento,
   PeaoEventoDoServidor,
+  ResgateRealizadoWireEvento,
   TabuleiroEventoDoServidor,
   PecaSorteadaEvento,
   VagaDaPecaRecebidaEscolhidaEvento,
@@ -65,10 +67,23 @@ import type {
   TurnoIniciadoEvento,
 } from '@flicker/shared'
 
+export type PercepcaoDeJogador = {
+  readonly apelido: string
+  readonly cor: CorDoPeao
+  readonly sanidade: number
+  readonly emBaixaIluminacao: boolean
+  readonly amedrontado: boolean
+}
+
+export type SanidadePorPeao = Readonly<
+  Record<string, { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }>
+>
+
 /**
  * Eventos que o canal da Partida entrega ao redutor: tabuleiro (ST-09),
- * peões/ciclo (ST-10), turnos (ST-11, issue #118) e iluminação/limpeza
- * (issue #151). É o tipo roteado pelo socket e aceito pelo reducer.
+ * peões/ciclo (ST-10), turnos (ST-11, issue #118), iluminação/limpeza
+ * (issue #151) e monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO e
+ * RESGATE_REALIZADO). É o tipo roteado pelo socket e aceito pelo reducer.
  */
 export type EventoDoJogoNoCliente =
   | TabuleiroEventoDoServidor
@@ -80,6 +95,8 @@ export type EventoDoJogoNoCliente =
   | LimpezaAplicadaWireEvento
   | PecaSorteadaEvento
   | VagaDaPecaRecebidaEscolhidaEvento
+  | AtaqueResolvidoWireEvento
+  | ResgateRealizadoWireEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -118,10 +135,12 @@ export interface EstadoDoTabuleiroNoCliente {
     */
   readonly peaoPorJogador: Readonly<Record<string, string>>
   /**
-    * Dicionário jogadorId → dados de exibição (apelido/cor) derivado do
-    * snapshot (issue #156). Fonte única para o chip de Jogador Ativo.
-    */
-  readonly jogadorPorId: Readonly<Record<string, { apelido: string; cor: CorDoPeao }>>
+   * Dicionário jogadorId → dados de exibição (apelido/cor) derivado do
+   * snapshot (issue #156). Fonte única para o chip de Jogador Ativo.
+   * Estendido na issue #174 com Sanidade e estados (Baixa Iluminação,
+   * Amedrontado) — projeção mínima sem recalcular no cliente.
+   */
+  readonly jogadorPorId: Readonly<Record<string, PercepcaoDeJogador>>
 }
 
 /** Estado inicial determinístico do cliente (deltas a partir do zero). */
@@ -199,7 +218,8 @@ function aprenderPeaoDoAtivo(
  * estado imutável. Eventos desconhecidos ou erro retornam o estado inalterado.
  *
  * Aceita eventos de tabuleiro (ST-09), de peões/ciclo (ST-10), de turno
- * (ST-11) e de iluminação/limpeza (issue #151).
+ * (ST-11), de iluminação/limpeza (issue #151) e de monstros/estados
+ * (ST-15, #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO).
  */
 export function reduzirEvento(
   estado: EstadoDoTabuleiroNoCliente,
@@ -445,6 +465,59 @@ export function reduzirEvento(
           estado.pecaEmManipulacaoId !== null && removidas.includes(estado.pecaEmManipulacaoId)
             ? null
             : estado.pecaEmManipulacaoId,
+      }
+    }
+
+    // ── Monstros e estados (ST-15, issue #174) ──
+    case 'ATAQUE_RESOLVIDO': {
+      // estadosAplicados carrega o estado resultante por Jogador mudado
+      // (Baixa Iluminação, sanidade, Amedrontado) — issue #173. O cliente
+      // apenas projeta no dicionário, sem derivar (mesma semântica do
+      // snapshot). Ataque sem alvos ⇒ array vazio — estado permanece, feedback
+      // é tratado na camada PartidaPage (flash).
+      if (evento.estadosAplicados.length === 0) {
+        return estado
+      }
+      // Atualiza apenas jogadores já conhecidos via snapshot; eventos antes do
+      // snapshot são ignorados até a projeção autoritativa (evita vazar
+      // jogadorId como apelido).
+      let mudou = false
+      const jogadorPorId = { ...estado.jogadorPorId }
+      for (const aplicado of evento.estadosAplicados) {
+        const anterior = jogadorPorId[aplicado.jogadorId]
+        if (!anterior) continue
+        mudou = true
+        jogadorPorId[aplicado.jogadorId] = {
+          ...anterior,
+          sanidade: aplicado.sanidade,
+          emBaixaIluminacao: aplicado.emBaixaIluminacao,
+          amedrontado: aplicado.amedrontado,
+        }
+      }
+      return mudou ? { ...estado, jogadorPorId } : estado
+    }
+    case 'RESGATE_REALIZADO': {
+      const anterior = estado.jogadorPorId[evento.resgatadoJogadorId]
+      if (!anterior) {
+        // Sem snapshot ainda — aguarda projeção autoritativa.
+        return estado
+      }
+      // Resgate remove todos os estados; se amedrontado, restaura sanidade
+      // a 1 ponto (CONTEXT.md: Resgate) — o wire não carrega sanidade, então
+      // o cliente aplica a regra mínima aqui; o snapshot autoritativo corrige
+      // em seguida se houver divergência.
+      const sanidadeRestaurada = anterior.amedrontado ? 1 : anterior.sanidade
+      return {
+        ...estado,
+        jogadorPorId: {
+          ...estado.jogadorPorId,
+          [evento.resgatadoJogadorId]: {
+            ...anterior,
+            sanidade: sanidadeRestaurada,
+            emBaixaIluminacao: false,
+            amedrontado: false,
+          },
+        },
       }
     }
 

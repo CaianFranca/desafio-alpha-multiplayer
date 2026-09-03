@@ -24,8 +24,9 @@ import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
  * Aplica um snapshot do servidor ao estado do cliente, produzindo um novo
  * estado. Mapeia posicionadas, peões, celulasIluminadas,
  * pecaSelecionadaId/pecaEmManipulacaoId/peaoSelecionadoId,
- * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId e
- * jogadorAtivoId/rodada/posicaoConfirmada — preservando a reserva.
+ * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId (com
+ * sanidade/estados — ST-15, #174) e jogadorAtivoId/rodada/posicaoConfirmada —
+ * preservando a reserva.
  */
 export function aplicarSnapshot(
   estado: EstadoDoTabuleiroNoCliente,
@@ -67,10 +68,23 @@ export function aplicarSnapshot(
   )
 
   const peaoPorJogador: Record<string, string> = {}
-  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao }> = {}
+  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
   for (const j of snapshot.jogadores) {
     peaoPorJogador[j.jogadorId] = j.peaoId
-    jogadorPorId[j.jogadorId] = { apelido: j.apelido, cor: j.cor }
+    // Snapshot carrega sanidade/estados (issue #173) com normalização
+    // defensiva no server, mas clientes com estado persistido antigo podem
+    // receber payload incompleto via WS replay — replicamos fallback defensivo
+    // (server: snapshot.ts:41) para não gravar undefined no modelo.
+    const sanidade = (j as { sanidade?: number }).sanidade ?? 3
+    const emBaixaIluminacao = (j as { emBaixaIluminacao?: boolean }).emBaixaIluminacao ?? false
+    const amedrontado = (j as { amedrontado?: boolean }).amedrontado ?? sanidade === 0
+    jogadorPorId[j.jogadorId] = {
+      apelido: j.apelido,
+      cor: j.cor,
+      sanidade,
+      emBaixaIluminacao,
+      amedrontado,
+    }
   }
 
   const pecasDeRecebimento: Record<string, TipoDaPeca> = { ...estado.pecasDeRecebimento }

@@ -13,8 +13,8 @@ import {
   reduzirEvento,
   estadoDeExibicaoDoModelo,
 } from '../game/tabuleiro/reducao'
-import type { EstadoDoTabuleiroNoCliente } from '../game/tabuleiro/reducao'
-import { mapearGiro, FLASH_BRANCO } from '../game/tabuleiro/interacao'
+import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
+import { mapearGiro, FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from '../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../game/tabuleiro/interacao'
 import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
@@ -121,15 +121,39 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           partidaEmAndamento()
           return
         }
-        if (evento.type === 'ATAQUE_RESOLVIDO') return
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
         if (emResultadoRef.current) return
+        // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
+        // projetados no modelo e geram feedback mínimo sem recarregar página.
+        if (evento.type === 'ATAQUE_RESOLVIDO' || evento.type === 'RESGATE_REALIZADO') {
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          if (evento.type === 'ATAQUE_RESOLVIDO') {
+            // Feedback perceptível para ataque (issue #174): vermelho quando há
+            // penalidade (Baixa/Amedrontado/sanidade), branco quando a Proteção
+            // negou o ataque (protegidos>0 sem estadosAplicados), âmbar quando o
+            // gatilho dispara sem vítimas (saída com alcance vazio). A limpeza de
+            // monstros fora da iluminação é o mesmo LIMPEZA_APLICADA branco.
+            if (evento.estadosAplicados.length > 0) {
+              setFlash({ ...FLASH_VERMELHO })
+            } else if (evento.protegidos.length > 0) {
+              setFlash({ ...FLASH_BRANCO })
+            } else if (evento.atacantes.length > 0) {
+              setFlash({ ...FLASH_AMBAR })
+            } else {
+              setFlash({ ...FLASH_BRANCO })
+            }
+          } else {
+            setFlash({ ...FLASH_BRANCO })
+          }
+          return
+        }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
         // ESTADO_DA_PARTIDA (em_andamento): eventos de turno avulsos não
         // abrem o tabuleiro sem snapshot — descreve a própria PR.
         despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
         // Feedback unificado: cobre eventos de tabuleiro, peão, turno (#118)
-        // e limpeza (#151). Branco para aprovação/seleção; vermelho para
+        // e limpeza (#151 — inclui limpeza de monstros removidos pela
+        // iluminação, issue #174). Branco para aprovação/seleção; vermelho para
         // ERRO_DO_TABULEIRO (motivo específico para pendências); âmbar para
         // FORA_DA_VEZ; TURNO_INICIADO/TURNO_ENCERRADO não geram flash (null).
         if (evento.type === 'CELULAS_ILUMINADAS') {
@@ -241,6 +265,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const jogadorAtivoDados =
     modelo.jogadorAtivoId !== null ? modelo.jogadorPorId[modelo.jogadorAtivoId] ?? null : null
 
+  // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
+  // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
+  // do snapshot + deltas de ATAQUE/RESGATE, sem recarregar página.
+  const sanidadePorPeao: SanidadePorPeao = useMemo(() => {
+      const out: Record<string, { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
+      for (const [jogadorId, dados] of Object.entries(modelo.jogadorPorId)) {
+        const peaoId = modelo.peaoPorJogador[jogadorId]
+        if (peaoId) {
+          out[peaoId] = {
+            sanidade: dados.sanidade,
+            emBaixaIluminacao: dados.emBaixaIluminacao,
+            amedrontado: dados.amedrontado,
+          }
+        }
+      }
+      return out
+    }, [modelo.jogadorPorId, modelo.peaoPorJogador])
+
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao
     ? (estadoInteracao.pecaEmManipulacaoId ?? estadoInteracao.pecaSelecionadaId)
@@ -310,6 +352,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onRejeicaoPeao={onRejeicaoPeao}
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
+        sanidadePorPeao={sanidadePorPeao}
       />
       <PartidaOverlays estado={estado} resultado={resultado} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       <FlashOverlay flash={flash} onClear={limparFlash} />
@@ -325,10 +368,55 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         <div
           data-testid="chip-jogador-ativo"
           data-cor={jogadorAtivoDados.cor}
+          data-sanidade={String(jogadorAtivoDados.sanidade)}
+          data-em-baixa={jogadorAtivoDados.emBaixaIluminacao ? 'true' : undefined}
+          data-amedrontado={jogadorAtivoDados.amedrontado ? 'true' : undefined}
           className="pointer-events-none absolute left-4 top-4 z-30 flex items-center gap-2 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-100"
           style={{ borderLeft: `4px solid ${HEX_COR_PEAO[jogadorAtivoDados.cor] ?? '#fff'}` }}
         >
           <span>{jogadorAtivoDados.apelido}</span>
+          <span data-testid="chip-sanidade" className="text-xs text-zinc-300">
+            {jogadorAtivoDados.sanidade}/3
+          </span>
+          {jogadorAtivoDados.emBaixaIluminacao ? (
+            <span data-testid="chip-baixa-iluminacao" className="text-xs text-amber-300" title="Baixa Iluminação">
+              ◐
+            </span>
+          ) : null}
+          {jogadorAtivoDados.amedrontado ? (
+            <span data-testid="chip-amedrontado" className="text-xs text-red-400" title="Amedrontado">
+              ⚠
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {/* Percepção mínima de todos os jogadores (issue #174): sem controles
+          completos — apenas 4 chips com sanidade/estados no Ambiente de Jogo.
+          O chip do Jogador Ativo acima é o destaque da vez; esta lista é a
+          visão “cada Jogador” exigida no critério, sem barras/painéis. */}
+      {(estadoEmAndamento || emResultado) && Object.keys(modelo.jogadorPorId).length > 0 ? (
+        <div
+          data-testid="indicadores-sanidade"
+          className="pointer-events-none absolute left-4 top-16 z-30 flex flex-col gap-1"
+        >
+          {Object.entries(modelo.jogadorPorId).map(([jid, dados]) => (
+            <div
+              key={jid}
+              data-testid="indicador-sanidade-jogador"
+              data-jogador-id={jid}
+              data-sanidade={String(dados.sanidade)}
+              data-em-baixa={dados.emBaixaIluminacao ? 'true' : undefined}
+              data-amedrontado={dados.amedrontado ? 'true' : undefined}
+              data-cor={dados.cor}
+              className="flex items-center gap-2 rounded bg-zinc-900/70 px-2 py-0.5 text-xs text-zinc-200"
+              style={{ borderLeft: `3px solid ${HEX_COR_PEAO[dados.cor] ?? '#fff'}` }}
+            >
+              <span>{dados.apelido}</span>
+              <span>{dados.sanidade}/3</span>
+              {dados.emBaixaIluminacao ? <span title="Baixa Iluminação">◐</span> : null}
+              {dados.amedrontado ? <span title="Amedrontado">⚠</span> : null}
+            </div>
+          ))}
         </div>
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (

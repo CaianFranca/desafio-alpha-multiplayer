@@ -680,13 +680,20 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     const snapshot = criarSnapshotBase()
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
-    expect((await screen.findByTestId('chip-jogador-ativo')).textContent).toBe('JogadorTeste')
+    const chip = await screen.findByTestId('chip-jogador-ativo')
+    expect(chip).toHaveTextContent('JogadorTeste')
+    expect(chip).toHaveAttribute('data-sanidade', '3')
+    expect(screen.getByTestId('chip-sanidade')).toHaveTextContent('3/3')
 
     act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
     // TURNO_INICIADO muda jogadorAtivoId mas chip lê do snapshot map + estado atualizado via evento
     // Como nosso snapshot já tinha jogador-2? Actually snapshot had branco active; TURNO muda para vermelho
     // O chip deve refletir Ana após o evento
-    await waitFor(() => expect(screen.getByTestId('chip-jogador-ativo')).toHaveTextContent('Ana'))
+    await waitFor(() => {
+      const chipAna = screen.getByTestId('chip-jogador-ativo')
+      expect(chipAna).toHaveTextContent('Ana')
+      expect(chipAna).toHaveAttribute('data-sanidade', '3')
+    })
   })
 
   it('sem TURNO nem snapshot chip não aparece em aguardando', async () => {
