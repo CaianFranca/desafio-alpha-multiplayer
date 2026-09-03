@@ -71,6 +71,7 @@ export type {
 export type {
   AtacanteDoAlcance,
   AtaqueResolvidoEvento,
+  EstadoResultanteDoAtaque,
   JogadorAlvoDoAtaque,
   ResolucaoDeAtaques,
 } from './monstros.ts';

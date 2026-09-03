@@ -37,10 +37,10 @@ function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): Es
       peaoSelecionadoId: null,
     },
     jogadores: [
-      { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: true },
-      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true },
-      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true },
-      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true },
+      { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
     ],
     jogadorAtivoId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
     rodada: 1,
@@ -653,10 +653,10 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
         peaoSelecionadoId: null,
       },
       jogadores: [
-        { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false },
-        { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true },
-        { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true },
-        { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true },
+        { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
       ],
       jogadorAtivoId: 'jogador-2',
       rodada: 2,
@@ -724,13 +724,20 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     const snapshot = criarSnapshotBase()
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
-    expect((await screen.findByTestId('chip-jogador-ativo')).textContent).toBe('JogadorTeste')
+    const chip = await screen.findByTestId('chip-jogador-ativo')
+    expect(chip).toHaveTextContent('JogadorTeste')
+    expect(chip).toHaveAttribute('data-sanidade', '3')
+    expect(screen.getByTestId('chip-sanidade')).toHaveTextContent('3/3')
 
     act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
     // TURNO_INICIADO muda jogadorAtivoId mas chip lê do snapshot map + estado atualizado via evento
     // Como nosso snapshot já tinha jogador-2? Actually snapshot had branco active; TURNO muda para vermelho
     // O chip deve refletir Ana após o evento
-    await waitFor(() => expect(screen.getByTestId('chip-jogador-ativo')).toHaveTextContent('Ana'))
+    await waitFor(() => {
+      const chipAna = screen.getByTestId('chip-jogador-ativo')
+      expect(chipAna).toHaveTextContent('Ana')
+      expect(chipAna).toHaveAttribute('data-sanidade', '3')
+    })
   })
 
   it('sem TURNO nem snapshot chip não aparece em aguardando', async () => {

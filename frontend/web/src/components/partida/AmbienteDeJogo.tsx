@@ -25,6 +25,7 @@ import {
   vagasDisponiveisDoPeao,
 } from '../../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
+import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -61,6 +62,8 @@ interface AmbienteDeJogoProps {
   peaoSelecionadoIdServidor?: PeaoId | null
   /** Peão do Jogador Ativo da vez (destaque, #118). */
   peaoAtivoId?: PeaoId | null
+  /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
+  sanidadePorPeao?: SanidadePorPeao
 }
 
 export function AmbienteDeJogo({
@@ -74,6 +77,7 @@ export function AmbienteDeJogo({
   onFlash,
   peaoSelecionadoIdServidor = null,
   peaoAtivoId = null,
+  sanidadePorPeao = {},
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade ──
   // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
@@ -269,6 +273,7 @@ export function AmbienteDeJogo({
           onFeedback={onFlash}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
+          sanidadePorPeao={sanidadePorPeao}
         />
       ) : null}
     </div>
