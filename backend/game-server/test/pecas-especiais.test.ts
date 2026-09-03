@@ -232,19 +232,13 @@ test('sorteio no serviço: partida criada via HTTP tem Caixa embaralhada complet
     // Total deriva da composição declarada no engine (incremental na spec).
     const totalDaCaixa = COMPOSICAO_DA_CAIXA.reduce((soma, entrada) => soma + entrada.quantidade, 0);
     assert.equal(estado!.tabuleiro.caixa.length, totalDaCaixa);
-    // Composição fixa sem seed começa com reta-1..10; com seed o topo deve divergir
-    // com probabilidade esmagadora — verifica que ao menos um dos 5 primeiros não é reta-1..5.
-    // Fallback: verifica que nem toda a ordem é a de composição (evita flake extremo onde seed sorteia mesma ordem).
+    // Composição fixa sem seed começa com reta-1..10; com seed a ordem global
+    // deve divergir (evita flake extremo onde o seed sortearia a mesma ordem).
     const semSeed = estadoInicialDaPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
     assert.equal(semSeed.sucesso, true);
     if (semSeed.sucesso) {
-      const caixaSemSeedIds = semSeed.estado.tabuleiro.caixa.slice(0, 5).map((p) => p.pecaId);
-      const caixaServicoIds = estado!.tabuleiro.caixa.slice(0, 5).map((p) => p.pecaId);
-      // Não exige diferença nos 5 primeiros sempre, mas exige diferença global (hash da ordem)
       const ordemIgual = estado!.tabuleiro.caixa.every((p, i) => p.pecaId === semSeed.estado.tabuleiro.caixa[i]!.pecaId);
       assert.equal(ordemIgual, false, 'Caixa do serviço deve estar embaralhada (ordem distinta da composição sem seed)');
-      // Ao menos registra que o serviço não retornou a ordem fixa trivial
-      assert.ok(caixaServicoIds.length === 5 && caixaSemSeedIds.length === 5);
     }
     await deletePartida(servidor.baseUrl, aceite.partidaId);
   } finally {
@@ -483,7 +477,7 @@ test('peças especiais não abrem janela de manipulação: girar rejeita MANIPUL
 
       enviar(ws, { type: 'GIRAR_PECA', jogadorId: 'jogador-1', pecaId: 'gerador-1', sentido: 'horario' });
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
-      assert.ok(['MANIPULACAO_ENCERRADA', 'PECA_NAO_SELECIONADA'].includes(erro.codigo as string), `codigo deve ser MANIPULACAO_ENCERRADA ou PECA_NAO_SELECIONADA, veio ${erro.codigo}`);
+      assert.equal(erro.codigo, 'MANIPULACAO_ENCERRADA');
 
       const estadoAposGiro = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.equal(estadoAposGiro!.tabuleiro.pecaEmManipulacaoId, null);
