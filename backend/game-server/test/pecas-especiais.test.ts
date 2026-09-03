@@ -536,6 +536,9 @@ test('portão de saída aceita até 4 peões e peça comum rejeita segundo peão
       rodada: 2,
       pecaDoInicioDoTurnoId: 'cruz-1',
       posicaoConfirmada: false,
+      // Rodada 2 pressupõe Primeiros Turnos concluídos (o engine bloqueia
+      // MOVER_PEAO com primeiroTurnoPendente — MOVIMENTO_INDISPONIVEL).
+      jogadores: estado.jogadores.map((j) => ({ ...j, primeiroTurnoPendente: false })),
     };
     await salvarEstadoDaPartida(redis, aceite.partidaId, estado);
 
