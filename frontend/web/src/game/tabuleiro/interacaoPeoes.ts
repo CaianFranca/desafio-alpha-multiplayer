@@ -326,10 +326,35 @@ export function despacharCliqueNaPecaDaBandeja(
   despacho.onFeedback?.(FLASH_BRANCO)
 }
 
+// ── Peça operável do ciclo (guard de coerência — revisão #199, JF532 5.3) ──
+
 /**
- * Giro da Recebida em foco (pecaId em pecaSelecionadaId, setado pela escolha
- * da vaga — #138) → GIRAR_PECA, orientação livre em passos de 90°. Sem
- * Recebida em foco → null.
+ * Recebida sobre a qual girar/encaixar podem agir: o `pecaId` em foco deve
+ * pertencer a uma pendência real do ciclo, nunca a uma peça divergente.
+ * Regra fina que mantém o fluxo puxar→vaga→encaixe funcional:
+ *   - pendência COM vaga: após ESCOLHER_VAGA o engine move a peça para
+ *     `pecaSelecionadaId` e o pull pode já ter sido consumido (ou substituído
+ *     pela próxima corrente) — o encaixe/giro seguem a pendência travada na
+ *     vaga, não o pull;
+ *   - pendência SEM vaga: só é operável enquanto for a peça PUXADA da bandeja
+ *     (o pull é o único modo de uma peça sem vaga entrar no fluxo).
+ */
+function recebidaOperavel(
+  estado: EstadoInteracaoPeoes,
+  pecaId: string,
+): PendenciaNoCliente | null {
+  const pendencia = estado.recebidasPendentes.find((r) => r.pecaId === pecaId)
+  if (pendencia === undefined) return null
+  if (pendencia.vaga !== null) return pendencia
+  return estado.recebidaPuxadaId === pendencia.recebidaId ? pendencia : null
+}
+
+/**
+ * Giro da Recebida em foco → GIRAR_PECA, orientação livre em passos de 90°.
+ * Guard de coerência (#199): só opera sobre a Recebida operável do ciclo —
+ * pendência com vaga escolhida (peça movida para `pecaSelecionadaId` pelo
+ * engine após a escolha) ou corrente puxada sem vaga. Peça em foco divergente
+ * (fora do ciclo ou pendência intocada) → null.
  */
 export function mapearGirarRecebida(
   estado: EstadoInteracaoPeoes,
@@ -337,6 +362,7 @@ export function mapearGirarRecebida(
 ): TabuleiroComandoDoCliente | null {
   const pecaId = estado.pecaSelecionadaId
   if (pecaId === null) return null
+  if (recebidaOperavel(estado, pecaId) === null) return null
   return { type: 'GIRAR_PECA', pecaId, sentido }
 }
 
@@ -344,9 +370,10 @@ export function mapearGirarRecebida(
  * Encaixe da Recebida em foco → POSICIONAR_PECA para a célula clicada. Só a
  * célula-alvo derivada da vaga escolhida (a vizinha correspondente à borda
  * aberta da Peça sob o Peão) aceita o encaixe; célula que não é alvo de
- * nenhuma Recebida pendente não reage (null). A correspondência fina entre foco
- * e alvo é validada pelo servidor (PECA_FORA_DO_ALVO). Sem Recebida em foco →
- * null.
+ * nenhuma Recebida pendente não reage (null). Guard de coerência (#199): o
+ * alvo precisa pertencer à PRÓPRIA peça em foco (match pecaId↔célula-alvo da
+ * pendência) — alvo de outra pendência com foco divergente fica silencioso.
+ * Sem Recebida em foco → null.
  */
 export function mapearPosicionarRecebida(
   estado: EstadoInteracaoPeoes,
@@ -354,14 +381,15 @@ export function mapearPosicionarRecebida(
 ): TabuleiroComandoDoCliente | null {
   const pecaId = estado.pecaSelecionadaId
   if (pecaId === null) return null
-  const ehAlvoDePendencia = estado.recebidasPendentes.some(
-    (pendencia) =>
+  const pendencia = estado.recebidasPendentes.find(
+    (r) =>
+      r.pecaId === pecaId &&
       // Célula-alvo só existe após a escolha da vaga (#138) — sem vaga, a
       // pendência ainda não é encaixável por esta rota.
-      pendencia.celulaAlvo !== null &&
-      chaveCelula(pendencia.celulaAlvo) === chaveCelula(celula),
+      r.celulaAlvo !== null &&
+      chaveCelula(r.celulaAlvo) === chaveCelula(celula),
   )
-  if (!ehAlvoDePendencia) return null
+  if (pendencia === undefined) return null
   return { type: 'POSICIONAR_PECA', pecaId, celula }
 }
 

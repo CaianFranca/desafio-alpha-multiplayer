@@ -261,8 +261,13 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
   // ── AC 4: girar e posicionar a Recebida na célula vizinha, orientação livre ──
 
   it('girar a Recebida emite GIRAR_PECA nos dois sentidos (orientação livre)', () => {
+    // Operação pós-vaga: a pendência tem vaga escolhida e o engine moveu a
+    // peça para pecaSelecionadaId (guard #199: peça operável do ciclo).
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [
+        pendencia('r1', 'reta-2', 'reta', 'norte', { linha: 2, coluna: 3 }),
+      ],
       pecaSelecionadaId: 'reta-2',
     })
     expect(mapearGirarRecebida(estado, 'horario')).toEqual({
@@ -274,6 +279,49 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
       type: 'GIRAR_PECA',
       pecaId: 'reta-2',
       sentido: 'anti_horario',
+    })
+  })
+
+  it('corrente PUXADA sem vaga também é operável (giro na bandeja, fluxo #199)', () => {
+    const estado = estadoBase({
+      peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [pendencia('r1', 'reta-2', 'reta', null, null)],
+      recebidaPuxadaId: 'r1',
+      pecaSelecionadaId: 'reta-2',
+    })
+    expect(mapearGirarRecebida(estado, 'horario')).toEqual({
+      type: 'GIRAR_PECA',
+      pecaId: 'reta-2',
+      sentido: 'horario',
+    })
+  })
+
+  it('guard de coerência: com duas pendências, peça divergente não emite comando (#199)', () => {
+    // r1: reta-1 travada na vaga norte (alvo 2:3); r2: t-1 sem vaga e SEM
+    // pull. Foco em t-1 (divergente do ciclo operável):
+    const estado = estadoBase({
+      peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', 'norte', { linha: 2, coluna: 3 }),
+        pendencia('r2', 't-1', 'T', null, null),
+      ],
+      pecaSelecionadaId: 't-1',
+    })
+    // Giro de peça intocada (sem vaga, sem pull) → silencioso.
+    expect(mapearGirarRecebida(estado, 'horario')).toBeNull()
+    // Encaixe do alvo DE r1 com foco em t-1 → match pecaId↔alvo falha.
+    expect(mapearPosicionarRecebida(estado, { linha: 2, coluna: 3 })).toBeNull()
+    // ...e a peça operável de verdade (foco em reta-1) segue funcionando.
+    const coerente: EstadoInteracaoPeoes = { ...estado, pecaSelecionadaId: 'reta-1' }
+    expect(mapearGirarRecebida(coerente, 'horario')).toEqual({
+      type: 'GIRAR_PECA',
+      pecaId: 'reta-1',
+      sentido: 'horario',
+    })
+    expect(mapearPosicionarRecebida(coerente, { linha: 2, coluna: 3 })).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
     })
   })
 
