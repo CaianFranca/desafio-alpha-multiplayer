@@ -6,7 +6,7 @@ import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { vi } from 'vitest'
-import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
+import type { EstadoDaPartidaSnapshot, PecaPosicionadaNoSnapshot } from '@flicker/shared'
 
 function renderPartidaNaRota(entry: string) {
   const router = createMemoryRouter(
@@ -710,5 +710,273 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     )
     expect(await screen.findByTestId('overlay-aguardando')).toBeInTheDocument()
     expect(screen.queryByTestId('chip-jogador-ativo')).not.toBeInTheDocument()
+  })
+})
+
+describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
+  function snapshotComObjetivos(opts: {
+    pecasRestantes?: number
+    geradoresLigados?: readonly string[]
+    cartaoDeAcesso?: boolean
+    posicionadas?: readonly PecaPosicionadaNoSnapshot[]
+  }): EstadoDaPartidaSnapshot {
+    return criarSnapshotBase({
+      tabuleiro: {
+        posicionadas: opts.posicionadas ?? [],
+        iniciais: [],
+        peoes: [],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+        pecasRestantesNaCaixa: opts.pecasRestantes ?? 57,
+      },
+      geradoresLigados: opts.geradoresLigados ?? [],
+      cartaoDeAcessoObtido: opts.cartaoDeAcesso ?? false,
+    })
+  }
+
+  const GERADOR_1: PecaPosicionadaNoSnapshot = {
+    pecaId: 'gerador-1',
+    tipo: 'gerador',
+    orientacao: 0,
+    celula: { linha: 1, coluna: 2 },
+  }
+  const SALA_DIRETOR_1: PecaPosicionadaNoSnapshot = {
+    pecaId: 'sala-do-diretor-1',
+    tipo: 'sala_do_diretor',
+    orientacao: 0,
+    celula: { linha: 4, coluna: 4 },
+  }
+
+  it('em aguardando nem contagem nem chips são montados', async () => {
+    renderPartidaNaRota('/partida?serverId=s&partidaId=p')
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+        apelido: 'JogadorTeste',
+        partidaId: 'p',
+        estado: 'preparada',
+      }),
+    )
+    expect(await screen.findByTestId('overlay-aguardando')).toBeInTheDocument()
+    expect(screen.queryByTestId('contagem-caixa')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('chip-geradores-ligados')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('chip-cartao-de-acesso')).not.toBeInTheDocument()
+  })
+
+  it('antes do snapshot: chips zerados visíveis e contagem da Caixa oculta', async () => {
+    await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    const chipG = await screen.findByTestId('chip-geradores-ligados')
+    expect(chipG).toHaveTextContent('Geradores 0/3')
+    expect(chipG.getAttribute('data-geradores')).toBe('0')
+    expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('false')
+    // Sem baseline: null ≠ 0 — a contagem não é inventada antes do primeiro
+    // ESTADO_DA_PARTIDA.
+    expect(screen.queryByTestId('contagem-caixa')).not.toBeInTheDocument()
+  })
+
+  it('ESTADO_DA_PARTIDA popula a contagem da Caixa e os chips pela baseline', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: snapshotComObjetivos({
+          pecasRestantes: 57,
+          geradoresLigados: ['gerador-1'],
+          posicionadas: [GERADOR_1],
+        }),
+      }),
+    )
+    expect(await screen.findByTestId('contagem-caixa')).toHaveTextContent('Caixa: 57')
+    const chipG = screen.getByTestId('chip-geradores-ligados')
+    expect(chipG.getAttribute('data-geradores')).toBe('1')
+    expect(chipG).toHaveTextContent('Geradores 1/3')
+    expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('false')
+  })
+
+  it('PECA_SORTEADA ao vivo decrementa; id repetido não decrementa 2×', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: snapshotComObjetivos({ pecasRestantes: 57 }),
+      }),
+    )
+    await screen.findByTestId('contagem-caixa')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'PECA_SORTEADA',
+        pecaId: 'reta-1',
+        tipoDaPeca: 'reta',
+        orientacao: 0,
+      }),
+    )
+    expect(await screen.findByTestId('contagem-caixa')).toHaveTextContent('Caixa: 56')
+
+    // Reentrega do mesmo sorteio: o gate de idempotência segura o decremento.
+    act(() =>
+      ws.simulateMessage({
+        type: 'PECA_SORTEADA',
+        pecaId: 'reta-1',
+        tipoDaPeca: 'reta',
+        orientacao: 0,
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('contagem-caixa')).toHaveTextContent('Caixa: 56'),
+    )
+  })
+
+  it('POSICAO_CONFIRMADA de gerador incrementa o chip ao vivo, com dedupe', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: snapshotComObjetivos({ posicionadas: [GERADOR_1] }),
+      }),
+    )
+    await screen.findByTestId('contagem-caixa')
+    expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('0')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+        pecaId: 'gerador-1',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('1'),
+    )
+    // Reconfirmação do MESMO gerador (reconexão com o gerador já na baseline
+    // não pode inflar): dedupe por pecaId.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: snapshotComObjetivos({
+          geradoresLigados: ['gerador-1'],
+          posicionadas: [GERADOR_1],
+        }),
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('1'),
+    )
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+        pecaId: 'gerador-1',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('1'),
+    )
+  })
+
+  it('POSICAO_CONFIRMADA de sala_do_diretor vira o chip do cartão para obtido', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: snapshotComObjetivos({ posicionadas: [SALA_DIRETOR_1] }),
+      }),
+    )
+    await screen.findByTestId('contagem-caixa')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+        pecaId: 'sala-do-diretor-1',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('true'),
+    )
+  })
+
+  it('reconexão: ESTADO_DA_PARTIDA reconcilia HUD e chips sem recarregar', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    // Snapshot inicial sem conquistas.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: snapshotComObjetivos({ pecasRestantes: 57 }),
+      }),
+    )
+    await screen.findByTestId('contagem-caixa')
+
+    // Reconexão: o novo snapshot traz a baseline real do engine (conquistas
+    // obtidas enquanto o cliente estava fora) — reconcilia sem reload.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: snapshotComObjetivos({
+          pecasRestantes: 40,
+          geradoresLigados: ['gerador-1', 'gerador-2'],
+          cartaoDeAcesso: true,
+          posicionadas: [GERADOR_1, SALA_DIRETOR_1],
+        }),
+      }),
+    )
+    expect(await screen.findByTestId('contagem-caixa')).toHaveTextContent('Caixa: 40')
+    expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('2')
+    expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('true')
+  })
+
+  it('AC1: especial posicionada renderiza com data-tipo e sem janela de Manipulação (snapshot e delta)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    const SALA_MEDICA_1: PecaPosicionadaNoSnapshot = {
+      pecaId: 'sala-medica-1',
+      tipo: 'sala_medica',
+      orientacao: 0,
+      celula: { linha: 1, coluna: 3 },
+    }
+    // Via snapshot: gerador e sala médica posicionadas, pecaEmManipulacaoId null.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: snapshotComObjetivos({ posicionadas: [GERADOR_1, SALA_MEDICA_1] }),
+      }),
+    )
+    const pospecas = await screen.findAllByTestId('peca-posicionada')
+    expect(pospecas).toHaveLength(2)
+    expect(
+      pospecas.find((el) => el.getAttribute('data-peca-id') === 'gerador-1')?.getAttribute('data-tipo'),
+    ).toBe('gerador')
+    expect(
+      pospecas.find((el) => el.getAttribute('data-peca-id') === 'sala-medica-1')?.getAttribute('data-tipo'),
+    ).toBe('sala_medica')
+    // Sem janela de Manipulação: os controles de giro nascem desabilitados.
+    expect(screen.getByTestId('girar-horario')).toBeDisabled()
+
+    // Via delta: sorteio + encaixe direto de outra especial no mesmo lote.
+    act(() => {
+      ws.simulateMessage({ type: 'PECA_SORTEADA', pecaId: 'sala-medica-2', tipoDaPeca: 'sala_medica', orientacao: 0 })
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'sala-medica-2',
+        celula: { linha: 1, coluna: 4 },
+        orientacao: 0,
+      })
+    })
+    await waitFor(() => expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(3))
+    const delta = screen
+      .getAllByTestId('peca-posicionada')
+      .find((el) => el.getAttribute('data-peca-id') === 'sala-medica-2')
+    expect(delta?.getAttribute('data-tipo')).toBe('sala_medica')
+    // O encaixe da especial não abriu janela de Manipulação (o modelo local
+    // reflete o engine): giro segue desabilitado.
+    expect(screen.getByTestId('girar-horario')).toBeDisabled()
+    expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
   })
 })

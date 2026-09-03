@@ -6,7 +6,11 @@ import {
 import { aplicarSnapshot } from '../web/src/game/tabuleiro/snapshot'
 import { criarReservaInicial, TOTAL_RESERVA } from '../web/src/game/tabuleiro/contrato'
 import { mapearCliqueNaCelula } from '../web/src/game/tabuleiro/interacao'
-import type { EstadoDaPartidaSnapshot, TabuleiroEventoDoServidor } from '@flicker/shared'
+import type {
+  EstadoDaPartidaSnapshot,
+  PecaPosicionadaNoSnapshot,
+  TabuleiroEventoDoServidor,
+} from '@flicker/shared'
 
 describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', () => {
   it('estado inicial é determinístico: reserva completa e grade vazia', () => {
@@ -665,5 +669,234 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
     expect(reaplicado.movimentouNoTurno).toBe(true)
     // posicaoConfirmada vem do snapshot (o campo existe na wire).
     expect(reaplicado.posicaoConfirmadaNoTurno).toBe(false)
+  })
+})
+
+describe('objetivos globais no modelo do cliente — baseline + derivação (issue #145)', () => {
+  function snapshotObjetivos(
+    opts: {
+      pecasRestantes?: number
+      geradores?: readonly string[]
+      cartao?: boolean
+      posicionadas?: readonly PecaPosicionadaNoSnapshot[]
+      pecaEmManipulacaoId?: string | null
+    } = {},
+  ): EstadoDaPartidaSnapshot {
+    return {
+      tabuleiro: {
+        posicionadas: opts.posicionadas ?? [],
+        iniciais: [],
+        peoes: [],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: opts.pecaEmManipulacaoId ?? null,
+        peaoSelecionadoId: null,
+        pecasRestantesNaCaixa: opts.pecasRestantes ?? 57,
+      },
+      jogadores: [],
+      jogadorAtivoId: 'jogador-1',
+      rodada: 2,
+      pecaDoInicioDoTurnoId: null,
+      posicaoConfirmada: false,
+      celulasIluminadas: [],
+      estado: 'em_andamento',
+      resultado: null,
+      geradoresLigados: opts.geradores ?? [],
+      cartaoDeAcessoObtido: opts.cartao ?? false,
+    }
+  }
+
+  function comBaseline(opts: Parameters<typeof snapshotObjetivos>[0] = {}) {
+    return aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotObjetivos(opts))
+  }
+
+  it('seed do modelo: contagem oculta (null) e chips zerados', () => {
+    const inicial = criarEstadoInicialDoCliente()
+    expect(inicial.pecasRestantesNaCaixa).toBeNull()
+    expect(inicial.geradoresLigados).toEqual([])
+    expect(inicial.cartaoDeAcessoObtido).toBe(false)
+  })
+
+  it('PECA_SORTEADA inédito decrementa a contagem; id repetido não decrementa 2×', () => {
+    let estado = comBaseline({ pecasRestantes: 57 })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_SORTEADA',
+      pecaId: 'reta-1',
+      tipoDaPeca: 'reta',
+      orientacao: 0,
+    })
+    expect(estado.pecasRestantesNaCaixa).toBe(56)
+    // Mesmo pecaId reentregue (repetição do broadcast): o gate de
+    // pecasDeRecebimento segura o regrava E o segundo decremento.
+    estado = reduzirEvento(estado, {
+      type: 'PECA_SORTEADA',
+      pecaId: 'reta-1',
+      tipoDaPeca: 'reta',
+      orientacao: 0,
+    })
+    expect(estado.pecasRestantesNaCaixa).toBe(56)
+  })
+
+  it('PECA_SORTEADA sem baseline do snapshot mantém a contagem null', () => {
+    const estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PECA_SORTEADA',
+      pecaId: 'reta-1',
+      tipoDaPeca: 'reta',
+      orientacao: 0,
+    })
+    // Nunca se conta a partir do nada: a HUD permanece oculta até o snapshot.
+    expect(estado.pecasRestantesNaCaixa).toBeNull()
+  })
+
+  it('contagem da Caixa tem clamp em 0 (nunca negativa)', () => {
+    let estado = comBaseline({ pecasRestantes: 0 })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_SORTEADA',
+      pecaId: 't-1',
+      tipoDaPeca: 'T',
+      orientacao: 0,
+    })
+    expect(estado.pecasRestantesNaCaixa).toBe(0)
+  })
+
+  it('POSICAO_CONFIRMADA de gerador liga com dedupe por pecaId', () => {
+    let estado = comBaseline({
+      posicionadas: [
+        { pecaId: 'gerador-1', tipo: 'gerador', orientacao: 0, celula: { linha: 1, coluna: 2 } },
+      ],
+    })
+    estado = reduzirEvento(estado, {
+      type: 'POSICAO_CONFIRMADA',
+      jogadorId: 'jogador-1',
+      peaoId: 'peao-branco',
+      pecaId: 'gerador-1',
+    })
+    expect(estado.geradoresLigados).toEqual(['gerador-1'])
+    // Reconfirmar o MESMO gerador não conta 2× (dedupe por id, espelho do
+    // gate `includes` do engine).
+    estado = reduzirEvento(estado, {
+      type: 'POSICAO_CONFIRMADA',
+      jogadorId: 'jogador-1',
+      peaoId: 'peao-branco',
+      pecaId: 'gerador-1',
+    })
+    expect(estado.geradoresLigados).toEqual(['gerador-1'])
+    // Um segundo gerador (chegando por deltas) incrementa.
+    estado = reduzirEventos(estado, [
+      { type: 'PECA_SORTEADA', pecaId: 'gerador-2', tipoDaPeca: 'gerador', orientacao: 0 },
+      { type: 'PECA_POSICIONADA', pecaId: 'gerador-2', celula: { linha: 5, coluna: 2 }, orientacao: 0 },
+      { type: 'POSICAO_CONFIRMADA', jogadorId: 'jogador-2', peaoId: 'peao-vermelho', pecaId: 'gerador-2' },
+    ])
+    expect(estado.geradoresLigados).toEqual(['gerador-1', 'gerador-2'])
+  })
+
+  it('POSICAO_CONFIRMADA resolve tipo via pecasDeRecebimento quando a peça saiu do tabuleiro', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PECA_SORTEADA',
+      pecaId: 'gerador-9',
+      tipoDaPeca: 'gerador',
+      orientacao: 0,
+    })
+    // A peça não está em `posicionadas` (fallback do derivador).
+    estado = reduzirEvento(estado, {
+      type: 'POSICAO_CONFIRMADA',
+      jogadorId: 'jogador-1',
+      peaoId: 'peao-branco',
+      pecaId: 'gerador-9',
+    })
+    expect(estado.geradoresLigados).toEqual(['gerador-9'])
+  })
+
+  it('cartão de acesso é monotônico: sala_do_diretor obtém e confirmações seguintes não revogam', () => {
+    let estado = comBaseline({
+      posicionadas: [
+        { pecaId: 'sala-do-diretor-1', tipo: 'sala_do_diretor', orientacao: 0, celula: { linha: 4, coluna: 4 } },
+        { pecaId: 'reta-1', tipo: 'reta', orientacao: 0, celula: { linha: 4, coluna: 5 } },
+      ],
+    })
+    expect(estado.cartaoDeAcessoObtido).toBe(false)
+    estado = reduzirEvento(estado, {
+      type: 'POSICAO_CONFIRMADA',
+      jogadorId: 'jogador-1',
+      peaoId: 'peao-branco',
+      pecaId: 'sala-do-diretor-1',
+    })
+    expect(estado.cartaoDeAcessoObtido).toBe(true)
+    // Confirmar peça de caminho depois não revoga (e não conta gerador).
+    estado = reduzirEvento(estado, {
+      type: 'POSICAO_CONFIRMADA',
+      jogadorId: 'jogador-2',
+      peaoId: 'peao-vermelho',
+      pecaId: 'reta-1',
+    })
+    expect(estado.cartaoDeAcessoObtido).toBe(true)
+    expect(estado.geradoresLigados).toEqual([])
+  })
+
+  it('ordem do lote: posicao_confirmada antes de limpeza mantém a conquista', () => {
+    let estado = comBaseline({
+      posicionadas: [
+        { pecaId: 'gerador-1', tipo: 'gerador', orientacao: 0, celula: { linha: 1, coluna: 2 } },
+      ],
+    })
+    // Ordem real do lote do engine: posicao_confirmada é o PRIMEIRO evento e
+    // a limpeza chega depois no mesmo lote — o tipo precisa ser resolvido no
+    // estado anterior, com a peça ainda em posicionadas.
+    estado = reduzirEventos(estado, [
+      { type: 'POSICAO_CONFIRMADA', jogadorId: 'jogador-1', peaoId: 'peao-branco', pecaId: 'gerador-1' },
+      { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['gerador-1'] },
+    ])
+    expect(estado.geradoresLigados).toEqual(['gerador-1'])
+    // A peça saiu do tabuleiro local, mas a conquista sobrevive.
+    expect(estado.posicionadas).toEqual([])
+  })
+
+  it('aplicarSnapshot substitui a baseline local (autoridade, sem merge)', () => {
+    let estado = comBaseline({
+      pecasRestantes: 50,
+      geradores: ['gerador-1', 'gerador-2'],
+      cartao: true,
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_SORTEADA',
+      pecaId: 'cruz-1',
+      tipoDaPeca: 'cruz',
+      orientacao: 0,
+    })
+    expect(estado.pecasRestantesNaCaixa).toBe(49)
+    // Reconexão com snapshot do engine: substitui, não acumula decremento nem
+    // faz merge de listas.
+    const reconciliado = aplicarSnapshot(
+      estado,
+      snapshotObjetivos({ pecasRestantes: 83, geradores: [], cartao: false }),
+    )
+    expect(reconciliado.pecasRestantesNaCaixa).toBe(83)
+    expect(reconciliado.geradoresLigados).toEqual([])
+    expect(reconciliado.cartaoDeAcessoObtido).toBe(false)
+  })
+
+  it('AC1: especial encaixa sem janela de Manipulação; peça de caminho abre (regressão)', () => {
+    const gerador = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_SORTEADA', pecaId: 'gerador-1', tipoDaPeca: 'gerador', orientacao: 0 },
+      { type: 'PECA_POSICIONADA', pecaId: 'gerador-1', celula: { linha: 2, coluna: 2 }, orientacao: 0 },
+    ])
+    expect(gerador.posicionadas.find((p) => p.pecaId === 'gerador-1')?.tipo).toBe('gerador')
+    expect(gerador.pecaEmManipulacaoId).toBeNull()
+
+    const salaMedica = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_SORTEADA', pecaId: 'sala-medica-1', tipoDaPeca: 'sala_medica', orientacao: 0 },
+      { type: 'PECA_POSICIONADA', pecaId: 'sala-medica-1', celula: { linha: 2, coluna: 3 }, orientacao: 0 },
+    ])
+    expect(salaMedica.posicionadas.find((p) => p.pecaId === 'sala-medica-1')?.tipo).toBe('sala_medica')
+    expect(salaMedica.pecaEmManipulacaoId).toBeNull()
+
+    // Regressão ST-09: peça de caminho da Reserva abre a janela como antes.
+    const caminho = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'reta-1',
+      celula: { linha: 3, coluna: 4 },
+      orientacao: 0,
+    })
+    expect(caminho.pecaEmManipulacaoId).toBe('reta-1')
   })
 })
