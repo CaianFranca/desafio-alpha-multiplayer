@@ -24,8 +24,10 @@ import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
  * Aplica um snapshot do servidor ao estado do cliente, produzindo um novo
  * estado. Mapeia posicionadas, peões, celulasIluminadas,
  * pecaSelecionadaId/pecaEmManipulacaoId/peaoSelecionadoId,
- * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId e
- * jogadorAtivoId/rodada/posicaoConfirmada — preservando a reserva.
+ * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId,
+ * jogadorAtivoId/rodada/posicaoConfirmada e a baseline dos objetivos globais
+ * — pecasRestantesNaCaixa/geradoresLigados/cartaoDeAcessoObtido (issue #145)
+ * — preservando a reserva.
  */
 export function aplicarSnapshot(
   estado: EstadoDoTabuleiroNoCliente,
@@ -102,5 +104,11 @@ export function aplicarSnapshot(
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
     peaoPorJogador,
     jogadorPorId,
+    // Baseline autoritativa dos objetivos globais (issue #145): o snapshot
+    // SUBSTITUI (não faz merge) — reconexão sem recarregamento reconcilia a
+    // contagem da Caixa e os contadores de conquista com o engine.
+    pecasRestantesNaCaixa: snapshot.tabuleiro.pecasRestantesNaCaixa,
+    geradoresLigados: snapshot.geradoresLigados,
+    cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido,
   }
 }

@@ -118,6 +118,33 @@ export interface EstadoExibicaoTabuleiro {
 /** 4 Peões, um por cor; ordem espelha `CORES_DOS_PEOES` do engine. */
 export const QUANTIDADE_PEOES = 4
 
+/**
+ * Alvo de Geradores ligados para a vitória (chip `Geradores n/3`, issue #145).
+ * Espelha o limiar de vitória do engine (`geradoresLigados.length < 3` em
+ * packages/engine/src/partida.ts). Acoplamento de EXIBIÇÃO: o engine não
+ * exporta o número; mover o limiar no domínio exige mover esta constante.
+ */
+export const ALVO_GERADORES_LIGADOS = 3
+
+/**
+ * Peças Especiais (ST-12/#142) e Monstros (ST-15/#169) entram no tabuleiro
+ * com encaixe direto e NÃO abrem a janela de Manipulação — espelho exato do
+ * engine (packages/engine/src/peoes.ts, posicionarRecebida: apenas Peças de
+ * caminho abrem a janela). Usado pelo reducer no PECA_POSICIONADA (AC1 #145).
+ */
+const SEM_JANELA_DE_MANIPULACAO: ReadonlySet<TipoDaPeca> = new Set<TipoDaPeca>([
+  'gerador',
+  'sala_do_diretor',
+  'sala_medica',
+  'portao_de_saida',
+  'vulto',
+  'espectro',
+])
+
+export function abreJanelaDeManipulacao(tipo: TipoDaPeca): boolean {
+  return !SEM_JANELA_DE_MANIPULACAO.has(tipo)
+}
+
 export const CORES_DOS_PEOES: readonly CorDoPeao[] = [
   'branco',
   'vermelho',
