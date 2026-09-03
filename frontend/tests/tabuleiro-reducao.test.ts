@@ -321,6 +321,24 @@ describe('redução do ciclo do peão — espelho do engine (issue #91, forma #1
     expect(estado.pecasDeRecebimento['t-1']).toBe('T')
   })
 
+  it('RECEBIMENTO_GERADO parcial (2 recebidas onde 3 eram plausíveis): modelo reflete o que chegou (rebate #199)', () => {
+    // A contagem é autoridade do engine (Esgotamento da Caixa — quando a
+    // Caixa tem menos peças que bordas abertas, o Recebimento vem truncado).
+    // O cliente não valida expectativa local: renderiza exatamente as
+    // pendências recebidas, sem erro e sem inventar a terceira.
+    const estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [
+        pendenciaSorteada('r1', 'reta-1', 'reta', null, null),
+        pendenciaSorteada('r2', 't-1', 'T', null, null),
+      ],
+    })
+    expect(estado.recebidasPendentes).toHaveLength(2)
+    expect(estado.recebidasPendentes.map((r) => r.recebidaId)).toEqual(['r1', 'r2'])
+    // O fluxo segue com as que chegaram: a corrente é a primeira delas.
+    expect(estado.recebidasPendentes.find((r) => r.vaga === null)?.recebidaId).toBe('r1')
+  })
+
   it('VAGA_DA_PECA_RECEBIDA_ESCOLHIDO fixa vaga/célula-alvo, seleciona a peça e mantém as demais', () => {
     let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
       type: 'RECEBIMENTO_GERADO',

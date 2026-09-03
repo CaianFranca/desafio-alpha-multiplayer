@@ -485,6 +485,90 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(flash.getAttribute('data-motivo')).toBe('caixa_esgotada')
   })
 
+  it('giro da pendência reflete na corrente da bandeja (rebate PECA_GIRADA — regressão #199)', async () => {
+    // O rebate: PECA_GIRADA de pecaId de pendência atualiza a orientação no
+    // modelo e a derivação da corrente (bandeja) reflete o giro sem re-sync.
+    const ws = await partidaDisponivel()
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
+      })
+    })
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-orientacao')).toBe('0')
+
+    act(() => {
+      ws.simulateMessage({
+        type: 'PECA_GIRADA',
+        pecaId: 'reta-1',
+        orientacaoAnterior: 0,
+        orientacao: 90,
+        sentido: 'horario',
+      })
+    })
+    // A corrente é derivada da pendência: a nova orientação aparece na bandeja.
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-orientacao')).toBe('90')
+    // E o pull segue resolvendo a mesma corrente após o giro.
+    const user = userEvent.setup()
+    await puxarCorrente(user)
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-puxada')).toBe('true')
+  })
+
+  it('espectador: corrente pública na bandeja, puxar silencioso e sem destaque de vaga (rebate #199)', async () => {
+    // O rebate "a corrente é privada": as pendências vêm do broadcast SEM
+    // filtro — a bandeja continua visível a todos; o que o gate restringe é
+    // o gesto de puxar (donoDoCiclo) e, por derivação, o destaque de vaga.
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogadora-2', rodada: 2 })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-vermelho' })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
+      })
+    })
+
+    // Corrente pública: presente no espelho do espectador.
+    const corrente = pecaCorrenteDaBandeja()
+    expect(corrente).not.toBeNull()
+    expect(corrente!.getAttribute('data-peca-id')).toBe('reta-1')
+    // Nenhum destaque de vaga (o destaque segue o pull, que o espectador não tem).
+    expect(
+      screen.getAllByTestId('tabuleiro-celula').every((el) => !el.hasAttribute('data-vaga')),
+    ).toBe(true)
+
+    // Clique de pull do não-ativo: silencioso — sem comando e sem puxada local.
+    const comandosAntes = ws.sentMessages.length
+    await user.click(corrente!)
+    expect(ws.sentMessages).toHaveLength(comandosAntes)
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-puxada')).toBe('false')
+  })
+
+  it('recebimento parcial: 2 pendências de 3 plausíveis renderizam sem erro local (rebate #199)', async () => {
+    // O rebate "recebimento parcial": o cliente renderiza o que chega — com
+    // duas pendências no wire, o modelo expõe duas e a bandeja abre com a
+    // corrente; nenhum estado de erro local é derivado da contagem (a
+    // autoridade dela é o engine: Esgotamento da Caixa).
+    const ws = await partidaDisponivel()
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [
+          recebidaSorteada('r1', 'reta-1', 'reta'),
+          recebidaSorteada('r2', 't-1', 'T'),
+        ],
+      })
+    })
+    expect(screen.getAllByTestId('recebida-pendente')).toHaveLength(2)
+    expect(screen.getAllByTestId('caixa-peca-sorteada')).toHaveLength(1)
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-recebida-id')).toBe('r1')
+  })
+
   it('pós-confirmação: clicar destino conectado NÃO envia MOVER_PEAO e pisca âmbar (AC3, review #165)', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
