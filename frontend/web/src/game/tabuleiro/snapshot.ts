@@ -107,8 +107,12 @@ export function aplicarSnapshot(
     rodada: snapshot.rodada,
     // A wire do snapshot não carrega a fase de movimento do turno: re-
     // sincronizar não pode sobrescrever o que os deltas já aprenderam
-    // (late-join no meio do turno perderia a fase 'confirmar').
-    movimentouNoTurno: estado.movimentouNoTurno,
+    // (late-join no meio do turno perderia a fase 'confirmar'). Exceção
+    // mínima e conservadora (revisão PR #199): se o snapshot traz a Posição
+    // Confirmada, o peão do turno necessariamente já se moveu (confirmar
+    // vem depois de mover) — fixar `true` evita um estado local
+    // contraditório (confirmada sem movimento) na retomada.
+    movimentouNoTurno: snapshot.posicaoConfirmada ? true : estado.movimentouNoTurno,
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
     peaoPorJogador,
     jogadorPorId,

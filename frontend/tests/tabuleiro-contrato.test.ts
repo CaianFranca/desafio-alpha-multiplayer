@@ -15,7 +15,7 @@ import {
   CAIXA_ALTURA,
   COLUNAS_INICIAIS,
   QUANTIDADE_INICIAIS,
-  ESPACAMENTO_INICIAIS,
+  ESPACAMENTO_ENTRE_PECAS_MESA,
   abreJanelaDeManipulacao,
   criarIniciaisDaMesa,
   bordasAbertas,
@@ -66,7 +66,7 @@ describe('contrato do tabuleiro', () => {
     // em z, a frente da grade 2×2 de iniciais é o ponto mais distante.
     const linhasIniciais = Math.ceil(QUANTIDADE_INICIAIS / COLUNAS_INICIAIS)
     const maxZIniciais =
-      POSICAO_INICIAIS[2] + ((linhasIniciais - 1) / 2) * ESPACAMENTO_INICIAIS + TAMANHO_CELULA / 2
+      POSICAO_INICIAIS[2] + ((linhasIniciais - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA + TAMANHO_CELULA / 2
     const minZCaixa = POSICAO_CAIXA[2] - CAIXA_PROFUNDIDADE / 2
     expect(Math.max(maxZIniciais, Math.abs(minZCaixa))).toBeLessThan(LARGURA_MESA / 2 + 1)
   })

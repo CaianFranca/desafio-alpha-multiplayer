@@ -825,4 +825,19 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
     // posicaoConfirmada vem do snapshot (o campo existe na wire).
     expect(reaplicado.posicaoConfirmadaNoTurno).toBe(false)
   })
+
+  it('aplicarSnapshot com posição confirmada fixa movimentouNoTurno (revisão #199)', () => {
+    // A wire não transporta `movimentouNoTurno`, mas confirmar pressupõe
+    // movimento: reconectar com posicaoConfirmada=true sobre um local que
+    // ainda não aprendeu o movimento (late-join/reload) não pode resultar no
+    // estado contraditório — o guard âmbar pós-confirmação derivaria dele.
+    const estado = criarEstadoInicialDoCliente()
+    expect(estado.movimentouNoTurno).toBe(false)
+    const reaplicado = aplicarSnapshot(
+      estado,
+      snapshotBase({ posicaoConfirmada: true }),
+    )
+    expect(reaplicado.posicaoConfirmadaNoTurno).toBe(true)
+    expect(reaplicado.movimentouNoTurno).toBe(true)
+  })
 })

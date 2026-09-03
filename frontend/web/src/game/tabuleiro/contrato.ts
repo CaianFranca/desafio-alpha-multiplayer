@@ -15,6 +15,14 @@ export const LADO_DA_GRADE = 7
 /** Lado de uma célula em unidades de mundo (quadrada). */
 export const TAMANHO_CELULA = 1.6
 
+/**
+ * Espaçamento padrão entre peças assentadas sobre o tampo da Mesa (grade 2×2
+ * das Iniciais, fileira de Peões no lado oposto à Caixa): ponto único de
+ * ajuste do layout lateral — extrai o valor antes duplicado entre
+ * `ESPACAMENTO_INICIAIS` e `ESPACAMENTO_PEAO_MESA` (revisão PR #199).
+ */
+export const ESPACAMENTO_ENTRE_PECAS_MESA = 1.7
+
 export const LARGURA_TABULEIRO = LADO_DA_GRADE * TAMANHO_CELULA
 export const PROFUNDIDADE_TABULEIRO = LADO_DA_GRADE * TAMANHO_CELULA
 
@@ -64,7 +72,6 @@ export const POSICAO_INICIAIS: readonly [number, number, number] = [
 ]
 export const COLUNAS_INICIAIS = 2
 export const QUANTIDADE_INICIAIS = 4
-export const ESPACAMENTO_INICIAIS = 1.7
 
 export const CELULA_INSET = TAMANHO_CELULA * 0.98
 export const ESPESSURA_BORDA = 0.04
@@ -214,10 +221,10 @@ export const PEAO_Y = PECA_Y + 0.14
 
 /**
  * Fileira dos peões não posicionados sobre a Mesa: lado oposto à zona da
- * Caixa (-X; Caixa fica em +X). Altura y = 0 (plano superior da Mesa).
+ * Caixa (-X; Caixa fica em +X). Altura y = 0 (plano superior da Mesa). O
+ * espaçamento usa o padrão compartilhado `ESPACAMENTO_ENTRE_PECAS_MESA`.
  */
 export const OFFSET_FILEIRA_PEOES_X = -8.0
-export const ESPACAMENTO_PEAO_MESA = 1.7
 
 // ── Composição inicial das Peças Iniciais na mesa (issue #143) ──
 // Espelha `estadoInicialDoTabuleiro()` do engine: as 4 iniciais (`inicial-1`
@@ -308,8 +315,8 @@ export function inicialIndiceParaLocal(indice: number): [number, number, number]
   const linhas = Math.ceil(QUANTIDADE_INICIAIS / COLUNAS_INICIAIS)
   const col = indice % COLUNAS_INICIAIS
   const row = Math.floor(indice / COLUNAS_INICIAIS)
-  const localX = (col - (COLUNAS_INICIAIS - 1) / 2) * ESPACAMENTO_INICIAIS
-  const localZ = (row - (linhas - 1) / 2) * ESPACAMENTO_INICIAIS
+  const localX = (col - (COLUNAS_INICIAIS - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA
+  const localZ = (row - (linhas - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA
   return [localX, 0, localZ]
 }
 
@@ -450,6 +457,6 @@ export function destinosConectadosDoPeao(
 
 /** Posição mundo da fileira de peões sobre a Mesa (índice = posição em `peoes`). */
 export function peaoMesaParaMundo(indice: number): [number, number, number] {
-  const z = (indice - (QUANTIDADE_PEOES - 1) / 2) * ESPACAMENTO_PEAO_MESA
+  const z = (indice - (QUANTIDADE_PEOES - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA
   return [OFFSET_FILEIRA_PEOES_X, 0, z]
 }
