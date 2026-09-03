@@ -26,6 +26,7 @@ import {
 import {
   aplicarComandoDePartida,
   bordasAbertas,
+  COMPOSICAO_DA_CAIXA,
   estadoInicialDaPartida,
   type EstadoDaPartida,
 } from '@flicker/engine';
@@ -222,13 +223,15 @@ after(async () => {
 // nasce com a Caixa embaralhada (seed aleatório no serviço). Valida comprimento
 // e que a ordem não é determinística da composição sem seed.
 
-test('sorteio no serviço: partida criada via HTTP tem Caixa embaralhada com 83 peças', async () => {
+test('sorteio no serviço: partida criada via HTTP tem Caixa embaralhada completa', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
     const estado = await obterEstadoDaPartida(redis, aceite.partidaId);
     assert.ok(estado !== null);
-    assert.equal(estado!.tabuleiro.caixa.length, 83);
+    // Total deriva da composição declarada no engine (incremental na spec).
+    const totalDaCaixa = COMPOSICAO_DA_CAIXA.reduce((soma, entrada) => soma + entrada.quantidade, 0);
+    assert.equal(estado!.tabuleiro.caixa.length, totalDaCaixa);
     // Composição fixa sem seed começa com reta-1..10; com seed o topo deve divergir
     // com probabilidade esmagadora — verifica que ao menos um dos 5 primeiros não é reta-1..5.
     // Fallback: verifica que nem toda a ordem é a de composição (evita flake extremo onde seed sorteia mesma ordem).
