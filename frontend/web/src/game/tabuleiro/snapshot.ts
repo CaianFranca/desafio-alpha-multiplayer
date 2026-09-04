@@ -4,14 +4,15 @@
  *
  * O canal da Partida entrega `ESTADO_DA_PARTIDA` com o snapshot completo do
  * engine; `aplicarSnapshot` substitui o modelo local pelas projeções do wire e
- * preserva o que o snapshot não carrega (reserva e a fase de movimento do
- * turno em andamento). Sem recalcular iluminação/limpeza: o motor é a
- * autoridade.
+ * preserva o que o snapshot não carrega (a fase de movimento do turno em
+ * andamento). As Peças Iniciais da mesa vêm do próprio snapshot (#143).
+ * Sem recalcular iluminação/limpeza: o motor é a autoridade.
  */
 
 import type {
   Celula as CelulaContrato,
   CorDoPeao,
+  PecaDaMesa,
   PecaPosicionada,
   PeaoDaExibicao,
   TipoDaPeca,
@@ -22,12 +23,12 @@ import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 /**
  * Aplica um snapshot do servidor ao estado do cliente, produzindo um novo
- * estado. Mapeia posicionadas, peões, celulasIluminadas,
+ * estado. Mapeia posicionadas, iniciais, peões, celulasIluminadas,
  * pecaSelecionadaId/pecaEmManipulacaoId/peaoSelecionadoId,
- * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId,
- * jogadorAtivoId/rodada/posicaoConfirmada e a baseline dos objetivos globais
- * — pecasRestantesNaCaixa/geradoresLigados/cartaoDeAcessoObtido (issue #145)
- * — preservando a reserva.
+ * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId (com
+ * sanidade/estados — ST-15, #174), jogadorAtivoId/rodada/posicaoConfirmada,
+ * as Peças Iniciais da mesa (#143) e a baseline dos objetivos globais —
+ * pecasRestantesNaCaixa/geradoresLigados/cartaoDeAcessoObtido (issue #145).
  */
 export function aplicarSnapshot(
   estado: EstadoDoTabuleiroNoCliente,
@@ -38,6 +39,14 @@ export function aplicarSnapshot(
     tipo: p.tipo,
     orientacao: p.orientacao,
     celula: { linha: p.celula.linha, coluna: p.celula.coluna },
+  }))
+
+  // Peças Iniciais ainda não encaixadas (issue #143): a lista do motor é a
+  // autoridade — recarregar reconstrói a mesa sem seed local.
+  const iniciais: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
+    pecaId: p.pecaId,
+    tipo: 'inicial' as const,
+    orientacao: p.orientacao,
   }))
 
   const mapPos = new Map<string, CelulaContrato>(
@@ -53,9 +62,9 @@ export function aplicarSnapshot(
     }
   })
 
-  // Pos-#138 toda Recebida do snapshot e da forma sorteada: map direto para
-  // PendenciaDaPecaSorteada, sem cast. `orientacao` do snapshot nao e copiado
-  // — nao faz parte da pendencia; o cliente a ignora fora da Reserva.
+  // Toda Recebida do snapshot é da forma sorteada (#138): map direto para
+  // PendenciaNoCliente, sem cast. `orientacao` da peça é copiado para que a
+  // bandeja da Caixa reexiba a corrente com a rotação correta ao recarregar.
   const recebidasPendentes: readonly PendenciaNoCliente[] = snapshot.tabuleiro.recebidas.map(
     (r): PendenciaNoCliente => ({
       recebidaId: r.recebidaId,
@@ -65,14 +74,28 @@ export function aplicarSnapshot(
       celulaAlvo: r.celulaAlvo
         ? { linha: r.celulaAlvo.linha, coluna: r.celulaAlvo.coluna }
         : null,
+      orientacao: r.orientacao,
     }),
   )
 
   const peaoPorJogador: Record<string, string> = {}
-  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao }> = {}
+  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
   for (const j of snapshot.jogadores) {
     peaoPorJogador[j.jogadorId] = j.peaoId
-    jogadorPorId[j.jogadorId] = { apelido: j.apelido, cor: j.cor }
+    // Snapshot carrega sanidade/estados (issue #173) com normalização
+    // defensiva no server, mas clientes com estado persistido antigo podem
+    // receber payload incompleto via WS replay — replicamos fallback defensivo
+    // (server: snapshot.ts:41) para não gravar undefined no modelo.
+    const sanidade = (j as { sanidade?: number }).sanidade ?? 3
+    const emBaixaIluminacao = (j as { emBaixaIluminacao?: boolean }).emBaixaIluminacao ?? false
+    const amedrontado = (j as { amedrontado?: boolean }).amedrontado ?? sanidade === 0
+    jogadorPorId[j.jogadorId] = {
+      apelido: j.apelido,
+      cor: j.cor,
+      sanidade,
+      emBaixaIluminacao,
+      amedrontado,
+    }
   }
 
   const pecasDeRecebimento: Record<string, TipoDaPeca> = { ...estado.pecasDeRecebimento }
@@ -86,7 +109,7 @@ export function aplicarSnapshot(
   }))
 
   return {
-    reserva: estado.reserva,
+    iniciais,
     posicionadas,
     pecaSelecionadaId: snapshot.tabuleiro.pecaSelecionadaId,
     pecaEmManipulacaoId: snapshot.tabuleiro.pecaEmManipulacaoId,
@@ -99,16 +122,24 @@ export function aplicarSnapshot(
     rodada: snapshot.rodada,
     // A wire do snapshot não carrega a fase de movimento do turno: re-
     // sincronizar não pode sobrescrever o que os deltas já aprenderam
-    // (late-join no meio do turno perderia a fase 'confirmar').
-    movimentouNoTurno: estado.movimentouNoTurno,
+    // (late-join no meio do turno perderia a fase 'confirmar'). Exceção
+    // mínima e conservadora (revisão PR #199): se o snapshot traz a Posição
+    // Confirmada, o peão do turno necessariamente já se moveu (confirmar
+    // vem depois de mover) — fixar `true` evita um estado local
+    // contraditório (confirmada sem movimento) na retomada.
+    movimentouNoTurno: snapshot.posicaoConfirmada ? true : estado.movimentouNoTurno,
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
     peaoPorJogador,
     jogadorPorId,
     // Baseline autoritativa dos objetivos globais (issue #145): o snapshot
     // SUBSTITUI (não faz merge) — reconexão sem recarregamento reconcilia a
     // contagem da Caixa e os contadores de conquista com o engine.
-    pecasRestantesNaCaixa: snapshot.tabuleiro.pecasRestantesNaCaixa,
-    geradoresLigados: snapshot.geradoresLigados,
-    cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido,
+    // Normalização defensiva no mesmo padrão da sanidade acima: snapshots
+    // produzidos por binário anterior à #145 não trazem os campos — `null`
+    // mantém a contagem oculta (sem baseline), as listas/flags partem
+    // neutras.
+    pecasRestantesNaCaixa: snapshot.tabuleiro.pecasRestantesNaCaixa ?? null,
+    geradoresLigados: snapshot.geradoresLigados ?? [],
+    cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido ?? false,
   }
 }

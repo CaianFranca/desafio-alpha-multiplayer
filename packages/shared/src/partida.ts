@@ -24,16 +24,19 @@
 //   shared type:'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO' { recebidaId, borda, celulaAlvo } <-> engine tipo:'vaga_da_peca_recebida_escolhida' idem — issue #138
 //   (Estes dois eventos novos vivem nesta união, e não em
 //   PeaoEventoDoServidor/TabuleiroEventoDoServidor, porque são o contrato do
-//   canal de Partida — o canal alvo do ST-11 — e as uniões antigas têm
-//   switches exaustivos no frontend legado, intocado pela #138.)
+//   canal de Partida — o canal alvo do ST-11. A limpeza do wire legado da
+//   ST-10 (#140/#143) removeu os switches legados do cliente.)
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   shared type:'PARTIDA_TERMINADA' { resultado } <-> engine tipo:'partida_terminada' { desfecho } — issue #179
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire); o
 //   motivo da derrota no engine fica interno — o contrato expõe apenas o par.)
-//   shared type:'ATAQUE_RESOLVIDO' { atacantes, peoesAtingidos, protegidos } <-> engine tipo:'ataque_resolvido' idem — issue #172
-//   (Shape 1:1 com o evento de domínio; o refinamento do wire/feedback —
-//   celular de penalidades, feedback ao cliente — é da issue #173.)
+//   shared type:'ATAQUE_RESOLVIDO' { atacantes, peoesAtingidos, protegidos, estadosAplicados } <-> engine tipo:'ataque_resolvido' idem — issues #172/#173
+//   (Shape 1:1 com o evento de domínio; o refinamento do wire/feedback da
+//   issue #173 está concluído neste commit: `estadosAplicados` carrega o
+//   estado resultante das penalidades (Baixa Iluminação, sanidade,
+//   Amedrontado) por Jogador mudado, e o snapshot do Jogador expõe
+//   sanidade/emBaixaIluminacao/amedrontado.)
 //   Erros: CodigoDeErroDaPartida alias de CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120) — FORA_DA_VEZ, PARTIDA_TERMINADA etc via ERRO_DO_TABULEIRO (SalaServerMessage via TabuleiroEventoDoServidor).
 //   shared type:UPPER_SNAKE no wire vs engine tipo:snake no domínio; campos em camelCase nos dois lados
 //   Snapshot (issue #145): EstadoDaPartidaSnapshot.tabuleiro.pecasRestantesNaCaixa
@@ -57,13 +60,7 @@ import type {
   SentidoDeRotacao,
   TipoDePecaDaCaixa,
 } from './tabuleiro.ts';
-import type {
-  PeaoId,
-  RecebidaId,
-  BordaCardinal,
-  TipoDePecaDeCaminho,
-  VagaDaPecaRecebidaEscolhidaEvento,
-} from './peoes.ts';
+import type { PeaoId, RecebidaId, BordaCardinal, VagaDaPecaRecebidaEscolhidaEvento } from './peoes.ts';
 
 // --- Comandos cliente → servidor (11) ---
 
@@ -200,7 +197,10 @@ export type CorDoPeaoWire = 'branco' | 'vermelho' | 'azul' | 'amarelo';
 
 export type TipoDaPecaWire =
   | 'inicial'
-  | TipoDePecaDeCaminho
+  // sync manual com engine.TipoDePecaDeCaminho
+  | 'reta'
+  | 'T'
+  | 'cruz'
   | 'gerador'
   | 'sala_do_diretor'
   | 'sala_medica'
@@ -215,6 +215,12 @@ export interface JogadorNoSnapshot {
   readonly ordem: number;
   readonly peaoId: PeaoId;
   readonly primeiroTurnoPendente: boolean;
+  // Estados dos Monstros no snapshot (issue #173): sanidade atual, Baixa
+  // Iluminação (Vulto) e Amedrontado (Espectro ao zerar sanidade) — o cliente
+  // projeta sem derivar do histórico de eventos.
+  readonly sanidade: number;
+  readonly emBaixaIluminacao: boolean;
+  readonly amedrontado: boolean;
 }
 
 export interface PecaPosicionadaNoSnapshot {
@@ -319,11 +325,24 @@ export interface AtacanteNoAlcance {
   readonly peoesNoAlcance: readonly PeaoId[];
 }
 
-// Ataque dos Monstros (issue #172): broadcast nos gatilhos definitivos da
-// Partida (posicionamento do Peão do Primeiro Turno e Confirmação de Posição
-// com mudança de peça) quando ao menos um Monstro dispara — mesmo que ninguém
-// seja atingido. Shape 1:1 com o evento de domínio; a aplicação das
-// penalidades e o refinamento do feedback são das issues #170/#173.
+// Estado resultante das penalidades (issue #173) para um Jogador atingido
+// cujo roster mudou no gatilho. Espelho de EstadoResultanteDoAtaque do
+// engine: jogador imune (já Amedrontado) e jogador protegido não mudam e
+// NÃO aparecem; ataque sem alvos atingidos ⇒ array vazio.
+export interface EstadoResultanteNoAtaque {
+  readonly jogadorId: string;
+  readonly emBaixaIluminacao: boolean;
+  readonly sanidade: number;
+  readonly amedrontado: boolean;
+}
+
+// Ataque dos Monstros (issues #172/#173): broadcast nos gatilhos definitivos
+// da Partida (posicionamento do Peão do Primeiro Turno e Confirmação de
+// Posição com mudança de peça) quando ao menos um Monstro dispara — mesmo
+// que ninguém seja atingido. Shape 1:1 com o evento de domínio;
+// estadosAplicados (issue #173) carrega o estado RESULTANTE das penalidades
+// (Baixa Iluminação, sanidade, Amedrontado) por Jogador mudado — o eco do
+// feedback aos clientes, não os efeitos em si.
 export interface AtaqueResolvidoWireEvento {
   readonly type: 'ATAQUE_RESOLVIDO';
   readonly atacantes: readonly AtacanteNoAlcance[];
@@ -331,6 +350,8 @@ export interface AtaqueResolvidoWireEvento {
   readonly peoesAtingidos: readonly PeaoId[];
   // Jogadores cuja Proteção foi consumida nesta resolução (ordem do roster).
   readonly protegidos: readonly string[];
+  // Estado resultante das penalidades por Jogador mudado (issue #173).
+  readonly estadosAplicados: readonly EstadoResultanteNoAtaque[];
 }
 
 // Resgate (issue #171): chegada do aliado por conexão à peça do afetado.

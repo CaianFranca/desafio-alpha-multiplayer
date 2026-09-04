@@ -29,14 +29,18 @@ import type {
   EstadoDaPartidaEvento,
   PecaSorteadaEvento,
   VagaDaPecaRecebidaEscolhidaEvento,
+  PartidaTerminadaWireEvento,
+  AtaqueResolvidoWireEvento,
+  ResgateRealizadoWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 
 /**
  * Eventos que o canal da Partida entrega à página (issue #156): tabuleiro
  * (ST-09), peões (ST-10), os três eventos de turno (ST-11), iluminação/
- * limpeza (issue #151) e os dois novos do snapshot (PARTIDA_INICIADA e
- * ESTADO_DA_PARTIDA) agora roteados exclusivamente pelo contrato de Partida.
+ * limpeza (issue #151), snapshot (PARTIDA_INICIADA/ESTADO_DA_PARTIDA) e
+ * monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO)
+ * agora roteados exclusivamente pelo contrato de Partida.
  */
 export type EventoDoCanalDaPartida =
   | TabuleiroEventoDoServidor
@@ -50,6 +54,9 @@ export type EventoDoCanalDaPartida =
   | VagaDaPecaRecebidaEscolhidaEvento
   | PartidaIniciadaEvento
   | EstadoDaPartidaEvento
+  | PartidaTerminadaWireEvento
+  | AtaqueResolvidoWireEvento
+  | ResgateRealizadoWireEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -66,8 +73,8 @@ interface UsePartidaWebSocketOptions {
   partidaId: string | null
   /**
    * Recebe cada evento do canal da partida em ordem de chegada do broadcast:
-   * tabuleiro (ST-09), peões/ciclo (ST-10), turnos (ST-11) e iluminação/
-   * limpeza (issue #151).
+   * tabuleiro (ST-09), peões/ciclo (ST-10), turnos (ST-11), iluminação/
+   * limpeza (issue #151) e monstros/estados (ST-15, issue #174).
    */
   onEvento: (evento: EventoDoCanalDaPartida) => void
   onAdmissao: (evento: AdmissaoAceitaEvento) => void
@@ -169,7 +176,6 @@ export function usePartidaWebSocket({
         case 'PEAO_SELECIONADO':
         case 'RECEBIMENTO_GERADO':
         case 'PEAO_POSICIONADO':
-        case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO':
         case 'PEAO_MOVIDO':
         case 'PEAO_PERMANECEU':
         case 'CELULAS_ILUMINADAS':
@@ -181,6 +187,9 @@ export function usePartidaWebSocket({
         case 'POSICAO_CONFIRMADA':
         case 'PARTIDA_INICIADA':
         case 'ESTADO_DA_PARTIDA':
+        case 'PARTIDA_TERMINADA':
+        case 'ATAQUE_RESOLVIDO':
+        case 'RESGATE_REALIZADO':
           // O grupo de cases acima é intencionalmente vazio (fall-through):
           // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
           // o cliente apenas espelha).

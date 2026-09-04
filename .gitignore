@@ -4,4 +4,5 @@
 **/node_modules
 **/dist
 frontend/web/media/*
+frontend/references/
 !frontend/web/media/.gitkeep

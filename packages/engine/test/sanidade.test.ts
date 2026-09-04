@@ -5,9 +5,11 @@ import {
   avaliarTerminoDaPartida,
   calcularIluminacao,
   estadoInicialDaPartida,
+  type AtaqueResolvidoEvento,
   type BordaCardinal,
   type ComandoDePartida,
   type EstadoDaPartida,
+  type EventoDaPartida,
   type Orientacao,
   type TipoDaPeca,
   type PecaPosicionada,
@@ -39,6 +41,11 @@ function peca(id: string, tipo: TipoDaPeca, o: Orientacao, l: number, c: number)
 }
 function comPeca(s: EstadoDaPartida, id: string, t: TipoDaPeca, o: Orientacao, l: number, c: number): EstadoDaPartida {
   return { ...s, tabuleiro: { ...s.tabuleiro, posicionadas: [...s.tabuleiro.posicionadas, peca(id, t, o, l, c)] } };
+}
+// Remove uma peça posicionada por id (injeção direta: substitui a peça sob o
+// destino planejado do Peão por um cenário de Monstros controlado).
+function semPeca(s: EstadoDaPartida, pecaId: string): EstadoDaPartida {
+  return { ...s, tabuleiro: { ...s.tabuleiro, posicionadas: s.tabuleiro.posicionadas.filter(p => p.pecaId !== pecaId) } };
 }
 function comPeaoSobre(s: EstadoDaPartida, peaoId: string, pecaId: string): EstadoDaPartida {
   return { ...s, tabuleiro: { ...s.tabuleiro, peoes: s.tabuleiro.peoes.map(p => p.peaoId === peaoId ? { ...p, pecaId } : p) } };
@@ -339,4 +346,123 @@ test('ataque simultâneo de vulto+espectro com proteção consome uma vez', () =
   assert.equal(ana.emBaixaIluminacao, false);
   assert.equal(ana.sanidade, 3);
   assert.equal(ana.protegido, false); // consumida
+});
+
+// ── estadosAplicados no ataque_resolvido (issue #173) ──────────────
+
+// Extrai o ataque_resolvido do lote (falha quando o gatilho não disparou).
+function ataqueDoLote(eventos: readonly EventoDaPartida[]): AtaqueResolvidoEvento {
+  const ataque = eventos.find((evento) => evento.tipo === 'ataque_resolvido');
+  if (ataque?.tipo !== 'ataque_resolvido') {
+    throw new Error('ataque_resolvido esperado no lote');
+  }
+  return ataque;
+}
+
+// Cenário comum dos casos de estadosAplicados: substitui a reta-2 (3,4) por
+// uma Cruz (quatro bordas abertas) na mesma célula, Espectro em (2,4) ao
+// norte e — nos cenários de penalidade dupla — Vulto em (4,4) ao sul. ana
+// move (3,3) → (3,4) e confirma: ambos os Monstros ficam iluminados por ela,
+// conectados à Cruz e com o Peão dentro do Alcance no MESMO gatilho.
+function cenarioDeAtaque(s: EstadoDaPartida, comVulto: boolean): EstadoDaPartida {
+  let c = semPeca(s, 'reta-2');
+  c = comPeca(c, 'cruz-x', 'cruz', 0, 3, 4);
+  if (comVulto) c = comPeca(c, 'vulto-x', 'vulto', 0, 4, 4);
+  c = comPeca(c, 'espectro-x', 'espectro', 0, 2, 4);
+  return c;
+}
+
+function anaMoveEConfirma(s: EstadoDaPartida): ReturnType<typeof aplicarComandoDePartida> {
+  let c = forcarAnaAtiva(s);
+  c = aplicar(c, selecionarPeao('peao-branco'), 'ana');
+  c = aplicar(c, moverPeao('peao-branco', 3, 4), 'ana');
+  c = aplicar(c, selecionarPeao('peao-branco'), 'ana');
+  return aplicarComandoDePartida(c, confirmar('peao-branco'), 'ana');
+}
+
+test('estadosAplicados: Vulto e Espectro simultâneos anexam o estado resultante das penalidades', () => {
+  const s = cenarioDeAtaque(rodada2(), true);
+  const r = anaMoveEConfirma(s);
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  const ataque = ataqueDoLote(r.eventos);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  assert.deepEqual(ataque.protegidos, []);
+  // Estado RESULTANTE de cada jogador mudado (não a delta): Baixa nova +
+  // sanidade drenada 3 → 2, sem Amedrontado.
+  assert.deepEqual(ataque.estadosAplicados, [
+    { jogadorId: 'ana', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+  ]);
+  const ana = r.estado.jogadores.find(j => j.jogadorId === 'ana')!;
+  assert.equal(ana.emBaixaIluminacao, true);
+  assert.equal(ana.sanidade, 2);
+  assert.equal(ana.amedrontado, false);
+});
+
+test('estadosAplicados: Proteção consumida nega as penalidades — protegido ausente do array', () => {
+  let s = cenarioDeAtaque(rodada2(), true);
+  s = comJogador(s, 'ana', { protegido: true });
+  const r = anaMoveEConfirma(s);
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  const ataque = ataqueDoLote(r.eventos);
+  // Protegida: atingida no ataque (negado), Proteção consumida e penalidades
+  // negadas — NÃO entra em estadosAplicados (o consumo vive em protegidos).
+  assert.deepEqual(ataque.peoesAtingidos, []);
+  assert.deepEqual(ataque.protegidos, ['ana']);
+  assert.deepEqual(ataque.estadosAplicados, []);
+  const ana = r.estado.jogadores.find(j => j.jogadorId === 'ana')!;
+  assert.equal(ana.protegido, false); // consumida
+  assert.equal(ana.emBaixaIluminacao, false);
+  assert.equal(ana.sanidade, 3);
+});
+
+test('estadosAplicados: jogador já Amedrontado é imune ao Espectro — ausente do array', () => {
+  let s = cenarioDeAtaque(rodada2(), false);
+  s = comJogador(s, 'ana', { amedrontado: true });
+  const r = anaMoveEConfirma(s);
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  const ataque = ataqueDoLote(r.eventos);
+  // Atingida pelo Espectro, porém imune: o estado não muda e a entrada não
+  // existe — o array carrega apenas quem de fato mudou.
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  assert.deepEqual(ataque.estadosAplicados, []);
+  const ana = r.estado.jogadores.find(j => j.jogadorId === 'ana')!;
+  assert.equal(ana.sanidade, 3);
+  assert.equal(ana.amedrontado, true);
+  assert.equal(ana.emBaixaIluminacao, false);
+});
+
+test('estadosAplicados: gatilho de saída sem alvos emite array vazio', () => {
+  let s = rodada2();
+  // Cruz no destino de ana (3,4) e Espectro em (4,4), ao sul — conectado à
+  // Cruz pela borda norte. Peão-vermelho injetado sobre uma Reta em (4,5):
+  // mantém o Espectro ILUMINADO quando ana sair (Reta não conecta ao Espectro
+  // — borda oeste fechada — então o Peão dela não volta ao Alcance).
+  s = semPeca(s, 'reta-2');
+  s = comPeca(s, 'cruz-x', 'cruz', 0, 3, 4);
+  s = comPeca(s, 'espectro-x', 'espectro', 0, 4, 4);
+  s = comPeca(s, 'reta-y', 'reta', 0, 4, 5);
+  s = comPeaoSobre(s, 'peao-vermelho', 'reta-y');
+  const r1 = anaMoveEConfirma(s);
+  assert.equal(r1.sucesso, true);
+  if (!r1.sucesso) return;
+  // Entrada no alcance: Espectro drena 3 → 2 (sem Baixa, sem Vulto).
+  const ataque1 = ataqueDoLote(r1.eventos);
+  assert.deepEqual(ataque1.estadosAplicados, [
+    { jogadorId: 'ana', emBaixaIluminacao: false, sanidade: 2, amedrontado: false },
+  ]);
+  let s2 = resolverRecebidas(r1.estado, 'ana');
+  s2 = forcarAnaAtiva(s2);
+  s2 = aplicar(s2, selecionarPeao('peao-branco'), 'ana');
+  s2 = aplicar(s2, moverPeao('peao-branco', 3, 3), 'ana');
+  s2 = aplicar(s2, selecionarPeao('peao-branco'), 'ana');
+  const r2 = aplicarComandoDePartida(s2, confirmar('peao-branco'), 'ana');
+  assert.equal(r2.sucesso, true);
+  if (!r2.sucesso) return;
+  // Saída dispara o gatilho mesmo sem ninguém no Alcance: array vazio.
+  const ataque2 = ataqueDoLote(r2.eventos);
+  assert.deepEqual(ataque2.peoesAtingidos, []);
+  assert.deepEqual(ataque2.estadosAplicados, []);
 });

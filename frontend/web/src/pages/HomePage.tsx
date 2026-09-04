@@ -8,7 +8,7 @@ import { Footer } from '../components/home/Footer'
 
 export function HomePage() {
   return (
-    <>
+    <div className="foundation-scope">
       <HeroSection />
       <TrailersSection />
       <HistorySection />
@@ -16,6 +16,6 @@ export function HomePage() {
       <ObjectivesSection />
       <FinalCtaSection />
       <Footer />
-    </>
+    </div>
   )
 }

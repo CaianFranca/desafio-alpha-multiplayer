@@ -173,6 +173,18 @@ _Avoid_: pilha, estoque, banco, reserva
 **Sorteio**:
 Retirada de uma peça da Caixa pelo serviço da partida, uma a uma, visível a todos os Jogadores.
 
+**Bandeja**:
+Recipiente de slot único adjacente à Caixa que exibe a Peça Corrente do Jogador Ativo; visível a todos, mas somente o dono do ciclo pode manuseá-la.
+_Avoid_: fila, bandeja de sorteio, dock
+
+**Peça Corrente**:
+Única peça sorteada exibida na Bandeja, correspondente à primeira pendência de Recebimento ainda sem vaga; uma por vez, do sorteio ao encaixe.
+_Avoid_: peça da vez, fila de sorteio
+
+**Puxar**:
+Gesto de interação que retira a Peça Corrente da Bandeja para habilitar a escolha de sua vaga; estado visual local do Jogador, consumido quando a peça recebe vaga e selecionada para o encaixe.
+_Avoid_: selecionar peça, arrastar, pegar
+
 **Embaralhamento**:
 Ordenação aleatória da Caixa no início da partida.
 

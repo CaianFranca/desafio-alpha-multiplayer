@@ -14,12 +14,11 @@ export type Trailer = {
 
 export const trailers = {
   id: 'trailers' as const,
-  title: 'Trailers',
-  description: 'Veja o sanatório por dentro — e decida se ainda quer entrar.',
+  title: 'TRAILERS',
+  description: 'Veja o sanatório por dentro',
   items: [
     {
       titulo: 'Trailer de Anúncio',
-      src: '/videos/trailer-anuncio.mp4',
     },
     {
       titulo: 'Gameplay em Grupo',

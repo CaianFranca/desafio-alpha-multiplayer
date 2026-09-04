@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AmbienteDeJogo } from '../components/partida/AmbienteDeJogo'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
@@ -13,13 +13,14 @@ import {
   reduzirEvento,
   estadoDeExibicaoDoModelo,
 } from '../game/tabuleiro/reducao'
-import type { EstadoDoTabuleiroNoCliente } from '../game/tabuleiro/reducao'
-import { mapearGiro, FLASH_BRANCO } from '../game/tabuleiro/interacao'
+import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
+import { mapearGiro, FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from '../game/tabuleiro/interacao'
 import type { FlashFeedback } from '../game/tabuleiro/interacao'
 import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
+import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
@@ -65,8 +66,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const { authState } = useAuth()
   const jogadorId =
     authState.status === 'authenticated' ? authState.jogador.id : null
+  const navigate = useNavigate()
+  const codigoDeSala = useSalaCodigoOptional()
 
-  const { estado, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, falhar } =
+  const { estado, resultado, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
     usePartidaTela({
       estadoInicial: !temAlvo ? 'falha' : estadoInicial,
       loader,
@@ -84,19 +87,64 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   )
   const [flash, setFlash] = useState<FlashFeedback | null>(null)
 
-  // ── Conexão do canal da partida (#156) ──
+  const estadoEmAndamento = temAlvo && estado === 'disponivel'
+  const emResultado = estado === 'resultado'
+  const emResultadoRef = useRef(emResultado)
+  useEffect(() => {
+    emResultadoRef.current = emResultado
+  }, [emResultado])
+
+  // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, conectar: reconectarSocket, desconectar } = usePartidaWebSocket({
     serverId,
     partidaId,
     onEvento: useCallback(
       (evento) => {
+        if (evento.type === 'PARTIDA_TERMINADA') {
+          // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante tela
+          // Limpa estados pendentes de interação: flash de erro não deve permanecer
+          setFlash(null)
+          partidaTerminada(evento.resultado)
+          return
+        }
         if (evento.type === 'ESTADO_DA_PARTIDA') {
-          if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
           aplicarSnapshotNoModelo(evento.snapshot)
+          if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
+            setFlash(null)
+            partidaTerminada(evento.snapshot.resultado)
+            return
+          }
+          if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
           return
         }
         if (evento.type === 'PARTIDA_INICIADA') {
           partidaEmAndamento()
+          return
+        }
+        // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
+        if (emResultadoRef.current) return
+        // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
+        // projetados no modelo e geram feedback mínimo sem recarregar página.
+        if (evento.type === 'ATAQUE_RESOLVIDO' || evento.type === 'RESGATE_REALIZADO') {
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          if (evento.type === 'ATAQUE_RESOLVIDO') {
+            // Feedback perceptível para ataque (issue #174): vermelho quando há
+            // penalidade (Baixa/Amedrontado/sanidade), branco quando a Proteção
+            // negou o ataque (protegidos>0 sem estadosAplicados), âmbar quando o
+            // gatilho dispara sem vítimas (saída com alcance vazio). A limpeza de
+            // monstros fora da iluminação é o mesmo LIMPEZA_APLICADA branco.
+            if (evento.estadosAplicados.length > 0) {
+              setFlash({ ...FLASH_VERMELHO })
+            } else if (evento.protegidos.length > 0) {
+              setFlash({ ...FLASH_BRANCO })
+            } else if (evento.atacantes.length > 0) {
+              setFlash({ ...FLASH_AMBAR })
+            } else {
+              setFlash({ ...FLASH_BRANCO })
+            }
+          } else {
+            setFlash({ ...FLASH_BRANCO })
+          }
           return
         }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
@@ -104,7 +152,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // abrem o tabuleiro sem snapshot — descreve a própria PR.
         despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
         // Feedback unificado: cobre eventos de tabuleiro, peão, turno (#118)
-        // e limpeza (#151). Branco para aprovação/seleção; vermelho para
+        // e limpeza (#151 — inclui limpeza de monstros removidos pela
+        // iluminação, issue #174). Branco para aprovação/seleção; vermelho para
         // ERRO_DO_TABULEIRO (motivo específico para pendências); âmbar para
         // FORA_DA_VEZ; TURNO_INICIADO/TURNO_ENCERRADO não geram flash (null).
         if (evento.type === 'CELULAS_ILUMINADAS') {
@@ -119,32 +168,42 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         )
         if (feedback !== null) setFlash({ ...feedback })
       },
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada],
     ),
     onAdmissao: useCallback(
       (evento) => {
         if (evento.estado === 'preparada') partidaPreparada()
-        else partidaEmAndamento()
+        else if (evento.estado === 'terminada') {
+          // ADMISSAO_ACEITA não carrega resultado (shared/protocol.ts); o
+          // snapshot ESTADO_DA_PARTIDA terminada que chega em seguida é a
+          // fonte da verdade — não adivinhar 'derrota' aqui (vitória viraria derrota)
+          return
+        } else partidaEmAndamento()
       },
       [partidaPreparada, partidaEmAndamento],
     ),
     onFalhaDeConexao: useCallback(() => falhar(), [falhar]),
   })
 
-  const estadoEmAndamento = temAlvo && estado === 'disponivel'
-
-  // Estado de exibição: exclusivamente do modelo quando disponível (sem mock)
-  const estadoExibicao = estadoEmAndamento ? estadoDeExibicaoDoModelo(modelo) : null
+  // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
+  const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
   const estadoInteracao: EstadoDoTabuleiroNoCliente | null =
     estadoEmAndamento ? modelo : null
 
-  // ── Injeção única de jogadorId (issue #91) ──
+  const voltarASala = useCallback(() => {
+    desconectar()
+    if (codigoDeSala) navigate(`/sala/${codigoDeSala}`)
+    else navigate('/salas/criar')
+  }, [desconectar, navigate, codigoDeSala])
+
+  // ── Injeção única de jogadorId (issue #91) — bloqueada após término ──
   const enviarComJogador = useCallback(
     (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
+      if (emResultado) return
       enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
-    [enviar, jogadorId],
+    [enviar, jogadorId, emResultado],
   )
 
   const onComando = useCallback(
@@ -158,8 +217,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Comandos de Peão passam pelo mesmo ponto de injeção ──
   const onComandoPeao = enviarComJogador
 
-  // ── Estado de interação dos peões (derivado do modelo) ──
+  // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
+  const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+
+  // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
+    if (emResultado) return null
     if (!temAlvo || !estadoEmAndamento) return null
     return {
       peoes: modelo.peoes,
@@ -167,18 +230,22 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       recebidasPendentes: modelo.recebidasPendentes,
       peaoSelecionadoId: modelo.peaoSelecionadoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
-      reserva: modelo.reserva,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
+      // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
+      // bandeja continua pública (as pendências vêm do broadcast sem filtro).
+      donoDoCiclo: minhaVez,
     }
-  }, [temAlvo, estadoEmAndamento, modelo])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez])
 
-  // ── Rejeição de peão (local) → flash vermelho ──
-  const onRejeicaoPeao = useCallback((feedback: FlashFeedback) => {
+  // ── Flash local (revisão #199): mesma fonte para o pull na bandeja; a
+  // rejeição de peão (vermelho/âmbar do roteador) segue o mesmo caminho. ──
+  const exibirFlash = useCallback((feedback: FlashFeedback) => {
     setFlash({ ...feedback })
   }, [])
+  const onRejeicaoPeao = exibirFlash
 
-  // ── Turnos (issue #118): vez, rodada, fase e peão do Jogador Ativo ──
-  const minhaVez = jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+  // ── Turnos (issue #118): rodada, fase e peão do Jogador Ativo (minhaVez
+  // derivada acima) — nulo em resultado ──
   const peaoProprioId =
     jogadorId !== null ? (modelo.peaoPorJogador[jogadorId] ?? null) : null
   const peaoAtivoId =
@@ -204,6 +271,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Chip Jogador Ativo (apelido/cor do snapshot, #156) ──
   const jogadorAtivoDados =
     modelo.jogadorAtivoId !== null ? modelo.jogadorPorId[modelo.jogadorAtivoId] ?? null : null
+
+  // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
+  // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
+  // do snapshot + deltas de ATAQUE/RESGATE, sem recarregar página.
+  const sanidadePorPeao: SanidadePorPeao = useMemo(() => {
+      const out: Record<string, { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
+      for (const [jogadorId, dados] of Object.entries(modelo.jogadorPorId)) {
+        const peaoId = modelo.peaoPorJogador[jogadorId]
+        if (peaoId) {
+          out[peaoId] = {
+            sanidade: dados.sanidade,
+            emBaixaIluminacao: dados.emBaixaIluminacao,
+            amedrontado: dados.amedrontado,
+          }
+        }
+      }
+      return out
+    }, [modelo.jogadorPorId, modelo.peaoPorJogador])
 
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao
@@ -272,12 +357,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onComando={onComando}
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}
+        onFlash={exibirFlash}
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
+        sanidadePorPeao={sanidadePorPeao}
       />
-      <PartidaOverlays estado={estado} onRetry={tentarNovamenteComConexao} />
+      <PartidaOverlays estado={estado} resultado={resultado} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       <FlashOverlay flash={flash} onClear={limparFlash} />
-      {estadoEmAndamento && modelo.rodada !== null ? (
+      {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
         <div
           data-testid="indicador-rodada"
           className="pointer-events-none absolute right-4 top-4 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
@@ -296,14 +383,59 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           Caixa: {modelo.pecasRestantesNaCaixa}
         </div>
       ) : null}
-      {estadoEmAndamento && jogadorAtivoDados ? (
+      {(estadoEmAndamento || emResultado) && jogadorAtivoDados ? (
         <div
           data-testid="chip-jogador-ativo"
           data-cor={jogadorAtivoDados.cor}
+          data-sanidade={String(jogadorAtivoDados.sanidade)}
+          data-em-baixa={jogadorAtivoDados.emBaixaIluminacao ? 'true' : undefined}
+          data-amedrontado={jogadorAtivoDados.amedrontado ? 'true' : undefined}
           className="pointer-events-none absolute left-4 top-4 z-30 flex items-center gap-2 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-100"
           style={{ borderLeft: `4px solid ${HEX_COR_PEAO[jogadorAtivoDados.cor] ?? '#fff'}` }}
         >
           <span>{jogadorAtivoDados.apelido}</span>
+          <span data-testid="chip-sanidade" className="text-xs text-zinc-300">
+            {jogadorAtivoDados.sanidade}/3
+          </span>
+          {jogadorAtivoDados.emBaixaIluminacao ? (
+            <span data-testid="chip-baixa-iluminacao" className="text-xs text-amber-300" title="Baixa Iluminação">
+              ◐
+            </span>
+          ) : null}
+          {jogadorAtivoDados.amedrontado ? (
+            <span data-testid="chip-amedrontado" className="text-xs text-red-400" title="Amedrontado">
+              ⚠
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {/* Percepção mínima de todos os jogadores (issue #174): sem controles
+          completos — apenas 4 chips com sanidade/estados no Ambiente de Jogo.
+          O chip do Jogador Ativo acima é o destaque da vez; esta lista é a
+          visão “cada Jogador” exigida no critério, sem barras/painéis. */}
+      {(estadoEmAndamento || emResultado) && Object.keys(modelo.jogadorPorId).length > 0 ? (
+        <div
+          data-testid="indicadores-sanidade"
+          className="pointer-events-none absolute left-4 top-16 z-30 flex flex-col gap-1"
+        >
+          {Object.entries(modelo.jogadorPorId).map(([jid, dados]) => (
+            <div
+              key={jid}
+              data-testid="indicador-sanidade-jogador"
+              data-jogador-id={jid}
+              data-sanidade={String(dados.sanidade)}
+              data-em-baixa={dados.emBaixaIluminacao ? 'true' : undefined}
+              data-amedrontado={dados.amedrontado ? 'true' : undefined}
+              data-cor={dados.cor}
+              className="flex items-center gap-2 rounded bg-zinc-900/70 px-2 py-0.5 text-xs text-zinc-200"
+              style={{ borderLeft: `3px solid ${HEX_COR_PEAO[dados.cor] ?? '#fff'}` }}
+            >
+              <span>{dados.apelido}</span>
+              <span>{dados.sanidade}/3</span>
+              {dados.emBaixaIluminacao ? <span title="Baixa Iluminação">◐</span> : null}
+              {dados.amedrontado ? <span title="Amedrontado">⚠</span> : null}
+            </div>
+          ))}
         </div>
       ) : null}
       {estadoEmAndamento ? (

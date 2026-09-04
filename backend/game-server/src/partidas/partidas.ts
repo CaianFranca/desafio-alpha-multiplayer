@@ -50,11 +50,14 @@ export async function criarPartidaPreparada(
   // recém-criada para não deixar partida órfã sem estado (que responderia
   // ESTADO_INDISPONIVEL para sempre).
   try {
+    // Seed aleatória via WebCrypto (mesma global do randomUUID acima).
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
     await inicializarEstadoDaPartida(
       redis,
       partida.partidaId,
       partidaPreparadaTtlSegundos,
       oferta.roster.map((membro) => membro.jogadorId),
+      seed,
     );
   } catch (erro) {
     await redis.del(chaveDaPartida(partida.partidaId));

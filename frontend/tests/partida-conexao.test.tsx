@@ -38,10 +38,10 @@ function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): Es
       pecasRestantesNaCaixa: 83,
     },
     jogadores: [
-      { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: true },
-      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true },
-      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true },
-      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true },
+      { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
     ],
     jogadorAtivoId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
     rodada: 1,
@@ -119,7 +119,8 @@ describe('partida conectada ao game-server (issue #85)', () => {
   it('evento de posicionamento atualiza o espelho DOM sem recarregar', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
-    expect(screen.getAllByTestId('reserva-peca')).toHaveLength(22)
+    // Issue #143: a mesa nasce com as 4 Peças Iniciais (seed determinístico).
+    expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(4)
     expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(0)
 
     act(() =>
@@ -132,7 +133,8 @@ describe('partida conectada ao game-server (issue #85)', () => {
     )
 
     expect(await screen.findAllByTestId('peca-posicionada')).toHaveLength(1)
-    expect(screen.getAllByTestId('reserva-peca')).toHaveLength(21)
+    // A inicial encaixada sai da mesa sem recarregar.
+    expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(3)
   })
 
   it('rotação via botão DOM envia GIRAR_PECA para a peça em manipulação ao WS', async () => {
@@ -657,10 +659,10 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
         pecasRestantesNaCaixa: 57,
       },
       jogadores: [
-        { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false },
-        { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true },
-        { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true },
-        { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true },
+        { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
       ],
       jogadorAtivoId: 'jogador-2',
       rodada: 2,
@@ -682,17 +684,67 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     expect(peaoVermelho?.getAttribute('data-ativo')).toBe('true')
   })
 
+  it('ESTADO_DA_PARTIDA com iniciais reconstrói a mesa sem recarregar (issue #143)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+
+    // A mesa local nasce com o seed (4 iniciais); o snapshot é a autoridade:
+    // inicial-1 já foi posicionada e as demais carregam orientação própria.
+    expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(4)
+
+    const snapshot = criarSnapshotBase({
+      tabuleiro: {
+        posicionadas: [
+          { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+        ],
+        iniciais: [
+          { pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 },
+          { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 90 },
+          { pecaId: 'inicial-4', tipo: 'inicial', orientacao: 0 },
+        ],
+        peoes: [
+          { peaoId: 'peao-branco', cor: 'branco', pecaId: 'inicial-1' },
+          { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: null },
+          { peaoId: 'peao-azul', cor: 'azul', pecaId: null },
+          { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+        ],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+        pecasRestantesNaCaixa: 83,
+      },
+    })
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
+
+    // Reconstrução pela mesma conexão: sem socket novo, sem reload.
+    const iniciais = await screen.findAllByTestId('mesa-peca-inicial')
+    expect(iniciais.map((el) => el.getAttribute('data-peca-id'))).toEqual([
+      'inicial-2',
+      'inicial-3',
+      'inicial-4',
+    ])
+    expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(1)
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
   it('TURNO_INICIADO atualiza chip via snapshot jogadores + TURNO', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     const snapshot = criarSnapshotBase()
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
-    expect((await screen.findByTestId('chip-jogador-ativo')).textContent).toBe('JogadorTeste')
+    const chip = await screen.findByTestId('chip-jogador-ativo')
+    expect(chip).toHaveTextContent('JogadorTeste')
+    expect(chip).toHaveAttribute('data-sanidade', '3')
+    expect(screen.getByTestId('chip-sanidade')).toHaveTextContent('3/3')
 
     act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
     // TURNO_INICIADO muda jogadorAtivoId mas chip lê do snapshot map + estado atualizado via evento
     // Como nosso snapshot já tinha jogador-2? Actually snapshot had branco active; TURNO muda para vermelho
     // O chip deve refletir Ana após o evento
-    await waitFor(() => expect(screen.getByTestId('chip-jogador-ativo')).toHaveTextContent('Ana'))
+    await waitFor(() => {
+      const chipAna = screen.getByTestId('chip-jogador-ativo')
+      expect(chipAna).toHaveTextContent('Ana')
+      expect(chipAna).toHaveAttribute('data-sanidade', '3')
+    })
   })
 
   it('sem TURNO nem snapshot chip não aparece em aguardando', async () => {

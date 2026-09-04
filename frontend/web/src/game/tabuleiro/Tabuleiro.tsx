@@ -12,7 +12,6 @@ import type { EstadoInteracaoPeoes } from './interacaoPeoes'
 import { despacharCliqueDeCelula } from './interacaoPeoes'
 import type {
   PeaoComandoDoCliente,
-  RecebidaId,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
 
@@ -48,10 +47,12 @@ interface TabuleiroProps {
   onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (destaque, #91). */
   alvosPendentesSet?: ReadonlySet<string>
-  /** Chave da célula-alvo da pendência FOCADA (destaque distinto, #91). */
-  alvoFocadoKey?: string | null
-  /** Foco de pendência sem tipo (foco local do AmbienteDeJogo). */
-  aoFocarPendencia?: (recebidaId: RecebidaId) => void
+  /**
+   * Chaves das células que são vagas disponíveis para a pendência corrente
+   * (destaque de escolha de vaga, issue #143). Derivado uma vez no pai —
+   * mesma fonte do espelho DOM.
+   */
+  vagasSet?: ReadonlySet<string>
 }
 
 export function Tabuleiro({
@@ -68,8 +69,7 @@ export function Tabuleiro({
   onComandoPeao,
   onRejeicaoPeao,
   alvosPendentesSet = new Set<string>(),
-  alvoFocadoKey = null,
-  aoFocarPendencia,
+  vagasSet = new Set<string>(),
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
@@ -101,10 +101,10 @@ export function Tabuleiro({
           (estadoInteracao.pecaSelecionadaId === peca.pecaId ||
             estadoInteracao.pecaEmManipulacaoId === peca.pecaId)
         const peao = peoesPorChave.get(chave) ?? null
-        // Destaques de pendência (#91): alvos ativos aquecidos; o alvo da
-        // pendência FOCADA ganha tom distinto (destinoValido mantém o cursor).
+        // Destaques do ciclo: alvos de pendência com vaga escolhida (#91) e
+        // vagas disponíveis para a escolha sequencial (#143) aquecem o plano.
         const alvoPendente = alvosPendentesSet.has(chave)
-        const focada = chave === alvoFocadoKey
+        const vagaDisponivel = vagasSet.has(chave)
         // Iluminada (issue #151): espelho do estado compartilhado; os destaques
         // de interação acima têm prioridade maior no plano da célula.
         const iluminada = iluminadasSet.has(chave)
@@ -116,12 +116,11 @@ export function Tabuleiro({
             cursor={cursor}
             pecaDestacada={destacada}
             onClick={() => {
-              // Roteador do ciclo (#91): foco de pendência, comando do ciclo
-              // (peão ou tabuleiro) ou fallback ST-09 (sem ciclo ativo).
+              // Roteador do ciclo (#91): comando do ciclo (peão ou tabuleiro)
+              // ou fallback ST-09 (sem ciclo ativo).
               despacharCliqueDeCelula(estadoPeoes, estadoInteracao, celula, {
                 onComando,
                 onComandoPeao,
-                onFocarPendencia: aoFocarPendencia,
                 onRejeicao: onRejeicaoPeao
                   ? (rejeicao) => onRejeicaoPeao(rejeicao.feedback)
                   : undefined,
@@ -130,7 +129,7 @@ export function Tabuleiro({
             peao={peao}
             destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}
-            celulaFocada={focada}
+            vagaDisponivel={vagaDisponivel}
             iluminada={iluminada}
             peaoSelecionadoId={peaoSelecionadoId}
             peaoAtivoId={peaoAtivoId}

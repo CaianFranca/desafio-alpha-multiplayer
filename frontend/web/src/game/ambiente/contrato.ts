@@ -4,7 +4,7 @@
  * ORIGEM DO ESPAÇO: [0, 0, 0] é o CENTRO DO PLANO SUPERIOR da Mesa.
  * O plano superior fica em y = 0; a espessura da Mesa se estende para
  * y negativo. Todo posicionamento futuro (grade 7x7 do ADR-0004, peças,
- * reserva) deve se apoiar nesse plano, com +x para a direita, +z para
+ * caixa) deve se apoiar nesse plano, com +x para a direita, +z para
  * "baixo" na tela (em direção à câmera) e +y para cima.
  *
  * O módulo é puro: sem three.js, sem DOM — testável isoladamente.
@@ -12,8 +12,8 @@
 
 /**
  * Dimensões da Mesa (quadrada): dimensionada para acomodar a grade 7x7 do
- * ADR-0004 mais a reserva dos jogadores. Ajustável antes da ST-10; a origem
- * no centro do plano superior não muda.
+ * ADR-0004 mais a zona da Caixa dos jogadores. Ajustável antes da ST-10; a
+ * origem no centro do plano superior não muda.
  */
 export const LARGURA_MESA = 20
 export const PROFUNDIDADE_MESA = 20

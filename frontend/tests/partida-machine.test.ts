@@ -16,6 +16,7 @@ describe('partidaTelaMachine', () => {
     expect(isEstadoDaTela('aguardando')).toBe(true)
     expect(isEstadoDaTela('disponivel')).toBe(true)
     expect(isEstadoDaTela('falha')).toBe(true)
+    expect(isEstadoDaTela('resultado')).toBe(true)
     expect(isEstadoDaTela('invalido')).toBe(false)
     expect(isEstadoDaTela(null)).toBe(false)
     expect(isEstadoDaTela(undefined)).toBe(false)
@@ -47,7 +48,7 @@ describe('partidaTelaMachine', () => {
   })
 
   it('forcar transita para estado alvo idempotente', () => {
-    const estados: EstadoDaTela[] = ['carregando', 'aguardando', 'disponivel', 'falha']
+    const estados: EstadoDaTela[] = ['carregando', 'aguardando', 'disponivel', 'falha', 'resultado']
     for (const alvo of estados) {
       for (const origem of estados) {
         expect(transicao(origem, { type: 'forcar', estado: alvo })).toBe(alvo)
@@ -58,5 +59,17 @@ describe('partidaTelaMachine', () => {
   it('forcar é idempotente quando já no mesmo estado', () => {
     expect(transicao('carregando', { type: 'forcar', estado: 'carregando' })).toBe('carregando')
     expect(transicao('falha', { type: 'forcar', estado: 'falha' })).toBe('falha')
+    expect(transicao('resultado', { type: 'forcar', estado: 'resultado' })).toBe('resultado')
+  })
+
+  it('partidaTerminada => resultado a partir de qualquer estado', () => {
+    expect(transicao('disponivel', { type: 'partidaTerminada', resultado: 'vitoria' })).toBe('resultado')
+    expect(transicao('disponivel', { type: 'partidaTerminada', resultado: 'derrota' })).toBe('resultado')
+    expect(transicao('aguardando', { type: 'partidaTerminada', resultado: 'vitoria' })).toBe('resultado')
+    expect(transicao('carregando', { type: 'partidaTerminada', resultado: 'derrota' })).toBe('resultado')
+  })
+
+  it('tentarNovamente em resultado permanece em resultado', () => {
+    expect(transicao('resultado', { type: 'tentarNovamente' })).toBe('resultado')
   })
 })

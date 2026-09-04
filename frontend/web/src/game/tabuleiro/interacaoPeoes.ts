@@ -1,6 +1,7 @@
 /**
  * Interação pura do ciclo do Peão (issue #92 — ST-10; roteador de células e
- * despacho unificado da cena/espelho na issue #91).
+ * despacho unificado da cena/espelho na issue #91; fluxo da Caixa sobre a
+ * mesa e escolha de vaga na issue #143).
  *
  * Módulo 100% puro: mapeia cliques simples → comandos wire (UPPER_SNAKE em
  * `@flicker/shared`) e eventos de servidor → feedback visual (flash branco /
@@ -8,15 +9,15 @@
  * chamador (extraído do store/WS).
  *
  * Contrato wire ↔ domínio documentado em `packages/shared/src/peoes.ts`:
- *   shared SELECIONAR_PEAO             ↔ engine selecionar_peao (idempotente)
- *   shared POSICIONAR_PEAO             ↔ engine posicionar_peao (1º posicionamento)
- *   shared ESCOLHER_TIPO_DA_PECA_RECEBIDA ↔ engine escolher_tipo_da_peca_recebida
- *   shared MOVER_PEAO                  ↔ engine mover_peao (vizinha conectada)
- *   shared PERMANECER                  ↔ engine permanecer (próprio peão/Peça sob ele)
+ *   shared SELECIONAR_PEAO                  ↔ engine selecionar_peao (idempotente)
+ *   shared POSICIONAR_PEAO                  ↔ engine posicionar_peao (1º posicionamento)
+ *   shared ESCOLHER_VAGA_DA_PECA_RECEBIDA   ↔ engine escolher_vaga_da_peca_recebida (#138)
+ *   shared MOVER_PEAO                       ↔ engine mover_peao (vizinha conectada)
+ *   shared PERMANECER                       ↔ engine permanecer (próprio peão/Peça sob ele)
  *   O encaixe da Recebida reusa o contrato do Tabuleiro: GIRAR_PECA /
- *   POSICIONAR_PECA com o pecaId da Recebida (o pecaId chega no wire via
- *   TIPO_DA_PECA_RECEBIDA_ESCOLHIDO e fica em pecaSelecionadaId) e a
- *   célula-alvo fixada no Recebimento.
+ *   POSICIONAR_PECA com o pecaId da Peça sorteada (que chega no wire em
+ *   RECEBIMENTO_GERADO e fica em pecaSelecionadaId após a escolha da vaga)
+ *   e a célula-alvo derivada da vaga escolhida.
  *
  * Bloqueio local de pendências: com Recebidas não posicionadas, não emite
  * comando — clicar em outro Peão retorna rejeição (FLASH_VERMELHO,
@@ -27,6 +28,13 @@
  * reservado à câmera via `deveSuprimirCliquePorArrasto` (limiar 6px, ver
  * cameraLimites.ts).
  *
+ * Atribuição de vaga (decisão da issue #143 ajustada na revisão da PR #199):
+ * o jogador PUXA a peça corrente clicando na bandeja (estado local) e só
+ * então o clique numa célula vazia vizinha disponível atribui a vaga à peça
+ * PUXADA — não há mais "primeira pendência sem vaga" automática. Sem peça
+ * puxada, o clique de vaga é silencioso (padrão #91: alvos inválidos não
+ * reagem). Puxar é restrito ao dono do ciclo (espectador: clique mudo).
+ *
  * Guard pós-confirmação (AC3 — review #165): com `posicaoConfirmadaNoTurno`,
  * os alvos que seriam válidos (permanecer/mover) retornam rejeição âmbar com
  * motivo `posicao_confirmada` — espelhando o FORA_DA_VEZ do servidor; alvos
@@ -35,7 +43,7 @@
 
 import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
 import type { FlashFeedback, EstadoInteracaoTabuleiro } from './interacao'
-import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada, mapearCliqueNaReserva } from './interacao'
+import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao'
 import {
   bordasAbertas,
   chaveCelula,
@@ -43,7 +51,7 @@ import {
   encontrarPecaNaCelula,
   estaDentroDaGrade,
 } from './contrato'
-import type { Celula, PeaoDaExibicao, PecaPosicionada, TipoDaPeca } from './contrato'
+import type { Celula, PeaoDaExibicao, PecaPosicionada } from './contrato'
 import type {
   BordaCardinal,
   ErroDoTabuleiroEvento,
@@ -53,64 +61,56 @@ import type {
   PeaoComandoDoCliente,
   PeaoEventoDoServidor,
   PendenciaDaPecaSorteada,
-  PendenciaDeRecebimento,
   PecaGiradaEvento,
   PecaPosicionadaEvento,
   PecaSelecionadaEvento,
   PosicaoConfirmadaEvento,
-  RecebidaId,
   SentidoDeRotacao,
   TabuleiroComandoDoCliente,
-  TipoDePecaDeCaminho,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
 } from '@flicker/shared'
 
 // ── Estado mínimo para mapear interações ──
-// Espelha EstadoDoTabuleiro do engine (peões/ciclo da ST-10) desacoplado:
-// só o necessário para a interação; `reserva` carrega o tipo disponível para
-// a escolha das Recebidas e `pecaSelecionadaId` é a Recebida em foco (pecaId
-// chega no wire via TIPO_DA_PECA_RECEBIDA_ESCOLHIDO).
+// Espelha EstadoDoTabuleiro do engine (peões/ciclo da ST-10 na forma #138)
+// desacoplado: só o necessário para a interação; `pecaSelecionadaId` é a
+// Peça sorteada em foco (selecionada pela escolha da vaga).
 
 /**
- * Pendência no cliente (issue #91): campos do wire + campos client-side.
- * Forma LEGADA (ST-10): `pecaId` é preenchido pelo evento
- * TIPO_DA_PECA_RECEBIDA_ESCOLHIDO até o encaixe. Forma NOVA (#138): o wire já
- * traz o pecaId da peça sorteada e a celulaAlvo pode ser null (vaga ainda não
- * escolhida). `orientacao` é metadado client-side do GIRAR_PECA em foco — o
- * snapshot não o popula (o cliente ignora fora da janela de manipulação). A
- * pendência só sai da lista no encaixe (PECA_POSICIONADA na célula-alvo).
+ * Pendência no cliente: a forma sorteada da #138 (o wire já traz o pecaId da
+ * peça sorteada da Caixa; a vaga e a célula-alvo podem ser nulas até
+ * ESCOLHER_VAGA_DA_PECA_RECEBIDA). `orientacao` é metadado client-side do
+ * GIRAR_PECA em foco — o snapshot a popula na reconexão. A pendência só sai
+ * da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
-export type PendenciaNoCliente =
-  // Legado ST-10 (@deprecated): borda geradora e célula-alvo fixas na criação,
-  // com pecaId client-side preenchido por TIPO_DA_PECA_RECEBIDA_ESCOLHIDO.
-  | (PendenciaDeRecebimento & {
-      readonly pecaId: string | null
-      readonly orientacao?: Orientacao
-    })
-  // Novo (#138): a peça já vem sorteada da Caixa (pecaId + tipo + vaga) e a
-  // célula-alvo deriva da vaga — pode estar null até ESCOLHER_VAGA_DA_PECA_RECEBIDA.
-  | (PendenciaDaPecaSorteada & { readonly orientacao?: Orientacao })
-
-/** Type guard: forma nova (#138) — só ela declara o campo `vaga`. */
-export function ehPendenciaSorteada(
-  pendencia: PendenciaNoCliente,
-): pendencia is PendenciaDaPecaSorteada & { readonly orientacao?: Orientacao } {
-  return 'vaga' in pendencia
+export interface PendenciaNoCliente extends PendenciaDaPecaSorteada {
+  readonly orientacao?: Orientacao
 }
 
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]
   readonly posicionadas: readonly PecaPosicionada[]
-  /** Recebidas aguardando escolha de tipo e encaixe (bloqueiam a seleção de outro Peão). */
+  /** Recebidas aguardando escolha de vaga e encaixe (bloqueiam a seleção de outro Peão). */
   readonly recebidasPendentes: readonly PendenciaNoCliente[]
   readonly peaoSelecionadoId: string | null
-  /** Peça em sequência: após ESCOLHER_TIPO, o pecaId da Recebida em foco. */
+  /** Peça em foco: após a escolha da vaga (#138), o pecaId da Recebida sorteada. */
   readonly pecaSelecionadaId: string | null
-  /** Tipos de Peça de Caminho disponíveis para a escolha das Recebidas. */
-  readonly reserva: readonly { readonly pecaId: string; readonly tipo: TipoDaPeca }[]
   /** A posição do Peão do Jogador Ativo já foi confirmada neste turno (POSICAO_CONFIRMADA). */
   readonly posicaoConfirmadaNoTurno: boolean
+  /**
+   * Recebida "puxada" da bandeja (fluxo aprovado na revisão #199 da issue
+   * #143): estado visual LOCAL do jogador — fora do modelo autoritativo, no
+   * padrão `peaoSelecionadoIdLocal` (AmbienteDeJogo). Só com a corrente
+   * puxada o clique numa célula de vaga emite ESCOLHER_VAGA para ela.
+   */
+  readonly recebidaPuxadaId?: string | null
+  /**
+   * O jogador local é o dono do ciclo (`jogadorAtivoId === jogadorIdLocal`).
+   * Espectador (`false`) não puxa: o clique na bandeja fica silencioso, mas a
+   * bandeja CONTINUA pública (pendências vêm do broadcast). `undefined` =
+   * gate não avaliado (unidades puras sem identidade local).
+   */
+  readonly donoDoCiclo?: boolean
 }
 
 // ── Resultado de clique/ação do ciclo ──
@@ -148,23 +148,13 @@ const REJEICAO_POSICAO_CONFIRMADA: ResultadoDeInteracaoDePeao & object = {
   },
 }
 
-// ── Helpers de pendências / reserva ──
+// ── Helpers de pendências ──
 
 export function haRecebidasPendentes(
   estado: Pick<EstadoInteracaoPeoes, 'recebidasPendentes'>,
 ): boolean {
   return estado.recebidasPendentes.length > 0
 }
-
-/** Tipos de caminho (reta|T|cruz) com peça disponível na Reserva, em ordem canônica. */
-export function tiposDeCaminhoDisponiveisNaReserva(
-  reserva: readonly { readonly tipo: TipoDaPeca }[],
-): readonly TipoDePecaDeCaminho[] {
-  const presentes = new Set<TipoDaPeca>(reserva.map((p) => p.tipo))
-  return TIPOS_DE_CAMINHO.filter((tipo) => presentes.has(tipo))
-}
-
-const TIPOS_DE_CAMINHO: readonly TipoDePecaDeCaminho[] = ['reta', 'T', 'cruz']
 
 // ── Mapeamento clique → comando ──
 
@@ -219,26 +209,6 @@ export function mapearCliqueNaPecaInicial(
   return { type: 'POSICIONAR_PEAO', peaoId, celula }
 }
 
-/**
- * Escolha do tipo de cada Recebida pendente → ESCOLHER_TIPO_DA_PECA_RECEBIDA (legado ST-10).
- * @deprecated #138 removeu escolha de tipo; mantido até limpeza #140/#143.
- */
-export function mapearEscolhaDeTipoDaRecebida(
-  estado: EstadoInteracaoPeoes,
-  recebidaId: string,
-  tipoDaPeca: TipoDePecaDeCaminho,
-): PeaoComandoDoCliente | null {
-  if (estado.peaoSelecionadoId === null) return null
-  const pendente = estado.recebidasPendentes.some(
-    (r) => r.recebidaId === recebidaId,
-  )
-  if (!pendente) return null
-  if (!tiposDeCaminhoDisponiveisNaReserva(estado.reserva).includes(tipoDaPeca)) {
-    return null
-  }
-  return { type: 'ESCOLHER_TIPO_DA_PECA_RECEBIDA', recebidaId, tipoDaPeca }
-}
-
 const DESLOCAMENTO_DA_BORDA: Record<BordaCardinal, Celula> = {
   norte: { linha: -1, coluna: 0 },
   leste: { linha: 0, coluna: 1 },
@@ -253,15 +223,6 @@ function celulaVizinhaNaBorda(celula: Celula, borda: BordaCardinal): Celula | nu
   return vizinha
 }
 
-/**
- * Vaga da pendência (forma nova #138): `null` até a escolha, `BordaCardinal`
- * depois. A forma legada (ST-10, @deprecated) não carrega o campo — `undefined`
- * distingue "sem vaga" (#138) de "forma legada" sem interpretar o campo.
- */
-export function getVaga(pendencia: PendenciaNoCliente): BordaCardinal | null | undefined {
-  return 'vaga' in pendencia ? pendencia.vaga : undefined
-}
-
 export function vagasDisponiveisDoPeao(
   estado: EstadoInteracaoPeoes,
 ): { borda: BordaCardinal; celula: Celula }[] {
@@ -274,8 +235,8 @@ export function vagasDisponiveisDoPeao(
   const bordas = bordasAbertas(origem)
   const jaEscolhidas = new Set<BordaCardinal>(
     estado.recebidasPendentes
-      .map(getVaga)
-      .filter((v): v is BordaCardinal => v !== null && v !== undefined),
+      .map((r) => r.vaga)
+      .filter((v): v is BordaCardinal => v !== null),
   )
   const vagas: { borda: BordaCardinal; celula: Celula }[] = []
   for (const borda of bordas) {
@@ -297,7 +258,7 @@ export function mapearEscolhaDeVagaDaRecebida(
     (r) => r.recebidaId === recebidaId,
   )
   if (!pendente) return null
-  if (getVaga(pendente) !== null) return null
+  if (pendente.vaga !== null) return null
   const vagaValida = vagasDisponiveisDoPeao(estado).some((v) => v.borda === borda)
   if (!vagaValida) return null
   return {
@@ -308,9 +269,105 @@ export function mapearEscolhaDeVagaDaRecebida(
 }
 
 /**
- * Giro da Recebida em foco (pecaId em pecaSelecionadaId, setado pela escolha
- * do tipo — ST-09) → GIRAR_PECA, orientação livre em passos de 90°. Sem
- * Recebida em foco → null.
+ * Resultado do clique na peça corrente da bandeja: o `recebidaId` a ser
+ * puxado (estado LOCAL do chamador — nenhum comando de wire; o pull não é
+ * regra do engine, é gesto de interação do cliente).
+ */
+export interface PuxadaDaBandeja {
+  readonly recebidaId: string
+}
+
+/**
+ * Clique na peça corrente da bandeja → "puxar" (fluxo aprovado na revisão
+ * #199 da issue #143). Regras:
+ *   - só a CORRENTE (primeira pendência sem vaga) é puxável;
+ *   - espectador (`donoDoCiclo === false`) não puxa — clique silencioso, a
+ *     bandeja continua pública (a corrente é exibida a todos);
+ *   - re-clique na já puxada é no-op (null), sem emissão repetida de flash;
+ *   - sem pendências correntes → null.
+ * O consumo do pull: com a vaga escolhida o engine move a peça para
+ * `pecaSelecionadaId` e a próxima corrente exige novo pull.
+ */
+export function mapearCliqueNaPecaDaBandeja(
+  estado: EstadoInteracaoPeoes,
+  puxadaAtual: string | null = estado.recebidaPuxadaId ?? null,
+): PuxadaDaBandeja | null {
+  if (estado.donoDoCiclo === false) return null
+  const corrente = estado.recebidasPendentes.find((r) => r.vaga === null)
+  if (corrente === undefined) return null
+  if (puxadaAtual === corrente.recebidaId) return null
+  return { recebidaId: corrente.recebidaId }
+}
+
+/**
+ * A corrente da bandeja está puxada (pull vigente)? Derivação do estado
+ * LOCAL, fora do modelo autoritativo — fonte única do destaque emissivo
+ * (Caixa), do destaque de vaga (AmbienteDeJogo) e do `data-puxada` do
+ * espelho DOM. Mesma derivação de corrente do mapeador de pull (primeira
+ * pendência sem vaga); pull antigo (vaga escolhida ou pendência encaixada)
+ * não conta como vigente.
+ */
+export function puxadaVigenteNaBandeja(estado: EstadoInteracaoPeoes): boolean {
+  const corrente = estado.recebidasPendentes.find((r) => r.vaga === null)
+  return corrente !== undefined && estado.recebidaPuxadaId === corrente.recebidaId
+}
+
+export interface DespachoDeCliqueNaBandeja {
+  /** Pull aceito: o chamador (React) persiste o id como estado visual local. */
+  onPuxar?: (recebidaId: string) => void
+  /**
+   * Feedback local do pull (FLASH_BRANCO). O destaque emissivo na peça é
+   * derivado do pull (`destacada` no padrão PecaPlaceholder), não daqui.
+   */
+  onFeedback?: (feedback: FlashFeedback) => void
+}
+
+/**
+ * Despacha o clique na peça da bandeja pelo MESMO mapeador puro (padrão
+ * `despacharCliqueDeCelula`): cena (Caixa.tsx) e espelho DOM
+ * (TabuleiroMirrorDOM.tsx) compartilham esta função — fonte única da regra
+ * de pull. Estado nulo ou clique inválido: nenhuma reação.
+ */
+export function despacharCliqueNaPecaDaBandeja(
+  estadoPeoes: EstadoInteracaoPeoes | null,
+  despacho: DespachoDeCliqueNaBandeja,
+): void {
+  if (estadoPeoes === null) return
+  const puxada = mapearCliqueNaPecaDaBandeja(estadoPeoes)
+  if (puxada === null) return
+  despacho.onPuxar?.(puxada.recebidaId)
+  despacho.onFeedback?.(FLASH_BRANCO)
+}
+
+// ── Peça operável do ciclo (guard de coerência — revisão #199, JF532 5.3) ──
+
+/**
+ * Recebida sobre a qual girar/encaixar podem agir: o `pecaId` em foco deve
+ * pertencer a uma pendência real do ciclo, nunca a uma peça divergente.
+ * Regra fina que mantém o fluxo puxar→vaga→encaixe funcional:
+ *   - pendência COM vaga: após ESCOLHER_VAGA o engine move a peça para
+ *     `pecaSelecionadaId` e o pull pode já ter sido consumido (ou substituído
+ *     pela próxima corrente) — o encaixe/giro seguem a pendência travada na
+ *     vaga, não o pull;
+ *   - pendência SEM vaga: só é operável enquanto for a peça PUXADA da bandeja
+ *     (o pull é o único modo de uma peça sem vaga entrar no fluxo).
+ */
+function recebidaOperavel(
+  estado: EstadoInteracaoPeoes,
+  pecaId: string,
+): PendenciaNoCliente | null {
+  const pendencia = estado.recebidasPendentes.find((r) => r.pecaId === pecaId)
+  if (pendencia === undefined) return null
+  if (pendencia.vaga !== null) return pendencia
+  return estado.recebidaPuxadaId === pendencia.recebidaId ? pendencia : null
+}
+
+/**
+ * Giro da Recebida em foco → GIRAR_PECA, orientação livre em passos de 90°.
+ * Guard de coerência (#199): só opera sobre a Recebida operável do ciclo —
+ * pendência com vaga escolhida (peça movida para `pecaSelecionadaId` pelo
+ * engine após a escolha) ou corrente puxada sem vaga. Peça em foco divergente
+ * (fora do ciclo ou pendência intocada) → null.
  */
 export function mapearGirarRecebida(
   estado: EstadoInteracaoPeoes,
@@ -318,16 +375,18 @@ export function mapearGirarRecebida(
 ): TabuleiroComandoDoCliente | null {
   const pecaId = estado.pecaSelecionadaId
   if (pecaId === null) return null
+  if (recebidaOperavel(estado, pecaId) === null) return null
   return { type: 'GIRAR_PECA', pecaId, sentido }
 }
 
 /**
  * Encaixe da Recebida em foco → POSICIONAR_PECA para a célula clicada. Só a
- * célula-alvo fixada no Recebimento (a vizinha correspondente à borda
- * geradora) aceita o encaixe; célula que não é alvo de nenhuma Recebida
- * pendente não reage (null). Como a pendência não carrega o pecaId da
- * Recebida, a correspondência fina entre foco e alvo é validada pelo
- * servidor (PECA_FORA_DO_ALVO). Sem Recebida em foco → null.
+ * célula-alvo derivada da vaga escolhida (a vizinha correspondente à borda
+ * aberta da Peça sob o Peão) aceita o encaixe; célula que não é alvo de
+ * nenhuma Recebida pendente não reage (null). Guard de coerência (#199): o
+ * alvo precisa pertencer à PRÓPRIA peça em foco (match pecaId↔célula-alvo da
+ * pendência) — alvo de outra pendência com foco divergente fica silencioso.
+ * Sem Recebida em foco → null.
  */
 export function mapearPosicionarRecebida(
   estado: EstadoInteracaoPeoes,
@@ -335,14 +394,15 @@ export function mapearPosicionarRecebida(
 ): TabuleiroComandoDoCliente | null {
   const pecaId = estado.pecaSelecionadaId
   if (pecaId === null) return null
-  const ehAlvoDePendencia = estado.recebidasPendentes.some(
-    (pendencia) =>
-      // Forma nova (#138): célula-alvo ainda indefinida (null) até o sorteio
-      // fixar a vaga — não é encaixável por esta rota legada.
-      pendencia.celulaAlvo !== null &&
-      chaveCelula(pendencia.celulaAlvo) === chaveCelula(celula),
+  const pendencia = estado.recebidasPendentes.find(
+    (r) =>
+      r.pecaId === pecaId &&
+      // Célula-alvo só existe após a escolha da vaga (#138) — sem vaga, a
+      // pendência ainda não é encaixável por esta rota.
+      r.celulaAlvo !== null &&
+      chaveCelula(r.celulaAlvo) === chaveCelula(celula),
   )
-  if (!ehAlvoDePendencia) return null
+  if (pendencia === undefined) return null
   return { type: 'POSICIONAR_PECA', pecaId, celula }
 }
 
@@ -399,14 +459,12 @@ export function mapearMovimentacao(
 /**
  * Resultado do clique em célula com o ciclo ativo: comando do ciclo (peão ou
  * tabuleiro — POSICIONAR_PECA da Recebida), rejeição local com feedback
- * (guard pós-confirmação, AC3), foco de uma pendência sem tipo, ou null
- * (alvo inválido não reage; sem ciclo ativo o chamador aplica o fallback
- * ST-09).
+ * (guard pós-confirmação, AC3), ou null (alvo inválido não reage; sem ciclo
+ * ativo o chamador aplica o fallback ST-09).
  */
 export type ResultadoDeCliqueEmCelula =
   | { readonly ciclo: PeaoComandoDoCliente | TabuleiroComandoDoCliente }
   | { readonly rejeicao: RejeicaoDeInteracao }
-  | { readonly focarPendencia: RecebidaId }
   | null
 
 /** Converte o resultado do mapeador do ciclo em resultado do roteador. */
@@ -424,16 +482,18 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
 }
 
 /**
- * Roteador puro do clique em célula durante o ciclo do Peão (issue #91).
- * Tabela exata de prioridades:
+ * Roteador puro do clique em célula durante o ciclo do Peão (issue #91;
+ * fluxo de puxar da revisão #199 da issue #143). Tabela exata de prioridades:
  *
  * Com pendências:
- *   - célula = célula-alvo de pendência SEM tipo (pecaId null) → focar
- *     (foco local; troca de foco permitida).
- *   - célula = célula-alvo de pendência COM tipo e pendência.pecaId ===
- *     pecaSelecionadaId → POSICIONAR_PECA (encaixe; coerência tríplice:
- *     célula-alvo + peça escolhida + peça em foco).
- *   - demais (alvo tipado divergente da seleção, célula não-alvo) → null.
+ *   - célula = vaga disponível E há pendência PUXADA sem vaga →
+ *     ESCOLHER_VAGA para a recebida puxada (fluxo #143/revisão #199: a vaga
+ *     vai para a peça puxada da bandeja — sem puxada ativa, ou com a puxada
+ *     já encaminhada, o clique de vaga é silencioso).
+ *   - célula = célula-alvo de pendência com pendência.pecaId ===
+ *     pecaSelecionadaId → POSICIONAR_PECA (encaixe; coerência tripla:
+ *     célula-alvo + vaga escolhida + peça em foco).
+ *   - demais (alvo em foco divergente da seleção, célula não-alvo) → null.
  *
  * Sem pendências, com peão selecionado:
  *   - célula do próprio peão → PERMANECER (ou rejeição âmbar se a posição já
@@ -451,15 +511,23 @@ export function rotearCliqueDeCelula(
 ): ResultadoDeCliqueEmCelula {
   if (haRecebidasPendentes(estadoPeoes)) {
     const temVagaPendente = estadoPeoes.recebidasPendentes.some(
-      (r) => getVaga(r) === null,
+      (r) => r.vaga === null,
     )
     if (temVagaPendente) {
       const vagas = vagasDisponiveisDoPeao(estadoPeoes)
       const vaga = vagas.find((v) => chaveCelula(v.celula) === chaveCelula(celula))
       if (vaga) {
-        const alvo = estadoPeoes.recebidasPendentes.find(
-          (r) => getVaga(r) === null,
-        )
+        // A vaga vai para a peça PUXADA da bandeja (fluxo #143/revisão #199):
+        // a puxada precisa existir, seguir sem vaga e estar na lista — pull
+        // antigo (pendência encaixada ou vaga já encaminhada) não contempla
+        // nova peça: exige novo pull.
+        const puxadaId = estadoPeoes.recebidaPuxadaId ?? null
+        const alvo =
+          puxadaId !== null
+            ? estadoPeoes.recebidasPendentes.find(
+                (r) => r.recebidaId === puxadaId && r.vaga === null,
+              )
+            : undefined
         if (alvo) {
           const comando = mapearEscolhaDeVagaDaRecebida(
             estadoPeoes,
@@ -475,7 +543,6 @@ export function rotearCliqueDeCelula(
       (r) => r.celulaAlvo !== null && chaveCelula(r.celulaAlvo) === chaveCelula(celula),
     )
     if (!pendencia) return null
-    if (pendencia.pecaId === null) return { focarPendencia: pendencia.recebidaId }
     if (pendencia.pecaId !== estadoPeoes.pecaSelecionadaId) return null
     const encaixe = mapearPosicionarRecebida(estadoPeoes, celula)
     return encaixe === null ? null : { ciclo: encaixe }
@@ -518,7 +585,6 @@ function fallbackST09ParaCelula(
 const TIPOS_DE_COMANDO_DE_PEAO: ReadonlySet<string> = new Set([
   'SELECIONAR_PEAO',
   'POSICIONAR_PEAO',
-  'ESCOLHER_TIPO_DA_PECA_RECEBIDA',
   'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
   'PERMANECER',
@@ -534,7 +600,6 @@ export function ehComandoDePeao(
 export interface DespachoDeCliqueEmCelula {
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
-  onFocarPendencia?: (recebidaId: RecebidaId) => void
   /** Rejeição local do ciclo (AC3): feedback para flash, sem comando enviado. */
   onRejeicao?: (rejeicao: RejeicaoDeInteracao) => void
 }
@@ -555,10 +620,6 @@ export function despacharCliqueDeCelula(
       ? rotearCliqueDeCelula(estadoPeoes, estadoInteracao, celula)
       : null
   if (resultado !== null) {
-    if ('focarPendencia' in resultado) {
-      despacho.onFocarPendencia?.(resultado.focarPendencia)
-      return
-    }
     if ('rejeicao' in resultado) {
       despacho.onRejeicao?.(resultado.rejeicao)
       return
@@ -577,30 +638,21 @@ export function despacharCliqueDeCelula(
 }
 
 /**
- * Clique em peça da Reserva coerente com o ciclo: com Recebidas pendentes, a
- * Reserva oferta o tipo da peça clicada para a pendência focada (foco ausente,
- * foco inválido ou peça inicial → null); sem pendências, mantém o ST-09
- * (mapearCliqueNaReserva → SELECIONAR_PECA).
+ * Clique em peça da mesa coerente com o ciclo (issue #143): as Peças Iniciais
+ * na mesa roteiam o fallback ST-09 (SELECIONAR_PECA — o engine aceita a
+ * seleção de iniciais via `encontrarNasIniciais`); com Recebidas pendentes a
+ * rota fica silenciosa (null), preservando o foco de encaixe da peça sorteada
+ * (padrão de bloqueio local da #91). Clique fora das iniciais conhecidas da
+ * mesa → null (o roteador puro valida a identidade da peça).
  */
-export function mapearCliqueNaReservaComCiclo(
+export function mapearCliqueNaPecaDaMesa(
   estadoPeoes: EstadoInteracaoPeoes | null,
   estadoInteracao: EstadoInteracaoTabuleiro,
-  recebidaFocadaId: RecebidaId | null,
-  peca: { readonly pecaId: string; readonly tipo: TipoDaPeca },
-): PeaoComandoDoCliente | TabuleiroComandoDoCliente | null {
-  if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) {
-    // Forma nova (#138): o campo `vaga` existe na pendência (getVaga !==
-    // undefined). A peça já vem sorteada, então a escolha de tipo legada
-    // (ESCOLHER_TIPO) não se aplica — null bloqueia a rota sem sinal sonoro.
-    const temSorteada = estadoPeoes.recebidasPendentes.some(
-      (r) => getVaga(r) !== undefined,
-    )
-    if (temSorteada) return null
-    if (recebidaFocadaId === null || peca.tipo === 'inicial') return null
-    if (peca.tipo !== 'reta' && peca.tipo !== 'T' && peca.tipo !== 'cruz') return null
-    return mapearEscolhaDeTipoDaRecebida(estadoPeoes, recebidaFocadaId, peca.tipo)
-  }
-  return mapearCliqueNaReserva(estadoInteracao, peca.pecaId)
+  pecaId: string,
+): TabuleiroComandoDoCliente | null {
+  if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) return null
+  if (!estadoInteracao.iniciais.some((p) => p.pecaId === pecaId)) return null
+  return { type: 'SELECIONAR_PECA', pecaId }
 }
 
 // ── Mapeamento evento → feedback visual ──
@@ -623,9 +675,10 @@ export type EventoDoCicloDoPeao =
 
 /**
  * Traduz evento do servidor em flash (issue #118): aprovação/seleção →
- * branco; rejeição → vermelho, com motivo específico para pendências; ação
- * fora da vez → âmbar (distinto do erro); Confirmação de Posição → branco;
- * abertura/encerramento de turno → null (sem flash).
+ * branco; rejeição → vermelho, com motivo específico para pendências e Caixa
+ * esgotada (issue #143); ação fora da vez → âmbar (distinto do erro);
+ * Confirmação de Posição → branco; abertura/encerramento de turno e sorteio
+ * (a bandeja comunica a peça corrente) → null (sem flash).
  */
 export function mapearEventoPeaoParaFeedback(
   evento: EventoDoCicloDoPeao,
@@ -634,7 +687,6 @@ export function mapearEventoPeaoParaFeedback(
     case 'PEAO_SELECIONADO':
     case 'RECEBIMENTO_GERADO':
     case 'PEAO_POSICIONADO':
-    case 'TIPO_DA_PECA_RECEBIDA_ESCOLHIDO':
     case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO':
     case 'PEAO_MOVIDO':
     case 'PEAO_PERMANECEU':
@@ -651,6 +703,10 @@ export function mapearEventoPeaoParaFeedback(
       if (evento.codigo === 'FORA_DA_VEZ') return FLASH_AMBAR
       if (evento.codigo === 'PENDENCIA_NAO_RESOLVIDA') {
         return { ...FLASH_VERMELHO, motivo: 'pendencia_nao_resolvida' }
+      }
+      if (evento.codigo === 'CAIXA_ESGOTADA') {
+        // Sorteio sem peças na Caixa (issue #143): flash vermelho com motivo.
+        return { ...FLASH_VERMELHO, motivo: 'caixa_esgotada' }
       }
       return FLASH_VERMELHO
     case 'TURNO_INICIADO':

@@ -151,11 +151,11 @@ describe('peões no contrato de exibição (issue #90)', () => {
 
   // ── Fileira na Mesa ──
 
-  it('peaoMesaParaMundo coloca 4 slots distintos no lado oposto à reserva (-X)', () => {
+  it('peaoMesaParaMundo coloca 4 slots distintos no lado oposto à Caixa (-X)', () => {
     const pos = Array.from({ length: QUANTIDADE_PEOES }, (_, i) => peaoMesaParaMundo(i))
     expect(new Set(pos.map((p) => p.join(','))).size).toBe(QUANTIDADE_PEOES)
     for (const [x, y, z] of pos) {
-      expect(x).toBeLessThan(0) // oposto à reserva (+X)
+      expect(x).toBeLessThan(0) // oposto à zona da Caixa (+X)
       expect(y).toBe(0) // plano superior da Mesa
       expect(Math.abs(x)).toBeLessThanOrEqual(LARGURA_MESA / 2)
       expect(Math.abs(z)).toBeLessThanOrEqual(LARGURA_MESA / 2)

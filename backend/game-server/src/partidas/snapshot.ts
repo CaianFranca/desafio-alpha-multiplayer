@@ -34,6 +34,13 @@ export function paraSnapshotWire(
         ordem: jogador.ordem,
         peaoId: jogador.peaoId,
         primeiroTurnoPendente: jogador.primeiroTurnoPendente,
+        // Estados dos Monstros no snapshot (issue #173), com normalização
+        // defensiva no mesmo padrão dos estados persistidos por binário
+        // anterior: sanidade ausente ≡ 3 (inicial), estados ausentes ≡
+        // falsos — e Amedrontado derivado do valor NORMALIZADO de sanidade.
+        sanidade: jogador.sanidade ?? 3,
+        emBaixaIluminacao: jogador.emBaixaIluminacao ?? false,
+        amedrontado: jogador.amedrontado ?? (jogador.sanidade ?? 3) === 0,
       } as const;
     });
 
