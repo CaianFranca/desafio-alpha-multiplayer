@@ -222,21 +222,37 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
   const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
 
+  // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
+  // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
+  // do snapshot + deltas de ATAQUE/RESGATE, sem recarregar página. Caminha
+  // jogadorPorId × peaoPorJogador uma única vez (fonte também dos afetados).
+  const sanidadePorPeao: SanidadePorPeao = useMemo(() => {
+      const out: Record<string, { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
+      for (const [jogadorId, dados] of Object.entries(modelo.jogadorPorId)) {
+        const peaoId = modelo.peaoPorJogador[jogadorId]
+        if (peaoId) {
+          out[peaoId] = {
+            sanidade: dados.sanidade,
+            emBaixaIluminacao: dados.emBaixaIluminacao,
+            amedrontado: dados.amedrontado,
+          }
+        }
+      }
+      return out
+    }, [modelo.jogadorPorId, modelo.peaoPorJogador])
+
   // ── Peões AFETADOS para o espelho de destinos (F1 #145-exp) ──
   // Predicado espelhado do engine (partida.ts:1484): Baixa Iluminação ∨
-  // Amedrontado. Fonte: jogadorPorId (snapshot #156 + deltas ATAQUE/RESGATE
-  // #174) × peaoPorJogador. Alimenta a exceção de ocupação de resgate (+1
-  // teto, #171) em destinosConectadosDoPeao/mapearMovimentacao.
+  // Amedrontado — único ponto onde a regra vive, sobre a projeção #174.
+  // Alimenta a exceção de ocupação de resgate (+1 teto, #171) em
+  // destinosConectadosDoPeao/mapearMovimentacao.
   const afetadosPorPeaoId: ReadonlySet<string> = useMemo(() => {
     const out = new Set<string>()
-    for (const [jid, dados] of Object.entries(modelo.jogadorPorId)) {
-      const peaoId = modelo.peaoPorJogador[jid]
-      if (peaoId !== undefined && (dados.emBaixaIluminacao || dados.amedrontado)) {
-        out.add(peaoId)
-      }
+    for (const [peaoId, dados] of Object.entries(sanidadePorPeao)) {
+      if (dados.emBaixaIluminacao || dados.amedrontado) out.add(peaoId)
     }
     return out
-  }, [modelo.jogadorPorId, modelo.peaoPorJogador])
+  }, [sanidadePorPeao])
 
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
@@ -291,24 +307,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Chip Jogador Ativo (apelido/cor do snapshot, #156) ──
   const jogadorAtivoDados =
     modelo.jogadorAtivoId !== null ? modelo.jogadorPorId[modelo.jogadorAtivoId] ?? null : null
-
-  // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
-  // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
-  // do snapshot + deltas de ATAQUE/RESGATE, sem recarregar página.
-  const sanidadePorPeao: SanidadePorPeao = useMemo(() => {
-      const out: Record<string, { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
-      for (const [jogadorId, dados] of Object.entries(modelo.jogadorPorId)) {
-        const peaoId = modelo.peaoPorJogador[jogadorId]
-        if (peaoId) {
-          out[peaoId] = {
-            sanidade: dados.sanidade,
-            emBaixaIluminacao: dados.emBaixaIluminacao,
-            amedrontado: dados.amedrontado,
-          }
-        }
-      }
-      return out
-    }, [modelo.jogadorPorId, modelo.peaoPorJogador])
 
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao

@@ -83,7 +83,10 @@ export function Tabuleiro({
     posicionadasPorChave.set(chaveCelula(p.celula), p)
   }
 
-  // Peões posicionados mapeados por célula da peça que os abriga (máx. 1).
+  // Peões posicionados mapeados por célula da peça que os abriga. A cena
+  // renderiza um placeholder por célula (último peão vence) — limitação
+  // conhecida de EXIBIÇÃO: a autoridade da ocupação é o engine (Portão aceita
+  // até 4, #176; exceção de resgate #171), e o espelho DOM lista todos.
   const peoesPorChave = new Map<string, PeaoDaExibicao>()
   for (const peao of peoes) {
     if (peao.celula !== null) {

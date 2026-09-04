@@ -30,7 +30,11 @@ interface CelulaProps {
   /** Destaque visual da peça posicionada selecionada/em manipulação. */
   pecaDestacada?: boolean
   onClick?: (event: ThreeEvent<MouseEvent>) => void
-  /** Peão posicionado sobre a peça desta célula (máx. 1 por peça). */
+  /**
+   * Peão posicionado sobre a peça desta célula. A cena exibe um placeholder
+   * por célula; a regra de ocupação (Portão 4, resgate +1) vive no engine e
+   * no espelho de destinos (`destinosConectadosDoPeao`).
+   */
   peao?: PeaoDaExibicao | null
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
   destinoValido?: boolean
