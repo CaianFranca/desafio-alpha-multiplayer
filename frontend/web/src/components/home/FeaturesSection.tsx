@@ -45,7 +45,7 @@ const featureIcons: Record<string, string> = {
 
 function FeaturesRevealItem({ index, children }: { index: number; children: ReactNode }) {
   const { ref, revealState } = useReveal<HTMLLIElement>()
-  const spanClass = 'md:col-span-2'
+  const spanClass = index < 3 ? 'md:col-span-2' : index === 3 ? 'md:col-span-4' : 'md:col-span-2'
   return (
     <li
       ref={ref}
