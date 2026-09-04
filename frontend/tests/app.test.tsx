@@ -32,7 +32,7 @@ describe('homepage structure', () => {
     expect(screen.getByRole('heading', { name: /trailers/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /a história/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /características do jogo/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /objetivos/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /para escapar, você precisa/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /pronto para enfrentar o sanatório/i })).toBeInTheDocument()
   })
 
@@ -65,9 +65,9 @@ describe('homepage structure', () => {
   it('renders objective items with numbered list', () => {
     renderWithRouter()
 
-    expect(screen.getByRole('heading', { name: /ativar os geradores/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /conseguir o cartão de acesso/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /abrir o portão de saída/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /restaurar a energia/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /obter o acesso/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /sobreviver à fuga/i })).toBeInTheDocument()
   })
 
   it('renders footer with brand and copyright', () => {
@@ -393,7 +393,7 @@ describe('responsive sections', () => {
     expect(screen.getByRole('heading', { name: /trailers/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /a história/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /características do jogo/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /objetivos/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /para escapar, você precisa/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /pronto para enfrentar o sanatório/i })).toBeInTheDocument()
     expect(screen.getByRole('contentinfo')).toBeInTheDocument()
   })
