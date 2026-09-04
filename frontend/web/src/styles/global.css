@@ -170,16 +170,16 @@ input:-webkit-autofill:active {
   background-color: var(--color-accent);
 }
 
-/* Layout de referência da seção Trailers (issue #210 follow-up): eyebrow
-   pequeno em caixa-alta à esquerda, 2 cards 16:9 lado a lado no desktop
-   (grade via Tailwind `md:grid-cols-2`), rótulo em overlay
+/* Layout de referência da seção Trailers (references/trailers.png):
+   eyebrow pequeno em caixa-alta à esquerda, 2 cards 16:9 lado a lado no
+   desktop (grade via Tailwind `md:grid-cols-2`), rótulo em overlay
    inferior-esquerdo em caps e play decorativo vazado centralizado.
    Estende o bloco de reveal/hover acima sem reescrevê-lo. */
 #trailers .trailers-eyebrow {
   margin: 0 0 2rem;
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 600;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   text-align: left;
   color: var(--color-text);

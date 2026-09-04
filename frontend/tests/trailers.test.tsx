@@ -59,7 +59,7 @@ describe('seção de trailers', () => {
     const section = renderHome()
 
     expect(section).toHaveAttribute('id', trailers.id)
-    expect(screen.getByRole('heading', { name: 'Trailers' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: trailers.title })).toBeInTheDocument()
     expect(section).toHaveAttribute('aria-labelledby', 'trailers-title')
     expect(within(section).getByText(trailers.description)).toBeInTheDocument()
     for (const item of trailers.items) {

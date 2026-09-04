@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { trailers } from './placeholders'
 import type { Trailer } from './placeholders'
-import { ImagePlaceholder } from '../ui/ImagePlaceholder'
 
 const controlButton =
   'inline-flex h-9 w-9 items-center justify-center border-0 rounded-full bg-transparent p-0 text-white cursor-pointer hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors'
@@ -42,7 +41,7 @@ function MutedIcon() {
 function TrailerCover({ titulo, children }: { titulo: string; children?: ReactNode }) {
   return (
     <div
-      className="trailers-cover group flex w-full aspect-video items-center justify-center rounded-xl border border-dashed border-(--color-muted) bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
+      className="trailers-cover group flex w-full aspect-video items-center justify-center rounded-none border-0 bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
       role="img"
       aria-label={titulo}
     >
@@ -124,14 +123,14 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     media = (
       <div>
         <TrailerCover titulo={titulo}>
-          {capa ? <img src={capa} alt="" className="w-full h-full object-cover rounded-xl" /> : null}
+          {capa ? <img src={capa} alt="" className="w-full h-full object-cover rounded-none" /> : null}
         </TrailerCover>
         <p role="status" className="mt-3 text-(--color-muted) text-sm">{trailers.mensagens.falha}</p>
       </div>
     )
   } else if (shouldLoad) {
     media = (
-      <div className="relative w-full aspect-video overflow-hidden rounded-xl bg-black group">
+      <div className="relative w-full aspect-video overflow-hidden rounded-none bg-black group">
         <video
           ref={videoRef}
           src={src}
@@ -185,8 +184,16 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     )
   } else {
     media = (
-      <div className="group relative overflow-hidden rounded-xl">
-        <ImagePlaceholder alt={titulo} src={capa} />
+      <div className="group relative overflow-hidden rounded-none">
+        {capa ? (
+          <img src={capa} alt={titulo} className="flex w-full aspect-video overflow-hidden rounded-none border-0 object-cover" />
+        ) : (
+          <div
+            role="img"
+            aria-label={titulo}
+            className="flex w-full aspect-video items-center justify-center overflow-hidden rounded-none border-0 bg-(--color-surface)"
+          />
+        )}
         <button
           type="button"
           onClick={() => setRequested(true)}
@@ -207,7 +214,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
   if (!src) {
     return (
       <div ref={containerRef} className="group">
-        <div className="trailers-card relative aspect-video w-full overflow-hidden rounded-xl">
+        <div className="trailers-card relative aspect-video w-full overflow-hidden rounded-none">
           {media}
           <h3 className="trailers-card-label">{titulo}</h3>
         </div>

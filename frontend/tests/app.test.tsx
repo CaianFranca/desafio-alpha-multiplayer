@@ -29,7 +29,7 @@ describe('homepage structure', () => {
     renderWithRouter()
 
     expect(screen.getByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Trailers' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /trailers/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /a história/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /características do jogo/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /objetivos/i })).toBeInTheDocument()
@@ -265,7 +265,7 @@ describe('responsive sections', () => {
     renderWithRouter()
 
     expect(screen.getByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Trailers' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /trailers/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /a história/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /características do jogo/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /objetivos/i })).toBeInTheDocument()
