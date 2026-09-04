@@ -19,7 +19,6 @@ export const trailers = {
   items: [
     {
       titulo: 'Trailer de Anúncio',
-      src: '/videos/trailer-anuncio.mp4',
     },
     {
       titulo: 'Gameplay em Grupo',

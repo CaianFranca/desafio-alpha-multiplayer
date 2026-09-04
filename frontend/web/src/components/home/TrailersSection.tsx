@@ -42,7 +42,7 @@ function MutedIcon() {
 function TrailerCover({ titulo, children }: { titulo: string; children?: ReactNode }) {
   return (
     <div
-      className="flex w-full aspect-video items-center justify-center rounded-xl border border-dashed border-(--color-muted) bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
+      className="trailers-cover group flex w-full aspect-video items-center justify-center rounded-xl border border-dashed border-(--color-muted) bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
       role="img"
       aria-label={titulo}
     >
@@ -178,13 +178,13 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     )
   } else {
     media = (
-      <div className="relative overflow-hidden rounded-xl">
+      <div className="group relative overflow-hidden rounded-xl">
         <ImagePlaceholder alt={titulo} src={capa} />
         <button
           type="button"
           onClick={() => setRequested(true)}
           aria-label={trailers.labels.play}
-          className="absolute inset-0 m-auto inline-flex h-16 w-16 items-center justify-center border-0 rounded-full bg-black/60 text-white cursor-pointer hover:bg-(--color-accent) hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors"
+          className="trailers-play absolute inset-0 m-auto inline-flex h-16 w-16 items-center justify-center border-0 rounded-full bg-black/60 text-white cursor-pointer hover:bg-(--color-accent) hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors"
         >
           <PlayIcon />
         </button>
@@ -201,8 +201,38 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
 }
 
 export function TrailersSection() {
+  const sectionRef = useRef<HTMLElement | null>(null)
+  // Sem IntersectionObserver (ex.: jsdom, ambientes sem suporte), nasce
+  // revelado — fallback estático sem JS/observer com conteúdo visível.
+  const [revealed, setRevealed] = useState(
+    () => typeof IntersectionObserver === 'undefined',
+  )
+
+  // Reveal único de entrada: observa a seção uma vez e revela; sem
+  // IntersectionObserver o estado inicial já é revelado (fallback estático).
+  // O estado inicial oculto só existe via JS — sem JS/observer o conteúdo
+  // segue visível. Espelha o padrão da HeroSection.
+  useEffect(() => {
+    if (revealed) return
+    const section = sectionRef.current
+    if (!section) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setRevealed(true)
+          observer.disconnect()
+        }
+      },
+      { threshold: 0 },
+    )
+    observer.observe(section)
+    return () => observer.disconnect()
+  }, [revealed])
+
+  const revealState = revealed ? 'is-visible' : 'is-hidden'
+
   return (
-    <section id={trailers.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-surface)" aria-labelledby="trailers-title">
+    <section ref={sectionRef} id={trailers.id} className={`trailers-reveal ${revealState} py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-surface)`} aria-labelledby="trailers-title">
       <div className="max-w-7xl mx-auto">
         <h2 id="trailers-title" className="text-[clamp(1.75rem,4vw,2.5rem)] text-center mb-2">{trailers.title}</h2>
         <p className="text-(--color-muted) leading-relaxed text-center max-w-2xl mb-10 mx-auto">{trailers.description}</p>
