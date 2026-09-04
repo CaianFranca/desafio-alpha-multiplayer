@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { hero } from './placeholders'
 import { AuthActions } from '../auth/AuthActions'
+import { useSectionParallax } from '../../hooks/useSectionParallax'
 
 /** Amplitude máxima do deslocamento do parallax (px); a camada tem folga de 14%. */
 const PARALLAX_RANGE = 56
@@ -35,66 +36,10 @@ export function HeroSection() {
     return () => observer.disconnect()
   }, [revealed])
 
-  // Parallax sutil do fundo, limitado à seção — mesmo padrão do
-  // FinalCtaSection: só anima com a seção visível (rAF + observer), respeita
-  // `prefers-reduced-motion` com early-return e desloca só via `transform`.
-  useEffect(() => {
-    const section = sectionRef.current
-    const bg = bgRef.current
-    if (!section || !bg) return
-    if (typeof window === 'undefined') return
-    if (
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      return
-    }
-
-    let raf = 0
-    let inView = false
-
-    const update = () => {
-      raf = 0
-      if (!inView) return
-      const rect = section.getBoundingClientRect()
-      const viewport = window.innerHeight || 1
-      const progress = (rect.top + rect.height / 2 - viewport / 2) / viewport
-      const clamped = Math.max(-1, Math.min(1, progress))
-      bg.style.transform = `translate3d(0, ${(clamped * PARALLAX_RANGE).toFixed(1)}px, 0)`
-    }
-
-    const schedule = () => {
-      if (raf === 0 && inView) raf = window.requestAnimationFrame(update)
-    }
-
-    const onScroll = () => schedule()
-    const onResize = () => schedule()
-
-    let observer: IntersectionObserver | null = null
-    if (typeof IntersectionObserver !== 'undefined') {
-      observer = new IntersectionObserver(
-        (entries) => {
-          inView = entries.some((entry) => entry.isIntersecting)
-          schedule()
-        },
-        { threshold: 0 },
-      )
-      observer.observe(section)
-    } else {
-      inView = true
-      schedule()
-    }
-
-    window.addEventListener('scroll', onScroll, { passive: true })
-    window.addEventListener('resize', onResize)
-
-    return () => {
-      if (raf !== 0) window.cancelAnimationFrame(raf)
-      observer?.disconnect()
-      window.removeEventListener('scroll', onScroll)
-      window.removeEventListener('resize', onResize)
-    }
-  }, [])
+  // Parallax sutil do fundo, limitado à seção (hook compartilhado com o
+  // CTA final): só anima com a seção visível, respeita
+  // `prefers-reduced-motion` e desloca só via `transform`.
+  useSectionParallax(sectionRef, bgRef, PARALLAX_RANGE)
 
   const revealState = revealed ? 'is-visible' : 'is-hidden'
 
