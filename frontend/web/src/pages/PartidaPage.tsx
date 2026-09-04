@@ -69,7 +69,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const navigate = useNavigate()
   const codigoDeSala = useSalaCodigoOptional()
 
-  const { estado, resultado, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
+  const { estado, resultado, motivo, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
     usePartidaTela({
       estadoInicial: !temAlvo ? 'falha' : estadoInicial,
       loader,
@@ -104,14 +104,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante tela
           // Limpa estados pendentes de interação: flash de erro não deve permanecer
           setFlash(null)
-          partidaTerminada(evento.resultado)
+          // Motivo da derrota acompanha (#145-exp); payloads antigos sem o
+          // campo chegam undefined → null (tela mantém texto genérico).
+          partidaTerminada(evento.resultado, evento.motivo ?? null)
           return
         }
         if (evento.type === 'ESTADO_DA_PARTIDA') {
           aplicarSnapshotNoModelo(evento.snapshot)
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             setFlash(null)
-            partidaTerminada(evento.snapshot.resultado)
+            partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
           }
           if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
@@ -380,7 +382,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}
       />
-      <PartidaOverlays estado={estado} resultado={resultado} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
+      <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       <FlashOverlay flash={flash} onClear={limparFlash} />
       {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
         <div
