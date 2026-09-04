@@ -381,6 +381,164 @@ input:-webkit-autofill:active {
   animation: none;
 }
 
+/* Layout de referência da seção Objetivos (references/objectives.png): node
+   exatamente no centro vertical, com texto à esquerda e imagem à direita
+   (linhas pares invertidas). Texto e imagem se encontram no node central. */
+#objetivos {
+  background: var(--color-background);
+}
+#objetivos .objectives-eyebrow {
+  margin: 0 0 clamp(2rem, 4vh, 3.5rem);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--color-text);
+}
+.objectives-reveal {
+  transition-property: opacity, transform;
+  transition-duration: 650ms;
+  transition-timing-function: ease-out;
+}
+.objectives-reveal.is-hidden {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+}
+.objectives-reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+/* Lista: relativa para a linha vertical e centraliza o conteúdo. */
+.objectives-timeline {
+  position: relative;
+  max-width: 48rem;
+  margin: 0 auto;
+}
+/* Linha vertical central que conecta todos os nodes. */
+.objectives-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(245, 241, 232, 0.22);
+  pointer-events: none;
+  transform: translateX(-0.5px);
+}
+/* Layout de cada objetivo: 3 colunas — texto | node | imagem.
+   Linhas pares invertidas via ordem do grid. Tudo centralizado. */
+.objectives-item {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: clamp(1rem, 2vw, 2rem);
+  padding: clamp(1.5rem, 3vh, 2.5rem) 0;
+}
+/* Inverter a ordem nas linhas pares: imagem à esquerda, node ao centro,
+   texto à direita. */
+.objectives-item:nth-child(even) > .objectives-item-media      { grid-column: 1; }
+.objectives-item:nth-child(even) > .objectives-item-node       { grid-column: 2; }
+.objectives-item:nth-child(even) > .objectives-item-text-wrap  { grid-column: 3; }
+/* Texto: alinhado à direita no padrão, à esquerda nas linhas pares. */
+.objectives-item-text-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  justify-content: center;
+  text-align: right;
+}
+.objectives-item:nth-child(even) .objectives-item-text-wrap {
+  text-align: left;
+}
+/* Node central: exatamente no centro da linha vertical. */
+.objectives-item-node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgba(245, 241, 232, 0.95);
+  border-radius: 9999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+}
+/* Glow âmbar no primeiro item. */
+.objectives-item:first-child .objectives-item-node {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.25), 0 0 12px rgba(245, 158, 11, 0.28);
+}
+/* Imagem: largura consistente com borda fina. */
+.objectives-item-media {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(245, 241, 232, 0.28);
+  border-radius: 0;
+  background: var(--color-surface);
+  width: clamp(12rem, 28vw, 18rem);
+  justify-self: center;
+}
+.objectives-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  opacity: 0.88;
+}
+/* Tipografia do texto. */
+.objectives-item-title {
+  font-size: clamp(1rem, 1.5vw, 1.125rem);
+  color: var(--color-text);
+  letter-spacing: 0.02em;
+}
+.objectives-item-desc {
+  margin: 0;
+  font-size: clamp(0.8125rem, 1vw, 0.875rem);
+  line-height: 1.6;
+  color: var(--color-muted);
+}
+/* ─── Mobile ─── */
+@media (max-width: 767px) {
+  .objectives-timeline::before {
+    left: 1.375rem;
+  }
+  .objectives-item,
+  .objectives-item:nth-child(even) {
+    display: grid;
+    grid-template-columns: 2.75rem 1fr;
+    gap: 0 0.875rem;
+    align-items: start;
+  }
+  .objectives-item-node,
+  .objectives-item:nth-child(even) > .objectives-item-node {
+    order: 1;
+    grid-row: 1;
+    grid-column: 1;
+    justify-self: center;
+  }
+  .objectives-item-text-wrap,
+  .objectives-item:nth-child(even) > .objectives-item-text-wrap {
+    order: 2;
+    grid-row: 1;
+    grid-column: 2;
+    text-align: left;
+  }
+  .objectives-item-media,
+  .objectives-item:nth-child(even) > .objectives-item-media {
+    order: 3;
+    grid-row: 2;
+    grid-column: 1 / -1;
+    width: 100%;
+    margin-top: 0.5rem;
+  }
+}
+
 /* Header — 4 variações visuais (#211, ref frontend/references/header.png):
    barra escura única sempre visível (sticky, sem observer), logo em
    Source Serif 4 caixa-alta com tracking largo à esquerda, nav por âncoras
@@ -772,6 +930,11 @@ input:-webkit-autofill:active {
     animation: none;
     transform: none !important;
     will-change: auto;
+  }
+  .objectives-reveal {
+    transition: none;
+    opacity: 1 !important;
+    transform: none !important;
   }
   .final-cta-media {
     inset: 0;

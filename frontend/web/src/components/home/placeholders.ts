@@ -81,23 +81,25 @@ export const features = {
 
 export const objectives = {
   id: 'objetivos' as const,
-  title: 'Objetivos',
-  subtitle: 'Para escapar do sanatório, você precisa:',
+  title: 'Para escapar, você precisa:',
   items: [
     {
-      title: 'Ativar os Geradores',
+      title: 'Restaurar a Energia',
       description: 'Encontre e ligue os geradores espalhados pelo sanatório para restaurar a energia.',
       imageAlt: 'Gerador elétrico em sala de utilidade do sanatório',
+      image: '/assets/objetivo-1.jpg',
     },
     {
-      title: 'Conseguir o Cartão de Acesso',
+      title: 'Obter o Acesso',
       description: 'Localize o cartão de acesso master que destranca a saída principal.',
       imageAlt: 'Cartão de acesso brilhando sobre uma mesa de metal',
+      image: '/assets/objetivo-2.jpg',
     },
     {
-      title: 'Abrir o Portão de Saída',
+      title: 'Sobreviver à Fuga',
       description: 'Com energia restaurada e cartão em mãos, abra o portão e escape — se ainda estiver são.',
       imageAlt: 'Portão de saída metálico com tranca eletrônica',
+      image: '/assets/objetivo-3.jpg',
     },
   ],
 } as const
