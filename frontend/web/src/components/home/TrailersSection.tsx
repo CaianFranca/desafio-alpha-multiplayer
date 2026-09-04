@@ -110,7 +110,14 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
   if (!src) {
     media = (
       <TrailerCover titulo={titulo}>
-        <span className="text-(--color-muted) text-sm italic px-6 text-center">{trailers.mensagens.indisponivel}</span>
+        <span className="flex flex-col items-center gap-4 px-6 text-center">
+          <span aria-hidden="true" className="trailers-play-decorative">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </span>
+          <span className="text-(--color-muted) text-sm italic text-center">{trailers.mensagens.indisponivel}</span>
+        </span>
       </TrailerCover>
     )
   } else if (failed) {
@@ -192,6 +199,22 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     )
   }
 
+  // Ramo placeholder (!src): card relativo com capa ao fundo, círculo de
+  // play DECORATIVO centralizado e rótulo em overlay inferior-esquerdo.
+  // O círculo é `aria-hidden` sem `role="button"` nem handler — preserva
+  // `queryByRole('button') === null`. O `h3` segue no DOM para leitores de
+  // tela, só muda estilo/posição (caps via CSS).
+  if (!src) {
+    return (
+      <div ref={containerRef} className="group">
+        <div className="trailers-card relative aspect-video w-full overflow-hidden rounded-xl">
+          {media}
+          <h3 className="trailers-card-label">{titulo}</h3>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div ref={containerRef}>
       <h3 className="text-[clamp(1.125rem,2vw,1.375rem)] font-bold text-center mb-4">{titulo}</h3>
@@ -234,11 +257,11 @@ export function TrailersSection() {
   return (
     <section ref={sectionRef} id={trailers.id} className={`trailers-reveal ${revealState} py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-surface)`} aria-labelledby="trailers-title">
       <div className="max-w-7xl mx-auto">
-        <h2 id="trailers-title" className="text-[clamp(1.75rem,4vw,2.5rem)] text-center mb-2">{trailers.title}</h2>
-        <p className="text-(--color-muted) leading-relaxed text-center max-w-2xl mb-10 mx-auto">{trailers.description}</p>
-        <ul role="list" className="grid grid-cols-1 gap-12 list-none m-0 p-0">
+        <h2 id="trailers-title" className="trailers-eyebrow">{trailers.title}</h2>
+        <p className="sr-only">{trailers.description}</p>
+        <ul role="list" className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 list-none m-0 p-0">
           {trailers.items.map((item) => (
-            <li key={item.titulo} className="w-full max-w-3xl mx-auto">
+            <li key={item.titulo} className="w-full">
               <TrailerPlayer trailer={item} />
             </li>
           ))}
