@@ -5,8 +5,8 @@ type Variant = 'primary' | 'secondary'
 type Size = 'md' | 'sm'
 
 const variantClasses: Record<Variant, string> = {
-  primary: 'font-display inline-block border-0 rounded-none bg-[var(--color-text)] text-[#0c0c0e] cursor-pointer font-semibold uppercase tracking-[0.12em] text-center hover:opacity-90 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] focus-visible:outline-offset-2 transition-opacity',
-  secondary: 'font-display inline-block border border-[var(--color-muted)] rounded-none bg-transparent text-[var(--color-text)] cursor-pointer font-semibold uppercase tracking-[0.12em] text-center hover:border-white hover:text-white focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] focus-visible:outline-offset-2 transition-colors',
+  primary: 'cta-primary font-display inline-block rounded-none cursor-pointer font-semibold uppercase tracking-[0.12em] text-center hover:opacity-90 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] focus-visible:outline-offset-2 transition-opacity',
+  secondary: 'cta-secondary font-display inline-block rounded-none cursor-pointer font-semibold uppercase tracking-[0.12em] text-center focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] focus-visible:outline-offset-2 transition-colors',
 }
 
 const sizeClasses: Record<Size, string> = {
@@ -24,7 +24,11 @@ interface CtaLinkProps {
 
 /**
  * Primitiva compartilhada de chamada à ação: concentra o vocabulário visual
- * primário (accent sólido) e secundário (borda muted) usado na aplicação.
+ * primário (preenchimento claro com texto escuro) e secundário (borda muted
+ * com texto claro) usado na Hero/CTA final. As cores vivem nas classes
+ * dedicadas `.cta-primary`/`.cta-secondary` em `styles/global.css` (valores
+ * explícitos, fora de camadas, após o reset `a`) — não só em utilidades do
+ * Tailwind, que perdem para o reset na cascata por camadas.
  * Use `size` para as variações padrão de tamanho e `className` para extras.
  */
 export function CtaLink({ to, variant, size = 'md', className, children }: CtaLinkProps) {
