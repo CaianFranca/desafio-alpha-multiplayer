@@ -40,7 +40,7 @@ test('paraSnapshotWire preserva preparada sem término', () => {
   assert.equal(snapshot.resultado, null);
 });
 
-test('paraSnapshotWire deriva terminada e projeta o resultado vitoria', () => {
+test('paraSnapshotWire deriva terminada e projeta o resultado vitoria sem motivo', () => {
   const snapshot = paraSnapshotWire(
     { ...estadoDaPartida(), resultado: { tipo: 'vitoria' } },
     roster(),
@@ -48,9 +48,11 @@ test('paraSnapshotWire deriva terminada e projeta o resultado vitoria', () => {
   );
   assert.equal(snapshot.estado, 'terminada');
   assert.equal(snapshot.resultado, 'vitoria');
+  // A vitória não tem motivo no domínio — a projeção normaliza para null.
+  assert.equal(snapshot.motivo, null);
 });
 
-test('paraSnapshotWire deriva terminada e projeta o resultado derrota sem o motivo', () => {
+test('paraSnapshotWire projeta o motivo da derrota no snapshot (#145-exp)', () => {
   const snapshot = paraSnapshotWire(
     { ...estadoDaPartida(), resultado: { tipo: 'derrota', motivo: 'equipe_amedrontada' } },
     roster(),
@@ -58,6 +60,7 @@ test('paraSnapshotWire deriva terminada e projeta o resultado derrota sem o moti
   );
   assert.equal(snapshot.estado, 'terminada');
   assert.equal(snapshot.resultado, 'derrota');
+  assert.equal(snapshot.motivo, 'equipe_amedrontada');
 });
 
 test('paraSnapshotWire deriva terminada mesmo com estado wire preparada repassado', () => {
@@ -68,6 +71,7 @@ test('paraSnapshotWire deriva terminada mesmo com estado wire preparada repassad
   );
   assert.equal(snapshot.estado, 'terminada');
   assert.equal(snapshot.resultado, 'derrota');
+  assert.equal(snapshot.motivo, 'caixa_esgotada');
 });
 
 // Contagem da Caixa e contadores de objetivo no snapshot (issue #145).

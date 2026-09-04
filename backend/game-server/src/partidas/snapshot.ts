@@ -98,11 +98,14 @@ export function paraSnapshotWire(
     // Término (issue #179): o Resultado no estado do engine é a própria
     // condição "terminada" — o snapshot o reflete para que quem se conecta
     // (recarregamento) volte a ver o resultado, independente do estado da
-    // partida persistida reportado pela transição de presença. O wire
-    // transporta apenas o par vitória/derrota — o motivo da derrota fica
-    // interno ao domínio.
+    // partida persistida reportado pela transição de presença. O motivo da
+    // derrota acompanha em campo opcional (issue #145-exp, sync
+    // DesfechoDaPartida): `null` na vitória e em estados persistidos por
+    // binário anterior sem o campo (normalização defensiva do `?? null`
+    // acima — o JSON pode materializar undefined como chave ausente).
     estado: desfecho !== null ? 'terminada' : estadoWire,
     resultado: desfecho === null ? null : desfecho.tipo,
+    motivo: desfecho !== null && desfecho.tipo === 'derrota' ? desfecho.motivo : null,
     // Conquistas/Objetivos Globais (issue #145): espelho dos contadores do
     // engine para os chips da moldura. Normalização defensiva contra estados
     // Redis antigos sem os campos (mesmo padrão do `resultado`): `?? []` e

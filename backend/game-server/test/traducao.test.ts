@@ -114,26 +114,36 @@ test('traduzirEventos mapeia resgate_realizado para RESGATE_REALIZADO', () => {
   });
 });
 
-test('traduzirEventos mapeia partida_terminada com vitoria para PARTIDA_TERMINADA', () => {
+test('traduzirEventos mapeia partida_terminada com vitoria para PARTIDA_TERMINADA sem chave motivo', () => {
   const eventos = [
     { tipo: 'partida_terminada', desfecho: { tipo: 'vitoria' } },
   ] as const satisfies readonly EventoDaPartida[];
   const saida = traduzirEventos(eventos);
   assert.equal(saida.length, 1);
+  // A vitória não tem motivo no domínio — a chave `motivo` nem aparece.
   assert.deepEqual(saida[0], { type: 'PARTIDA_TERMINADA', resultado: 'vitoria' });
 });
 
-test('traduzirEventos mapeia partida_terminada com derrota para PARTIDA_TERMINADA sem o motivo', () => {
-  // O motivo da derrota (caixa_esgotada/equipe_amedrontada) é interno ao
-  // domínio: o contrato wire expõe apenas o par vitória/derrota (#179).
+test('traduzirEventos mapeia partida_terminada com derrota projetando o motivo no wire (#145-exp)', () => {
+  // O motivo da derrota (caixa_esgotada/equipe_amedrontada — sync
+  // DesfechoDaPartida, engine/src/partida.ts:128-133) viaja no evento para a
+  // tela distinguir o fim (issue #145-exp).
   const eventos = [
     { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'caixa_esgotada' } },
     { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'equipe_amedrontada' } },
   ] as const satisfies readonly EventoDaPartida[];
   const saida = traduzirEventos(eventos);
   assert.equal(saida.length, 2);
-  assert.deepEqual(saida[0], { type: 'PARTIDA_TERMINADA', resultado: 'derrota' });
-  assert.deepEqual(saida[1], { type: 'PARTIDA_TERMINADA', resultado: 'derrota' });
+  assert.deepEqual(saida[0], {
+    type: 'PARTIDA_TERMINADA',
+    resultado: 'derrota',
+    motivo: 'caixa_esgotada',
+  });
+  assert.deepEqual(saida[1], {
+    type: 'PARTIDA_TERMINADA',
+    resultado: 'derrota',
+    motivo: 'equipe_amedrontada',
+  });
 });
 
 test('traduzirEventos emite PARTIDA_TERMINADA como último evento do lote da Ação consumadora', () => {

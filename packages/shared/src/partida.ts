@@ -28,9 +28,13 @@
 //   ST-10 (#140/#143) removeu os switches legados do cliente.)
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
-//   shared type:'PARTIDA_TERMINADA' { resultado } <-> engine tipo:'partida_terminada' { desfecho } — issue #179
-//   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire); o
-//   motivo da derrota no engine fica interno — o contrato expõe apenas o par.)
+//   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp)
+//   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
+//   motivo da derrota viaja em campo opcional separado (MotivoDeDerrotaWire,
+//   sync com DesfechoDaPartida — engine/src/partida.ts:128-133): presente só
+//   com resultado 'derrota'; payloads de binário anterior omitem o campo —
+//   o cliente trata ausente/null como "motivo desconhecido". A vitória não
+//   tem motivo no domínio; o wire não inventa um.)
 //   shared type:'ATAQUE_RESOLVIDO' { atacantes, peoesAtingidos, protegidos, estadosAplicados } <-> engine tipo:'ataque_resolvido' idem — issues #172/#173
 //   (Shape 1:1 com o evento de domínio; o refinamento do wire/feedback da
 //   issue #173 está concluído neste commit: `estadosAplicados` carrega o
@@ -191,6 +195,14 @@ export type { VagaDaPecaRecebidaEscolhidaEvento };
 // convenção do cabeçalho.
 export type ResultadoDaPartidaWire = 'vitoria' | 'derrota';
 
+// Motivo da derrota (issue #145-exp): sync manual com o motivo de
+// DesfechoDaPartida do engine (packages/engine/src/partida.ts:130-132) —
+// 'caixa_esgotada' (Caixa Esgotada sem objetivos alcançáveis,
+// caixaEsgotadaSemObjetivos) e 'equipe_amedrontada' (Sanidade 0 em toda a
+// equipe). Tipo fechado: a vitória não tem motivo no domínio e o wire não
+// inventa um. Terminais do glossário (CONTEXT.md): Caixa, Amedrontado.
+export type MotivoDeDerrotaWire = 'caixa_esgotada' | 'equipe_amedrontada';
+
 export type EstadoDaPartidaWire = 'preparada' | 'em_andamento' | 'terminada';
 
 export type CorDoPeaoWire = 'branco' | 'vermelho' | 'azul' | 'amarelo';
@@ -281,6 +293,11 @@ export interface EstadoDaPartidaSnapshot {
   // Término (issue #179): não nulo quando e somente quando estado === 'terminada' —
   // preserva o Resultado no snapshot entregue a quem se conecta (recarregamento).
   readonly resultado: ResultadoDaPartidaWire | null;
+  // Motivo da derrota (issue #145-exp): companheiro de `resultado` com a
+  // mesma semântica do `motivo` em PARTIDA_TERMINADA — presente somente quando
+  // `resultado === 'derrota'`. Opcional/defensivo: snapshots persistidos por
+  // binário anterior omitem o campo (padrão do `?? null` do `resultado`).
+  readonly motivo?: MotivoDeDerrotaWire | null;
   // Conquistas / Objetivos Globais (issue #145, glossário CONTEXT.md):
   // baseline dos contadores de chip na moldura. `geradoresLigados` é o espelho
   // exato do engine (pecaIds das Peças Gerador já ligadas — packages/engine/
@@ -315,6 +332,12 @@ export interface LimpezaAplicadaWireEvento {
 export interface PartidaTerminadaWireEvento {
   readonly type: 'PARTIDA_TERMINADA';
   readonly resultado: ResultadoDaPartidaWire;
+  /**
+   * Motivo quando `resultado === 'derrota'` (issue #145-exp). Opcional e
+   * defensivo: payloads de binário anterior omitem o campo — o cliente trata
+   * ausente/null como "motivo desconhecido". Nunca presente na vitória.
+   */
+  readonly motivo?: MotivoDeDerrotaWire | null;
 }
 
 // Um Monstro que disparou no gatilho, com os peões dentro do Alcance atual
