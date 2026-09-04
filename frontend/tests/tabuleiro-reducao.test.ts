@@ -1090,13 +1090,12 @@ describe('objetivos globais no modelo do cliente — baseline + derivação (iss
     expect(salaMedica.posicionadas.find((p) => p.pecaId === 'sala-medica-1')?.tipo).toBe('sala_medica')
     expect(salaMedica.pecaEmManipulacaoId).toBeNull()
 
-    // Regressão ST-09: peça de caminho da Reserva abre a janela como antes.
-    const caminho = reduzirEvento(criarEstadoInicialDoCliente(), {
-      type: 'PECA_POSICIONADA',
-      pecaId: 'reta-1',
-      celula: { linha: 3, coluna: 4 },
-      orientacao: 0,
-    })
+    // Regressão ST-09: peça de caminho da Caixa abre a janela como antes.
+    const caminho = reduzirEventos(criarEstadoInicialDoCliente(), [
+      { type: 'PECA_SORTEADA', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0 },
+      { type: 'PECA_POSICIONADA', pecaId: 'reta-1', celula: { linha: 3, coluna: 4 }, orientacao: 0 },
+    ])
+    expect(caminho.posicionadas.find((p) => p.pecaId === 'reta-1')?.tipo).toBe('reta')
     expect(caminho.pecaEmManipulacaoId).toBe('reta-1')
   })
 })
