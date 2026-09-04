@@ -298,12 +298,15 @@ input:-webkit-autofill:active {
 /* Layout de referência da seção Características (references/features.png):
    eyebrow pequeno em caixa-alta à esquerda, grade 3 cartões no topo + 2
    embaixo (largo + estreito via `md:col-span-*` no Tailwind), cards escuros
-   com moldura clara e selo de ícone sobreposto só com CSS (sem novos
-   assets). Entrada por cartão com reveal reciclado de Trailers/História —
+   com moldura branca espessa irregular por lado (larguras sorteadas por
+   card via inline style) e selo quadrado claro com SVG local sobreposto.
+   Entrada por cartão com reveal reciclado de Trailers/História —
    só `opacity` + `transform`, reveal único — composta com flicker clínico
    sutil de `opacity` restrito à entrada (1 execução, sem repetição em
    hover). O estado inicial oculto (`is-hidden`) só é aplicado via JS
-   (`revealed === false`); sem JS/observer o conteúdo nasce visível. */
+   (`revealed === false`); sem JS/observer o conteúdo nasce visível. O tilt
+   do card e do selo é estático por montagem (inline style); o reveal vive
+   no `li` externo e nunca no card. */
 #caracteristicas {
   background: var(--color-surface);
 }
@@ -343,15 +346,13 @@ input:-webkit-autofill:active {
   position: relative;
   height: 100%;
   background: var(--color-background);
-  border: 1px solid rgba(245, 241, 232, 0.9);
+  border-style: solid;
+  border-color: rgba(245, 241, 232, 0.95);
+  border-width: 4px;
   padding: 2.5rem 1.5rem 1.75rem;
 }
 #caracteristicas .features-card::after {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border: 1px solid rgba(245, 241, 232, 0.14);
-  pointer-events: none;
+  content: none;
 }
 #caracteristicas .features-card h3 {
   text-transform: uppercase;
@@ -363,9 +364,22 @@ input:-webkit-autofill:active {
   right: 1.25rem;
   width: 2.75rem;
   height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--color-text);
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  transform: rotate(6deg);
+  border: 0;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+#caracteristicas .features-badge-icon {
+  width: 1.6rem;
+  height: 1.6rem;
+  display: block;
+}
+#caracteristicas .features-grid > li:nth-child(n+4) .features-badge {
+  top: 1.25rem;
+  right: auto;
+  left: 1.25rem;
 }
 #caracteristicas .features-card:hover {
   transform: none;
@@ -453,7 +467,6 @@ input:-webkit-autofill:active {
   }
   #caracteristicas .features-badge {
     transition: none;
-    transform: none !important;
     animation: none !important;
   }
   #historia .history-media::after {
