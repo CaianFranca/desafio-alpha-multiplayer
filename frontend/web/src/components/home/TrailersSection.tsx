@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { trailers } from './placeholders'
 import type { Trailer } from './placeholders'
-import { ImagePlaceholder } from '../ui/ImagePlaceholder'
 
 const controlButton =
   'inline-flex h-9 w-9 items-center justify-center border-0 rounded-full bg-transparent p-0 text-white cursor-pointer hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors'
@@ -42,7 +41,7 @@ function MutedIcon() {
 function TrailerCover({ titulo, children }: { titulo: string; children?: ReactNode }) {
   return (
     <div
-      className="flex w-full aspect-video items-center justify-center rounded-xl border border-dashed border-(--color-muted) bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
+      className="trailers-cover group flex w-full aspect-video items-center justify-center rounded-none border-0 bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
       role="img"
       aria-label={titulo}
     >
@@ -110,21 +109,28 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
   if (!src) {
     media = (
       <TrailerCover titulo={titulo}>
-        <span className="text-(--color-muted) text-sm italic px-6 text-center">{trailers.mensagens.indisponivel}</span>
+        <span className="flex flex-col items-center gap-4 px-6 text-center">
+          <span aria-hidden="true" className="trailers-play-decorative">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </span>
+          <span className="text-(--color-muted) text-sm italic text-center">{trailers.mensagens.indisponivel}</span>
+        </span>
       </TrailerCover>
     )
   } else if (failed) {
     media = (
       <div>
         <TrailerCover titulo={titulo}>
-          {capa ? <img src={capa} alt="" className="w-full h-full object-cover rounded-xl" /> : null}
+          {capa ? <img src={capa} alt="" className="w-full h-full object-cover rounded-none" /> : null}
         </TrailerCover>
         <p role="status" className="mt-3 text-(--color-muted) text-sm">{trailers.mensagens.falha}</p>
       </div>
     )
   } else if (shouldLoad) {
     media = (
-      <div className="relative w-full aspect-video overflow-hidden rounded-xl bg-black group">
+      <div className="relative w-full aspect-video overflow-hidden rounded-none bg-black group">
         <video
           ref={videoRef}
           src={src}
@@ -178,16 +184,40 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     )
   } else {
     media = (
-      <div className="relative overflow-hidden rounded-xl">
-        <ImagePlaceholder alt={titulo} src={capa} />
+      <div className="group relative overflow-hidden rounded-none">
+        {capa ? (
+          <img src={capa} alt={titulo} className="flex w-full aspect-video overflow-hidden rounded-none border-0 object-cover" />
+        ) : (
+          <div
+            role="img"
+            aria-label={titulo}
+            className="flex w-full aspect-video items-center justify-center overflow-hidden rounded-none border-0 bg-(--color-surface)"
+          />
+        )}
         <button
           type="button"
           onClick={() => setRequested(true)}
           aria-label={trailers.labels.play}
-          className="absolute inset-0 m-auto inline-flex h-16 w-16 items-center justify-center border-0 rounded-full bg-black/60 text-white cursor-pointer hover:bg-(--color-accent) hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors"
+          className="trailers-play absolute inset-0 m-auto inline-flex h-16 w-16 items-center justify-center border-0 rounded-full bg-black/60 text-white cursor-pointer hover:bg-(--color-accent) hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors"
         >
           <PlayIcon />
         </button>
+      </div>
+    )
+  }
+
+  // Ramo placeholder (!src): card relativo com capa ao fundo, círculo de
+  // play DECORATIVO centralizado e rótulo em overlay inferior-esquerdo.
+  // O círculo é `aria-hidden` sem `role="button"` nem handler — preserva
+  // `queryByRole('button') === null`. O `h3` segue no DOM para leitores de
+  // tela, só muda estilo/posição (caps via CSS).
+  if (!src) {
+    return (
+      <div ref={containerRef} className="group">
+        <div className="trailers-card relative aspect-video w-full overflow-hidden rounded-none">
+          {media}
+          <h3 className="trailers-card-label">{titulo}</h3>
+        </div>
       </div>
     )
   }
@@ -200,17 +230,64 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
   )
 }
 
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null)
+  // Sem IntersectionObserver (ex.: jsdom, ambientes sem suporte), nasce
+  // revelado — fallback estático sem JS/observer com conteúdo visível.
+  const [revealed, setRevealed] = useState(
+    () => typeof IntersectionObserver === 'undefined',
+  )
+
+  // Reveal único de entrada por elemento: observa o próprio nó uma vez e
+  // revela; sem IntersectionObserver o estado inicial já é revelado
+  // (fallback estático). O estado inicial oculto só existe via JS — sem
+  // JS/observer o conteúdo segue visível. Espelha o padrão da HeroSection.
+  useEffect(() => {
+    if (revealed) return
+    const node = ref.current
+    if (!node) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setRevealed(true)
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.15 },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [revealed])
+
+  return { ref, revealState: revealed ? 'is-visible' : 'is-hidden' }
+}
+
+function TrailerRevealItem({ index, children }: { index: number; children: ReactNode }) {
+  const { ref, revealState } = useReveal<HTMLLIElement>()
+  return (
+    <li
+      ref={ref}
+      style={{ transitionDelay: `${index * 90}ms` }}
+      className={`trailers-reveal ${revealState} w-full`}
+    >
+      {children}
+    </li>
+  )
+}
+
 export function TrailersSection() {
+  const { ref: titleRef, revealState: titleState } = useReveal<HTMLHeadingElement>()
+
   return (
     <section id={trailers.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-surface)" aria-labelledby="trailers-title">
       <div className="max-w-7xl mx-auto">
-        <h2 id="trailers-title" className="text-[clamp(1.75rem,4vw,2.5rem)] text-center mb-2">{trailers.title}</h2>
-        <p className="text-(--color-muted) leading-relaxed text-center max-w-2xl mb-10 mx-auto">{trailers.description}</p>
-        <ul role="list" className="grid grid-cols-1 gap-12 list-none m-0 p-0">
-          {trailers.items.map((item) => (
-            <li key={item.titulo} className="w-full max-w-3xl mx-auto">
+        <h2 ref={titleRef} id="trailers-title" className={`trailers-eyebrow trailers-reveal ${titleState}`}>{trailers.title}</h2>
+        <p className="sr-only">{trailers.description}</p>
+        <ul role="list" className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 list-none m-0 p-0">
+          {trailers.items.map((item, index) => (
+            <TrailerRevealItem key={item.titulo} index={index}>
               <TrailerPlayer trailer={item} />
-            </li>
+            </TrailerRevealItem>
           ))}
         </ul>
       </div>

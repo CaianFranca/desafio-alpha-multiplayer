@@ -5,7 +5,7 @@
      hero_section, final_cta, cadastro_page, login_page). Contraste AA do texto
      sobre o fundo/superfície; Criar Sala/Partida seguem usáveis via variáveis. */
   --color-background: #0c0c0e;
-  --color-surface: #1a1a1f;
+  --color-surface: #07080A;
   --color-text: #f5f1e8;
   --color-muted: #c9c2b4;
   --color-accent: #f59e0b;
@@ -128,6 +128,107 @@ input:-webkit-autofill:active {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
+/* Entrada por elemento da seção Trailers (título + cards revelam ao
+   entrar em vista, sem reanimar; a seção em si segue estática): só
+   `opacity` + `transform`, espelho do padrão da Hero. O estado
+   inicial oculto (`is-hidden`) só é aplicado via JS (`revealed === false`);
+   sem JS/observer o conteúdo nasce visível. */
+.trailers-reveal {
+  transition-property: opacity, transform;
+  transition-duration: 650ms;
+  transition-timing-function: ease-out;
+}
+.trailers-reveal.is-hidden {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+}
+.trailers-reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+/* Micro-interações das capas de trailer: escala sutil da capa no hover do
+   invólucro (`group`) e destaque do botão play no hover/foco. Só
+   `transform`/`opacity` são animados; a troca de fundo do botão é
+   instantânea (sem transição) e o escopo `#trailers` preserva as demais
+   seções. `will-change` pontual nas capas. */
+#trailers .trailers-cover {
+  transition-property: transform, opacity;
+  transition-duration: 200ms;
+  transition-timing-function: ease-out;
+  will-change: transform;
+}
+#trailers .group:hover .trailers-cover {
+  transform: scale(1.02);
+}
+#trailers .trailers-play {
+  transition-property: transform, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+#trailers .trailers-play:hover,
+#trailers .trailers-play:focus-visible {
+  background-color: var(--color-accent);
+}
+
+/* Layout de referência da seção Trailers (references/trailers.png):
+   eyebrow pequeno em caixa-alta à esquerda, 2 cards 16:9 lado a lado no
+   desktop (grade via Tailwind `md:grid-cols-2`), rótulo em overlay
+   inferior-esquerdo em caps e play decorativo vazado centralizado.
+   Estende o bloco de reveal/hover acima sem reescrevê-lo. */
+#trailers .trailers-eyebrow {
+  margin: 0 0 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--color-text);
+}
+#trailers .trailers-card {
+  position: relative;
+  isolation: isolate;
+}
+#trailers .trailers-card::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 38%;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.72),
+    rgba(0, 0, 0, 0.28) 55%,
+    transparent
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+#trailers .trailers-card-label {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 2;
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  color: #fff;
+}
+#trailers .trailers-play-decorative {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 4.5rem;
+  height: 4.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 9999px;
+  background: transparent;
+  color: #fff;
+}
+
 /* Camada de fundo do CTA final: mesma imagem da Hero; o deslocamento de
    parallax acontece só via `transform` (JS, com rAF) + `opacity` — nunca no
    layout — e com `will-change` aplicado só enquanto a seção está visível. */
@@ -164,6 +265,33 @@ input:-webkit-autofill:active {
   #hero .cta-secondary:hover {
     transform: none;
     box-shadow: none;
+  }
+  .trailers-reveal {
+    transition: none;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  #trailers .trailers-cover {
+    transition: none;
+    transform: none !important;
+  }
+  #trailers .group:hover .trailers-cover {
+    transform: none;
+  }
+  #trailers .trailers-play {
+    transition: none;
+  }
+  #trailers .trailers-play:hover,
+  #trailers .trailers-play:focus-visible {
+    transform: none;
+    background-color: rgba(0, 0, 0, 0.6);
+  }
+  #trailers .trailers-play-decorative {
+    transition: none;
+    transform: none !important;
+  }
+  #trailers .trailers-card::after {
+    transition: none;
   }
   .final-cta-media {
     inset: 0;
