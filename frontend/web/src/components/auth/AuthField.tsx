@@ -27,11 +27,11 @@ export function AuthField({
 }: AuthFieldProps) {
   return (
     <div>
-      <label htmlFor={id} className="block text-sm font-medium text-[var(--color-muted)] mb-1">
+      <label htmlFor={id} className="auth-field__label">
         {label}
       </label>
       <div className="relative">
-        <span className="absolute inset-y-0 left-3 flex items-center text-slate-400" aria-hidden="true">
+        <span className="absolute inset-y-0 left-3 flex items-center text-[var(--color-muted)]" aria-hidden="true">
           {icon}
         </span>
         <input
@@ -47,11 +47,11 @@ export function AuthField({
           }}
           aria-invalid={Boolean(error)}
           aria-describedby={error ? `${id}-error` : undefined}
-          className="w-full pl-10 pr-3 py-2.5 bg-[var(--color-background)]/60 border border-white/15 rounded-md text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-[var(--color-accent)]"
+          className="auth-field__input"
         />
       </div>
       {error && (
-        <p id={`${id}-error`} role="alert" className="mt-1 text-sm text-red-400">
+        <p id={`${id}-error`} role="alert" className="auth-field__error">
           {error}
         </p>
       )}
