@@ -376,11 +376,6 @@ input:-webkit-autofill:active {
   height: 1.6rem;
   display: block;
 }
-#caracteristicas .features-grid > li:nth-child(n+4) .features-badge {
-  top: 1.25rem;
-  right: auto;
-  left: 1.25rem;
-}
 #caracteristicas .features-card:hover {
   transform: none;
   animation: none;
