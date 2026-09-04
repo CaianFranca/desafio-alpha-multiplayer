@@ -503,7 +503,7 @@ input:-webkit-autofill:active {
    de submit das telas Entrar/Cadastro (bg laranja `--color-accent` com texto
    escuro `slate-900`); mantém o esqueleto do `.site-header__cta` (padding e
    tipografia do header). Vem após o `:hover` base para vencer na cascata e
-   usa hover só em `opacity`, como o submit das telas de auth. */
+   usa hover só em `opacity`. */
 .site-header__cta--accent {
   background-color: var(--color-accent);
   border-color: transparent;
@@ -582,10 +582,11 @@ input:-webkit-autofill:active {
    login_page.png: foto do corredor do sanatório (asset
    imagem_fundo_cadastro_login.png) full-bleed sob overlay escuro em
    gradiente (contraste AA do texto warm-white), card centralizado elevado
-   sobre a foto (#141519), borda fina clara, radius 1rem e sombra profunda;
-   campos com fundo var(--color-background) — cor casada com o autofill
-   global —, borda sutil e foco âmbar; botão âmbar com texto slate-900 e
-   link âmbar (sem underline, como na ref). Classes explícitas em vez de
+   sobre a foto na cor do header (var(--color-background)), borda fina clara,
+   cantos retos (0, como os botões do header) e sombra profunda;
+    campos com fundo var(--color-background) — cor casada com o autofill
+    global —, borda sutil e foco âmbar; botão âmbar com texto slate-900 e
+    link âmbar (sem underline, como na ref). Classes explícitas em vez de
    utilidades Tailwind pelo mesmo motivo das .cta-*: o reset `a` e as
    camadas do Tailwind não vencem o CSS fora de camadas. Só apresentação:
    handlers, validações, aria e copy inalterados. */
@@ -612,9 +613,9 @@ input:-webkit-autofill:active {
 .auth-card {
   position: relative;
   z-index: 1;
-  background: #141519;
+  background: var(--color-background);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 1rem;
+  border-radius: 0;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
 }
 .auth-field__label {
@@ -668,7 +669,7 @@ input:-webkit-autofill:active {
   background-color: var(--color-accent);
   color: #0f172a;
   border: 0;
-  border-radius: 0.5rem;
+  border-radius: 0;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
