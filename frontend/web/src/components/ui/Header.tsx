@@ -44,7 +44,7 @@ export function Header() {
           )}
           {!autenticado && !emLobby && (
             <div className="site-header__guest">
-              <Link to="/login" className="site-header__login">Entrar</Link>
+              <Link to="/login" className="site-header__login cta-primary">Entrar</Link>
               <Link to="/cadastro" className="site-header__cta">Criar conta</Link>
             </div>
           )}

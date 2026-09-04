@@ -385,10 +385,12 @@ input:-webkit-autofill:active {
    barra escura única sempre visível (sticky, sem observer), logo em
    Source Serif 4 caixa-alta com tracking largo à esquerda, nav por âncoras
    em muted→branco no hover, CTAs em outline fino claro à direita (Entrar
-   como texto), Apelido truncado no lugar do avatar e ícone de porta
-   (door_open_icon.svg, fill #f5f1e8) no CTA de saída. Só apresentação:
-   rótulos/destinos/handleLogout inalterados. Transições só em
-   transform/opacity; a troca de cor/borda no hover é instantânea. */
+   com preenchimento claro via `.cta-primary` reutilizado — hierarquia
+   inversa à hero — e Criar conta fantasma), Apelido truncado no lugar do
+   avatar e ícone de porta (door_open_icon.svg, fill #f5f1e8) no CTA de
+   saída. Só apresentação: rótulos/destinos/handleLogout inalterados.
+   Transições só em transform/opacity; a troca de cor/borda no hover é
+   instantânea. */
 .site-header {
   position: sticky;
   top: 0;
@@ -454,17 +456,23 @@ input:-webkit-autofill:active {
   white-space: nowrap;
 }
 .site-header__login {
-  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 1.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--color-text);
+  cursor: pointer;
+  flex-shrink: 0;
   transition-property: transform, opacity;
   transition-duration: 180ms;
   transition-timing-function: ease-out;
 }
-.site-header__login:hover {
-  color: #fff;
-  opacity: 0.9;
+.site-header__login.cta-primary:hover {
+  color: #0c0c0e;
+  opacity: 0.92;
 }
 .site-header__cta {
   display: inline-flex;
