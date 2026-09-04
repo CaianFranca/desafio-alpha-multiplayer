@@ -229,6 +229,72 @@ input:-webkit-autofill:active {
   color: #fff;
 }
 
+/* Layout de referência da seção História (references/story.png): desktop em
+   2 colunas com a imagem à esquerda e o texto à direita (grade via Tailwind
+   `md:grid-cols-2`), mobile empilhado com a imagem primeiro (ordem do DOM).
+   Entrada por elemento (imagem + bloco de texto) com reveal reciclado de
+   Trailers — só `opacity` + `transform`, reveal único — e ken-burns leve e
+   contínuo só na imagem (só `transform`). O estado inicial oculto
+   (`is-hidden`) só é aplicado via JS (`revealed === false`); sem
+   JS/observer o conteúdo nasce visível. */
+#historia {
+  background: var(--color-background);
+}
+#historia .history-eyebrow {
+  margin: 0 0 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--color-text);
+}
+.history-reveal {
+  transition-property: opacity, transform;
+  transition-duration: 650ms;
+  transition-timing-function: ease-out;
+}
+.history-reveal.is-hidden {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+}
+.history-reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+/* Moldura da imagem da ref reproduzida só com CSS: borda fina externa +
+   filete interno em inset via `::after`, sem novo texto/legenda. O
+   `overflow: hidden` contém o ken-burns da imagem. */
+#historia .history-media {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(245, 241, 232, 0.22);
+}
+#historia .history-media::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgba(245, 241, 232, 0.16);
+  pointer-events: none;
+}
+#historia .history-kenburns {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+  will-change: transform;
+  animation: history-kenburns 18s ease-in-out infinite alternate;
+}
+@keyframes history-kenburns {
+  from {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.045) translate3d(1.5%, -1.5%, 0);
+  }
+}
+
 /* Camada de fundo do CTA final: mesma imagem da Hero; o deslocamento de
    parallax acontece só via `transform` (JS, com rAF) + `opacity` — nunca no
    layout — e com `will-change` aplicado só enquanto a seção está visível. */
@@ -292,6 +358,19 @@ input:-webkit-autofill:active {
   }
   #trailers .trailers-card::after {
     transition: none;
+  }
+  .history-reveal {
+    transition: none;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  #historia .history-media::after {
+    transition: none;
+  }
+  #historia .history-kenburns {
+    animation: none;
+    transform: none !important;
+    will-change: auto;
   }
   .final-cta-media {
     inset: 0;
