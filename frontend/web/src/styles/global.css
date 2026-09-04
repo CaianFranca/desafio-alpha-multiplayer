@@ -295,6 +295,92 @@ input:-webkit-autofill:active {
   }
 }
 
+/* Layout de referência da seção Características (references/features.png):
+   eyebrow pequeno em caixa-alta à esquerda, grade 3 cartões no topo + 2
+   embaixo (largo + estreito via `md:col-span-*` no Tailwind), cards escuros
+   com moldura branca espessa irregular por lado (larguras sorteadas por
+   card via inline style) e selo quadrado claro com SVG local sobreposto.
+   Entrada por cartão com reveal reciclado de Trailers/História —
+   só `opacity` + `transform`, reveal único — composta com flicker clínico
+   sutil de `opacity` restrito à entrada (1 execução, sem repetição em
+   hover). O estado inicial oculto (`is-hidden`) só é aplicado via JS
+   (`revealed === false`); sem JS/observer o conteúdo nasce visível. O tilt
+   do card e do selo é estático por montagem (inline style); o reveal vive
+   no `li` externo e nunca no card. */
+#caracteristicas {
+  background: var(--color-surface);
+}
+#caracteristicas .features-eyebrow {
+  margin: 0 0 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--color-text);
+}
+.features-reveal {
+  transition-property: opacity, transform;
+  transition-duration: 650ms;
+  transition-timing-function: ease-out;
+}
+.features-reveal.is-hidden {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+}
+.features-reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  animation: features-flicker 520ms ease-out 1;
+}
+@keyframes features-flicker {
+  0% { opacity: 0; }
+  18% { opacity: 0.55; }
+  32% { opacity: 0.3; }
+  48% { opacity: 0.85; }
+  64% { opacity: 0.65; }
+  82% { opacity: 0.95; }
+  100% { opacity: 1; }
+}
+#caracteristicas .features-card {
+  position: relative;
+  height: 100%;
+  background: var(--color-background);
+  border-style: solid;
+  border-color: rgba(245, 241, 232, 0.95);
+  border-width: 4px;
+  padding: 2.5rem 1.5rem 1.75rem;
+}
+#caracteristicas .features-card::after {
+  content: none;
+}
+#caracteristicas .features-card h3 {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+#caracteristicas .features-badge {
+  position: absolute;
+  top: -1.1rem;
+  right: 1.25rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-text);
+  border: 0;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+#caracteristicas .features-badge-icon {
+  width: 1.6rem;
+  height: 1.6rem;
+  display: block;
+}
+#caracteristicas .features-card:hover {
+  transform: none;
+  animation: none;
+}
+
 /* Camada de fundo do CTA final: mesma imagem da Hero; o deslocamento de
    parallax acontece só via `transform` (JS, com rAF) + `opacity` — nunca no
    layout — e com `will-change` aplicado só enquanto a seção está visível. */
@@ -363,6 +449,20 @@ input:-webkit-autofill:active {
     transition: none;
     opacity: 1 !important;
     transform: none !important;
+  }
+  .features-reveal {
+    transition: none;
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+  }
+  #caracteristicas .features-card:hover {
+    transform: none;
+    animation: none;
+  }
+  #caracteristicas .features-badge {
+    transition: none;
+    animation: none !important;
   }
   #historia .history-media::after {
     transition: none;
