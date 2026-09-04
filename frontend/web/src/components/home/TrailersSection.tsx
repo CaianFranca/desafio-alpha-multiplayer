@@ -230,22 +230,22 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
   )
 }
 
-export function TrailersSection() {
-  const sectionRef = useRef<HTMLElement | null>(null)
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null)
   // Sem IntersectionObserver (ex.: jsdom, ambientes sem suporte), nasce
   // revelado — fallback estático sem JS/observer com conteúdo visível.
   const [revealed, setRevealed] = useState(
     () => typeof IntersectionObserver === 'undefined',
   )
 
-  // Reveal único de entrada: observa a seção uma vez e revela; sem
-  // IntersectionObserver o estado inicial já é revelado (fallback estático).
-  // O estado inicial oculto só existe via JS — sem JS/observer o conteúdo
-  // segue visível. Espelha o padrão da HeroSection.
+  // Reveal único de entrada por elemento: observa o próprio nó uma vez e
+  // revela; sem IntersectionObserver o estado inicial já é revelado
+  // (fallback estático). O estado inicial oculto só existe via JS — sem
+  // JS/observer o conteúdo segue visível. Espelha o padrão da HeroSection.
   useEffect(() => {
     if (revealed) return
-    const section = sectionRef.current
-    if (!section) return
+    const node = ref.current
+    if (!node) return
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
@@ -253,24 +253,41 @@ export function TrailersSection() {
           observer.disconnect()
         }
       },
-      { threshold: 0 },
+      { threshold: 0.15 },
     )
-    observer.observe(section)
+    observer.observe(node)
     return () => observer.disconnect()
   }, [revealed])
 
-  const revealState = revealed ? 'is-visible' : 'is-hidden'
+  return { ref, revealState: revealed ? 'is-visible' : 'is-hidden' }
+}
+
+function TrailerRevealItem({ index, children }: { index: number; children: ReactNode }) {
+  const { ref, revealState } = useReveal<HTMLLIElement>()
+  return (
+    <li
+      ref={ref}
+      style={{ transitionDelay: `${index * 90}ms` }}
+      className={`trailers-reveal ${revealState} w-full`}
+    >
+      {children}
+    </li>
+  )
+}
+
+export function TrailersSection() {
+  const { ref: titleRef, revealState: titleState } = useReveal<HTMLHeadingElement>()
 
   return (
-    <section ref={sectionRef} id={trailers.id} className={`trailers-reveal ${revealState} py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-surface)`} aria-labelledby="trailers-title">
+    <section id={trailers.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-surface)" aria-labelledby="trailers-title">
       <div className="max-w-7xl mx-auto">
-        <h2 id="trailers-title" className="trailers-eyebrow">{trailers.title}</h2>
+        <h2 ref={titleRef} id="trailers-title" className={`trailers-eyebrow trailers-reveal ${titleState}`}>{trailers.title}</h2>
         <p className="sr-only">{trailers.description}</p>
         <ul role="list" className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 list-none m-0 p-0">
-          {trailers.items.map((item) => (
-            <li key={item.titulo} className="w-full">
+          {trailers.items.map((item, index) => (
+            <TrailerRevealItem key={item.titulo} index={index}>
               <TrailerPlayer trailer={item} />
-            </li>
+            </TrailerRevealItem>
           ))}
         </ul>
       </div>

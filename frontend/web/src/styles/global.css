@@ -128,8 +128,9 @@ input:-webkit-autofill:active {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-/* Entrada única da seção Trailers (reveal ao entrar em vista, sem
-   reanimar): só `opacity` + `transform`, espelho do padrão da Hero. O estado
+/* Entrada por elemento da seção Trailers (título + cards revelam ao
+   entrar em vista, sem reanimar; a seção em si segue estática): só
+   `opacity` + `transform`, espelho do padrão da Hero. O estado
    inicial oculto (`is-hidden`) só é aplicado via JS (`revealed === false`);
    sem JS/observer o conteúdo nasce visível. */
 .trailers-reveal {

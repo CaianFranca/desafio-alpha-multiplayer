@@ -31,17 +31,27 @@ function renderHome() {
 }
 
 /**
- * Localiza o observer do reveal da seção (o que observa a própria `#trailers`).
- * Cada player também observa seu contêiner interno, então a seleção é pelo alvo
- * observado — a seção em si — e não por índice posicional em `instances`.
+ * Localiza o observer do reveal de um alvo (título ou item), pelo nó
+ * observado. Cada player também observa seu contêiner interno, então a
+ * seleção é pelo alvo exato — e não por índice posicional em `instances`.
  */
-function getSectionObserver() {
-  const section = document.getElementById('trailers')
+function getObserverFor(target: Element | null) {
   const found = FakeIntersectionObserver.instances.find((instance) =>
-    instance.observe.mock.calls.some(([target]) => target === section),
+    instance.observe.mock.calls.some(([node]) => node === target),
   )
-  if (!found) throw new Error('observer da seção de trailers deveria existir')
+  if (!found) throw new Error('observer do reveal deveria existir')
   return found
+}
+
+function getRevealTargets() {
+  const section = document.getElementById('trailers')
+  if (!section) throw new Error('seção de trailers deveria existir')
+  const title = screen.getByRole('heading', { name: trailers.title })
+  const items = Array.from(section.querySelectorAll('li'))
+  if (items.length !== trailers.items.length) {
+    throw new Error('itens de trailer deveriam existir')
+  }
+  return { section, title, items }
 }
 
 beforeEach(() => {
@@ -84,29 +94,57 @@ describe('seção de trailers', () => {
     expect(section.querySelector('video')).toBeNull()
   })
 
-  it('revela uma única vez ao entrar em vista, sem reanimar', () => {
-    const section = renderHome()
-    const observer = getSectionObserver()
+  it('revela título e vídeos uma única vez ao entrar em vista, sem reanimar', () => {
+    const { section, title, items } = (() => {
+      renderHome()
+      return getRevealTargets()
+    })()
+    const titleObserver = getObserverFor(title)
+    const itemObservers = items.map((item) => getObserverFor(item))
 
-    expect(section).toHaveClass('trailers-reveal', 'is-hidden')
+    // A seção em si segue estática — só título e cards animam.
+    expect(section).not.toHaveClass('trailers-reveal')
+    expect(title).toHaveClass('trailers-reveal', 'is-hidden')
+    for (const item of items) {
+      expect(item).toHaveClass('trailers-reveal', 'is-hidden')
+    }
 
-    act(() => observer.trigger(false))
-    expect(section).toHaveClass('is-hidden')
+    act(() => titleObserver.trigger(false))
+    expect(title).toHaveClass('is-hidden')
 
-    act(() => observer.trigger(true))
-    expect(section).toHaveClass('trailers-reveal', 'is-visible')
-    expect(observer.disconnect).toHaveBeenCalled()
+    // Cada elemento revela de forma independente ao entrar em vista.
+    act(() => titleObserver.trigger(true))
+    expect(title).toHaveClass('trailers-reveal', 'is-visible')
+    expect(titleObserver.disconnect).toHaveBeenCalled()
+    for (const item of items) {
+      expect(item).toHaveClass('is-hidden')
+    }
 
-    act(() => observer.trigger(true))
-    expect(section).toHaveClass('trailers-reveal', 'is-visible')
+    act(() => itemObservers[0]?.trigger(true))
+    expect(items[0]).toHaveClass('trailers-reveal', 'is-visible')
+    expect(items[1]).toHaveClass('is-hidden')
+
+    act(() => itemObservers[1]?.trigger(true))
+    expect(items[1]).toHaveClass('trailers-reveal', 'is-visible')
+    expect(itemObservers[1]?.disconnect).toHaveBeenCalled()
+
+    act(() => titleObserver.trigger(true))
+    expect(title).toHaveClass('trailers-reveal', 'is-visible')
   })
 
   it('sem IntersectionObserver, nasce visível (fallback estático)', () => {
     Reflect.deleteProperty(window, 'IntersectionObserver')
 
-    const section = renderHome()
+    const { section, title, items } = (() => {
+      renderHome()
+      return getRevealTargets()
+    })()
 
-    expect(section).toHaveClass('trailers-reveal', 'is-visible')
+    expect(section).not.toHaveClass('trailers-reveal')
+    expect(title).toHaveClass('trailers-reveal', 'is-visible')
+    for (const item of items) {
+      expect(item).toHaveClass('trailers-reveal', 'is-visible')
+    }
     expect(section.querySelector('video')).toBeNull()
   })
 })
