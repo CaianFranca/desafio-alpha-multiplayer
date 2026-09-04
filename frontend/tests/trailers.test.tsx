@@ -34,6 +34,23 @@ function renderHome() {
   return section
 }
 
+/**
+ * Localiza o observer do player de trailer (o que observa um nó dentro de
+ * `#trailers`). A Hero (#208) também observa a própria seção (reveal único +
+ * parallax); o índice posicional em `instances` deixou de ser estável, então
+ * a seleção é pelo alvo observado — as asserções dos testes seguem as mesmas.
+ */
+function getTrailerObserver() {
+  const section = document.getElementById('trailers')
+  const found = FakeIntersectionObserver.instances.find((instance) =>
+    instance.observe.mock.calls.some(
+      ([target]) => target instanceof HTMLElement && section?.contains(target),
+    ),
+  )
+  if (!found) throw new Error('observer do trailer deveria existir')
+  return found
+}
+
 function getVideo(section: HTMLElement) {
   const video = section.querySelector('video')
   if (!video) throw new Error('vídeo deveria estar montado')
@@ -88,10 +105,10 @@ describe('seção de trailers', () => {
     const section = renderHome()
     expect(section.querySelector('video')).toBeNull()
 
-    act(() => FakeIntersectionObserver.instances[0].trigger(true))
+    act(() => getTrailerObserver().trigger(true))
 
     expect(section.querySelectorAll('video')).toHaveLength(1)
-    expect(FakeIntersectionObserver.instances[0].unobserve).toHaveBeenCalled()
+    expect(getTrailerObserver().unobserve).toHaveBeenCalled()
     const video = getVideo(section)
     expect(video.getAttribute('src')).toBe(trailers.items[0]?.src)
     expect(video.autoplay).toBe(true)
@@ -117,7 +134,7 @@ describe('seção de trailers', () => {
   it('controles de reprodução e áudio funcionam por teclado e clique', async () => {
     const user = userEvent.setup()
     const section = renderHome()
-    act(() => FakeIntersectionObserver.instances[0].trigger(true))
+    act(() => getTrailerObserver().trigger(true))
 
     const item = getTrailerItem(section, trailerComVideo.titulo)
     const video = getVideo(item)
@@ -152,7 +169,7 @@ describe('seção de trailers', () => {
   it('vídeo clicável tem semântica de botão e é operável por teclado', async () => {
     const user = userEvent.setup()
     const section = renderHome()
-    act(() => FakeIntersectionObserver.instances[0].trigger(true))
+    act(() => getTrailerObserver().trigger(true))
 
     const item = getTrailerItem(section, trailerComVideo.titulo)
     const video = getVideo(item)
@@ -172,7 +189,7 @@ describe('seção de trailers', () => {
 
   it('em caso de falha de carregamento mostra capa com mensagem alternativa', async () => {
     const section = renderHome()
-    act(() => FakeIntersectionObserver.instances[0].trigger(true))
+    act(() => getTrailerObserver().trigger(true))
     const video = getVideo(section)
 
     await act(async () => {
