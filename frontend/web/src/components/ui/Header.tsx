@@ -50,7 +50,6 @@ export function Header() {
           )}
           {autenticado && (
             <div className="site-header__user">
-              <span className="site-header__nickname truncate">{authState.jogador.apelido}</span>
               {emLobby ? (
                 <button type="button" onClick={() => navigate('/')} className={styleVoltar}>
                   Voltar para o início
@@ -74,6 +73,7 @@ export function Header() {
                   className="site-header__logout-icon"
                 />
               </button>
+              <span className="site-header__nickname truncate">{authState.jogador.apelido}</span>
             </div>
           )}
         </div>
