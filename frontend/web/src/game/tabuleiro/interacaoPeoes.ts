@@ -728,6 +728,12 @@ export function mapearEventoPeaoParaFeedback(
       }
       if (evento.codigo === 'CAIXA_ESGOTADA') {
         // Sorteio sem peças na Caixa (issue #143): flash vermelho com motivo.
+        // Rota DEFENSIVA (#145-exp F5): nenhum comando do wire invoca a
+        // primitiva sortearDaCaixa que produz este código (engine/
+        // tabuleiro.ts:504-507) — o Recebimento (#138) esvazia sem erro e o
+        // término por Caixa chega via PARTIDA_TERMINADA com motivo
+        // 'caixa_esgotada' (F2/F4). Mantida para rejeições explícitas de um
+        // servidor autoritativo; não remover.
         return { ...FLASH_VERMELHO, motivo: 'caixa_esgotada' }
       }
       return FLASH_VERMELHO

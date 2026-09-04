@@ -479,6 +479,12 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
   })
 
   it('CAIXA_ESGOTADA no ERRO_DO_TABULEIRO produz flash vermelho com motivo (issue #143)', async () => {
+    // Rota DEFENSIVA (#145-exp F5): o código CAIXA_ESGOTADA só é produzido
+    // pela primitiva sortearDaCaixa do engine (tabuleiro.ts:504-507), que
+    // nenhum comando do wire invoca; o término por Caixa esgotada chega ao
+    // cliente via PARTIDA_TERMINADA com motivo (coberto em
+    // partida-ciclo-completo.test.tsx, F4). O teste blinda o feedback caso um
+    // servidor autoritativo emita a rejeição explícita — não remover.
     const ws = await partidaDisponivel()
 
     act(() =>
