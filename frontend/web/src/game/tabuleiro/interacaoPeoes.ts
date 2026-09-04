@@ -51,7 +51,12 @@ import {
   encontrarPecaNaCelula,
   estaDentroDaGrade,
 } from './contrato'
-import type { Celula, PeaoDaExibicao, PecaPosicionada } from './contrato'
+import type {
+  Celula,
+  PeaoDaExibicao,
+  PeaoId,
+  PecaPosicionada,
+} from './contrato'
 import type {
   BordaCardinal,
   ErroDoTabuleiroEvento,
@@ -111,6 +116,17 @@ export interface EstadoInteracaoPeoes {
    * gate não avaliado (unidades puras sem identidade local).
    */
   readonly donoDoCiclo?: boolean
+  /**
+   * Projeção mínima dos peões AFETADOS (Baixa Iluminação ∨ Amedrontado —
+   * predicado espelhado de engine/partida.ts:1484). Menor shape coerente com
+   * este módulo: um Set de peaoIds, derivado no pai (PartidaPage) de
+   * `jogadorPorId` × `peaoPorJogador` (snapshot + deltas de ATAQUE/RESGATE
+   * #174) — o módulo permanece puro e sem mapa de jogadores. Alimenta a
+   * exceção de ocupação de resgate (+1 teto, issue #171) em
+   * `destinosConectadosDoPeao`; ausente/vazio = percepção ainda não chegou
+   * (peças ocupadas por não-afetados ficam bloqueadas — conservador).
+   */
+  readonly afetadosPorPeaoId?: ReadonlySet<PeaoId>
 }
 
 // ── Resultado de clique/ação do ciclo ──
@@ -431,8 +447,13 @@ export function mapearPermanencia(
  * Clique em Peça vizinha conectada destacada do Peão selecionado →
  * MOVER_PEAO. Exige tudo posicionado (US 15: recebidas pendentes antes de
  * mover → não reage). Posição já confirmada neste turno → rejeição âmbar
- * (AC3). Destino não conectado, ocupado por outro Peão ou Peão sem
- * seleção/posicionado → null (alvos inválidos não reagem ao clique).
+ * (AC3). Destino não conectado, peça comum ocupada por Peão não-afetado,
+ * peça no teto de ocupação (Portão 4, demais 1; +1 com afetado — espelho do
+ * engine em contrato.ts) ou Peão sem seleção/posicionado → null (alvos
+ * inválidos não reagem ao clique). Destino de RESGATE (peça com peão
+ * AFETADO sob teto elevado) emite o MESMO comando `MOVER_PEAO` — o resgate é
+ * efeito atômico do pouso no engine (partida.ts:675-712), não um comando novo
+ * no wire.
  */
 export function mapearMovimentacao(
   estado: EstadoInteracaoPeoes,
@@ -445,9 +466,10 @@ export function mapearMovimentacao(
     estado.posicionadas,
     estado.peoes,
     peaoId,
+    estado.afetadosPorPeaoId,
   )
   const conectada = destinos.some(
-    (p) => chaveCelula(p.celula) === chaveCelula(celula),
+    (d) => chaveCelula(d.peca.celula) === chaveCelula(celula),
   )
   if (!conectada) return null
   if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA

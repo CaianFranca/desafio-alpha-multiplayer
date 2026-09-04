@@ -220,6 +220,22 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
   const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
 
+  // ── Peões AFETADOS para o espelho de destinos (F1 #145-exp) ──
+  // Predicado espelhado do engine (partida.ts:1484): Baixa Iluminação ∨
+  // Amedrontado. Fonte: jogadorPorId (snapshot #156 + deltas ATAQUE/RESGATE
+  // #174) × peaoPorJogador. Alimenta a exceção de ocupação de resgate (+1
+  // teto, #171) em destinosConectadosDoPeao/mapearMovimentacao.
+  const afetadosPorPeaoId: ReadonlySet<string> = useMemo(() => {
+    const out = new Set<string>()
+    for (const [jid, dados] of Object.entries(modelo.jogadorPorId)) {
+      const peaoId = modelo.peaoPorJogador[jid]
+      if (peaoId !== undefined && (dados.emBaixaIluminacao || dados.amedrontado)) {
+        out.add(peaoId)
+      }
+    }
+    return out
+  }, [modelo.jogadorPorId, modelo.peaoPorJogador])
+
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
@@ -234,8 +250,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
       // bandeja continua pública (as pendências vêm do broadcast sem filtro).
       donoDoCiclo: minhaVez,
+      // Projeção dos afetados (exceção de resgate #171 no espelho de destinos).
+      afetadosPorPeaoId,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId])
 
   // ── Flash local (revisão #199): mesma fonte para o pull na bandeja; a
   // rejeição de peão (vermelho/âmbar do roteador) segue o mesmo caminho. ──

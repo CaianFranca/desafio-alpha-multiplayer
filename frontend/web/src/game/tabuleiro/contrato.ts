@@ -440,27 +440,83 @@ export function selecionarPeaoNaExibicao(
 }
 
 /**
- * Destinos válidos do peão selecionado: vizinhas conectadas cuja célula não
- * está ocupada por outro peão (máx. 1 peão por peça). Espelha a aceitação de
- * `mover_peao` do engine (conectada + sem PECA_JA_TEM_PEAO).
+ * Peça de Monstro (espelha `ehPecaDeMonstro` do engine —
+ * packages/engine/src/peoes.ts:104-106): Monstros NUNCA aceitam Peão; o
+ * engine rejeita antes de qualquer consulta de vizinhança/ocupação
+ * (peoes.ts:531-536, partida.ts:583-585).
+ */
+export function ehPecaDeMonstro(tipo: TipoDaPeca): boolean {
+  return tipo === 'vulto' || tipo === 'espectro'
+}
+
+/**
+ * Teto de ocupação do Portão de Saída (espelha peoes.ts:558 e
+ * partida.ts:1490): a reunião dos peões no Portão é condição de vitória;
+ * as demais peças continuam no máximo 1.
+ */
+export const TETO_DE_OCUPACAO_DO_PORTAO = 4
+
+/** Classe do destino: movimento comum ou resgate de peão afetado. */
+export type TipoDeDestinoDoPeao = 'movimento' | 'resgate'
+
+/**
+ * Destino aceito por `mover_peao`, com a natureza do pouso. `resgate` espelha
+ * o gatilho atômico do engine: chegada com aliado AFETADO (Baixa Iluminação ∨
+ * Amedrontado) na peça de destino limpa seus estados
+ * (partida.ts:675-712). O comando de wire é o mesmo `MOVER_PEAO` nos dois
+ * casos — o tipo só diferencia destaque/cursor na UI.
+ */
+export interface DestinoDoPeao {
+  readonly peca: PecaPosicionada
+  readonly tipo: TipoDeDestinoDoPeao
+}
+
+/**
+ * Destinos válidos do peão selecionado — espelho da aceitação de `mover_peao`
+ * do engine (partida.ts:575-612 + peoes.ts:521-561):
+ *   1. vizinha conectada à peça de origem (senão MOVIMENTO_NAO_CONECTADO);
+ *   2. Monstros excluídos sempre (partida.ts:583-585, peoes.ts:531-536);
+ *   3. ocupação < teto, onde teto = 4 no Portão, 1 nas demais
+ *      (peoes.ts:555-561), +1 quando a peça abriga peão AFETADO
+ *      (`tetoOcupacao`/`temAfetadoNaPeca`, partida.ts:1479-1492) — a
+ *      exceção de resgate da issue #171.
+ *
+ * `afetadosPorPeaoId` é a projeção de percepção dos afetados
+ * (emBaixaIluminacao ∨ amedrontado — predicado espelhado de
+ * partida.ts:1484); o chamador a deriva de `jogadorPorId` × `peaoPorJogador`
+ * (fonte: snapshot #154/#156 + deltas de ATAQUE/RESGATE #174). Sem o
+ * argumento (ou set vazio) a regra antiga de 1 peão/peça é o resultado
+ * natural do teto base — unidades puras sem percepção degradam conservador.
  */
 export function destinosConectadosDoPeao(
   posicionadas: readonly PecaPosicionada[],
   peoes: readonly PeaoDaExibicao[],
   peaoId: PeaoId,
-): PecaPosicionada[] {
+  afetadosPorPeaoId: ReadonlySet<PeaoId> = new Set(),
+): DestinoDoPeao[] {
   const peao = peoes.find((p) => p.peaoId === peaoId)
   if (!peao || peao.celula === null) return []
   const origem = encontrarPecaNaCelula(posicionadas, peao.celula)
   if (!origem) return []
-  const ocupadasPorOutroPeao = new Set(
-    peoes.flatMap((p) =>
-      p.peaoId !== peaoId && p.celula !== null ? [chaveCelula(p.celula)] : [],
-    ),
-  )
-  return vizinhasConectadas(posicionadas, origem).filter(
-    (p) => !ocupadasPorOutroPeao.has(chaveCelula(p.celula)),
-  )
+  const destinos: DestinoDoPeao[] = []
+  for (const peca of vizinhasConectadas(posicionadas, origem)) {
+    // (2) Monstros fora — antes de qualquer análise de ocupação.
+    if (ehPecaDeMonstro(peca.tipo)) continue
+    const chave = chaveCelula(peca.celula)
+    // O peão em movimento aponta para a origem e não se conta entre os
+    // ocupantes do destino (mesmo pressuposto de peoes.ts:553-557).
+    const ocupantes = peoes.filter(
+      (p) => p.peaoId !== peaoId && p.celula !== null && chaveCelula(p.celula) === chave,
+    )
+    // (3) teto espelhado: Portão 4, demais 1; +1 com afetado na peça.
+    const tetoBase =
+      peca.tipo === 'portao_de_saida' ? TETO_DE_OCUPACAO_DO_PORTAO : 1
+    const temAfetado = ocupantes.some((p) => afetadosPorPeaoId.has(p.peaoId))
+    const teto = temAfetado ? tetoBase + 1 : tetoBase
+    if (ocupantes.length >= teto) continue
+    destinos.push({ peca, tipo: temAfetado ? 'resgate' : 'movimento' })
+  }
+  return destinos
 }
 
 /** Posição mundo da fileira de peões sobre a Mesa (índice = posição em `peoes`). */

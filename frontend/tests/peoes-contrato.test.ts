@@ -120,7 +120,11 @@ describe('peões no contrato de exibição (issue #90)', () => {
   it('peão sobre a Mesa não tem seleção resolvida nem destinos', () => {
     const mock = criarEstadoExibicaoMock()
     expect(selecionarPeaoNaExibicao(mock, 'peao-2-vermelho')).toBeNull()
-    expect(destinosConectadosDoPeao(mock.posicionadas, mock.peoes, 'peao-2-vermelho')).toEqual([])
+    expect(
+      destinosConectadosDoPeao(mock.posicionadas, mock.peoes, 'peao-2-vermelho').map(
+        (d) => d.peca.pecaId,
+      ),
+    ).toEqual([])
     expect(selecionarPeaoNaExibicao(mock, 'peao-inexistente')).toBeNull()
   })
 
@@ -131,7 +135,14 @@ describe('peões no contrato de exibição (issue #90)', () => {
     expect(selecionarPeaoNaExibicao(estado, 'p1')).toBeNull()
   })
 
-  it('destinos conectados excluem peça ocupada por outro peão (máx. 1 peão/peça)', () => {
+  // ── Destinos: espelho da ocupação do engine (F1 #145-exp) ──
+  //
+  // Regra espelhada de `mover_peao` (engine):
+  //   - teto comum 1 / Portão 4 (peoes.ts:555-561, partida.ts:1490);
+  //   - +1 teto quando a peça abriga peão AFETADO (partida.ts:1479-1492);
+  //   - Monstros nunca aceitam peão (partida.ts:583-585, peoes.ts:531-536).
+
+  it('peça comum ocupada por peão NÃO-afetado é bloqueada (teto 1 — partida.ts:1490)', () => {
     const pos = [
       peca('inicial', 'inicial', 0, 3, 3),
       peca('reta', 'reta', 90, 3, 4),
@@ -140,13 +151,94 @@ describe('peões no contrato de exibição (issue #90)', () => {
       { peaoId: 'p1', cor: 'branco', celula: { linha: 3, coluna: 3 } },
       { peaoId: 'p2', cor: 'vermelho', celula: { linha: 3, coluna: 4 } },
     ]
-    // conectada, mas ocupada por p2 → não é destino válido de p1
-    expect(destinosConectadosDoPeao(pos, doisPeoes, 'p1').map((p) => p.pecaId)).toEqual([])
-    // sem p2, a reta é destino válido
+    // conectada, mas ocupada por p2 não-afetado → teto 1 atingido, sem destino.
+    expect(
+      destinosConectadosDoPeao(pos, doisPeoes, 'p1').map((d) => d.peca.pecaId),
+    ).toEqual([])
+    // sem p2, a reta é destino de movimento normal.
     const umPeao: EstadoExibicaoTabuleiro['peoes'] = [
       { peaoId: 'p1', cor: 'branco', celula: { linha: 3, coluna: 3 } },
     ]
-    expect(destinosConectadosDoPeao(pos, umPeao, 'p1').map((p) => p.pecaId)).toEqual(['reta'])
+    expect(destinosConectadosDoPeao(pos, umPeao, 'p1')).toEqual([
+      { peca: pos[1], tipo: 'movimento' },
+    ])
+  })
+
+  it('peça ocupada por peão AFETADO vira destino de RESGATE (+1 teto — partida.ts:1491)', () => {
+    const pos = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('reta', 'reta', 90, 3, 4),
+    ]
+    const doisPeoes: EstadoExibicaoTabuleiro['peoes'] = [
+      { peaoId: 'p1', cor: 'branco', celula: { linha: 3, coluna: 3 } },
+      { peaoId: 'p2', cor: 'vermelho', celula: { linha: 3, coluna: 4 } },
+    ]
+    // p2 afetado (Baixa Iluminação ∨ Amedrontado — projeção do chamador):
+    // teto 2, 1 ocupante → aceito como resgate (comando segue MOVER_PEAO).
+    expect(destinosConectadosDoPeao(pos, doisPeoes, 'p1', new Set(['p2']))).toEqual([
+      { peca: pos[1], tipo: 'resgate' },
+    ])
+  })
+
+  it('Portão aceita do 2º ao 4º peão; ocupantes no teto 4 bloqueiam nova entrada (espelha engine/termino.test.ts:770)', () => {
+    const pos = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('portao', 'portao_de_saida', 0, 3, 4),
+    ]
+    const noPortao = (quantidade: number): EstadoExibicaoTabuleiro['peoes'] => [
+      { peaoId: 'p1', cor: 'branco', celula: { linha: 3, coluna: 3 } },
+      ...Array.from({ length: quantidade }, (_, i) => ({
+        // ids sintéticos além dos 4 canônicos: a função espelha a REGRA de
+        // teto, não o roster; o engine com 4 peões torna o 5º inalcançável
+        // (peoes.ts:549-554).
+        peaoId: `px${i}`,
+        cor: 'azul' as const,
+        celula: { linha: 3, coluna: 4 },
+      })),
+    ]
+    // 1, 2 e 3 ocupantes → o 2º-4º peões entram como movimento.
+    for (const ocupantes of [1, 2, 3]) {
+      expect(destinosConectadosDoPeao(pos, noPortao(ocupantes), 'p1')).toEqual([
+        { peca: pos[1], tipo: 'movimento' },
+      ])
+    }
+    // 4 ocupantes → teto atingido, sem destino.
+    expect(destinosConectadosDoPeao(pos, noPortao(4), 'p1')).toEqual([])
+  })
+
+  it('Portão com afetado eleva o teto a 5 (espelho exato de tetoOcupacao — partida.ts:1489-1492)', () => {
+    const pos = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('portao', 'portao_de_saida', 0, 3, 4),
+    ]
+    const quatroNoPortao: EstadoExibicaoTabuleiro['peoes'] = [
+      { peaoId: 'p1', cor: 'branco', celula: { linha: 3, coluna: 3 } },
+      { peaoId: 'p2', cor: 'vermelho', celula: { linha: 3, coluna: 4 } },
+      { peaoId: 'p3', cor: 'azul', celula: { linha: 3, coluna: 4 } },
+      { peaoId: 'p4', cor: 'amarelo', celula: { linha: 3, coluna: 4 } },
+      { peaoId: 'px', cor: 'azul', celula: { linha: 3, coluna: 4 } },
+    ]
+    // sem afetado: 4 ocupantes já bloqueavam; com p2 afetado: teto 5 → entra
+    // e o pouso é de resgate.
+    expect(
+      destinosConectadosDoPeao(pos, quatroNoPortao, 'p1', new Set(['p2'])),
+    ).toEqual([{ peca: pos[1], tipo: 'resgate' }])
+  })
+
+  it('Monstros posicionados nunca são destino (vulto/espectro — partida.ts:583-585)', () => {
+    const comVulto = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('vulto-1', 'vulto', 90, 3, 4),
+    ]
+    const umPeao: EstadoExibicaoTabuleiro['peoes'] = [
+      { peaoId: 'p1', cor: 'branco', celula: { linha: 3, coluna: 3 } },
+    ]
+    expect(destinosConectadosDoPeao(comVulto, umPeao, 'p1')).toEqual([])
+    const comEspectro = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('espectro-1', 'espectro', 90, 3, 4),
+    ]
+    expect(destinosConectadosDoPeao(comEspectro, umPeao, 'p1')).toEqual([])
   })
 
   // ── Fileira na Mesa ──
@@ -191,6 +283,6 @@ describe('peões no contrato de exibição (issue #90)', () => {
   it('cenário do mock: peão branco na inicial destaca a reta vizinha conectada', () => {
     const mock = criarEstadoExibicaoMock()
     const destinos = destinosConectadosDoPeao(mock.posicionadas, mock.peoes, 'peao-1-branco')
-    expect(destinos.map((p) => p.pecaId)).toEqual(['posicionada-reta-2'])
+    expect(destinos.map((d) => d.peca.pecaId)).toEqual(['posicionada-reta-2'])
   })
 })

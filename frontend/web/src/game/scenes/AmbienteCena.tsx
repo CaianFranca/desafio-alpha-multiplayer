@@ -76,6 +76,8 @@ interface AmbienteCenaProps {
   peaoAtivoId?: PeaoId | null
   /** PecaIds destinos válidos do peão selecionado (derivado uma vez no pai). */
   destinosSet?: ReadonlySet<PecaId>
+  /** Subconjunto de destinos de RESGATE (tom distinto; mesma fonte do pai). */
+  resgateSet?: ReadonlySet<PecaId>
   /** Chaves das células iluminadas (issue #151; derivado uma vez no pai). */
   iluminadasSet?: ReadonlySet<string>
   onSelecionarPeao?: (peaoId: PeaoId) => void
@@ -119,8 +121,10 @@ export function AmbienteCena({
   peaoSelecionadoId = null,
   peaoAtivoId = null,
   destinosSet,
+  resgateSet,
   iluminadasSet,
   onSelecionarPeao,
+
   onDesselecionar,
   estadoPeoes = null,
   onComandoPeao,
@@ -162,6 +166,7 @@ export function AmbienteCena({
               peaoSelecionadoId={peaoSelecionadoId}
               peaoAtivoId={peaoAtivoId}
               destinosSet={destinosSet}
+              resgateSet={resgateSet}
               iluminadasSet={iluminadasSet}
               onSelecionarPeao={onSelecionarPeao}
               estadoPeoes={estadoPeoes}

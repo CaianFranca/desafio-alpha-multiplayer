@@ -192,17 +192,25 @@ export function AmbienteDeJogo({
   // Destinos válidos do peão selecionado: mesmo conjunto deriva destaque/cursor
   // na cena e data-conectada no espelho DOM (fonte única de verdade). Após a
   // Confirmação de Posição os destinos somem — o peão está travado no turno
-  // (guard AC3 do roteador; a regra vive em um só lugar).
-  const destinosSet = new Set<string>(
+  // (guard AC3 do roteador; a regra vive em um só lugar). A projeção de
+  // afetados (exceção de resgate #171) vem do estado do ciclo, derivado do
+  // modelo; Monstros posicionados saem dos destinos (espelho do engine).
+  const destinosDoPeao =
     estadoExibicao &&
-      peaoSelecionadoIdLocal !== null &&
-      !estadoInteracaoPeoes?.posicaoConfirmadaNoTurno
+    peaoSelecionadoIdLocal !== null &&
+    !estadoInteracaoPeoes?.posicaoConfirmadaNoTurno
       ? destinosConectadosDoPeao(
           estadoExibicao.posicionadas,
           estadoExibicao.peoes,
           peaoSelecionadoIdLocal,
-        ).map((peca) => peca.pecaId)
-      : [],
+          estadoInteracaoPeoes?.afetadosPorPeaoId,
+        )
+      : []
+  const destinosSet = new Set<string>(destinosDoPeao.map((d) => d.peca.pecaId))
+  // Subconjunto de resgate: só muda o tom do destaque (cena) e o
+  // `data-resgate` (espelho); o clique segue emitindo o mesmo MOVER_PEAO.
+  const resgateSet = new Set<string>(
+    destinosDoPeao.filter((d) => d.tipo === 'resgate').map((d) => d.peca.pecaId),
   )
 
   return (
@@ -237,6 +245,7 @@ export function AmbienteDeJogo({
           peaoSelecionadoId={peaoSelecionadoIdLocal}
           peaoAtivoId={peaoAtivoId}
           destinosSet={destinosSet}
+          resgateSet={resgateSet}
           iluminadasSet={iluminadasSet}
           onSelecionarPeao={aoSelecionarPeao}
           onDesselecionar={aoDesselecionar}
@@ -262,6 +271,7 @@ export function AmbienteDeJogo({
           peaoSelecionadoId={peaoSelecionadoIdLocal}
           peaoAtivoId={peaoAtivoId}
           destinosSet={destinosSet}
+          resgateSet={resgateSet}
           aoSelecionarPeao={aoSelecionarPeao}
           aoDesselecionar={aoDesselecionar}
           estadoInteracao={estadoInteracao}

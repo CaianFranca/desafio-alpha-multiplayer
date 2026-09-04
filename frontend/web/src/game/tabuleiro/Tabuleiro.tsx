@@ -33,6 +33,12 @@ interface TabuleiroProps {
    */
   destinosSet?: ReadonlySet<PecaId>
   /**
+   * Subconjunto de `destinosSet` com os destinos de RESGATE (peça com peão
+   * AFETADO — exceção #171). Derivado no pai junto de `destinosSet`; muda só
+   * o tom do destaque, nunca a affordância (o clique segue o MOVER_PEAO).
+   */
+  resgateSet?: ReadonlySet<PecaId>
+  /**
    * Chaves das células iluminadas (`linha:coluna`) vindas do estado
    * compartilhado (issue #151). Derivado uma vez no pai — mesma fonte do
    * espelho DOM.
@@ -63,6 +69,7 @@ export function Tabuleiro({
   peaoSelecionadoId = null,
   peaoAtivoId = null,
   destinosSet = new Set<string>(),
+  resgateSet = new Set<string>(),
   iluminadasSet = new Set<string>(),
   onSelecionarPeao,
   estadoPeoes = null,
@@ -128,6 +135,7 @@ export function Tabuleiro({
             }}
             peao={peao}
             destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
+            destinoResgate={peca !== null && resgateSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}
             vagaDisponivel={vagaDisponivel}
             iluminada={iluminada}

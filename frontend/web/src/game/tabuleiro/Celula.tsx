@@ -19,7 +19,7 @@ import type {
   PecaPosicionada,
 } from './contrato'
 import { PeaoPlaceholder } from './PeaoPlaceholder'
-import { PecaPlaceholder } from './PecaPlaceholder'
+import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
 import { handlersDeCursor } from './cursor'
 
 interface CelulaProps {
@@ -34,6 +34,12 @@ interface CelulaProps {
   peao?: PeaoDaExibicao | null
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
   destinoValido?: boolean
+  /**
+   * Destino válido que é especificamente de RESGATE (peça com peão AFETADO
+   * sob teto elevado, exceção #171). Só muda o tom do destaque emissivo —
+   * mesma affordância de clique (problema do `destinoValido`).
+   */
+  destinoResgate?: boolean
   /** Célula é alvo de pendência de Recebimento ativa (destaque sutil, #91). */
   alvoPendente?: boolean
   /**
@@ -68,6 +74,7 @@ export function Celula({
   onClick,
   peao,
   destinoValido = false,
+  destinoResgate = false,
   alvoPendente = false,
   vagaDisponivel = false,
   iluminada = false,
@@ -129,6 +136,7 @@ export function Celula({
           orientacao={peca.orientacao}
           position={[0, PECA_Y, 0]}
           destacada={pecaDestacada || destinoValido}
+          corDestaque={destinoResgate ? COR_DESTAQUE_RESGATE : undefined}
           cursor={cursorEfetivo}
           onClick={onClick}
         />
