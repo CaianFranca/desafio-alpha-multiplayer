@@ -765,6 +765,145 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
   })
 })
 
+describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-exp F3)', () => {
+  const MEU_JOGADOR_ID = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
+
+  function indicadorDoJogador(jogadorId: string): HTMLElement | undefined {
+    return screen
+      .getAllByTestId('indicador-sanidade-jogador')
+      .find((el) => el.getAttribute('data-jogador-id') === jogadorId)
+  }
+
+  it('ATAQUE_RESOLVIDO com estadosAplicados atualiza os chips na tela e pisca vermelho', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+    // Ana vira a Jogadora Ativa: o chip de destaque passa a ser o dela.
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
+    const chip = await screen.findByTestId('chip-jogador-ativo')
+    expect(chip).toHaveTextContent('Ana')
+    expect(chip).toHaveAttribute('data-sanidade', '3')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-vermelho'] }],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+        ],
+      }),
+    )
+
+    // Projeção no modelo autoritativo-do-eco: chip do ativo + indicador da Ana.
+    await waitFor(() => {
+      expect(screen.getByTestId('chip-jogador-ativo')).toHaveAttribute('data-sanidade', '2')
+      expect(screen.getByTestId('chip-jogador-ativo')).toHaveAttribute('data-em-baixa', 'true')
+      const indicador = indicadorDoJogador('jogador-2')
+      expect(indicador).toHaveAttribute('data-sanidade', '2')
+      expect(indicador).toHaveAttribute('data-em-baixa', 'true')
+    })
+    // Feedback vermelho de penalidade (PartidaPage: estadosAplicados > 0).
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('vermelho')
+  })
+
+  it('ATAQUE_RESOLVIDO com Amedrontado atualiza o chip de medo na tela', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'espectro-1', tipo: 'espectro', peoesNoAlcance: ['peao-vermelho'] }],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [
+          { jogadorId: 'jogador-2', emBaixaIluminacao: false, sanidade: 0, amedrontado: true },
+        ],
+      }),
+    )
+    await waitFor(() => {
+      const indicador = indicadorDoJogador('jogador-2')
+      expect(indicador).toHaveAttribute('data-sanidade', '0')
+      expect(indicador).toHaveAttribute('data-amedrontado', 'true')
+    })
+    expect((await screen.findByTestId('flash-overlay')).getAttribute('data-cor')).toBe('vermelho')
+  })
+
+  it('ATAQUE_RESOLVIDO sem vítimas pisca âmbar; com Proteção negada pisca branco', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+
+    // Gatilho sem atingidos (alcance vazio): âmbar.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [] }],
+        peoesAtingidos: [],
+        protegidos: [],
+        estadosAplicados: [],
+      }),
+    )
+    const ambar = await screen.findByTestId('flash-overlay')
+    expect(ambar.getAttribute('data-cor')).toBe('ambar')
+
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
+
+    // Proteção (sala médica) negou o ataque: branco.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'espectro-1', tipo: 'espectro', peoesNoAlcance: ['peao-vermelho'] }],
+        peoesAtingidos: [],
+        protegidos: ['jogador-2'],
+        estadosAplicados: [],
+      }),
+    )
+    const branco = await screen.findByTestId('flash-overlay')
+    expect(branco.getAttribute('data-cor')).toBe('branco')
+    // Sem estadosAplicados, os chips não mudam (o eco é feedback, não autoridade).
+    expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-sanidade', '3')
+  })
+
+  it('RESGATE_REALIZADO limpa os estados no chip, restaura a Sanidade e pisca branco', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    // Ana Amedrontada (sanidade 0) no snapshot autoritativo.
+    const snapshot = criarSnapshotBase({
+      jogadores: criarSnapshotBase().jogadores.map((j) =>
+        j.jogadorId === 'jogador-2'
+          ? { ...j, sanidade: 0, emBaixaIluminacao: true, amedrontado: true }
+          : j,
+      ),
+    })
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
+    await waitFor(() => {
+      expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-amedrontado', 'true')
+      expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-sanidade', '0')
+    })
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'RESGATE_REALIZADO',
+        pecaId: 'reta-1',
+        resgatadoJogadorId: 'jogador-2',
+        resgatadorJogadorId: MEU_JOGADOR_ID,
+        resgatadorPeaoId: 'peao-branco',
+      }),
+    )
+
+    // Estados limpos + sanidade restaurada a 1 (regra do Resgate no domínio).
+    await waitFor(() => {
+      const indicador = indicadorDoJogador('jogador-2')
+      expect(indicador).not.toHaveAttribute('data-amedrontado')
+      expect(indicador).not.toHaveAttribute('data-em-baixa')
+      expect(indicador).toHaveAttribute('data-sanidade', '1')
+    })
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('branco')
+  })
+})
+
 describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
   function snapshotComObjetivos(opts: {
     pecasRestantes?: number
