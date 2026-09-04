@@ -10,6 +10,9 @@ const lobbyServerPort = process.env.LOBBY_SERVER_PORT ?? '3001'
 
 export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
+  // Os assets estáticos vivem em web/public (ex.: /assets/imagem_fundo_hero.png
+  // usado como fundo da Hero/CTA final); o default <root>/public não existe.
+  publicDir: 'web/public',
   // Resolve o pacote de DTOs compartilhado pelo nome canônico,
   // apontando para a fonte TS (browser-safe: só importamos DTOs puros, sem redis).
   resolve: {
