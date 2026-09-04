@@ -69,11 +69,15 @@ input:-webkit-autofill:active {
 }
 
 /* Camada de fundo da Hero: mesma imagem do CTA final, com overlay escuro em
-   gradiente que garante contraste AA do texto warm-white sobre a foto. */
+   gradiente que garante contraste AA do texto warm-white sobre a foto. O
+   deslocamento de parallax acontece só via `transform` (JS, com rAF) —
+   nunca no layout — com sangria vertical de 14% para não expor bordas e
+   `will-change` (o overlay em `::after` acompanha a camada). */
 .hero-media {
   position: absolute;
-  inset: 0;
+  inset: -14% 0;
   background: var(--image-hero) center 35% / cover no-repeat, var(--color-background);
+  will-change: transform;
 }
 .hero-media::after {
   content: "";
@@ -85,6 +89,43 @@ input:-webkit-autofill:active {
     rgba(5, 5, 7, 0.62) 42%,
     rgba(5, 5, 7, 0.86)
   );
+}
+
+/* Entrada escalonada da Hero (eyebrow → título → copy → CTAs): só `opacity` +
+   `transform`, reveal único. O estado inicial oculto (`is-hidden`) só é
+   aplicado via JS (`revealed === false`); sem JS/observer o conteúdo nasce
+   visível. Delays crescentes por elemento. */
+.hero-reveal {
+  transition-property: opacity, transform;
+  transition-duration: 650ms;
+  transition-timing-function: ease-out;
+}
+.hero-reveal.is-hidden {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+}
+.hero-reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+.hero-delay-eyebrow { transition-delay: 0ms; }
+.hero-delay-title { transition-delay: 90ms; }
+.hero-delay-copy { transition-delay: 180ms; }
+.hero-delay-ctas { transition-delay: 270ms; }
+
+/* Elevação dos CTAs só na Hero: `translateY(-2px)` + sombra no hover. Só
+   `transform`/`opacity` são animados; a sombra troca sem transição e o
+   escopo `#hero` preserva o CTA final e demais seções. */
+#hero .cta-primary,
+#hero .cta-secondary {
+  transition-property: transform, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+#hero .cta-primary:hover,
+#hero .cta-secondary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 /* Camada de fundo do CTA final: mesma imagem da Hero; o deslocamento de
@@ -109,6 +150,21 @@ input:-webkit-autofill:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .hero-media {
+    inset: 0;
+    transform: none !important;
+    will-change: auto;
+  }
+  .hero-reveal {
+    transition: none;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  #hero .cta-primary:hover,
+  #hero .cta-secondary:hover {
+    transform: none;
+    box-shadow: none;
+  }
   .final-cta-media {
     inset: 0;
     transform: none !important;
