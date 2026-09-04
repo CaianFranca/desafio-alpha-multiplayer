@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
@@ -252,6 +252,131 @@ describe('authentication states', () => {
     await user.click(within(screen.getByRole('banner')).getByRole('link', { name: /criar\/entrar sala/i }))
 
     expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
+  })
+})
+
+describe('header variations (issue #211)', () => {
+  const visitante: AuthState = { status: 'visitor' }
+  const autenticado = mockAuthenticatedState
+  const apelidoMock = mockAuthenticatedState.jogador.apelido
+
+  function criarSalaParaHeader(codigoDeSala = 'H211AA') {
+    const membro = {
+      id: 'membro-1',
+      jogadorId: mockAuthenticatedState.jogador.id,
+      apelido: apelidoMock,
+      ordemDeEntrada: 0,
+      presenca: 'conectado' as const,
+      prontidao: false,
+    }
+    return {
+      id: 'sala-1',
+      codigoDeSala,
+      estado: 'aberta' as const,
+      anfitriaoId: membro.id,
+      membros: [membro],
+      convite: { codigoDeSala, link: `http://localhost/sala/${codigoDeSala}` },
+    }
+  }
+
+  function iconePortaDoSair(header: HTMLElement) {
+    const botaoSair = within(header).getByRole('button', { name: /^sair$/i })
+    const icone = botaoSair.querySelector('img.site-header__logout-icon')
+    expect(icone).not.toBeNull()
+    expect(icone?.getAttribute('alt')).toBe('')
+    expect(icone?.getAttribute('aria-hidden')).toBe('true')
+    expect(icone?.getAttribute('src')).toContain('door_open_icon.svg')
+  }
+
+  it('variação 1 — Visitante na Home: âncoras + Entrar + Criar conta, sem Apelido', () => {
+    MockWebSocket.clean()
+    renderWithRouter(['/'], visitante)
+
+    const header = screen.getByRole('banner')
+    expect(header).toHaveClass('site-header')
+    expect(within(header).getByRole('link', { name: /flicker of sanity/i })).toHaveAttribute('href', '/')
+
+    const nav = within(header).getByRole('navigation', { name: /navegação principal/i })
+    expect(nav).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
+    expect(within(nav).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
+
+    expect(within(header).getByRole('link', { name: /^entrar$/i })).toHaveAttribute('href', '/login')
+    expect(within(header).getByRole('link', { name: /criar conta/i })).toHaveAttribute('href', '/cadastro')
+
+    expect(within(header).queryByText(apelidoMock)).not.toBeInTheDocument()
+    expect(header.querySelector('img.site-header__logout-icon')).toBeNull()
+    expect(within(header).queryByRole('button', { name: /^sair$/i })).not.toBeInTheDocument()
+  })
+
+  it('variação 2 — Jogador na Home sem sala: âncoras + Apelido + Criar/Entrar Sala + Sair com ícone', () => {
+    MockWebSocket.clean()
+    renderWithRouter(['/'], autenticado)
+
+    const header = screen.getByRole('banner')
+    expect(within(header).getByRole('navigation', { name: /navegação principal/i })).toBeInTheDocument()
+    expect(within(header).getByText(apelidoMock)).toBeInTheDocument()
+    expect(within(header).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(header).queryByRole('button', { name: /voltar para o início/i })).not.toBeInTheDocument()
+    iconePortaDoSair(header)
+  })
+
+  it('variação 3 — Logado em Criação (/salas/criar, sem sala): sem âncoras + Voltar + Sair sem SAIR_DA_SALA', async () => {
+    MockWebSocket.clean()
+    const user = userEvent.setup()
+    renderWithRouter(['/salas/criar'], autenticado)
+
+    const header = screen.getByRole('banner')
+    expect(within(header).queryByRole('navigation', { name: /navegação principal/i })).not.toBeInTheDocument()
+    expect(within(header).getByText(apelidoMock)).toBeInTheDocument()
+    expect(within(header).getByRole('button', { name: /voltar para o início/i })).toBeInTheDocument()
+    iconePortaDoSair(header)
+    expect(within(header).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
+    expect(within(header).queryByRole('link', { name: /retornar para sala/i })).not.toBeInTheDocument()
+
+    const ws = MockWebSocket.last()
+    await user.click(within(header).getByRole('button', { name: /voltar para o início/i }))
+
+    expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    const enviouSair = ws?.sentMessages.some((m) => {
+      try {
+        return JSON.parse(m as string).type === 'SAIR_DA_SALA'
+      } catch {
+        return false
+      }
+    })
+    expect(enviouSair).toBe(false)
+  })
+
+  it('variação 4 — Logado em Sala (sala !== null): sem âncoras + Apelido + Retornar + Sair com ícone', async () => {
+    MockWebSocket.clean()
+    const user = userEvent.setup()
+    renderWithRouter(['/salas/criar'], autenticado)
+
+    const ws = MockWebSocket.last()!
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: criarSalaParaHeader() })
+    await screen.findByText('H211AA')
+
+    // Volta à Home mantendo a sala: header passa a oferecer Retornar para Sala.
+    await user.click(within(screen.getByRole('banner')).getByRole('button', { name: /voltar para o início/i }))
+    expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+
+    const headerHome = screen.getByRole('banner')
+    expect(within(headerHome).queryByRole('navigation', { name: /navegação principal/i })).not.toBeInTheDocument()
+    expect(within(headerHome).getByText(apelidoMock)).toBeInTheDocument()
+    expect(within(headerHome).getByRole('link', { name: /retornar para sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(headerHome).queryByRole('button', { name: /voltar para o início/i })).not.toBeInTheDocument()
+    iconePortaDoSair(headerHome)
+
+    const enviouSair = ws.sentMessages.some((m) => {
+      try {
+        return JSON.parse(m as string).type === 'SAIR_DA_SALA'
+      } catch {
+        return false
+      }
+    })
+    expect(enviouSair).toBe(false)
+    await waitFor(() => expect(headerHome).toHaveClass('site-header'))
   })
 })
 

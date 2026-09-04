@@ -381,6 +381,156 @@ input:-webkit-autofill:active {
   animation: none;
 }
 
+/* Header — 4 variações visuais (#211, ref frontend/references/header.png):
+   barra escura única sempre visível (sticky, sem observer), logo em
+   Source Serif 4 caixa-alta com tracking largo à esquerda, nav por âncoras
+   em muted→branco no hover, CTAs em outline fino claro à direita (Entrar
+   como texto), Apelido truncado no lugar do avatar e ícone de porta
+   (door_open_icon.svg, fill #f5f1e8) no CTA de saída. Só apresentação:
+   rótulos/destinos/handleLogout inalterados. Transições só em
+   transform/opacity; a troca de cor/borda no hover é instantânea. */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--color-background);
+  border-bottom: 1px solid rgba(245, 241, 232, 0.1);
+  padding: 1.25rem clamp(1.5rem, 5vw, 5rem);
+}
+.site-header__inner {
+  max-width: 80rem;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+}
+.site-header__brand {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+.site-header__right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem 1.75rem;
+  min-width: 0;
+}
+.site-header__nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  white-space: nowrap;
+}
+.site-header__nav-link {
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  transition-property: transform, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+.site-header__nav-link:hover {
+  color: #fff;
+  opacity: 0.95;
+}
+.site-header__guest,
+.site-header__user {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+.site-header__login {
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text);
+  transition-property: transform, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+.site-header__login:hover {
+  color: #fff;
+  opacity: 0.9;
+}
+.site-header__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: transparent;
+  color: var(--color-text);
+  border: 1px solid rgba(245, 241, 232, 0.55);
+  padding: 0.55rem 1.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition-property: transform, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+.site-header__cta:hover {
+  border-color: #fff;
+  color: #fff;
+}
+.site-header__nickname {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-text);
+  min-width: 0;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.site-header__logout-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.site-header__skip-link {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.site-header__skip-link:focus-visible {
+  left: 0.5rem;
+  top: 0.5rem;
+  width: auto;
+  height: auto;
+  z-index: 50;
+  background: var(--color-accent);
+  color: #0c0c0e;
+  padding: 0.5rem 1rem;
+  font-weight: 700;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.site-header :focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 /* Camada de fundo do CTA final: mesma imagem da Hero; o deslocamento de
    parallax acontece só via `transform` (JS, com rAF) + `opacity` — nunca no
    layout — e com `will-change` aplicado só enquanto a seção está visível. */
@@ -403,6 +553,11 @@ input:-webkit-autofill:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .site-header__nav-link,
+  .site-header__login,
+  .site-header__cta {
+    transition: none;
+  }
   .hero-media {
     inset: 0;
     transform: none !important;

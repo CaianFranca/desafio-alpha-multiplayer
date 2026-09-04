@@ -3,13 +3,9 @@ import { useAuth } from '../../state/useAuth'
 import { useSalaWebSocketContext } from '../../state/sala-web-socket-context'
 import { criarSalaLabel, retornarParaSalaLabel } from '../auth/AuthActions'
 
-const styleBotaoHeader =
-  'border border-white/20 px-4 py-2 text-xs tracking-[0.18em] font-bold uppercase text-white hover:bg-white hover:text-black transition-colors shrink-0'
-
-// Rótulo do CTA criado com cantos retos (sem arredondamento) e fundo accent,
-// espelhando o CtaLink primary — corrige a UX do header (critério #128).
-const styleLinkCriarSala =
-  'inline-block border-0 rounded-none bg-[var(--color-accent)] text-gray-800 cursor-pointer font-sans font-bold text-center hover:opacity-90 transition-opacity px-4 py-2 text-sm shrink-0 whitespace-nowrap'
+const styleBotaoSair = 'site-header__cta site-header__logout'
+const styleVoltar = 'site-header__cta'
+const styleCriarSala = 'site-header__cta'
 
 export function Header() {
   const { authState, logout } = useAuth()
@@ -18,6 +14,10 @@ export function Header() {
   const emLobby = location.pathname.startsWith('/salas') || location.pathname.startsWith('/sala')
   const { sala } = useSalaWebSocketContext()
   const emSala = sala !== null
+  const autenticado = authState.status === 'authenticated'
+  // Âncoras só na Home sem sala (Visitante ou Jogador sem sala); em lobby ou
+  // com sala o header foca nos CTAs (variações 3 e 4 da #211).
+  const mostrarNav = !emLobby && !emSala
 
   // A navegação pós-logout fica aqui porque o AuthProvider está acima do
   // RouterProvider em main.tsx (o provider não tem acesso ao navigate).
@@ -27,30 +27,36 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-40 bg-[var(--color-background)] py-6 px-[clamp(1.5rem,5vw,5rem)]">
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-(--color-accent) focus:text-gray-800 focus:px-4 focus:py-2 focus:rounded-lg focus:font-bold">
+    <header className="site-header">
+      <a href="#main-content" className="site-header__skip-link">
         Pular para o conteúdo
       </a>
-      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 items-center gap-4">
-        <Link className="w-fit font-extrabold tracking-[.04em] text-inherit no-underline justify-self-center sm:justify-self-start" to="/">Flicker of Sanity</Link>
-        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-6 gap-y-3 min-w-0">
-          {!emLobby && (
-            <nav aria-label="Navegação principal" className="flex items-center gap-6 whitespace-nowrap">
-              <a href="#trailers" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Trailers</a>
-              <a href="#historia" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">História</a>
-              <a href="#caracteristicas" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Características</a>
-              <a href="#objetivos" className="w-fit text-(--color-muted) text-sm hover:text-white transition-colors">Objetivos</a>
+      <div className="site-header__inner">
+        <Link className="site-header__brand font-display" to="/">FLICKER OF SANITY</Link>
+        <div className="site-header__right">
+          {mostrarNav && (
+            <nav aria-label="Navegação principal" className="site-header__nav">
+              <a href="#historia" className="site-header__nav-link">História</a>
+              <a href="#trailers" className="site-header__nav-link">Trailers</a>
+              <a href="#caracteristicas" className="site-header__nav-link">Características</a>
+              <a href="#objetivos" className="site-header__nav-link">Objetivos</a>
             </nav>
           )}
-          {authState.status === 'authenticated' && (
-            <div className="flex items-center gap-3 min-w-0 whitespace-nowrap">
-              <span className="text-sm font-bold truncate min-w-0 max-w-[14rem]">{authState.jogador.apelido}</span>
+          {!autenticado && !emLobby && (
+            <div className="site-header__guest">
+              <Link to="/login" className="site-header__login">Entrar</Link>
+              <Link to="/cadastro" className="site-header__cta">Criar conta</Link>
+            </div>
+          )}
+          {autenticado && (
+            <div className="site-header__user">
+              <span className="site-header__nickname truncate">{authState.jogador.apelido}</span>
               {emLobby ? (
-                <button type="button" onClick={() => navigate('/')} className={styleBotaoHeader}>
+                <button type="button" onClick={() => navigate('/')} className={styleVoltar}>
                   Voltar para o início
                 </button>
               ) : (
-                <Link to="/salas/criar" className={styleLinkCriarSala}>
+                <Link to="/salas/criar" className={styleCriarSala}>
                   {emSala ? retornarParaSalaLabel : criarSalaLabel}
                 </Link>
               )}
@@ -58,9 +64,15 @@ export function Header() {
               <button
                 type="button"
                 onClick={() => void handleLogout()}
-                className={styleBotaoHeader}
+                className={styleBotaoSair}
               >
                 Sair
+                <img
+                  src="/assets/door_open_icon.svg"
+                  alt=""
+                  aria-hidden="true"
+                  className="site-header__logout-icon"
+                />
               </button>
             </div>
           )}
