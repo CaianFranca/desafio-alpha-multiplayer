@@ -40,14 +40,14 @@ export function EntrarPage() {
   return (
     <AuthCard title="Entrar" subtitle="Junte-se ao Flicker of Sanity">
       {reason && (
-        <p role="status" className="mt-6 text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-md px-3 py-2 text-center">
+        <p role="status" className="auth-notice mt-6">
           {reason}
         </p>
       )}
 
       <form onSubmit={(e) => void handleSubmit(e)} noValidate className="mt-8 space-y-5">
         {generalError && (
-          <p role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2">
+          <p role="alert" className="auth-alert">
             {generalError}
           </p>
         )}
@@ -90,7 +90,7 @@ export function EntrarPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full bg-[var(--color-accent)] text-slate-900 font-bold uppercase tracking-wide py-3 rounded-md hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+          className="auth-submit"
         >
           {isSubmitting ? 'Enviando...' : 'ENTRAR'}
         </button>
@@ -98,7 +98,7 @@ export function EntrarPage() {
 
       <p className="text-sm text-center text-[var(--color-muted)] mt-6">
         Ainda não tem Cadastro?{' '}
-        <Link to="/cadastro" className="!text-amber-400 underline decoration-2 underline-offset-4 decoration-amber-400/70 hover:decoration-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] rounded-sm transition-colors">
+        <Link to="/cadastro" className="auth-link">
           Crie seu Cadastro
         </Link>
       </p>

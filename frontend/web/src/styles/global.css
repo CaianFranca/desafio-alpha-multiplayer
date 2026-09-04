@@ -578,6 +578,125 @@ input:-webkit-autofill:active {
   );
 }
 
+/* Auth (Cadastro/Entrar) — refs frontend/references/cadastro_page.png e
+   login_page.png: foto do corredor do sanatório (asset
+   imagem_fundo_cadastro_login.png) full-bleed sob overlay escuro em
+   gradiente (contraste AA do texto warm-white), card centralizado elevado
+   sobre a foto (#141519), borda fina clara, radius 1rem e sombra profunda;
+   campos com fundo var(--color-background) — cor casada com o autofill
+   global —, borda sutil e foco âmbar; botão âmbar com texto slate-900 e
+   link âmbar (sem underline, como na ref). Classes explícitas em vez de
+   utilidades Tailwind pelo mesmo motivo das .cta-*: o reset `a` e as
+   camadas do Tailwind não vencem o CSS fora de camadas. Só apresentação:
+   handlers, validações, aria e copy inalterados. */
+.auth-page {
+  position: relative;
+}
+.auth-media {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: url("/assets/imagem_fundo_cadastro_login.png") center / cover no-repeat, var(--color-background);
+}
+.auth-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(5, 5, 7, 0.68),
+    rgba(5, 5, 7, 0.55) 42%,
+    rgba(5, 5, 7, 0.74)
+  );
+}
+.auth-card {
+  position: relative;
+  z-index: 1;
+  background: #141519;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1rem;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.auth-field__label {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+.auth-field__input {
+  width: 100%;
+  padding: 0.75rem 0.75rem 0.75rem 2.5rem;
+  background-color: var(--color-background);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+.auth-field__input::placeholder {
+  color: var(--color-muted);
+}
+.auth-field__input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+.auth-field__error {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: #f87171;
+}
+.auth-alert {
+  font-size: 0.875rem;
+  color: #f87171;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+.auth-notice {
+  font-size: 0.875rem;
+  color: #fcd34d;
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  text-align: center;
+}
+.auth-submit {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background-color: var(--color-accent);
+  color: #0f172a;
+  border: 0;
+  border-radius: 0.5rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition-property: transform, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+.auth-submit:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.auth-link {
+  color: var(--color-accent);
+  font-weight: 500;
+  border-radius: 0.125rem;
+  transition-property: transform, opacity;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+.auth-link:hover {
+  opacity: 0.85;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .site-header__nav-link,
   .site-header__login,
@@ -657,6 +776,13 @@ input:-webkit-autofill:active {
     inset: 0;
     transform: none !important;
     will-change: auto;
+  }
+  .auth-submit,
+  .auth-link {
+    transition: none;
+  }
+  .auth-submit:hover {
+    transform: none;
   }
   .foundation-scope *,
   .foundation-scope *::before,
