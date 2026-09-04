@@ -5,7 +5,7 @@ import { criarSalaLabel, retornarParaSalaLabel } from '../auth/AuthActions'
 
 const styleBotaoSair = 'site-header__cta site-header__logout'
 const styleVoltar = 'site-header__cta'
-const styleCriarSala = 'site-header__cta'
+const styleCriarSala = 'site-header__cta site-header__cta--accent'
 
 export function Header() {
   const { authState, logout } = useAuth()

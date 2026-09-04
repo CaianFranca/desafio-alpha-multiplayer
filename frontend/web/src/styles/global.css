@@ -386,11 +386,13 @@ input:-webkit-autofill:active {
    Source Serif 4 caixa-alta com tracking largo à esquerda, nav por âncoras
    em muted→branco no hover, CTAs em outline fino claro à direita (Entrar
    com preenchimento claro via `.cta-primary` reutilizado — hierarquia
-   inversa à hero — e Criar conta fantasma), Apelido truncado no lugar do
-   avatar e ícone de porta (door_open_icon.svg, fill #f5f1e8) no CTA de
-   saída. Só apresentação: rótulos/destinos/handleLogout inalterados.
-   Transições só em transform/opacity; a troca de cor/borda no hover é
-   instantânea. */
+   inversa à hero — e Criar conta fantasma; logado, Criar/Entrar Sala e
+   Retornar para Sala usam `.site-header__cta--accent`, laranja
+   `--color-accent` com texto `slate-900` das telas Entrar/Cadastro),
+   Apelido truncado no lugar do avatar e ícone de porta
+   (door_open_icon.svg, fill #f5f1e8) no CTA de saída. Só apresentação:
+   rótulos/destinos/handleLogout inalterados. Transições só em
+   transform/opacity; a troca de cor/borda no hover é instantânea. */
 .site-header {
   position: sticky;
   top: 0;
@@ -496,6 +498,22 @@ input:-webkit-autofill:active {
 .site-header__cta:hover {
   border-color: #fff;
   color: #fff;
+}
+/* Destaque logado (Criar/Entrar Sala e Retornar para Sala): espelha o botão
+   de submit das telas Entrar/Cadastro (bg laranja `--color-accent` com texto
+   escuro `slate-900`); mantém o esqueleto do `.site-header__cta` (padding e
+   tipografia do header). Vem após o `:hover` base para vencer na cascata e
+   usa hover só em `opacity`, como o submit das telas de auth. */
+.site-header__cta--accent {
+  background-color: var(--color-accent);
+  border-color: transparent;
+  color: #0f172a;
+  font-weight: 700;
+}
+.site-header__cta--accent:hover {
+  border-color: transparent;
+  color: #0f172a;
+  opacity: 0.9;
 }
 .site-header__nickname {
   font-size: 0.85rem;
