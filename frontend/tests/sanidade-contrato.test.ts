@@ -201,15 +201,15 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
     const { container } = render(
       React.createElement(TabuleiroMirrorDOM, {
         todasCelulas: todas,
-        ocupadasSet: new Set(),
-        reserva: [],
+        ocupadasSet: new Set<string>(),
+        iniciais: [],
         posicionadas: [],
         peoes: [
           { peaoId: 'peao-branco', cor: 'branco', celula: { linha: 3, coluna: 3 } },
           { peaoId: 'peao-vermelho', cor: 'vermelho', celula: { linha: 3, coluna: 4 } },
         ],
         peaoSelecionadoId: null,
-        destinosSet: new Set(),
+        destinosSet: new Set<string>(),
         sanidadePorPeao,
       }),
     )

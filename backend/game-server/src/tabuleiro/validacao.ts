@@ -7,19 +7,16 @@
 // codigo: 'DADOS_INVALIDOS' }`.
 
 import type {
-  EscolherTipoDaPecaRecebidaComando,
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared';
 
-// Comandos aceitos no wire do seam legado: a forma de escolha de tipo (ST-10)
-// saiu do domínio na #138 e não é mais aceita — o tipo shared permanece na
-// união só até a limpeza do wire (#140/#143), então o guard estreita a união
-// ao devolver o tipo aceito.
-export type ComandoDoTabuleiroAceito = Exclude<
-  TabuleiroComandoDoCliente | PeaoComandoDoCliente,
-  EscolherTipoDaPecaRecebidaComando
->;
+// Comandos aceitos no wire: a forma de escolha de tipo (ST-10) saiu do domínio
+// na #138 e teve o tipo removido do shared na limpeza do wire (#140/#143) — a
+// união do contrato já a exclui, o guard apenas fecha os `type` aceitos.
+export type ComandoDoTabuleiroAceito =
+  | TabuleiroComandoDoCliente
+  | PeaoComandoDoCliente;
 
 const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'SELECIONAR_PECA',

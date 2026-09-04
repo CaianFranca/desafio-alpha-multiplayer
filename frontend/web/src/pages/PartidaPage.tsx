@@ -217,6 +217,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Comandos de Peão passam pelo mesmo ponto de injeção ──
   const onComandoPeao = enviarComJogador
 
+  // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
+  const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
@@ -227,18 +230,22 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       recebidasPendentes: modelo.recebidasPendentes,
       peaoSelecionadoId: modelo.peaoSelecionadoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
-      reserva: modelo.reserva,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
+      // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
+      // bandeja continua pública (as pendências vêm do broadcast sem filtro).
+      donoDoCiclo: minhaVez,
     }
-  }, [temAlvo, estadoEmAndamento, modelo])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez])
 
-  // ── Rejeição de peão (local) → flash vermelho ──
-  const onRejeicaoPeao = useCallback((feedback: FlashFeedback) => {
+  // ── Flash local (revisão #199): mesma fonte para o pull na bandeja; a
+  // rejeição de peão (vermelho/âmbar do roteador) segue o mesmo caminho. ──
+  const exibirFlash = useCallback((feedback: FlashFeedback) => {
     setFlash({ ...feedback })
   }, [])
+  const onRejeicaoPeao = exibirFlash
 
-  // ── Turnos (issue #118): vez, rodada, fase e peão do Jogador Ativo — nulo em resultado ──
-  const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+  // ── Turnos (issue #118): rodada, fase e peão do Jogador Ativo (minhaVez
+  // derivada acima) — nulo em resultado ──
   const peaoProprioId =
     jogadorId !== null ? (modelo.peaoPorJogador[jogadorId] ?? null) : null
   const peaoAtivoId =
@@ -350,6 +357,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onComando={onComando}
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}
+        onFlash={exibirFlash}
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}

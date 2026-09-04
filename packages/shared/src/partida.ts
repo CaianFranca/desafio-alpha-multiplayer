@@ -24,8 +24,8 @@
 //   shared type:'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO' { recebidaId, borda, celulaAlvo } <-> engine tipo:'vaga_da_peca_recebida_escolhida' idem — issue #138
 //   (Estes dois eventos novos vivem nesta união, e não em
 //   PeaoEventoDoServidor/TabuleiroEventoDoServidor, porque são o contrato do
-//   canal de Partida — o canal alvo do ST-11 — e as uniões antigas têm
-//   switches exaustivos no frontend legado, intocado pela #138.)
+//   canal de Partida — o canal alvo do ST-11. A limpeza do wire legado da
+//   ST-10 (#140/#143) removeu os switches legados do cliente.)
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   shared type:'PARTIDA_TERMINADA' { resultado } <-> engine tipo:'partida_terminada' { desfecho } — issue #179
@@ -53,13 +53,7 @@ import type {
   SentidoDeRotacao,
   TipoDePecaDaCaixa,
 } from './tabuleiro.ts';
-import type {
-  PeaoId,
-  RecebidaId,
-  BordaCardinal,
-  TipoDePecaDeCaminho,
-  VagaDaPecaRecebidaEscolhidaEvento,
-} from './peoes.ts';
+import type { PeaoId, RecebidaId, BordaCardinal, VagaDaPecaRecebidaEscolhidaEvento } from './peoes.ts';
 
 // --- Comandos cliente → servidor (11) ---
 
@@ -196,7 +190,10 @@ export type CorDoPeaoWire = 'branco' | 'vermelho' | 'azul' | 'amarelo';
 
 export type TipoDaPecaWire =
   | 'inicial'
-  | TipoDePecaDeCaminho
+  // sync manual com engine.TipoDePecaDeCaminho
+  | 'reta'
+  | 'T'
+  | 'cruz'
   | 'gerador'
   | 'sala_do_diretor'
   | 'sala_medica'

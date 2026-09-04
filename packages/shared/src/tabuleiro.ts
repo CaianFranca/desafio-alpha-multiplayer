@@ -1,5 +1,5 @@
 // Protocolo WS do Tabuleiro — DTOs tipados compartilhados via @flicker/shared.
-// Vocabulário canônico: Tabuleiro, Célula, Peça, Orientação, Sentido de Rotação, Reserva, Manipulação, Finalização.
+// Vocabulário canônico: Tabuleiro, Célula, Peça, Orientação, Sentido de Rotação, Caixa, Manipulação, Finalização.
 // Apenas type/interface, sem runtime, sem validação, sem dependência de @flicker/engine.
 //
 // Fronteira shared (DTO de transporte) vs engine (domínio): propositalmente
@@ -11,7 +11,7 @@
 //   shared Celula{linha,coluna} (0-6)    <-> engine Celula{linha,coluna}
 //   shared Orientacao 0|90|180|270       <-> engine Orientacao idem
 //   shared SentidoDeRotacao 'horario'|'anti_horario' <-> engine SentidoDeRotacao idem
-//   shared PecaId string opaca           <-> engine PecaDaReserva.pecaId / PecaPosicionada.pecaId
+//   shared PecaId string opaca           <-> engine PecaDaCaixa.pecaId / PecaPosicionada.pecaId
 //   shared type:UPPER_SNAKE ('SELECIONAR_PECA') vs engine tipo:snake ('selecionar_peca'); campos em camelCase nos dois lados
 // Ver ADR-0004 para grade 7x7 e vizinhança ortogonal.
 
@@ -106,8 +106,9 @@ export interface ManipulacaoFinalizadaEvento {
 }
 
 // A união cobre também as rejeições de Peões/ciclo (ST-10) e Turnos (ST-11).
-// CAIXA_ESGOTADA entra pela ST-12 (issue #144) como adição; RESERVA_ESGOTADA
-// foi removido do wire na limpeza da sync (#140) — o domínio já não o emite.
+// CAIXA_ESGOTADA entra pela ST-12 (issue #144) como adição; o código legado de
+// esgotamento da composição inicial foi removido na limpeza da sync (#140) —
+// o domínio já não o emite.
 export type CodigoDeErroDoTabuleiro =
   | CodigoDeErroComum
   | 'ESTADO_INDISPONIVEL'

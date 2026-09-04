@@ -30,7 +30,8 @@ import type {
 // a interação da ST-09; Peões/Recebidas da ST-10 não participam).
 
 export interface EstadoInteracaoTabuleiro {
-  readonly reserva: readonly { readonly pecaId: string }[]
+  /** Peças Iniciais na mesa aguardando encaixe (issue #143). */
+  readonly iniciais: readonly { readonly pecaId: string }[]
   readonly posicionadas: readonly { readonly pecaId: string; readonly celula: Celula }[]
   readonly pecaSelecionadaId: string | null
   readonly pecaEmManipulacaoId: string | null
@@ -115,18 +116,6 @@ export function deveSuprimirCliquePorArrasto(dx: number, dy: number): boolean {
 // ── Mapeamento clique → comando ──
 
 /**
- * Clique em peça da Reserva → sempre SELECIONAR_PECA.
- * Cobre: selecionar (sem seleção), trocar (outra peça), desfazer (mesma peça).
- * O servidor decide qual evento emitir (peca_selecionada vs peca_deselecionada).
- */
-export function mapearCliqueNaReserva(
-  _estado: EstadoInteracaoTabuleiro,
-  pecaId: string,
-): TabuleiroComandoDoCliente {
-  return { type: 'SELECIONAR_PECA', pecaId }
-}
-
-/**
  * Clique em célula da grade.
  * - Célula ocupada → null (sem reação ao cursor nem ao clique).
  * - Célula vazia sem seleção → null.
@@ -150,7 +139,8 @@ export function mapearCliqueNaCelula(
  * - Caso contrário → null (sem efeito, evita sobrepor).
  *
  * A Finalização também ocorre por nova seleção ou novo posicionamento, mas
- * esses fluxos já são cobertos por mapearCliqueNaReserva / mapearCliqueNaCelula.
+ * esses fluxos já são cobertos por mapearCliqueNaPecaDaMesa (interacaoPeoes)
+ * / mapearCliqueNaCelula.
  */
 export function mapearCliqueNaPecaPosicionada(
   estado: EstadoInteracaoTabuleiro,

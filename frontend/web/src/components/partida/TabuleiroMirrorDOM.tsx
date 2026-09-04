@@ -3,7 +3,8 @@ import type {
   Celula,
   PeaoDaExibicao,
   PeaoId,
-  PecaDaReserva,
+  PecaCorrente,
+  PecaDaMesa,
   PecaId,
   PecaPosicionada,
 } from '../../game/tabuleiro/contrato'
@@ -11,12 +12,12 @@ import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../../game/tabulei
 import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
 import {
   despacharCliqueDeCelula,
-  ehComandoDePeao,
-  mapearCliqueNaReservaComCiclo,
+  despacharCliqueNaPecaDaBandeja,
+  mapearCliqueNaPecaDaMesa,
+  puxadaVigenteNaBandeja,
 } from '../../game/tabuleiro/interacaoPeoes'
 import type {
   PeaoComandoDoCliente,
-  RecebidaId,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
@@ -26,7 +27,10 @@ interface TabuleiroMirrorDOMProps {
   ocupadasSet: ReadonlySet<string>
   /** Chaves das células iluminadas (mesma fonte da cena, issue #151). */
   iluminadasSet?: ReadonlySet<string>
-  reserva: readonly PecaDaReserva[]
+  /** Peças Iniciais na mesa (mesma fonte da cena, issue #143). */
+  iniciais: readonly PecaDaMesa[]
+  /** Peça sorteada corrente na bandeja da Caixa (null = sem corrente, #143). */
+  pecaCorrente?: PecaCorrente | null
   posicionadas: readonly PecaPosicionada[]
   peoes: readonly PeaoDaExibicao[]
   /** Peão selecionado (estado visual local espelhado da cena, issue #90). */
@@ -37,42 +41,46 @@ interface TabuleiroMirrorDOMProps {
   destinosSet: ReadonlySet<PecaId>
   aoSelecionarPeao?: (peaoId: PeaoId) => void
   aoDesselecionar?: () => void
-  /** Estado de interação ST-09 para o fallback de célula/reserva (#91). */
+  /** Estado de interação ST-09 para o fallback de célula/peça da mesa (#91). */
   estadoInteracao?: EstadoInteracaoTabuleiro | null
-  /** Estado do ciclo do peão: roteia cliques em células/pendências/reserva. */
+  /** Estado do ciclo do peão: roteia cliques em células/pendências. */
   estadoPeoes?: EstadoInteracaoPeoes | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
   /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
   onRejeicaoPeao?: (feedback: FlashFeedback) => void
-  /** Recebida focada (validada pelo dono do foco, AmbienteDeJogo). */
-  recebidaFocadaId?: RecebidaId | null
-  aoFocarPendencia?: (recebidaId: RecebidaId) => void
+  /** Pull aceito na bandeja (fluxo #143/revisão #199) → estado local no pai. */
+  onPuxar?: (recebidaId: string) => void
+  /** Feedback local do pull (FLASH_BRANCO). */
+  onFeedback?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (mesma fonte da cena). */
   alvosPendentesSet?: ReadonlySet<string>
-  /** Chave da célula-alvo da pendência FOCADA. */
-  alvoFocadoKey?: string | null
+  /** Chaves das vagas disponíveis para a pendência corrente (#143, cena/espelho). */
+  vagasSet?: ReadonlySet<string>
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
 }
 
 /**
  * Espelho DOM do tabuleiro — seam de testes (a cena WebGL é caixa-preta no
- * jsdom). Deriva do MESMO estado que a cena: peões, seleção, conexões e
- * pendências de Recebimento; cliques passam pelo MESMO roteador do ciclo
- * (despacharCliqueDeCelula / mapearCliqueNaReservaComCiclo, issue #91).
+ * jsdom). Deriva do MESMO estado que a cena: peões, seleção, conexões,
+ * pendências de Recebimento, a Caixa (bloco opaco), a bandeja com a peça
+ * sorteada corrente e as Peças Iniciais da mesa (issue #143); cliques passam
+ * pelo MESMO roteador do ciclo (despacharCliqueDeCelula /
+ * mapearCliqueNaPecaDaMesa, issues #91/#143).
  *
  * Os handlers de clique aqui só têm efeito em testes: em browser real o
  * overlay é `pointer-events-none` (os cliques passam para a cena, onde os
  * mesmos callbacks são disparados via raycast). Clicar um peão seleciona;
- * clicar célula/peça roteia pelo ciclo (foco ou comando) ou aplica o fallback
- * ST-09; clicar qualquer outra área desseleciona — espelhando a cena.
+ * clicar célula/peça roteia pelo ciclo (comando) ou aplica o fallback ST-09;
+ * clicar qualquer outra área desseleciona — espelhando a cena.
  */
 export function TabuleiroMirrorDOM({
   todasCelulas,
   ocupadasSet,
   iluminadasSet = new Set<string>(),
-  reserva,
+  iniciais,
+  pecaCorrente = null,
   posicionadas,
   peoes,
   peaoSelecionadoId,
@@ -85,10 +93,10 @@ export function TabuleiroMirrorDOM({
   onComando,
   onComandoPeao,
   onRejeicaoPeao,
-  recebidaFocadaId = null,
-  aoFocarPendencia,
+  onPuxar,
+  onFeedback,
   alvosPendentesSet = new Set<string>(),
-  alvoFocadoKey = null,
+  vagasSet = new Set<string>(),
   sanidadePorPeao = {},
 }: TabuleiroMirrorDOMProps) {
   // Mesma derivação pura usada pela cena: resolve a peça sob o peão selecionado
@@ -108,27 +116,19 @@ export function TabuleiroMirrorDOM({
     despacharCliqueDeCelula(estadoPeoes, estadoInteracao, celula, {
       onComando,
       onComandoPeao,
-      onFocarPendencia: aoFocarPendencia,
       onRejeicao: onRejeicaoPeao
         ? (rejeicao) => onRejeicaoPeao(rejeicao.feedback)
         : undefined,
     })
   }
 
-  const aoClicarReserva = (peca: PecaDaReserva) => {
+  const aoClicarPecaDaMesa = (pecaId: string) => {
     if (estadoInteracao === null) return
-    const comando = mapearCliqueNaReservaComCiclo(
-      estadoPeoes,
-      estadoInteracao,
-      recebidaFocadaId,
-      peca,
-    )
+    // Mesmo roteador puro da cena (issue #143): clique em Inicial na mesa →
+    // SELECIONAR_PECA (ST-09); silencioso com pendências / peça desconhecida.
+    const comando = mapearCliqueNaPecaDaMesa(estadoPeoes, estadoInteracao, pecaId)
     if (comando === null) return
-    if (ehComandoDePeao(comando)) {
-      onComandoPeao?.(comando)
-    } else {
-      onComando?.(comando)
-    }
+    onComando?.(comando)
   }
 
   return (
@@ -142,6 +142,7 @@ export function TabuleiroMirrorDOM({
         const chave = chaveCelula(celula)
         const ocupada = ocupadasSet.has(chave)
         const alvoPendente = alvosPendentesSet.has(chave)
+        const vaga = vagasSet.has(chave)
         // Iluminação (issue #151): espelho DOM do MESMO set que ilumina a cena.
         const iluminada = iluminadasSet.has(chave)
         return (
@@ -152,7 +153,7 @@ export function TabuleiroMirrorDOM({
             data-linha={celula.linha}
             data-coluna={celula.coluna}
             data-alvo-pendente={alvoPendente ? 'true' : undefined}
-            data-focada={chave === alvoFocadoKey ? 'true' : undefined}
+            data-vaga={vaga ? 'true' : undefined}
             data-iluminada={iluminada ? 'true' : undefined}
             onClick={(e) => {
               aoClicarCelula(celula, e)
@@ -160,19 +161,49 @@ export function TabuleiroMirrorDOM({
           />
         )
       })}
-      <div data-testid="reserva">
-        {reserva.map((peca) => (
-          <div
-            key={peca.pecaId}
-            data-testid="reserva-peca"
-            data-tipo={peca.tipo}
-            data-peca-id={peca.pecaId}
-            onClick={(e) => {
-              e.stopPropagation()
-              aoClicarReserva(peca)
-            }}
-          />
-        ))}
+      {/* Caixa sobre a mesa (issue #143): bloco opaco (sem conteúdo exposto),
+          bandeja de slot único com a corrente (clicável para PUXAR — revisão
+          #199: mesmo despachador da cena; `data-puxada` expõe o estado local
+          para os testes sem WebGL) e as Peças Iniciais clicáveis. */}
+      <div data-testid="caixa">
+        <div data-testid="caixa-bandeja">
+          {pecaCorrente ? (
+            <div
+              data-testid="caixa-peca-sorteada"
+              data-peca-id={pecaCorrente.pecaId}
+              data-recebida-id={pecaCorrente.recebidaId}
+              data-tipo={pecaCorrente.tipo}
+              data-orientacao={pecaCorrente.orientacao}
+              data-puxada={
+                estadoPeoes !== null && puxadaVigenteNaBandeja(estadoPeoes)
+                  ? 'true'
+                  : 'false'
+              }
+              onClick={(e) => {
+                // stopPropagation: a raiz desseleciona ao clicar área inerte.
+                e.stopPropagation()
+                despacharCliqueNaPecaDaBandeja(estadoPeoes, {
+                  onPuxar,
+                  onFeedback,
+                })
+              }}
+            />
+          ) : null}
+        </div>
+        <div data-testid="caixa-iniciais">
+          {iniciais.map((peca) => (
+            <div
+              key={peca.pecaId}
+              data-testid="mesa-peca-inicial"
+              data-tipo={peca.tipo}
+              data-peca-id={peca.pecaId}
+              onClick={(e) => {
+                e.stopPropagation()
+                aoClicarPecaDaMesa(peca.pecaId)
+              }}
+            />
+          ))}
+        </div>
       </div>
       {posicionadas.map((p) => (
         <div
@@ -197,12 +228,8 @@ export function TabuleiroMirrorDOM({
               data-testid="recebida-pendente"
               data-recebida-id={r.recebidaId}
               data-celula-alvo={r.celulaAlvo !== null ? chaveCelula(r.celulaAlvo) : undefined}
-              data-peca-id={r.pecaId ?? undefined}
-              data-focada={r.recebidaId === recebidaFocadaId ? 'true' : 'false'}
-              onClick={(e) => {
-                e.stopPropagation()
-                aoFocarPendencia?.(r.recebidaId)
-              }}
+              data-peca-id={r.pecaId}
+              data-vaga={r.vaga ?? undefined}
             />
           ))
         : null}

@@ -36,8 +36,12 @@ interface CelulaProps {
   destinoValido?: boolean
   /** Célula é alvo de pendência de Recebimento ativa (destaque sutil, #91). */
   alvoPendente?: boolean
-  /** Célula é o alvo da pendência FOCADA (destaque distinto, #91). */
-  celulaFocada?: boolean
+  /**
+   * Célula é vaga disponível para a pendência corrente (destaque de escolha,
+   * issue #143): mesmo tom quente do alvo pendente — ambas convidam o clique
+   * do ciclo — mas distinta da iluminação e da ocupação.
+   */
+  vagaDisponivel?: boolean
   /**
    * Célula iluminada no estado compartilhado (issue #151). Tom sutil sobre a
    * base; os destaques de seleção/pendência/ocupação têm prioridade maior.
@@ -65,7 +69,7 @@ export function Celula({
   peao,
   destinoValido = false,
   alvoPendente = false,
-  celulaFocada = false,
+  vagaDisponivel = false,
   iluminada = false,
   peaoSelecionadoId = null,
   peaoAtivoId = null,
@@ -73,29 +77,28 @@ export function Celula({
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
   const ocupada = Boolean(peca)
-  // Destino válido (vizinho conectado ao peão selecionado, #90) e alvo de
-  // pendência (#91) também oferecem cursor pointer; compõe com o cursor da
-  // interação (#85).
-  const cursorEfetivo = destinoValido || alvoPendente ? 'pointer' : cursor
+  // Destino válido (vizinho conectado ao peão selecionado, #90), alvo de
+  // pendência (#91) e vaga disponível (#143) também oferecem cursor pointer;
+  // compõe com o cursor da interação (#85).
+  const cursorEfetivo = destinoValido || alvoPendente || vagaDisponivel ? 'pointer' : cursor
   const cursorHandlers = handlersDeCursor(cursorEfetivo)
   // Célula ocupada: clique só pela peça (evita disparo duplo plano+peca e
   // mapeamento indevido de POSICIONAR_PECA em célula ocupada). Plano fica inerte.
   const planeOnClick = ocupada ? undefined : onClick
 
-  // Destaques de pendência (#91): alvo ativo ganha tom aquecido sutil; o alvo
-  // FOCADO ganha tom frio distinto (foco local da escolha de tipo).
-  // Iluminação (#151): tom levemente mais claro que a base, aplicado só quando
-  // nenhum destaque de interação/ocupação vence (focada > pendente > ocupada).
-  const corPlano = celulaFocada
-    ? '#2e6bd6'
-    : alvoPendente
-      ? '#6b5a33'
-      : ocupada
-        ? '#5e4e36'
-        : iluminada
-          ? '#3d3a30'
-          : '#1b1915'
-  const opacidadePlano = celulaFocada ? 0.95 : ocupada ? 0.82 : 0.7
+  // Destaques do ciclo: alvo de pendência (#91) e vaga disponível para a
+  // pendência corrente (#143) ganham o mesmo tom quente (ambas convidam o
+  // clique do ciclo). Iluminação (#151): tom levemente mais claro que a base,
+  // aplicado só quando nenhum destaque de interação/ocupação vence
+  // (alvo/vaga > ocupada > iluminada).
+  const corPlano = alvoPendente || vagaDisponivel
+    ? '#6b5a33'
+    : ocupada
+      ? '#5e4e36'
+      : iluminada
+        ? '#3d3a30'
+        : '#1b1915'
+  const opacidadePlano = ocupada ? 0.82 : 0.7
 
   return (
     <group position={pos}>
