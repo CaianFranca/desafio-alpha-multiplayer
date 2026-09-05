@@ -298,6 +298,35 @@ docker compose --profile backend exec lobby-server \
 O tratamento definitivo da incompatibilidade do seed fica como dívida para a
 issue #24 (ST-04).
 
+## 2.5 Modo dev com hot-reload (testes manuais)
+
+Para testar funcionalidades e visual sem rebuild a cada edição, suba o
+override de desenvolvimento (profile `dev`, arquivo
+`docker-compose.dev.yml`):
+
+```sh
+cp .env.example .env
+COMPOSE_PROFILES=dev docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+O que muda em relação ao `full`:
+
+| Aspecto | `full` (padrão) | `dev` (este modo) |
+|---|---|---|
+| Frontend em `:8080` | build estático (`npm run build` na imagem) | Vite HMR via `frontend-dev:5173` (`infra/nginx/nginx.dev.conf`) |
+| Editar `frontend/web/src` | exige `docker compose build nginx` | HMR automático, sem rebuild |
+| Editar `backend/*/src` ou `packages/*` | `tsx watch` (pode falhar no Windows) | `tsx watch` + polling (`CHOKIDAR_USEPOLLING`) |
+| Routing `/api/`, `/ws/*`, `/media/` | `infra/nginx/nginx.conf` | idêntico (`nginx.dev.conf` só troca o `location /`) |
+
+A entrada continua sendo `http://localhost:8080` (o HMR conecta de volta
+ao host da página; o nginx repassa o upgrade). A porta `5173` direta do
+Vite fica exposta como fallback de debug — nesse acesso, o WebSocket do
+lobby cai no fallback `5173→3001` (ver `resolverWsUrl` em
+`useSalaWebSocket.ts`) e o `/api` usa `VITE_DEV_PROXY_LOBBY`.
+
+Para voltar ao modo `full`: `docker compose down` e `docker compose up -d`
+(sem `-f docker-compose.dev.yml`).
+
 ## 3. GitHub CLI (`gh`)
 
 Instalação por sistema operacional: https://github.com/cli/cli#installation

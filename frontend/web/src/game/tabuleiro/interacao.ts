@@ -2,9 +2,10 @@
  * Interação pura do Tabuleiro (issue #84 — ST-09).
  *
  * Módulo 100% puro: mapeia cliques simples → comandos wire (UPPER_SNAKE em
- * `@flicker/shared`) e eventos de servidor → feedback visual (flash branco /
- * vermelho). Sem Three.js, sem DOM, sem estado interno — todo estado vem do
- * chamador (extraído do store/WS).
+ * `@flicker/shared`). Sem Three.js, sem DOM, sem estado interno — todo estado
+ * vem do chamador (extraído do store/WS). O feedback de erro/rejeição vive no
+ * ponto de som de recusa da Partida (`components/partida/somDeRecusa.ts`,
+ * issue #228) — este módulo não emite feedback visual nem sonoro.
  *
  * Contrato wire ↔ domínio documentado em `packages/shared/src/tabuleiro.ts`:
  *   shared SELECIONAR_PECA  ↔ engine selecionar_peca
@@ -20,10 +21,7 @@
 import { atingiuLimiar } from '../ambiente/cameraLimites'
 import { chaveCelula } from './contrato'
 import type { Celula } from './contrato'
-import type {
-  TabuleiroComandoDoCliente,
-  TabuleiroEventoDoServidor,
-} from '@flicker/shared'
+import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 
 // ── Estado mínimo para mapear interações ──
 // Espelha EstadoDoTabuleiro do engine mas desacoplado (só o necessário para
@@ -37,45 +35,9 @@ export interface EstadoInteracaoTabuleiro {
   readonly pecaEmManipulacaoId: string | null
 }
 
-// ── Sentido e flash ──
+// ── Sentido de rotação ──
 
 export type SentidoDeRotacao = 'horario' | 'anti_horario'
-
-export type CorFlash = 'branco' | 'vermelho' | 'ambar'
-
-export interface FlashFeedback {
-  readonly cor: CorFlash
-  /** Hex da cor para contraste perceptível (branco ≠ vermelho). */
-  readonly hex: string
-  readonly duracaoMs: number
-  /** Motivo para debug/telemetria. */
-  readonly motivo: string
-}
-
-export const FLASH_BRANCO: FlashFeedback = {
-  cor: 'branco',
-  hex: '#ffffff',
-  duracaoMs: 320,
-  motivo: 'aprovacao_ou_selecao',
-}
-
-export const FLASH_VERMELHO: FlashFeedback = {
-  cor: 'vermelho',
-  hex: '#ff3b30',
-  duracaoMs: 500,
-  motivo: 'rejeicao_do_servico',
-}
-
-/**
- * Âmbar (issue #118): ação fora da vez — distinto do vermelho de rejeição
- * (não é erro do comando, é a vez de outro jogador).
- */
-export const FLASH_AMBAR: FlashFeedback = {
-  cor: 'ambar',
-  hex: '#ffb340',
-  duracaoMs: 500,
-  motivo: 'fora_da_vez',
-}
 
 // ── Helpers de ocupação / cursor ──
 
@@ -158,7 +120,7 @@ export function mapearCliqueNaPecaPosicionada(
 /**
  * Comando de rotação em passos de 90° nos dois sentidos.
  * Mapeia até a Finalização; após finalização o servidor rejeita com
- * MANIPULACAO_ENCERRADA → flash vermelho.
+ * MANIPULACAO_ENCERRADA (o ponto de som da Partida anuncia a recusa).
  */
 export function mapearGiro(
   pecaId: string,
@@ -173,31 +135,4 @@ export function mapearGiro(
  */
 export function mapearFinalizarManipulacao(): TabuleiroComandoDoCliente {
   return { type: 'FINALIZAR_MANIPULACAO' }
-}
-
-// ── Mapeamento evento → feedback visual ──
-
-/**
- * Traduz evento do servidor em flash:
- * - seleção / deseleção / giro / posicionamento / finalização → branco
- * - erro → vermelho (distinto, duração maior)
- */
-export function mapearEventoParaFeedback(
-  evento: TabuleiroEventoDoServidor,
-): FlashFeedback | null {
-  switch (evento.type) {
-    case 'PECA_SELECIONADA':
-    case 'PECA_DESELECIONADA':
-    case 'PECA_GIRADA':
-    case 'PECA_POSICIONADA':
-    case 'MANIPULACAO_FINALIZADA':
-      return FLASH_BRANCO
-    case 'ERRO_DO_TABULEIRO':
-      return FLASH_VERMELHO
-    default: {
-      // Exaustividade: novo evento wire sem case falha em compilação.
-      const _exaustivo: never = evento
-      return _exaustivo
-    }
-  }
 }

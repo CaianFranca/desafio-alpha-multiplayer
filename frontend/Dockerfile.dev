@@ -1,0 +1,23 @@
+# frontend/Dockerfile.dev — Flicker of Sanity (modo dev com hot-reload).
+# Sobe o Vite dev server com HMR; o código é sobrescrito por bind-mount
+# no docker-compose.dev.yml, então edições no host refletem sem rebuild.
+# Base bookworm (igual ao stage de build de infra/nginx/Dockerfile):
+# evita problemas de binários nativos (esbuild) comuns no alpine.
+FROM node:22-bookworm
+
+WORKDIR /app/frontend
+
+# Cache de deps: copia só manifests antes do source.
+COPY frontend/package.json frontend/package-lock.json ./
+
+RUN npm ci
+
+# Fallback para quando o bind-mount não está ativo (ex.: `docker build` isolado).
+COPY frontend/ ./
+
+EXPOSE 5173
+
+# --host 0.0.0.0: expõe o dev server para fora do container (nginx-dev e host).
+# --strictPort: falha em vez de trocar de porta silenciosamente (o nginx-dev
+# espera exatamente a 5173).
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]

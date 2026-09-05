@@ -11,11 +11,12 @@ import {
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
-import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../tabuleiro/interacao'
-import type { EstadoInteracaoPeoes } from '../tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
+import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
+import { TransicaoLimpeza, type LimpezaTrigger } from './TransicaoLimpeza'
 import type {
   PeaoId,
   PecaId,
@@ -87,21 +88,21 @@ interface AmbienteCenaProps {
   estadoPeoes?: EstadoInteracaoPeoes | null
   /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
-  /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
-  onRejeicaoPeao?: (feedback: FlashFeedback) => void
+  /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
+  onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
   /**
    * Pull aceito na bandeja da Caixa (fluxo #143/revisão #199): estado local
    * persistido no pai (AmbienteDeJogo), nunca viaja ao wire.
    */
   onPuxarPecaDaBandeja?: (recebidaId: string) => void
-  /** Feedback local do pull (FLASH_BRANCO) — o setter de flash da página. */
-  onFlash?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (destaque, #91). */
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (destaque, #143). */
   vagasSet?: ReadonlySet<string>
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
   pecaCorrente?: PecaCorrente | null
+  /** Trigger de limpeza evento-driven (issue #239, B1). */
+  limpezaTrigger?: LimpezaTrigger | null
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -130,10 +131,10 @@ export function AmbienteCena({
   onComandoPeao,
   onRejeicaoPeao,
   onPuxarPecaDaBandeja,
-  onFlash,
   alvosPendentesSet,
   vagasSet,
   pecaCorrente = null,
+  limpezaTrigger = null,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
@@ -182,8 +183,8 @@ export function AmbienteCena({
               onComando={onComando ?? noop}
               estadoPeoes={estadoPeoes}
               onPuxar={onPuxarPecaDaBandeja}
-              onFeedback={onFlash}
             />
+            <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
             {peoesNaMesa.map((peao) => {
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (

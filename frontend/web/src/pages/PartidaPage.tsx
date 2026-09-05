@@ -5,7 +5,14 @@ import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
 import { usePartidaTela } from '../components/partida/usePartidaTela'
 import type { EstadoDaTela } from '../components/partida/partidaTelaMachine'
-import { FlashOverlay } from '../components/partida/FlashOverlay'
+import {
+  motivoDeRecusaDoEvento,
+  textoDoAnuncioDeRecusa,
+  tocarSomDeRecusa,
+} from '../components/partida/somDeRecusa'
+import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
+import { tocarSom } from '../game/audio/sons'
+import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
 import {
@@ -14,9 +21,7 @@ import {
   estadoDeExibicaoDoModelo,
 } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
-import { mapearGiro, FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from '../game/tabuleiro/interacao'
-import type { FlashFeedback } from '../game/tabuleiro/interacao'
-import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
+import { mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
@@ -85,7 +90,28 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     (snapshot: EstadoDaPartidaSnapshot) => despachar({ type: 'APLICAR_SNAPSHOT', snapshot }),
     [],
   )
-  const [flash, setFlash] = useState<FlashFeedback | null>(null)
+  // ── Som de recusa + anúncio ao leitor de tela (issue #228) ──
+  // Único dono dos disparos: reage aos mesmos eventos do canal que antes
+  // geravam flash, somente leitura do modelo. Aprovações/seleções/sorteios/
+  // turnos ficam em silêncio (motivo null = "foi"). O id (nonce) remonta a
+  // região viva a cada disparo (`key`), então repetições do MESMO motivo
+  // re-anunciam — sem ele, texto idêntico + bail-out do setState calariam a
+  // segunda recusa para o leitor de tela.
+  const [anuncioDeRecusa, setAnuncioDeRecusa] = useState<{
+    id: number
+    motivo: MotivoDeRecusa
+  } | null>(null)
+  const proximoIdDeAnuncio = useRef(0)
+  const tocarRecusa = useCallback((motivo: MotivoDeRecusa) => {
+    tocarSomDeRecusa(motivo)
+    proximoIdDeAnuncio.current += 1
+    setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
+  }, [])
+
+  // ── Trigger de limpeza para TransicaoLimpeza (issue #239, B1) ──
+  // Evento-driven: só LIMPEZA_APLICADA dispara som/animação, snapshots não.
+  const [limpezaTrigger, setLimpezaTrigger] = useState<{ pecasRemovidas: readonly string[]; key: number } | null>(null)
+  const limpezaKeyRef = useRef(0)
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
   const emResultado = estado === 'resultado'
@@ -101,9 +127,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     onEvento: useCallback(
       (evento) => {
         if (evento.type === 'PARTIDA_TERMINADA') {
-          // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante tela
-          // Limpa estados pendentes de interação: flash de erro não deve permanecer
-          setFlash(null)
+          // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante a
+          // tela de resultado.
           // Motivo da derrota acompanha (#145-exp); payloads antigos sem o
           // campo chegam undefined → null (tela mantém texto genérico).
           partidaTerminada(evento.resultado, evento.motivo ?? null)
@@ -112,7 +137,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         if (evento.type === 'ESTADO_DA_PARTIDA') {
           aplicarSnapshotNoModelo(evento.snapshot)
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
-            setFlash(null)
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
           }
@@ -126,51 +150,40 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
         if (emResultadoRef.current) return
         // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
-        // projetados no modelo e geram feedback mínimo sem recarregar página.
+        // projetados no modelo sem recarregar página. Só o ataque COM
+        // penalidade (`estadosAplicados.length > 0`, issue #228) toca a
+        // recusa — proteção que negou, gatilho sem vítimas e resgate ficam
+        // em silêncio.
         if (evento.type === 'ATAQUE_RESOLVIDO' || evento.type === 'RESGATE_REALIZADO') {
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           if (evento.type === 'ATAQUE_RESOLVIDO') {
-            // Feedback perceptível para ataque (issue #174): vermelho quando há
-            // penalidade (Baixa/Amedrontado/sanidade), branco quando a Proteção
-            // negou o ataque (protegidos>0 sem estadosAplicados), âmbar quando o
-            // gatilho dispara sem vítimas (saída com alcance vazio). A limpeza de
-            // monstros fora da iluminação é o mesmo LIMPEZA_APLICADA branco.
-            if (evento.estadosAplicados.length > 0) {
-              setFlash({ ...FLASH_VERMELHO })
-            } else if (evento.protegidos.length > 0) {
-              setFlash({ ...FLASH_BRANCO })
-            } else if (evento.atacantes.length > 0) {
-              setFlash({ ...FLASH_AMBAR })
-            } else {
-              setFlash({ ...FLASH_BRANCO })
-            }
-          } else {
-            setFlash({ ...FLASH_BRANCO })
+            const motivo = motivoDeRecusaDoEvento(evento)
+            if (motivo !== null) tocarRecusa(motivo)
           }
+          return
+        }
+        // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
+        // LIMPEZA_APLICADA dispara som/animação, snapshots não.
+        if (evento.type === 'LIMPEZA_APLICADA') {
+          if (evento.pecasRemovidas.length > 0) {
+            limpezaKeyRef.current += 1
+            setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
+            tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
+          }
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           return
         }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
         // ESTADO_DA_PARTIDA (em_andamento): eventos de turno avulsos não
         // abrem o tabuleiro sem snapshot — descreve a própria PR.
         despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
-        // Feedback unificado: cobre eventos de tabuleiro, peão, turno (#118)
-        // e limpeza (#151 — inclui limpeza de monstros removidos pela
-        // iluminação, issue #174). Branco para aprovação/seleção; vermelho para
-        // ERRO_DO_TABULEIRO (motivo específico para pendências); âmbar para
-        // FORA_DA_VEZ; TURNO_INICIADO/TURNO_ENCERRADO não geram flash (null).
-        if (evento.type === 'CELULAS_ILUMINADAS') {
-          return
-        }
-        if (evento.type === 'LIMPEZA_APLICADA') {
-          setFlash({ ...FLASH_BRANCO })
-          return
-        }
-        const feedback = mapearEventoPeaoParaFeedback(
-          evento as Parameters<typeof mapearEventoPeaoParaFeedback>[0],
-        )
-        if (feedback !== null) setFlash({ ...feedback })
+        // Som de recusa unificado (issue #228): erros do tabuleiro incluindo
+        // FORA_DA_VEZ (#118), pendências e Caixa esgotada (#143/#151); seleção,
+        // aprovação, sorteio, confirmação, limpeza e turnos em silêncio (null).
+        const motivo = motivoDeRecusaDoEvento(evento)
+        if (motivo !== null) tocarRecusa(motivo)
       },
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa],
     ),
     onAdmissao: useCallback(
       (evento) => {
@@ -273,12 +286,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
   }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId])
 
-  // ── Flash local (revisão #199): mesma fonte para o pull na bandeja; a
-  // rejeição de peão (vermelho/âmbar do roteador) segue o mesmo caminho. ──
-  const exibirFlash = useCallback((feedback: FlashFeedback) => {
-    setFlash({ ...feedback })
-  }, [])
-  const onRejeicaoPeao = exibirFlash
+  // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
+  const onRejeicaoPeao = tocarRecusa
 
   // ── Turnos (issue #118): rodada, fase e peão do Jogador Ativo (minhaVez
   // derivada acima) — nulo em resultado ──
@@ -347,8 +356,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     reconectarSocket()
   }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader])
 
-  const limparFlash = useCallback(() => setFlash(null), [])
-
   // ── Comandos de turno (issue #118) — todos via enviarComJogador ──
   const permanecerNoTurno = useCallback(() => {
     if (peaoProprioId === null) return
@@ -375,13 +382,31 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onComando={onComando}
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}
-        onFlash={exibirFlash}
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}
+        limpezaTrigger={limpezaTrigger}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
-      <FlashOverlay flash={flash} onClear={limparFlash} />
+      {/*
+        Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
+        região viva sempre presente; o texto atualiza a cada recusa (som +
+        anúncio). Invisível para quem não usa leitor (`sr-only`). O `key` com
+        o id do anúncio remonta o nó a cada disparo para que repetições do
+        mesmo motivo re-anunciem; `data-anuncio-id` expõe o nonce aos testes.
+      */}
+      <div
+        key={anuncioDeRecusa?.id ?? 'sem-anuncio'}
+        data-testid="anuncio-de-recusa"
+        data-motivo={anuncioDeRecusa?.motivo ?? undefined}
+        data-anuncio-id={anuncioDeRecusa?.id ?? undefined}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa.motivo) : ''}
+      </div>
       {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
         <div
           data-testid="indicador-rodada"
