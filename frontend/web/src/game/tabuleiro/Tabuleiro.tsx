@@ -7,8 +7,8 @@ import type {
 } from './contrato'
 import { Celula } from './Celula'
 import { cursorParaCelula, cursorParaPecaPosicionada } from './interacao'
-import type { EstadoInteracaoTabuleiro, FlashFeedback } from './interacao'
-import type { EstadoInteracaoPeoes } from './interacaoPeoes'
+import type { EstadoInteracaoTabuleiro } from './interacao'
+import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from './interacaoPeoes'
 import { despacharCliqueDeCelula } from './interacaoPeoes'
 import type {
   PeaoComandoDoCliente,
@@ -49,8 +49,8 @@ interface TabuleiroProps {
   estadoPeoes?: EstadoInteracaoPeoes | null
   /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
-  /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
-  onRejeicaoPeao?: (feedback: FlashFeedback) => void
+  /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
+  onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
   /** Chaves das células-alvo de pendências ativas (destaque, #91). */
   alvosPendentesSet?: ReadonlySet<string>
   /**
@@ -132,7 +132,7 @@ export function Tabuleiro({
                 onComando,
                 onComandoPeao,
                 onRejeicao: onRejeicaoPeao
-                  ? (rejeicao) => onRejeicaoPeao(rejeicao.feedback)
+                  ? (rejeicao) => onRejeicaoPeao(rejeicao.motivo)
                   : undefined,
               })
             }}
