@@ -13,23 +13,37 @@ interface SaindoProps {
   onFim: (pecaId: string) => void
 }
 
+type MaterialComOrigem = {
+  mat: THREE.MeshStandardMaterial
+  opacityOriginal: number
+}
+
 function PecaSaindo({ peca, inicioMs, onFim }: SaindoProps) {
   const groupRef = useRef<THREE.Group>(null)
-  const materiaisRef = useRef<THREE.MeshStandardMaterial[]>([])
+  const materiaisRef = useRef<MaterialComOrigem[]>([])
   const invalidate = useThree((s) => s.invalidate)
   const jaFinalizou = useRef(false)
 
   const pos = celulaParaMundo(peca.celula)
 
-  // Coleta materiais uma vez no mount para evitar traverse a cada quadro (B3)
+  // Coleta TODOS os materiais no mount, força transparent e guarda opacity
+  // original para que base (0.88) e trilhas opacas (1) desvanecam juntas sem pop.
+  // Clona por instância para não vazar mutação para outras peças.
   useEffect(() => {
     if (!groupRef.current) return
-    const mats: THREE.MeshStandardMaterial[] = []
+    const mats: MaterialComOrigem[] = []
     groupRef.current.traverse((obj) => {
       if ((obj as THREE.Mesh).isMesh) {
         const mesh = obj as THREE.Mesh
-        const mat = mesh.material as THREE.MeshStandardMaterial
-        if (mat.transparent) mats.push(mat)
+        const matOriginal = mesh.material as THREE.MeshStandardMaterial
+        // Clona para isolar esta instância (evita vazar transparent/opacity)
+        const mat = matOriginal.clone() as THREE.MeshStandardMaterial
+        mesh.material = mat
+        const opacityOriginal = mat.opacity
+        mat.transparent = true
+        // Garante que needsUpdate reflita a mudança de transparent
+        mat.needsUpdate = true
+        mats.push({ mat, opacityOriginal })
       }
     })
     materiaisRef.current = mats
@@ -42,8 +56,8 @@ function PecaSaindo({ peca, inicioMs, onFim }: SaindoProps) {
     const eased = easeOutCubic(t)
     const escala = 1 - 0.3 * eased
     groupRef.current.scale.set(escala, escala, escala)
-    for (const mat of materiaisRef.current) {
-      mat.opacity = 0.88 * (1 - eased)
+    for (const { mat, opacityOriginal } of materiaisRef.current) {
+      mat.opacity = opacityOriginal * (1 - eased)
     }
     invalidate()
     if (t >= 1 && !jaFinalizou.current) {
