@@ -547,19 +547,21 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
       .find((el) => el.getAttribute('data-peao-id') === peaoId)
   }
 
-  it('TURNO_INICIADO exibe indicador de rodada e botões só na vez do jogador', async () => {
+  it('TURNO_INICIADO exibe botões só na vez do jogador (HUD oculto sem snapshot)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
-    // Sem TURNO_INICIADO: indicador escondido e sem botões de turno.
-    expect(screen.queryByTestId('indicador-rodada')).not.toBeInTheDocument()
+    // Sem snapshot o HUD fica oculto (issue #226: sem dados inventados) e sem
+    // botões de turno.
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
     expect(screen.queryByTestId('controles-de-turno')).not.toBeInTheDocument()
 
-    // Minha vez (rodada 2): indicador visível e fase "sem movimento" →
-    // Permanecer, desabilitado enquanto o peão próprio não é aprendido.
+    // Minha vez (rodada 2): fase "sem movimento" → Permanecer, desabilitado
+    // enquanto o peão próprio não é aprendido. O HUD segue oculto (TURNO não
+    // carrega jogadores — só o snapshot projeta jogadorPorId).
     act(() => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
     })
-    expect(await screen.findByTestId('indicador-rodada')).toHaveTextContent('Rodada 2')
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
     expect(screen.getByTestId('botao-permanecer')).toBeDisabled()
 
     // Primeiro evento de peão da janela aprende o mapa → destaque do ativo e
@@ -577,13 +579,13 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
     const azul = peaoDoEspelho('peao-azul')
     expect(azul?.getAttribute('data-ativo')).toBe('false')
 
-    // Vez de outro jogador: nenhum botão de ação; indicador permanece.
+    // Vez de outro jogador: nenhum botão de ação; HUD segue oculto sem snapshot.
     act(() => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 })
     })
     expect(screen.queryByTestId('controles-de-turno')).not.toBeInTheDocument()
     expect(screen.queryByTestId('botao-permanecer')).not.toBeInTheDocument()
-    expect(screen.getByTestId('indicador-rodada')).toHaveTextContent('Rodada 2')
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
   })
 
   it('Primeiro Turno (rodada 1) sem peão posicionado não mostra Permanecer/Confirmar; com colocação completa mostra Encerrar', async () => {
@@ -810,12 +812,10 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
 
     // Duas peças posicionadas
     expect(await screen.findAllByTestId('peca-posicionada')).toHaveLength(2)
-    // Chip com apelido do ativo (Ana / vermelho)
-    const chip = await screen.findByTestId('chip-jogador-ativo')
-    expect(chip).toHaveTextContent('Ana')
-    expect(chip.getAttribute('data-cor')).toBe('vermelho')
-    // Indicador de rodada vindo do snapshot
-    expect(screen.getByTestId('indicador-rodada')).toHaveTextContent('Rodada 2')
+    // Turno no HUD com a vez da Ana (jogadora ativa do snapshot)
+    const turnoAtivo = await screen.findByTestId('hud-turno-ativo')
+    expect(turnoAtivo).toHaveAttribute('data-jogador-id', 'jogador-2')
+    expect(turnoAtivo).toHaveAttribute('aria-label', 'Vez de Ana')
     // Peão ativo marcado no espelho
     const peaoVermelho = screen.getAllByTestId('peao').find((el) => el.getAttribute('data-peao-id') === 'peao-vermelho')
     expect(peaoVermelho?.getAttribute('data-ativo')).toBe('true')
@@ -864,27 +864,37 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     expect(MockWebSocket.instances).toHaveLength(1)
   })
 
-  it('TURNO_INICIADO atualiza chip via snapshot jogadores + TURNO', async () => {
+  it('TURNO_INICIADO atualiza o destaque do Turno no HUD (snapshot + TURNO)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     const snapshot = criarSnapshotBase()
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
-    const chip = await screen.findByTestId('chip-jogador-ativo')
-    expect(chip).toHaveTextContent('JogadorTeste')
-    expect(chip).toHaveAttribute('data-sanidade', '3')
-    expect(screen.getByTestId('chip-sanidade')).toHaveTextContent('3/3')
+    // Jogador local (autenticado) com sanidade cheia: retrato + barra 3/3.
+    const local = await screen.findByTestId('hud-jogador-local')
+    expect(local).toHaveAttribute('data-jogador-id', '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90')
+    expect(screen.getByTestId('hud-sanidade')).toHaveAttribute('data-sanidade', '3')
+    expect(
+      screen.getAllByTestId('hud-sanidade-segmento').filter((el) => el.getAttribute('data-preenchido') === 'true'),
+    ).toHaveLength(3)
+    expect(await screen.findByTestId('hud-turno-ativo')).toHaveAttribute(
+      'data-jogador-id',
+      '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+    )
 
     act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
-    // TURNO_INICIADO muda jogadorAtivoId mas chip lê do snapshot map + estado atualizado via evento
-    // Como nosso snapshot já tinha jogador-2? Actually snapshot had branco active; TURNO muda para vermelho
-    // O chip deve refletir Ana após o evento
+    // TURNO_INICIADO muda jogadorAtivoId e o destaque do Turno passa à Ana;
+    // o retrato local segue no jogador autenticado.
     await waitFor(() => {
-      const chipAna = screen.getByTestId('chip-jogador-ativo')
-      expect(chipAna).toHaveTextContent('Ana')
-      expect(chipAna).toHaveAttribute('data-sanidade', '3')
+      const ativo = screen.getByTestId('hud-turno-ativo')
+      expect(ativo).toHaveAttribute('data-jogador-id', 'jogador-2')
+      expect(ativo).toHaveAttribute('aria-label', 'Vez de Ana')
+      expect(screen.getByTestId('hud-jogador-local')).toHaveAttribute(
+        'data-jogador-id',
+        '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+      )
     })
   })
 
-  it('sem TURNO nem snapshot chip não aparece em aguardando', async () => {
+  it('sem snapshot o HUD não aparece em aguardando', async () => {
     renderPartidaNaRota('/partida?serverId=s&partidaId=p')
     await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
     const ws = MockWebSocket.last()!
@@ -898,27 +908,27 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
       }),
     )
     expect(await screen.findByTestId('overlay-aguardando')).toBeInTheDocument()
-    expect(screen.queryByTestId('chip-jogador-ativo')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
   })
 })
 
 describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-exp F3)', () => {
   const MEU_JOGADOR_ID = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
 
-  function indicadorDoJogador(jogadorId: string): HTMLElement | undefined {
+  function avatarDoAdversario(jogadorId: string): HTMLElement | undefined {
     return screen
-      .getAllByTestId('indicador-sanidade-jogador')
+      .getAllByTestId('hud-avatar-adversario')
       .find((el) => el.getAttribute('data-jogador-id') === jogadorId)
   }
 
-  it('ATAQUE_RESOLVIDO com estadosAplicados atualiza os chips na tela e toca som de recusa', async () => {
+  it('ATAQUE_RESOLVIDO com estadosAplicados atualiza o HUD e toca som de recusa', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
-    // Ana vira a Jogadora Ativa: o chip de destaque passa a ser o dela.
+    // Ana vira a Jogadora Ativa: o destaque do Turno passa a ser o dela.
     act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
-    const chip = await screen.findByTestId('chip-jogador-ativo')
-    expect(chip).toHaveTextContent('Ana')
-    expect(chip).toHaveAttribute('data-sanidade', '3')
+    const ativo = await screen.findByTestId('hud-turno-ativo')
+    expect(ativo).toHaveAttribute('data-jogador-id', 'jogador-2')
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
 
     act(() =>
       ws.simulateMessage({
@@ -932,13 +942,11 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       }),
     )
 
-    // Projeção no modelo autoritativo-do-eco: chip do ativo + indicador da Ana.
+    // Projeção no modelo: avatar da Ana reflete sanidade e Baixa Iluminação.
     await waitFor(() => {
-      expect(screen.getByTestId('chip-jogador-ativo')).toHaveAttribute('data-sanidade', '2')
-      expect(screen.getByTestId('chip-jogador-ativo')).toHaveAttribute('data-em-baixa', 'true')
-      const indicador = indicadorDoJogador('jogador-2')
-      expect(indicador).toHaveAttribute('data-sanidade', '2')
-      expect(indicador).toHaveAttribute('data-em-baixa', 'true')
+      const avatar = avatarDoAdversario('jogador-2')
+      expect(avatar).toHaveAttribute('data-sanidade', '2')
+      expect(avatar).toHaveAttribute('data-em-baixa', 'true')
     })
     // Som de recusa com motivo de ataque (PartidaPage: estadosAplicados > 0).
     expect(toquesDeAudio).toHaveLength(1)
@@ -949,7 +957,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     expect(anuncio).toHaveTextContent('ataque')
   })
 
-  it('ATAQUE_RESOLVIDO com Amedrontado atualiza o chip de medo na tela', async () => {
+  it('ATAQUE_RESOLVIDO com Amedrontado atualiza o avatar no HUD', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
     act(() =>
@@ -964,9 +972,9 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       }),
     )
     await waitFor(() => {
-      const indicador = indicadorDoJogador('jogador-2')
-      expect(indicador).toHaveAttribute('data-sanidade', '0')
-      expect(indicador).toHaveAttribute('data-amedrontado', 'true')
+      const avatar = avatarDoAdversario('jogador-2')
+      expect(avatar).toHaveAttribute('data-sanidade', '0')
+      expect(avatar).toHaveAttribute('data-amedrontado', 'true')
     })
     // Ataque com penalidade também toca a recusa.
     expect(toquesDeAudio).toHaveLength(1)
@@ -1006,11 +1014,11 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     )
     expect(toquesDeAudio).toHaveLength(0)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    // Sem estadosAplicados, os chips não mudam (o eco é feedback, não autoridade).
-    expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    // Sem estadosAplicados, o avatar não muda (o eco é feedback, não autoridade).
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
   })
 
-  it('RESGATE_REALIZADO limpa os estados no chip e restaura a Sanidade, em silêncio', async () => {
+  it('RESGATE_REALIZADO limpa os estados no avatar e restaura a Sanidade, em silêncio', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     // Ana Amedrontada (sanidade 0) no snapshot autoritativo.
     const snapshot = criarSnapshotBase({
@@ -1022,8 +1030,8 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     })
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
     await waitFor(() => {
-      expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-amedrontado', 'true')
-      expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-sanidade', '0')
+      expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-amedrontado', 'true')
+      expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '0')
     })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
@@ -1039,10 +1047,10 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
 
     // Estados limpos + sanidade restaurada a 1 (regra do Resgate no domínio).
     await waitFor(() => {
-      const indicador = indicadorDoJogador('jogador-2')
-      expect(indicador).not.toHaveAttribute('data-amedrontado')
-      expect(indicador).not.toHaveAttribute('data-em-baixa')
-      expect(indicador).toHaveAttribute('data-sanidade', '1')
+      const avatar = avatarDoAdversario('jogador-2')
+      expect(avatar).not.toHaveAttribute('data-amedrontado')
+      expect(avatar).not.toHaveAttribute('data-em-baixa')
+      expect(avatar).toHaveAttribute('data-sanidade', '1')
     })
     // Resgate em silêncio: nenhum toque, nenhum clarão, nenhum anúncio.
     expect(toquesDeAudio).toHaveLength(0)
@@ -1074,6 +1082,12 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
     })
   }
 
+  function geradoresAcesos(): number {
+    return screen
+      .getAllByTestId('hud-conquista-gerador')
+      .filter((el) => el.getAttribute('data-acesa') === 'true').length
+  }
+
   const GERADOR_1: PecaPosicionadaNoSnapshot = {
     pecaId: 'gerador-1',
     tipo: 'gerador',
@@ -1087,7 +1101,7 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
     celula: { linha: 4, coluna: 4 },
   }
 
-  it('em aguardando nem contagem nem chips são montados', async () => {
+  it('em aguardando o HUD não é montado', async () => {
     renderPartidaNaRota('/partida?serverId=s&partidaId=p')
     await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
     const ws = MockWebSocket.last()!
@@ -1101,23 +1115,18 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
       }),
     )
     expect(await screen.findByTestId('overlay-aguardando')).toBeInTheDocument()
-    expect(screen.queryByTestId('contagem-caixa')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('chip-geradores-ligados')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('chip-cartao-de-acesso')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
   })
 
-  it('antes do snapshot: chips zerados visíveis e contagem da Caixa oculta', async () => {
+  it('antes do snapshot o HUD fica oculto (nada inventado)', async () => {
     await partidaDisponivel('/partida?serverId=s&partidaId=p')
-    const chipG = await screen.findByTestId('chip-geradores-ligados')
-    expect(chipG).toHaveTextContent('Geradores 0/3')
-    expect(chipG.getAttribute('data-geradores')).toBe('0')
-    expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('false')
-    // Sem baseline: null ≠ 0 — a contagem não é inventada antes do primeiro
-    // ESTADO_DA_PARTIDA.
-    expect(screen.queryByTestId('contagem-caixa')).not.toBeInTheDocument()
+    // Sem baseline do snapshot o HUD não renderiza — nem conquistas zeradas,
+    // nem contagem da Caixa: a issue #226 exige HUD oculto sem snapshot.
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('hud-conquistas')).not.toBeInTheDocument()
   })
 
-  it('ESTADO_DA_PARTIDA popula a contagem da Caixa e os chips pela baseline', async () => {
+  it('ESTADO_DA_PARTIDA popula as conquistas pela baseline', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() =>
       ws.simulateMessage({
@@ -1129,14 +1138,13 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         }),
       }),
     )
-    expect(await screen.findByTestId('contagem-caixa')).toHaveTextContent('Caixa: 57')
-    const chipG = screen.getByTestId('chip-geradores-ligados')
-    expect(chipG.getAttribute('data-geradores')).toBe('1')
-    expect(chipG).toHaveTextContent('Geradores 1/3')
-    expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('false')
+    await screen.findByTestId('hud-da-partida')
+    // Baseline: 1 gerador ligado acende 1 conquista; cartão apagado.
+    expect(geradoresAcesos()).toBe(1)
+    expect(screen.getByTestId('hud-conquista-cartao')).toHaveAttribute('data-acesa', 'false')
   })
 
-  it('PECA_SORTEADA ao vivo decrementa; id repetido não decrementa 2×', async () => {
+  it('PECA_SORTEADA ao vivo não inventa contagem no HUD (Caixa fora do HUD #226)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() =>
       ws.simulateMessage({
@@ -1144,8 +1152,10 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         snapshot: snapshotComObjetivos({ pecasRestantes: 57 }),
       }),
     )
-    await screen.findByTestId('contagem-caixa')
-
+    await screen.findByTestId('hud-da-partida')
+    // A contagem da Caixa saiu do HUD (derivação segue no modelo, coberta em
+    // tabuleiro-reducao.test.ts): sorteios não acendem conquistas nem exibem
+    // contagem — o HUD segue íntegro, inclusive no sorteio repetido.
     act(() =>
       ws.simulateMessage({
         type: 'PECA_SORTEADA',
@@ -1154,9 +1164,10 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         orientacao: 0,
       }),
     )
-    expect(await screen.findByTestId('contagem-caixa')).toHaveTextContent('Caixa: 56')
+    expect(geradoresAcesos()).toBe(0)
+    expect(screen.queryByTestId('contagem-caixa')).not.toBeInTheDocument()
 
-    // Reentrega do mesmo sorteio: o gate de idempotência segura o decremento.
+    // Reentrega do mesmo sorteio: sem efeito visível.
     act(() =>
       ws.simulateMessage({
         type: 'PECA_SORTEADA',
@@ -1165,12 +1176,10 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         orientacao: 0,
       }),
     )
-    await waitFor(() =>
-      expect(screen.getByTestId('contagem-caixa')).toHaveTextContent('Caixa: 56'),
-    )
+    await waitFor(() => expect(geradoresAcesos()).toBe(0))
   })
 
-  it('POSICAO_CONFIRMADA de gerador incrementa o chip ao vivo, com dedupe', async () => {
+  it('POSICAO_CONFIRMADA de gerador acende a conquista ao vivo, com dedupe', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() =>
       ws.simulateMessage({
@@ -1178,8 +1187,8 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         snapshot: snapshotComObjetivos({ posicionadas: [GERADOR_1] }),
       }),
     )
-    await screen.findByTestId('contagem-caixa')
-    expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('0')
+    await screen.findByTestId('hud-da-partida')
+    expect(geradoresAcesos()).toBe(0)
 
     act(() =>
       ws.simulateMessage({
@@ -1189,9 +1198,7 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         pecaId: 'gerador-1',
       }),
     )
-    await waitFor(() =>
-      expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('1'),
-    )
+    await waitFor(() => expect(geradoresAcesos()).toBe(1))
     // Reconfirmação do MESMO gerador (reconexão com o gerador já na baseline
     // não pode inflar): dedupe por pecaId.
     act(() =>
@@ -1203,9 +1210,7 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         }),
       }),
     )
-    await waitFor(() =>
-      expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('1'),
-    )
+    await waitFor(() => expect(geradoresAcesos()).toBe(1))
     act(() =>
       ws.simulateMessage({
         type: 'POSICAO_CONFIRMADA',
@@ -1214,12 +1219,10 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         pecaId: 'gerador-1',
       }),
     )
-    await waitFor(() =>
-      expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('1'),
-    )
+    await waitFor(() => expect(geradoresAcesos()).toBe(1))
   })
 
-  it('POSICAO_CONFIRMADA de sala_do_diretor vira o chip do cartão para obtido', async () => {
+  it('POSICAO_CONFIRMADA de sala_do_diretor acende a conquista do cartão', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() =>
       ws.simulateMessage({
@@ -1227,7 +1230,7 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         snapshot: snapshotComObjetivos({ posicionadas: [SALA_DIRETOR_1] }),
       }),
     )
-    await screen.findByTestId('contagem-caixa')
+    await screen.findByTestId('hud-da-partida')
 
     act(() =>
       ws.simulateMessage({
@@ -1238,11 +1241,11 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
       }),
     )
     await waitFor(() =>
-      expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('true'),
+      expect(screen.getByTestId('hud-conquista-cartao')).toHaveAttribute('data-acesa', 'true'),
     )
   })
 
-  it('reconexão: ESTADO_DA_PARTIDA reconcilia HUD e chips sem recarregar', async () => {
+  it('reconexão: ESTADO_DA_PARTIDA reconcilia as conquistas sem recarregar', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     // Snapshot inicial sem conquistas.
     act(() =>
@@ -1251,7 +1254,7 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         snapshot: snapshotComObjetivos({ pecasRestantes: 57 }),
       }),
     )
-    await screen.findByTestId('contagem-caixa')
+    await screen.findByTestId('hud-da-partida')
 
     // Reconexão: o novo snapshot traz a baseline real do engine (conquistas
     // obtidas enquanto o cliente estava fora) — reconcilia sem reload.
@@ -1266,9 +1269,8 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         }),
       }),
     )
-    expect(await screen.findByTestId('contagem-caixa')).toHaveTextContent('Caixa: 40')
-    expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('2')
-    expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('true')
+    expect(geradoresAcesos()).toBe(2)
+    expect(screen.getByTestId('hud-conquista-cartao')).toHaveAttribute('data-acesa', 'true')
   })
 
   it('AC1: especial posicionada renderiza com data-tipo e sem janela de Manipulação (snapshot e delta)', async () => {

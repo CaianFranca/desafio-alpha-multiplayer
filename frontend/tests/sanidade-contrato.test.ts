@@ -54,9 +54,9 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
       { jogadorId: 'j3', apelido: 'Carol', cor: 'azul', ordem: 2, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 0, emBaixaIluminacao: false, amedrontado: true },
     ])
     const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
-    expect(estado.jogadorPorId['j1']).toEqual({ apelido: 'Ana', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false })
-    expect(estado.jogadorPorId['j2']).toEqual({ apelido: 'Bob', cor: 'vermelho', sanidade: 1, emBaixaIluminacao: true, amedrontado: false })
-    expect(estado.jogadorPorId['j3']).toEqual({ apelido: 'Carol', cor: 'azul', sanidade: 0, emBaixaIluminacao: false, amedrontado: true })
+    expect(estado.jogadorPorId['j1']).toEqual({ apelido: 'Ana', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 0 })
+    expect(estado.jogadorPorId['j2']).toEqual({ apelido: 'Bob', cor: 'vermelho', sanidade: 1, emBaixaIluminacao: true, amedrontado: false, ordem: 1 })
+    expect(estado.jogadorPorId['j3']).toEqual({ apelido: 'Carol', cor: 'azul', sanidade: 0, emBaixaIluminacao: false, amedrontado: true, ordem: 2 })
     expect(estado.peaoPorJogador['j2']).toBe('peao-vermelho')
   })
 

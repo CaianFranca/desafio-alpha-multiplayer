@@ -10,7 +10,7 @@ import type { EstadoDaPartidaSnapshot, PecaPosicionadaNoSnapshot } from '@flicke
 import type { UseSalaWebSocketReturn } from '../web/src/hooks/useSalaWebSocket'
 
 // F4 (#145-exp) — capstone do ciclo completo PELA UI: objetivo global
-// derivado ao vivo (POSICAO_CONFIRMADA → chips), peões convergindo ao Portão
+// derivado ao vivo (POSICAO_CONFIRMADA → conquistas do HUD #226), peões
 // por CLIQUE (destinos da F1 emitindo MOVER_PEAO) até o servidor (simulado)
 // declarar PARTIDA_TERMINADA; e a derrota por Caixa Esgotada decrescendo a
 // contagem até 0 antes do término com o motivo da F2. É teste de CLIENTE: o
@@ -211,10 +211,10 @@ describe('ciclo completo pela UI — vitória no Portão e retorno à sala (#145
         }),
       }),
     )
-    expect(await screen.findByTestId('contagem-caixa')).toBeInTheDocument()
+    expect(await screen.findByTestId('hud-da-partida')).toBeInTheDocument()
 
     // Objetivo Global derivado ao vivo pelos eventos existentes (issue #145):
-    // cada confirmação liga um gerador/obtém o cartão; o TURNO_INICIADO
+    // cada confirmação acende uma conquista do HUD (#226); o TURNO_INICIADO
     // seguinte reabre a janela do turno (espelha a serialização real).
     for (const pecaId of ['gerador-1', 'gerador-2', 'gerador-3', 'sala-do-diretor-1']) {
       act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 }))
@@ -227,11 +227,15 @@ describe('ciclo completo pela UI — vitória no Portão e retorno à sala (#145
         }),
       )
     }
-    await waitFor(() =>
-      expect(screen.getByTestId('chip-geradores-ligados').getAttribute('data-geradores')).toBe('3'),
-    )
-    expect(screen.getByTestId('chip-geradores-ligados')).toHaveTextContent('Geradores 3/3')
-    expect(screen.getByTestId('chip-cartao-de-acesso').getAttribute('data-obtido')).toBe('true')
+    // Conquistas no HUD (issue #226): cada confirmação acende 1 gerador; a
+    // 4ª (cartão) acende na confirmação da Sala do Diretor.
+    function geradoresAcesos(): number {
+      return screen
+        .getAllByTestId('hud-conquista-gerador')
+        .filter((el) => el.getAttribute('data-acesa') === 'true').length
+    }
+    await waitFor(() => expect(geradoresAcesos()).toBe(3))
+    expect(screen.getByTestId('hud-conquista-cartao')).toHaveAttribute('data-acesa', 'true')
     // Última confirmação travou a posição do turno (AC3); o turno seguinte
     // reabre a janela — mesma serialização do jogo real.
     act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 3 }))
@@ -292,11 +296,13 @@ describe('ciclo completo pela UI — vitória no Portão e retorno à sala (#145
 })
 
 describe('ciclo completo pela UI — derrota por Caixa Esgotada (#145-exp F4)', () => {
-  it('sorteios esvaziam a Caixa até 0 no HUD → PARTIDA_TERMINADA derrota/caixa_esgotada → overlay com o motivo', async () => {
+  it('sorteios até o esgotamento → PARTIDA_TERMINADA derrota/caixa_esgotada → overlay com o motivo', async () => {
     const ws = await partidaDisponivel('A3K9M2')
 
     // Baseline do snapshot: 2 peças na Caixa, objetivos incompletos (sem
-    // monstros em cena — a derrota aqui é contagem, não ataque).
+    // monstros em cena — a derrota aqui é contagem, não ataque). A contagem
+    // da Caixa não é mais exibida no HUD (#226); o fluxo segue até o término
+    // com o motivo da F2.
     act(() =>
       ws.simulateMessage({
         type: 'ESTADO_DA_PARTIDA',
@@ -309,18 +315,19 @@ describe('ciclo completo pela UI — derrota por Caixa Esgotada (#145-exp F4)', 
         }),
       }),
     )
-    expect(await screen.findByTestId('contagem-caixa')).toHaveTextContent('Caixa: 2')
+    expect(await screen.findByTestId('hud-da-partida')).toBeInTheDocument()
 
     // Sequência de sorteios até 0 — decremento ao vivo por PECA_SORTEADA
-    // inédita (regra #145); o sorteio em si não pisca flash.
+    // inédita (regra #145, coberta em tabuleiro-reducao.test.ts); o sorteio
+    // em si não pisca flash.
     act(() =>
       ws.simulateMessage({ type: 'PECA_SORTEADA', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0 }),
     )
-    await waitFor(() => expect(screen.getByTestId('contagem-caixa')).toHaveTextContent('Caixa: 1'))
+    await waitFor(() => expect(screen.getByTestId('hud-da-partida')).toBeInTheDocument())
     act(() =>
       ws.simulateMessage({ type: 'PECA_SORTEADA', pecaId: 'reta-2', tipoDaPeca: 'reta', orientacao: 0 }),
     )
-    await waitFor(() => expect(screen.getByTestId('contagem-caixa')).toHaveTextContent('Caixa: 0'))
+    await waitFor(() => expect(screen.getByTestId('hud-da-partida')).toBeInTheDocument())
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Caixa Esgotada sem objetivos alcançáveis → o funil do engine (testado

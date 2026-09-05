@@ -79,7 +79,7 @@ export function aplicarSnapshot(
   )
 
   const peaoPorJogador: Record<string, string> = {}
-  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
+  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean; ordem: number }> = {}
   for (const j of snapshot.jogadores) {
     peaoPorJogador[j.jogadorId] = j.peaoId
     // Snapshot carrega sanidade/estados (issue #173) com normalização
@@ -95,6 +95,9 @@ export function aplicarSnapshot(
       sanidade,
       emBaixaIluminacao,
       amedrontado,
+      // Ordem de entrada na Sala (issue #226): alimenta a fila circular do
+      // Turno no HUD; o wire sempre carrega (fallback defensivo 0).
+      ordem: (j as { ordem?: number }).ordem ?? 0,
     }
   }
 
