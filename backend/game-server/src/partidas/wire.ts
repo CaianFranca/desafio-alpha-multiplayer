@@ -23,6 +23,7 @@ import type {
 // Comandos aceitos no wire do canal de Partida: a forma legada de escolha de
 // tipo (ST-10) saiu do domínio na #138 e foi removida da união wire na limpeza
 // da #140 — a união compartilhada já é exatamente o conjunto aceito.
+// DESELECIONAR_PEAO entra pela issue #249 (desseleção autoritativa).
 export type ComandoDaPartidaAceito = PartidaComandoDoCliente;
 
 const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
@@ -31,6 +32,7 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'POSICIONAR_PECA',
   'FINALIZAR_MANIPULACAO',
   'SELECIONAR_PEAO',
+  'DESELECIONAR_PEAO',
   'POSICIONAR_PEAO',
   'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
@@ -103,6 +105,8 @@ export function ehComandoDaPartida(value: unknown): value is ComandoDaPartidaAce
       return true;
     case 'SELECIONAR_PEAO':
       return ehIdNaoVazio(mensagem.peaoId);
+    case 'DESELECIONAR_PEAO':
+      return ehIdNaoVazio(mensagem.peaoId);
     case 'POSICIONAR_PEAO':
       return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     case 'ESCOLHER_VAGA_DA_PECA_RECEBIDA':
@@ -140,6 +144,8 @@ export function mapearComandoDaPartida(
       return { tipo: 'finalizar_manipulacao' };
     case 'SELECIONAR_PEAO':
       return { tipo: 'selecionar_peao', peaoId: comando.peaoId };
+    case 'DESELECIONAR_PEAO':
+      return { tipo: 'desselecionar_peao', peaoId: comando.peaoId };
     case 'POSICIONAR_PEAO':
       return { tipo: 'posicionar_peao', peaoId: comando.peaoId, celula: comando.celula };
     case 'ESCOLHER_VAGA_DA_PECA_RECEBIDA':

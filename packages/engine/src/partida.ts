@@ -384,6 +384,13 @@ function rotearComandoDaPartida(
       }
       return delegarAoTabuleiro(estado, comando);
     }
+    case 'desselecionar_peao': {
+      const alheio = exigirPeaoDoAtor(comando.peaoId, jogadorAtivo);
+      if (alheio) {
+        return alheio;
+      }
+      return delegarAoTabuleiro(estado, comando);
+    }
     case 'posicionar_peca':
       return posicionarPecaDaPartida(estado, comando, jogadorAtivo);
     case 'posicionar_peao':

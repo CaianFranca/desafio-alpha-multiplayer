@@ -44,6 +44,9 @@ export function traduzirEventos(
       case 'peao_selecionado':
         saida.push({ type: 'PEAO_SELECIONADO', peaoId: evento.peaoId });
         break;
+      case 'peao_desselecionado':
+        saida.push({ type: 'PEAO_DESELECIONADO', peaoId: evento.peaoId });
+        break;
       case 'recebimento_gerado':
         saida.push({ type: 'RECEBIMENTO_GERADO', recebidas: evento.recebidas });
         break;

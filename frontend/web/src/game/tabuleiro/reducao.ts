@@ -32,6 +32,9 @@
  *     Recebida (pecaSelecionadaId) até o encaixe.
  *   - PEAO_POSICIONADO re-seleciona o peão (Primeiro Turno, partida.ts:344);
  *     PEAO_MOVIDO/PEAO_PERMANECEU limpam a seleção (mover/permanecer).
+ *   - PEAO_DESELECIONADO limpa a seleção vigente (desseleção autoritativa do
+ *     servidor, issue #249 — idempotentes não reemitem, fora de sequência é
+ *     no-op); o snapshot é a autoridade total da seleção no reload.
  *
  * Turnos (issue #118 — espelho do ST-11):
  *   - TURNO_INICIADO seta jogadorAtivoId/rodada e reseta a fase do turno;
@@ -354,6 +357,12 @@ export function reduzirEvento(
     // ── Eventos de Peão / Ciclo (ST-10) ──
     case 'PEAO_SELECIONADO':
       return { ...estado, peaoSelecionadoId: evento.peaoId }
+    case 'PEAO_DESELECIONADO':
+      // Desseleção autoritativa (#249): limpa só a seleção vigente; evento
+      // para outro peão (ou sem seleção) é no-op — nunca ressuscita seleção obsoleta.
+      return estado.peaoSelecionadoId === evento.peaoId
+        ? { ...estado, peaoSelecionadoId: null }
+        : estado
     case 'RECEBIMENTO_GERADO': {
       // Forma da #138: o wire já traz cada pendência com a Peça sorteada
       // (pecaId + tipo) e a vaga nula — passa direto para o modelo.
@@ -426,7 +435,7 @@ export function reduzirEvento(
         p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
       )
       // mover_peao no engine limpa o peaoSelecionadoId — o cliente espelha
-      // para não manter seleção fantasma. Dentro do turno, o movimento marca
+      // para não manter seleção obsoleta. Dentro do turno, o movimento marca
       // a fase e atribui o peão ao Jogador Ativo (issue #118).
       return {
         ...estado,
