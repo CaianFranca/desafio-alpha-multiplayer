@@ -371,8 +371,9 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     )
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
 
-    // Limpeza em silêncio: nenhum toque, nenhum clarão.
-    expect(toquesDeAudio).toHaveLength(0)
+    // Limpeza com som único (issue #239): um toque sombrio por comando, sem clarão.
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/toque-sombrio-limpeza.mp3' })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Célula liberada aceita novo posicionamento pela mesma via dos testes de

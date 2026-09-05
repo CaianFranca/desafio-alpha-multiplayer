@@ -25,6 +25,7 @@ import {
 } from '../../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
+import type { LimpezaTrigger } from '../../game/scenes/TransicaoLimpeza'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -61,6 +62,8 @@ interface AmbienteDeJogoProps {
   peaoAtivoId?: PeaoId | null
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
+  /** Trigger de limpeza evento-driven (issue #239, B1) — só LIMPEZA_APLICADA dispara, snapshot não. */
+  limpezaTrigger?: LimpezaTrigger | null
 }
 
 export function AmbienteDeJogo({
@@ -74,6 +77,7 @@ export function AmbienteDeJogo({
   peaoSelecionadoIdServidor = null,
   peaoAtivoId = null,
   sanidadePorPeao = {},
+  limpezaTrigger = null,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade ──
   // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
@@ -252,6 +256,7 @@ export function AmbienteDeJogo({
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           pecaCorrente={pecaCorrente}
+          limpezaTrigger={limpezaTrigger}
         />
       </Canvas>
       {estadoExibicao ? (
