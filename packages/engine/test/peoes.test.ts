@@ -836,7 +836,7 @@ test('desselecionar_peao sob Recebidas pendentes rejeita PENDENCIA_NAO_RESOLVIDA
 test('desselecionar_peao de peão inexistente rejeita PEAO_NAO_ENCONTRADO', () => {
   const estado = estadoInicialDoTabuleiro();
   assert.equal(
-    codigoDaRejeicao(estado, desselecionarPeao('fantasma')),
+    codigoDaRejeicao(estado, desselecionarPeao('peao-inexistente')),
     'PEAO_NAO_ENCONTRADO',
   );
   assert.equal(codigoDaRejeicao(estado, desselecionarPeao('   ')), 'DADOS_INVALIDOS');

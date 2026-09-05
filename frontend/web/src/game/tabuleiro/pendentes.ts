@@ -38,35 +38,49 @@ interface FormaDeAck {
   readonly type: string
   readonly pecaId?: string
   readonly peaoId?: string
+  readonly celula?: Celula
 }
 
 /**
- * Remove do conjunto as chaves confirmadas pelo ack. Retorna true quando ao
- * menos uma chave foi consumida (o chamador pode ignorar o valor — o efeito
- * é a mutação do Set).
+ * Consome do conjunto o alvo confirmado pelo ack: com a célula do evento,
+ * apaga só a chave exata (dois pendentes da mesma peça em células distintas
+ * não se limpam entre si); sem célula no evento, mantém o fallback por
+ * prefixo documentado (payload sem célula confirma a peça/o peão sem amarrar
+ * a célula). Retorna true quando ao menos uma chave foi consumida (o chamador
+ * pode ignorar o valor — o efeito é a mutação do Set).
  */
+function consumirPorChaveExataOuPrefixo(
+  pendentes: Set<string>,
+  prefixo: string,
+  celula: Celula | undefined,
+): boolean {
+  if (celula !== undefined) {
+    return pendentes.delete(`${prefixo}:${celula.linha}:${celula.coluna}`)
+  }
+  let consumiu = false
+  for (const chave of [...pendentes]) {
+    if (chave.startsWith(`${prefixo}:`)) {
+      pendentes.delete(chave)
+      consumiu = true
+    }
+  }
+  return consumiu
+}
+
 export function consumirAck(pendentes: Set<string>, evento: FormaDeAck): boolean {
   if (evento.type === 'PECA_POSICIONADA' && typeof evento.pecaId === 'string') {
-    const prefixo = `POSICIONAR_PECA:${evento.pecaId}:`
-    let consumiu = false
-    for (const chave of [...pendentes]) {
-      if (chave.startsWith(prefixo)) {
-        pendentes.delete(chave)
-        consumiu = true
-      }
-    }
-    return consumiu
+    return consumirPorChaveExataOuPrefixo(
+      pendentes,
+      `POSICIONAR_PECA:${evento.pecaId}`,
+      evento.celula,
+    )
   }
   if (evento.type === 'PEAO_POSICIONADO' && typeof evento.peaoId === 'string') {
-    const prefixo = `POSICIONAR_PEAO:${evento.peaoId}:`
-    let consumiu = false
-    for (const chave of [...pendentes]) {
-      if (chave.startsWith(prefixo)) {
-        pendentes.delete(chave)
-        consumiu = true
-      }
-    }
-    return consumiu
+    return consumirPorChaveExataOuPrefixo(
+      pendentes,
+      `POSICIONAR_PEAO:${evento.peaoId}`,
+      evento.celula,
+    )
   }
   if (evento.type === 'PEAO_DESELECIONADO' && typeof evento.peaoId === 'string') {
     return pendentes.delete(`DESELECIONAR_PEAO:${evento.peaoId}`)

@@ -150,8 +150,12 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(mapearCliqueNoPeao(estado, 'peao-vermelho')).toBeNull()
     expect(podeSelecionarPeao(estado, 'peao-branco')).toBe(true)
     expect(podeSelecionarPeao(estado, 'peao-vermelho')).toBe(false)
-    // Id sem cor inferível não trava além do silêncio existente.
-    expect(podeSelecionarPeao(estado, 'peao-sintetico')).toBe(true)
+    // Id sem cor inferível falha fechado: fora do padrão `peao-<cor>`, nunca
+    // fura o gate (o engine só cria `peao-<cor>`) — mesmo existindo na lista,
+    // o clique fica silencioso.
+    expect(podeSelecionarPeao(estado, 'peao-sintetico')).toBe(false)
+    const comSintetico = estadoBase({ peoes: [...estadoBase().peoes, peao('peao-sintetico', null)] })
+    expect(mapearCliqueNoPeao(comSintetico, 'peao-sintetico')).toBeNull()
   })
 
   it('clique no próprio peão já selecionado emite PERMANECER (AC 5)', () => {
@@ -1118,8 +1122,11 @@ describe('primeiro turno sem deadlock (issue #249)', () => {
     expect(capturarDespacho(estado, CELULA_VAZIA).comandos).toEqual([])
     // A desseleção autoritativa é o único caminho para liberar a Inicial.
     expect(mapearDesselecaoDePeao(estado)).toEqual({
-      type: 'DESELECIONAR_PEAO',
-      peaoId: 'peao-branco',
+      tipo: 'comando',
+      comando: {
+        type: 'DESELECIONAR_PEAO',
+        peaoId: 'peao-branco',
+      },
     })
   })
 
@@ -1252,8 +1259,11 @@ describe('desseleção autoritativa do peão (issue #249)', () => {
   it('com seleção vigente e sem pendências emite DESELECIONAR_PEAO', () => {
     const estado = estadoBaseDesselecao({ peaoSelecionadoId: 'peao-branco' })
     expect(mapearDesselecaoDePeao(estado)).toEqual({
-      type: 'DESELECIONAR_PEAO',
-      peaoId: 'peao-branco',
+      tipo: 'comando',
+      comando: {
+        type: 'DESELECIONAR_PEAO',
+        peaoId: 'peao-branco',
+      },
     })
   })
 
@@ -1261,12 +1271,15 @@ describe('desseleção autoritativa do peão (issue #249)', () => {
     expect(mapearDesselecaoDePeao(estadoBaseDesselecao())).toBeNull()
   })
 
-  it('sob Recebidas pendentes é silenciosa (o domínio rejeitaria com PENDENCIA_NAO_RESOLVIDA)', () => {
+  it('sob Recebidas pendentes retorna rejeição com motivo pendencia_nao_resolvida (recusa em vez de silêncio)', () => {
     const estado = estadoBaseDesselecao({
       peaoSelecionadoId: 'peao-branco',
       recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', null, null)],
     })
-    expect(mapearDesselecaoDePeao(estado)).toBeNull()
+    expect(mapearDesselecaoDePeao(estado)).toEqual({
+      tipo: 'rejeicao',
+      rejeicao: { motivo: 'pendencia_nao_resolvida' },
+    })
   })
 
   it('ciclo binário: só a desseleção autoritativa libera o fallback (sem merge local)', () => {
@@ -1347,6 +1360,37 @@ describe('pendentes otimistas anti-duplo-place (issue #249)', () => {
     expect(consumirAck(outros, { type: 'PEAO_POSICIONADO', peaoId: 'peao-vermelho' })).toBe(false)
     expect(outros.size).toBe(1)
   })
+
+  it('ack com célula consome só a chave exata: pendente da mesma peça em outra célula permanece', () => {
+    // Dois POSICIONAR_PECA da mesma peça em células distintas em voo (retry
+    // em outra célula gera chave distinta); o ack de uma não limpa a outra.
+    const voo = new Set<string>([
+      'POSICIONAR_PECA:inicial-2:5:5',
+      'POSICIONAR_PECA:inicial-2:5:6',
+    ])
+    expect(
+      consumirAck(voo, { type: 'PECA_POSICIONADA', pecaId: 'inicial-2', celula: { linha: 5, coluna: 5 } }),
+    ).toBe(true)
+    expect(voo).toEqual(new Set(['POSICIONAR_PECA:inicial-2:5:6']))
+    // O mesmo vale para POSICIONAR_PEAO do mesmo peão em células distintas.
+    const vooPeao = new Set<string>([
+      'POSICIONAR_PEAO:peao-branco:3:3',
+      'POSICIONAR_PEAO:peao-branco:3:4',
+    ])
+    expect(
+      consumirAck(vooPeao, { type: 'PEAO_POSICIONADO', peaoId: 'peao-branco', celula: { linha: 3, coluna: 4 } }),
+    ).toBe(true)
+    expect(vooPeao).toEqual(new Set(['POSICIONAR_PEAO:peao-branco:3:3']))
+  })
+
+  it('ack sem célula mantém o fallback por prefixo (payload sem célula confirma a peça)', () => {
+    const voo = new Set<string>([
+      'POSICIONAR_PECA:inicial-2:5:5',
+      'POSICIONAR_PECA:inicial-2:5:6',
+    ])
+    expect(consumirAck(voo, { type: 'PECA_POSICIONADA', pecaId: 'inicial-2' })).toBe(true)
+    expect(voo.size).toBe(0)
+  })
 })
 
 describe('integração dos 8 passos da issue #249 (ordem Inicial-primeiro)', () => {
@@ -1393,8 +1437,11 @@ describe('integração dos 8 passos da issue #249 (ordem Inicial-primeiro)', () 
     })
     expect(comandos).toEqual([])
     expect(mapearDesselecaoDePeao(travado)).toEqual({
-      type: 'DESELECIONAR_PEAO',
-      peaoId: 'peao-branco',
+      tipo: 'comando',
+      comando: {
+        type: 'DESELECIONAR_PEAO',
+        peaoId: 'peao-branco',
+      },
     })
     // Ack do servidor (PEAO_DESELECIONADO) libera o fallback.
     const liberado: EstadoInteracaoPeoes = { ...travado, peaoSelecionadoId: null }
@@ -1407,7 +1454,7 @@ describe('integração dos 8 passos da issue #249 (ordem Inicial-primeiro)', () 
     expect(apos).toEqual([{ type: 'POSICIONAR_PECA', pecaId: 'inicial-1', celula: CELULA_VAZIA }])
   })
 
-  it('passo 8 + reload: POSICIONAR_PEAO sobre a Inicial posicionada; snapshot reconcilia sem fantasma', () => {
+  it('passo 8 + reload: POSICIONAR_PEAO sobre a Inicial posicionada; snapshot reconcilia sem seleção obsoleta', () => {
     // 7. Inicial posicionada + peão selecionado (gate passa: inicial-1 em mesa).
     const pronto = estadoBase({
       posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
@@ -1419,7 +1466,7 @@ describe('integração dos 8 passos da issue #249 (ordem Inicial-primeiro)', () 
     expect(rotearCliqueDeCelula(pronto, tabuleiroDe(pronto), CELULA_INICIAL)).toEqual({
       ciclo: { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: CELULA_INICIAL },
     })
-    // Reload: snapshot sem seleção não ressuscita fantasma — o fallback volta
+    // Reload: snapshot sem seleção não ressuscita seleção obsoleta — o fallback volta
     // a valer e nova seleção passa pelo gate (Inicial posicionada).
     const aposReload: EstadoInteracaoPeoes = { ...pronto, peaoSelecionadoId: null }
     expect(cicloAtivo(aposReload)).toBe(false)

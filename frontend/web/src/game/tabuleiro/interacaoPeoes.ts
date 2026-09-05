@@ -190,15 +190,15 @@ function corDoPeaoId(peaoId: string): string | null {
  *
  * O dono é inferido pela cor (`peao-branco` → `inicial-1`, espelhando
  * `estadoInicialDaPartida` do engine: ordem ↔ cor ↔ inicial-<ordem>). Sem
- * cor inferível, não se trava além do silêncio existente (retorna true) —
- * espectador e ids sintéticos degradam ao comportamento anterior.
+ * cor inferível o gate falha fechado (retorna false): ids fora do padrão
+ * `peao-<cor>` nunca furam a seleção — o engine só cria `peao-<cor>`.
  */
 export function podeSelecionarPeao(
   estado: Pick<EstadoInteracaoPeoes, 'posicionadas'>,
   peaoId: string,
 ): boolean {
   const cor = corDoPeaoId(peaoId)
-  if (cor === null) return true
+  if (cor === null) return false
   const ordem = ORDEM_DA_COR_DO_PEAO[cor]
   const inicialDoDono = `inicial-${ordem}`
   return estado.posicionadas.some((p) => p.pecaId === inicialDoDono)
@@ -207,16 +207,23 @@ export function podeSelecionarPeao(
 /**
  * Desseleção autoritativa (issue #249): com seleção vigente e sem pendências,
  * emite DESELECIONAR_PEAO para o peão selecionado (o servidor é a autoridade
- * — o cliente nunca desseleciona só no Local). Sem seleção ou sob pendências
- * (o domínio rejeitaria com PENDENCIA_NAO_RESOLVIDA), é silenciosa (null).
+ * — o cliente nunca desseleciona só no Local). Sem seleção é silenciosa
+ * (null); sob pendências retorna rejeição com motivo `pendencia_nao_resolvida`
+ * (o domínio rejeitaria com PENDENCIA_NAO_RESOLVIDA) para que o chamador toque
+ * a recusa em vez de silenciar o clique-fora.
  */
 export function mapearDesselecaoDePeao(
   estado: EstadoInteracaoPeoes,
-): PeaoComandoDoCliente | null {
+): ResultadoDeInteracaoDePeao {
   const peaoId = estado.peaoSelecionadoId
   if (peaoId === null) return null
-  if (haRecebidasPendentes(estado)) return null
-  return { type: 'DESELECIONAR_PEAO', peaoId }
+  if (haRecebidasPendentes(estado)) {
+    return {
+      tipo: 'rejeicao',
+      rejeicao: { motivo: 'pendencia_nao_resolvida' },
+    }
+  }
+  return { tipo: 'comando', comando: { type: 'DESELECIONAR_PEAO', peaoId } }
 }
 
 // ── Mapeamento clique → comando ──

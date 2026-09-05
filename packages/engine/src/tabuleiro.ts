@@ -184,8 +184,10 @@ export interface SelecionarPeaoComando {
 }
 
 // Desseleção autoritativa (issue #249): limpa a seleção vigente do ciclo.
-// Idempotente (já desselecionado ou outro peão em sequência é no-op, sem
-// eventos); rejeitada sob Recebidas pendentes para nunca órfanar pendência.
+// Idempotente COM confirmação (já desselecionado ou outro peão em sequência
+// mantém o estado e sempre emite peao_desselecionado quando o comando é
+// válido, para que o autor receba o ack); rejeitada sob Recebidas pendentes
+// para nunca órfanar pendência.
 export interface DesselecionarPeaoComando {
   readonly tipo: 'desselecionar_peao';
   readonly peaoId: string;

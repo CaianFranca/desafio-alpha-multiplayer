@@ -320,7 +320,7 @@ describe('redução do ciclo do peão — espelho do engine (issue #91, forma #1
     expect(estado.peaoSelecionadoId).toBeNull()
   })
 
-  it('PEAO_DESELECIONADO de outro peão é no-op (sem seleção fantasma, #249)', () => {
+  it('PEAO_DESELECIONADO de outro peão é no-op (sem seleção obsoleta, #249)', () => {
     const selecionado = reduzirEvento(criarEstadoInicialDoCliente(), {
       type: 'PEAO_SELECIONADO',
       peaoId: 'peao-branco',
@@ -452,7 +452,7 @@ describe('redução do ciclo do peão — espelho do engine (issue #91, forma #1
     expect(estado.peaoSelecionadoId).toBe('peao-branco')
   })
 
-  it('PEAO_MOVIDO atualiza a posição e limpa a seleção (sem seleção fantasma)', () => {
+  it('PEAO_MOVIDO atualiza a posição e limpa a seleção (sem seleção remanescente)', () => {
     let estado = criarEstadoInicialDoCliente()
     estado = reduzirEvento(estado, { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
     estado = reduzirEvento(estado, {
@@ -1037,10 +1037,10 @@ describe('reconciliação no reload — prova segura sem reset blanket (issue #2
     expect(pendencia?.celulaAlvo).toEqual({ linha: 2, coluna: 3 })
   })
 
-  it('snapshot é autoridade total da seleção: null limpa sem ressuscitar fantasma (#249)', () => {
+  it('snapshot é autoridade total da seleção: null limpa sem ressuscitar seleção obsoleta (#249)', () => {
     // Seleção vigente via evento, depois snapshot sem seleção (pós
     // DESELECIONAR_PEAO + reload): o modelo assume null — nunca mantém o
-    // valor antigo como fantasma.
+    // valor antigo como seleção obsoleta.
     let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
       type: 'PEAO_SELECIONADO',
       peaoId: 'peao-branco',
@@ -1055,7 +1055,7 @@ describe('reconciliação no reload — prova segura sem reset blanket (issue #2
 
   it('reload pós-ack: PEAO_DESELECIONADO persiste no snapshot com seleção null (#249)', () => {
     // O servidor persiste antes do broadcast (handlers.ts:122-123), então o
-    // reload lê o estado confirmado: evento → snapshot null, sem fantasma.
+    // reload lê o estado confirmado: evento → snapshot null, sem seleção obsoleta.
     let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
       type: 'PEAO_SELECIONADO',
       peaoId: 'peao-branco',
@@ -1066,7 +1066,7 @@ describe('reconciliação no reload — prova segura sem reset blanket (issue #2
     expect(estado.peaoSelecionadoId).toBeNull()
   })
 
-  it('evento tardio pós-snapshot converge sem fantasma (ack idempotente atrasado, #249)', () => {
+  it('evento tardio pós-snapshot converge sem seleção obsoleta (ack idempotente atrasado, #249)', () => {
     // Snapshot null + ack atrasado do DESELECIONAR idempotente: no-op.
     let estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotReload({ peaoSelecionadoId: null }))
     estado = reduzirEvento(estado, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })

@@ -107,10 +107,16 @@ export function AmbienteDeJogo({
   )
   const aoDesselecionar = useCallback(() => {
     if (estadoInteracaoPeoes && onComandoPeao) {
-      const comando = mapearDesselecaoDePeao(estadoInteracaoPeoes)
-      if (comando) onComandoPeao(comando)
+      const resultado = mapearDesselecaoDePeao(estadoInteracaoPeoes)
+      if (resultado?.tipo === 'rejeicao') {
+        onRejeicaoPeao?.(resultado.rejeicao.motivo)
+        return
+      }
+      if (resultado?.tipo === 'comando') {
+        onComandoPeao(resultado.comando)
+      }
     }
-  }, [estadoInteracaoPeoes, onComandoPeao])
+  }, [estadoInteracaoPeoes, onComandoPeao, onRejeicaoPeao])
 
   // ── Caixa sobre a mesa (issue #143): corrente da bandeja e vagas ──
   // Pendências do ciclo (forma #138): a CORRENTE é a primeira sem vaga — a

@@ -120,8 +120,10 @@ export interface PeaoSelecionadoEvento {
   readonly peaoId: PeaoId;
 }
 
-// Espelho da desseleção autoritativa (issue #249): emitido apenas quando a
-// seleção vigente é limpa (idempotentes não reemitem).
+// Espelho da desseleção autoritativa (issue #249): idempotente COM
+// confirmação — sempre emitido quando o comando é válido, inclusive quando a
+// seleção vigente já estava limpa ou era de outro peão (o redutor dos demais
+// clientes trata como no-op).
 export interface PeaoDesselecionadoEvento {
   readonly type: 'PEAO_DESELECIONADO';
   readonly peaoId: PeaoId;
