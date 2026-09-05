@@ -461,7 +461,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
 
     // Som de recusa com motivo + anúncio, sem clarão.
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 1 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 0.3 })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')

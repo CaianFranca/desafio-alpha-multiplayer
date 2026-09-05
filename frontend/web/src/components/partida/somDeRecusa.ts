@@ -11,7 +11,7 @@
  *
  * O motivo do disparo sobrevive como identificador (string), preparando sons
  * distintos futuros — hoje o mapa abaixo aponta todos para o mesmo asset.
- * Sempre volume cheio: o futuro botão de volume controlará este ponto sem
+ * Volume reduzido (0.3): o futuro botão de volume controlará este ponto sem
  * recostura. `play()` com `catch` silencioso como defensivo (no-op se falhar).
  *
  * Puro onde dá: `motivoDeRecusaDoEvento` é 100% puro (evento → motivo | null,
@@ -93,7 +93,7 @@ export function motivoDeRecusaDoEvento(
 export function tocarSomDeRecusa(motivo: MotivoDeRecusa): void {
   try {
     const audio = new Audio(SOM_POR_MOTIVO[motivo])
-    // Sempre cheio — compatível com o futuro botão de volume sem recostura.
+    // Volume reduzido (0.3) — compatível com o futuro botão de volume sem recostura.
     audio.volume = 0.3
     const tocando: unknown = audio.play()
     // jsdom não implementa play(): retorna undefined em vez de Promise.

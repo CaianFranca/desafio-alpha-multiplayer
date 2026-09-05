@@ -92,7 +92,7 @@ describe('som de recusa — mapeamento evento → motivo (issue #228)', () => {
 })
 
 describe('som de recusa — toque (issue #228)', () => {
-  it('toca sempre o mesmo asset, habilitado por padrão e sempre cheio', () => {
+  it('toca sempre o mesmo asset, habilitado por padrão e com volume reduzido', () => {
     tocarSomDeRecusa('rejeicao_do_servico')
     tocarSomDeRecusa('fora_da_vez')
     tocarSomDeRecusa('ataque_com_penalidade')
@@ -101,14 +101,14 @@ describe('som de recusa — toque (issue #228)', () => {
     for (const toque of toquesDeAudio) {
       expect(toque.src).toBe(CAMINHO_SOM_DE_RECUSA)
       expect(toque.src).toBe('/assets/audio/bumpintowall.mp3')
-      expect(toque.volume).toBe(1)
+      expect(toque.volume).toBe(0.3)
     }
   })
 
   it('falha de play() não quebra (recusa silenciosa)', async () => {
     armarFalhaNoProximoPlay()
     expect(() => tocarSomDeRecusa('fora_da_vez')).not.toThrow()
-    // O toque foi registrado (src/volume cheios); a rejeição foi engolida.
+    // O toque foi registrado (src/volume com o asset e o volume reduzido); a rejeição foi engolida.
     expect(toquesDeAudio).toHaveLength(1)
     // Unhandled rejections quebrariam a suíte — dá um giro ao event loop.
     await Promise.resolve()

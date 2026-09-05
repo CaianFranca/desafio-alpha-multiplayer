@@ -187,7 +187,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
       }),
     )
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 1 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 0.3 })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('rejeicao_do_servico')
@@ -556,7 +556,7 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
       })
     })
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 1 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 0.3 })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('fora_da_vez')
@@ -803,7 +803,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     })
     // Som de recusa com motivo de ataque (PartidaPage: estadosAplicados > 0).
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 1 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 0.3 })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('ataque_com_penalidade')
