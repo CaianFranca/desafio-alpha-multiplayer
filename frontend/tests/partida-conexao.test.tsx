@@ -433,6 +433,104 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     // A mesma conexão sobreviveu a todo o fluxo (nenhum socket novo).
     expect(MockWebSocket.instances).toHaveLength(1)
   })
+
+  it('LIMPEZA_APLICADA com N peças toca exatamente 1 som por comando, qualquer quantidade', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Prepara 3 peças posicionadas via deltas
+    act(() => {
+      ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 1, coluna: 1 }, orientacao: 0 })
+      ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-2', celula: { linha: 1, coluna: 2 }, orientacao: 0 })
+      ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-3', celula: { linha: 1, coluna: 3 }, orientacao: 0 })
+    })
+    await waitFor(() => expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(3))
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'LIMPEZA_APLICADA',
+        pecasRemovidas: ['inicial-1', 'inicial-2', 'inicial-3'],
+      }),
+    )
+
+    await waitFor(() => expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(0))
+    // Exatamente 1 som por comando, mesmo com N=3 (nunca um por peça)
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/toque-sombrio-limpeza.mp3' })
+    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    // Células liberadas
+    expect(celulaDoEspelho(1, 1).getAttribute('data-ocupada')).toBe('false')
+    expect(celulaDoEspelho(1, 2).getAttribute('data-ocupada')).toBe('false')
+    expect(celulaDoEspelho(1, 3).getAttribute('data-ocupada')).toBe('false')
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('LIMPEZA_APLICADA com prefers-reduced-motion faz snap instantâneo mas ainda toca 1 som', async () => {
+    const originalMatchMedia = window.matchMedia
+    // Mock reduce = true antes de montar a PartidaPage
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia
+
+    try {
+      const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+      act(() =>
+        ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 }),
+      )
+      await screen.findByTestId('peca-posicionada')
+      expect(toquesDeAudio).toHaveLength(0)
+
+      act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] }))
+
+      // Snap instantâneo: peça some sem precisar de animação, estado final pixel-igual
+      await waitFor(() => expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument())
+      expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
+      // Som único mesmo com reduce ativo
+      await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+      expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/toque-sombrio-limpeza.mp3' })
+      expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    } finally {
+      window.matchMedia = originalMatchMedia
+    }
+  })
+
+  it('fade+encolher termina sem resíduos — peça removida desaparece e célula fica livre para reuso', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    act(() =>
+      ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 2, coluna: 2 }, orientacao: 0 }),
+    )
+    await screen.findByTestId('peca-posicionada')
+    expect(celulaDoEspelho(2, 2).getAttribute('data-ocupada')).toBe('true')
+
+    act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] }))
+
+    // Após LIMPEZA_APLICADA o reducer já filtra, e TransicaoLimpeza faz o fade
+    // com lerp scale 1→0.7 e opacity 0.88→0 terminando sem resíduos (onFim remove fantasma)
+    await waitFor(() => expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument())
+    expect(celulaDoEspelho(2, 2).getAttribute('data-ocupada')).toBe('false')
+
+    // Reuso imediato da célula liberada prova que não há resíduo lógico nem visual
+    act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'reta-1' }))
+    const user = userEvent.setup()
+    await user.click(celulaDoEspelho(2, 2))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'POSICIONAR_PECA',
+        pecaId: 'reta-1',
+        celula: { linha: 2, coluna: 2 },
+        jogadorId: mockAuthenticatedState.jogador.id,
+      })
+    })
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+  })
 })
 
 describe('turnos no cliente — rodada, destaque do ativo e botões por fase (issue #118)', () => {
