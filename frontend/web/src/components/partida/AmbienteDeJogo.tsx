@@ -99,7 +99,13 @@ export function AmbienteDeJogo({
   const aoSelecionarPeao = useCallback(
     (peaoId: PeaoId) => {
       if (estadoInteracaoPeoes && onComandoPeao) {
-        const resultado = mapearCliqueNoPeao(estadoInteracaoPeoes, peaoId)
+        // Roteamento usa a seleção vigente (otimista local, #249): o Local
+        // governa só o clique, nunca o modelo — o servidor re-sincroniza.
+        const estadoParaMapeamento: EstadoInteracaoPeoes = {
+          ...estadoInteracaoPeoes,
+          peaoSelecionadoId: peaoSelecionadoIdLocal,
+        }
+        const resultado = mapearCliqueNoPeao(estadoParaMapeamento, peaoId)
         if (resultado?.tipo === 'rejeicao') {
           onRejeicaoPeao?.(resultado.rejeicao.motivo)
           return
@@ -110,7 +116,7 @@ export function AmbienteDeJogo({
       }
       setPeaoSelecionadoIdLocal(peaoId)
     },
-    [estadoInteracaoPeoes, onComandoPeao, onRejeicaoPeao],
+    [estadoInteracaoPeoes, onComandoPeao, onRejeicaoPeao, peaoSelecionadoIdLocal],
   )
   const aoDesselecionar = useCallback(() => {
     setPeaoSelecionadoIdLocal(null)
@@ -137,11 +143,18 @@ export function AmbienteDeJogo({
   ) {
     setRecebidaPuxadaId(null)
   }
-  // Estado do ciclo com o pull mesclado: roteador, cena e espelho veem a
-  // mesma fonte (o pull nunca vai ao wire — segue local até ESCOLHER_VAGA).
+  // Estado do ciclo com o pull + seleção local mesclados (issue #249):
+  // roteador, cena e espelho veem a mesma fonte — o Local otimista governa
+  // só o roteamento do clique (seleção/desseleção visual), nunca o modelo;
+  // o pull nunca vai ao wire (segue local até ESCOLHER_VAGA) e o
+  // snapshot/evento do servidor re-sincroniza o Local ao chegar.
   const estadoPeoesComPuxada: EstadoInteracaoPeoes | null =
     estadoInteracaoPeoes !== null
-      ? { ...estadoInteracaoPeoes, recebidaPuxadaId }
+      ? {
+          ...estadoInteracaoPeoes,
+          recebidaPuxadaId,
+          peaoSelecionadoId: peaoSelecionadoIdLocal,
+        }
       : null
 
   const alvosPendentesSet = new Set<string>(

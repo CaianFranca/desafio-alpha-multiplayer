@@ -484,9 +484,22 @@ function resultadoDoMapeadorParaCelula(
     : { rejeicao: resultado.rejeicao }
 }
 
-/** Ciclo ativo: há Recebidas pendentes OU peão selecionado (suprime o fallback ST-09). */
+/**
+ * Ciclo ativo: há Recebidas pendentes OU peão selecionado POSICIONADO
+ * (suprime o fallback ST-09). Exceção do primeiro turno (issue #249): peão
+ * selecionado ainda sobre a Mesa (`celula === null`) e sem pendências NÃO
+ * suprime o fallback — a célula vazia com a Inicial selecionada roteia
+ * POSICIONAR_PECA via ST-09, e a célula da Inicial posicionada roteia
+ * POSICIONAR_PEAO pelo ciclo. Peão inexistente conserva o bloqueio
+ * (estado inconsistente não libera o fallback).
+ */
 export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
-  return haRecebidasPendentes(estado) || estado.peaoSelecionadoId !== null
+  if (haRecebidasPendentes(estado)) return true
+  if (estado.peaoSelecionadoId === null) return false
+  const selecionado = estado.peoes.find((p) => p.peaoId === estado.peaoSelecionadoId)
+  if (!selecionado) return true
+  if (selecionado.celula === null) return false
+  return true
 }
 
 /**
@@ -507,8 +520,11 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *   - célula do próprio peão → PERMANECER (ou rejeição âmbar se a posição já
  *     foi confirmada — AC3).
  *   - destino conectado → MOVER_PEAO (ou rejeição âmbar pós-confirmação).
- *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO.
- *   - demais → null.
+ *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO (a seleção
+ *     vigente no estado roteado inclui a otimista local pós-reload, #249).
+ *   - demais → null (com peão na Mesa e sem pendências o ciclo está inativo —
+ *     #249 — e o chamador aplica o fallback ST-09: célula vazia com a
+ *     Inicial selecionada emite POSICIONAR_PECA).
  *
  * Sem ciclo ativo → null (o chamador aplica o fallback ST-09).
  */
@@ -640,7 +656,8 @@ export function despacharCliqueDeCelula(
     return
   }
   // Sem resultado do roteador: fallback ST-09 só quando o ciclo está inativo
-  // (alvos inválidos com ciclo ativo não reagem — decisão aprovada #91).
+  // (alvos inválidos com ciclo ativo não reagem — decisão aprovada #91;
+  // primeiro turno com peão na Mesa é inativo por definição — #249).
   if (estadoPeoes !== null && cicloAtivo(estadoPeoes)) return
   despacho.onComando?.(fallbackST09ParaCelula(estadoInteracao, celula))
 }

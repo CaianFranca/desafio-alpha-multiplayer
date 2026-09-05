@@ -1,6 +1,7 @@
 import {
   deveSuprimirCliquePorArrasto,
   cicloAtivo,
+  despacharCliqueDeCelula,
   despacharCliqueNaPecaDaBandeja,
   ehComandoDePeao,
   haRecebidasPendentes,
@@ -871,7 +872,9 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
 
   it('peão sobre a Mesa + Peça Inicial clicada → POSICIONAR_PEAO', () => {
     const estado = estadoBase({ peaoSelecionadoId: 'peao-branco' })
-    expect(cicloAtivo(estado)).toBe(true)
+    // Primeiro turno (#249): peão na Mesa não caracteriza ciclo que suprime
+    // o fallback — mas a célula da Inicial posicionada roteia POSICIONAR_PEAO.
+    expect(cicloAtivo(estado)).toBe(false)
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), INICIAL)).toEqual({
       ciclo: { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: INICIAL },
     })
@@ -1015,5 +1018,97 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     despacharCliqueNaPecaDaBandeja(semCorrente, { onPuxar: () => chamou++ })
     despacharCliqueNaPecaDaBandeja(null, { onPuxar: () => chamou++ })
     expect(chamou).toBe(0)
+  })
+})
+
+describe('primeiro turno sem deadlock (issue #249)', () => {
+  const CELULA_VAZIA = { linha: 5, coluna: 5 }
+
+  function estadoTabuleiro249(estadoPeoes: EstadoInteracaoPeoes): EstadoInteracaoTabuleiro {
+    return {
+      iniciais: [{ pecaId: 'inicial-2' }, { pecaId: 'inicial-3' }],
+      posicionadas: estadoPeoes.posicionadas,
+      pecaSelecionadaId: estadoPeoes.pecaSelecionadaId,
+      pecaEmManipulacaoId: null,
+    }
+  }
+
+  it('peão na Mesa não caracteriza ciclo que suprime o fallback (sem pendências)', () => {
+    const naMesa = estadoBase({ peaoSelecionadoId: 'peao-branco' })
+    expect(cicloAtivo(naMesa)).toBe(false)
+    const posicionado = estadoBase({
+      peoes: [peao('peao-branco', INICIAL), peao('peao-vermelho', null)],
+      peaoSelecionadoId: 'peao-branco',
+    })
+    expect(cicloAtivo(posicionado)).toBe(true)
+    const naMesaComPendencia = estadoBase({
+      peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', null, null)],
+    })
+    expect(cicloAtivo(naMesaComPendencia)).toBe(true)
+  })
+
+  it('ordem peão→inicial: célula vazia com a Inicial selecionada emite POSICIONAR_PECA', () => {
+    const estado = estadoBase({
+      peaoSelecionadoId: 'peao-branco',
+      pecaSelecionadaId: 'inicial-2',
+    })
+    // O roteador puro não resolve o encaixe da Inicial (não é Recebida).
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro249(estado), CELULA_VAZIA)).toBeNull()
+    // O despacho cai no fallback ST-09 em vez de silenciar (deadlock #249).
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estado, estadoTabuleiro249(estado), CELULA_VAZIA, {
+      onComando: (comando) => comandos.push(comando),
+      onComandoPeao: (comando) => comandos.push(comando),
+    })
+    expect(comandos).toEqual([
+      { type: 'POSICIONAR_PECA', pecaId: 'inicial-2', celula: CELULA_VAZIA },
+    ])
+  })
+
+  it('desseleção libera a Inicial: sem peão selecionado o fallback posiciona', () => {
+    // Após aoDesselecionar o merge entrega peaoSelecionadoId null ao roteador.
+    const estado = estadoBase({
+      peaoSelecionadoId: null,
+      pecaSelecionadaId: 'inicial-2',
+    })
+    expect(cicloAtivo(estado)).toBe(false)
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estado, estadoTabuleiro249(estado), CELULA_VAZIA, {
+      onComando: (comando) => comandos.push(comando),
+      onComandoPeao: (comando) => comandos.push(comando),
+    })
+    expect(comandos).toEqual([
+      { type: 'POSICIONAR_PECA', pecaId: 'inicial-2', celula: CELULA_VAZIA },
+    ])
+  })
+
+  it('ordem inicial→peão: clique na Inicial posicionada emite POSICIONAR_PEAO', () => {
+    const estado = estadoBase({
+      peaoSelecionadoId: 'peao-branco',
+      pecaSelecionadaId: null,
+    })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro249(estado), INICIAL)).toEqual({
+      ciclo: { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: INICIAL },
+    })
+    const comandosPeao: unknown[] = []
+    despacharCliqueDeCelula(estado, estadoTabuleiro249(estado), INICIAL, {
+      onComando: () => {},
+      onComandoPeao: (comando) => comandosPeao.push(comando),
+    })
+    expect(comandosPeao).toEqual([
+      { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: INICIAL },
+    ])
+  })
+
+  it('pós-reload: seleção só local (servidor sem seleção) posiciona o peão', () => {
+    // O merge de AmbienteDeJogo entrega o Local otimista ao roteador quando
+    // o servidor ainda está sem seleção (reload / confirmação pendente).
+    const estadoComSelecaoLocal = estadoBase({ peaoSelecionadoId: 'peao-branco' })
+    expect(
+      rotearCliqueDeCelula(estadoComSelecaoLocal, estadoTabuleiro249(estadoComSelecaoLocal), INICIAL),
+    ).toEqual({
+      ciclo: { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: INICIAL },
+    })
   })
 })
