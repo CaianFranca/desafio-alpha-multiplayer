@@ -1,7 +1,4 @@
 import {
-  CAMINHO_SOM_BAQUE_PEAO,
-  CAMINHO_SOM_CLIQUE_PEAO,
-  DURACAO_VOO_PEAO_MS,
   SOM_CAMINHO_BAQUE_PEAO,
   SOM_CAMINHO_CLIQUE_PEAO,
   SOM_VOLUME_BASE_BAQUE_PEAO,
@@ -170,16 +167,18 @@ describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (exte
     const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
     expect(voo).not.toBeNull()
     expect(voo?.peaoId).toBe('peao-branco')
-    expect(voo?.origem).toBeNull()
-    expect(voo?.origemMesaIndice).toBe(0)
+    expect(voo?.origem).toEqual({ mesaIndice: 0 })
     expect(voo?.destino).toEqual(DESTINO)
     expect(toquesDeAudio).toHaveLength(0)
   })
 
   it('voo mesa→inicial termina na peça certa (pixel-igual ao estático)', () => {
     const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
-    expect(voo?.origem).toBeNull()
-    const origemMundo = peaoMesaParaMundo(voo?.origemMesaIndice ?? -1)
+    expect(voo?.origem).toEqual({ mesaIndice: 0 })
+    if (voo === null || !('mesaIndice' in voo.origem)) {
+      throw new Error('voo do posicionado deveria ter origem na Mesa')
+    }
+    const origemMundo = peaoMesaParaMundo(voo.origem.mesaIndice)
     const destinoMundo = mundoDoPeaoSobreACelula(DESTINO)
     expect(vooPoseEntreMundos(origemMundo, destinoMundo, 0).posicao).toEqual(
       origemMundo,
@@ -209,7 +208,7 @@ describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (exte
     expect(voo).not.toBeNull()
     tocarBaqueDoPeao()
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]?.src).toBe(CAMINHO_SOM_BAQUE_PEAO)
+    expect(toquesDeAudio[0]?.src).toBe(SOM_CAMINHO_BAQUE_PEAO)
     expect(toquesDeAudio[0]?.volume).toBe(SOM_VOLUME_BASE_BAQUE_PEAO)
   })
 
@@ -270,7 +269,16 @@ describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (exte
     const voo = vooDoPeaoDoEvento(eventoPosicionado(), modelo)
     expect(voo?.origem).toEqual(ORIGEM)
     expect(voo?.destino).toEqual(DESTINO)
-    expect(voo?.origemMesaIndice).toBeUndefined()
+    expect(voo !== null && 'mesaIndice' in voo.origem).toBe(false)
+  })
+
+  it('origemMesaIndice órfã não existe mais (união por forma)', () => {
+    const vooMesa = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
+    expect(vooMesa?.origem).toEqual({ mesaIndice: 0 })
+    // Forma antiga (`origem: null` + `origemMesaIndice` solto) não é mais
+    // emitida: o slot vive dentro de `origem`, sem campo órfão.
+    expect(vooMesa).not.toHaveProperty('origemMesaIndice')
+    expect(vooMesa !== null && 'mesaIndice' in vooMesa.origem).toBe(true)
   })
 
   it('sem duplicado: voador some do estático no destino e da Mesa', () => {
@@ -308,7 +316,6 @@ describe('voo do peão — clique ao selecionar (issue #242)', () => {
 
     tocarCliqueDoPeao()
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]?.src).toBe(CAMINHO_SOM_CLIQUE_PEAO)
     expect(toquesDeAudio[0]?.src).toBe(SOM_CAMINHO_CLIQUE_PEAO)
     expect(toquesDeAudio[0]?.volume).toBe(SOM_VOLUME_BASE_CLIQUE_PEAO)
     // Som distinto do THUD de recusa (gatilhos opostos, assets distintos).
@@ -331,7 +338,6 @@ describe('voo do peão — pouso com baque (issue #242)', () => {
   it('pouso toca 1 baque distinto do clique e limpa o pendente do nonce', () => {
     tocarBaqueDoPeao()
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]?.src).toBe(CAMINHO_SOM_BAQUE_PEAO)
     expect(toquesDeAudio[0]?.src).toBe(SOM_CAMINHO_BAQUE_PEAO)
     expect(toquesDeAudio[0]?.src).not.toBe(SOM_CAMINHO_CLIQUE_PEAO)
     expect(toquesDeAudio[0]?.volume).toBe(SOM_VOLUME_BASE_BAQUE_PEAO)
@@ -376,9 +382,8 @@ describe('voo do peão — pouso com baque (issue #242)', () => {
 })
 
 describe('voo do peão — transição e reduce (issue #242)', () => {
-  it('duração de partida (~500ms) e aliases do plano', () => {
+  it('duração de partida (~500ms)', () => {
     expect(VOO_DURACAO_MS).toBe(500)
-    expect(DURACAO_VOO_PEAO_MS).toBe(VOO_DURACAO_MS)
     expect(VOO_ALTURA_MAX).toBeGreaterThan(0)
     expect(VOO_INCLINACAO_RAD).toBeGreaterThan(0)
   })

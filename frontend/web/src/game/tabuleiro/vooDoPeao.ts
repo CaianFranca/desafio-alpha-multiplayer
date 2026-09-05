@@ -40,19 +40,24 @@ import type { EstadoDoTabuleiroNoCliente } from './reducao'
  * sobrepostos: último vence. `ESTADO_DA_PARTIDA` limpa o voo (snapshot é
  * autoridade).
  */
+/**
+ * Origem do voo: célula do tabuleiro ou slot da fileira da Mesa (Primeiro
+ * Turno: o peão ainda não estava posicionado no modelo anterior). União
+ * discriminada pela forma — estados ilegais (ex.: slot órfão fora da união)
+ * são irrepresentáveis.
+ */
+export type OrigemDoVoo = Celula | { mesaIndice: number }
+
 export interface VooDoPeaoPendente {
   readonly nonce: number
   readonly peaoId: string
   /**
-   * Origem do voo; `null` = fileira da Mesa (Primeiro Turno: o peão ainda não
-   * estava posicionado no modelo anterior). Com origem na Mesa, o slot global
-   * em `peoes` vai em `origemMesaIndice` (pixel-igual ao estático via
+   * Origem do voo; `{ mesaIndice }` = fileira da Mesa (Primeiro Turno). O slot
+   * global em `peoes` vai em `mesaIndice` (pixel-igual ao estático via
    * `peaoMesaParaMundo`).
    */
-  readonly origem: Celula | null
+  readonly origem: OrigemDoVoo
   readonly destino: Celula
-  /** Slot da origem na Mesa; presente só quando `origem` é `null`. */
-  readonly origemMesaIndice?: number
 }
 
 /** Voo sem nonce: o que a pura deriva; a página carimba o nonce ao registrar. */
@@ -60,8 +65,6 @@ export type VooDoPeaoBase = Omit<VooDoPeaoPendente, 'nonce'>
 
 /** Duração do voo erguer→flutuar→aterrissar (~500ms de partida). */
 export const VOO_DURACAO_MS = 500
-/** Alias com o nome do plano (Execução 1). */
-export const DURACAO_VOO_PEAO_MS = VOO_DURACAO_MS
 
 /** Altura máxima do arco do voo, em unidades de mundo. */
 export const VOO_ALTURA_MAX = 1.2
@@ -71,13 +74,9 @@ export const VOO_INCLINACAO_RAD = 0.28
 
 /** Asset do clique suave ao selecionar (chega depois; sem arquivo = silêncio). */
 export const SOM_CAMINHO_CLIQUE_PEAO = '/media/clique-peao.mp3'
-/** Alias com o nome do plano (Execução 1). */
-export const CAMINHO_SOM_CLIQUE_PEAO = SOM_CAMINHO_CLIQUE_PEAO
 
 /** Asset do baque ao aterrissar (chega depois; sem arquivo = silêncio). */
 export const SOM_CAMINHO_BAQUE_PEAO = '/media/baque-peao.mp3'
-/** Alias com o nome do plano (Execução 1). */
-export const CAMINHO_SOM_BAQUE_PEAO = SOM_CAMINHO_BAQUE_PEAO
 
 /**
  * Volumes base (contrato com o futuro botão de volume, ADR-0007:
@@ -99,8 +98,8 @@ export function deveTocarCliqueDoPeao(evento: EventoDoCanalDaPartida): boolean {
  * destino é sempre a célula do evento. No `PEAO_MOVIDO`, origem é a célula da
  * peça de `pecaIdDe` em `posicionadas`, com fallback para a célula do peão no
  * modelo anterior. No `PEAO_POSICIONADO`, origem é a célula do peão no modelo
- * anterior — `null` (ainda sobre a Mesa) vira voo mesa→peça com o slot global
- * em `peoes` carimbado em `origemMesaIndice`. Origem irresolúvel (ou idêntica
+ * anterior — peão ainda sobre a Mesa vira voo mesa→peça com o slot global
+ * em `peoes` carimbado em `origem.mesaIndice`. Origem irresolúvel (ou idêntica
  * ao destino) → `null` = snap, sem voo nem som.
  * `PEAO_PERMANECEU`/demais eventos → `null`.
  */
@@ -114,7 +113,7 @@ export function vooDoPeaoDoEvento(
     if (indice < 0) return null
     const celulaAntes = modeloAntes.peoes[indice]?.celula ?? null
     if (celulaAntes === null) {
-      return { peaoId: evento.peaoId, origem: null, destino, origemMesaIndice: indice }
+      return { peaoId: evento.peaoId, origem: { mesaIndice: indice }, destino }
     }
     if (chaveCelula(celulaAntes) === chaveCelula(destino)) return null
     return { peaoId: evento.peaoId, origem: celulaAntes, destino }
@@ -151,7 +150,7 @@ export function deveLimparVooNoSnapshot(evento: EventoDoCanalDaPartida): boolean
 /**
  * Durante o voo ativo, o peão estático de mesmo `peaoId` não renderiza na
  * origem nem no destino (o modelo atualiza instantâneo, então o destino já o
- * teria) — só o overlay voador aparece. Com origem na Mesa (`origem` null),
+ * teria) — só o overlay voador aparece. Com origem na Mesa (`{ mesaIndice }`),
  * só o destino se suprime aqui; a fileira da Mesa suprime pelo
  * `deveSuprimirPeaoNaMesa`. Demais células/peões (ex.: Portão com 4) seguem
  * intactos. Sem voo, nada se suprime.
@@ -162,14 +161,17 @@ export function deveSuprimirPeaoEstatico(
   chaveDaCelula: string,
 ): boolean {
   if (voo === null || voo.peaoId !== peaoId) return false
+  if ('mesaIndice' in voo.origem) {
+    return chaveDaCelula === chaveCelula(voo.destino)
+  }
   return (
-    (voo.origem !== null && chaveDaCelula === chaveCelula(voo.origem)) ||
+    chaveDaCelula === chaveCelula(voo.origem) ||
     chaveDaCelula === chaveCelula(voo.destino)
   )
 }
 
 /**
- * Durante o voo com origem na Mesa (`origem` null — Primeiro Turno), o peão
+ * Durante o voo com origem na Mesa (`{ mesaIndice }` — Primeiro Turno), o peão
  * de mesmo `peaoId` não renderiza na fileira da Mesa (`peoesNaMesa` em
  * `AmbienteCena`) — só o overlay voador aparece. Voos célula→célula e ausência
  * de voo nada supremem aqui. (Na prática o modelo atualiza instantâneo, então
@@ -180,7 +182,7 @@ export function deveSuprimirPeaoNaMesa(
   peaoId: string,
 ): boolean {
   if (voo === null || voo.peaoId !== peaoId) return false
-  return voo.origem === null
+  return 'mesaIndice' in voo.origem
 }
 
 function tocarArquivoDeAudio(caminho: string, volumeBase: number): void {

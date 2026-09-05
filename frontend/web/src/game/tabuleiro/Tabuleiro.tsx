@@ -205,8 +205,8 @@ export function Tabuleiro({
 /**
  * Overlay do peão voador (issue #242): erguer→flutuar inclinado→aterrissar,
  * terminando pixel-igual ao destino estático. A origem pode ser uma célula ou
- * a fileira da Mesa (Primeiro Turno, `PEAO_POSICIONADO` com `origem` null —
- * o slot vai em `origemMesaIndice`). Interpola via `useFrame` + `invalidate()`
+ * a fileira da Mesa (Primeiro Turno, `PEAO_POSICIONADO` com origem
+ * `{ mesaIndice }`). Interpola via `useFrame` + `invalidate()`
  * (Canvas em `frameloop="demand"`, sem trocar o modo); conclui via callback,
  * sem `setTimeout`. Sob `prefers-reduced-motion` vira snap imediato no
  * destino + baque. Inerte ao ponteiro (sem handlers): cliques atravessam para
@@ -230,30 +230,27 @@ function PeaoVoador({
   const destinoMundo = useMemo(() => mundoDoPeaoSobreACelula(voo.destino), [voo])
   const origemMundo = useMemo(
     () =>
-      voo.origem !== null
-        ? mundoDoPeaoSobreACelula(voo.origem)
-        : peaoMesaParaMundo(voo.origemMesaIndice ?? 0),
+      'mesaIndice' in voo.origem
+        ? peaoMesaParaMundo(voo.origem.mesaIndice)
+        : mundoDoPeaoSobreACelula(voo.origem),
     [voo],
   )
-  // Origem na Mesa sem slot (nunca emitido pela derivação): snap defensivo no
-  // destino, com baque e aviso de pouso como no reduce.
-  const semOrigem = voo.origem === null && voo.origemMesaIndice == null
 
   // Reduce: snap + baque imediato, uma vez por nonce (efeito, sem temporizador).
   useEffect(() => {
-    if ((!reduce && !semOrigem) || concluido.current) return
+    if (!reduce || concluido.current) return
     concluido.current = true
     tocarBaqueDoPeao()
     onAterrissou?.(voo.nonce)
-  }, [reduce, semOrigem, voo.nonce, onAterrissou])
+  }, [reduce, voo.nonce, onAterrissou])
 
   // Chute inicial do loop sob demanda: garante o primeiro frame do voo.
   useEffect(() => {
-    if (!reduce && !semOrigem) invalidate()
-  }, [reduce, semOrigem, invalidate])
+    if (!reduce) invalidate()
+  }, [reduce, invalidate])
 
   useFrame(() => {
-    if (reduce || semOrigem || concluido.current) return
+    if (reduce || concluido.current) return
     const agora = performance.now()
     if (inicio.current === null) inicio.current = agora
     const progresso = Math.min(1, (agora - inicio.current) / VOO_DURACAO_MS)
@@ -272,7 +269,7 @@ function PeaoVoador({
     invalidate()
   })
 
-  if (reduce || semOrigem) {
+  if (reduce) {
     return <PeaoPlaceholder cor={cor} position={destinoMundo} />
   }
   return (
