@@ -6,3 +6,5 @@
 frontend/web/media/*
 frontend/references/
 !frontend/web/media/.gitkeep
+
+release/

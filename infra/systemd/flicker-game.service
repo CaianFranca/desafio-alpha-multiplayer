@@ -1,0 +1,31 @@
+[Unit]
+Description=Flicker of Sanity — Game Server (WS das partidas)
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=flicker
+Group=flicker
+WorkingDirectory=/opt/flicker/current
+EnvironmentFile=/opt/flicker/env
+Environment=NODE_ENV=production
+# tsx em produção: as fontes TS são o artefato (imports com extensão .ts
+# e packages @flicker/* expondo src/); tsx vem nas dependencies.
+ExecStart=/usr/local/bin/node --import tsx backend/game-server/src/index.ts
+Restart=on-failure
+RestartSec=3
+MemoryMax=128M
+
+# Loopback-only: nada deste serviço conversa com fora da máquina.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
