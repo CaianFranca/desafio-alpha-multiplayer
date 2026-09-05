@@ -106,7 +106,9 @@ export function traduzirEventos(
           // Proteção RESULTANTE do ator no gatilho (issue #227): a concessão
           // da Sala Médica e o consumo pelo ataque do MESMO gatilho já estão
           // resolvidos no domínio — o wire só transporta o estado final.
-          protegido: evento.protegido,
+          // `?? false` no padrão de snapshot.ts:44: binário do engine anterior
+          // à #227 durante rolling deploy não carrega o campo no payload.
+          protegido: evento.protegido ?? false,
         });
         break;
       case 'celulas_iluminadas':

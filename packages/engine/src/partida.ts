@@ -27,6 +27,14 @@
 // altera o snapshot e não gera Ataque. A Proteção concedida pela Sala Médica
 // na Confirmação não é consumida pelo Ataque do MESMO gatilho — permanece
 // para o próximo (CONTEXT.md: "permanece até ser consumida").
+//
+// Proteção observável (issue #227): o evento posicao_confirmada carrega o
+// `protegido` RESULTANTE do ator no fim do gatilho completo — concessão da
+// Sala Médica e consumo pelo ataque do MESMO gatilho incluídos. O snapshot
+// da partida (projeção no game-server) leva o `protegido` por Jogador como
+// baseline autoritativa de reconciliação de reconexão; o consumo corrente
+// continua observável em ataque_resolvido.protegidos. Espelho no wire:
+// shared/src/partida.ts (cabeçalho de fronteira).
 
 import {
   aplicarComandoDeTabuleiro,

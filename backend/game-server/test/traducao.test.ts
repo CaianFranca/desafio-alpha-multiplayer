@@ -182,3 +182,26 @@ test('traduzirEventos propaga o protegido resultante no POSICAO_CONFIRMADA (#227
     protegido: false,
   });
 });
+
+// Rolling deploy (review PR #246): payload de binário do engine anterior à
+// #227 não carrega `protegido` no posicao_confirmada — a tradução projeta
+// false (mesmo padrão de snapshot.ts), sem quebrar o contrato do wire.
+test('traduzirEventos normaliza posicao_confirmada sem protegido para false (#227)', () => {
+  // Cast deliberado: simula o evento do binário antigo, cujo payload chega
+  // sem o campo novo.
+  const eventoAntigo = {
+    tipo: 'posicao_confirmada',
+    jogadorId: 'jogador-1',
+    peaoId: 'peao-branco',
+    pecaId: 'reta-1',
+  } as unknown as EventoDaPartida;
+  const saida = traduzirEventos([eventoAntigo]);
+  assert.equal(saida.length, 1);
+  assert.deepEqual(saida[0], {
+    type: 'POSICAO_CONFIRMADA',
+    jogadorId: 'jogador-1',
+    peaoId: 'peao-branco',
+    pecaId: 'reta-1',
+    protegido: false,
+  });
+});

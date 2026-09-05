@@ -48,6 +48,10 @@
 //   EstadoDaPartidaSnapshot.geradoresLigados <-> engine geradoresLigados
 //   (espelho exato: readonly string[] de pecaIds);
 //   EstadoDaPartidaSnapshot.cartaoDeAcessoObtido <-> engine cartaoDeAcessoObtido.
+//   EstadoDaPartidaSnapshot.jogadores[].protegido <-> engine jogador.protegido
+//   (baseline da Proteção da Sala Médica, issue #227: concessão vive na
+//   Confirmação de Posição e consumo em ATAQUE_RESOLVIDO.protegidos; o
+//   cliente reconcilia pelo snapshot sem derivar do histórico).
 //   Sync manual: o engine não conhece o wire; novos contadores de objetivo
 //   exigem estender as duas pontas à mão (projeção + modelo do cliente).
 //
