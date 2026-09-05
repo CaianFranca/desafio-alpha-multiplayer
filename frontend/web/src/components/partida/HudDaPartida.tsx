@@ -34,6 +34,11 @@ export interface HudDaPartidaProps {
   emAndamento: boolean
   /** Partida em resultado (cronômetro congela). */
   emResultado: boolean
+  /**
+   * Identificador da Partida (paliativo do cronômetro: persiste o início em
+   * `sessionStorage` para retomar ao sair e voltar na mesma aba).
+   */
+  partidaId?: string | null
   /** Retorno à Sala de origem (SAIR com confirmação). */
   onSair: () => void
 }
@@ -80,10 +85,11 @@ export function HudDaPartida({
   cartaoDeAcessoObtido,
   emAndamento,
   emResultado,
+  partidaId = null,
   onSair,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
-  const { texto: tempo, segundos } = useCronometroDaPartida({ emAndamento, emResultado })
+  const { texto: tempo, segundos } = useCronometroDaPartida({ emAndamento, emResultado, partidaId })
 
   const ordenados = ordenarPorOrdemDeEntrada(jogadorPorId)
   // Sem snapshot o HUD fica oculto (sem dados inventados — critério #226).

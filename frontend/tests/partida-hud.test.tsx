@@ -350,6 +350,60 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
       vi.advanceTimersByTime(30_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
+    vi.useRealTimers()
+  })
+
+  it('retoma ao sair e voltar na mesma aba (paliativo sessionStorage por partidaId)', () => {
+    window.sessionStorage.clear()
+    vi.useFakeTimers()
+    const base = {
+      jogadorPorId: JOGADORES_HUD,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      onSair: () => {},
+    }
+    const { unmount } = render(<HudDaPartida {...base} partidaId="partida-timer-a" emAndamento emResultado={false} />)
+    act(() => {
+      vi.advanceTimersByTime(65_000)
+    })
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
+
+    // Sair desmonta; voltar remonta a mesma partida e retoma.
+    unmount()
+    render(<HudDaPartida {...base} partidaId="partida-timer-a" emAndamento emResultado={false} />)
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
+    act(() => {
+      vi.advanceTimersByTime(10_000)
+    })
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:15')
+    window.sessionStorage.clear()
+    vi.useRealTimers()
+  })
+
+  it('partida distinta recomeça do zero', () => {
+    window.sessionStorage.clear()
+    vi.useFakeTimers()
+    const base = {
+      jogadorPorId: JOGADORES_HUD,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      onSair: () => {},
+    }
+    const { unmount } = render(<HudDaPartida {...base} partidaId="partida-timer-b" emAndamento emResultado={false} />)
+    act(() => {
+      vi.advanceTimersByTime(65_000)
+    })
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
+    unmount()
+
+    render(<HudDaPartida {...base} partidaId="partida-timer-c" emAndamento emResultado={false} />)
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:00')
+    window.sessionStorage.clear()
+    vi.useRealTimers()
   })
 
   it('SAIR pede confirmação; confirmar volta à sala e encerra o WS', async () => {

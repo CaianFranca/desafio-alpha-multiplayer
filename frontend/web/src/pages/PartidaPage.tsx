@@ -419,6 +419,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           cartaoDeAcessoObtido={modelo.cartaoDeAcessoObtido}
           emAndamento={estadoEmAndamento}
           emResultado={emResultado}
+          partidaId={partidaId}
           onSair={voltarASala}
         />
       ) : null}
