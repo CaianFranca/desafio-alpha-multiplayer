@@ -427,7 +427,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // Botões de turno acima do card de Turno do HUD (inf-dir, #226).
         <div
           data-testid="controles-de-turno"
-          className="pointer-events-auto absolute bottom-32 right-4 z-30 flex gap-2"
+          className="pointer-events-auto absolute bottom-32 right-6 z-30 flex gap-2"
         >
           {faseDoTurno === 'permanecer' ? (
             <button

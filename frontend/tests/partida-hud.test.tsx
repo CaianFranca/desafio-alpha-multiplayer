@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, waitFor, act, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -214,6 +214,8 @@ describe('HUD da Partida — 6 regiões do modelo real (#226 [2])', () => {
     // inf-dir: turno com ativo + 3 próximos.
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', MEU_JOGADOR_ID)
     expect(screen.getAllByTestId('hud-turno-proximo')).toHaveLength(3)
+    // Vez do jogador local (snapshot base): anel da vez visível.
+    expect(screen.getByTestId('hud-anel-da-vez')).toBeInTheDocument()
   })
 })
 
@@ -244,6 +246,17 @@ describe('HUD da Partida — Sanidade e estados (#226 [3])', () => {
     )
     expect(screen.getByTestId('hud-card-amedrontado')).toHaveAttribute('data-ativo', 'false')
     expect(screen.getByTestId('hud-card-amedrontado')).toHaveAttribute('aria-label', 'Amedrontado inativo')
+    // Leitura visual de ativo/apagado: mesma largura máxima, borda e fundo próprios.
+    const cardBaixa = screen.getByTestId('hud-card-baixa-iluminacao')
+    const cardAmedrontado = screen.getByTestId('hud-card-amedrontado')
+    for (const card of [cardBaixa, cardAmedrontado]) {
+      expect(card).toHaveClass('w-24')
+      expect(card).toHaveClass('max-w-[6rem]')
+    }
+    expect(cardBaixa).toHaveClass('border-amber-400/70')
+    expect(cardBaixa).toHaveClass('bg-amber-400/10')
+    expect(cardAmedrontado).toHaveClass('border-zinc-700/60')
+    expect(cardAmedrontado).toHaveClass('bg-zinc-950/70')
     // Adversários: Ana zerada e amedrontada, Beto com 2.
     const avatarAna = screen
       .getAllByTestId('hud-avatar-adversario')
@@ -257,19 +270,105 @@ describe('HUD da Partida — Sanidade e estados (#226 [3])', () => {
     expect(avatarBeto).toHaveAttribute('data-sanidade', '2')
     expect(avatarBeto).not.toHaveAttribute('data-amedrontado')
   })
+
+  it('anel circular de cada adversário tem 3 arcos; acesos == Sanidade e reagem ao dano', async () => {
+    const ws = await partidaDisponivel()
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({
+          jogadores: [
+            JOGADORES_BASE[0],
+            { ...JOGADORES_BASE[1], sanidade: 2 },
+            { ...JOGADORES_BASE[2], sanidade: 3 },
+            { ...JOGADORES_BASE[3], sanidade: 0 },
+          ],
+        }),
+      }),
+    )
+    await screen.findByTestId('hud-da-partida')
+
+    const aneis = screen.getAllByTestId('hud-anel-sanidade')
+    expect(aneis).toHaveLength(3)
+    for (const anel of aneis) {
+      const segmentos = screen
+        .getAllByTestId('hud-anel-sanidade-segmento')
+        .filter((el) => el.getAttribute('data-jogador-id') === anel.getAttribute('data-jogador-id'))
+      expect(segmentos).toHaveLength(3)
+      const acesos = segmentos.filter((el) => el.getAttribute('data-preenchido') === 'true')
+      expect(acesos).toHaveLength(Number(anel.getAttribute('data-sanidade')))
+    }
+
+    // Ana sofre dano (2 → 0): o anel apaga os 3 arcos.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({
+          jogadores: [
+            JOGADORES_BASE[0],
+            { ...JOGADORES_BASE[1], sanidade: 0, amedrontado: true },
+            JOGADORES_BASE[2],
+            JOGADORES_BASE[3],
+          ],
+        }),
+      }),
+    )
+    await waitFor(() => {
+      const anel = screen
+        .getAllByTestId('hud-anel-sanidade')
+        .find((el) => el.getAttribute('data-jogador-id') === 'jogador-2')!
+      expect(anel).toHaveAttribute('data-sanidade', '0')
+    })
+    const anelAna = screen
+      .getAllByTestId('hud-anel-sanidade')
+      .find((el) => el.getAttribute('data-jogador-id') === 'jogador-2')!
+    expect(anelAna).toHaveAttribute('data-sanidade', '0')
+    expect(
+      screen
+        .getAllByTestId('hud-anel-sanidade-segmento')
+        .filter(
+          (el) =>
+            el.getAttribute('data-jogador-id') === 'jogador-2' &&
+            el.getAttribute('data-preenchido') === 'true',
+        ),
+    ).toHaveLength(0)
+  })
 })
 
-describe('HUD da Partida — Turno circular por ordem de entrada (#226 [4])', () => {
-  it('ativo em destaque + próximos na ordem circular a partir do ativo', async () => {
-    await partidaComSnapshot(criarSnapshotBase({ jogadorAtivoId: 'jogador-3' }))
+describe('HUD da Partida — Turno em ordem fixa de entrada (#226 [4])', () => {
+  it('slots fixos na ordem de entrada; só o anel da vez transita', async () => {
+    const ws = await partidaDisponivel()
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({ jogadorAtivoId: 'jogador-3' }),
+      }),
+    )
+    await screen.findByTestId('hud-da-partida')
 
-    const ativo = screen.getByTestId('hud-turno-ativo')
-    expect(ativo).toHaveAttribute('data-jogador-id', 'jogador-3')
-    expect(ativo).toHaveAttribute('aria-label', 'Vez de Beto')
-    // Ordem de entrada 3→4→1→2: Beto, Cara, JogadorTeste, Ana.
-    expect(
-      screen.getAllByTestId('hud-turno-proximo').map((el) => el.getAttribute('data-jogador-id')),
-    ).toEqual(['jogador-4', MEU_JOGADOR_ID, 'jogador-2'])
+    const ordemDosSlots = () =>
+      within(screen.getByTestId('hud-turno'))
+        .getAllByRole('img')
+        .map((el) => el.getAttribute('data-jogador-id'))
+    // Slots fixos 1→2→3→4; anel no Beto.
+    expect(ordemDosSlots()).toEqual([MEU_JOGADOR_ID, 'jogador-2', 'jogador-3', 'jogador-4'])
+    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-3')
+    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('aria-label', 'Vez de Beto')
+
+    // A vez passa para o Cara: ninguém muda de lugar, só o anel transita.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({ jogadorAtivoId: 'jogador-4' }),
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-4'),
+    )
+    expect(ordemDosSlots()).toEqual([MEU_JOGADOR_ID, 'jogador-2', 'jogador-3', 'jogador-4'])
+    expect(screen.getByTestId('hud-turno-anel-da-vez').parentElement).toContainElement(
+      screen.getByTestId('hud-turno-ativo'),
+    )
   })
 })
 
@@ -380,6 +479,61 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:15')
     window.sessionStorage.clear()
     vi.useRealTimers()
+  })
+
+  it('avatar exibe foto quando há URL e iniciais como fallback', () => {
+    const { unmount } = render(
+      <HudDaPartida
+        jogadorPorId={JOGADORES_HUD}
+        jogadorAtivoId={MEU_JOGADOR_ID}
+        jogadorLocalId={MEU_JOGADOR_ID}
+        geradoresLigados={[]}
+        cartaoDeAcessoObtido={false}
+        emAndamento
+        emResultado={false}
+        imagemPorJogador={{ [MEU_JOGADOR_ID]: 'https://exemplo.test/eu.png' }}
+        onSair={() => {}}
+      />,
+    )
+    const retrato = screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' })
+    expect(retrato.querySelector('img')).toHaveAttribute('src', 'https://exemplo.test/eu.png')
+    expect(retrato).not.toHaveTextContent('JO')
+    // Adversário sem URL mantém as iniciais.
+    expect(screen.getAllByTestId('hud-avatar-adversario')[0]).toHaveTextContent('AN')
+    unmount()
+  })
+
+  it('retrato local é redondo e o anel da vez pisca só no turno do jogador', () => {
+    const base = {
+      jogadorPorId: JOGADORES_HUD,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      onSair: () => {},
+    }
+    const { unmount } = render(
+      <HudDaPartida {...base} emAndamento emResultado={false} />,
+    )
+    expect(screen.getByTestId('hud-anel-da-vez')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' })).toHaveClass(
+      'rounded-full',
+    )
+    unmount()
+
+    // Vez do adversário: sem anel, sem menção à vez.
+    render(
+      <HudDaPartida
+        {...base}
+        jogadorAtivoId="jogador-2"
+        emAndamento
+        emResultado={false}
+      />,
+    )
+    expect(screen.queryByTestId('hud-anel-da-vez')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Retrato de JogadorTeste' }),
+    ).toBeInTheDocument()
   })
 
   it('partida distinta recomeça do zero', () => {

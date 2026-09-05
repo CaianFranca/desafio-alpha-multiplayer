@@ -15,7 +15,7 @@
  */
 
 import { useState } from 'react'
-import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS } from '../../game/tabuleiro/contrato'
+import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS, type CorDoPeao } from '../../game/tabuleiro/contrato'
 import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
 import { useCronometroDaPartida } from './useCronometroDaPartida'
 
@@ -34,11 +34,16 @@ export interface HudDaPartidaProps {
   emAndamento: boolean
   /** Partida em resultado (cronômetro congela). */
   emResultado: boolean
-  /**
+/**
    * Identificador da Partida (paliativo do cronômetro: persiste o início em
    * `sessionStorage` para retomar ao sair e voltar na mesma aba).
    */
   partidaId?: string | null
+  /**
+   * Foto por jogador (jogadorId → URL); ausente/null mantém as iniciais.
+   * Ainda sem fonte no snapshot — prop pronta para quando o servidor expor.
+   */
+  imagemPorJogador?: Readonly<Record<string, string | null | undefined>>
   /** Retorno à Sala de origem (SAIR com confirmação). */
   onSair: () => void
 }
@@ -54,28 +59,51 @@ function iniciaisDoApelido(apelido: string): string {
   return (letras.slice(0, 2) || '??').toUpperCase()
 }
 
+/**
+ * Conteúdo do avatar: foto quando houver URL, iniciais na cor do peão como
+ * fallback. O contêiner (moldura circular/quadrada com `overflow-hidden`)
+ * vive no chamador; aqui só o preenchimento em `object-cover`.
+ */
+function ConteudoDoAvatar({
+  apelido,
+  cor,
+  imagemUrl = null,
+}: {
+  apelido: string
+  cor: CorDoPeao
+  imagemUrl?: string | null
+}) {
+  if (imagemUrl) {
+    return (
+      <img
+        src={imagemUrl}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        className="h-full w-full object-cover"
+      />
+    )
+  }
+  return (
+    <span aria-hidden="true" style={{ color: HEX_COR_PEAO[cor] ?? '#fff' }}>
+      {iniciaisDoApelido(apelido)}
+    </span>
+  )
+}
+
 function ordenarPorOrdemDeEntrada(jogadorPorId: Readonly<Record<string, PercepcaoDeJogador>>): JogadorOrdenado[] {
   return Object.entries(jogadorPorId)
     .map(([jogadorId, dados]) => ({ jogadorId, dados }))
     .sort((a, b) => a.dados.ordem - b.dados.ordem)
 }
 
-/**
- * Fila circular do Turno a partir do Jogador Ativo (ordem de entrada da
- * Sala): o ativo abre a fila, os próximos seguem na ordem.
- */
-function filaCircularDoTurno(
-  jogadorPorId: Readonly<Record<string, PercepcaoDeJogador>>,
-  jogadorAtivoId: string | null,
-): JogadorOrdenado[] {
-  const ordenados = ordenarPorOrdemDeEntrada(jogadorPorId)
-  if (ordenados.length === 0) return ordenados
-  const indiceDoAtivo = ordenados.findIndex((j) => j.jogadorId === jogadorAtivoId)
-  if (indiceDoAtivo <= 0) return ordenados
-  return [...ordenados.slice(indiceDoAtivo), ...ordenados.slice(0, indiceDoAtivo)]
-}
-
-const CLASSE_CARD = 'rounded bg-zinc-900/80 text-zinc-200'
+// Anel de Sanidade ao redor do avatar do adversário: 3 arcos de 120° com
+// folga entre eles; o arco `i` acende quando `i < sanidade` (mesma linguagem
+// da barra segmentada local).
+const RAIO_ANEL_SANIDADE = 26
+const CIRC_ANEL_SANIDADE = 2 * Math.PI * RAIO_ANEL_SANIDADE
+const ARCO_ANEL_SANIDADE = CIRC_ANEL_SANIDADE / 3
+const FOLGA_ANEL_SANIDADE = 5
 
 export function HudDaPartida({
   jogadorPorId,
@@ -86,6 +114,7 @@ export function HudDaPartida({
   emAndamento,
   emResultado,
   partidaId = null,
+  imagemPorJogador = {},
   onSair,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
@@ -99,9 +128,12 @@ export function HudDaPartida({
     (jogadorLocalId !== null ? ordenados.find((j) => j.jogadorId === jogadorLocalId) : undefined) ??
     ordenados.find((j) => j.jogadorId === jogadorAtivoId) ??
     ordenados[0]
+  // Anel da vez: só pisca quando a vez é de fato do jogador local.
+  const ehMinhaVez =
+    jogadorLocalId !== null &&
+    local.jogadorId === jogadorLocalId &&
+    jogadorAtivoId === jogadorLocalId
   const adversarios = ordenados.filter((j) => j.jogadorId !== local.jogadorId)
-  const filaDoTurno = filaCircularDoTurno(jogadorPorId, jogadorAtivoId)
-  const [turnoAtivo, ...proximosDoTurno] = filaDoTurno
   const geradoresAcesos = Math.min(geradoresLigados.length, ALVO_GERADORES_LIGADOS)
 
   return (
@@ -114,37 +146,78 @@ export function HudDaPartida({
       <div
         data-testid="hud-outros-jogadores"
         aria-label="Outros jogadores"
-        className="absolute left-4 top-4 flex origin-top-left scale-90 flex-col gap-2 lg:scale-100"
+        className="absolute left-6 top-6 flex origin-top-left scale-90 flex-col gap-2 lg:scale-100"
       >
         {adversarios.map(({ jogadorId, dados }) => {
           const ehAtivo = jogadorId === jogadorAtivoId
           return (
             <div key={jogadorId} className="flex items-center gap-1.5">
-              <div
-                data-testid="hud-avatar-adversario"
-                data-jogador-id={jogadorId}
-                data-sanidade={String(dados.sanidade)}
-                data-ativo={ehAtivo ? 'true' : 'false'}
-                data-em-baixa={dados.emBaixaIluminacao ? 'true' : undefined}
-                data-amedrontado={dados.amedrontado ? 'true' : undefined}
-                role="img"
-                aria-label={`${dados.apelido}, Sanidade ${dados.sanidade} de 3${dados.emBaixaIluminacao ? ', em Baixa Iluminação' : ''}${dados.amedrontado ? ', Amedrontado' : ''}${ehAtivo ? ', com a vez' : ''}`}
+              <div className="relative flex h-14 w-14 items-center justify-center">
+                <svg
+                  viewBox="0 0 56 56"
+                  aria-hidden="true"
+                  data-testid="hud-anel-sanidade"
+                  data-jogador-id={jogadorId}
+                  data-sanidade={String(dados.sanidade)}
+                  className="absolute inset-0 h-full w-full"
+                >
+                  {[0, 1, 2].map((indice) => (
+                    <circle
+                      key={indice}
+                      cx="28"
+                      cy="28"
+                      r={RAIO_ANEL_SANIDADE}
+                      fill="none"
+                      strokeWidth="3"
+                      data-testid="hud-anel-sanidade-segmento"
+                      data-jogador-id={jogadorId}
+                      data-preenchido={indice < dados.sanidade ? 'true' : 'false'}
+                      strokeDasharray={`${ARCO_ANEL_SANIDADE - FOLGA_ANEL_SANIDADE} ${CIRC_ANEL_SANIDADE - ARCO_ANEL_SANIDADE + FOLGA_ANEL_SANIDADE}`}
+                      strokeDashoffset={-(indice * ARCO_ANEL_SANIDADE)}
+                      transform="rotate(-90 28 28)"
+                      className={
+                        indice < dados.sanidade
+                          ? 'stroke-amber-400'
+                          : dados.amedrontado
+                            ? 'stroke-red-900'
+                            : 'stroke-zinc-600'
+                      }
+                    />
+                  ))}
+                </svg>
+                <div
+                  data-testid="hud-avatar-adversario"
+                  data-jogador-id={jogadorId}
+                  data-sanidade={String(dados.sanidade)}
+                  data-ativo={ehAtivo ? 'true' : 'false'}
+                  data-em-baixa={dados.emBaixaIluminacao ? 'true' : undefined}
+                  data-amedrontado={dados.amedrontado ? 'true' : undefined}
+                  role="img"
+                aria-label={`${dados.apelido}, Sanidade ${dados.sanidade} de 3${dados.emBaixaIluminacao ? ', em Baixa Iluminação' : ''}${dados.amedrontado ? ', Amedrontado' : ''}`}
                 title={dados.apelido}
-                className={`flex h-11 w-11 items-center justify-center rounded-full border-2 font-display text-sm font-semibold ${
-                  ehAtivo ? 'border-amber-400' : 'border-amber-400/60'
-                } ${dados.sanidade === 0 ? 'opacity-60' : ''}`}
-                style={{ backgroundColor: '#1c1c1f', color: HEX_COR_PEAO[dados.cor] ?? '#fff' }}
-              >
-                {iniciaisDoApelido(dados.apelido)}
+                  className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display text-base font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${
+                    dados.amedrontado
+                      ? 'opacity-70 grayscale'
+                      : dados.emBaixaIluminacao
+                        ? 'brightness-75 saturate-50'
+                        : ''
+                  }`}
+                >
+                  <ConteudoDoAvatar
+                    apelido={dados.apelido}
+                    cor={dados.cor}
+                    imagemUrl={imagemPorJogador[jogadorId] ?? null}
+                  />
+                </div>
               </div>
               <div className="flex flex-col gap-0.5" aria-hidden="true">
                 {dados.emBaixaIluminacao ? (
-                  <span data-testid="hud-estado-baixa-iluminacao" title="Baixa Iluminação" className="rounded bg-zinc-900/80 px-1 text-[10px] text-amber-300">
+                  <span data-testid="hud-estado-baixa-iluminacao" title="Baixa Iluminação" className="rounded border border-amber-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-sm leading-none text-amber-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
                     ◐
                   </span>
                 ) : null}
                 {dados.amedrontado ? (
-                  <span data-testid="hud-estado-amedrontado" title="Amedrontado" className="rounded bg-zinc-900/80 px-1 text-[10px] text-red-400">
+                  <span data-testid="hud-estado-amedrontado" title="Amedrontado" className="rounded border border-red-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-sm leading-none text-red-400 shadow-[0_0_8px_rgba(248,113,113,0.35)]">
                     ⚠
                   </span>
                 ) : null}
@@ -155,7 +228,7 @@ export function HudDaPartida({
       </div>
 
       {/* ── sup-centro: título ── */}
-      <div className="absolute left-1/2 top-4 -translate-x-1/2">
+      <div className="absolute left-1/2 top-6 -translate-x-1/2">
         <h1
           data-testid="hud-titulo"
           className="font-display text-sm font-semibold uppercase tracking-[0.28em] text-zinc-100"
@@ -167,7 +240,7 @@ export function HudDaPartida({
       {/* ── sup-dir: cronômetro + volume visual + SAIR ── */}
       <div
         data-testid="hud-controles-partida"
-        className="absolute right-4 top-4 flex origin-top-right scale-90 items-center gap-3 rounded bg-zinc-900/80 px-3 py-1.5 lg:scale-100"
+        className="absolute right-6 top-6 flex origin-top-right scale-90 items-center gap-3 rounded bg-zinc-900/80 px-3 py-1.5 lg:scale-100"
       >
         <span
           data-testid="hud-cronometro"
@@ -210,7 +283,7 @@ export function HudDaPartida({
           role="alertdialog"
           aria-modal="true"
           aria-label="Confirmar saída da partida"
-          className="pointer-events-auto absolute right-4 top-16 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
+          className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
         >
           <p>Sair da partida e voltar à sala?</p>
           <div className="flex gap-2">
@@ -235,15 +308,29 @@ export function HudDaPartida({
       ) : null}
 
       {/* ── inf-esq: jogador local (retrato + Apelido + Sanidade + estados) ── */}
-      <div className="absolute bottom-4 left-4 flex origin-bottom-left scale-90 flex-col gap-2 lg:scale-100">
+      <div className="absolute bottom-6 left-6 flex origin-bottom-left scale-90 flex-col gap-3 lg:scale-100">
         <div data-testid="hud-jogador-local" data-jogador-id={local.jogadorId} className="flex items-center gap-3">
-          <div
-            role="img"
-            aria-label={`Retrato de ${local.dados.apelido}`}
-            className="flex h-16 w-16 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900/80 font-display text-xl font-semibold"
-            style={{ color: HEX_COR_PEAO[local.dados.cor] ?? '#fff' }}
-          >
-            {iniciaisDoApelido(local.dados.apelido)}
+          <div className="relative flex h-20 w-20 items-center justify-center">
+            {ehMinhaVez ? (
+              <span
+                data-testid="hud-anel-da-vez"
+                aria-hidden="true"
+                className="absolute inset-0 animate-pulse rounded-full border-2 border-amber-300 shadow-[0_0_16px_rgba(251,191,36,0.5)]"
+              />
+            ) : null}
+            <div
+              role="img"
+              aria-label={`Retrato de ${local.dados.apelido}${ehMinhaVez ? ', com a vez' : ''}`}
+              className={`flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display text-2xl font-semibold transition-colors duration-500 ${
+                ehMinhaVez ? 'border-amber-300/40' : 'border-zinc-700'
+              }`}
+            >
+              <ConteudoDoAvatar
+                apelido={local.dados.apelido}
+                cor={local.dados.cor}
+                imagemUrl={imagemPorJogador[local.jogadorId] ?? null}
+              />
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-100">
@@ -278,11 +365,18 @@ export function HudDaPartida({
             data-ativo={local.dados.emBaixaIluminacao ? 'true' : 'false'}
             role="status"
             aria-label={local.dados.emBaixaIluminacao ? 'Baixa Iluminação ativa' : 'Baixa Iluminação inativa'}
-            className={`${CLASSE_CARD} px-3 py-1.5 text-center text-xs ${
-              local.dados.emBaixaIluminacao ? 'text-amber-300' : 'opacity-40'
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+              local.dados.emBaixaIluminacao
+                ? 'border-amber-400/70 bg-amber-400/10 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.35)]'
+                : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
             }`}
           >
-            <span aria-hidden="true" className="block text-sm">◐</span>
+            <span
+              aria-hidden="true"
+              className={`block text-sm ${local.dados.emBaixaIluminacao ? 'text-amber-300' : 'text-zinc-600'}`}
+            >
+              ◐
+            </span>
             Baixa Iluminação
           </div>
           <div
@@ -290,11 +384,18 @@ export function HudDaPartida({
             data-ativo={local.dados.amedrontado ? 'true' : 'false'}
             role="status"
             aria-label={local.dados.amedrontado ? 'Amedrontado ativo' : 'Amedrontado inativo'}
-            className={`${CLASSE_CARD} px-3 py-1.5 text-center text-xs ${
-              local.dados.amedrontado ? 'text-red-400' : 'opacity-40'
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+              local.dados.amedrontado
+                ? 'border-red-400/70 bg-red-400/10 text-red-200 shadow-[0_0_16px_rgba(248,113,113,0.35)]'
+                : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
             }`}
           >
-            <span aria-hidden="true" className="block text-sm">⚠</span>
+            <span
+              aria-hidden="true"
+              className={`block text-sm ${local.dados.amedrontado ? 'text-red-300' : 'text-zinc-600'}`}
+            >
+              ⚠
+            </span>
             Amedrontado
           </div>
         </div>
@@ -304,7 +405,7 @@ export function HudDaPartida({
       <div
         data-testid="hud-conquistas"
         aria-label="Conquistas"
-        className="absolute bottom-4 left-1/2 flex origin-bottom -translate-x-1/2 scale-90 items-center gap-3 lg:scale-100"
+        className="absolute bottom-6 left-1/2 flex origin-bottom -translate-x-1/2 scale-90 items-center gap-3 lg:scale-100"
       >
         {Array.from({ length: ALVO_GERADORES_LIGADOS }, (_, indice) => {
           const acesa = indice < geradoresAcesos
@@ -343,42 +444,50 @@ export function HudDaPartida({
         </div>
       </div>
 
-      {/* ── inf-dir: Turno (ativo em destaque + próximos na ordem) ── */}
-      {turnoAtivo ? (
+      {/* ── inf-dir: Turno em slots fixos (ordem de entrada): só o anel da
+          vez transita entre os jogadores, ninguém muda de lugar ── */}
+      {ordenados.length > 0 ? (
         <div
           data-testid="hud-turno"
           aria-label="Turno"
-          className={`${CLASSE_CARD} absolute bottom-4 right-4 flex origin-bottom-right scale-90 flex-col gap-2 px-3 py-2 lg:scale-100`}
+          className="absolute bottom-6 right-6 flex origin-bottom-right scale-90 flex-col gap-2 bg-transparent px-1 py-1 lg:scale-100"
         >
-          <span className="text-right text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">
+          <span className="text-right font-display text-xs font-semibold uppercase tracking-[0.28em] text-amber-200/90">
             Turno
           </span>
           <div className="flex items-center gap-1.5">
-            <div
-              data-testid="hud-turno-ativo"
-              data-jogador-id={turnoAtivo.jogadorId}
-              role="img"
-              aria-label={`Vez de ${turnoAtivo.dados.apelido}`}
-              title={turnoAtivo.dados.apelido}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-amber-400 bg-zinc-800 font-display text-xs font-semibold"
-              style={{ color: HEX_COR_PEAO[turnoAtivo.dados.cor] ?? '#fff' }}
-            >
-              {iniciaisDoApelido(turnoAtivo.dados.apelido)}
-            </div>
-            {proximosDoTurno.map(({ jogadorId, dados }) => (
-              <div
-                key={jogadorId}
-                data-testid="hud-turno-proximo"
-                data-jogador-id={jogadorId}
-                role="img"
-                aria-label={`Próximo: ${dados.apelido}`}
-                title={dados.apelido}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 font-display text-[10px] opacity-60"
-                style={{ color: HEX_COR_PEAO[dados.cor] ?? '#fff' }}
-              >
-                {iniciaisDoApelido(dados.apelido)}
-              </div>
-            ))}
+            {ordenados.map(({ jogadorId, dados }) => {
+              const ehAtivo = jogadorId === jogadorAtivoId
+              return (
+                <div key={jogadorId} className="relative flex h-10 w-10 items-center justify-center">
+                  {ehAtivo ? (
+                    <span
+                      data-testid="hud-turno-anel-da-vez"
+                      aria-hidden="true"
+                      className="absolute inset-0 animate-pulse rounded-lg border-2 border-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.55)]"
+                    />
+                  ) : null}
+                  <div
+                    data-testid={ehAtivo ? 'hud-turno-ativo' : 'hud-turno-proximo'}
+                    data-jogador-id={jogadorId}
+                    role="img"
+                    aria-label={ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}
+                    title={dados.apelido}
+                    className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border font-display text-xs transition-all duration-500 ${
+                      ehAtivo
+                        ? 'border-amber-300/40 bg-zinc-800'
+                        : 'border-zinc-800 bg-zinc-950 opacity-50 grayscale'
+                    }`}
+                  >
+                    <ConteudoDoAvatar
+                      apelido={dados.apelido}
+                      cor={dados.cor}
+                      imagemUrl={imagemPorJogador[jogadorId] ?? null}
+                    />
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       ) : null}
