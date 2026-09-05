@@ -7,6 +7,8 @@ import { usePartidaTela } from '../components/partida/usePartidaTela'
 import type { EstadoDaTela } from '../components/partida/partidaTelaMachine'
 import { FlashOverlay } from '../components/partida/FlashOverlay'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
+import { useRequerOrientacaoLandscape } from '../hooks/useOrientacaoCelular'
+import { OverlayOrientacao } from '../components/partida/OverlayOrientacao'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
 import {
   criarEstadoInicialDoCliente,
@@ -363,6 +365,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const encerrarTurno = useCallback(() => {
     enviarComJogador({ type: 'ENCERRAR_TURNO' })
   }, [enviarComJogador])
+  const requerOrientacao = useRequerOrientacaoLandscape()
   const [bordaPx, setBordaPx] = useState(0)
 
   return (
@@ -557,6 +560,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           </button>
         </div>
       ) : null}
+      {requerOrientacao ? <OverlayOrientacao /> : null}
       <PartidaMoldura onBordaChange={setBordaPx} />
     </div>
   )
