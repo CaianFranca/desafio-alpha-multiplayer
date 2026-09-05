@@ -163,6 +163,7 @@ export {
 export {
   calcularAlcance,
   resolverAtaques,
+  resolverAtaquesCentradoNoAtuante,
 } from './monstros.ts';
 
 export {
