@@ -15,6 +15,7 @@
 import {
   exigirCelulaNoAlcance,
   escolherVagaDaPecaRecebida,
+  desselecionarPeao,
   estaDentroDaGrade,
   encontrarPosicionada,
   encontrarPosicionadaPorCelula,
@@ -182,6 +183,14 @@ export interface SelecionarPeaoComando {
   readonly peaoId: string;
 }
 
+// Desseleção autoritativa (issue #249): limpa a seleção vigente do ciclo.
+// Idempotente (já desselecionado ou outro peão em sequência é no-op, sem
+// eventos); rejeitada sob Recebidas pendentes para nunca órfanar pendência.
+export interface DesselecionarPeaoComando {
+  readonly tipo: 'desselecionar_peao';
+  readonly peaoId: string;
+}
+
 export interface PosicionarPeaoComando {
   readonly tipo: 'posicionar_peao';
   readonly peaoId: string;
@@ -214,6 +223,7 @@ export type ComandoDeTabuleiro =
   | PosicionarPecaComando
   | FinalizarManipulacaoComando
   | SelecionarPeaoComando
+  | DesselecionarPeaoComando
   | PosicionarPeaoComando
   | EscolherVagaDaPecaRecebidaComando
   | MoverPeaoComando
@@ -261,6 +271,13 @@ export interface ManipulacaoFinalizadaEvento {
 
 export interface PeaoSelecionadoEvento {
   readonly tipo: 'peao_selecionado';
+  readonly peaoId: string;
+}
+
+// Espelho da desseleção autoritativa (issue #249): emitido apenas quando a
+// seleção vigente é efetivamente limpa.
+export interface PeaoDesselecionadoEvento {
+  readonly tipo: 'peao_desselecionado';
   readonly peaoId: string;
 }
 
@@ -325,6 +342,7 @@ export type EventoDoTabuleiro =
   | PecaSorteadaEvento
   | ManipulacaoFinalizadaEvento
   | PeaoSelecionadoEvento
+  | PeaoDesselecionadoEvento
   | RecebimentoGeradoEvento
   | PeaoPosicionadoEvento
   | VagaDaPecaRecebidaEscolhidaEvento
@@ -617,6 +635,8 @@ export function aplicarComandoDeTabuleiro(
       return finalizarManipulacao(estado);
     case 'selecionar_peao':
       return selecionarPeao(estado, comando);
+    case 'desselecionar_peao':
+      return desselecionarPeao(estado, comando);
     case 'posicionar_peao':
       return posicionarPeao(estado, comando);
     case 'escolher_vaga_da_peca_recebida':

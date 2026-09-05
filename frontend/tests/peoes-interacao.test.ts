@@ -9,18 +9,21 @@ import {
   mapearCliqueNaPecaDaMesa,
   mapearCliqueNaPecaInicial,
   mapearCliqueNoPeao,
+  mapearDesselecaoDePeao,
   mapearEscolhaDeVagaDaRecebida,
   mapearGirarRecebida,
   mapearMovimentacao,
   mapearPermanencia,
   mapearPosicionarRecebida,
   peaoSobreAMesa,
+  podeSelecionarPeao,
   puxadaVigenteNaBandeja,
   rotearCliqueDeCelula,
   vagasDisponiveisDoPeao,
 } from '../web/src/game/tabuleiro/interacaoPeoes'
 import type { PendenciaNoCliente } from '../web/src/game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../web/src/game/tabuleiro/interacaoPeoes'
+import { chaveDeComandoPendente, consumirAck } from '../web/src/game/tabuleiro/pendentes'
 import { motivoDeRecusaDoEvento } from '../web/src/components/partida/somDeRecusa'
 import type { EventoDoCanalDaPartida } from '../web/src/hooks/usePartidaWebSocket'
 import type { Celula, PecaPosicionada, PeaoDaExibicao } from '../web/src/game/tabuleiro/contrato'
@@ -123,11 +126,32 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
   })
 
   it('peão sobre a Mesa também é selecionável (mesmo comando)', () => {
-    const estado = estadoBase()
+    // Gate "Inicial primeiro" (#249): peao-vermelho exige inicial-2
+    // posicionada — o estadoBase só tem a inicial-1 (do branco).
+    const estado = estadoBase({
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('inicial-2', 'inicial', 0, 3, 4),
+      ],
+    })
     expect(mapearCliqueNoPeao(estado, 'peao-vermelho')).toEqual({
       tipo: 'comando',
       comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-vermelho' },
     })
+  })
+
+  it('gate Inicial primeiro: sem a própria Inicial posicionada a seleção é silenciosa (#249)', () => {
+    // estadoBase só tem inicial-1: o branco passa, o vermelho não.
+    const estado = estadoBase()
+    expect(mapearCliqueNoPeao(estado, 'peao-branco')).toEqual({
+      tipo: 'comando',
+      comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' },
+    })
+    expect(mapearCliqueNoPeao(estado, 'peao-vermelho')).toBeNull()
+    expect(podeSelecionarPeao(estado, 'peao-branco')).toBe(true)
+    expect(podeSelecionarPeao(estado, 'peao-vermelho')).toBe(false)
+    // Id sem cor inferível não trava além do silêncio existente.
+    expect(podeSelecionarPeao(estado, 'peao-sintetico')).toBe(true)
   })
 
   it('clique no próprio peão já selecionado emite PERMANECER (AC 5)', () => {
@@ -585,7 +609,15 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
   })
 
   it('sem pendências o bloqueio não dispara', () => {
-    const estado = estadoBase({ peaoSelecionadoId: 'peao-branco' })
+    // Gate "Inicial primeiro" (#249): para selecionar o vermelho, a
+    // inicial-2 precisa estar posicionada.
+    const estado = estadoBase({
+      peaoSelecionadoId: 'peao-branco',
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('inicial-2', 'inicial', 0, 3, 4),
+      ],
+    })
     expect(haRecebidasPendentes(estado)).toBe(false)
     expect(mapearCliqueNoPeao(estado, 'peao-vermelho')).toEqual({
       tipo: 'comando',
@@ -873,9 +905,10 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
 
   it('peão sobre a Mesa + Peça Inicial clicada → POSICIONAR_PEAO', () => {
     const estado = estadoBase({ peaoSelecionadoId: 'peao-branco' })
-    // Primeiro turno (#249): peão na Mesa não caracteriza ciclo que suprime
-    // o fallback — mas a célula da Inicial posicionada roteia POSICIONAR_PEAO.
-    expect(cicloAtivo(estado)).toBe(false)
+    // Ciclo binário (#249): seleção vigente (mesmo sobre a Mesa) é ciclo
+    // ativo — o fallback ST-09 fica suprimido; a célula da Inicial posicionada
+    // roteia POSICIONAR_PEAO pelo ciclo.
+    expect(cicloAtivo(estado)).toBe(true)
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), INICIAL)).toEqual({
       ciclo: { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: INICIAL },
     })
@@ -922,6 +955,7 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
 
   it('ehComandoDePeao distingue comando do ciclo do comando do Tabuleiro', () => {
     expect(ehComandoDePeao({ type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' })).toBe(true)
+    expect(ehComandoDePeao({ type: 'DESELECIONAR_PEAO', peaoId: 'peao-branco' })).toBe(true)
     expect(ehComandoDePeao({ type: 'PERMANECER', peaoId: 'peao-branco' })).toBe(true)
     expect(ehComandoDePeao({ type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' })).toBe(true)
     expect(ehComandoDePeao({ type: 'SELECIONAR_PECA', pecaId: 'reta-1' })).toBe(false)
@@ -1049,12 +1083,14 @@ describe('primeiro turno sem deadlock (issue #249)', () => {
     return { comandos, comandosPeao }
   }
 
-  it('peão na Mesa não caracteriza ciclo que suprime o fallback (sem pendências)', () => {
+  it('peão na Mesa selecionado É ciclo ativo que suprime o fallback (binário, #249)', () => {
     const naMesa = estadoBase({ peaoSelecionadoId: 'peao-branco' })
     expect(peaoSobreAMesa(naMesa.peoes.find((p) => p.peaoId === 'peao-branco'))).toBe(true)
     expect(peaoSobreAMesa(naMesa.peoes.find((p) => p.peaoId === 'peao-vermelho'))).toBe(true)
     expect(peaoSobreAMesa(undefined)).toBe(false)
-    expect(cicloAtivo(naMesa)).toBe(false)
+    // Invariante binário: qualquer seleção vigente (mesmo sobre a Mesa) é
+    // ciclo ativo — só DESELECIONAR_PEAO + ack libera o fallback.
+    expect(cicloAtivo(naMesa)).toBe(true)
     const posicionado = estadoBase({
       peoes: [peao('peao-branco', INICIAL), peao('peao-vermelho', null)],
       peaoSelecionadoId: 'peao-branco',
@@ -1065,19 +1101,26 @@ describe('primeiro turno sem deadlock (issue #249)', () => {
       recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', null, null)],
     })
     expect(cicloAtivo(naMesaComPendencia)).toBe(true)
+    const semSelecao = estadoBase()
+    expect(cicloAtivo(semSelecao)).toBe(false)
   })
 
-  it('ordem peão→inicial: célula vazia com a Inicial selecionada emite POSICIONAR_PECA', () => {
+  it('ordem peão→inicial: célula vazia com seleção vigente NÃO emite POSICIONAR_PECA (exige DESELECIONAR_PEAO, #249)', () => {
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       pecaSelecionadaId: 'inicial-2',
     })
-    // O roteador puro não resolve o encaixe da Inicial (não é Recebida).
+    // Ciclo binário: com seleção vigente o roteador não resolve o encaixe da
+    // Inicial (não é Recebida) e o despacho NÃO cai no fallback ST-09 — fica
+    // silencioso até DESELECIONAR_PEAO + ack ("Inicial primeiro").
+    expect(cicloAtivo(estado)).toBe(true)
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro249(estado), CELULA_VAZIA)).toBeNull()
-    // O despacho cai no fallback ST-09 em vez de silenciar (deadlock #249).
-    expect(capturarDespacho(estado, CELULA_VAZIA).comandos).toEqual([
-      { type: 'POSICIONAR_PECA', pecaId: 'inicial-2', celula: CELULA_VAZIA },
-    ])
+    expect(capturarDespacho(estado, CELULA_VAZIA).comandos).toEqual([])
+    // A desseleção autoritativa é o único caminho para liberar a Inicial.
+    expect(mapearDesselecaoDePeao(estado)).toEqual({
+      type: 'DESELECIONAR_PEAO',
+      peaoId: 'peao-branco',
+    })
   })
 
   it('desseleção libera a Inicial: sem peão selecionado o fallback posiciona', () => {
@@ -1105,9 +1148,9 @@ describe('primeiro turno sem deadlock (issue #249)', () => {
     ])
   })
 
-  it('pós-reload: seleção só local (servidor sem seleção) posiciona o peão', () => {
-    // O merge de AmbienteDeJogo entrega o Local otimista ao roteador quando
-    // o servidor ainda está sem seleção (reload / confirmação pendente).
+  it('pós-reload: seleção autoritativa do servidor posiciona o peão (sem merge local)', () => {
+    // A seleção vigente vem do servidor (PEAO_SELECIONADO/snapshot) — o
+    // cliente nunca roteia por estado local divergente (#249).
     const estadoComSelecaoLocal = estadoBase({ peaoSelecionadoId: 'peao-branco' })
     expect(
       rotearCliqueDeCelula(estadoComSelecaoLocal, estadoTabuleiro249(estadoComSelecaoLocal), INICIAL),
@@ -1116,19 +1159,19 @@ describe('primeiro turno sem deadlock (issue #249)', () => {
     })
   })
 
-  it('prova Spec #249: seleção autoritativa com peão na Mesa não bloqueia POSICIONAR_PECA em célula vazia', () => {
+  it('prova Spec #249: seleção vigente com peão na Mesa SUPRIME o fallback até DESELECIONAR_PEAO', () => {
     // A seleção veio do servidor (PEAO_SELECIONADO aplicado) e o peão segue
-    // sobre a Mesa; a Inicial segue selecionada para o primeiro encaixe.
+    // sobre a Mesa; a Inicial segue selecionada para o primeiro encaixe —
+    // mas o ciclo binário suprime o fallback: só a desseleção autoritativa
+    // libera POSICIONAR_PECA ("Inicial primeiro").
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       pecaSelecionadaId: 'inicial-2',
     })
-    expect(cicloAtivo(estado)).toBe(false)
+    expect(cicloAtivo(estado)).toBe(true)
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro249(estado), CELULA_VAZIA)).toBeNull()
     const { comandos, comandosPeao } = capturarDespacho(estado, CELULA_VAZIA)
-    expect(comandos).toEqual([
-      { type: 'POSICIONAR_PECA', pecaId: 'inicial-2', celula: CELULA_VAZIA },
-    ])
+    expect(comandos).toEqual([])
     expect(comandosPeao).toEqual([])
   })
 
@@ -1169,7 +1212,7 @@ describe('primeiro turno sem deadlock (issue #249)', () => {
   it('prova Spec #249: POSICIONAR_PEAO após a Inicial posicionada com seleção vigente', () => {
     // A Inicial-2 acabou de encaixar em (3,4); o peão segue na Mesa e a
     // seleção do ciclo segue vigente — o clique na peça posicionada posiciona
-    // o peão, sem exigir desseleção prévia.
+    // o peão pelo ciclo (ativo), sem exigir desseleção prévia.
     const celulaDaInicial2 = { linha: 3, coluna: 4 }
     const estado = estadoBase({
       posicionadas: [
@@ -1179,7 +1222,7 @@ describe('primeiro turno sem deadlock (issue #249)', () => {
       peaoSelecionadoId: 'peao-branco',
       pecaSelecionadaId: null,
     })
-    expect(cicloAtivo(estado)).toBe(false)
+    expect(cicloAtivo(estado)).toBe(true)
     expect(
       rotearCliqueDeCelula(estado, estadoTabuleiro249(estado), celulaDaInicial2),
     ).toEqual({
@@ -1188,5 +1231,180 @@ describe('primeiro turno sem deadlock (issue #249)', () => {
     expect(capturarDespacho(estado, celulaDaInicial2).comandosPeao).toEqual([
       { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: celulaDaInicial2 },
     ])
+  })
+})
+
+describe('desseleção autoritativa do peão (issue #249)', () => {
+  const CELULA_VAZIA = { linha: 5, coluna: 5 }
+
+  function estadoBaseDesselecao(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPeoes {
+    return {
+      peoes: [peao('peao-branco', null), peao('peao-vermelho', null)],
+      posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      recebidasPendentes: [],
+      peaoSelecionadoId: null,
+      pecaSelecionadaId: null,
+      posicaoConfirmadaNoTurno: false,
+      ...opts,
+    }
+  }
+
+  it('com seleção vigente e sem pendências emite DESELECIONAR_PEAO', () => {
+    const estado = estadoBaseDesselecao({ peaoSelecionadoId: 'peao-branco' })
+    expect(mapearDesselecaoDePeao(estado)).toEqual({
+      type: 'DESELECIONAR_PEAO',
+      peaoId: 'peao-branco',
+    })
+  })
+
+  it('sem seleção é silenciosa (null)', () => {
+    expect(mapearDesselecaoDePeao(estadoBaseDesselecao())).toBeNull()
+  })
+
+  it('sob Recebidas pendentes é silenciosa (o domínio rejeitaria com PENDENCIA_NAO_RESOLVIDA)', () => {
+    const estado = estadoBaseDesselecao({
+      peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', null, null)],
+    })
+    expect(mapearDesselecaoDePeao(estado)).toBeNull()
+  })
+
+  it('ciclo binário: só a desseleção autoritativa libera o fallback (sem merge local)', () => {
+    const comSelecao = estadoBaseDesselecao({
+      peaoSelecionadoId: 'peao-branco',
+      pecaSelecionadaId: 'inicial-2',
+    })
+    expect(cicloAtivo(comSelecao)).toBe(true)
+    const tabuleiro = {
+      iniciais: [{ pecaId: 'inicial-2' }, { pecaId: 'inicial-3' }],
+      posicionadas: comSelecao.posicionadas,
+      pecaSelecionadaId: comSelecao.pecaSelecionadaId,
+      pecaEmManipulacaoId: null,
+    }
+    // Com seleção vigente o despacho não cai no fallback.
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(comSelecao, tabuleiro, CELULA_VAZIA, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandos).toEqual([])
+    // Após o ack (seleção null, autoridade do servidor), o fallback posiciona.
+    const aposAck: EstadoInteracaoPeoes = { ...comSelecao, peaoSelecionadoId: null }
+    expect(cicloAtivo(aposAck)).toBe(false)
+    const comandosApos: unknown[] = []
+    despacharCliqueDeCelula(aposAck, { ...tabuleiro, pecaSelecionadaId: 'inicial-2' }, CELULA_VAZIA, {
+      onComando: (c) => comandosApos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandosApos).toEqual([
+      { type: 'POSICIONAR_PECA', pecaId: 'inicial-2', celula: CELULA_VAZIA },
+    ])
+  })
+})
+
+describe('pendentes otimistas anti-duplo-place (issue #249)', () => {
+  it('chaveia POSICIONAR_PECA/POSICIONAR_PEAO/DESELECIONAR_PEAO e ignora os demais', () => {
+    expect(
+      chaveDeComandoPendente({ type: 'POSICIONAR_PECA', pecaId: 'inicial-2', celula: { linha: 5, coluna: 5 } }),
+    ).toBe('POSICIONAR_PECA:inicial-2:5:5')
+    expect(
+      chaveDeComandoPendente({ type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: { linha: 3, coluna: 3 } }),
+    ).toBe('POSICIONAR_PEAO:peao-branco:3:3')
+    expect(chaveDeComandoPendente({ type: 'DESELECIONAR_PEAO', peaoId: 'peao-branco' })).toBe(
+      'DESELECIONAR_PEAO:peao-branco',
+    )
+    expect(chaveDeComandoPendente({ type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' })).toBeNull()
+    // Ack consome o alvo em voo; segundo envio do mesmo alvo volta a passar.
+    const pendentes = new Set<string>(['POSICIONAR_PECA:inicial-2:5:5'])
+    expect(consumirAck(pendentes, { type: 'PECA_POSICIONADA', pecaId: 'inicial-2' })).toBe(true)
+    expect(pendentes.size).toBe(0)
+    const voo = new Set<string>(['DESELECIONAR_PEAO:peao-branco'])
+    expect(consumirAck(voo, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })).toBe(true)
+    expect(voo.size).toBe(0)
+    // Ack de outro alvo não consome.
+    const outros = new Set<string>(['POSICIONAR_PEAO:peao-branco:3:3'])
+    expect(consumirAck(outros, { type: 'PEAO_POSICIONADO', peaoId: 'peao-vermelho' })).toBe(false)
+    expect(outros.size).toBe(1)
+  })
+})
+
+describe('integração dos 8 passos da issue #249 (ordem Inicial-primeiro)', () => {
+  const CELULA_VAZIA = { linha: 5, coluna: 5 }
+  const CELULA_INICIAL = { linha: 3, coluna: 3 }
+
+  function tabuleiroDe(estado: EstadoInteracaoPeoes): EstadoInteracaoTabuleiro {
+    return {
+      iniciais: [{ pecaId: 'inicial-1' }],
+      posicionadas: estado.posicionadas,
+      pecaSelecionadaId: estado.pecaSelecionadaId,
+      pecaEmManipulacaoId: null,
+    }
+  }
+
+  it('passo 2: SELECIONAR_PEAO antes da própria Inicial é silencioso (gate Inicial-primeiro)', () => {
+    // 1. Partida iniciada: tabuleiro vazio, primeiro turno, sem seleção.
+    const vazio = estadoBase({ posicionadas: [], peaoSelecionadoId: null })
+    // 2. Clicar no peão sobre a Mesa antes da Inicial → gate silencioso.
+    expect(mapearCliqueNoPeao(vazio, 'peao-branco')).toBeNull()
+    expect(podeSelecionarPeao(vazio, 'peao-branco')).toBe(false)
+  })
+
+  it('passos 3-4: Inicial posiciona sem ciclo; com seleção vigente só DESELECIONAR_PEAO libera (passo 4)', () => {
+    // 3. Selecionar a Inicial na mesa roteia ST-09 (sem pendências, sem seleção).
+    const semCiclo = estadoBase({ posicionadas: [], peaoSelecionadoId: null })
+    expect(mapearCliqueNaPecaDaMesa(semCiclo, tabuleiroDe(semCiclo), 'inicial-1')).toEqual({
+      type: 'SELECIONAR_PECA',
+      pecaId: 'inicial-1',
+    })
+    // 4. Com o peão selecionado (estado autoritativo do servidor), a célula
+    // vazia NÃO posiciona a Inicial — exige DESELECIONAR_PEAO + ack antes.
+    const travado = estadoBase({
+      posicionadas: [],
+      peaoSelecionadoId: 'peao-branco',
+      pecaSelecionadaId: 'inicial-1',
+    })
+    expect(cicloAtivo(travado)).toBe(true)
+    expect(rotearCliqueDeCelula(travado, tabuleiroDe(travado), CELULA_VAZIA)).toBeNull()
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(travado, tabuleiroDe(travado), CELULA_VAZIA, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandos).toEqual([])
+    expect(mapearDesselecaoDePeao(travado)).toEqual({
+      type: 'DESELECIONAR_PEAO',
+      peaoId: 'peao-branco',
+    })
+    // Ack do servidor (PEAO_DESELECIONADO) libera o fallback.
+    const liberado: EstadoInteracaoPeoes = { ...travado, peaoSelecionadoId: null }
+    expect(cicloAtivo(liberado)).toBe(false)
+    const apos: unknown[] = []
+    despacharCliqueDeCelula(liberado, tabuleiroDe(liberado), CELULA_VAZIA, {
+      onComando: (c) => apos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(apos).toEqual([{ type: 'POSICIONAR_PECA', pecaId: 'inicial-1', celula: CELULA_VAZIA }])
+  })
+
+  it('passo 8 + reload: POSICIONAR_PEAO sobre a Inicial posicionada; snapshot reconcilia sem fantasma', () => {
+    // 7. Inicial posicionada + peão selecionado (gate passa: inicial-1 em mesa).
+    const pronto = estadoBase({
+      posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      peaoSelecionadoId: 'peao-branco',
+      pecaSelecionadaId: null,
+    })
+    expect(podeSelecionarPeao(pronto, 'peao-branco')).toBe(true)
+    // 8. Clicar a célula da Inicial posicionada emite POSICIONAR_PEAO.
+    expect(rotearCliqueDeCelula(pronto, tabuleiroDe(pronto), CELULA_INICIAL)).toEqual({
+      ciclo: { type: 'POSICIONAR_PEAO', peaoId: 'peao-branco', celula: CELULA_INICIAL },
+    })
+    // Reload: snapshot sem seleção não ressuscita fantasma — o fallback volta
+    // a valer e nova seleção passa pelo gate (Inicial posicionada).
+    const aposReload: EstadoInteracaoPeoes = { ...pronto, peaoSelecionadoId: null }
+    expect(cicloAtivo(aposReload)).toBe(false)
+    expect(mapearCliqueNoPeao(aposReload, 'peao-branco')).toEqual({
+      tipo: 'comando',
+      comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' },
+    })
   })
 })

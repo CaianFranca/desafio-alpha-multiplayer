@@ -311,6 +311,48 @@ describe('redução do ciclo do peão — espelho do engine (issue #91, forma #1
     expect(estado.peaoSelecionadoId).toBe('peao-branco')
   })
 
+  it('PEAO_DESELECIONADO limpa a seleção vigente (desseleção autoritativa, #249)', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_SELECIONADO',
+      peaoId: 'peao-branco',
+    })
+    estado = reduzirEvento(estado, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })
+    expect(estado.peaoSelecionadoId).toBeNull()
+  })
+
+  it('PEAO_DESELECIONADO de outro peão é no-op (sem seleção fantasma, #249)', () => {
+    const selecionado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_SELECIONADO',
+      peaoId: 'peao-branco',
+    })
+    const intocado = reduzirEvento(selecionado, {
+      type: 'PEAO_DESELECIONADO',
+      peaoId: 'peao-vermelho',
+    })
+    expect(intocado.peaoSelecionadoId).toBe('peao-branco')
+    // Sem seleção vigente também é no-op.
+    expect(
+      reduzirEvento(criarEstadoInicialDoCliente(), {
+        type: 'PEAO_DESELECIONADO',
+        peaoId: 'peao-branco',
+      }).peaoSelecionadoId,
+    ).toBeNull()
+  })
+
+  it('PECA_POSICIONADA não toca a seleção do peão (só o ciclo a governa, #249)', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_SELECIONADO',
+      peaoId: 'peao-branco',
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+      orientacao: 0,
+    })
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
+  })
+
   it('RECEBIMENTO_GERADO (#138) passa as pendências sorteadas e semeia os tipos', () => {
     const recebidas = [
       pendenciaSorteada('r1', 'reta-1', 'reta', null, null),
@@ -961,8 +1003,7 @@ describe('reconciliação no reload — prova segura sem reset blanket (issue #2
     expect(comSelecao.peaoSelecionadoId).toBe('peao-branco')
   })
 
-  it('snapshot após o remount restaura o fluxo: seleção + pendentes preservados para o encaixe', () => {
-    // O encaixe exige pendencia.pecaId === pecaSelecionadaId
+  it('snapshot após o remount restaura o fluxo: seleção + pendentes preservados para o encaixe', () => {    // O encaixe exige pendencia.pecaId === pecaSelecionadaId
     // (interacaoPeoes.ts:399-409): descartar qualquer um dos dois no reload
     // criaria um deadlock novo — por isso o reset blanket foi rejeitado.
     const estado = aplicarSnapshot(
@@ -994,6 +1035,22 @@ describe('reconciliação no reload — prova segura sem reset blanket (issue #2
     const pendencia = estado.recebidasPendentes[0]
     expect(pendencia?.pecaId).toBe(estado.pecaSelecionadaId)
     expect(pendencia?.celulaAlvo).toEqual({ linha: 2, coluna: 3 })
+  })
+
+  it('snapshot é autoridade total da seleção: null limpa sem ressuscitar fantasma (#249)', () => {
+    // Seleção vigente via evento, depois snapshot sem seleção (pós
+    // DESELECIONAR_PEAO + reload): o modelo assume null — nunca mantém o
+    // valor antigo como fantasma.
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_SELECIONADO',
+      peaoId: 'peao-branco',
+    })
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
+    estado = aplicarSnapshot(estado, snapshotReload({ peaoSelecionadoId: null }))
+    expect(estado.peaoSelecionadoId).toBeNull()
+    // E o evento de desseleção após o snapshot segue idempotente.
+    estado = reduzirEvento(estado, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })
+    expect(estado.peaoSelecionadoId).toBeNull()
   })
 })
 

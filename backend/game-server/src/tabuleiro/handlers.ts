@@ -183,6 +183,8 @@ function mapearComando(
       return { tipo: 'finalizar_manipulacao' };
     case 'SELECIONAR_PEAO':
       return { tipo: 'selecionar_peao', peaoId: comando.peaoId };
+    case 'DESELECIONAR_PEAO':
+      return { tipo: 'desselecionar_peao', peaoId: comando.peaoId };
     case 'POSICIONAR_PEAO':
       return { tipo: 'posicionar_peao', peaoId: comando.peaoId, celula: comando.celula };
     case 'ESCOLHER_VAGA_DA_PECA_RECEBIDA':

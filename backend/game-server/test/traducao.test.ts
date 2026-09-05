@@ -156,3 +156,12 @@ test('traduzirEventos emite PARTIDA_TERMINADA como último evento do lote da Aç
   assert.equal(saida.length, 3);
   assert.equal(saida[saida.length - 1]!.type, 'PARTIDA_TERMINADA');
 });
+
+test('traduzirEventos mapeia peao_desselecionado para PEAO_DESELECIONADO (issue #249)', () => {
+  const eventos = [
+    { tipo: 'peao_desselecionado', peaoId: 'peao-branco' },
+  ] as const satisfies readonly EventoDaPartida[];
+  const saida = traduzirEventos(eventos);
+  assert.equal(saida.length, 1);
+  assert.deepEqual(saida[0], { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' });
+});

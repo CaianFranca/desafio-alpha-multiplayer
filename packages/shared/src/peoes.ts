@@ -6,12 +6,14 @@
 // divergem para desacoplar wire do modelo interno. Sync manual quando engine evolui.
 //   Comandos:
 //   shared type:'SELECIONAR_PEAO'                <-> engine tipo:'selecionar_peao' (peaoId)
+//   shared type:'DESELECIONAR_PEAO'              <-> engine tipo:'desselecionar_peao' (peaoId) — issue #249
 //   shared type:'POSICIONAR_PEAO'                <-> engine tipo:'posicionar_peao' (peaoId, celula)
 //   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' <-> engine tipo:'escolher_vaga_da_peca_recebida' (recebidaId, borda) — issue #138
 //   shared type:'MOVER_PEAO'                     <-> engine tipo:'mover_peao' (peaoId, celula)
 //   shared type:'PERMANECER'                     <-> engine tipo:'permanecer' (peaoId)
 //   Eventos:
 //   shared type:'PEAO_SELECIONADO'                <-> engine tipo:'peao_selecionado' (peaoId)
+//   shared type:'PEAO_DESELECIONADO'              <-> engine tipo:'peao_desselecionado' (peaoId) — issue #249
 //   shared type:'RECEBIMENTO_GERADO'              <-> engine tipo:'recebimento_gerado' (pendências sorteada da #138 em PendenciaDaPecaSorteada)
 //   shared type:'PEAO_POSICIONADO'                <-> engine tipo:'peao_posicionado' (peaoId, pecaId, celula)
 //   shared type:'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO' <-> engine tipo:'vaga_da_peca_recebida_escolhida' (recebidaId, borda, celulaAlvo) — issue #138
@@ -57,11 +59,20 @@ export interface PendenciaDaPecaSorteada {
   readonly celulaAlvo: Celula | null;
 }
 
-// --- Comandos cliente → servidor (5) ---
+// --- Comandos cliente → servidor (6) ---
 // girar/posicionar da Peça Recebida usam GirarPecaComando / PosicionarPecaComando de ./tabuleiro.ts.
 
 export interface SelecionarPeaoComando {
   readonly type: 'SELECIONAR_PEAO';
+  readonly peaoId: PeaoId;
+}
+
+// Desseleção autoritativa (issue #249): o servidor é a autoridade inclusive
+// para desselecionar — o cliente nunca roteia por estado local divergente.
+// Idempotente no domínio (já desselecionado ou outro peão em sequência é
+// no-op); rejeitada sob Recebidas pendentes (PENDENCIA_NAO_RESOLVIDA).
+export interface DesselecionarPeaoComando {
+  readonly type: 'DESELECIONAR_PEAO';
   readonly peaoId: PeaoId;
 }
 
@@ -93,18 +104,26 @@ export interface PermanecerComando {
 
 export type PeaoComandoDoCliente =
   | SelecionarPeaoComando
+  | DesselecionarPeaoComando
   | PosicionarPeaoComando
   | EscolherVagaDaPecaRecebidaComando
   | MoverPeaoComando
   | PermanecerComando;
 
-// --- Eventos servidor → cliente (6) ---
+// --- Eventos servidor → cliente (7) ---
 // Reusos do ciclo via TabuleiroEventoDoServidor (SalaServerMessage), sem
 // redefinição aqui: peca_selecionada, peca_deselecionada, peca_girada,
 // peca_posicionada, manipulacao_finalizada e erro_do_tabuleiro.
 
 export interface PeaoSelecionadoEvento {
   readonly type: 'PEAO_SELECIONADO';
+  readonly peaoId: PeaoId;
+}
+
+// Espelho da desseleção autoritativa (issue #249): emitido apenas quando a
+// seleção vigente é limpa (idempotentes não reemitem).
+export interface PeaoDesselecionadoEvento {
+  readonly type: 'PEAO_DESELECIONADO';
   readonly peaoId: PeaoId;
 }
 
@@ -146,6 +165,7 @@ export interface PeaoPermaneceuEvento {
 
 export type PeaoEventoDoServidor =
   | PeaoSelecionadoEvento
+  | PeaoDesselecionadoEvento
   | RecebimentoGeradoEvento
   | PeaoPosicionadoEvento
   | PeaoMovidoEvento

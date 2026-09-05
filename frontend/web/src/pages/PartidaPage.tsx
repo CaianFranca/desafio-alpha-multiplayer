@@ -16,6 +16,10 @@ import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
 import {
+  chaveDeComandoPendente,
+  consumirAck,
+} from '../game/tabuleiro/pendentes'
+import {
   criarEstadoInicialDoCliente,
   reduzirEvento,
   estadoDeExibicaoDoModelo,
@@ -120,12 +124,32 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     emResultadoRef.current = emResultado
   }, [emResultado])
 
+  // ── Pendentes otimistas anti-duplo-place (issue #249) ──
+  // Conjunto de alvos em voo (POSICIONAR_PECA/POSICIONAR_PEAO/
+  // DESELECIONAR_PEAO): bloqueia o reenvio do mesmo alvo até ack/erro/
+  // snapshot. O servidor é a autoridade — o cliente nunca permite duplo
+  // envio; o consumo acontece no onEvento abaixo (ack por evento, erro e
+  // snapshot limpam). Ref estável, fora do modelo (nunca persiste).
+  const pendentesEmVoo = useRef<Set<string>>(new Set())
+
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, conectar: reconectarSocket, desconectar } = usePartidaWebSocket({
     serverId,
     partidaId,
     onEvento: useCallback(
       (evento) => {
+        // Consumo dos pendentes otimistas (#249): ack remove o alvo em voo;
+        // erro e snapshot reconciliam (autoridade total — limpam).
+        if (
+          evento.type === 'PECA_POSICIONADA' ||
+          evento.type === 'PEAO_POSICIONADO' ||
+          evento.type === 'PEAO_DESELECIONADO'
+        ) {
+          consumirAck(pendentesEmVoo.current, evento)
+        }
+        if (evento.type === 'ERRO_DO_TABULEIRO') {
+          pendentesEmVoo.current.clear()
+        }
         if (evento.type === 'PARTIDA_TERMINADA') {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante a
           // tela de resultado.
@@ -135,6 +159,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           return
         }
         if (evento.type === 'ESTADO_DA_PARTIDA') {
+          // Snapshot é autoridade total da seleção (#249): reconcilia
+          // pendentes em voo contraditórios (limpa o conjunto).
+          pendentesEmVoo.current.clear()
           aplicarSnapshotNoModelo(evento.snapshot)
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
@@ -212,10 +239,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [desconectar, navigate, codigoDeSala])
 
   // ── Injeção única de jogadorId (issue #91) — bloqueada após término ──
+  // Com gate anti-duplo-place (#249): o mesmo alvo em voo não é reenviado.
   const enviarComJogador = useCallback(
     (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
       if (emResultado) return
+      const chave = chaveDeComandoPendente(comando)
+      if (chave !== null) {
+        if (pendentesEmVoo.current.has(chave)) return
+        pendentesEmVoo.current.add(chave)
+      }
       enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
     [enviar, jogadorId, emResultado],

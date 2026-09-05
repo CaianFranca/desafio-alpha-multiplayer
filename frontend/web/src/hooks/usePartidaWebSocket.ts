@@ -174,6 +174,7 @@ export function usePartidaWebSocket({
         case 'MANIPULACAO_FINALIZADA':
         case 'ERRO_DO_TABULEIRO':
         case 'PEAO_SELECIONADO':
+        case 'PEAO_DESELECIONADO':
         case 'RECEBIMENTO_GERADO':
         case 'PEAO_POSICIONADO':
         case 'PEAO_MOVIDO':
