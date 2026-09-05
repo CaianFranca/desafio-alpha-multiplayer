@@ -16,6 +16,7 @@ import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/i
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
+import { TransicaoLimpeza, type LimpezaTrigger } from './TransicaoLimpeza'
 import type {
   PeaoId,
   PecaId,
@@ -109,6 +110,8 @@ interface AmbienteCenaProps {
   vooPendente?: VooDoPeaoPendente | null
   /** Pouso do voo concluído (nonce): a página limpa o pendente. */
   onVooAterrissou?: (nonce: number) => void
+  /** Trigger de limpeza evento-driven (issue #239, B1). */
+  limpezaTrigger?: LimpezaTrigger | null
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -142,6 +145,7 @@ export function AmbienteCena({
   pecaCorrente = null,
   vooPendente = null,
   onVooAterrissou,
+  limpezaTrigger = null,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
@@ -193,6 +197,7 @@ export function AmbienteCena({
               estadoPeoes={estadoPeoes}
               onPuxar={onPuxarPecaDaBandeja}
             />
+            <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
             {peoesNaMesa.map((peao) => {
               // Voo ativo (#242): o peão voador não renderiza estático na Mesa
               // (Primeiro Turno: origem mesa→peça inicial) — só o overlay voa.

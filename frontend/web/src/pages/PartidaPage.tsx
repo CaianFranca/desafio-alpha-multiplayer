@@ -10,6 +10,8 @@ import {
   textoDoAnuncioDeRecusa,
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
+import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
+import { tocarSom } from '../game/audio/sons'
 import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
 import {
   deveLimparVooNoSnapshot,
@@ -130,6 +132,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const onVooAterrissou = useCallback((nonce: number) => {
     setVooPendente((atual) => limparVooAoAterrissar(atual, nonce))
   }, [])
+  // ── Trigger de limpeza para TransicaoLimpeza (issue #239, B1) ──
+  // Evento-driven: só LIMPEZA_APLICADA dispara som/animação, snapshots não.
+  const [limpezaTrigger, setLimpezaTrigger] = useState<{ pecasRemovidas: readonly string[]; key: number } | null>(null)
+  const limpezaKeyRef = useRef(0)
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
   const emResultado = estado === 'resultado'
@@ -179,6 +185,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             const motivo = motivoDeRecusaDoEvento(evento)
             if (motivo !== null) tocarRecusa(motivo)
           }
+          return
+        }
+        // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
+        // LIMPEZA_APLICADA dispara som/animação, snapshots não.
+        if (evento.type === 'LIMPEZA_APLICADA') {
+          if (evento.pecasRemovidas.length > 0) {
+            limpezaKeyRef.current += 1
+            setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
+            tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
+          }
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           return
         }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
@@ -404,6 +421,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         sanidadePorPeao={sanidadePorPeao}
         vooPendente={vooPendente}
         onVooAterrissou={onVooAterrissou}
+        limpezaTrigger={limpezaTrigger}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*

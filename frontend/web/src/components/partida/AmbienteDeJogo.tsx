@@ -26,6 +26,7 @@ import {
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 import type { VooDoPeaoPendente } from '../../game/tabuleiro/vooDoPeao'
+import type { LimpezaTrigger } from '../../game/scenes/TransicaoLimpeza'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -69,6 +70,8 @@ interface AmbienteDeJogoProps {
   vooPendente?: VooDoPeaoPendente | null
   /** Pouso do voo concluído (nonce): a página limpa o pendente. */
   onVooAterrissou?: (nonce: number) => void
+  /** Trigger de limpeza evento-driven (issue #239, B1) — só LIMPEZA_APLICADA dispara, snapshot não. */
+  limpezaTrigger?: LimpezaTrigger | null
 }
 
 export function AmbienteDeJogo({
@@ -84,6 +87,7 @@ export function AmbienteDeJogo({
   sanidadePorPeao = {},
   vooPendente = null,
   onVooAterrissou,
+  limpezaTrigger = null,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade ──
   // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
@@ -264,6 +268,7 @@ export function AmbienteDeJogo({
           pecaCorrente={pecaCorrente}
           vooPendente={vooPendente}
           onVooAterrissou={onVooAterrissou}
+          limpezaTrigger={limpezaTrigger}
         />
       </Canvas>
       {estadoExibicao ? (

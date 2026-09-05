@@ -47,6 +47,7 @@ export function SalaPage() {
   const isDisponivel = encaminhamento.fase === 'disponivel'
   const [codigoInput, setCodigoInput] = useState('')
   const conviteEnviadoRef = useRef<string | null>(null)
+  const conviteRedirecionadoRef = useRef<string | null>(null)
   const conectando = !conectado && !sala
 
   // Anfitrião: membro local identificado por jogadorId, comparado ao anfitriaoId da sala.
@@ -59,10 +60,16 @@ export function SalaPage() {
     navigate('/salas/criar')
   }, [sairDaSala, navigate])
 
-  // Entrada por rota de Convite /sala/:codigoDeSala — envia apenas uma vez
-  // por código normalizado, para não reentrar após sair da sala.
+  // Entrada por rota de Convite /sala/:codigoDeSala, /salas/:codigoDeSala ou
+  // /convite/:codigoDeSala — envia apenas uma vez por código normalizado,
+  // para não reentrar após sair da sala. Quem já está em sala tem o convite ignorado.
   useEffect(() => {
-    if (!codigoParam || sala) return
+    if (!codigoParam) {
+      conviteEnviadoRef.current = null
+      conviteRedirecionadoRef.current = null
+      return
+    }
+    if (sala) return
     const codigo = normalizarCodigoDeSala(codigoParam)
     if (codigo && conviteEnviadoRef.current !== codigo) {
       conviteEnviadoRef.current = codigo
@@ -70,15 +77,28 @@ export function SalaPage() {
     }
   }, [codigoParam, sala, entrarNaSala])
 
-  // Se o servidor rejeitar a entrada (ex.: SALA_NAO_ENCONTRADA), libera a ref
-  // para permitir nova tentativa — sem reenviar sozinho enquanto houver erro.
+  // Convite com formato inválido (ex.: /sala/ABC) — volta para criar/entrar
+  // sem acionar o WS. O replace evita prender a URL inválida no histórico.
+  useEffect(() => {
+    if (!codigoParam || sala) return
+    if (normalizarCodigoDeSala(codigoParam) === null) {
+      navigate('/salas/criar', { replace: true })
+    }
+  }, [codigoParam, sala, navigate])
+
+  // Servidor rejeitou a entrada do convite (ex.: SALA_NAO_ENCONTRADA) — volta
+  // para /salas/criar uma única vez por código, mantendo `erro`/`avisos` do
+  // contexto (provider acima do Outlet) para explicar o motivo no destino.
+  // Sem reenvio automático enquanto houver erro; erros de digitação manual
+  // em /salas/criar (codigoParam nulo) nunca redirecionam.
   useEffect(() => {
     if (!erro || sala || !codigoParam) return
     const codigo = normalizarCodigoDeSala(codigoParam)
-    if (codigo && conviteEnviadoRef.current === codigo) {
-      conviteEnviadoRef.current = null
-    }
-  }, [erro, sala, codigoParam])
+    if (!codigo || conviteRedirecionadoRef.current === codigo) return
+    conviteRedirecionadoRef.current = codigo
+    conviteEnviadoRef.current = null
+    navigate('/salas/criar', { replace: true })
+  }, [erro, sala, codigoParam, navigate])
 
   const possuiSala = sala !== null
 
