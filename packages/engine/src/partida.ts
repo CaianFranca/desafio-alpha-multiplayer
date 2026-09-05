@@ -27,6 +27,14 @@
 // altera o snapshot e não gera Ataque. A Proteção concedida pela Sala Médica
 // na Confirmação não é consumida pelo Ataque do MESMO gatilho — permanece
 // para o próximo (CONTEXT.md: "permanece até ser consumida").
+//
+// Proteção observável (issue #227): o evento posicao_confirmada carrega o
+// `protegido` RESULTANTE do ator no fim do gatilho completo — concessão da
+// Sala Médica e consumo pelo ataque do MESMO gatilho incluídos. O snapshot
+// da partida (projeção no game-server) leva o `protegido` por Jogador como
+// baseline autoritativa de reconciliação de reconexão; o consumo corrente
+// continua observável em ataque_resolvido.protegidos. Espelho no wire:
+// shared/src/partida.ts (cabeçalho de fronteira).
 
 import {
   aplicarComandoDeTabuleiro,
@@ -157,6 +165,12 @@ export interface PosicaoConfirmadaEvento {
   readonly jogadorId: string;
   readonly peaoId: string;
   readonly pecaId: string;
+  // Proteção do ator RESULTANTE do gatilho (issue #227): o espelho exato do
+  // `protegido` do ator no ESTADO FINAL — true quando a Sala Médica a concedeu
+  // (sobrevive ao ataque do MESMO gatilho) OU quando uma Proteção prévia não
+  // foi consumida; false quando não havia Proteção ou ela foi consumida pelo
+  // ataque do próprio gatilho (sem Sala Médica no destino para restaurá-la).
+  readonly protegido: boolean;
 }
 
 export interface CelulasIluminadasEvento {
@@ -874,15 +888,13 @@ function confirmarPosicaoDoPeao(
   // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
   const emBaixa = ator.emBaixaIluminacao ?? false;
   const sorteio = gerarRecebidas(estado.tabuleiro, peca, emBaixa);
-  const eventos: EventoDaPartida[] = [
-    {
-      tipo: 'posicao_confirmada',
-      jogadorId: ator.jogadorId,
-      peaoId: peao.peaoId,
-      pecaId: peca.pecaId,
-    },
-    ...sorteio.eventos,
-  ];
+  // Issue #227: o posicao_confirmada só entra no lote ao FINAL da computação —
+  // o evento carrega o protegido RESULTANTE do ator no gatilho completo, que
+  // inclui a concessão da Sala Médica e o consumo pelo ataque do MESMO gatilho
+  // (ambos computados abaixo). A ordem do lote é preservada: ele permanece em
+  // PRIMEIRO, antes de peca_sorteada/recebimento_gerado/celulas_iluminadas/
+  // ataque_resolvido.
+  const eventos: EventoDaPartida[] = [...sorteio.eventos];
   if (sorteio.recebidas.length > 0) {
     eventos.push({
       tipo: 'recebimento_gerado',
@@ -932,6 +944,15 @@ function confirmarPosicaoDoPeao(
           : jogador,
       )
     : ataque.jogadores;
+  // Proteção do ator no fim do gatilho completo (issue #227): true quando a
+  // Sala Médica acabou de conceder (sobrevive ao ataque do MESMO gatilho) ou
+  // quando uma Proteção prévia não foi consumida; false quando não havia
+  // Proteção ou ela foi consumida pelo ataque do próprio gatilho. `?? false`
+  // no padrão defensivo de estados persistidos sem o campo.
+  const atorFinal = jogadores.find(
+    (jogador) => jogador.jogadorId === ator.jogadorId,
+  );
+  const protegidoFinal = atorFinal?.protegido ?? false;
   return sucessoDaPartida(
     {
       ...estado,
@@ -944,7 +965,18 @@ function confirmarPosicaoDoPeao(
       jogadores,
       pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
     },
-    eventos,
+    // O posicao_confirmada abre o lote (ordem canônica da Confirmação
+    // preservada) já com o protegido RESULTANTE (issue #227).
+    [
+      {
+        tipo: 'posicao_confirmada',
+        jogadorId: ator.jogadorId,
+        peaoId: peao.peaoId,
+        pecaId: peca.pecaId,
+        protegido: protegidoFinal,
+      },
+      ...eventos,
+    ],
   );
 }
 

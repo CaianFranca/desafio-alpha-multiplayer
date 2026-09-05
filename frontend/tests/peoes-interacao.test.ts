@@ -730,7 +730,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
         type: 'POSICAO_CONFIRMADA',
         jogadorId: 'jogador-1',
         peaoId: 'peao-1',
-        pecaId: 'reta-2',
+        pecaId: 'reta-2', protegido: false,
       }),
     ).toBeNull()
   })

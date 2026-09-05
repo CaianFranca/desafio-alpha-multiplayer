@@ -1010,6 +1010,130 @@ test('confirmação sobre a sala médica concede a Proteção após o ataque do 
   assert.equal(anaDepois?.protegido, false);
 });
 
+// Issue #227: o posicao_confirmada carrega o protegido RESULTANTE do ator no
+// gatilho completo — o eco observável da Proteção no canal (o snapshot leva o
+// estado por Jogador como baseline de reconexão). Onde a Proteção vive: engine
+// (concessão na Confirmação, consumo no ATAQUE_RESOLVIDO.protegidos) →
+// snapshot (baseline). ATAQUE_RESOLVIDO.protegidos já cobria o lado do
+// consumo; aqui o estado resultante viaja na Confirmação.
+test('a Confirmação sobre a Sala Médica emite posicao_confirmada com protegido: true (issue #227)', () => {
+  let estado = partidaEmRodada2();
+  estado = comPeca(estado, 'sala-x', 'sala_medica', 0, 1, 3);
+  // Ana passa por reta-1 e confirma SOBRE a Sala Médica — sem Monstro no
+  // cenário: a concessão acontece e o evento carrega o estado resultante.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const confirmado = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmado.sucesso, true);
+  if (!confirmado.sucesso) return;
+  // Ordem do lote preservada (issue #227): posicao_confirmada em PRIMEIRO,
+  // antes de peca_sorteada/recebimento_gerado/celulas_iluminadas.
+  assert.equal(confirmado.eventos[0].tipo, 'posicao_confirmada');
+  assert.deepEqual(confirmado.eventos[0], {
+    tipo: 'posicao_confirmada',
+    jogadorId: 'ana',
+    peaoId: 'peao-branco',
+    pecaId: 'sala-x',
+    protegido: true,
+  });
+  const ana = confirmado.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.protegido, true);
+});
+
+test('a Confirmação sem Sala Médica emite posicao_confirmada com protegido: false (issue #227)', () => {
+  let estado = partidaEmRodada2();
+  // Ana confirma sobre a reta-1 (mudança de peça comum): nenhuma concessão e
+  // nenhuma Proteção prévia — o estado resultante é false.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const confirmado = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmado.sucesso, true);
+  if (!confirmado.sucesso) return;
+  assert.equal(confirmado.eventos[0].tipo, 'posicao_confirmada');
+  assert.deepEqual(confirmado.eventos[0], {
+    tipo: 'posicao_confirmada',
+    jogadorId: 'ana',
+    peaoId: 'peao-branco',
+    pecaId: 'reta-1',
+    protegido: false,
+  });
+  const ana = confirmado.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.protegido, false);
+});
+
+test('a Confirmação cujo ataque consumiu a Proteção prévia emite protegido: false sem Sala Médica (issue #227)', () => {
+  let estado = partidaEmRodada2();
+  estado = comPeca(estado, 'espectro-x', 'espectro', 0, 0, 3);
+  estado = comPeca(estado, 'reta-nova', 'reta', 0, 1, 3);
+  // Ana já chegou à Confirmação COM Proteção (concedida por gatilho anterior).
+  estado = {
+    ...estado,
+    jogadores: estado.jogadores.map((jogador) =>
+      jogador.jogadorId === 'ana' ? { ...jogador, protegido: true } : jogador,
+    ),
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const confirmado = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmado.sucesso, true);
+  if (!confirmado.sucesso) return;
+  // O ataque do MESMO gatilho dispara (delta do alcance) e CONSOME a Proteção
+  // de ana (sem Sala Médica no destino para restaurá-la): o estado resultante
+  // do ator no fim do gatilho completo é false — é o que o evento carrega.
+  const ataque = ataqueDoLote(confirmado.eventos);
+  assert.ok(ataque, 'a entrada no alcance do espectro deveria disparar o ataque');
+  if (!ataque) return;
+  assert.deepEqual(ataque.protegidos, ['ana']);
+  assert.deepEqual(ataque.peoesAtingidos, []);
+  assert.equal(confirmado.eventos[0].tipo, 'posicao_confirmada');
+  assert.deepEqual(confirmado.eventos[0], {
+    tipo: 'posicao_confirmada',
+    jogadorId: 'ana',
+    peaoId: 'peao-branco',
+    pecaId: 'reta-nova',
+    protegido: false,
+  });
+  const ana = confirmado.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.protegido, false);
+});
+
+test('a Confirmação preserva Proteção prévia não consumida: evento emite protegido: true (issue #227)', () => {
+  let estado = partidaEmRodada2();
+  // Ana já chegou à Confirmação COM Proteção (gatilho anterior) e o destino
+  // não é a Sala Médica — sem Monstro, o ataque não dispara e a Proteção
+  // permanece: o estado resultante do ator é true, e é o que o evento carrega.
+  estado = {
+    ...estado,
+    jogadores: estado.jogadores.map((jogador) =>
+      jogador.jogadorId === 'ana' ? { ...jogador, protegido: true } : jogador,
+    ),
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const confirmado = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmado.sucesso, true);
+  if (!confirmado.sucesso) return;
+  assert.equal(confirmado.eventos[0].tipo, 'posicao_confirmada');
+  assert.deepEqual(confirmado.eventos[0], {
+    tipo: 'posicao_confirmada',
+    jogadorId: 'ana',
+    peaoId: 'peao-branco',
+    pecaId: 'reta-1',
+    protegido: true,
+  });
+  assert.equal(ataqueDoLote(confirmado.eventos), undefined);
+  const ana = confirmado.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.protegido, true);
+});
+
 test('posicionar monstro não dispara ataque, mesmo com peão no alcance; o próximo gatilho atinge (critério 7)', () => {
   const inicio = estadoInicialDaPartida(JOGADORES);
   assert.equal(inicio.sucesso, true);

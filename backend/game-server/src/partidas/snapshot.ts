@@ -41,6 +41,10 @@ export function paraSnapshotWire(
         sanidade: jogador.sanidade ?? 3,
         emBaixaIluminacao: jogador.emBaixaIluminacao ?? false,
         amedrontado: jogador.amedrontado ?? (jogador.sanidade ?? 3) === 0,
+        // Proteção da Sala Médica no snapshot (issue #227): baseline do estado
+        // da Proteção por Jogador. Normalização defensiva no mesmo padrão dos
+        // estados persistidos por binário anterior: protegido ausente ≡ false.
+        protegido: jogador.protegido ?? false,
       } as const;
     });
 

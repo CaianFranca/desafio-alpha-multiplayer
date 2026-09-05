@@ -545,7 +545,7 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
   assert.equal(confirmacao.sucesso, true);
   if (!confirmacao.sucesso) return;
   assert.deepEqual(confirmacao.eventos, [
-    { tipo: 'posicao_confirmada', jogadorId: 'ana', peaoId: 'peao-branco', pecaId: 'reta-1' },
+    { tipo: 'posicao_confirmada', jogadorId: 'ana', peaoId: 'peao-branco', pecaId: 'reta-1', protegido: false },
     { tipo: 'peca_sorteada', pecaId: 'reta-7', tipoDaPeca: 'reta', orientacao: 0 },
     {
       tipo: 'recebimento_gerado',
