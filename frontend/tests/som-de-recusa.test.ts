@@ -100,7 +100,7 @@ describe('som de recusa — toque (issue #228)', () => {
     expect(toquesDeAudio).toHaveLength(3)
     for (const toque of toquesDeAudio) {
       expect(toque.src).toBe(CAMINHO_SOM_DE_RECUSA)
-      expect(toque.src).toBe('/assets/audio/bumpintowall.mp3')
+      expect(toque.src).toBe('/media/bumpintowall.mp3')
       expect(toque.volume).toBe(0.3)
     }
   })

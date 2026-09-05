@@ -92,10 +92,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Único dono dos disparos: reage aos mesmos eventos do canal que antes
   // geravam flash, somente leitura do modelo. Aprovações/seleções/sorteios/
   // turnos ficam em silêncio (motivo null = "foi").
-  const [anuncioDeRecusa, setAnuncioDeRecusa] = useState<MotivoDeRecusa | null>(null)
+  // B2: live region precisa re-anunciar mesmo motivo repetido — `seq` força
+  // nova render (key/aria) mesmo quando o texto é idêntico; sem isso leitores
+  // ignoram a segunda recusa (bail-out do React + texto igual).
+  const [anuncioDeRecusa, setAnuncioDeRecusa] = useState<{ motivo: MotivoDeRecusa; seq: number } | null>(null)
+  const seqRef = useRef(0)
   const tocarRecusa = useCallback((motivo: MotivoDeRecusa) => {
     tocarSomDeRecusa(motivo)
-    setAnuncioDeRecusa(motivo)
+    seqRef.current += 1
+    setAnuncioDeRecusa({ motivo, seq: seqRef.current })
   }, [])
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
@@ -367,13 +372,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         anúncio). Invisível para quem não usa leitor (`sr-only`).
       */}
       <div
+        key={anuncioDeRecusa?.seq ?? 'vazio'}
         data-testid="anuncio-de-recusa"
-        data-motivo={anuncioDeRecusa ?? undefined}
+        data-motivo={anuncioDeRecusa?.motivo ?? undefined}
+        data-seq={anuncioDeRecusa?.seq ?? undefined}
         role="status"
         aria-live="polite"
+        aria-atomic="true"
         className="sr-only"
       >
-        {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa) : ''}
+        {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa.motivo) : ''}
       </div>
       {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
         <div
