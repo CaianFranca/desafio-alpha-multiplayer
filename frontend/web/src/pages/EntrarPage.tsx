@@ -96,7 +96,7 @@ export function EntrarPage() {
         </button>
       </form>
 
-      <p className="text-sm text-center text-[var(--color-muted)] mt-6">
+      <p className="text-sm text-center text-muted mt-6">
         Ainda não tem Cadastro?{' '}
         <Link to="/cadastro" className="auth-link">
           Crie seu Cadastro

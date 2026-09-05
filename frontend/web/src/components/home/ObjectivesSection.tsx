@@ -43,7 +43,7 @@ function ObjectivesRevealItem({ index, children }: { index: number; children: Re
 
 export function ObjectivesSection() {
   return (
-    <section id={objectives.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-background)" aria-labelledby="objectives-title">
+    <section id={objectives.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-background" aria-labelledby="objectives-title">
       <div className="max-w-4xl mx-auto">
         <h2 id="objectives-title" className="objectives-eyebrow">{objectives.title}</h2>
         <ol className="objectives-timeline list-none m-0 p-0 flex flex-col">

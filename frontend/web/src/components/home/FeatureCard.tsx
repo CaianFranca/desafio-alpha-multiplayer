@@ -42,7 +42,7 @@ export function FeatureCard({ title, description, iconSrc }: FeatureCardProps) {
         <img src={iconSrc} alt="" aria-hidden="true" draggable={false} className="features-badge-icon" />
       </span>
       <h3 className="text-xl mt-4 mb-2">{title}</h3>
-      <p className="text-(--color-muted) text-sm leading-relaxed m-0">{description}</p>
+      <p className="text-muted text-sm leading-relaxed m-0">{description}</p>
     </div>
   )
 }

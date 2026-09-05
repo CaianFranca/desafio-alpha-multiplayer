@@ -5,8 +5,8 @@ type Variant = 'primary' | 'secondary'
 type Size = 'md' | 'sm'
 
 const variantClasses: Record<Variant, string> = {
-  primary: 'cta-primary font-display inline-block rounded-none cursor-pointer font-semibold uppercase tracking-[0.12em] text-center hover:opacity-90 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] focus-visible:outline-offset-2 transition-opacity',
-  secondary: 'cta-secondary font-display inline-block rounded-none cursor-pointer font-semibold uppercase tracking-[0.12em] text-center focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] focus-visible:outline-offset-2 transition-colors',
+  primary: 'cta-primary font-display inline-block rounded-none cursor-pointer font-semibold uppercase tracking-[0.12em] text-center hover:opacity-90 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 transition-opacity',
+  secondary: 'cta-secondary font-display inline-block rounded-none cursor-pointer font-semibold uppercase tracking-[0.12em] text-center focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 transition-colors',
 }
 
 const sizeClasses: Record<Size, string> = {

@@ -31,7 +31,7 @@ export function AuthField({
         {label}
       </label>
       <div className="relative">
-        <span className="absolute inset-y-0 left-3 flex items-center text-[var(--color-muted)]" aria-hidden="true">
+        <span className="absolute inset-y-0 left-3 flex items-center text-muted" aria-hidden="true">
           {icon}
         </span>
         <input

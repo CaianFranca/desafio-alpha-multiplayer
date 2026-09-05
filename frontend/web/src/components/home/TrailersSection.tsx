@@ -4,7 +4,7 @@ import { trailers } from './placeholders'
 import type { Trailer } from './placeholders'
 
 const controlButton =
-  'inline-flex h-9 w-9 items-center justify-center border-0 rounded-full bg-transparent p-0 text-white cursor-pointer hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors'
+  'inline-flex h-9 w-9 items-center justify-center border-0 rounded-full bg-transparent p-0 text-white cursor-pointer hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-accent transition-colors'
 
 function PlayIcon() {
   return (
@@ -41,7 +41,7 @@ function MutedIcon() {
 function TrailerCover({ titulo, children }: { titulo: string; children?: ReactNode }) {
   return (
     <div
-      className="trailers-cover group flex w-full aspect-video items-center justify-center rounded-none border-0 bg-linear-to-br from-(--color-surface) via-(--color-background) to-(--color-surface)"
+      className="trailers-cover group flex w-full aspect-video items-center justify-center rounded-none border-0 bg-linear-to-br from-surface via-background to-surface"
       role="img"
       aria-label={titulo}
     >
@@ -115,7 +115,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
               <path d="M8 5v14l11-7z" />
             </svg>
           </span>
-          <span className="text-(--color-muted) text-sm italic text-center">{trailers.mensagens.indisponivel}</span>
+          <span className="text-muted text-sm italic text-center">{trailers.mensagens.indisponivel}</span>
         </span>
       </TrailerCover>
     )
@@ -125,7 +125,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
         <TrailerCover titulo={titulo}>
           {capa ? <img src={capa} alt="" className="w-full h-full object-cover rounded-none" /> : null}
         </TrailerCover>
-        <p role="status" className="mt-3 text-(--color-muted) text-sm">{trailers.mensagens.falha}</p>
+        <p role="status" className="mt-3 text-muted text-sm">{trailers.mensagens.falha}</p>
       </div>
     )
   } else if (shouldLoad) {
@@ -191,14 +191,14 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
           <div
             role="img"
             aria-label={titulo}
-            className="flex w-full aspect-video items-center justify-center overflow-hidden rounded-none border-0 bg-(--color-surface)"
+            className="flex w-full aspect-video items-center justify-center overflow-hidden rounded-none border-0 bg-surface"
           />
         )}
         <button
           type="button"
           onClick={() => setRequested(true)}
           aria-label={trailers.labels.play}
-          className="trailers-play absolute inset-0 m-auto inline-flex h-16 w-16 items-center justify-center border-0 rounded-full bg-black/60 text-white cursor-pointer hover:bg-(--color-accent) hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-(--color-accent) transition-colors"
+          className="trailers-play absolute inset-0 m-auto inline-flex h-16 w-16 items-center justify-center border-0 rounded-full bg-black/60 text-white cursor-pointer hover:bg-accent hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-accent transition-colors"
         >
           <PlayIcon />
         </button>
@@ -279,7 +279,7 @@ export function TrailersSection() {
   const { ref: titleRef, revealState: titleState } = useReveal<HTMLHeadingElement>()
 
   return (
-    <section id={trailers.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-surface)" aria-labelledby="trailers-title">
+    <section id={trailers.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-surface" aria-labelledby="trailers-title">
       <div className="max-w-7xl mx-auto">
         <h2 ref={titleRef} id="trailers-title" className={`trailers-eyebrow trailers-reveal ${titleState}`}>{trailers.title}</h2>
         <p className="sr-only">{trailers.description}</p>
