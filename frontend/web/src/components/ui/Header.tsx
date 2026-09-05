@@ -35,8 +35,16 @@ export function Header() {
     navigate('/')
   }
 
-  // Âncoras apontam para seções da Home, com o topo da seção no meio da
-  // tela. Na Home o scroll é suave; fora dela redireciona para "/#id"
+  // Logo na Home volta para o hero com scroll suave; fora dela o Link
+  // navega para "/" normalmente (que já abre no topo, onde está o hero).
+  function irParaHero(event: MouseEvent<HTMLAnchorElement>) {
+    if (location.pathname !== '/') return
+    event.preventDefault()
+    rolarSecaoParaCentro('hero', 'smooth')
+  }
+
+  // Âncoras apontam para seções da Home, com o topo da seção a 20% da
+  // viewport. Na Home o scroll é suave; fora dela redireciona para "/#id"
   // (a HomePage rola de forma instantânea ao montar).
   function irParaSecao(event: MouseEvent<HTMLAnchorElement>, id: string) {
     if (location.pathname === '/') {
@@ -54,7 +62,7 @@ export function Header() {
         Pular para o conteúdo
       </a>
       <div className="site-header__inner">
-        <Link className="site-header__brand font-display" to="/">FLICKER OF SANITY</Link>
+        <Link className="site-header__brand font-display" to="/" onClick={irParaHero}>FLICKER OF SANITY</Link>
         <div className="site-header__right">
           {mostrarNav && (
             <nav aria-label="Navegação principal" className="site-header__nav">
