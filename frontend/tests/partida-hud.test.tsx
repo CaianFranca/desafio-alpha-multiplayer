@@ -381,6 +381,13 @@ describe('HUD da Partida — conquistas redondas (#226 [5])', () => {
       screen.getAllByTestId('hud-conquista-gerador').filter((el) => el.getAttribute('data-acesa') === 'true'),
     ).toHaveLength(0)
     expect(screen.getByTestId('hud-conquista-cartao')).toHaveAttribute('data-acesa', 'false')
+    // Inativos translúcidos.
+    for (const slot of [
+      ...screen.getAllByTestId('hud-conquista-gerador'),
+      screen.getByTestId('hud-conquista-cartao'),
+    ]) {
+      expect(slot).toHaveClass('opacity-40')
+    }
 
     act(() =>
       ws.simulateMessage({
@@ -398,6 +405,14 @@ describe('HUD da Partida — conquistas redondas (#226 [5])', () => {
     )
     expect(screen.getByTestId('hud-conquista-cartao')).toHaveAttribute('data-acesa', 'true')
     expect(screen.getByTestId('hud-conquista-cartao')).toHaveAttribute('aria-label', 'Cartão de Acesso obtido')
+    // Conquistas soltas: rótulo compartilhado, brilho de aceso e inativo translúcido.
+    expect(screen.getByTestId('hud-conquistas')).toHaveTextContent('Geradores')
+    expect(screen.getByTestId('hud-conquistas')).toHaveTextContent('Cartão')
+    expect(screen.queryByTestId('hud-conquistas')).not.toHaveTextContent('Fuga')
+    expect(
+      screen.getAllByTestId('hud-conquista-gerador')[0],
+    ).toHaveClass('border-amber-300')
+    expect(screen.getByTestId('hud-conquista-cartao')).toHaveClass('border-emerald-300')
   })
 })
 

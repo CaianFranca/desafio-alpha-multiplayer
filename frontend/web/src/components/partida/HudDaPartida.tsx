@@ -401,46 +401,58 @@ export function HudDaPartida({
         </div>
       </div>
 
-      {/* ── inf-centro: 4 conquistas redondas (3 Geradores + Cartão) ── */}
+      {/* ── inf-centro: conquistas soltas abaixo do girar (Geradores + Cartão) ── */}
       <div
         data-testid="hud-conquistas"
         aria-label="Conquistas"
-        className="absolute bottom-6 left-1/2 flex origin-bottom -translate-x-1/2 scale-90 items-center gap-3 lg:scale-100"
+        className="absolute bottom-4 left-1/2 flex origin-bottom -translate-x-1/2 scale-90 items-start gap-4 lg:scale-100"
       >
-        {Array.from({ length: ALVO_GERADORES_LIGADOS }, (_, indice) => {
-          const acesa = indice < geradoresAcesos
-          return (
-            <div
-              key={`gerador-${indice}`}
-              data-testid="hud-conquista-gerador"
-              data-indice={String(indice)}
-              data-acesa={acesa ? 'true' : 'false'}
-              role="status"
-              aria-label={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1} desligado`}
-              title={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1}`}
-              className={`flex h-11 w-11 items-center justify-center rounded-full border text-sm ${
-                acesa
-                  ? 'border-amber-400 bg-amber-400/20 text-amber-300'
-                  : 'border-zinc-700 bg-zinc-900/80 text-zinc-600 opacity-40'
-              }`}
-            >
-              <span aria-hidden="true">⚡</span>
-            </div>
-          )
-        })}
-        <div
-          data-testid="hud-conquista-cartao"
-          data-acesa={cartaoDeAcessoObtido ? 'true' : 'false'}
-          role="status"
-          aria-label={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso não obtido'}
-          title={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso'}
-          className={`flex h-11 w-11 items-center justify-center rounded-full border text-sm ${
-            cartaoDeAcessoObtido
-              ? 'border-emerald-400 bg-emerald-400/20 text-emerald-300'
-              : 'border-zinc-700 bg-zinc-900/80 text-zinc-600 opacity-40'
-          }`}
-        >
-          <span aria-hidden="true">▣</span>
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-2">
+            {Array.from({ length: ALVO_GERADORES_LIGADOS }, (_, indice) => {
+              const acesa = indice < geradoresAcesos
+              return (
+                <div
+                  key={`gerador-${indice}`}
+                  data-testid="hud-conquista-gerador"
+                  data-indice={String(indice)}
+                  data-acesa={acesa ? 'true' : 'false'}
+                  role="status"
+                  aria-label={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1} desligado`}
+                  title={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1}`}
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm transition-all duration-500 ${
+                    acesa
+                      ? 'border-amber-300 bg-amber-400/15 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.5)]'
+                      : 'border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40'
+                  }`}
+                >
+                  <span aria-hidden="true" className={acesa ? 'drop-shadow-[0_0_6px_rgba(251,191,36,0.8)]' : ''}>⚡</span>
+                </div>
+              )
+            })}
+          </div>
+          <span className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400">
+            Geradores
+          </span>
+        </div>
+        <div className="flex flex-col items-center gap-1">
+          <div
+            data-testid="hud-conquista-cartao"
+            data-acesa={cartaoDeAcessoObtido ? 'true' : 'false'}
+            role="status"
+            aria-label={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso não obtido'}
+            title={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso'}
+            className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm transition-all duration-500 ${
+              cartaoDeAcessoObtido
+                  ? 'border-emerald-300 bg-emerald-400/15 text-emerald-200 shadow-[0_0_16px_rgba(52,211,153,0.5)]'
+                  : 'border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40'
+            }`}
+          >
+            <span aria-hidden="true" className={cartaoDeAcessoObtido ? 'drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]' : ''}>▣</span>
+          </div>
+          <span className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400">
+            Cartão
+          </span>
         </div>
       </div>
 

@@ -464,11 +464,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         </div>
       ) : null}
       {estadoEmAndamento ? (
-        // Controles de giro acima das conquistas do HUD (inf-centro, #226)
-        // para não sobrepor as 4 conquistas redondas.
+        // Controles de giro acima das conquistas soltas do HUD (inf-centro,
+        // #226) para não sobrepor Geradores/Cartão.
         <div
           data-testid="controles-de-giro"
-          className="pointer-events-auto absolute bottom-20 left-1/2 z-30 flex -translate-x-1/2 gap-2"
+          className="pointer-events-auto absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 gap-2"
         >
           <button
             type="button"
