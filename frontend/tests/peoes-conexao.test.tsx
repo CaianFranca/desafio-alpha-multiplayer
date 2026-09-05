@@ -10,6 +10,10 @@ import {
   CAMINHO_SOM_DE_RECUSA,
   VOLUME_BASE_SOM_DE_RECUSA,
 } from '../web/src/components/partida/somDeRecusa'
+import {
+  SOM_CAMINHO_CLIQUE_PEAO,
+  SOM_VOLUME_BASE_CLIQUE_PEAO,
+} from '../web/src/game/tabuleiro/vooDoPeao'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 // Issue #91 + #143: conexão do frontend com o game-server para peões, ciclo e
@@ -432,8 +436,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
       })
     })
-    // Aprovações em silêncio: sem som, sem clarão.
-    expect(toquesDeAudio).toHaveLength(0)
+    // Aprovações sem recusa: só o clique da seleção (#242), sem clarão.
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     const comandosAntes = ws.sentMessages.length
@@ -452,8 +457,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
       })
     })
-    // Aprovações em silêncio.
-    expect(toquesDeAudio).toHaveLength(0)
+    // Aprovações sem recusa (só o clique da seleção, #242).
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     const comandosAntes = ws.sentMessages.length
@@ -463,9 +469,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(ws.sentMessages).toHaveLength(comandosAntes)
     expect(peaoDoEspelho('vermelho').getAttribute('data-selecionado')).toBe('false')
 
-    // Som de recusa com motivo + anúncio, sem clarão.
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
+    // Som de recusa com motivo + anúncio, sem clarão (após o clique da seleção).
+    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeAudio[1]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')
@@ -650,8 +656,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         celula: { linha: 2, coluna: 3 },
       })
     })
-    // Movimento em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
+    // Movimento sem recusa (só o clique da seleção anterior, #242; sem clarão).
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Fase 'confirmar' → botão envia CONFIRMAR_POSICAO_DO_PEAO; servidor confirma.
@@ -669,8 +676,8 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         pecaId: 'reta-1',
       })
     })
-    // Confirmação em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
+    // Confirmação sem recusa (só o clique da seleção anterior, #242; sem clarão).
+    expect(toquesDeAudio).toHaveLength(1)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Re-seleção aceita pelo servidor: a seleção volta ao peão confirmado.
@@ -684,9 +691,13 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     await user.click(celulaDoEspelho(3, 3))
 
     // Guard AC3: nenhum comando trafega e o som de recusa toca com motivo
-    // específico (espelha o FORA_DA_VEZ que o servidor responderia).
+    // específico (espelha o FORA_DA_VEZ que o servidor responderia) — após os
+    // 2 cliques de seleção (#242).
     expect(ws.sentMessages).toHaveLength(comandosAntes)
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio).toHaveLength(3)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO })
+    expect(toquesDeAudio[1]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO })
+    expect(toquesDeAudio[2]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('posicao_confirmada')

@@ -11,6 +11,14 @@ import {
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
 import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
+import {
+  deveLimparVooNoSnapshot,
+  deveTocarCliqueDoPeao,
+  limparVooAoAterrissar,
+  tocarCliqueDoPeao,
+  vooDoPeaoDoEvento,
+} from '../game/tabuleiro/vooDoPeao'
+import type { VooDoPeaoPendente } from '../game/tabuleiro/vooDoPeao'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
 import {
@@ -106,6 +114,22 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
   }, [])
 
+  // ── Voo do peão com sons (issue #242) ──
+  // Único dono dos disparos: reage aos mesmos eventos do canal que atualizam
+  // o modelo, somente leitura do modelo anterior. `PEAO_SELECIONADO` toca o
+  // clique imediato; `PEAO_MOVIDO` registra o voo pendente (último vence — o
+  // overlay remonta por nonce); o baque é tocado pela cena ao concluir o
+  // pouso. `ESTADO_DA_PARTIDA` limpa o voo (snapshot é autoridade).
+  const [vooPendente, setVooPendente] = useState<VooDoPeaoPendente | null>(null)
+  const proximoNonceVoo = useRef(0)
+  const modeloRef = useRef(modelo)
+  useEffect(() => {
+    modeloRef.current = modelo
+  }, [modelo])
+  const onVooAterrissou = useCallback((nonce: number) => {
+    setVooPendente((atual) => limparVooAoAterrissar(atual, nonce))
+  }, [])
+
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
   const emResultado = estado === 'resultado'
   const emResultadoRef = useRef(emResultado)
@@ -129,6 +153,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         }
         if (evento.type === 'ESTADO_DA_PARTIDA') {
           aplicarSnapshotNoModelo(evento.snapshot)
+          if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
@@ -158,6 +183,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
         // ESTADO_DA_PARTIDA (em_andamento): eventos de turno avulsos não
         // abrem o tabuleiro sem snapshot — descreve a própria PR.
+        // Voo do peão (#242): gatilhos só do canal, sobre o modelo ANTES do
+        // despacho (origem no estado anterior); o modelo atualiza instantâneo
+        // e a cena interpola até o mesmo estado final.
+        if (deveTocarCliqueDoPeao(evento)) tocarCliqueDoPeao()
+        const vooBase = vooDoPeaoDoEvento(evento, modeloRef.current)
+        if (vooBase !== null) {
+          proximoNonceVoo.current += 1
+          setVooPendente({ nonce: proximoNonceVoo.current, ...vooBase })
+        }
         despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
         // Som de recusa unificado (issue #228): erros do tabuleiro incluindo
         // FORA_DA_VEZ (#118), pendências e Caixa esgotada (#143/#151); seleção,
@@ -367,6 +401,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}
+        vooPendente={vooPendente}
+        onVooAterrissou={onVooAterrissou}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*

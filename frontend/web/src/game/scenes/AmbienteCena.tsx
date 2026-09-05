@@ -22,6 +22,7 @@ import type {
   PecaCorrente,
   EstadoExibicaoTabuleiro,
 } from '../tabuleiro/contrato'
+import type { VooDoPeaoPendente } from '../tabuleiro/vooDoPeao'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
@@ -100,6 +101,13 @@ interface AmbienteCenaProps {
   vagasSet?: ReadonlySet<string>
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
   pecaCorrente?: PecaCorrente | null
+  /**
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = snap.
+   * Desce até o `Tabuleiro`, que avisa o pouso via `onVooAterrissou(nonce)`.
+   */
+  vooPendente?: VooDoPeaoPendente | null
+  /** Pouso do voo concluído (nonce): a página limpa o pendente. */
+  onVooAterrissou?: (nonce: number) => void
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -131,6 +139,8 @@ export function AmbienteCena({
   alvosPendentesSet,
   vagasSet,
   pecaCorrente = null,
+  vooPendente = null,
+  onVooAterrissou,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
@@ -171,6 +181,8 @@ export function AmbienteCena({
               onRejeicaoPeao={onRejeicaoPeao}
               alvosPendentesSet={alvosPendentesSet}
               vagasSet={vagasSet}
+              vooPendente={vooPendente}
+              onVooAterrissou={onVooAterrissou}
             />
             <Caixa
               iniciais={estadoExibicao.iniciais}

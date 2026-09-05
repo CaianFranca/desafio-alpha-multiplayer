@@ -25,6 +25,7 @@ import {
 } from '../../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
+import type { VooDoPeaoPendente } from '../../game/tabuleiro/vooDoPeao'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -61,6 +62,13 @@ interface AmbienteDeJogoProps {
   peaoAtivoId?: PeaoId | null
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
+  /**
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = snap.
+   * Desce até a cena, que avisa o pouso via `onVooAterrissou(nonce)`.
+   */
+  vooPendente?: VooDoPeaoPendente | null
+  /** Pouso do voo concluído (nonce): a página limpa o pendente. */
+  onVooAterrissou?: (nonce: number) => void
 }
 
 export function AmbienteDeJogo({
@@ -74,6 +82,8 @@ export function AmbienteDeJogo({
   peaoSelecionadoIdServidor = null,
   peaoAtivoId = null,
   sanidadePorPeao = {},
+  vooPendente = null,
+  onVooAterrissou,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade ──
   // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
@@ -252,6 +262,8 @@ export function AmbienteDeJogo({
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           pecaCorrente={pecaCorrente}
+          vooPendente={vooPendente}
+          onVooAterrissou={onVooAterrissou}
         />
       </Canvas>
       {estadoExibicao ? (
