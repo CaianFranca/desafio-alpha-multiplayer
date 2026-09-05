@@ -89,6 +89,9 @@ export type PercepcaoDeJogador = {
   readonly sanidade: number
   readonly emBaixaIluminacao: boolean
   readonly amedrontado: boolean
+  // Baseline da Proteção da Sala Médica (issue #227): o cliente só projeta
+  // pelo snapshot (reconciliação); deltas ao vivo ficam para a UI (#225/#226).
+  readonly protegido: boolean
 }
 
 export type SanidadePorPeao = Readonly<

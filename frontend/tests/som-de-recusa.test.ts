@@ -58,7 +58,7 @@ describe('som de recusa — mapeamento evento → motivo (issue #228)', () => {
       { type: 'PECA_SORTEADA', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0 },
       { type: 'PEAO_SELECIONADO', peaoId: 'peao-1' },
       { type: 'PEAO_MOVIDO', peaoId: 'peao-1', pecaIdDe: 'a', pecaIdPara: 'b', celula: { linha: 3, coluna: 4 } },
-      { type: 'POSICAO_CONFIRMADA', jogadorId: 'j1', peaoId: 'peao-1', pecaId: 'reta-1' },
+      { type: 'POSICAO_CONFIRMADA', jogadorId: 'j1', peaoId: 'peao-1', pecaId: 'reta-1', protegido: false },
       { type: 'TURNO_INICIADO', jogadorId: 'j1', rodada: 2 },
       { type: 'TURNO_ENCERRADO', jogadorId: 'j1' },
       { type: 'CELULAS_ILUMINADAS', celulas: [] },

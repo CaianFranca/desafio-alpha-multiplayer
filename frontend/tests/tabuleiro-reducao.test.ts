@@ -654,7 +654,7 @@ describe('redução dos turnos no cliente — fase, rodada e mapa aprendido (iss
       type: 'POSICAO_CONFIRMADA',
       jogadorId: 'jogador-1',
       peaoId: 'peao-branco',
-      pecaId: 'reta-1',
+      pecaId: 'reta-1', protegido: false,
     })
     expect(estado.posicaoConfirmadaNoTurno).toBe(true)
   })
@@ -969,7 +969,7 @@ describe('objetivos globais no modelo do cliente — baseline + derivação (iss
       type: 'POSICAO_CONFIRMADA',
       jogadorId: 'jogador-1',
       peaoId: 'peao-branco',
-      pecaId: 'gerador-1',
+      pecaId: 'gerador-1', protegido: false,
     })
     expect(estado.geradoresLigados).toEqual(['gerador-1'])
     // Reconfirmar o MESMO gerador não conta 2× (dedupe por id, espelho do
@@ -978,14 +978,14 @@ describe('objetivos globais no modelo do cliente — baseline + derivação (iss
       type: 'POSICAO_CONFIRMADA',
       jogadorId: 'jogador-1',
       peaoId: 'peao-branco',
-      pecaId: 'gerador-1',
+      pecaId: 'gerador-1', protegido: false,
     })
     expect(estado.geradoresLigados).toEqual(['gerador-1'])
     // Um segundo gerador (chegando por deltas) incrementa.
     estado = reduzirEventos(estado, [
       { type: 'PECA_SORTEADA', pecaId: 'gerador-2', tipoDaPeca: 'gerador', orientacao: 0 },
       { type: 'PECA_POSICIONADA', pecaId: 'gerador-2', celula: { linha: 5, coluna: 2 }, orientacao: 0 },
-      { type: 'POSICAO_CONFIRMADA', jogadorId: 'jogador-2', peaoId: 'peao-vermelho', pecaId: 'gerador-2' },
+      { type: 'POSICAO_CONFIRMADA', jogadorId: 'jogador-2', peaoId: 'peao-vermelho', pecaId: 'gerador-2', protegido: false },
     ])
     expect(estado.geradoresLigados).toEqual(['gerador-1', 'gerador-2'])
   })
@@ -1002,7 +1002,7 @@ describe('objetivos globais no modelo do cliente — baseline + derivação (iss
       type: 'POSICAO_CONFIRMADA',
       jogadorId: 'jogador-1',
       peaoId: 'peao-branco',
-      pecaId: 'gerador-9',
+      pecaId: 'gerador-9', protegido: false,
     })
     expect(estado.geradoresLigados).toEqual(['gerador-9'])
   })
@@ -1019,7 +1019,7 @@ describe('objetivos globais no modelo do cliente — baseline + derivação (iss
       type: 'POSICAO_CONFIRMADA',
       jogadorId: 'jogador-1',
       peaoId: 'peao-branco',
-      pecaId: 'sala-do-diretor-1',
+      pecaId: 'sala-do-diretor-1', protegido: false,
     })
     expect(estado.cartaoDeAcessoObtido).toBe(true)
     // Confirmar peça de caminho depois não revoga (e não conta gerador).
@@ -1027,7 +1027,7 @@ describe('objetivos globais no modelo do cliente — baseline + derivação (iss
       type: 'POSICAO_CONFIRMADA',
       jogadorId: 'jogador-2',
       peaoId: 'peao-vermelho',
-      pecaId: 'reta-1',
+      pecaId: 'reta-1', protegido: false,
     })
     expect(estado.cartaoDeAcessoObtido).toBe(true)
     expect(estado.geradoresLigados).toEqual([])
@@ -1043,7 +1043,7 @@ describe('objetivos globais no modelo do cliente — baseline + derivação (iss
     // a limpeza chega depois no mesmo lote — o tipo precisa ser resolvido no
     // estado anterior, com a peça ainda em posicionadas.
     estado = reduzirEventos(estado, [
-      { type: 'POSICAO_CONFIRMADA', jogadorId: 'jogador-1', peaoId: 'peao-branco', pecaId: 'gerador-1' },
+      { type: 'POSICAO_CONFIRMADA', jogadorId: 'jogador-1', peaoId: 'peao-branco', pecaId: 'gerador-1', protegido: false },
       { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['gerador-1'] },
     ])
     expect(estado.geradoresLigados).toEqual(['gerador-1'])

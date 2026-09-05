@@ -26,7 +26,8 @@ import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
  * estado. Mapeia posicionadas, iniciais, peões, celulasIluminadas,
  * pecaSelecionadaId/pecaEmManipulacaoId/peaoSelecionadoId,
  * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId (com
- * sanidade/estados — ST-15, #174), jogadorAtivoId/rodada/posicaoConfirmada,
+ * sanidade/estados — ST-15, #174 — e a Proteção da Sala Médica, #227),
+ * jogadorAtivoId/rodada/posicaoConfirmada,
  * as Peças Iniciais da mesa (#143) e a baseline dos objetivos globais —
  * pecasRestantesNaCaixa/geradoresLigados/cartaoDeAcessoObtido (issue #145).
  */
@@ -79,22 +80,25 @@ export function aplicarSnapshot(
   )
 
   const peaoPorJogador: Record<string, string> = {}
-  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
+  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean; protegido: boolean }> = {}
   for (const j of snapshot.jogadores) {
     peaoPorJogador[j.jogadorId] = j.peaoId
-    // Snapshot carrega sanidade/estados (issue #173) com normalização
-    // defensiva no server, mas clientes com estado persistido antigo podem
-    // receber payload incompleto via WS replay — replicamos fallback defensivo
-    // (server: snapshot.ts:41) para não gravar undefined no modelo.
+    // Snapshot carrega sanidade/estados (issue #173) e a Proteção da Sala
+    // Médica (issue #227) com normalização defensiva no server, mas clientes
+    // com estado persistido antigo podem receber payload incompleto via WS
+    // replay — replicamos fallback defensivo (server: snapshot.ts:41) para
+    // não gravar undefined no modelo.
     const sanidade = (j as { sanidade?: number }).sanidade ?? 3
     const emBaixaIluminacao = (j as { emBaixaIluminacao?: boolean }).emBaixaIluminacao ?? false
     const amedrontado = (j as { amedrontado?: boolean }).amedrontado ?? sanidade === 0
+    const protegido = (j as { protegido?: boolean }).protegido ?? false
     jogadorPorId[j.jogadorId] = {
       apelido: j.apelido,
       cor: j.cor,
       sanidade,
       emBaixaIluminacao,
       amedrontado,
+      protegido,
     }
   }
 
