@@ -46,10 +46,23 @@ describe('homepage structure', () => {
 
     const nav = screen.getByRole('navigation', { name: /navegação principal/i })
     expect(nav).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
-    expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
-    expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '#caracteristicas')
-    expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '#objetivos')
+    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
+    expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '/#historia')
+    expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '/#caracteristicas')
+    expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '/#objetivos')
+  })
+
+  it('header nav outside home redirects to home and targets the section', async () => {
+    const user = userEvent.setup()
+    const scrollIntoView = vi.fn()
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView
+    renderWithRouter(['/login'])
+
+    await user.click(screen.getByRole('link', { name: /história/i }))
+
+    expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    expect(document.getElementById('historia')).not.toBeNull()
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' })
   })
 
   it('renders feature cards for all five game features', () => {
@@ -174,7 +187,7 @@ describe('authentication states', () => {
     const header = screen.getByRole('banner')
     // Só o apelido trunca com reticências; navegação e controles permanecem.
     expect(within(header).getByText(apelidoLongo)).toHaveClass('truncate')
-    expect(within(header).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
+    expect(within(header).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
     expect(within(header).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
     expect(within(header).getByRole('button', { name: /^sair$/i })).toBeInTheDocument()
   })
@@ -298,8 +311,8 @@ describe('header variations (issue #211)', () => {
 
     const nav = within(header).getByRole('navigation', { name: /navegação principal/i })
     expect(nav).toBeInTheDocument()
-    expect(within(nav).getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
-    expect(within(nav).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
+    expect(within(nav).getByRole('link', { name: /história/i })).toHaveAttribute('href', '/#historia')
+    expect(within(nav).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
 
     expect(within(header).getByRole('link', { name: /^entrar$/i })).toHaveAttribute('href', '/login')
     expect(within(header).getByRole('link', { name: /criar conta/i })).toHaveAttribute('href', '/cadastro')
