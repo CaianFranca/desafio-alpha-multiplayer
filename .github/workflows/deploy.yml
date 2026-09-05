@@ -2,11 +2,12 @@
 #
 # Dispara em push na branch `prod` ou manualmente (workflow_dispatch com SHA
 # curto opcional para rollback). O job `quality` roda typecheck + migrations
-# em banco limpo + testes do frontend; o job `build` empacota o artefato de
-# release (tarball) como artifact baixável.
+# em banco limpo; o job `build` empacota o artefato de release (tarball) como
+# artifact baixável.
 #
-# Decisão: testes de integração (lobby/game) NÃO rodam no CI — suíte não
-# mantida pelo time, validada localmente antes do merge (decisão de 2026-09-05).
+# Decisão: NENHUM teste roda no CI — suíte (integração e frontend) não
+# mantida pelo time e validada localmente antes do merge; testes de frontend
+# se mostraram flaky no runner do Actions (decisão de 2026-09-05).
 #
 # Fase 3 adicionará o job de deploy (scp + systemd + nginx + GitHub Release).
 
@@ -31,7 +32,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality gates (typecheck + migrations + frontend)
+    name: Quality gates (typecheck + migrations)
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -80,10 +81,6 @@ jobs:
       - name: Migrations (db não é workspace da raiz)
         working-directory: db
         run: npm ci && npx knex migrate:latest --knexfile knexfile.ts
-
-      - name: Testes do frontend
-        working-directory: frontend
-        run: npm ci && npx vitest run
 
   build:
     name: Build do artefato de release (tarball)
