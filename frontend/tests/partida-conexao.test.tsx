@@ -6,6 +6,10 @@ import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { toquesDeAudio } from './helpers/mockAudio'
+import {
+  CAMINHO_SOM_DE_RECUSA,
+  VOLUME_BASE_SOM_DE_RECUSA,
+} from '../web/src/components/partida/somDeRecusa'
 import type { EstadoDaPartidaSnapshot, PecaPosicionadaNoSnapshot } from '@flicker/shared'
 
 function renderPartidaNaRota(entry: string) {
@@ -187,7 +191,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
       }),
     )
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 0.3 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('rejeicao_do_servico')
@@ -225,6 +229,42 @@ describe('partida conectada ao game-server (issue #85)', () => {
     expect(toquesDeAudio).toHaveLength(2)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe('fora_da_vez')
+  })
+
+  it('recusa repetida com o mesmo motivo re-anuncia (região viva remonta por key)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    const recusarForaDaVez = () =>
+      act(() => {
+        ws.simulateMessage({
+          type: 'ERRO_DO_TABULEIRO',
+          codigo: 'FORA_DA_VEZ',
+          mensagem: 'Não é a sua vez.',
+        })
+      })
+
+    recusarForaDaVez()
+    expect(toquesDeAudio).toHaveLength(1)
+    const anuncio = screen.getByTestId('anuncio-de-recusa')
+    expect(anuncio.getAttribute('data-motivo')).toBe('fora_da_vez')
+    expect(anuncio).toHaveTextContent('Ação recusada: aguarde a sua vez.')
+    const primeiroId = anuncio.getAttribute('data-anuncio-id')
+    expect(primeiroId).not.toBeNull()
+
+    // Mesmo motivo de novo: o som toca outra vez e a região viva re-emite
+    // (novo id = remontagem por key; sem isso o texto idêntico calaria o
+    // segundo anúncio para o leitor de tela).
+    recusarForaDaVez()
+    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeAudio[1]).toMatchObject({
+      src: CAMINHO_SOM_DE_RECUSA,
+      volume: VOLUME_BASE_SOM_DE_RECUSA,
+    })
+    const anuncioRepetido = screen.getByTestId('anuncio-de-recusa')
+    expect(anuncioRepetido.getAttribute('data-motivo')).toBe('fora_da_vez')
+    expect(anuncioRepetido).toHaveTextContent('Ação recusada: aguarde a sua vez.')
+    expect(anuncioRepetido.getAttribute('data-anuncio-id')).not.toBeNull()
+    expect(anuncioRepetido.getAttribute('data-anuncio-id')).not.toBe(primeiroId)
   })
 
   it('retry com alvo na URL transita de falha para carregando', async () => {
@@ -556,7 +596,7 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
       })
     })
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 0.3 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('fora_da_vez')
@@ -803,7 +843,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     })
     // Som de recusa com motivo de ataque (PartidaPage: estadosAplicados > 0).
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/assets/audio/bumpintowall.mp3', volume: 0.3 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('ataque_com_penalidade')

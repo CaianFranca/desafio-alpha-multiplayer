@@ -2,17 +2,19 @@
  * Som de recusa da Partida (issue #228).
  *
  * Ponto de som ÚNICO e centralizado da tela da Partida: toca sempre o mesmo
- * asset (`/assets/audio/bumpintowall.mp3`, servido de `web/public`) nos pontos
- * que antes geravam flash vermelho/âmbar — erros do tabuleiro (incluindo ação
- * fora da vez), rejeições locais do roteador após confirmação e ataque com
- * penalidade. Demais eventos (aprovações, seleções, sorteios, turnos,
- * limpeza, resgate, ataque sem vítimas) ficam em silêncio, sem substituto
- * visual.
+ * asset (`/media/bumpintowall.mp3`, servido de `web/media/` — duto `/media/`
+ * do nginx em prod/dev via compose; em `npm run dev` puro via middleware do
+ * `vite.config.ts`) nos pontos que antes geravam flash vermelho/âmbar — erros
+ * do tabuleiro (incluindo ação fora da vez), rejeições locais do roteador
+ * após confirmação e ataque com penalidade. Demais eventos (aprovações,
+ * seleções, sorteios, turnos, limpeza, resgate, ataque sem vítimas) ficam em
+ * silêncio, sem substituto visual.
  *
  * O motivo do disparo sobrevive como identificador (string), preparando sons
  * distintos futuros — hoje o mapa abaixo aponta todos para o mesmo asset.
- * Volume reduzido (0.3): o futuro botão de volume controlará este ponto sem
- * recostura. `play()` com `catch` silencioso como defensivo (no-op se falhar).
+ * Volume base 0.3 (contrato `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`:
+ * o futuro botão de volume multiplica o master por esta base sem recostura).
+ * `play()` com `catch` silencioso como defensivo (no-op se falhar).
  *
  * Puro onde dá: `motivoDeRecusaDoEvento` é 100% puro (evento → motivo | null,
  * somente leitura do evento, sem recalcular regra); só `tocarSomDeRecusa`
@@ -21,8 +23,15 @@
 
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
 
-/** Asset de recusa (web/public → servido em /assets/...). */
-export const CAMINHO_SOM_DE_RECUSA = '/assets/audio/bumpintowall.mp3'
+/** Asset de recusa (web/media → servido em /media/). */
+export const CAMINHO_SOM_DE_RECUSA = '/media/bumpintowall.mp3'
+
+/**
+ * Volume base do som de recusa (contrato com o futuro botão de volume, ADR-0007:
+ * `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`, com master em [0, 1]).
+ * Desvio consciente da spec #228 ("sempre cheio") por decisão humana explícita.
+ */
+export const VOLUME_BASE_SOM_DE_RECUSA = 0.3
 
 /**
  * Motivo do disparo do som — identificador estável da recusa. Herda os
@@ -93,8 +102,9 @@ export function motivoDeRecusaDoEvento(
 export function tocarSomDeRecusa(motivo: MotivoDeRecusa): void {
   try {
     const audio = new Audio(SOM_POR_MOTIVO[motivo])
-    // Volume reduzido (0.3) — compatível com o futuro botão de volume sem recostura.
-    audio.volume = 0.3
+    // Contrato de volume (ADR-0007): base fixa; o futuro botão de volume
+    // aplica `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`.
+    audio.volume = VOLUME_BASE_SOM_DE_RECUSA
     const tocando: unknown = audio.play()
     // jsdom não implementa play(): retorna undefined em vez de Promise.
     if (

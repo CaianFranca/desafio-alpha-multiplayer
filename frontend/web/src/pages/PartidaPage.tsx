@@ -91,11 +91,19 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Som de recusa + anúncio ao leitor de tela (issue #228) ──
   // Único dono dos disparos: reage aos mesmos eventos do canal que antes
   // geravam flash, somente leitura do modelo. Aprovações/seleções/sorteios/
-  // turnos ficam em silêncio (motivo null = "foi").
-  const [anuncioDeRecusa, setAnuncioDeRecusa] = useState<MotivoDeRecusa | null>(null)
+  // turnos ficam em silêncio (motivo null = "foi"). O id (nonce) remonta a
+  // região viva a cada disparo (`key`), então repetições do MESMO motivo
+  // re-anunciam — sem ele, texto idêntico + bail-out do setState calariam a
+  // segunda recusa para o leitor de tela.
+  const [anuncioDeRecusa, setAnuncioDeRecusa] = useState<{
+    id: number
+    motivo: MotivoDeRecusa
+  } | null>(null)
+  const proximoIdDeAnuncio = useRef(0)
   const tocarRecusa = useCallback((motivo: MotivoDeRecusa) => {
     tocarSomDeRecusa(motivo)
-    setAnuncioDeRecusa(motivo)
+    proximoIdDeAnuncio.current += 1
+    setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
   }, [])
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
@@ -364,16 +372,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       {/*
         Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
         região viva sempre presente; o texto atualiza a cada recusa (som +
-        anúncio). Invisível para quem não usa leitor (`sr-only`).
+        anúncio). Invisível para quem não usa leitor (`sr-only`). O `key` com
+        o id do anúncio remonta o nó a cada disparo para que repetições do
+        mesmo motivo re-anunciem; `data-anuncio-id` expõe o nonce aos testes.
       */}
       <div
+        key={anuncioDeRecusa?.id ?? 'sem-anuncio'}
         data-testid="anuncio-de-recusa"
-        data-motivo={anuncioDeRecusa ?? undefined}
+        data-motivo={anuncioDeRecusa?.motivo ?? undefined}
+        data-anuncio-id={anuncioDeRecusa?.id ?? undefined}
         role="status"
         aria-live="polite"
         className="sr-only"
       >
-        {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa) : ''}
+        {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa.motivo) : ''}
       </div>
       {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
         <div
