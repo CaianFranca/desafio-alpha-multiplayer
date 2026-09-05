@@ -1,9 +1,12 @@
 # Deploy — Flicker of Sanity (Fase 2: quality gates + artefato tarball)
 #
 # Dispara em push na branch `prod` ou manualmente (workflow_dispatch com SHA
-# curto opcional para rollback). O job `quality` roda typecheck + testes de
-# integração reais (Postgres 17 + Redis 7) + testes do frontend; o job `build`
-# empacota o artefato de release (tarball) como artifact baixável.
+# curto opcional para rollback). O job `quality` roda typecheck + migrations
+# em banco limpo + testes do frontend; o job `build` empacota o artefato de
+# release (tarball) como artifact baixável.
+#
+# Decisão: testes de integração (lobby/game) NÃO rodam no CI — suíte não
+# mantida pelo time, validada localmente antes do merge (decisão de 2026-09-05).
 #
 # Fase 3 adicionará o job de deploy (scp + systemd + nginx + GitHub Release).
 
@@ -28,24 +31,19 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality gates (typecheck + integração + frontend)
+    name: Quality gates (typecheck + migrations + frontend)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     env:
-      # Nomes derivados do código (packages/config, db/knexfile.ts, testes de
-      # integração). Valores de teste — nenhum secret real.
+      # Nomes derivados do código (packages/config, db/knexfile.ts).
+      # Valores de teste — nenhum secret real.
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: '5432'
       POSTGRES_USER: flicker
       POSTGRES_PASSWORD: flicker_ci_password
       POSTGRES_DB: flicker
-      REDIS_HOST: 127.0.0.1
-      REDIS_PORT: '6379'
-      JWT_SECRET: ci_jwt_secret_apenas_para_testes
-      JWT_REFRESH_SECRET: ci_jwt_refresh_secret_apenas_para_testes
-      LOBBY_PUBLIC_URL: http://localhost:3001
       # knexfile escolhe a config por NODE_ENV (default: development).
-      # Testes que exigem 'production' setam a env nos próprios before().
       NODE_ENV: development
 
     services:
@@ -63,17 +61,6 @@ jobs:
           --health-timeout 5s
           --health-retries 10
           --health-start-period 10s
-
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 5s
 
     steps:
       - name: Checkout
@@ -94,9 +81,6 @@ jobs:
         working-directory: db
         run: npm ci && npx knex migrate:latest --knexfile knexfile.ts
 
-      - name: Testes de integração (lobby + game)
-        run: npm run test:all
-
       - name: Testes do frontend
         working-directory: frontend
         run: npm ci && npx vitest run
@@ -105,6 +89,7 @@ jobs:
     name: Build do artefato de release (tarball)
     needs: quality
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
