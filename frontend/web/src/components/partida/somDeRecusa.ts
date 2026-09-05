@@ -30,6 +30,7 @@ export const CAMINHO_SOM_DE_RECUSA = '/media/bumpintowall.mp3'
  * Volume base do som de recusa (contrato com o futuro botão de volume, ADR-0007:
  * `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`, com master em [0, 1]).
  * Desvio consciente da spec #228 ("sempre cheio") por decisão humana explícita.
+ */
 export const VOLUME_BASE_SOM_DE_RECUSA = 0.3
 
 /**

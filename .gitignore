@@ -3,6 +3,9 @@
 .scratch/
 **/node_modules
 **/dist
+frontend/web/media/*
 frontend/references/
+!frontend/web/media/.gitkeep
+!frontend/web/media/*.mp3
 
 release/
