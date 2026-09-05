@@ -9,16 +9,36 @@ export function OverlayOrientacao() {
       data-testid="overlay-orientacao"
       role="alert"
       aria-live="assertive"
-      className="pointer-events-auto absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-zinc-900 px-6 text-center"
+      className="pointer-events-auto absolute inset-0 z-50 flex items-center justify-center bg-zinc-900/80 px-6 text-center"
     >
-      {/* Ícone simples de rotação (sem dependência externa) */}
-      <span aria-hidden="true" className="text-4xl">
-        ⟡
-      </span>
-      <p className="text-lg font-semibold text-white">Vire o aparelho para jogar</p>
-      <p className="max-w-xs text-sm text-zinc-400">
-        Esta experiência foi pensada para o modo paisagem no celular.
-      </p>
+      <div className="flex flex-col items-center gap-4">
+        <span
+          aria-hidden="true"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-amber-500/40 text-accent"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="7" y="2" width="10" height="14" rx="1.5" />
+            <path d="M9 18h6" />
+            <path d="M16 8l3-1v6l-3-1" />
+          </svg>
+        </span>
+        <p className="font-display text-2xl font-bold tracking-wide text-white">
+          Vire o aparelho para jogar
+        </p>
+        <p className="max-w-xs text-sm leading-relaxed text-zinc-400">
+          Esta experiência foi pensada para o modo paisagem no celular.
+        </p>
+      </div>
     </div>
   )
 }
