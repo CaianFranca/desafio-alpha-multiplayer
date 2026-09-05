@@ -41,6 +41,17 @@
  *     o próximo TURNO_INICIADO governa a fase seguinte).
  *   - PEAO_POSICIONADO/PEAO_MOVIDO/PEAO_PERMANECEU atribuem o peão do evento
  *     ao Jogador Ativo no mapa peaoPorJogador (janela do turno, ver campo).
+ *
+ * Objetivos globais no HUD (issue #145 — espelho dos contadores do engine):
+ *   - `pecasRestantesNaCaixa`: baseline do snapshot + decremento ao vivo a cada
+ *     PECA_SORTEADA com pecaId inédito (mesmo gate de `pecasDeRecebimento`),
+ *     clamp ≥ 0; `null` (sem snapshot) mantém a contagem oculta.
+ *   - `geradoresLigados`/`cartaoDeAcessoObtido`: derivados no POSICAO_CONFIRMADA
+ *     com o tipo resolvido no estado ANTERIOR (a Confirmação chega antes da
+ *     Limpeza no mesmo lote) — dedupe por pecaId e monotonicidade espelhando o
+ *     engine. Snapshot substitui a baseline (autoridade, sem merge).
+ *   - Encaixe de Peça Especial/Monstro NÃO abre janela de Manipulação no
+ *     cliente (AC1 — o engine também não abre; peoes.ts do engine).
  */
 
 import {
@@ -147,6 +158,27 @@ export interface EstadoDoTabuleiroNoCliente {
    * Amedrontado) — projeção mínima sem recalcular no cliente.
    */
   readonly jogadorPorId: Readonly<Record<string, PercepcaoDeJogador>>
+  /**
+    * Peças restantes na Caixa para o HUD (issue #145): baseline do snapshot
+    * (`tabuleiro.pecasRestantesNaCaixa`) + derivação ao vivo por decremento em
+    * PECA_SORTEADA com pecaId inédito (mesmo gate de idempotência de
+    * `pecasDeRecebimento`), clamp em 0. `null` = ainda sem snapshot — a
+    * contagem fica oculta (nunca se conta a partir do nada).
+    */
+  readonly pecasRestantesNaCaixa: number | null
+  /**
+    * pecaIds dos Geradores ligados (chips de Objetivo Global, issue #145):
+    * espelho do wire/engine — a contagem exibida é o length. Incrementa no
+    * POSICAO_CONFIRMADA com dedupe por id (confirmar o mesmo gerador não
+    * conta 2×); substituído pela baseline a cada snapshot (autoridade).
+    */
+  readonly geradoresLigados: readonly string[]
+  /**
+    * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
+    * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
+    * engine). O snapshot substitui a baseline (reconexão reconcilia).
+    */
+  readonly cartaoDeAcessoObtido: boolean
 }
 
 /** Estado inicial determinístico do cliente (deltas a partir do zero). */
@@ -176,6 +208,11 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     posicaoConfirmadaNoTurno: false,
     peaoPorJogador: {},
     jogadorPorId: {},
+    // Objetivos globais (issue #145): sem baseline até o primeiro snapshot —
+    // a contagem da Caixa fica oculta (null) e os chips partem zerados.
+    pecasRestantesNaCaixa: null,
+    geradoresLigados: [],
+    cartaoDeAcessoObtido: false,
   }
 }
 
@@ -325,6 +362,9 @@ export function reduzirEvento(
       return { ...estado, recebidasPendentes, pecasDeRecebimento }
     }
     case 'PECA_SORTEADA':
+      // Gate de idempotência (issue #145): pecaId já conhecido em
+      // `pecasDeRecebimento` é repetição do mesmo sorteio — não regrava o
+      // tipo e não decrementa a contagem da Caixa uma segunda vez.
       if (estado.pecasDeRecebimento[evento.pecaId] !== undefined) return estado
       return {
         ...estado,
@@ -332,6 +372,12 @@ export function reduzirEvento(
           ...estado.pecasDeRecebimento,
           [evento.pecaId]: evento.tipoDaPeca,
         },
+        // Decremento ao vivo da contagem da Caixa: só com baseline do
+        // snapshot (null permanece null); clamp ≥ 0 (nunca negativa).
+        pecasRestantesNaCaixa:
+          estado.pecasRestantesNaCaixa === null
+            ? null
+            : Math.max(0, estado.pecasRestantesNaCaixa - 1),
       }
     case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO': {
       // A escolha da vaga (#138) fixa borda/célula-alvo e seleciona a Peça
@@ -420,9 +466,29 @@ export function reduzirEvento(
         pecaEmManipulacaoId: null,
         recebidasPendentes: [],
       }
-    case 'POSICAO_CONFIRMADA':
-      // A Confirmação de Posição trava o peão do Jogador Ativo neste turno.
-      return { ...estado, posicaoConfirmadaNoTurno: true }
+    case 'POSICAO_CONFIRMADA': {
+      // A Confirmação de Posição trava o peão do Jogador Ativo neste turno e
+      // é o ÚNICO ponto onde o engine confere conquistas (issue #145, espelho
+      // de partida.ts): gerador liga (dedupe por pecaId — reconfirmar o mesmo
+      // gerador não conta 2×) e sala_do_diretor obtém o cartão (monotônico).
+      // Ordem do lote: posicao_confirmada chega ANTES de limpeza/turno no
+      // mesmo lote, então o tipo é resolvido no estado anterior — a peça ainda
+      // está em `posicionadas`; `pecasDeRecebimento` é o fallback se ela já
+      // saiu do tabuleiro local em outro lote.
+      const tipo =
+        estado.posicionadas.find((p) => p.pecaId === evento.pecaId)?.tipo ??
+        estado.pecasDeRecebimento[evento.pecaId]
+      return {
+        ...estado,
+        posicaoConfirmadaNoTurno: true,
+        geradoresLigados:
+          tipo === 'gerador' && !estado.geradoresLigados.includes(evento.pecaId)
+            ? [...estado.geradoresLigados, evento.pecaId]
+            : estado.geradoresLigados,
+        cartaoDeAcessoObtido:
+          estado.cartaoDeAcessoObtido || tipo === 'sala_do_diretor',
+      }
+    }
 
     // ── Iluminação / Limpeza (issue #151) ──
     case 'CELULAS_ILUMINADAS':

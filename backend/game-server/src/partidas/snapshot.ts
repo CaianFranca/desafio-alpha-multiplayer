@@ -74,6 +74,12 @@ export function paraSnapshotWire(
     pecaSelecionadaId: estado.tabuleiro.pecaSelecionadaId,
     pecaEmManipulacaoId: estado.tabuleiro.pecaEmManipulacaoId,
     peaoSelecionadoId: estado.tabuleiro.peaoSelecionadoId,
+    // Contagem da Caixa no HUD (issue #145): projeção do comprimento da Caixa
+    // do engine. Normalização defensiva (`?.`/`?? 0`): estados Redis
+    // persistidos por binário anterior podem não trazer o campo materializado
+    // (JSON.parse as EstadoDaPartida não valida o shape) — padrão do `?? null`
+    // do `resultado` abaixo.
+    pecasRestantesNaCaixa: estado.tabuleiro.caixa?.length ?? 0,
   } as const;
 
   // Normalização defensiva: estados persistidos por binário anterior à #176
@@ -92,10 +98,19 @@ export function paraSnapshotWire(
     // Término (issue #179): o Resultado no estado do engine é a própria
     // condição "terminada" — o snapshot o reflete para que quem se conecta
     // (recarregamento) volte a ver o resultado, independente do estado da
-    // partida persistida reportado pela transição de presença. O wire
-    // transporta apenas o par vitória/derrota — o motivo da derrota fica
-    // interno ao domínio.
+    // partida persistida reportado pela transição de presença. O motivo da
+    // derrota acompanha em campo opcional (issue #145-exp, sync
+    // DesfechoDaPartida): `null` na vitória e em estados persistidos por
+    // binário anterior sem o campo (normalização defensiva do `?? null`
+    // acima — o JSON pode materializar undefined como chave ausente).
     estado: desfecho !== null ? 'terminada' : estadoWire,
     resultado: desfecho === null ? null : desfecho.tipo,
+    motivo: desfecho !== null && desfecho.tipo === 'derrota' ? desfecho.motivo : null,
+    // Conquistas/Objetivos Globais (issue #145): espelho dos contadores do
+    // engine para os chips da moldura. Normalização defensiva contra estados
+    // Redis antigos sem os campos (mesmo padrão do `resultado`): `?? []` e
+    // `?? false`.
+    geradoresLigados: estado.geradoresLigados ?? [],
+    cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido ?? false,
   };
 }

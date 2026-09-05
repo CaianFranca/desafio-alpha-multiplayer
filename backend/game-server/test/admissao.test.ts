@@ -599,6 +599,13 @@ test('ESTADO_DA_PARTIDA snapshot contém tabuleiro e metadados do turno', async 
     assert.ok(Array.isArray(snap.tabuleiro.recebidas));
     assert.ok(Array.isArray(snap.jogadores));
     assert.equal(snap.jogadores.length, 4);
+    // Contagem da Caixa e objetivos globais no snapshot (issue #145).
+    assert.equal(typeof snap.tabuleiro.pecasRestantesNaCaixa, 'number');
+    assert.ok(snap.tabuleiro.pecasRestantesNaCaixa > 0);
+    assert.ok(Array.isArray(snap.geradoresLigados));
+    assert.equal(snap.geradoresLigados.length, 0);
+    assert.equal(typeof snap.cartaoDeAcessoObtido, 'boolean');
+    assert.equal(snap.cartaoDeAcessoObtido, false);
     for (const j of snap.jogadores) {
       assert.ok(typeof j.jogadorId === 'string' && j.jogadorId.length > 0);
       assert.ok(typeof j.apelido === 'string' && j.apelido.length > 0);

@@ -18,7 +18,7 @@ import { mapearGiro, FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from '../game/t
 import type { FlashFeedback } from '../game/tabuleiro/interacao'
 import { mapearEventoPeaoParaFeedback } from '../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
-import { HEX_COR_PEAO } from '../game/tabuleiro/contrato'
+import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
 import type {
@@ -69,7 +69,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const navigate = useNavigate()
   const codigoDeSala = useSalaCodigoOptional()
 
-  const { estado, resultado, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
+  const { estado, resultado, motivo, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
     usePartidaTela({
       estadoInicial: !temAlvo ? 'falha' : estadoInicial,
       loader,
@@ -104,14 +104,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante tela
           // Limpa estados pendentes de interação: flash de erro não deve permanecer
           setFlash(null)
-          partidaTerminada(evento.resultado)
+          // Motivo da derrota acompanha (#145-exp); payloads antigos sem o
+          // campo chegam undefined → null (tela mantém texto genérico).
+          partidaTerminada(evento.resultado, evento.motivo ?? null)
           return
         }
         if (evento.type === 'ESTADO_DA_PARTIDA') {
           aplicarSnapshotNoModelo(evento.snapshot)
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             setFlash(null)
-            partidaTerminada(evento.snapshot.resultado)
+            partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
           }
           if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
@@ -220,6 +222,38 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
   const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
 
+  // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
+  // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
+  // do snapshot + deltas de ATAQUE/RESGATE, sem recarregar página. Caminha
+  // jogadorPorId × peaoPorJogador uma única vez (fonte também dos afetados).
+  const sanidadePorPeao: SanidadePorPeao = useMemo(() => {
+      const out: Record<string, { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
+      for (const [jogadorId, dados] of Object.entries(modelo.jogadorPorId)) {
+        const peaoId = modelo.peaoPorJogador[jogadorId]
+        if (peaoId) {
+          out[peaoId] = {
+            sanidade: dados.sanidade,
+            emBaixaIluminacao: dados.emBaixaIluminacao,
+            amedrontado: dados.amedrontado,
+          }
+        }
+      }
+      return out
+    }, [modelo.jogadorPorId, modelo.peaoPorJogador])
+
+  // ── Peões AFETADOS para o espelho de destinos (F1 #145-exp) ──
+  // Predicado espelhado do engine (partida.ts:1484): Baixa Iluminação ∨
+  // Amedrontado — único ponto onde a regra vive, sobre a projeção #174.
+  // Alimenta a exceção de ocupação de resgate (+1 teto, #171) em
+  // destinosConectadosDoPeao/mapearMovimentacao.
+  const afetadosPorPeaoId: ReadonlySet<string> = useMemo(() => {
+    const out = new Set<string>()
+    for (const [peaoId, dados] of Object.entries(sanidadePorPeao)) {
+      if (dados.emBaixaIluminacao || dados.amedrontado) out.add(peaoId)
+    }
+    return out
+  }, [sanidadePorPeao])
+
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
@@ -234,8 +268,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
       // bandeja continua pública (as pendências vêm do broadcast sem filtro).
       donoDoCiclo: minhaVez,
+      // Projeção dos afetados (exceção de resgate #171 no espelho de destinos).
+      afetadosPorPeaoId,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId])
 
   // ── Flash local (revisão #199): mesma fonte para o pull na bandeja; a
   // rejeição de peão (vermelho/âmbar do roteador) segue o mesmo caminho. ──
@@ -271,24 +307,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Chip Jogador Ativo (apelido/cor do snapshot, #156) ──
   const jogadorAtivoDados =
     modelo.jogadorAtivoId !== null ? modelo.jogadorPorId[modelo.jogadorAtivoId] ?? null : null
-
-  // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
-  // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
-  // do snapshot + deltas de ATAQUE/RESGATE, sem recarregar página.
-  const sanidadePorPeao: SanidadePorPeao = useMemo(() => {
-      const out: Record<string, { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }> = {}
-      for (const [jogadorId, dados] of Object.entries(modelo.jogadorPorId)) {
-        const peaoId = modelo.peaoPorJogador[jogadorId]
-        if (peaoId) {
-          out[peaoId] = {
-            sanidade: dados.sanidade,
-            emBaixaIluminacao: dados.emBaixaIluminacao,
-            amedrontado: dados.amedrontado,
-          }
-        }
-      }
-      return out
-    }, [modelo.jogadorPorId, modelo.peaoPorJogador])
 
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao
@@ -362,7 +380,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}
       />
-      <PartidaOverlays estado={estado} resultado={resultado} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
+      <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       <FlashOverlay flash={flash} onClear={limparFlash} />
       {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
         <div
@@ -370,6 +388,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           className="pointer-events-none absolute right-4 top-4 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
         >
           Rodada {modelo.rodada}
+        </div>
+      ) : null}
+      {estadoEmAndamento && modelo.pecasRestantesNaCaixa !== null ? (
+        // Contagem da Caixa no HUD (issue #145): baseline do snapshot +
+        // decremento ao vivo em PECA_SORTEADA. Oculta enquanto null (antes do
+        // primeiro ESTADO_DA_PARTIDA nunca se mostra contagem inventada).
+        <div
+          data-testid="contagem-caixa"
+          className="pointer-events-none absolute right-4 top-12 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
+        >
+          Caixa: {modelo.pecasRestantesNaCaixa}
         </div>
       ) : null}
       {(estadoEmAndamento || emResultado) && jogadorAtivoDados ? (
@@ -425,6 +454,43 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               {dados.amedrontado ? <span title="Amedrontado">⚠</span> : null}
             </div>
           ))}
+        </div>
+      ) : null}
+      {estadoEmAndamento ? (
+        // Chips de Objetivo Global na moldura (issue #145, spec pai ST-12):
+        // overlay IRMÃO sobre a moldura — o PartidaMoldura é decoração
+        // aria-hidden, os chips são informativos (aria-label) e nunca captam
+        // ponteiro. Fonte: modelo local (baseline do snapshot + derivação ao
+        // vivo pelos eventos existentes; sem novos eventos de conquista).
+        <div className="pointer-events-none absolute left-1/2 top-4 z-30 flex -translate-x-1/2 gap-2">
+          <div
+            data-testid="chip-geradores-ligados"
+            role="status"
+            data-geradores={modelo.geradoresLigados.length}
+            aria-label={`Geradores ligados: ${modelo.geradoresLigados.length} de ${ALVO_GERADORES_LIGADOS}`}
+            className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
+              modelo.geradoresLigados.length >= ALVO_GERADORES_LIGADOS
+                ? 'text-amber-300'
+                : 'text-zinc-200'
+            }`}
+          >
+            Geradores {modelo.geradoresLigados.length}/{ALVO_GERADORES_LIGADOS}
+          </div>
+          <div
+            data-testid="chip-cartao-de-acesso"
+            role="status"
+            data-obtido={modelo.cartaoDeAcessoObtido ? 'true' : 'false'}
+            aria-label={
+              modelo.cartaoDeAcessoObtido
+                ? 'Cartão de Acesso obtido'
+                : 'Cartão de Acesso ainda não obtido'
+            }
+            className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
+              modelo.cartaoDeAcessoObtido ? 'text-emerald-300' : 'text-zinc-500'
+            }`}
+          >
+            Cartão de Acesso
+          </div>
         </div>
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (

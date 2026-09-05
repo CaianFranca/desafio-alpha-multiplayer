@@ -9,6 +9,11 @@ interface PecaPlaceholderProps {
   position?: [number, number, number]
   /** Destaque visual da peça selecionada/em manipulação. */
   destacada?: boolean
+  /**
+   * Tom do destaque emissivo (default `COR_DESTAQUE` quente). Destino de
+   * resgate passa `COR_DESTAQUE_RESGATE` — sóbria, sem arte nova.
+   */
+  corDestaque?: string
   /** Cursor do ponteiro ao pairar (peça da mesa selecionável). */
   cursor?: 'default' | 'pointer'
   onClick?: (event: ThreeEvent<MouseEvent>) => void
@@ -35,6 +40,12 @@ const COR_CAMINHO = '#111111'
 // distinguir visualmente da composição padrão.
 /** Cor do destaque de destino válido (vizinha conectada ao peão selecionado). */
 const COR_DESTAQUE = '#ffe08a'
+/**
+ * Cor do destaque de destino de RESGATE (peça que abriga peão AFETADO sob o
+ * teto elevado — exceção #171). Tom frio sóbrio que contrasta do âmbar quente
+ * do movimento sem exigir arte nova (issue #145-exp F1).
+ */
+export const COR_DESTAQUE_RESGATE = '#7fd1e0'
 const INTENSIDADE_DESTAQUE = 0.7
 
 const TAMANHO_PECA = TAMANHO_CELULA * 0.96
@@ -56,6 +67,7 @@ export function PecaPlaceholder({
   orientacao,
   position,
   destacada = false,
+  corDestaque = COR_DESTAQUE,
   cursor = 'default',
   onClick,
 }: PecaPlaceholderProps) {
@@ -81,7 +93,7 @@ export function PecaPlaceholder({
           color={COR_POR_TIPO[tipo]}
           transparent
           opacity={0.88}
-          emissive={destacada ? COR_DESTAQUE : '#000000'}
+          emissive={destacada ? corDestaque : '#000000'}
           emissiveIntensity={destacada ? INTENSIDADE_DESTAQUE : 0}
         />
       </mesh>

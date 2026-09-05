@@ -24,6 +24,8 @@ function snapshotComJogadores(
       pecaSelecionadaId: null,
       pecaEmManipulacaoId: null,
       peaoSelecionadoId: null,
+      // Campos de objetivo global (issue #145): neutros para estes testes.
+      pecasRestantesNaCaixa: 83,
     },
     jogadores,
     jogadorAtivoId: jogadores[0]?.jogadorId ?? 'j1',
@@ -33,6 +35,8 @@ function snapshotComJogadores(
     celulasIluminadas: [],
     estado: 'em_andamento',
     resultado: null,
+    geradoresLigados: [],
+    cartaoDeAcessoObtido: false,
     ...overrides,
   }
 }

@@ -5,6 +5,7 @@ import { AuthProvider } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
+import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 // Issue #91 + #143: conexão do frontend com o game-server para peões, ciclo e
 // a Caixa sobre a mesa (forma #138: peça sorteada + escolha sequencial de
@@ -103,6 +104,14 @@ function recebidaSorteada(
   tipoDaPeca: string,
 ) {
   return { recebidaId, pecaId, tipoDaPeca, vaga: null, celulaAlvo: null }
+}
+
+function pecaPosicionadaDoEspelho(pecaId: string): HTMLElement {
+  const peca = screen
+    .getAllByTestId('peca-posicionada')
+    .find((el) => el.getAttribute('data-peca-id') === pecaId)
+  if (!peca) throw new Error(`peça ${pecaId} não encontrada no espelho`)
+  return peca
 }
 
 afterEach(() => {
@@ -470,6 +479,12 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
   })
 
   it('CAIXA_ESGOTADA no ERRO_DO_TABULEIRO produz flash vermelho com motivo (issue #143)', async () => {
+    // Rota DEFENSIVA (#145-exp F5): o código CAIXA_ESGOTADA só é produzido
+    // pela primitiva sortearDaCaixa do engine (tabuleiro.ts:504-507), que
+    // nenhum comando do wire invoca; o término por Caixa esgotada chega ao
+    // cliente via PARTIDA_TERMINADA com motivo (coberto em
+    // partida-ciclo-completo.test.tsx, F4). O teste blinda o feedback caso um
+    // servidor autoritativo emita a rejeição explícita — não remover.
     const ws = await partidaDisponivel()
 
     act(() =>
@@ -656,5 +671,279 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     const flash = await screen.findByTestId('flash-overlay')
     expect(flash.getAttribute('data-cor')).toBe('ambar')
     expect(flash.getAttribute('data-motivo')).toBe('posicao_confirmada')
+  })
+})
+
+// F3 (#145-exp): monstros na Caixa e resgate por clique ponta a ponta NA TELA
+// (o funil de regras já é coberto no engine; aqui é o caminho wire → modelo →
+// espelho DOM → comando que a auditoria pediu para blindar).
+describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
+  it('vulto na corrente da bandeja: pull → ESCOLHER_VAGA → POSICIONAR_PECA, sem janela de Manipulação', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+      // O servidor sorteia o Monstro e o entrega no Recebimento como peça comum.
+      ws.simulateMessage({
+        type: 'PECA_SORTEADA',
+        pecaId: 'vulto-1',
+        tipoDaPeca: 'vulto',
+        orientacao: 0,
+      })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [recebidaSorteada('r1', 'vulto-1', 'vulto')],
+      })
+    })
+
+    // Bandeja exibe o Monstro com o tipo do wire.
+    const corrente = pecaCorrenteDaBandeja()
+    expect(corrente).not.toBeNull()
+    expect(corrente!.getAttribute('data-tipo')).toBe('vulto')
+    expect(corrente!.getAttribute('data-peca-id')).toBe('vulto-1')
+
+    // Pull → vaga norte → ESCOLHER_VAGA (o Monstro percorre o mesmo fluxo).
+    await puxarCorrente(user)
+    expect(celulaDoEspelho(2, 3).getAttribute('data-vaga')).toBe('true')
+    await user.click(celulaDoEspelho(2, 3))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r1',
+      borda: 'norte',
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
+        recebidaId: 'r1',
+        borda: 'norte',
+        celulaAlvo: { linha: 2, coluna: 3 },
+      })
+    })
+
+    // Encaixe: POSICIONAR_PECA do Monstro na célula-alvo.
+    await user.click(celulaDoEspelho(2, 3))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'vulto-1',
+      celula: { linha: 2, coluna: 3 },
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'vulto-1',
+        celula: { linha: 2, coluna: 3 },
+        orientacao: 0,
+      })
+    })
+    // Monstro posicionado no espelho com o tipo correto…
+    expect(pecaPosicionadaDoEspelho('vulto-1').getAttribute('data-tipo')).toBe('vulto')
+    // …e sem janela de Manipulação (espelha engine posicionarRecebida):
+    // os controles de giro nascem travados.
+    expect(screen.getByTestId('girar-horario')).toBeDisabled()
+    expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
+  })
+
+  it('espectro na corrente da bandeja e no encaixe (cobertura do segundo tipo de Monstro)', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+      ws.simulateMessage({
+        type: 'PECA_SORTEADA',
+        pecaId: 'espectro-1',
+        tipoDaPeca: 'espectro',
+        orientacao: 0,
+      })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [recebidaSorteada('r1', 'espectro-1', 'espectro')],
+      })
+    })
+
+    expect(pecaCorrenteDaBandeja()!.getAttribute('data-tipo')).toBe('espectro')
+    await puxarCorrente(user)
+    await user.click(celulaDoEspelho(3, 4))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r1',
+      borda: 'leste',
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
+        recebidaId: 'r1',
+        borda: 'leste',
+        celulaAlvo: { linha: 3, coluna: 4 },
+      })
+    })
+    await user.click(celulaDoEspelho(3, 4))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'espectro-1',
+      celula: { linha: 3, coluna: 4 },
+      jogadorId: JOGADOR_ID,
+    })
+  })
+
+  it('Monstro posicionado perde o destaque de destino do peão (exclusão do engine na tela)', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+      // O servidor sorteia o Monstro e o posiciona no tabuleiro (rota real:
+      // o modelo local só posiciona peça cujo tipo conhece via sorteio).
+      ws.simulateMessage({
+        type: 'PECA_SORTEADA',
+        pecaId: 'vulto-1',
+        tipoDaPeca: 'vulto',
+        orientacao: 0,
+      })
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'vulto-1',
+        celula: { linha: 3, coluna: 4 },
+        orientacao: 0,
+      })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+    })
+
+    // O Monstro está no tabuleiro, mas NÃO é destino do peão selecionado.
+    const vulto = pecaPosicionadaDoEspelho('vulto-1')
+    expect(vulto.getAttribute('data-conectada')).toBe('false')
+    const comandosAntes = ws.sentMessages.length
+    await user.click(celulaDoEspelho(3, 4))
+    expect(ws.sentMessages).toHaveLength(comandosAntes)
+  })
+
+  it('clique em destino de RESGATE emite MOVER_PEAO e o eco limpa o afetado (#145-exp F1+F3d)', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    // Snapshot autoritativo: Ana (vermelho) afetada por Baixa Iluminação na
+    // reta vizinha ao meu peão branco (Inicial). Seleção já no modelo.
+    const snapshot = {
+      tabuleiro: {
+        posicionadas: [
+          { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+          { pecaId: 'reta-1', tipo: 'reta', orientacao: 90, celula: { linha: 3, coluna: 4 } },
+        ],
+        iniciais: [],
+        peoes: [
+          { peaoId: 'peao-branco', cor: 'branco', pecaId: 'inicial-1' },
+          { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'reta-1' },
+          { peaoId: 'peao-azul', cor: 'azul', pecaId: null },
+          { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+        ],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: 'peao-branco',
+        pecasRestantesNaCaixa: 60,
+      },
+      jogadores: [
+        { jogadorId: JOGADOR_ID, apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: true, amedrontado: false },
+        { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      ],
+      jogadorAtivoId: JOGADOR_ID,
+      rodada: 2,
+      pecaDoInicioDoTurnoId: 'inicial-1',
+      posicaoConfirmada: false,
+      celulasIluminadas: [],
+      estado: 'em_andamento',
+      resultado: null,
+      geradoresLigados: [],
+      cartaoDeAcessoObtido: false,
+    } as unknown as EstadoDaPartidaSnapshot
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
+
+    // Percepção do afetado no espelho e destino de resgate destacado na peça.
+    await waitFor(() =>
+      expect(peaoDoEspelho('vermelho').getAttribute('data-em-baixa')).toBe('true'),
+    )
+    const reta = pecaPosicionadaDoEspelho('reta-1')
+    expect(reta.getAttribute('data-conectada')).toBe('true')
+    expect(reta.getAttribute('data-resgate')).toBe('true')
+
+    // Clique no destino → MESMO comando MOVER_PEAO (nenhum comando novo no wire).
+    await user.click(reta)
+    expect(ultimoComando(ws)).toEqual({
+      type: 'MOVER_PEAO',
+      peaoId: 'peao-branco',
+      celula: { linha: 3, coluna: 4 },
+      jogadorId: JOGADOR_ID,
+    })
+
+    // Eco do servidor: movimento consumado + resgate realizado (partida.ts:
+    // 675-712) — a Baixa Iluminação limpa na tela e o destino deixa de ser
+    // de resgate (peça no teto 1 sem afetado).
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_MOVIDO',
+        peaoId: 'peao-branco',
+        pecaIdDe: 'inicial-1',
+        pecaIdPara: 'reta-1',
+        celula: { linha: 3, coluna: 4 },
+      })
+      ws.simulateMessage({
+        type: 'RESGATE_REALIZADO',
+        pecaId: 'reta-1',
+        resgatadoJogadorId: 'jogador-2',
+        resgatadorJogadorId: JOGADOR_ID,
+        resgatadorPeaoId: 'peao-branco',
+      })
+    })
+    await waitFor(() =>
+      expect(peaoDoEspelho('vermelho').hasAttribute('data-em-baixa')).toBe(false),
+    )
+    expect(
+      screen.getAllByTestId('peca-posicionada').find((el) => el.getAttribute('data-peca-id') === 'reta-1')
+        ?.hasAttribute('data-resgate'),
+    ).toBe(false)
   })
 })

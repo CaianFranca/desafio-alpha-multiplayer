@@ -114,12 +114,24 @@ export function traduzirEventos(
           pecasRemovidas: evento.pecasRemovidas,
         });
         break;
-      // Término (issues #176 e #179): broadcast com o Resultado (par
-      // vitória/derrota — o motivo da derrota fica interno ao domínio); o
+      // Término (issues #176 e #179): broadcast com o Resultado; o motivo da
+      // derrota viaja em campo opcional (issue #145-exp — sync
+      // DesfechoDaPartida, engine/src/partida.ts:128-133). A vitória não tem
+      // motivo no domínio — a chave `motivo` só aparece nas derrotas. O
       // engine emite partida_terminada como último evento do lote da Ação.
-      case 'partida_terminada':
-        saida.push({ type: 'PARTIDA_TERMINADA', resultado: evento.desfecho.tipo });
+      case 'partida_terminada': {
+        const desfecho = evento.desfecho;
+        saida.push(
+          desfecho.tipo === 'derrota'
+            ? {
+                type: 'PARTIDA_TERMINADA',
+                resultado: desfecho.tipo,
+                motivo: desfecho.motivo,
+              }
+            : { type: 'PARTIDA_TERMINADA', resultado: desfecho.tipo },
+        );
         break;
+      }
       // Ataque dos Monstros (issues #172/#173): shape 1:1 com o evento de
       // domínio — estadosAplicados carrega o estado resultante das
       // penalidades por Jogador mudado (eco do feedback da #173).

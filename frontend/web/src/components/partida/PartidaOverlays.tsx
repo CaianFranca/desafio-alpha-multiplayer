@@ -1,32 +1,60 @@
-import type { EstadoDaTela, ResultadoDaPartida } from './partidaTelaMachine'
+import type {
+  EstadoDaTela,
+  MotivoDeDerrota,
+  ResultadoDaPartida,
+} from './partidaTelaMachine'
 
 interface PartidaOverlaysProps {
   estado: EstadoDaTela
   resultado: ResultadoDaPartida | null
+  /**
+   * Motivo da derrota (#145-exp, espelho do wire/engine — partidaTelaMachine).
+   * `null`/ausente (vitória ou payload antigo sem o campo): a derrota mantém
+   * o texto genérico pré-#145-exp.
+   */
+  motivo?: MotivoDeDerrota | null
   onRetry: () => void
   onVoltar: () => void
 }
 
 const baseClasses = 'absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/80'
 
-export function PartidaOverlays({ estado, resultado, onRetry, onVoltar }: PartidaOverlaysProps) {
+// Textos sóbrios por motivo de derrota, no estilo do overlay; os nomes do
+// domínio são os do engine (DesfechoDaPartida.motivo). Payload sem motivo
+// (binário anterior) cai no texto genérico — defensivos, sem inventar causa.
+const TEXTO_MOTIVO_DERROTA: Record<MotivoDeDerrota, string> = {
+  caixa_esgotada: 'A Caixa esgotou antes de a equipe completar a fuga',
+  equipe_amedrontada: 'A equipe perdeu toda a Sanidade',
+}
+
+export function PartidaOverlays({
+  estado,
+  resultado,
+  motivo = null,
+  onRetry,
+  onVoltar,
+}: PartidaOverlaysProps) {
   if (estado === 'disponivel') {
     return null
   }
 
   if (estado === 'resultado') {
     const vitoria = resultado === 'vitoria'
+    const detalhe = !vitoria && motivo !== null && motivo !== undefined
+      ? TEXTO_MOTIVO_DERROTA[motivo]
+      : 'A equipe não conseguiu escapar'
     return (
       <div
         data-testid="overlay-resultado"
         data-resultado={resultado ?? ''}
+        data-motivo={!vitoria && motivo ? motivo : ''}
         role="status"
         className={baseClasses}
       >
         <div className="flex flex-col items-center gap-4">
           <p className="text-white text-2xl font-bold">{vitoria ? 'Vitória!' : 'Derrota'}</p>
           <p className="text-zinc-400 text-sm">
-            {vitoria ? 'A equipe escapou do sanatório' : 'A equipe não conseguiu escapar'}
+            {vitoria ? 'A equipe escapou do sanatório' : detalhe}
           </p>
           <button
             type="button"

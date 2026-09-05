@@ -39,6 +39,12 @@ interface TabuleiroMirrorDOMProps {
   peaoAtivoId?: PeaoId | null
   /** PecaIds destinos válidos do peão selecionado (mesma fonte do destaque). */
   destinosSet: ReadonlySet<PecaId>
+  /**
+   * Subconjunto de `destinosSet` com os destinos de RESGATE (exceção #171):
+   * exposto como `data-resgate="true"` na peça — costura de teste do espelho;
+   * a cena usa o mesmo set para o tom frio do destaque.
+   */
+  resgateSet?: ReadonlySet<PecaId>
   aoSelecionarPeao?: (peaoId: PeaoId) => void
   aoDesselecionar?: () => void
   /** Estado de interação ST-09 para o fallback de célula/peça da mesa (#91). */
@@ -86,6 +92,7 @@ export function TabuleiroMirrorDOM({
   peaoSelecionadoId,
   peaoAtivoId = null,
   destinosSet,
+  resgateSet = new Set<PecaId>(),
   aoSelecionarPeao,
   aoDesselecionar,
   estadoInteracao = null,
@@ -210,9 +217,13 @@ export function TabuleiroMirrorDOM({
           key={p.pecaId}
           data-testid="peca-posicionada"
           data-peca-id={p.pecaId}
+          // Tipo derivado do modelo local (AC1 issue #145): prova de que peças
+          // especiais entram no tabuleiro com o tipo correto no espelho DOM.
+          data-tipo={p.tipo}
           data-conectada={
             selecao ? (destinosSet.has(p.pecaId) ? 'true' : 'false') : undefined
           }
+          data-resgate={resgateSet.has(p.pecaId) ? 'true' : undefined}
           data-selecionada={
             selecao ? (selecao.pecaId === p.pecaId ? 'true' : 'false') : undefined
           }

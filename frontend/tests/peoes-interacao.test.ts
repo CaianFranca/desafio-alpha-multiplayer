@@ -423,7 +423,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(mapearMovimentacao(estado, { linha: 3, coluna: 5 })).toBeNull()
   })
 
-  it('destino conectado ocupado por outro peão não gera movimentação (null)', () => {
+  it('destino conectado ocupado por peão NÃO-afetado não gera movimentação (teto 1 em peça comum — espelho do engine)', () => {
     const mock = criarEstadoExibicaoMock()
     const estado = estadoComMock({
       peoes: [
@@ -431,8 +431,80 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
         peao('peao-3-azul', { linha: 3, coluna: 4 }),
       ],
     })
-    // reta(3,4) conectada, mas ocupada pelo peão azul → não é destino válido.
+    // reta(3,4) conectada e ocupada pelo peão azul sem estados (afetados
+    // vazio): teto 1 atingido → não é destino (mesma regra do engine).
     expect(mapearMovimentacao(estado, { linha: 3, coluna: 4 })).toBeNull()
+  })
+
+  it('destino de RESGATE sobre peão AFETADO emite o mesmo MOVER_PEAO (exceção #171 espelhada; nenhum comando novo no wire)', () => {
+    const estado: EstadoInteracaoPeoes = {
+      ...estadoBase(),
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('reta-1', 'reta', 90, 3, 4),
+      ],
+      peoes: [
+        peao('peao-1-branco', INICIAL),
+        peao('peao-2-vermelho', { linha: 3, coluna: 4 }),
+      ],
+      peaoSelecionadoId: 'peao-1-branco',
+      // Projeção mínima do chamador: vermelho está afetado (Baixa ∨ Medo).
+      afetadosPorPeaoId: new Set(['peao-2-vermelho']),
+    }
+    expect(mapearMovimentacao(estado, { linha: 3, coluna: 4 })).toEqual({
+      tipo: 'comando',
+      comando: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 4 } },
+    })
+  })
+
+  it('Portão aceita do 2º ao 4º peão e bloqueia no teto 4 (espelho peoes.ts:555-561 / engine termino.test.ts:770)', () => {
+    const posicionadas = [
+      pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+      pecaPosicionada('portao-1', 'portao_de_saida', 0, 3, 4),
+    ]
+    const comOcupantes = (quantidade: number): EstadoInteracaoPeoes => ({
+      ...estadoBase(),
+      posicionadas,
+      peoes: [
+        peao('peao-1-branco', INICIAL),
+        ...Array.from({ length: quantidade }, (_, i) =>
+          peao(`peao-x-${i}`, { linha: 3, coluna: 4 }),
+        ),
+      ],
+      peaoSelecionadoId: 'peao-1-branco',
+    })
+    // 1-3 ocupantes: do 2º ao 4º peão entram como movimento. (com ocupantes
+    // ≥ 4 a unidade sintética espelha a regra — com o roster real de 4 peões
+    // o 5º não existe no jogo.)
+    for (const ocupantes of [1, 2, 3]) {
+      expect(mapearMovimentacao(comOcupantes(ocupantes), { linha: 3, coluna: 4 })).toEqual({
+        tipo: 'comando',
+        comando: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 4 } },
+      })
+    }
+    // 4 ocupantes sem afetado → teto atingido, destino fora.
+    expect(mapearMovimentacao(comOcupantes(4), { linha: 3, coluna: 4 })).toBeNull()
+  })
+
+  it('Monstro posicionado conectado não gera movimentação (exclusão absoluta — partida.ts:583-585)', () => {
+    const estado: EstadoInteracaoPeoes = {
+      ...estadoBase(),
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('vulto-1', 'vulto', 0, 3, 4),
+      ],
+      peoes: [peao('peao-1-branco', INICIAL)],
+      peaoSelecionadoId: 'peao-1-branco',
+    }
+    // vulto conecta (4 bordas abertas) mas nunca aceita peão: nem mesmo com
+    // afetado "em estado artesanal" sob ele.
+    expect(mapearMovimentacao(estado, { linha: 3, coluna: 4 })).toBeNull()
+    expect(
+      mapearMovimentacao(
+        { ...estado, afetadosPorPeaoId: new Set(['peao-fantasma']) },
+        { linha: 3, coluna: 4 },
+      ),
+    ).toBeNull()
   })
 
   it('com Recebidas pendentes, movimentação não emite comando (tudo posicionado antes)', () => {
@@ -790,6 +862,25 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
 
   it('destino conectado → MOVER_PEAO', () => {
     const estado = estadoComMock()
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), { linha: 3, coluna: 4 })).toEqual({
+      ciclo: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 4 } },
+    })
+  })
+
+  it('destino de RESGATE roteia o mesmo MOVER_PEAO (nenhuma rota nova no roteador)', () => {
+    const estado: EstadoInteracaoPeoes = {
+      ...estadoBase(),
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('reta-1', 'reta', 90, 3, 4),
+      ],
+      peoes: [
+        peao('peao-1-branco', INICIAL),
+        peao('peao-2-vermelho', { linha: 3, coluna: 4 }),
+      ],
+      peaoSelecionadoId: 'peao-1-branco',
+      afetadosPorPeaoId: new Set(['peao-2-vermelho']),
+    }
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), { linha: 3, coluna: 4 })).toEqual({
       ciclo: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 4 } },
     })

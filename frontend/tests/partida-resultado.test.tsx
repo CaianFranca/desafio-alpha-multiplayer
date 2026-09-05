@@ -151,6 +151,53 @@ describe('partida resultado e retorno à sala (issue #180)', () => {
     const overlay = await screen.findByTestId('overlay-resultado')
     expect(overlay).toHaveAttribute('data-resultado', 'derrota')
     expect(overlay).toHaveTextContent('Derrota')
+    // Payload sem motivo (contrato antigo — defensivo): texto genérico, sem data-motivo.
+    expect(overlay).toHaveAttribute('data-motivo', '')
+    expect(overlay).toHaveTextContent('A equipe não conseguiu escapar')
+  })
+
+  it('derrota com motivo caixa_esgotada distingue o motivo na tela (#145-exp)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() =>
+      ws.simulateMessage({
+        type: 'PARTIDA_TERMINADA',
+        resultado: 'derrota',
+        motivo: 'caixa_esgotada',
+      }),
+    )
+    const overlay = await screen.findByTestId('overlay-resultado')
+    expect(overlay).toHaveAttribute('data-resultado', 'derrota')
+    expect(overlay).toHaveAttribute('data-motivo', 'caixa_esgotada')
+    expect(overlay).toHaveTextContent('A Caixa esgotou antes de a equipe completar a fuga')
+    expect(overlay).not.toHaveTextContent('A equipe não conseguiu escapar')
+  })
+
+  it('derrota com motivo equipe_amedrontada distingue o motivo na tela (#145-exp)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() =>
+      ws.simulateMessage({
+        type: 'PARTIDA_TERMINADA',
+        resultado: 'derrota',
+        motivo: 'equipe_amedrontada',
+      }),
+    )
+    const overlay = await screen.findByTestId('overlay-resultado')
+    expect(overlay).toHaveAttribute('data-motivo', 'equipe_amedrontada')
+    expect(overlay).toHaveTextContent('A equipe perdeu toda a Sanidade')
+    expect(overlay).not.toHaveTextContent('A equipe não conseguiu escapar')
+  })
+
+  it('snapshot terminada com motivo no resultado também o projeta na tela (#145-exp)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    const snap = criarSnapshotBase({
+      estado: 'terminada',
+      resultado: 'derrota' as const,
+      motivo: 'caixa_esgotada' as const,
+    })
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: snap }))
+    const overlay = await screen.findByTestId('overlay-resultado')
+    expect(overlay).toHaveAttribute('data-motivo', 'caixa_esgotada')
+    expect(overlay).toHaveTextContent('A Caixa esgotou antes de a equipe completar a fuga')
   })
 
   it('ESTADO_DA_PARTIDA snapshot terminada (reload) volta a exibir resultado', async () => {

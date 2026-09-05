@@ -26,8 +26,9 @@ import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
  * estado. Mapeia posicionadas, iniciais, peões, celulasIluminadas,
  * pecaSelecionadaId/pecaEmManipulacaoId/peaoSelecionadoId,
  * recebidas→recebidasPendentes, jogadores→peaoPorJogador+jogadorPorId (com
- * sanidade/estados — ST-15, #174), jogadorAtivoId/rodada/posicaoConfirmada e
- * as Peças Iniciais da mesa (#143).
+ * sanidade/estados — ST-15, #174), jogadorAtivoId/rodada/posicaoConfirmada,
+ * as Peças Iniciais da mesa (#143) e a baseline dos objetivos globais —
+ * pecasRestantesNaCaixa/geradoresLigados/cartaoDeAcessoObtido (issue #145).
  */
 export function aplicarSnapshot(
   estado: EstadoDoTabuleiroNoCliente,
@@ -130,5 +131,15 @@ export function aplicarSnapshot(
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
     peaoPorJogador,
     jogadorPorId,
+    // Baseline autoritativa dos objetivos globais (issue #145): o snapshot
+    // SUBSTITUI (não faz merge) — reconexão sem recarregamento reconcilia a
+    // contagem da Caixa e os contadores de conquista com o engine.
+    // Normalização defensiva no mesmo padrão da sanidade acima: snapshots
+    // produzidos por binário anterior à #145 não trazem os campos — `null`
+    // mantém a contagem oculta (sem baseline), as listas/flags partem
+    // neutras.
+    pecasRestantesNaCaixa: snapshot.tabuleiro.pecasRestantesNaCaixa ?? null,
+    geradoresLigados: snapshot.geradoresLigados ?? [],
+    cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido ?? false,
   }
 }
