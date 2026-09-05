@@ -782,21 +782,45 @@ test('desselecionar_peao limpa a seleção vigente e emite peao_desselecionado (
   );
 });
 
-test('desselecionar_peao é idempotente sem eventos (já desselecionado ou outro peão, #249)', () => {
-  // Sem seleção vigente: no-op.
+test('desselecionar_peao idempotente emite confirmação sem alterar o estado (já desselecionado ou outro peão, #249)', () => {
+  // Sem seleção vigente: estado inalterado + ack para o autor (libera retry).
   const semSelecao = estadoInicialDoTabuleiro();
   const vazio = aplicarComandoDeTabuleiro(semSelecao, desselecionarPeao('peao-branco'));
   assert.equal(vazio.sucesso, true);
   if (!vazio.sucesso) throw new Error('inacessível');
   assert.equal(vazio.estado.peaoSelecionadoId, null);
-  assert.deepEqual(vazio.eventos, []);
-  // Outro peão em sequência: não rouba a sequência alheia.
+  assert.deepEqual(
+    vazio.eventos.map((e) => e.tipo),
+    ['peao_desselecionado'],
+  );
+  assert.deepEqual(vazio.estado, semSelecao);
+  // Outro peão em sequência: não rouba a sequência alheia, mas confirma.
   const comSelecao = aplicar(semSelecao, selecionarPeao('peao-branco'));
   const alheia = aplicarComandoDeTabuleiro(comSelecao, desselecionarPeao('peao-vermelho'));
   assert.equal(alheia.sucesso, true);
   if (!alheia.sucesso) throw new Error('inacessível');
   assert.equal(alheia.estado.peaoSelecionadoId, 'peao-branco');
-  assert.deepEqual(alheia.eventos, []);
+  assert.deepEqual(
+    alheia.eventos.map((e) => e.tipo),
+    ['peao_desselecionado'],
+  );
+  assert.deepEqual(alheia.estado, comSelecao);
+});
+
+test('desselecionar_peao idempotente não encerra manipulação em aberto (#249)', () => {
+  // Seleção vigente de outro peão + manipulação: o no-op confirmatório não
+  // pode encerrar nem reabrir manipulação alheia.
+  let estado = aplicar(estadoInicialDoTabuleiro(), selecionarPeao('peao-branco'));
+  estado = { ...estado, pecaEmManipulacaoId: 'inicial-1' };
+  const resultado = aplicarComandoDeTabuleiro(estado, desselecionarPeao('peao-vermelho'));
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) throw new Error('inacessível');
+  assert.equal(resultado.estado.pecaEmManipulacaoId, 'inicial-1');
+  assert.equal(resultado.estado.peaoSelecionadoId, 'peao-branco');
+  assert.deepEqual(
+    resultado.eventos.map((e) => e.tipo),
+    ['peao_desselecionado'],
+  );
 });
 
 test('desselecionar_peao sob Recebidas pendentes rejeita PENDENCIA_NAO_RESOLVIDA (#249)', () => {

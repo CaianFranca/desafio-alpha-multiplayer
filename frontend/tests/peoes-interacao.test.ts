@@ -1303,6 +1303,27 @@ describe('desseleção autoritativa do peão (issue #249)', () => {
 })
 
 describe('pendentes otimistas anti-duplo-place (issue #249)', () => {
+  it('retry de DESELECIONAR_PEAO bloqueia em voo e libera no ack idempotente', () => {
+    // Espelho do gate `enviarComJogador` da PartidaPage: o mesmo alvo em voo
+    // não é reenviado; o ack (inclusive o idempotente com confirmação do
+    // servidor) libera o retry — nunca fica preso até o snapshot.
+    function tentarEnviar(pendentes: Set<string>, comando: { type: string; peaoId: string }): boolean {
+      const chave = chaveDeComandoPendente(comando)
+      if (chave === null) return true
+      if (pendentes.has(chave)) return false
+      pendentes.add(chave)
+      return true
+    }
+    const voo = new Set<string>()
+    expect(tentarEnviar(voo, { type: 'DESELECIONAR_PEAO', peaoId: 'peao-branco' })).toBe(true)
+    expect(tentarEnviar(voo, { type: 'DESELECIONAR_PEAO', peaoId: 'peao-branco' })).toBe(false)
+    // Ack idempotente do servidor (PEAO_DESELECIONADO mesmo sem seleção
+    // vigente) consome o alvo — o retry volta a passar.
+    expect(consumirAck(voo, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })).toBe(true)
+    expect(voo.size).toBe(0)
+    expect(tentarEnviar(voo, { type: 'DESELECIONAR_PEAO', peaoId: 'peao-branco' })).toBe(true)
+  })
+
   it('chaveia POSICIONAR_PECA/POSICIONAR_PEAO/DESELECIONAR_PEAO e ignora os demais', () => {
     expect(
       chaveDeComandoPendente({ type: 'POSICIONAR_PECA', pecaId: 'inicial-2', celula: { linha: 5, coluna: 5 } }),

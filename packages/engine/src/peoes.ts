@@ -222,8 +222,11 @@ export function selecionarPeao(
 // para desselecionar — elimina o deadlock do Primeiro Turno (ordem
 // peão→inicial travava a Inicial; após reload travava o peão).
 //
-//   - idempotente sem eventos quando já desselecionado (seleção null) ou
-//     quando outro peão está em sequência (não rouba a sequência alheia);
+//   - idempotente COM confirmação quando já desselecionado (seleção null)
+//     ou quando outro peão está em sequência (não rouba a sequência
+//     alheia): o estado sai inalterado, sem encerrar Manipulação, mas emite
+//     peao_desselecionado para que o autor receba o ack (libera o retry em
+//     `pendentesEmVoo`; nos demais clientes o redutor trata como no-op);
 //   - rejeitada com PENDENCIA_NAO_RESOLVIDA sob Recebidas pendentes — nunca
 //     órfã pendência de outro peão;
 //   - senão limpa peaoSelecionadoId e emite peao_desselecionado (a
@@ -243,10 +246,15 @@ export function desselecionarPeao(
     return rejeitar('PEAO_NAO_ENCONTRADO', 'O Peão não foi encontrado.');
   }
 
-  // Idempotência: sem seleção vigente ou com outro peão em sequência, não
-  // há o que desselecionar — no-op sem eventos (não reabre nem rouba nada).
+  // Idempotência com confirmação: sem seleção vigente ou com outro peão
+  // em sequência, não há o que desselecionar — estado inalterado, sem
+  // encerrar Manipulação, mas com peao_desselecionado para que todo
+  // DESELECIONAR_PEAO válido gere ack visível ao autor (não reabre nem
+  // rouba nada; nos demais clientes o evento é no-op).
   if (estado.peaoSelecionadoId !== comando.peaoId) {
-    return sucesso(estado, []);
+    return sucesso(estado, [
+      { tipo: 'peao_desselecionado', peaoId: comando.peaoId },
+    ]);
   }
 
   // Desseleção com recebidas pendentes é rejeitada, nunca órfã pendência.

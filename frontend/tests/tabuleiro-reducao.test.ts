@@ -1052,6 +1052,30 @@ describe('reconciliação no reload — prova segura sem reset blanket (issue #2
     estado = reduzirEvento(estado, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })
     expect(estado.peaoSelecionadoId).toBeNull()
   })
+
+  it('reload pós-ack: PEAO_DESELECIONADO persiste no snapshot com seleção null (#249)', () => {
+    // O servidor persiste antes do broadcast (handlers.ts:122-123), então o
+    // reload lê o estado confirmado: evento → snapshot null, sem fantasma.
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_SELECIONADO',
+      peaoId: 'peao-branco',
+    })
+    estado = reduzirEvento(estado, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })
+    expect(estado.peaoSelecionadoId).toBeNull()
+    estado = aplicarSnapshot(estado, snapshotReload({ peaoSelecionadoId: null }))
+    expect(estado.peaoSelecionadoId).toBeNull()
+  })
+
+  it('evento tardio pós-snapshot converge sem fantasma (ack idempotente atrasado, #249)', () => {
+    // Snapshot null + ack atrasado do DESELECIONAR idempotente: no-op.
+    let estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotReload({ peaoSelecionadoId: null }))
+    estado = reduzirEvento(estado, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })
+    expect(estado.peaoSelecionadoId).toBeNull()
+    // Snapshot com seleção + tardio de outro peão: não rouba a sequência.
+    estado = aplicarSnapshot(estado, snapshotReload({ peaoSelecionadoId: 'peao-branco' }))
+    estado = reduzirEvento(estado, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-vermelho' })
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
+  })
 })
 
 describe('objetivos globais no modelo do cliente — baseline + derivação (issue #145)', () => {
