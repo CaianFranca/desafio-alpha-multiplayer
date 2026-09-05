@@ -870,6 +870,131 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
     expect(reaplicado.posicaoConfirmadaNoTurno).toBe(true)
     expect(reaplicado.movimentouNoTurno).toBe(true)
   })
+
+  it('prova Spec #249: PECA_POSICIONADA da Inicial preserva peaoSelecionadoId (reducao.ts não o toca)', () => {
+    // Ordem peão→inicial do primeiro turno: a seleção do peão segue vigente
+    // após o encaixe da Inicial — sem ela o POSICIONAR_PEAO seguinte ficaria
+    // sem seleção e o reload perderia o fluxo.
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_SELECIONADO',
+      peaoId: 'peao-branco',
+    })
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
+    estado = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+      orientacao: 0,
+    })
+    expect(estado.posicionadas.some((p) => p.pecaId === 'inicial-1')).toBe(true)
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
+  })
+
+  it('prova Spec #249: aplicarSnapshot preserva peaoSelecionadoId do servidor (snapshot.ts:118)', () => {
+    // O snapshot autoritativo restaura a seleção em fluxo — zerá-la aqui
+    // quebraria o POSICIONAR_PEAO pós-reload e o encaixe com pendentes.
+    const snapshot = snapshotBase({
+      tabuleiro: {
+        posicionadas: [
+          { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+        ],
+        iniciais: [{ pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 }],
+        peoes: [{ peaoId: 'peao-branco', cor: 'branco', pecaId: null }],
+        recebidas: [],
+        pecaSelecionadaId: 'inicial-2',
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: 'peao-branco',
+        pecasRestantesNaCaixa: 83,
+      },
+    })
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
+    expect(estado.pecaSelecionadaId).toBe('inicial-2')
+  })
+})
+
+describe('reconciliação no reload — prova segura sem reset blanket (issue #249)', () => {
+  function snapshotReload(
+    overrides: Partial<EstadoDaPartidaSnapshot['tabuleiro']> = {},
+  ): EstadoDaPartidaSnapshot {
+    return {
+      tabuleiro: {
+        posicionadas: [],
+        iniciais: [],
+        peoes: [],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+        pecasRestantesNaCaixa: 83,
+        ...overrides,
+      },
+      jogadores: [],
+      jogadorAtivoId: 'jogador-1',
+      rodada: 1,
+      pecaDoInicioDoTurnoId: null,
+      posicaoConfirmada: false,
+      celulasIluminadas: [],
+      estado: 'em_andamento',
+      resultado: null,
+      geradoresLigados: [],
+      cartaoDeAcessoObtido: false,
+    }
+  }
+
+  it('remount parte zerado: sem seleção nem pendências até o snapshot/evento chegar', () => {
+    // Não há localStorage/sessionStorage: o remount reconstrói do zero e só
+    // assume valor quando o snapshot/evento chega (espelho de prop do
+    // AmbienteDeJogo só re-sincroniza quando o valor do servidor muda).
+    const remontado = criarEstadoInicialDoCliente()
+    expect(remontado.peaoSelecionadoId).toBeNull()
+    expect(remontado.pecaSelecionadaId).toBeNull()
+    expect(remontado.recebidasPendentes).toEqual([])
+  })
+
+  it('evento após o remount re-estabelece a seleção (autoridade do servidor)', () => {
+    const remontado = criarEstadoInicialDoCliente()
+    const comSelecao = reduzirEvento(remontado, {
+      type: 'PEAO_SELECIONADO',
+      peaoId: 'peao-branco',
+    })
+    expect(comSelecao.peaoSelecionadoId).toBe('peao-branco')
+  })
+
+  it('snapshot após o remount restaura o fluxo: seleção + pendentes preservados para o encaixe', () => {
+    // O encaixe exige pendencia.pecaId === pecaSelecionadaId
+    // (interacaoPeoes.ts:399-409): descartar qualquer um dos dois no reload
+    // criaria um deadlock novo — por isso o reset blanket foi rejeitado.
+    const estado = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      snapshotReload({
+        posicionadas: [
+          { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+        ],
+        iniciais: [],
+        peoes: [{ peaoId: 'peao-branco', cor: 'branco', pecaId: 'inicial-1' }],
+        recebidas: [
+          {
+            recebidaId: 'r1',
+            pecaId: 'reta-1',
+            tipo: 'reta',
+            orientacao: 0,
+            vaga: 'norte',
+            celulaAlvo: { linha: 2, coluna: 3 },
+          },
+        ],
+        pecaSelecionadaId: 'reta-1',
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: 'peao-branco',
+      }),
+    )
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
+    expect(estado.pecaSelecionadaId).toBe('reta-1')
+    expect(estado.recebidasPendentes).toHaveLength(1)
+    const pendencia = estado.recebidasPendentes[0]
+    expect(pendencia?.pecaId).toBe(estado.pecaSelecionadaId)
+    expect(pendencia?.celulaAlvo).toEqual({ linha: 2, coluna: 3 })
+  })
 })
 
 describe('objetivos globais no modelo do cliente — baseline + derivação (issue #145)', () => {

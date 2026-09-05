@@ -29,6 +29,25 @@ import type { LimpezaTrigger } from '../../game/scenes/TransicaoLimpeza'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
+/**
+ * Mescla a seleção otimista local ao estado do ciclo para roteamento (issue
+ * #249): o Local governa só o clique (seleção/desseleção visual e pull da
+ * bandeja), nunca o modelo — o servidor segue autoridade e re-sincroniza o
+ * Local quando o snapshot/evento chega. Fonte única do merge usado em
+ * `aoSelecionarPeao` e em `estadoPeoesComPuxada`.
+ */
+function comSelecaoLocalParaRoteamento(
+  estado: EstadoInteracaoPeoes,
+  peaoSelecionadoIdLocal: PeaoId | null,
+  recebidaPuxadaId?: string | null,
+): EstadoInteracaoPeoes {
+  return {
+    ...estado,
+    peaoSelecionadoId: peaoSelecionadoIdLocal,
+    ...(recebidaPuxadaId !== undefined ? { recebidaPuxadaId } : {}),
+  }
+}
+
 interface CameraRigProps {
   bordaPx?: number
 }
@@ -101,10 +120,8 @@ export function AmbienteDeJogo({
       if (estadoInteracaoPeoes && onComandoPeao) {
         // Roteamento usa a seleção vigente (otimista local, #249): o Local
         // governa só o clique, nunca o modelo — o servidor re-sincroniza.
-        const estadoParaMapeamento: EstadoInteracaoPeoes = {
-          ...estadoInteracaoPeoes,
-          peaoSelecionadoId: peaoSelecionadoIdLocal,
-        }
+        const estadoParaMapeamento: EstadoInteracaoPeoes =
+          comSelecaoLocalParaRoteamento(estadoInteracaoPeoes, peaoSelecionadoIdLocal)
         const resultado = mapearCliqueNoPeao(estadoParaMapeamento, peaoId)
         if (resultado?.tipo === 'rejeicao') {
           onRejeicaoPeao?.(resultado.rejeicao.motivo)
@@ -150,11 +167,11 @@ export function AmbienteDeJogo({
   // snapshot/evento do servidor re-sincroniza o Local ao chegar.
   const estadoPeoesComPuxada: EstadoInteracaoPeoes | null =
     estadoInteracaoPeoes !== null
-      ? {
-          ...estadoInteracaoPeoes,
+      ? comSelecaoLocalParaRoteamento(
+          estadoInteracaoPeoes,
+          peaoSelecionadoIdLocal,
           recebidaPuxadaId,
-          peaoSelecionadoId: peaoSelecionadoIdLocal,
-        }
+        )
       : null
 
   const alvosPendentesSet = new Set<string>(

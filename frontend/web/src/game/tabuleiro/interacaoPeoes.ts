@@ -485,20 +485,38 @@ function resultadoDoMapeadorParaCelula(
 }
 
 /**
+ * Peão ainda sobre a Mesa: nunca ocupou uma célula do tabuleiro
+ * (`celula === null` — seed do cliente e do engine antes do primeiro
+ * POSICIONAR_PEAO). Predicado nomeado da exceção do primeiro turno (#249).
+ */
+export function peaoSobreAMesa(peao: PeaoDaExibicao | undefined): boolean {
+  return peao !== undefined && peao.celula === null
+}
+
+/**
  * Ciclo ativo: há Recebidas pendentes OU peão selecionado POSICIONADO
- * (suprime o fallback ST-09). Exceção do primeiro turno (issue #249): peão
- * selecionado ainda sobre a Mesa (`celula === null`) e sem pendências NÃO
- * suprime o fallback — a célula vazia com a Inicial selecionada roteia
- * POSICIONAR_PECA via ST-09, e a célula da Inicial posicionada roteia
- * POSICIONAR_PEAO pelo ciclo. Peão inexistente conserva o bloqueio
- * (estado inconsistente não libera o fallback).
+ * (suprime o fallback ST-09 e o chamador não aplica a rota ST-09 da célula).
+ *
+ * Tabela de decisão (issue #249 — o nome `cicloAtivo` é termo da issue):
+ *   - com Recebidas pendentes → true (o encaixe governa; alvos inválidos com
+ *     ciclo ativo não reagem em vez de cair no fallback — decisão #91);
+ *   - sem seleção → false (fallback ST-09 livre: célula vazia com seleção
+ *     emite POSICIONAR_PECA);
+ *   - seleção de peão inexistente → true conservador (estado inconsistente
+ *     não libera o fallback);
+ *   - peão selecionado ainda sobre a Mesa (`peaoSobreAMesa`) e sem
+ *     pendências → false, independentemente da seleção (é o que torna a
+ *     desseleção durável para o fallback): a célula vazia com a Inicial
+ *     selecionada roteia POSICIONAR_PECA via ST-09, e a célula da Inicial
+ *     posicionada roteia POSICIONAR_PEAO pelo ciclo (`rotearCliqueDeCelula`);
+ *   - peão selecionado posicionado → true.
  */
 export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
   if (haRecebidasPendentes(estado)) return true
   if (estado.peaoSelecionadoId === null) return false
   const selecionado = estado.peoes.find((p) => p.peaoId === estado.peaoSelecionadoId)
   if (!selecionado) return true
-  if (selecionado.celula === null) return false
+  if (peaoSobreAMesa(selecionado)) return false
   return true
 }
 
