@@ -383,6 +383,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         data-anuncio-id={anuncioDeRecusa?.id ?? undefined}
         role="status"
         aria-live="polite"
+        aria-atomic="true"
         className="sr-only"
       >
         {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa.motivo) : ''}

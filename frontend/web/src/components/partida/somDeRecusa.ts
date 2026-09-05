@@ -2,18 +2,18 @@
  * Som de recusa da Partida (issue #228).
  *
  * Ponto de som ÚNICO e centralizado da tela da Partida: toca sempre o mesmo
- * asset (`/media/bumpintowall.mp3`, servido de `web/media/` — duto `/media/`
- * do nginx em prod/dev via compose; em `npm run dev` puro via middleware do
- * `vite.config.ts`) nos pontos que antes geravam flash vermelho/âmbar — erros
- * do tabuleiro (incluindo ação fora da vez), rejeições locais do roteador
- * após confirmação e ataque com penalidade. Demais eventos (aprovações,
- * seleções, sorteios, turnos, limpeza, resgate, ataque sem vítimas) ficam em
- * silêncio, sem substituto visual.
+ * asset (`/media/bumpintowall.mp3`, servido pelo proxy a partir de
+ * `frontend/web/media/` — duto existente de mídia estática, `infra/nginx`) nos
+ * pontos que antes geravam flash vermelho/âmbar — erros do tabuleiro
+ * (incluindo ação fora da vez), rejeições locais do roteador após confirmação
+ * e ataque com penalidade. Demais eventos (aprovações, seleções, sorteios,
+ * turnos, limpeza, resgate, ataque sem vítimas) ficam em silêncio, sem
+ * substituto visual.
  *
  * O motivo do disparo sobrevive como identificador (string), preparando sons
  * distintos futuros — hoje o mapa abaixo aponta todos para o mesmo asset.
- * Volume base 0.3 (contrato `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`:
- * o futuro botão de volume multiplica o master por esta base sem recostura).
+ * Volume base 0.3 (VOLUME_BASE_SOM_DE_RECUSA): o futuro botão de volume
+ * controlará este ponto sem recostura via `masterVolume * VOLUME_BASE`.
  * `play()` com `catch` silencioso como defensivo (no-op se falhar).
  *
  * Puro onde dá: `motivoDeRecusaDoEvento` é 100% puro (evento → motivo | null,
@@ -30,7 +30,6 @@ export const CAMINHO_SOM_DE_RECUSA = '/media/bumpintowall.mp3'
  * Volume base do som de recusa (contrato com o futuro botão de volume, ADR-0007:
  * `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`, com master em [0, 1]).
  * Desvio consciente da spec #228 ("sempre cheio") por decisão humana explícita.
- */
 export const VOLUME_BASE_SOM_DE_RECUSA = 0.3
 
 /**
@@ -98,6 +97,8 @@ export function motivoDeRecusaDoEvento(
  * Toca o som de recusa do motivo — habilitado por padrão, sem etapa de
  * habilitação (história 6: a primeira recusa já é audível). No-op silencioso
  * se o áudio falhar (história 2 sem quebrar a Partida).
+ * Volume efetivo = VOLUME_BASE_SOM_DE_RECUSA (0.3); futuro controle fará
+ * `masterVolume * VOLUME_BASE`.
  */
 export function tocarSomDeRecusa(motivo: MotivoDeRecusa): void {
   try {
