@@ -1,12 +1,13 @@
 /**
  * Overlay bloqueante que pede para virar o aparelho.
- * Visível apenas em celular portrait; `z-50` acima de moldura/flash,
- * bloqueia interações subjacentes sem desmontar o modelo/WS.
+ * Visível apenas em celular com tela em retrato vertical;
+ * fica acima de moldura/flash e bloqueia interações subjacentes
+ * sem desmontar o modelo/WS.
  */
-export function OverlayOrientacao() {
+export function OverlayModoPaisagem() {
   return (
     <div
-      data-testid="overlay-orientacao"
+      data-testid="overlay-modo-paisagem"
       role="alert"
       aria-live="assertive"
       className="pointer-events-auto absolute inset-0 z-50 flex items-center justify-center bg-zinc-900/80 px-6 text-center"
