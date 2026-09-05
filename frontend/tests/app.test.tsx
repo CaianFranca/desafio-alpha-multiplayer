@@ -52,17 +52,53 @@ describe('homepage structure', () => {
     expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '/#objetivos')
   })
 
-  it('header nav outside home redirects to home and targets the section', async () => {
+  it('header nav outside home redirects to home and centers the section top', async () => {
     const user = userEvent.setup()
-    const scrollIntoView = vi.fn()
-    window.HTMLElement.prototype.scrollIntoView = scrollIntoView
-    renderWithRouter(['/login'])
+    const scrollTo = vi.fn()
+    const scrollToOriginal = window.scrollTo
+    const rectOriginal = window.HTMLElement.prototype.getBoundingClientRect
+    const innerHeightOriginal = window.innerHeight
+    window.scrollTo = scrollTo as typeof window.scrollTo
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 800 })
+    window.HTMLElement.prototype.getBoundingClientRect = () =>
+      ({ x: 0, y: 1000, top: 1000, left: 0, bottom: 1000, right: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect
+    try {
+      renderWithRouter(['/login'])
 
-    await user.click(screen.getByRole('link', { name: /história/i }))
+      await user.click(screen.getByRole('link', { name: /história/i }))
 
-    expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
-    expect(document.getElementById('historia')).not.toBeNull()
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' })
+      expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+      expect(document.getElementById('historia')).not.toBeNull()
+      // Topo da seção (1000) menos 20% da viewport (160), salto instantâneo.
+      expect(scrollTo).toHaveBeenCalledWith({ top: 840, behavior: 'auto' })
+    } finally {
+      window.scrollTo = scrollToOriginal
+      window.HTMLElement.prototype.getBoundingClientRect = rectOriginal
+      Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: innerHeightOriginal })
+    }
+  })
+
+  it('header nav on home smooth-scrolls the section top to the viewport middle', async () => {
+    const user = userEvent.setup()
+    const scrollTo = vi.fn()
+    const scrollToOriginal = window.scrollTo
+    const rectOriginal = window.HTMLElement.prototype.getBoundingClientRect
+    const innerHeightOriginal = window.innerHeight
+    window.scrollTo = scrollTo as typeof window.scrollTo
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 800 })
+    window.HTMLElement.prototype.getBoundingClientRect = () =>
+      ({ x: 0, y: 1000, top: 1000, left: 0, bottom: 1000, right: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect
+    try {
+      renderWithRouter(['/'])
+
+      await user.click(screen.getByRole('link', { name: /história/i }))
+
+      expect(scrollTo).toHaveBeenCalledWith({ top: 840, behavior: 'smooth' })
+    } finally {
+      window.scrollTo = scrollToOriginal
+      window.HTMLElement.prototype.getBoundingClientRect = rectOriginal
+      Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: innerHeightOriginal })
+    }
   })
 
   it('renders feature cards for all five game features', () => {

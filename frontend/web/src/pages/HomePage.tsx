@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
+import { rolarSecaoParaCentro } from '../utils/rolagemDeSecao'
 import { HeroSection } from '../components/home/HeroSection'
 import { TrailersSection } from '../components/home/TrailersSection'
 import { HistorySection } from '../components/home/HistorySection'
@@ -12,10 +13,11 @@ export function HomePage() {
   const { hash } = useLocation()
 
   // Chegando via "/#secao" (nav do header fora da Home ou link externo),
-  // posiciona de forma instantânea — sem smooth fora da Home.
+  // posiciona o topo da seção no meio da tela de forma instantânea —
+  // sem smooth fora da Home.
   useEffect(() => {
     if (!hash) return
-    document.getElementById(hash.slice(1))?.scrollIntoView?.({ behavior: 'auto', block: 'start' })
+    rolarSecaoParaCentro(hash.slice(1), 'auto')
   }, [hash])
   return (
     <div className="foundation-scope">

@@ -3,14 +3,15 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../state/useAuth'
 import { useSalaWebSocketContext } from '../../state/sala-web-socket-context'
 import { criarSalaLabel, retornarParaSalaLabel } from '../auth/AuthActions'
+import { rolarSecaoParaCentro } from '../../utils/rolagemDeSecao'
 
 const styleBotaoSair = 'site-header__cta site-header__logout'
 const styleVoltar = 'site-header__cta'
 const styleCriarSala = 'site-header__cta site-header__cta--accent'
 
 const secoesDoHeader = [
-  { rotulo: 'História', id: 'historia' },
   { rotulo: 'Trailers', id: 'trailers' },
+  { rotulo: 'História', id: 'historia' },
   { rotulo: 'Características', id: 'caracteristicas' },
   { rotulo: 'Objetivos', id: 'objetivos' },
 ] as const
@@ -34,12 +35,13 @@ export function Header() {
     navigate('/')
   }
 
-  // Âncoras apontam para seções da Home. Na Home o scroll é suave; fora dela
-  // redireciona para "/#id" (a HomePage rola de forma instantânea ao montar).
+  // Âncoras apontam para seções da Home, com o topo da seção no meio da
+  // tela. Na Home o scroll é suave; fora dela redireciona para "/#id"
+  // (a HomePage rola de forma instantânea ao montar).
   function irParaSecao(event: MouseEvent<HTMLAnchorElement>, id: string) {
     if (location.pathname === '/') {
       event.preventDefault()
-      document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+      rolarSecaoParaCentro(id, 'smooth')
       return
     }
     event.preventDefault()
