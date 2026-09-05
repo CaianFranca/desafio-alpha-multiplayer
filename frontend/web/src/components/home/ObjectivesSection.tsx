@@ -43,13 +43,13 @@ function ObjectivesRevealItem({ index, children }: { index: number; children: Re
 
 export function ObjectivesSection() {
   return (
-    <section id={objectives.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-background)" aria-labelledby="objectives-title">
+    <section id={objectives.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-background" aria-labelledby="objectives-title">
       <div className="max-w-4xl mx-auto">
         <h2 id="objectives-title" className="objectives-eyebrow">{objectives.title}</h2>
-        <ol className="objectives-timeline list-none m-0 p-0 flex flex-col gap-8">
+        <ol className="objectives-timeline list-none m-0 p-0 flex flex-col">
           {objectives.items.map((item, index) => (
             <ObjectivesRevealItem key={item.title} index={index}>
-              <div className="objectives-item">
+              <div className={`objectives-item${index % 2 === 1 ? ' is-flipped' : ''}`}>
                 <div className="objectives-item-text-wrap">
                   <h3 className="objectives-item-title">{item.title}</h3>
                   <p className="objectives-item-desc">{item.description}</p>

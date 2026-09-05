@@ -61,7 +61,7 @@ export function FeaturesSection() {
   const { ref: titleRef, revealState: titleState } = useReveal<HTMLHeadingElement>()
 
   return (
-    <section id={features.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-(--color-surface)" aria-labelledby="features-title">
+    <section id={features.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-surface" aria-labelledby="features-title">
       <div className="max-w-7xl mx-auto">
         <h2 ref={titleRef} id="features-title" className={`features-eyebrow features-reveal ${titleState}`}>{features.title}</h2>
         <ul className="features-grid grid grid-cols-1 md:grid-cols-6 gap-8 list-none m-0 p-0" role="list">

@@ -624,10 +624,10 @@ describe('lobby - página do lobby', () => {
     // Na home, a navegação principal reaparece.
     expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: /navegação principal/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
-    expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
-    expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '#caracteristicas')
-    expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '#objetivos')
+    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
+    expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '/#historia')
+    expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '/#caracteristicas')
+    expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '/#objetivos')
   })
 
   it('sala ocupa o espaço restante da viewport: overflow interno no wrapper, não no documento', async () => {

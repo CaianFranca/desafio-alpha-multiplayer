@@ -1,0 +1,45 @@
+/* Base global — resets e fundação dentro de `@layer base` para que as
+   utilities do Tailwind vençam na cascata (corrige o bug "CTA branco"
+   do reset `a` unlayered). Só o que se repete em todas as telas. */
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    font-family: var(--font-body);
+    color: var(--color-text);
+    background: var(--color-background);
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px var(--color-background) inset;
+    -webkit-text-fill-color: var(--color-text);
+    caret-color: var(--color-text);
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  /* Escopo da fundação (Home/Cadastro/Entrar): títulos em Source Serif 4.
+     Fora do escopo (Partida/Criar Sala) segue Inter. */
+  .foundation-scope :is(h1, h2, h3) {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  /* Foco visível preservado em todo o escopo da fundação. */
+  .foundation-scope :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}

@@ -46,10 +46,85 @@ describe('homepage structure', () => {
 
     const nav = screen.getByRole('navigation', { name: /navegação principal/i })
     expect(nav).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
-    expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
-    expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '#caracteristicas')
-    expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '#objetivos')
+    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
+    expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '/#historia')
+    expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '/#caracteristicas')
+    expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '/#objetivos')
+  })
+
+  it('header nav outside home redirects to home and centers the section top', async () => {
+    const user = userEvent.setup()
+    const scrollTo = vi.fn()
+    const scrollToOriginal = window.scrollTo
+    const rectOriginal = window.HTMLElement.prototype.getBoundingClientRect
+    const innerHeightOriginal = window.innerHeight
+    window.scrollTo = scrollTo as typeof window.scrollTo
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 800 })
+    window.HTMLElement.prototype.getBoundingClientRect = () =>
+      ({ x: 0, y: 1000, top: 1000, left: 0, bottom: 1000, right: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect
+    try {
+      renderWithRouter(['/login'])
+
+      await user.click(screen.getByRole('link', { name: /história/i }))
+
+      expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+      expect(document.getElementById('historia')).not.toBeNull()
+      // Topo da seção (1000) menos 20% da viewport (160), salto instantâneo.
+      expect(scrollTo).toHaveBeenCalledWith({ top: 840, behavior: 'auto' })
+    } finally {
+      window.scrollTo = scrollToOriginal
+      window.HTMLElement.prototype.getBoundingClientRect = rectOriginal
+      Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: innerHeightOriginal })
+    }
+  })
+
+  it('header nav on home smooth-scrolls the section top to the viewport middle', async () => {
+    const user = userEvent.setup()
+    const scrollTo = vi.fn()
+    const scrollToOriginal = window.scrollTo
+    const rectOriginal = window.HTMLElement.prototype.getBoundingClientRect
+    const innerHeightOriginal = window.innerHeight
+    window.scrollTo = scrollTo as typeof window.scrollTo
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 800 })
+    window.HTMLElement.prototype.getBoundingClientRect = () =>
+      ({ x: 0, y: 1000, top: 1000, left: 0, bottom: 1000, right: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect
+    try {
+      renderWithRouter(['/'])
+
+      await user.click(screen.getByRole('link', { name: /história/i }))
+
+      expect(scrollTo).toHaveBeenCalledWith({ top: 840, behavior: 'smooth' })
+    } finally {
+      window.scrollTo = scrollToOriginal
+      window.HTMLElement.prototype.getBoundingClientRect = rectOriginal
+      Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: innerHeightOriginal })
+    }
+  })
+
+  it('header logo on home scrolls back to the hero section', async () => {
+    const user = userEvent.setup()
+    const scrollTo = vi.fn()
+    const scrollToOriginal = window.scrollTo
+    const rectOriginal = window.HTMLElement.prototype.getBoundingClientRect
+    const innerHeightOriginal = window.innerHeight
+    window.scrollTo = scrollTo as typeof window.scrollTo
+    Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: 800 })
+    // Hero está no topo da página: 50 - 160 < 0, então trava em 0.
+    window.HTMLElement.prototype.getBoundingClientRect = () =>
+      ({ x: 0, y: 50, top: 50, left: 0, bottom: 50, right: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect
+    try {
+      renderWithRouter(['/'])
+
+      await user.click(screen.getByRole('link', { name: /flicker of sanity/i }))
+
+      expect(document.getElementById('hero')).not.toBeNull()
+      expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
+      expect(screen.getByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
+    } finally {
+      window.scrollTo = scrollToOriginal
+      window.HTMLElement.prototype.getBoundingClientRect = rectOriginal
+      Object.defineProperty(window, 'innerHeight', { writable: true, configurable: true, value: innerHeightOriginal })
+    }
   })
 
   it('renders feature cards for all five game features', () => {
@@ -174,7 +249,7 @@ describe('authentication states', () => {
     const header = screen.getByRole('banner')
     // Só o apelido trunca com reticências; navegação e controles permanecem.
     expect(within(header).getByText(apelidoLongo)).toHaveClass('truncate')
-    expect(within(header).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
+    expect(within(header).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
     expect(within(header).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
     expect(within(header).getByRole('button', { name: /^sair$/i })).toBeInTheDocument()
   })
@@ -298,8 +373,8 @@ describe('header variations (issue #211)', () => {
 
     const nav = within(header).getByRole('navigation', { name: /navegação principal/i })
     expect(nav).toBeInTheDocument()
-    expect(within(nav).getByRole('link', { name: /história/i })).toHaveAttribute('href', '#historia')
-    expect(within(nav).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '#trailers')
+    expect(within(nav).getByRole('link', { name: /história/i })).toHaveAttribute('href', '/#historia')
+    expect(within(nav).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
 
     expect(within(header).getByRole('link', { name: /^entrar$/i })).toHaveAttribute('href', '/login')
     expect(within(header).getByRole('link', { name: /criar conta/i })).toHaveAttribute('href', '/cadastro')

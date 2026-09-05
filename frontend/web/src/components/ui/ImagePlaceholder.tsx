@@ -15,11 +15,11 @@ export function ImagePlaceholder({ alt, src, className = '' }: ImagePlaceholderP
 
   return (
     <div
-      className={`${base} bg-(--color-surface) border border-dashed border-(--color-muted) ${className}`}
+      className={`${base} bg-surface border border-dashed border-muted ${className}`}
       role="img"
       aria-label={alt}
     >
-      <span className="text-(--color-muted) text-sm italic">[Imagem]</span>
+      <span className="text-muted text-sm italic">[Imagem]</span>
     </div>
   )
 }

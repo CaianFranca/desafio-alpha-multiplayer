@@ -115,6 +115,22 @@ export const footer = {
   brand: 'Flicker of Sanity',
   tagline: 'Um jogo de terror cooperativo online.',
   copyright: `© ${new Date().getFullYear()} Flicker of Sanity. Todos os direitos reservados.`,
+  logos: [
+    {
+      src: '/assets/Logo_Ginga_Branco.png',
+      alt: 'Ginga',
+    },
+    {
+      src: '/assets/alpha_edtech_logo_color_unofficial.svg',
+      alt: 'Alpha EdTech',
+      href: 'https://www.alphaedtech.org.br/',
+    },
+    {
+      src: '/assets/Logo_Cummis.png',
+      alt: 'Cummins',
+      href: 'https://www.cummins.com/pt-br',
+    },
+  ],
 } as const
 
 export const stubs = {

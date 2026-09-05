@@ -103,7 +103,7 @@ export function CadastroPage() {
         </button>
       </form>
 
-      <p className="text-sm text-center text-[var(--color-muted)] mt-6">
+      <p className="text-sm text-center text-muted mt-6">
         Já tem Cadastro?{' '}
         <Link to="/login" className="auth-link">
           Entre

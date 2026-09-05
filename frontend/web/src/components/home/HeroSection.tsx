@@ -47,14 +47,14 @@ export function HeroSection() {
     <section ref={sectionRef} id="hero" className="relative overflow-hidden" aria-labelledby="home-title">
       <div ref={bgRef} className="hero-media" aria-hidden="true" />
       <div className="relative max-w-4xl text-center mx-auto py-[clamp(4rem,15vh,8rem)] px-8">
-        <p className={`hero-reveal ${revealState} hero-delay-eyebrow flex items-center justify-center gap-4 text-(--color-accent) text-xs font-bold tracking-[.22em] uppercase`}>
-          <span className="inline-block h-px w-12 bg-(--color-accent)/70" aria-hidden="true" />
+        <p className={`hero-reveal ${revealState} delay-0 flex items-center justify-center gap-4 text-accent text-xs font-bold tracking-[.22em] uppercase`}>
+          <span className="inline-block h-px w-12 bg-accent/70" aria-hidden="true" />
           {hero.eyebrow}
-          <span className="inline-block h-px w-12 bg-(--color-accent)/70" aria-hidden="true" />
+          <span className="inline-block h-px w-12 bg-accent/70" aria-hidden="true" />
         </p>
-        <h1 id="home-title" className={`hero-reveal ${revealState} hero-delay-title my-4 text-[clamp(2.5rem,8vw,5rem)] leading-[.95] uppercase tracking-[.06em]`}>{hero.title}</h1>
-        <p className={`hero-reveal ${revealState} hero-delay-copy text-(--color-text) text-lg leading-relaxed font-display`}>{hero.copy}</p>
-        <AuthActions className={`hero-reveal ${revealState} hero-delay-ctas flex gap-3 justify-center flex-wrap mt-6`} />
+        <h1 id="home-title" className={`hero-reveal ${revealState} delay-[90ms] my-4 text-[clamp(2.5rem,8vw,5rem)] leading-[.95] uppercase tracking-[.06em]`}>{hero.title}</h1>
+        <p className={`hero-reveal ${revealState} delay-[180ms] text-text text-lg leading-relaxed font-display`}>{hero.copy}</p>
+        <AuthActions className={`hero-reveal ${revealState} delay-[270ms] flex gap-3 justify-center flex-wrap mt-6`} />
       </div>
     </section>
   )
