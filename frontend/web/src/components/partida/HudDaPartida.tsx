@@ -34,7 +34,7 @@ export interface HudDaPartidaProps {
   emAndamento: boolean
   /** Partida em resultado (cronômetro congela). */
   emResultado: boolean
-/**
+  /**
    * Identificador da Partida (paliativo do cronômetro: persiste o início em
    * `sessionStorage` para retomar ao sair e voltar na mesma aba).
    */

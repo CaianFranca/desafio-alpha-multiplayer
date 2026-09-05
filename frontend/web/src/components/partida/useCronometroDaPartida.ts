@@ -61,6 +61,15 @@ export function useCronometroDaPartida({ emAndamento, emResultado, partidaId = n
   const contando = emAndamento && !emResultado
 
   useEffect(() => {
+    // Resultado congela e dispensa o marco: sem intervalo e sem chave órfã.
+    if (emResultado && partidaId !== null && partidaId !== undefined && partidaId !== '') {
+      try {
+        window.sessionStorage.removeItem(chaveDoInicio(partidaId))
+      } catch {
+        // Sem persistência: nada a limpar.
+      }
+      return
+    }
     if (!contando) return
     if (partidaId === null || partidaId === undefined || partidaId === '') {
       const id = window.setInterval(() => {
@@ -89,7 +98,7 @@ export function useCronometroDaPartida({ emAndamento, emResultado, partidaId = n
     return () => {
       window.clearInterval(id)
     }
-  }, [contando, partidaId])
+  }, [contando, partidaId, emResultado])
 
   return { texto: formatarCronometroDaPartida(segundos), segundos }
 }

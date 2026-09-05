@@ -551,6 +551,37 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     ).toBeInTheDocument()
   })
 
+  it('resultado congela e limpa o marco persistido', () => {
+    window.sessionStorage.clear()
+    vi.useFakeTimers()
+    const base = {
+      jogadorPorId: JOGADORES_HUD,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      onSair: () => {},
+    }
+    const { rerender, unmount } = render(
+      <HudDaPartida {...base} partidaId="partida-timer-d" emAndamento emResultado={false} />,
+    )
+    act(() => {
+      vi.advanceTimersByTime(65_000)
+    })
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
+    expect(window.sessionStorage.getItem('hud-cronometro-inicio:partida-timer-d')).not.toBeNull()
+
+    rerender(<HudDaPartida {...base} partidaId="partida-timer-d" emAndamento emResultado />)
+    act(() => {
+      vi.advanceTimersByTime(30_000)
+    })
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
+    expect(window.sessionStorage.getItem('hud-cronometro-inicio:partida-timer-d')).toBeNull()
+    unmount()
+    window.sessionStorage.clear()
+    vi.useRealTimers()
+  })
+
   it('partida distinta recomeça do zero', () => {
     window.sessionStorage.clear()
     vi.useFakeTimers()
