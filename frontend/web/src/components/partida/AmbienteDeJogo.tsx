@@ -10,6 +10,7 @@ import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import type { EstadoExibicaoTabuleiro, PecaCorrente } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
+import type { FlashFeedback } from '../../game/tabuleiro/interacao'
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import {
   chaveCelula,
@@ -23,7 +24,7 @@ import {
   puxadaVigenteNaBandeja,
   vagasDisponiveisDoPeao,
 } from '../../game/tabuleiro/interacaoPeoes'
-import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
@@ -53,8 +54,10 @@ interface AmbienteDeJogoProps {
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   /** Callback de comando de peão (com jogadorId já injetado pelo pai). */
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
-  /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
-  onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
+  /** Callback de rejeição de peão (flash vermelho). */
+  onRejeicaoPeao?: (feedback: FlashFeedback) => void
+  /** Feedback local do pull na bandeja (FLASH_BRANCO — fluxo #143/revisão #199). */
+  onFlash?: (feedback: FlashFeedback) => void
   /** Peão selecionado vindo do modelo/servidor (null = nenhum). */
   peaoSelecionadoIdServidor?: PeaoId | null
   /** Peão do Jogador Ativo da vez (destaque, #118). */
@@ -71,6 +74,7 @@ export function AmbienteDeJogo({
   onComando,
   onComandoPeao,
   onRejeicaoPeao,
+  onFlash,
   peaoSelecionadoIdServidor = null,
   peaoAtivoId = null,
   sanidadePorPeao = {},
@@ -97,7 +101,7 @@ export function AmbienteDeJogo({
       if (estadoInteracaoPeoes && onComandoPeao) {
         const resultado = mapearCliqueNoPeao(estadoInteracaoPeoes, peaoId)
         if (resultado?.tipo === 'rejeicao') {
-          onRejeicaoPeao?.(resultado.rejeicao.motivo)
+          onRejeicaoPeao?.(resultado.rejeicao.feedback)
           return
         }
         if (resultado?.tipo === 'comando') {
@@ -170,7 +174,7 @@ export function AmbienteDeJogo({
   )
 
   // O mapeador puro decide o pull (gate de espectador incluso); o pai só
-  // persiste o resultado como estado local.
+  // persiste o resultado como estado local e mostra o flash.
   const aoPuxarPecaDaBandeja = useCallback((recebidaId: string) => {
     setRecebidaPuxadaId(recebidaId)
   }, [])
@@ -249,6 +253,7 @@ export function AmbienteDeJogo({
           onComandoPeao={onComandoPeao}
           onRejeicaoPeao={onRejeicaoPeao}
           onPuxarPecaDaBandeja={aoPuxarPecaDaBandeja}
+          onFlash={onFlash}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           pecaCorrente={pecaCorrente}
@@ -275,6 +280,7 @@ export function AmbienteDeJogo({
           onComandoPeao={onComandoPeao}
           onRejeicaoPeao={onRejeicaoPeao}
           onPuxar={aoPuxarPecaDaBandeja}
+          onFeedback={onFlash}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           sanidadePorPeao={sanidadePorPeao}

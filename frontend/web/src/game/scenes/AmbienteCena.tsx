@@ -11,8 +11,8 @@ import {
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
-import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
-import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../tabuleiro/interacao'
+import type { EstadoInteracaoPeoes } from '../tabuleiro/interacaoPeoes'
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
@@ -87,13 +87,15 @@ interface AmbienteCenaProps {
   estadoPeoes?: EstadoInteracaoPeoes | null
   /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
-  /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
-  onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
+  /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
+  onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /**
    * Pull aceito na bandeja da Caixa (fluxo #143/revisão #199): estado local
    * persistido no pai (AmbienteDeJogo), nunca viaja ao wire.
    */
   onPuxarPecaDaBandeja?: (recebidaId: string) => void
+  /** Feedback local do pull (FLASH_BRANCO) — o setter de flash da página. */
+  onFlash?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (destaque, #91). */
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (destaque, #143). */
@@ -128,6 +130,7 @@ export function AmbienteCena({
   onComandoPeao,
   onRejeicaoPeao,
   onPuxarPecaDaBandeja,
+  onFlash,
   alvosPendentesSet,
   vagasSet,
   pecaCorrente = null,
@@ -179,6 +182,7 @@ export function AmbienteCena({
               onComando={onComando ?? noop}
               estadoPeoes={estadoPeoes}
               onPuxar={onPuxarPecaDaBandeja}
+              onFeedback={onFlash}
             />
             {peoesNaMesa.map((peao) => {
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)

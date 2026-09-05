@@ -5,7 +5,7 @@ import { AuthProvider } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
-import { toquesDeAudio } from './helpers/mockAudio'
+import { vi } from 'vitest'
 import type { EstadoDaPartidaSnapshot, PecaPosicionadaNoSnapshot } from '@flicker/shared'
 
 function renderPartidaNaRota(entry: string) {
@@ -167,18 +167,18 @@ describe('partida conectada ao game-server (issue #85)', () => {
     })
   })
 
-  it('ERRO_DO_TABULEIRO toca som de recusa e anuncia, sem clarão', async () => {
+  it('ERRO_DO_TABULEIRO produz flash vermelho distinto do branco', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
-    // Aprovação → silêncio: sem som, sem clarão, sem anúncio.
+    // Aprovação → flash branco.
     act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' }))
-    await screen.findByTestId('tabuleiro')
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('anuncio-de-recusa')).toHaveTextContent('')
-    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
+    const branco = await screen.findByTestId('flash-overlay')
+    expect(branco.getAttribute('data-cor')).toBe('branco')
 
-    // Rejeição → som de recusa com motivo + anúncio, sem clarão.
+    // Branco expira sozinho (320ms).
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
+
+    // Rejeição → flash vermelho distinto.
     act(() =>
       ws.simulateMessage({
         type: 'ERRO_DO_TABULEIRO',
@@ -186,45 +186,46 @@ describe('partida conectada ao game-server (issue #85)', () => {
         mensagem: 'Peças de caminho só entram pelo Recebimento.',
       }),
     )
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/bumpintowall.mp3', volume: 0.3 })
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    const anuncio = screen.getByTestId('anuncio-de-recusa')
-    expect(anuncio.getAttribute('data-motivo')).toBe('rejeicao_do_servico')
-    expect(anuncio).toHaveTextContent('Ação recusada.')
+    const vermelho = await screen.findByTestId('flash-overlay')
+    expect(vermelho.getAttribute('data-cor')).toBe('vermelho')
+    expect(vermelho.getAttribute('data-motivo')).toBe('rejeicao_do_servico')
   })
 
-  it('recusas sucessivas tocam o som a cada vez, sem clarão', async () => {
+  it('sucessivos eventos de mesmo tipo reiniciam o timer do flash (via nova ref)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
-    // Aprovações sucessivas seguem em silêncio.
-    act(() => {
+    vi.useFakeTimers()
+
+    await act(async () => {
       ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' })
     })
-    act(() => {
+    expect(screen.getByTestId('flash-overlay')).toBeInTheDocument()
+
+    // Avança quase até o fim (300ms de 320ms).
+    await act(async () => {
+      vi.advanceTimersByTime(300)
+    })
+    expect(screen.getByTestId('flash-overlay')).toBeInTheDocument()
+
+    // Segundo evento idêntico reinicia o timer.
+    await act(async () => {
       ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-2' })
     })
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
-    // Cada recusa toca uma vez, com seu motivo; o anúncio acompanha a última.
-    act(() => {
-      ws.simulateMessage({
-        type: 'ERRO_DO_TABULEIRO',
-        codigo: 'PECA_NAO_RECEBIDA',
-        mensagem: 'Peças de caminho só entram pelo Recebimento.',
-      })
+    // Avança mais 100ms (total 400ms desde o início). 
+    // Sem o restart, o flash teria sumido em 320ms.
+    await act(async () => {
+      vi.advanceTimersByTime(100)
     })
-    act(() => {
-      ws.simulateMessage({
-        type: 'ERRO_DO_TABULEIRO',
-        codigo: 'FORA_DA_VEZ',
-        mensagem: 'Não é a sua vez.',
-      })
+    expect(screen.getByTestId('flash-overlay')).toBeInTheDocument()
+
+    // Avança até o fim do segundo timer.
+    await act(async () => {
+      vi.advanceTimersByTime(250)
     })
-    expect(toquesDeAudio).toHaveLength(2)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe('fora_da_vez')
+    
+    vi.useRealTimers()
   })
 
   it('retry com alvo na URL transita de falha para carregando', async () => {
@@ -341,7 +342,7 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     expect(reIluminadas[0]).toBe(celulaDoEspelho(0, 0))
   })
 
-  it('LIMPEZA_APLICADA remove a peça da cena, libera a célula, em silêncio, e aceita novo posicionamento sem recarregar', async () => {
+  it('LIMPEZA_APLICADA remove a peça da cena, libera a célula, produz flash único e aceita novo posicionamento sem recarregar', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
     // Posiciona inicial-1 em 3:3 via broadcast (mesma via dos eventos de #85).
@@ -356,9 +357,10 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     await screen.findByTestId('peca-posicionada')
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('true')
 
-    // Aprovação do posicionamento em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    // Deixa o flash de aprovação do posicionamento expirar (isola o da Limpeza).
+    await waitFor(() =>
+      expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument(),
+    )
 
     // A Limpeza chega pelo MESMO socket — sem recarregar página, sem reconectar.
     act(() =>
@@ -371,13 +373,16 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     )
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
 
-    // Limpeza em silêncio: nenhum toque, nenhum clarão.
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    // Feedback: um ÚNICO flash (branco de aprovação) percebido via data-cor.
+    expect(screen.getAllByTestId('flash-overlay')).toHaveLength(1)
+    expect(screen.getByTestId('flash-overlay').getAttribute('data-cor')).toBe('branco')
 
     // Célula liberada aceita novo posicionamento pela mesma via dos testes de
     // interação: seleção via broadcast + clique no espelho → POSICIONAR_PECA no WS.
     act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'reta-1' }))
+    await waitFor(() =>
+      expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument(),
+    )
     const user = userEvent.setup()
     await user.click(celulaDoEspelho(3, 3))
     await waitFor(() => {
@@ -545,7 +550,7 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
     })
   })
 
-  it('ERRO_DO_TABULEIRO FORA_DA_VEZ toca som de recusa com motivo e anuncia (issue #118)', async () => {
+  it('ERRO_DO_TABULEIRO FORA_DA_VEZ produz flash âmbar distinto (issue #118)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
     act(() => {
@@ -555,12 +560,9 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
         mensagem: 'Não é a sua vez.',
       })
     })
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/bumpintowall.mp3', volume: 0.3 })
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    const anuncio = screen.getByTestId('anuncio-de-recusa')
-    expect(anuncio.getAttribute('data-motivo')).toBe('fora_da_vez')
-    expect(anuncio).toHaveTextContent('Ação recusada: aguarde a sua vez.')
+    const ambar = await screen.findByTestId('flash-overlay')
+    expect(ambar.getAttribute('data-cor')).toBe('ambar')
+    expect(ambar.getAttribute('data-motivo')).toBe('fora_da_vez')
   })
 })
 
@@ -772,7 +774,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       .find((el) => el.getAttribute('data-jogador-id') === jogadorId)
   }
 
-  it('ATAQUE_RESOLVIDO com estadosAplicados atualiza os chips na tela e toca som de recusa', async () => {
+  it('ATAQUE_RESOLVIDO com estadosAplicados atualiza os chips na tela e pisca vermelho', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
     // Ana vira a Jogadora Ativa: o chip de destaque passa a ser o dela.
@@ -801,13 +803,9 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       expect(indicador).toHaveAttribute('data-sanidade', '2')
       expect(indicador).toHaveAttribute('data-em-baixa', 'true')
     })
-    // Som de recusa com motivo de ataque (PartidaPage: estadosAplicados > 0).
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/bumpintowall.mp3', volume: 0.3 })
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    const anuncio = screen.getByTestId('anuncio-de-recusa')
-    expect(anuncio.getAttribute('data-motivo')).toBe('ataque_com_penalidade')
-    expect(anuncio).toHaveTextContent('ataque')
+    // Feedback vermelho de penalidade (PartidaPage: estadosAplicados > 0).
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('vermelho')
   })
 
   it('ATAQUE_RESOLVIDO com Amedrontado atualiza o chip de medo na tela', async () => {
@@ -829,19 +827,14 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       expect(indicador).toHaveAttribute('data-sanidade', '0')
       expect(indicador).toHaveAttribute('data-amedrontado', 'true')
     })
-    // Ataque com penalidade também toca a recusa.
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe(
-      'ataque_com_penalidade',
-    )
+    expect((await screen.findByTestId('flash-overlay')).getAttribute('data-cor')).toBe('vermelho')
   })
 
-  it('ATAQUE_RESOLVIDO sem penalidade fica em silêncio (sem vítimas ou proteção que negou)', async () => {
+  it('ATAQUE_RESOLVIDO sem vítimas pisca âmbar; com Proteção negada pisca branco', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
 
-    // Gatilho sem atingidos (alcance vazio): silêncio.
+    // Gatilho sem atingidos (alcance vazio): âmbar.
     act(() =>
       ws.simulateMessage({
         type: 'ATAQUE_RESOLVIDO',
@@ -851,11 +844,12 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
         estadosAplicados: [],
       }),
     )
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
+    const ambar = await screen.findByTestId('flash-overlay')
+    expect(ambar.getAttribute('data-cor')).toBe('ambar')
 
-    // Proteção (sala médica) negou o ataque: silêncio.
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
+
+    // Proteção (sala médica) negou o ataque: branco.
     act(() =>
       ws.simulateMessage({
         type: 'ATAQUE_RESOLVIDO',
@@ -865,13 +859,13 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
         estadosAplicados: [],
       }),
     )
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    const branco = await screen.findByTestId('flash-overlay')
+    expect(branco.getAttribute('data-cor')).toBe('branco')
     // Sem estadosAplicados, os chips não mudam (o eco é feedback, não autoridade).
     expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-sanidade', '3')
   })
 
-  it('RESGATE_REALIZADO limpa os estados no chip e restaura a Sanidade, em silêncio', async () => {
+  it('RESGATE_REALIZADO limpa os estados no chip, restaura a Sanidade e pisca branco', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     // Ana Amedrontada (sanidade 0) no snapshot autoritativo.
     const snapshot = criarSnapshotBase({
@@ -886,7 +880,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-amedrontado', 'true')
       expect(indicadorDoJogador('jogador-2')).toHaveAttribute('data-sanidade', '0')
     })
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
 
     act(() =>
       ws.simulateMessage({
@@ -905,10 +899,8 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       expect(indicador).not.toHaveAttribute('data-em-baixa')
       expect(indicador).toHaveAttribute('data-sanidade', '1')
     })
-    // Resgate em silêncio: nenhum toque, nenhum clarão, nenhum anúncio.
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('branco')
   })
 })
 

@@ -11,7 +11,7 @@ import {
 } from './contrato'
 import type { PecaCorrente, PecaDaMesa } from './contrato'
 import { PecaPlaceholder } from './PecaPlaceholder'
-import type { EstadoInteracaoTabuleiro } from './interacao'
+import type { EstadoInteracaoTabuleiro, FlashFeedback } from './interacao'
 import type { EstadoInteracaoPeoes } from './interacaoPeoes'
 import {
   despacharCliqueNaPecaDaBandeja,
@@ -32,10 +32,11 @@ interface CaixaProps {
   estadoPeoes?: EstadoInteracaoPeoes | null
   /**
    * Pull aceito na bandeja (fluxo #143/revisão #199): o pai persiste o id como
-   * estado local; sem callback a bandeja fica inerte. O pull é silencioso
-   * (issue #228): nenhum feedback visual nem sonoro.
+   * estado local e aplica o flash; sem callback a bandeja fica inerte.
    */
   onPuxar?: (recebidaId: string) => void
+  /** Feedback local do pull (FLASH_BRANCO) ao puxar a corrente. */
+  onFeedback?: (feedback: FlashFeedback) => void
 }
 
 /**
@@ -60,6 +61,7 @@ export function Caixa({
   onComando,
   estadoPeoes = null,
   onPuxar,
+  onFeedback,
 }: CaixaProps) {
   // A corrente exibida é puxável? O MESMO mapeador puro do clique decide
   // (inclui gate de espectador); o cursor espelha a clicabilidade na cena.
@@ -108,6 +110,7 @@ export function Caixa({
                     // DOM; gate de espectador no roteador, silencioso).
                     despacharCliqueNaPecaDaBandeja(estadoPeoes, {
                       onPuxar,
+                      onFeedback,
                     })
                   }
                 : undefined

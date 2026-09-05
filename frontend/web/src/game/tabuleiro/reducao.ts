@@ -20,8 +20,8 @@
  *   - Nova Seleção com Manipulação em aberto emite [manipulacao_finalizada,
  *     peca_selecionada] em ordem — o broadcast preserva a ordem; a aplicação
  *     sequencial aqui reproduz esse encadeamento.
-  *   - ERRO_DO_TABULEIRO chega só ao autor e não altera o estado do cliente
-  *     (o som de recusa é gerenciado pela PartidaPage, não pelo reducer).
+ *   - ERRO_DO_TABULEIRO chega só ao autor e não altera o estado do cliente
+ *     (o flash vermelho é gerenciado pela camada de feedback, não pelo reducer).
  *
  * Ciclo do Peão (issue #91 — espelho do engine; forma #138):
  *   - Peões nascem seedados (`peao-${cor}`, sobre a Mesa) e o servidor move.
@@ -345,7 +345,7 @@ export function reduzirEvento(
         ? { ...estado, pecaEmManipulacaoId: null }
         : estado
     case 'ERRO_DO_TABULEIRO':
-      // Rejeição não altera o modelo local (recusa é da PartidaPage: som + anúncio).
+      // Rejeição não altera o modelo local (flash é da camada de feedback).
       return estado
 
     // ── Eventos de Peão / Ciclo (ST-10) ──
@@ -523,8 +523,8 @@ export function reduzirEvento(
       // estadosAplicados carrega o estado resultante por Jogador mudado
       // (Baixa Iluminação, sanidade, Amedrontado) — issue #173. O cliente
       // apenas projeta no dicionário, sem derivar (mesma semântica do
-      // snapshot). Ataque sem alvos ⇒ array vazio — estado permanece, a
-      // recusa (som) é tratada na camada PartidaPage.
+      // snapshot). Ataque sem alvos ⇒ array vazio — estado permanece, feedback
+      // é tratado na camada PartidaPage (flash).
       if (evento.estadosAplicados.length === 0) {
         return estado
       }

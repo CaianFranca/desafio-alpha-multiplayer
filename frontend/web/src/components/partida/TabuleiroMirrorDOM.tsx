@@ -8,8 +8,8 @@ import type {
   PecaId,
   PecaPosicionada,
 } from '../../game/tabuleiro/contrato'
-import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
-import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoTabuleiro, FlashFeedback } from '../../game/tabuleiro/interacao'
+import type { EstadoInteracaoPeoes } from '../../game/tabuleiro/interacaoPeoes'
 import {
   despacharCliqueDeCelula,
   despacharCliqueNaPecaDaBandeja,
@@ -53,10 +53,12 @@ interface TabuleiroMirrorDOMProps {
   estadoPeoes?: EstadoInteracaoPeoes | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
-  /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
-  onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
+  /** Rejeição local do roteador (guard pós-confirmação, AC3) → flash no pai. */
+  onRejeicaoPeao?: (feedback: FlashFeedback) => void
   /** Pull aceito na bandeja (fluxo #143/revisão #199) → estado local no pai. */
   onPuxar?: (recebidaId: string) => void
+  /** Feedback local do pull (FLASH_BRANCO). */
+  onFeedback?: (feedback: FlashFeedback) => void
   /** Chaves das células-alvo de pendências ativas (mesma fonte da cena). */
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (#143, cena/espelho). */
@@ -99,6 +101,7 @@ export function TabuleiroMirrorDOM({
   onComandoPeao,
   onRejeicaoPeao,
   onPuxar,
+  onFeedback,
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
   sanidadePorPeao = {},
@@ -121,7 +124,7 @@ export function TabuleiroMirrorDOM({
       onComando,
       onComandoPeao,
       onRejeicao: onRejeicaoPeao
-        ? (rejeicao) => onRejeicaoPeao(rejeicao.motivo)
+        ? (rejeicao) => onRejeicaoPeao(rejeicao.feedback)
         : undefined,
     })
   }
@@ -188,6 +191,7 @@ export function TabuleiroMirrorDOM({
                 e.stopPropagation()
                 despacharCliqueNaPecaDaBandeja(estadoPeoes, {
                   onPuxar,
+                  onFeedback,
                 })
               }}
             />

@@ -4,11 +4,9 @@
  * mesa e escolha de vaga na issue #143).
  *
  * Módulo 100% puro: mapeia cliques simples → comandos wire (UPPER_SNAKE em
- * `@flicker/shared`). Sem Three.js, sem DOM, sem estado interno — todo estado
- * vem do chamador (extraído do store/WS). O feedback de recusa vive no ponto
- * de som da Partida (`components/partida/somDeRecusa.ts`, issue #228): as
- * rejeições locais carregam só o motivo como identificador — este módulo não
- * emite feedback visual nem sonoro.
+ * `@flicker/shared`) e eventos de servidor → feedback visual (flash branco /
+ * vermelho). Sem Three.js, sem DOM, sem estado interno — todo estado vem do
+ * chamador (extraído do store/WS).
  *
  * Contrato wire ↔ domínio documentado em `packages/shared/src/peoes.ts`:
  *   shared SELECIONAR_PEAO                  ↔ engine selecionar_peao (idempotente)
@@ -22,13 +20,13 @@
  *   e a célula-alvo derivada da vaga escolhida.
  *
  * Bloqueio local de pendências: com Recebidas não posicionadas, não emite
- * comando — clicar em outro Peão retorna rejeição com motivo
- * `pendencia_nao_resolvida` (espelhando PENDENCIA_NAO_RESOLVIDA do servidor)
- * e clicar no próprio Peão, permanecer ou mover não reage (tudo precisa ser
- * posicionado antes de mover/permanecer). Clique no próprio Peão já
- * selecionado, sem pendências → PERMANECER. Alvos inválidos não reagem
- * (null); o arrasto permanece reservado à câmera via
- * `deveSuprimirCliquePorArrasto` (limiar 6px, ver cameraLimites.ts).
+ * comando — clicar em outro Peão retorna rejeição (FLASH_VERMELHO,
+ * espelhando PENDENCIA_NAO_RESOLVIDA do servidor) e clicar no próprio Peão,
+ * permanecer ou mover não reage (tudo precisa ser posicionado antes de
+ * mover/permanecer). Clique no próprio Peão já selecionado, sem pendências →
+ * PERMANECER. Alvos inválidos não reagem (null); o arrasto permanece
+ * reservado à câmera via `deveSuprimirCliquePorArrasto` (limiar 6px, ver
+ * cameraLimites.ts).
  *
  * Atribuição de vaga (decisão da issue #143 ajustada na revisão da PR #199):
  * o jogador PUXA a peça corrente clicando na bandeja (estado local) e só
@@ -38,13 +36,14 @@
  * reagem). Puxar é restrito ao dono do ciclo (espectador: clique mudo).
  *
  * Guard pós-confirmação (AC3 — review #165): com `posicaoConfirmadaNoTurno`,
- * os alvos que seriam válidos (permanecer/mover) retornam rejeição com motivo
- * `posicao_confirmada` — espelhando o FORA_DA_VEZ do servidor; alvos
+ * os alvos que seriam válidos (permanecer/mover) retornam rejeição âmbar com
+ * motivo `posicao_confirmada` — espelhando o FORA_DA_VEZ do servidor; alvos
  * inválidos seguem silenciosos (null).
  */
 
+import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from './interacao'
+import type { FlashFeedback, EstadoInteracaoTabuleiro } from './interacao'
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao'
-import type { EstadoInteracaoTabuleiro } from './interacao'
 import {
   bordasAbertas,
   chaveCelula,
@@ -60,11 +59,21 @@ import type {
 } from './contrato'
 import type {
   BordaCardinal,
+  ErroDoTabuleiroEvento,
+  ManipulacaoFinalizadaEvento,
   Orientacao,
+  PecaDeselecionadaEvento,
   PeaoComandoDoCliente,
+  PeaoEventoDoServidor,
   PendenciaDaPecaSorteada,
+  PecaGiradaEvento,
+  PecaPosicionadaEvento,
+  PecaSelecionadaEvento,
+  PosicaoConfirmadaEvento,
   SentidoDeRotacao,
   TabuleiroComandoDoCliente,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
 } from '@flicker/shared'
 
 // ── Estado mínimo para mapear interações ──
@@ -122,15 +131,14 @@ export interface EstadoInteracaoPeoes {
 
 // ── Resultado de clique/ação do ciclo ──
 
-/**
- * Motivo da rejeição local — identificador estável que o ponto de som de
- * recusa da Partida (`components/partida/somDeRecusa.ts`, issue #228)
- * usa para tocar o som e anunciar ao leitor de tela.
- */
-export type MotivoDeRejeicaoLocal = 'pendencia_nao_resolvida' | 'posicao_confirmada'
-
 export interface RejeicaoDeInteracao {
-  readonly motivo: MotivoDeRejeicaoLocal
+  readonly motivo: 'pendencia_nao_resolvida' | 'posicao_confirmada'
+  /**
+   * Feedback da rejeição local: FLASH_VERMELHO para pendências (erro real);
+   * FLASH_AMBAR com motivo próprio para ação pós-confirmação (espelha o
+   * FORA_DA_VEZ que o servidor responderia).
+   */
+  readonly feedback: FlashFeedback
 }
 
 /** Comando, rejeição com feedback ou nenhuma reação do ciclo do Peão. */
@@ -144,14 +152,15 @@ export type ResultadoDeCliqueNoPeao = ResultadoDeInteracaoDePeao
 
 /**
  * Rejeição pós-confirmação: o comando seria válido, mas a posição do Peão já
- * foi travada neste turno (AC3 — guard client-side do review #165). Motivo
- * próprio, distinto do de pendência (o servidor responde FORA_DA_VEZ nesta
- * situação — partida.ts do engine).
+ * foi travada neste turno (AC3 — guard client-side do review #165). Âmbar
+ * com motivo próprio, distinto do vermelho de pendência (o servidor responde
+ * FORA_DA_VEZ nesta situação — partida.ts do engine).
  */
 const REJEICAO_POSICAO_CONFIRMADA: ResultadoDeInteracaoDePeao & object = {
   tipo: 'rejeicao',
   rejeicao: {
     motivo: 'posicao_confirmada',
+    feedback: { ...FLASH_AMBAR, motivo: 'posicao_confirmada' },
   },
 }
 
@@ -192,7 +201,7 @@ export function mapearCliqueNoPeao(
   if (haRecebidasPendentes(estado)) {
     return {
       tipo: 'rejeicao',
-      rejeicao: { motivo: 'pendencia_nao_resolvida' },
+      rejeicao: { motivo: 'pendencia_nao_resolvida', feedback: FLASH_VERMELHO },
     }
   }
   return { tipo: 'comando', comando: { type: 'SELECIONAR_PEAO', peaoId } }
@@ -290,7 +299,7 @@ export interface PuxadaDaBandeja {
  *   - só a CORRENTE (primeira pendência sem vaga) é puxável;
  *   - espectador (`donoDoCiclo === false`) não puxa — clique silencioso, a
  *     bandeja continua pública (a corrente é exibida a todos);
- *   - re-clique na já puxada é no-op (null), sem reação repetida;
+ *   - re-clique na já puxada é no-op (null), sem emissão repetida de flash;
  *   - sem pendências correntes → null.
  * O consumo do pull: com a vaga escolhida o engine move a peça para
  * `pecaSelecionadaId` e a próxima corrente exige novo pull.
@@ -322,14 +331,18 @@ export function puxadaVigenteNaBandeja(estado: EstadoInteracaoPeoes): boolean {
 export interface DespachoDeCliqueNaBandeja {
   /** Pull aceito: o chamador (React) persiste o id como estado visual local. */
   onPuxar?: (recebidaId: string) => void
+  /**
+   * Feedback local do pull (FLASH_BRANCO). O destaque emissivo na peça é
+   * derivado do pull (`destacada` no padrão PecaPlaceholder), não daqui.
+   */
+  onFeedback?: (feedback: FlashFeedback) => void
 }
 
 /**
  * Despacha o clique na peça da bandeja pelo MESMO mapeador puro (padrão
  * `despacharCliqueDeCelula`): cena (Caixa.tsx) e espelho DOM
  * (TabuleiroMirrorDOM.tsx) compartilham esta função — fonte única da regra
- * de pull. Estado nulo ou clique inválido: nenhuma reação. O pull é
- * silencioso (issue #228): nenhum feedback visual nem sonoro.
+ * de pull. Estado nulo ou clique inválido: nenhuma reação.
  */
 export function despacharCliqueNaPecaDaBandeja(
   estadoPeoes: EstadoInteracaoPeoes | null,
@@ -339,6 +352,7 @@ export function despacharCliqueNaPecaDaBandeja(
   const puxada = mapearCliqueNaPecaDaBandeja(estadoPeoes)
   if (puxada === null) return
   despacho.onPuxar?.(puxada.recebidaId)
+  despacho.onFeedback?.(FLASH_BRANCO)
 }
 
 // ── Peça operável do ciclo (guard de coerência — revisão #199, JF532 5.3) ──
@@ -608,7 +622,7 @@ export function ehComandoDePeao(
 export interface DespachoDeCliqueEmCelula {
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   onComandoPeao?: (comando: PeaoComandoDoCliente) => void
-  /** Rejeição local do ciclo (AC3): motivo para o som de recusa, sem comando enviado. */
+  /** Rejeição local do ciclo (AC3): feedback para flash, sem comando enviado. */
   onRejeicao?: (rejeicao: RejeicaoDeInteracao) => void
 }
 
@@ -661,6 +675,79 @@ export function mapearCliqueNaPecaDaMesa(
   if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) return null
   if (!estadoInteracao.iniciais.some((p) => p.pecaId === pecaId)) return null
   return { type: 'SELECIONAR_PECA', pecaId }
+}
+
+// ── Mapeamento evento → feedback visual ──
+
+/** Eventos do ciclo do Peão + reusos do Tabuleiro que chegam no mesmo canal,
+ * + eventos de turno (ST-11, issue #118) para o feedback unificado da página. */
+export type EventoDoCicloDoPeao =
+  | PeaoEventoDoServidor
+  | PecaSelecionadaEvento
+  | PecaDeselecionadaEvento
+  | PecaPosicionadaEvento
+  | PecaGiradaEvento
+  | ManipulacaoFinalizadaEvento
+  | ErroDoTabuleiroEvento
+  | TurnoIniciadoEvento
+  | TurnoEncerradoEvento
+  | PosicaoConfirmadaEvento
+  | import('@flicker/shared').VagaDaPecaRecebidaEscolhidaEvento
+  | import('@flicker/shared').PecaSorteadaEvento
+
+/**
+ * Traduz evento do servidor em flash (issue #118): aprovação/seleção →
+ * branco; rejeição → vermelho, com motivo específico para pendências e Caixa
+ * esgotada (issue #143); ação fora da vez → âmbar (distinto do erro);
+ * Confirmação de Posição → branco; abertura/encerramento de turno e sorteio
+ * (a bandeja comunica a peça corrente) → null (sem flash).
+ */
+export function mapearEventoPeaoParaFeedback(
+  evento: EventoDoCicloDoPeao,
+): FlashFeedback | null {
+  switch (evento.type) {
+    case 'PEAO_SELECIONADO':
+    case 'RECEBIMENTO_GERADO':
+    case 'PEAO_POSICIONADO':
+    case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO':
+    case 'PEAO_MOVIDO':
+    case 'PEAO_PERMANECEU':
+    case 'PECA_SELECIONADA':
+    case 'PECA_DESELECIONADA':
+    case 'PECA_POSICIONADA':
+    case 'PECA_GIRADA':
+    case 'MANIPULACAO_FINALIZADA':
+    case 'POSICAO_CONFIRMADA':
+      return FLASH_BRANCO
+    case 'PECA_SORTEADA':
+      return null
+    case 'ERRO_DO_TABULEIRO':
+      if (evento.codigo === 'FORA_DA_VEZ') return FLASH_AMBAR
+      if (evento.codigo === 'PENDENCIA_NAO_RESOLVIDA') {
+        return { ...FLASH_VERMELHO, motivo: 'pendencia_nao_resolvida' }
+      }
+      if (evento.codigo === 'CAIXA_ESGOTADA') {
+        // Sorteio sem peças na Caixa (issue #143): flash vermelho com motivo.
+        // Rota DEFENSIVA (#145-exp F5): nenhum comando do wire invoca a
+        // primitiva sortearDaCaixa que produz este código (engine/
+        // tabuleiro.ts:504-507) — o Recebimento (#138) esvazia sem erro e o
+        // término por Caixa chega via PARTIDA_TERMINADA com motivo
+        // 'caixa_esgotada' (F2/F4). Mantida para rejeições explícitas de um
+        // servidor autoritativo; não remover.
+        return { ...FLASH_VERMELHO, motivo: 'caixa_esgotada' }
+      }
+      return FLASH_VERMELHO
+    case 'TURNO_INICIADO':
+    case 'TURNO_ENCERRADO':
+      // Passagem de vez não é flash: o destaque do ativo e o indicador de
+      // rodada comunicam a mudança (issue #118).
+      return null
+    default: {
+      // Exaustividade: novo evento wire sem case falha em compilação.
+      const _exaustivo: never = evento
+      return _exaustivo
+    }
+  }
 }
 
 // ── Arrasto reservado à câmera (reuso do limiar 6px da ST-09) ──

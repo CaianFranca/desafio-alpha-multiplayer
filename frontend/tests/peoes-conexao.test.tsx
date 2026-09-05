@@ -5,7 +5,6 @@ import { AuthProvider } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
-import { toquesDeAudio } from './helpers/mockAudio'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 // Issue #91 + #143: conexão do frontend com o game-server para peões, ciclo e
@@ -428,16 +427,16 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
       })
     })
-    // Aprovações em silêncio: sem som, sem clarão.
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument(),
+    )
 
     const comandosAntes = ws.sentMessages.length
     await user.click(pecaDaMesa('inicial-1'))
     expect(ws.sentMessages).toHaveLength(comandosAntes)
   })
 
-  it('rejeição local: com pendências, clicar outro peão toca som de recusa e NÃO envia comando (AC 3)', async () => {
+  it('rejeição local: com pendências, clicar outro peão produz flash vermelho e NÃO envia comando (AC 3)', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
@@ -448,9 +447,8 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
       })
     })
-    // Aprovações em silêncio.
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    // Flash branco dos eventos expira sozinho.
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
 
     const comandosAntes = ws.sentMessages.length
     await user.click(peaoDoEspelho('vermelho'))
@@ -459,16 +457,11 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(ws.sentMessages).toHaveLength(comandosAntes)
     expect(peaoDoEspelho('vermelho').getAttribute('data-selecionado')).toBe('false')
 
-    // Som de recusa com motivo + anúncio, sem clarão.
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/bumpintowall.mp3', volume: 0.3 })
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    const anuncio = screen.getByTestId('anuncio-de-recusa')
-    expect(anuncio.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')
-    expect(anuncio).toHaveTextContent('peças recebidas pendentes')
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('vermelho')
   })
 
-  it('rejeição do serviço (ERRO_DO_TABULEIRO) toca som de recusa com motivo (AC 3)', async () => {
+  it('rejeição do serviço (ERRO_DO_TABULEIRO) produz flash vermelho distinto (AC 3)', async () => {
     const ws = await partidaDisponivel()
 
     act(() =>
@@ -479,14 +472,13 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
       }),
     )
 
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('vermelho')
     // Issue #118: pendências não resolvidas carregam o motivo específico.
-    const anuncio = screen.getByTestId('anuncio-de-recusa')
-    expect(anuncio.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')
+    expect(flash.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')
   })
 
-  it('CAIXA_ESGOTADA no ERRO_DO_TABULEIRO toca som de recusa com motivo (issue #143)', async () => {
+  it('CAIXA_ESGOTADA no ERRO_DO_TABULEIRO produz flash vermelho com motivo (issue #143)', async () => {
     // Rota DEFENSIVA (#145-exp F5): o código CAIXA_ESGOTADA só é produzido
     // pela primitiva sortearDaCaixa do engine (tabuleiro.ts:504-507), que
     // nenhum comando do wire invoca; o término por Caixa esgotada chega ao
@@ -503,11 +495,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
       }),
     )
 
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe(
-      'caixa_esgotada',
-    )
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('vermelho')
+    expect(flash.getAttribute('data-motivo')).toBe('caixa_esgotada')
   })
 
   it('giro da pendência reflete na corrente da bandeja (rebate PECA_GIRADA — regressão #199)', async () => {
@@ -594,7 +584,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-recebida-id')).toBe('r1')
   })
 
-  it('pós-confirmação: clicar destino conectado NÃO envia MOVER_PEAO e toca som de recusa (AC3, review #165)', async () => {
+  it('pós-confirmação: clicar destino conectado NÃO envia MOVER_PEAO e pisca âmbar (AC3, review #165)', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
     const pecaDoEspelho = (pecaId: string): HTMLElement => {
@@ -646,9 +636,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         celula: { linha: 2, coluna: 3 },
       })
     })
-    // Movimento em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
 
     // Fase 'confirmar' → botão envia CONFIRMAR_POSICAO_DO_PEAO; servidor confirma.
     await user.click(screen.getByTestId('botao-confirmar-posicao'))
@@ -665,9 +653,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         pecaId: 'reta-1',
       })
     })
-    // Confirmação em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument())
 
     // Re-seleção aceita pelo servidor: a seleção volta ao peão confirmado.
     act(() => {
@@ -679,14 +665,12 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     const comandosAntes = ws.sentMessages.length
     await user.click(celulaDoEspelho(3, 3))
 
-    // Guard AC3: nenhum comando trafega e o som de recusa toca com motivo
+    // Guard AC3: nenhum comando trafega e o feedback é âmbar com motivo
     // específico (espelha o FORA_DA_VEZ que o servidor responderia).
     expect(ws.sentMessages).toHaveLength(comandosAntes)
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    const anuncio = screen.getByTestId('anuncio-de-recusa')
-    expect(anuncio.getAttribute('data-motivo')).toBe('posicao_confirmada')
-    expect(anuncio).toHaveTextContent('posição já confirmada')
+    const flash = await screen.findByTestId('flash-overlay')
+    expect(flash.getAttribute('data-cor')).toBe('ambar')
+    expect(flash.getAttribute('data-motivo')).toBe('posicao_confirmada')
   })
 })
 

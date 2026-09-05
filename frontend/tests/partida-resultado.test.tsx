@@ -5,7 +5,6 @@ import { AuthProvider } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
-import { toquesDeAudio } from './helpers/mockAudio'
 import { SalaWebSocketContext } from '../web/src/state/sala-web-socket-context'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 import type { UseSalaWebSocketReturn } from '../web/src/hooks/useSalaWebSocket'
@@ -258,25 +257,12 @@ describe('partida resultado e retorno à sala (issue #180)', () => {
     expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
   })
 
-  it('após término, eventos de jogo são ignorados (sem som, sem clarão)', async () => {
+  it('flash é limpo ao receber término', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
-    // Aprovação em jogo: silêncio, sem anúncio.
     act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' }))
-    await screen.findByTestId('tabuleiro')
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
-
-    // Término: overlay sem tocar som nem acender clarão.
+    expect(await screen.findByTestId('flash-overlay')).toBeInTheDocument()
     act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'vitoria' }))
     await screen.findByTestId('overlay-resultado')
-    expect(toquesDeAudio).toHaveLength(0)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-
-    // Evento tardio ignorado (partida em somente-leitura): segue em silêncio.
-    act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-2' }))
-    expect(toquesDeAudio).toHaveLength(0)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('overlay-resultado')).toBeInTheDocument()
   })
 })

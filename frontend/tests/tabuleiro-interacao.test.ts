@@ -1,14 +1,16 @@
 import {
+  FLASH_BRANCO,
+  FLASH_VERMELHO,
   cursorParaCelula,
   cursorParaPecaPosicionada,
   deveSuprimirCliquePorArrasto,
   ehCelulaOcupada,
   mapearCliqueNaCelula,
   mapearCliqueNaPecaPosicionada,
+  mapearEventoParaFeedback,
   mapearFinalizarManipulacao,
   mapearGiro,
 } from '../web/src/game/tabuleiro/interacao'
-import { motivoDeRecusaDoEvento } from '../web/src/components/partida/somDeRecusa'
 import { mapearCliqueNaPecaDaMesa } from '../web/src/game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoTabuleiro } from '../web/src/game/tabuleiro/interacao'
 import type { Celula } from '../web/src/game/tabuleiro/contrato'
@@ -216,9 +218,9 @@ describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
     expect(mapearFinalizarManipulacao()).toEqual({ type: 'FINALIZAR_MANIPULACAO' })
   })
 
-  // ── Critério: recusas tocam som com motivo; aprovações ficam em silêncio (#228) ──
+  // ── Critério: flash branco para seleção/aprovação, vermelho para rejeição ──
 
-  it('eventos de sucesso ficam em silêncio (null — o efeito no tabuleiro basta)', () => {
+  it('eventos de sucesso produzem flash branco perceptível', () => {
     const eventos: TabuleiroEventoDoServidor[] = [
       { type: 'PECA_SELECIONADA', pecaId: 'inicial-1' },
       { type: 'PECA_DESELECIONADA', pecaId: 'inicial-1' },
@@ -227,28 +229,36 @@ describe('interação do tabuleiro — mapeamento puro (issue #84)', () => {
       { type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' },
     ]
     for (const ev of eventos) {
-      expect(motivoDeRecusaDoEvento(ev)).toBeNull()
+      const flash = mapearEventoParaFeedback(ev)
+      expect(flash).not.toBeNull()
+      expect(flash!.cor).toBe('branco')
+      expect(flash!.hex).toBe(FLASH_BRANCO.hex)
+      expect(flash!.hex).toBe('#ffffff')
     }
   })
 
-  it('erros do tabuleiro geram motivo de recusa (genérico por padrão)', () => {
+  it('eventos de rejeição produzem flash vermelho distinto do branco', () => {
     const erro: TabuleiroEventoDoServidor = {
       type: 'ERRO_DO_TABULEIRO',
       codigo: 'CELULA_JA_OCUPADA',
       mensagem: 'Célula ocupada',
     }
-    expect(motivoDeRecusaDoEvento(erro)).toBe('rejeicao_do_servico')
+    const flashVermelho = mapearEventoParaFeedback(erro)
+    const flashBranco = mapearEventoParaFeedback({ type: 'PECA_SELECIONADA', pecaId: 'x' })
+
+    expect(flashVermelho).not.toBeNull()
+    expect(flashVermelho!.cor).toBe('vermelho')
+    expect(flashVermelho!.hex).toBe(FLASH_VERMELHO.hex)
+    expect(flashVermelho!.hex).toBe('#ff3b30')
+    expect(flashVermelho!.duracaoMs).toBeGreaterThan(flashBranco!.duracaoMs)
+    expect(flashVermelho!.hex).not.toBe(flashBranco!.hex)
+    expect(flashVermelho!.cor).not.toBe(flashBranco!.cor)
   })
 
-  it('ação fora da vez tem motivo próprio (distinto do erro de comando)', () => {
-    const erro: TabuleiroEventoDoServidor = {
-      type: 'ERRO_DO_TABULEIRO',
-      codigo: 'FORA_DA_VEZ',
-      mensagem: 'Não é a sua vez.',
-    }
-    const motivo = motivoDeRecusaDoEvento(erro)
-    expect(motivo).toBe('fora_da_vez')
-    expect(motivo).not.toBe('rejeicao_do_servico')
+  it('flash vermelho tem hex e duração distintos do branco', () => {
+    expect(FLASH_BRANCO.hex).not.toBe(FLASH_VERMELHO.hex)
+    expect(FLASH_BRANCO.duracaoMs).not.toBe(FLASH_VERMELHO.duracaoMs)
+    expect(FLASH_VERMELHO.duracaoMs).toBeGreaterThan(FLASH_BRANCO.duracaoMs)
   })
 
   // ── Critério: arrasto reservado à câmera ──
