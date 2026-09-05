@@ -95,18 +95,12 @@ export function TransicaoLimpeza({ posicionadas, trigger = null }: TransicaoLimp
   const posicionadasPorIdRef = useRef<Map<string, PecaPosicionada>>(new Map())
   const [saindo, setSaindo] = useState<readonly (PecaPosicionada & { inicioMs: number })[]>([])
 
-  // Mantém mapa atualizado APÓS o trigger (ordem de efeitos garante que o
-  // trigger veja o mapa antigo com as peças removidas)
-  useEffect(() => {
-    const map = new Map<string, PecaPosicionada>()
-    for (const p of posicionadas) map.set(p.pecaId, p)
-    posicionadasPorIdRef.current = map
-  }, [posicionadas])
-
+  // Trigger precisa ver o mapa ANTERIOR (antes da remoção). Este effect vem
+  // ANTES do que atualiza o mapa a partir de `posicionadas` — quando ambos
+  // mudam no mesmo commit, este roda primeiro com o mapa ainda pré-remoção.
   useEffect(() => {
     if (!trigger || trigger.pecasRemovidas.length === 0) return
 
-    // Lookup das peças removidas no mapa ANTERIOR (ainda não atualizado pelo segundo effect)
     const removidas: PecaPosicionada[] = []
     for (const id of trigger.pecasRemovidas) {
       const p = posicionadasPorIdRef.current.get(id)
@@ -122,6 +116,14 @@ export function TransicaoLimpeza({ posicionadas, trigger = null }: TransicaoLimp
       ])
     }
   }, [trigger, reduce])
+
+  // Mantém mapa atualizado para o próximo trigger. Vem DEPOIS do trigger
+  // para não sobrescrever o snapshot pré-remoção no mesmo commit.
+  useEffect(() => {
+    const map = new Map<string, PecaPosicionada>()
+    for (const p of posicionadas) map.set(p.pecaId, p)
+    posicionadasPorIdRef.current = map
+  }, [posicionadas])
 
   const remover = (pecaId: string) => {
     setSaindo((atuais) => atuais.filter((p) => p.pecaId !== pecaId))
