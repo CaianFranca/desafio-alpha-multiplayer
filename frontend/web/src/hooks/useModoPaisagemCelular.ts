@@ -6,7 +6,33 @@ import { useEffect, useState } from 'react'
  */
 export const LIMITE_CELULAR_PX = 768
 
-function isPortrait(): boolean {
+type AoMudarTela = (e: MediaQueryListEvent) => void
+
+type MqlLegado = {
+  addListener: (cb: AoMudarTela) => void
+  removeListener: (cb: AoMudarTela) => void
+}
+
+/**
+ * Assina mudanças da media query de tela em retrato.
+ * Cobre `addEventListener` moderno e `addListener` legado.
+ * Retorna função de cancelamento. (S2)
+ */
+export function assinarMudancaDeTela(mql: MediaQueryList, cb: AoMudarTela): () => void {
+  if (typeof mql.addEventListener === 'function') {
+    mql.addEventListener('change', cb)
+    return () => {
+      mql.removeEventListener('change', cb)
+    }
+  }
+  const legado = mql as unknown as MqlLegado
+  legado.addListener(cb)
+  return () => {
+    legado.removeListener(cb)
+  }
+}
+
+function telaEmRetrato(): boolean {
   if (typeof window === 'undefined') return false
   // Tenta matchMedia primeiro; fallback para comparação geométrica.
   if (typeof window.matchMedia === 'function') {
@@ -23,15 +49,15 @@ function deveExibirOverlay(): boolean {
   if (typeof window === 'undefined') return false
   const isCelular = window.innerWidth < LIMITE_CELULAR_PX
   if (!isCelular) return false
-  return isPortrait()
+  return telaEmRetrato()
 }
 
 /**
- * Hook restrito a celular em Portrait.
- * Retorna `true` apenas quando `width < 768` e orientação é portrait,
- * liberando automaticamente em landscape sem recarregar.
+ * Hook restrito a celular com tela em retrato vertical.
+ * Retorna `true` apenas quando `width < 768` e a tela está em retrato,
+ * liberando automaticamente em paisagem sem recarregar.
  */
-export function useRequerOrientacaoLandscape(): boolean {
+export function useRequerModoPaisagem(): boolean {
   const [requer, setRequer] = useState<boolean>(() => deveExibirOverlay())
 
   useEffect(() => {
@@ -42,23 +68,14 @@ export function useRequerOrientacaoLandscape(): boolean {
     // Estado inicial síncrono (caso já tenha mudado entre render e effect)
     atualizar()
 
-    let mql: MediaQueryList | null = null
-    let onMqlChange: ((e: MediaQueryListEvent) => void) | null = null
+    let cancelarAssinatura: (() => void) | null = null
 
     if (typeof window.matchMedia === 'function') {
       try {
-        mql = window.matchMedia('(orientation: portrait)')
-        onMqlChange = () => atualizar()
-        // addEventListener é moderno; addListener é fallback legado.
-        if (typeof mql.addEventListener === 'function') {
-          mql.addEventListener('change', onMqlChange)
-        } else {
-          ;(mql as unknown as { addListener: (cb: (e: MediaQueryListEvent) => void) => void }).addListener(
-            onMqlChange,
-          )
-        }
+        const mql = window.matchMedia('(orientation: portrait)')
+        cancelarAssinatura = assinarMudancaDeTela(mql, () => atualizar())
       } catch {
-        mql = null
+        cancelarAssinatura = null
       }
     }
 
@@ -68,15 +85,7 @@ export function useRequerOrientacaoLandscape(): boolean {
     return () => {
       window.removeEventListener('resize', atualizar)
       window.removeEventListener('orientationchange', atualizar)
-      if (mql && onMqlChange) {
-        if (typeof mql.removeEventListener === 'function') {
-          mql.removeEventListener('change', onMqlChange)
-        } else {
-          ;(mql as unknown as { removeListener: (cb: (e: MediaQueryListEvent) => void) => void }).removeListener(
-            onMqlChange,
-          )
-        }
-      }
+      cancelarAssinatura?.()
     }
   }, [])
 
