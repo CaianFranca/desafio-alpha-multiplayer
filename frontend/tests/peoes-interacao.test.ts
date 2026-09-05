@@ -9,7 +9,6 @@ import {
   mapearCliqueNaPecaInicial,
   mapearCliqueNoPeao,
   mapearEscolhaDeVagaDaRecebida,
-  mapearEventoPeaoParaFeedback,
   mapearGirarRecebida,
   mapearMovimentacao,
   mapearPermanencia,
@@ -19,11 +18,9 @@ import {
   vagasDisponiveisDoPeao,
 } from '../web/src/game/tabuleiro/interacaoPeoes'
 import type { PendenciaNoCliente } from '../web/src/game/tabuleiro/interacaoPeoes'
-import { FLASH_AMBAR, FLASH_BRANCO, FLASH_VERMELHO } from '../web/src/game/tabuleiro/interacao'
-import type {
-  EstadoInteracaoPeoes,
-  EventoDoCicloDoPeao,
-} from '../web/src/game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes } from '../web/src/game/tabuleiro/interacaoPeoes'
+import { motivoDeRecusaDoEvento } from '../web/src/components/partida/somDeRecusa'
+import type { EventoDoCanalDaPartida } from '../web/src/hooks/usePartidaWebSocket'
 import type { Celula, PecaPosicionada, PeaoDaExibicao } from '../web/src/game/tabuleiro/contrato'
 import { criarEstadoExibicaoMock } from './helpers/mockExibicao'
 import type { EstadoInteracaoTabuleiro } from '../web/src/game/tabuleiro/interacao'
@@ -530,7 +527,6 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     tipo: 'rejeicao',
     rejeicao: {
       motivo: 'posicao_confirmada',
-      feedback: { ...FLASH_AMBAR, motivo: 'posicao_confirmada' },
     },
   } as const
 
@@ -553,7 +549,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toEqual(REJEITACAO_CONFIRMADA)
   })
 
-  it('pós-confirmação, alvos inválidos seguem silenciosos (null, sem flash indevido)', () => {
+  it('pós-confirmação, alvos inválidos seguem silenciosos (null, sem recusa indevida)', () => {
     const estado = estadoComMock({ posicaoConfirmadaNoTurno: true })
     // cruz(3,5) não é destino conectado → null mesmo com a flag ligada.
     expect(mapearMovimentacao(estado, { linha: 3, coluna: 5 })).toBeNull()
@@ -562,7 +558,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
 
   // ── AC 6: pendências bloqueiam outro peão com rejeição local ──
 
-  it('com Recebidas pendentes, clicar em outro peão não emite comando e rejeita (flash vermelho)', () => {
+  it('com Recebidas pendentes, clicar em outro peão não emite comando e rejeita (som de recusa)', () => {
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       recebidasPendentes: [
@@ -572,7 +568,7 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(haRecebidasPendentes(estado)).toBe(true)
     expect(mapearCliqueNoPeao(estado, 'peao-vermelho')).toEqual({
       tipo: 'rejeicao',
-      rejeicao: { motivo: 'pendencia_nao_resolvida', feedback: FLASH_VERMELHO },
+      rejeicao: { motivo: 'pendencia_nao_resolvida' },
     })
   })
 
@@ -595,10 +591,10 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     })
   })
 
-  // ── AC 7: feedback branco (aprovação) vs vermelho (rejeição), distinto ──
+  // ── AC 7: recusa com motivo (som) vs aprovação em silêncio (#228) ──
 
-  it('eventos de sucesso do ciclo produzem flash branco perceptível', () => {
-    const eventosDeSucesso: EventoDoCicloDoPeao[] = [
+  it('eventos de sucesso do ciclo ficam em silêncio (null — o efeito no tabuleiro basta)', () => {
+    const eventosDeSucesso: EventoDoCanalDaPartida[] = [
       { type: 'PEAO_SELECIONADO', peaoId: 'peao-1' },
       {
         type: 'RECEBIMENTO_GERADO',
@@ -618,17 +614,13 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
       { type: 'MANIPULACAO_FINALIZADA', pecaId: 'reta-2' },
     ]
     for (const evento of eventosDeSucesso) {
-      const flash = mapearEventoPeaoParaFeedback(evento)
-      expect(flash).toBe(FLASH_BRANCO)
-      if (flash === null) throw new Error('flash inesperadamente nulo')
-      expect(flash.cor).toBe('branco')
-      expect(flash.hex).toBe('#ffffff')
+      expect(motivoDeRecusaDoEvento(evento)).toBeNull()
     }
   })
 
-  it('PECA_SORTEADA não produz flash (a bandeja comunica a peça corrente, #143)', () => {
+  it('PECA_SORTEADA fica em silêncio (a bandeja comunica a peça corrente, #143)', () => {
     expect(
-      mapearEventoPeaoParaFeedback({
+      motivoDeRecusaDoEvento({
         type: 'PECA_SORTEADA',
         pecaId: 'reta-2',
         tipoDaPeca: 'reta',
@@ -637,90 +629,72 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     ).toBeNull()
   })
 
-  it('rejeição por pendência produz flash vermelho com motivo específico (issue #118)', () => {
+  it('rejeição por pendência gera motivo específico (issue #118)', () => {
     const erro: ErroDoTabuleiroEvento = {
       type: 'ERRO_DO_TABULEIRO',
       codigo: 'PENDENCIA_NAO_RESOLVIDA',
       mensagem: 'Há Peças Recebidas pendentes.',
     }
-    const flashVermelho = mapearEventoPeaoParaFeedback(erro)
-    const flashBranco = mapearEventoPeaoParaFeedback({ type: 'PEAO_SELECIONADO', peaoId: 'peao-1' })
-    if (flashVermelho === null || flashBranco === null) {
-      throw new Error('flash inesperadamente nulo')
-    }
-
-    expect(flashVermelho.cor).toBe('vermelho')
-    expect(flashVermelho.hex).toBe('#ff3b30')
-    expect(flashVermelho.motivo).toBe('pendencia_nao_resolvida')
-    expect(flashVermelho.duracaoMs).toBeGreaterThan(flashBranco.duracaoMs)
-    expect(flashVermelho.hex).not.toBe(flashBranco.hex)
-    expect(flashVermelho.cor).not.toBe(flashBranco.cor)
-    expect(flashVermelho.motivo).not.toBe(flashBranco.motivo)
+    expect(motivoDeRecusaDoEvento(erro)).toBe('pendencia_nao_resolvida')
+    // Aprovação segue em silêncio (distinta da recusa).
+    expect(
+      motivoDeRecusaDoEvento({ type: 'PEAO_SELECIONADO', peaoId: 'peao-1' }),
+    ).toBeNull()
   })
 
-  it('CAIXA_ESGOTADA produz flash vermelho com motivo próprio (issue #143)', () => {
+  it('CAIXA_ESGOTADA gera motivo próprio (issue #143)', () => {
     const erro: ErroDoTabuleiroEvento = {
       type: 'ERRO_DO_TABULEIRO',
       codigo: 'CAIXA_ESGOTADA',
       mensagem: 'A Caixa está vazia.',
     }
-    const flash = mapearEventoPeaoParaFeedback(erro)
-    expect(flash).not.toBeNull()
-    if (flash === null) throw new Error('flash inesperadamente nulo')
-    expect(flash.cor).toBe('vermelho')
-    expect(flash.motivo).toBe('caixa_esgotada')
+    expect(motivoDeRecusaDoEvento(erro)).toBe('caixa_esgotada')
   })
 
   // ── AC 4: feedback distinto para FORA_DA_VEZ e turnos (issue #118) ──
 
-  it('ação fora da vez produz flash âmbar distinto do vermelho (issue #118)', () => {
+  it('ação fora da vez gera motivo próprio (distinto do erro de comando, issue #118)', () => {
     const erro: ErroDoTabuleiroEvento = {
       type: 'ERRO_DO_TABULEIRO',
       codigo: 'FORA_DA_VEZ',
       mensagem: 'Não é a sua vez.',
     }
-    const flashAmbar = mapearEventoPeaoParaFeedback(erro)
-    expect(flashAmbar).toBe(FLASH_AMBAR)
-    if (flashAmbar === null) throw new Error('flash inesperadamente nulo')
-
-    expect(flashAmbar.cor).toBe('ambar')
-    expect(flashAmbar.hex).toBe('#ffb340')
-    expect(flashAmbar.motivo).toBe('fora_da_vez')
-    // Distinto da rejeição vermelha: hex e cor próprios.
-    expect(flashAmbar.hex).not.toBe(FLASH_VERMELHO.hex)
-    expect(flashAmbar.cor).not.toBe(FLASH_VERMELHO.cor)
+    const motivo = motivoDeRecusaDoEvento(erro)
+    expect(motivo).toBe('fora_da_vez')
+    expect(motivo).not.toBe('rejeicao_do_servico')
   })
 
-  it('demais rejeições do servidor seguem o flash vermelho genérico (issue #118)', () => {
+  it('demais rejeições do servidor geram o motivo genérico (issue #118)', () => {
     const erro: ErroDoTabuleiroEvento = {
       type: 'ERRO_DO_TABULEIRO',
       codigo: 'MOVIMENTO_INDISPONIVEL',
       mensagem: 'O Peão só se move a partir do turno seguinte.',
     }
-    expect(mapearEventoPeaoParaFeedback(erro)).toBe(FLASH_VERMELHO)
+    expect(motivoDeRecusaDoEvento(erro)).toBe('rejeicao_do_servico')
   })
 
-  it('abertura e encerramento de turno não geram flash (issue #118)', () => {
+  it('abertura e encerramento de turno ficam em silêncio (issue #118)', () => {
     expect(
-      mapearEventoPeaoParaFeedback({
+      motivoDeRecusaDoEvento({
         type: 'TURNO_INICIADO',
         jogadorId: 'jogador-1',
         rodada: 1,
       }),
     ).toBeNull()
     expect(
-      mapearEventoPeaoParaFeedback({ type: 'TURNO_ENCERRADO', jogadorId: 'jogador-1' }),
+      motivoDeRecusaDoEvento({ type: 'TURNO_ENCERRADO', jogadorId: 'jogador-1' }),
     ).toBeNull()
   })
 
-  it('Confirmação de Posição produz flash branco (issue #118)', () => {
-    const flash = mapearEventoPeaoParaFeedback({
-      type: 'POSICAO_CONFIRMADA',
-      jogadorId: 'jogador-1',
-      peaoId: 'peao-1',
-      pecaId: 'reta-2',
-    })
-    expect(flash).toBe(FLASH_BRANCO)
+  it('Confirmação de Posição fica em silêncio (issue #118)', () => {
+    expect(
+      motivoDeRecusaDoEvento({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: 'jogador-1',
+        peaoId: 'peao-1',
+        pecaId: 'reta-2',
+      }),
+    ).toBeNull()
   })
 
   // ── AC 8: arrasto reservado à câmera, sem conflito com o clique simples ──
@@ -891,7 +865,6 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), { linha: 3, coluna: 4 })).toEqual({
       rejeicao: {
         motivo: 'posicao_confirmada',
-        feedback: { ...FLASH_AMBAR, motivo: 'posicao_confirmada' },
       },
     })
   })
@@ -1018,21 +991,18 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     expect(mapearCliqueNaPecaDaBandeja(estado)).toBeNull()
   })
 
-  it('despacharCliqueNaPecaDaBandeja entrega pull + flash branco ao chamador', () => {
+  it('despacharCliqueNaPecaDaBandeja entrega só o pull ao chamador (pull silencioso, #228)', () => {
     const estado = estadoBase({
       recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
     })
     const puxados: string[] = []
-    const flashes: unknown[] = []
     despacharCliqueNaPecaDaBandeja(estado, {
       onPuxar: (id) => puxados.push(id),
-      onFeedback: (f) => flashes.push(f),
     })
     expect(puxados).toEqual(['r1'])
-    expect(flashes).toEqual([FLASH_BRANCO])
   })
 
-  it('despachar com espectador ou sem corrente não reage (sem pull, sem flash)', () => {
+  it('despachar com espectador ou sem corrente não reage (sem pull)', () => {
     const espectador = estadoBase({
       recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
       donoDoCiclo: false,
@@ -1041,7 +1011,6 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     let chamou = 0
     despacharCliqueNaPecaDaBandeja(espectador, {
       onPuxar: () => chamou++,
-      onFeedback: () => chamou++,
     })
     despacharCliqueNaPecaDaBandeja(semCorrente, { onPuxar: () => chamou++ })
     despacharCliqueNaPecaDaBandeja(null, { onPuxar: () => chamou++ })
