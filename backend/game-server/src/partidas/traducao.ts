@@ -103,6 +103,10 @@ export function traduzirEventos(
           jogadorId: evento.jogadorId,
           peaoId: evento.peaoId,
           pecaId: evento.pecaId,
+          // Proteção RESULTANTE do ator no gatilho (issue #227): a concessão
+          // da Sala Médica e o consumo pelo ataque do MESMO gatilho já estão
+          // resolvidos no domínio — o wire só transporta o estado final.
+          protegido: evento.protegido,
         });
         break;
       case 'celulas_iluminadas':

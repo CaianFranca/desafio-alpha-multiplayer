@@ -148,11 +148,37 @@ test('traduzirEventos mapeia partida_terminada com derrota projetando o motivo n
 
 test('traduzirEventos emite PARTIDA_TERMINADA como último evento do lote da Ação consumadora', () => {
   const eventos = [
-    { tipo: 'posicao_confirmada', jogadorId: 'jogador-1', peaoId: 'peao-branco', pecaId: 'gerador-1' },
+    { tipo: 'posicao_confirmada', jogadorId: 'jogador-1', peaoId: 'peao-branco', pecaId: 'gerador-1', protegido: false },
     { tipo: 'turno_iniciado', jogadorId: 'jogador-2', rodada: 3 },
     { tipo: 'partida_terminada', desfecho: { tipo: 'vitoria' } },
   ] as const satisfies readonly EventoDaPartida[];
   const saida = traduzirEventos(eventos);
   assert.equal(saida.length, 3);
   assert.equal(saida[saida.length - 1]!.type, 'PARTIDA_TERMINADA');
+});
+
+// Proteção no canal (issue #227): o POSICAO_CONFIRMADA transporta o estado
+// RESULTANTE do ator no gatilho completo — a tradução é pass-through; a
+// concessão/consumo vivem no domínio (engine).
+test('traduzirEventos propaga o protegido resultante no POSICAO_CONFIRMADA (#227)', () => {
+  const eventos = [
+    { tipo: 'posicao_confirmada', jogadorId: 'jogador-1', peaoId: 'peao-branco', pecaId: 'sala-medica-1', protegido: true },
+    { tipo: 'posicao_confirmada', jogadorId: 'jogador-2', peaoId: 'peao-vermelho', pecaId: 'reta-2', protegido: false },
+  ] as const satisfies readonly EventoDaPartida[];
+  const saida = traduzirEventos(eventos);
+  assert.equal(saida.length, 2);
+  assert.deepEqual(saida[0], {
+    type: 'POSICAO_CONFIRMADA',
+    jogadorId: 'jogador-1',
+    peaoId: 'peao-branco',
+    pecaId: 'sala-medica-1',
+    protegido: true,
+  });
+  assert.deepEqual(saida[1], {
+    type: 'POSICAO_CONFIRMADA',
+    jogadorId: 'jogador-2',
+    peaoId: 'peao-vermelho',
+    pecaId: 'reta-2',
+    protegido: false,
+  });
 });
