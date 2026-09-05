@@ -1,20 +1,34 @@
-// Domínio puro do Alcance e do Ataque dos Monstros (ST-15 / issue #172).
+// Domínio puro do Alcance e do Ataque dos Monstros (ST-15 / issue #172,
+// refatorado na issue #237 — avaliação centrada no atuante).
 //
 // O Tabuleiro calcula o Alcance de cada Monstro a partir das Conexões —
 // Vulto: linhas retas ortogonais encadeadas por Conexão a partir da sua peça,
 // sem diagonais, distância ilimitada, interrompidas por célula vazia ou borda
 // fechada; Espectro: as peças adjacentes conectadas nas quatro direções
 // ortogonais. Peças de Monstro retransmitem como qualquer peça (as quatro
-// bordas abertas, issue #169). A resolução do Ataque é pura e delta-based:
-// compara o conjunto de peões dentro do Alcance atual de cada Monstro com o
-// snapshot do gatilho anterior (peoesNoAlcance no EstadoDaPartida) — conjunto
-// diferente ⇒ o Monstro ataca, atingindo todos os peões dentro do Alcance
-// atual, negado pela Proteção (consumida uma única vez por resolução,
-// negando todos os ataques simultâneos contra o mesmo Jogador). A aplicação
-// das penalidades (Baixa Iluminação, perda de Sanidade) é da issue #170 e o
-// eco no wire é da issue #173: o evento carrega também `estadosAplicados` —
-// o estado RESULTANTE de cada Jogador cujo roster mudou com as penalidades
-// do gatilho (preenchido pela camada da Partida, que conhece o roster; a
+// bordas abertas, issue #169).
+//
+// Resolução do Ataque — duas famílias, mesmo funil de penalidades:
+//
+// - Legado delta-based (issue #172): compara o conjunto de peões dentro do
+//   Alcance atual de cada Monstro com o snapshot do gatilho anterior
+//   (peoesNoAlcance) — mantido para retrocompatibilidade de binários
+//   persistidos e testes legados; marcado como deprecated.
+//
+// - Centrado no atuante (issue #237, spec #233): compara, POR MONSTRO, a
+//   Peça do início do turno com a Peça decidida (confirmada, mantida ou
+//   posicionada) no Tabuleiro PÓS-Limpeza. Fora→fora é silêncio; entrar,
+//   sair e permanecer disparam com SÓ os monstros envolvidos atacando;
+//   movimentações intermediárias não confirmadas são ignoradas; entrar por
+//   obra própria no turno (posicionamentos/Limpeza mudando o alcance sob o
+//   peão) conta como entrada pois ambas as peças são avaliadas no tabuleiro
+//   pós-Limpeza. A Proteção é consumida uma única vez por resolução, negando
+//   todos os ataques simultâneos contra o mesmo Jogador.
+//
+// A aplicação das penalidades (Baixa Iluminação, perda de Sanidade) é da
+// issue #170 e o eco no wire é da issue #173: o evento carrega também
+// `estadosAplicados` — o estado RESULTANTE de cada Jogador cujo roster mudou
+// com as penalidades do gatilho (preenchido pela camada da Partida; a
 // resolução pura abaixo o emite vazio).
 //
 // Sem ciclos: a dependência em runtime é única — partida.ts → monstros.ts →
@@ -163,13 +177,105 @@ export interface ResolucaoDeAtaques {
   readonly protegidosConsumidos: readonly string[];
 }
 
-// Resolução do Ataque (issue #172): pura e determinística. Para cada Monstro
-// posicionado, compara o conjunto de peões dentro do Alcance ATUAL com o
-// snapshot anterior (ausência ≡ conjunto vazio) — conjunto diferente ⇒ o
-// Monstro ataca, atingindo todos os peões dentro do Alcance atual; quem saiu
-// não é atingido. A Proteção de um Jogador no alcance dos atacantes nega
-// TODOS os ataques simultâneos contra ele e é consumida UMA única vez; a
-// Proteção de Jogador fora do alcance dos atacantes não é consumida.
+// Resolução centrada no atuante (issue #237, spec #233): pura e
+// determinística. Para cada Monstro posicionado no Tabuleiro PÓS-Limpeza,
+// verifica se a Peça do início do turno e a Peça decidida estão dentro do
+// Alcance daquele Monstro (calculado no tabuleiro pós-Limpeza). Fora→fora
+// (ambas fora) é silêncio; entrar (!antes && depois), sair (antes &&
+// !depois) e permanecer (antes && depois) disparam — SÓ os monstros
+// envolvidos atacam. A comparação ignora movimentações intermediárias não
+// confirmadas (só vale início vs decidida) e voltar atrás antes de decidir
+// não livra: permanecer dentro ainda dispara. Entrar por obra própria no
+// turno (posicionamentos/Limpeza mudando o alcance sob o peão) conta como
+// entrada/permanência pois ambas as peças são avaliadas no tabuleiro
+// pós-Limpeza. Primeiro Turno: pecaDoInicioId === null ≡ fora. A Proteção e
+// as vítimas seguem o mesmo funil do legado: união dos peões no Alcance dos
+// envolvidos, Proteção consome UMA vez e nega todos simultâneos contra o
+// mesmo Jogador; quem saiu/fora nunca é atingido (não está no alcance atual
+// dos envolvidos).
+export function resolverAtaquesCentradoNoAtuante(
+  tabuleiro: EstadoDoTabuleiro,
+  pecaDoInicioId: string | null,
+  pecaDecididaId: string,
+  jogadores: readonly JogadorAlvoDoAtaque[],
+): ResolucaoDeAtaques {
+  const monstros = tabuleiro.posicionadas.filter(ehPecaDeMonstroPosicionada);
+  const atuaisPorMonstro = new Map<string, readonly string[]>();
+  const alcancePorMonstro = new Map<string, ReadonlySet<string>>();
+  const peoesNoAlcance: Record<string, readonly string[]> = {};
+  for (const monstro of monstros) {
+    const alcanceSet = new Set(
+      calcularAlcance(tabuleiro, monstro.pecaId).map((peca) => peca.pecaId),
+    );
+    alcancePorMonstro.set(monstro.pecaId, alcanceSet);
+    const atuais = tabuleiro.peoes
+      .filter((peao) => peao.pecaId !== null && alcanceSet.has(peao.pecaId))
+      .map((peao) => peao.peaoId);
+    atuaisPorMonstro.set(monstro.pecaId, atuais);
+    peoesNoAlcance[monstro.pecaId] = atuais;
+  }
+
+  const atacantes: AtacanteDoAlcance[] = [];
+  for (const monstro of monstros) {
+    const alcanceSet = alcancePorMonstro.get(monstro.pecaId) ?? new Set<string>();
+    const antesDentro =
+      pecaDoInicioId !== null && alcanceSet.has(pecaDoInicioId);
+    const depoisDentro = alcanceSet.has(pecaDecididaId);
+    const envolvido = antesDentro || depoisDentro;
+    if (!envolvido) {
+      continue;
+    }
+    const atuais = atuaisPorMonstro.get(monstro.pecaId) ?? [];
+    atacantes.push({
+      pecaId: monstro.pecaId,
+      tipo: monstro.tipo,
+      peoesNoAlcance: atuais,
+    });
+  }
+
+  if (atacantes.length === 0) {
+    return { evento: null, peoesNoAlcance, protegidosConsumidos: [] };
+  }
+
+  const alvos = new Set(
+    atacantes.flatMap((atacante) => atacante.peoesNoAlcance),
+  );
+  const protegidosConsumidos: string[] = [];
+  const peoesProtegidos = new Set<string>();
+  for (const jogador of jogadores) {
+    if (jogador.protegido && alvos.has(jogador.peaoId)) {
+      protegidosConsumidos.push(jogador.jogadorId);
+      peoesProtegidos.add(jogador.peaoId);
+    }
+  }
+  const peoesAtingidos = tabuleiro.peoes
+    .filter(
+      (peao) => alvos.has(peao.peaoId) && !peoesProtegidos.has(peao.peaoId),
+    )
+    .map((peao) => peao.peaoId);
+
+  return {
+    evento: {
+      tipo: 'ataque_resolvido',
+      atacantes,
+      peoesAtingidos,
+      protegidos: protegidosConsumidos,
+      estadosAplicados: [],
+    },
+    peoesNoAlcance,
+    protegidosConsumidos,
+  };
+}
+
+// Resolução do Ataque — legado delta-based (issue #172): pura e
+// determinística. Para cada Monstro posicionado, compara o conjunto de peões
+// dentro do Alcance ATUAL com o snapshot anterior (ausência ≡ conjunto vazio)
+// — conjunto diferente ⇒ o Monstro ataca, atingindo todos os peões dentro do
+// Alcance atual; quem saiu não é atingido. A Proteção de um Jogador no
+// alcance dos atacantes nega TODOS os ataques simultâneos contra ele e é
+// consumida UMA única vez; a Proteção de Jogador fora do alcance dos
+// atacantes não é consumida.
+// @deprecated Preferir resolverAtaquesCentradoNoAtuante (issue #237).
 export function resolverAtaques(
   tabuleiro: EstadoDoTabuleiro,
   peoesNoAlcanceAnterior: Readonly<Record<string, readonly string[]>>,

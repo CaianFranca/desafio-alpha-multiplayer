@@ -23,14 +23,13 @@
 
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
 
-/** Asset de recusa (frontend/web/media → servido em /media/ pelo proxy nginx). */
+/** Asset de recusa (web/media → servido em /media/). */
 export const CAMINHO_SOM_DE_RECUSA = '/media/bumpintowall.mp3'
 
 /**
- * Volume base do som de recusa (0.3). O futuro botão de volume controlará
- * este ponto sem recostura via `audio.volume = masterVolume * VOLUME_BASE`,
- * onde `masterVolume` ∈ [0,1] (hoje sempre 1, i.e. 0.3 efetivo). Exposto para
- * testes e para o futuro controle não precisar adivinhar o fator.
+ * Volume base do som de recusa (contrato com o futuro botão de volume, ADR-0007:
+ * `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`, com master em [0, 1]).
+ * Desvio consciente da spec #228 ("sempre cheio") por decisão humana explícita.
  */
 export const VOLUME_BASE_SOM_DE_RECUSA = 0.3
 
@@ -105,6 +104,8 @@ export function motivoDeRecusaDoEvento(
 export function tocarSomDeRecusa(motivo: MotivoDeRecusa): void {
   try {
     const audio = new Audio(SOM_POR_MOTIVO[motivo])
+    // Contrato de volume (ADR-0007): base fixa; o futuro botão de volume
+    // aplica `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`.
     audio.volume = VOLUME_BASE_SOM_DE_RECUSA
     const tocando: unknown = audio.play()
     // jsdom não implementa play(): retorna undefined em vez de Promise.

@@ -93,16 +93,19 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Som de recusa + anúncio ao leitor de tela (issue #228) ──
   // Único dono dos disparos: reage aos mesmos eventos do canal que antes
   // geravam flash, somente leitura do modelo. Aprovações/seleções/sorteios/
-  // turnos ficam em silêncio (motivo null = "foi").
-  // B2: live region precisa re-anunciar mesmo motivo repetido — `seq` força
-  // nova render (key/aria) mesmo quando o texto é idêntico; sem isso leitores
-  // ignoram a segunda recusa (bail-out do React + texto igual).
-  const [anuncioDeRecusa, setAnuncioDeRecusa] = useState<{ motivo: MotivoDeRecusa; seq: number } | null>(null)
-  const seqRef = useRef(0)
+  // turnos ficam em silêncio (motivo null = "foi"). O id (nonce) remonta a
+  // região viva a cada disparo (`key`), então repetições do MESMO motivo
+  // re-anunciam — sem ele, texto idêntico + bail-out do setState calariam a
+  // segunda recusa para o leitor de tela.
+  const [anuncioDeRecusa, setAnuncioDeRecusa] = useState<{
+    id: number
+    motivo: MotivoDeRecusa
+  } | null>(null)
+  const proximoIdDeAnuncio = useRef(0)
   const tocarRecusa = useCallback((motivo: MotivoDeRecusa) => {
     tocarSomDeRecusa(motivo)
-    seqRef.current += 1
-    setAnuncioDeRecusa({ motivo, seq: seqRef.current })
+    proximoIdDeAnuncio.current += 1
+    setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
   }, [])
 
   // ── Trigger de limpeza para TransicaoLimpeza (issue #239, B1) ──
@@ -388,13 +391,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       {/*
         Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
         região viva sempre presente; o texto atualiza a cada recusa (som +
-        anúncio). Invisível para quem não usa leitor (`sr-only`).
+        anúncio). Invisível para quem não usa leitor (`sr-only`). O `key` com
+        o id do anúncio remonta o nó a cada disparo para que repetições do
+        mesmo motivo re-anunciem; `data-anuncio-id` expõe o nonce aos testes.
       */}
       <div
-        key={anuncioDeRecusa?.seq ?? 'vazio'}
+        key={anuncioDeRecusa?.id ?? 'sem-anuncio'}
         data-testid="anuncio-de-recusa"
         data-motivo={anuncioDeRecusa?.motivo ?? undefined}
-        data-seq={anuncioDeRecusa?.seq ?? undefined}
+        data-anuncio-id={anuncioDeRecusa?.id ?? undefined}
         role="status"
         aria-live="polite"
         aria-atomic="true"

@@ -6,6 +6,10 @@ import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { toquesDeAudio } from './helpers/mockAudio'
+import {
+  CAMINHO_SOM_DE_RECUSA,
+  VOLUME_BASE_SOM_DE_RECUSA,
+} from '../web/src/components/partida/somDeRecusa'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 // Issue #91 + #143: conexão do frontend com o game-server para peões, ciclo e
@@ -461,7 +465,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
 
     // Som de recusa com motivo + anúncio, sem clarão.
     expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/bumpintowall.mp3', volume: 0.3 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')

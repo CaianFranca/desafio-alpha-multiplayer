@@ -9,7 +9,9 @@
 # mantida pelo time e validada localmente antes do merge; testes de frontend
 # se mostraram flaky no runner do Actions (decisão de 2026-09-05).
 #
-# Fase 3 adicionará o job de deploy (scp + systemd + nginx + GitHub Release).
+# O job `deploy` conecta ao servidor via OpenVPN + SSH e publica a release
+# (scp + systemd + nginx). SEM GitHub Release: rollback via workflow_dispatch
+# + SHA (re-testa e re-gera o tarball de qualquer commit).
 
 name: Deploy — Flicker of Sanity
 
@@ -24,7 +26,7 @@ on:
         default: ''
 
 permissions:
-  contents: read   # Fase 3 muda p/ write (GitHub Release)
+  contents: read   # sem GitHub Release — rollback é workflow_dispatch + SHA
 
 concurrency:
   group: deploy-prod
@@ -65,12 +67,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha || github.ref }}
 
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -90,12 +92,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha || github.ref }}
 
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -107,8 +109,150 @@ jobs:
         run: scripts/build-release.sh "$SHORT_SHA"
 
       - name: Upload do artefato
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flicker-${{ env.SHORT_SHA }}
           path: release/flicker-${{ env.SHORT_SHA }}.tar.gz
           retention-days: 14
+
+  deploy:
+    name: Deploy em produção (VPN + SSH + systemd)
+    needs: build
+    # Só deplona a partir da branch `prod` (push nela ou workflow_dispatch nela).
+    # workflow_dispatch com input sha → checkout do SHA, artifact regenerado e
+    # redeploy do commit antigo (rollback), pois github.ref segue sendo prod.
+    if: github.ref == 'refs/heads/prod'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha || github.ref }}
+
+      - name: Resolver SHA curto (nome do artifact/tarball)
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - name: Download do artefato gerado no job build
+        uses: actions/download-artifact@v8
+        with:
+          name: flicker-${{ env.SHORT_SHA }}
+          path: release
+
+      - name: Conectar à VPN (OpenVPN)
+        env:
+          VPN_CONFIG: ${{ secrets.VPN_CONFIG }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openvpn
+          mkdir -p /tmp/vpn
+          printf '%s\n' "$VPN_CONFIG" | sudo tee /tmp/vpn/client.ovpn > /dev/null
+          sudo openvpn --config /tmp/vpn/client.ovpn --daemon \
+            --log /tmp/vpn/openvpn.log --writepid /tmp/vpn/openvpn.pid
+          for i in $(seq 1 60); do
+            if ping -c 1 -W 2 "$SERVER_HOST" > /dev/null 2>&1; then
+              echo "VPN ativa: $SERVER_HOST alcançável (tentativa $i)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Servidor $SERVER_HOST inalcançável após 60s com a VPN ativa"
+          echo '--- Diagnóstico de rota ---'
+          if curl -fsS -m 5 https://api.github.com > /dev/null 2>&1; then
+            echo 'Internet OK: o túnel subiu, mas a rota até o servidor falhou.'
+          else
+            echo 'Sem internet com a VPN ativa: tráfego está sendo desviado para o túnel.'
+          fi
+          echo '--- Últimas linhas do log OpenVPN ---'
+          sudo tail -20 /tmp/vpn/openvpn.log || true
+          echo 'Provável causa: o servidor VPN faz push de redirect-gateway (invisível no grep do .ovpn).'
+          echo 'Fallback: adicione ao client.ovpn do secret VPN_CONFIG:'
+          echo '  pull-filter ignore "redirect-gateway"'
+          echo '  route <IP_DO_SERVIDOR> 255.255.255.255 net_gateway'
+          echo '(alternativa: route-nopull + rota estática para o servidor)'
+          exit 1
+
+      - name: Configurar SSH (chave dedicada + known_hosts)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SERVER_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$SERVER_USER@$SERVER_HOST" 'echo "conectado: $(hostname)"'
+
+      - name: Gerar env de produção (valores nunca logados)
+        env:
+          PROD_POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          PROD_JWT_SECRET: ${{ secrets.PROD_JWT_SECRET }}
+          PROD_JWT_REFRESH_SECRET: ${{ secrets.PROD_JWT_REFRESH_SECRET }}
+          LOBBY_PUBLIC_URL: ${{ vars.PROD_LOBBY_PUBLIC_URL }}
+        run: |
+          {
+            echo 'NODE_ENV=production'
+            echo 'POSTGRES_HOST=127.0.0.1'
+            echo 'POSTGRES_USER=flicker'
+            echo 'POSTGRES_DB=flicker'
+            echo "POSTGRES_PASSWORD=${PROD_POSTGRES_PASSWORD}"
+            echo 'REDIS_HOST=127.0.0.1'
+            echo 'REDIS_PORT=6379'
+            echo "JWT_SECRET=${PROD_JWT_SECRET}"
+            echo "JWT_REFRESH_SECRET=${PROD_JWT_REFRESH_SECRET}"
+            echo "LOBBY_PUBLIC_URL=${LOBBY_PUBLIC_URL}"
+            # Obrigatório sem TLS: default em produção é Secure=true e o
+            # navegador descartaria os cookies (revisitar quando houver HTTPS).
+            echo 'COOKIE_SECURE=false'
+          } > /tmp/flicker-env
+          chmod 600 /tmp/flicker-env
+
+      - name: Copiar artefatos para o servidor
+        run: |
+          scp -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            "release/flicker-${SHORT_SHA}.tar.gz" \
+            scripts/deploy-server.sh \
+            /tmp/flicker-env \
+            "$SERVER_USER@$SERVER_HOST:/tmp/"
+
+      - name: Instalar env e preparar Postgres (idempotente)
+        run: |
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          install -m 600 /tmp/flicker-env /opt/flicker/env
+          mkdir -p /opt/flicker/releases
+          set -a; . /opt/flicker/env; set +a
+          [ -n "$POSTGRES_PASSWORD" ] || { echo 'POSTGRES_PASSWORD vazio no env' >&2; exit 1; }
+          # format('%L', :'flicker_pw') cita a senha com segurança (qualquer
+          # caractere — provado com aspas/$/backslash); \gexec executa o SQL
+          # gerado apenas quando a condição tem linhas.
+          runuser -u postgres -- psql --dbname postgres --set=flicker_pw="$POSTGRES_PASSWORD" <<'SQL'
+          SELECT format('CREATE ROLE flicker LOGIN PASSWORD %L', :'flicker_pw')
+          WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'flicker') \gexec
+          SELECT format('ALTER ROLE flicker LOGIN PASSWORD %L', :'flicker_pw')
+          WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'flicker') \gexec
+          SELECT 'CREATE DATABASE flicker OWNER flicker'
+          WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'flicker') \gexec
+          SQL
+          REMOTE
+
+      - name: Publicar release (deploy-server.sh)
+        run: |
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$SERVER_USER@$SERVER_HOST" \
+            "bash /tmp/deploy-server.sh ${SHORT_SHA} /tmp/flicker-${SHORT_SHA}.tar.gz"
+
+      - name: Encerrar OpenVPN
+        if: always()
+        run: |
+          if [ -f /tmp/vpn/openvpn.pid ]; then
+            sudo kill "$(cat /tmp/vpn/openvpn.pid)" 2>/dev/null || true
+          fi
+          sudo pkill -x openvpn 2>/dev/null || true

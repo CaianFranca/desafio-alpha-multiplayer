@@ -3,9 +3,6 @@
 .scratch/
 **/node_modules
 **/dist
-frontend/web/media/*
 frontend/references/
-!frontend/web/media/.gitkeep
-!frontend/web/media/bumpintowall.mp3
 
 release/
