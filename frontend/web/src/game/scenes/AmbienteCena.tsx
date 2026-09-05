@@ -23,6 +23,7 @@ import type {
   EstadoExibicaoTabuleiro,
 } from '../tabuleiro/contrato'
 import type { VooDoPeaoPendente } from '../tabuleiro/vooDoPeao'
+import { deveSuprimirPeaoNaMesa } from '../tabuleiro/vooDoPeao'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
@@ -193,6 +194,11 @@ export function AmbienteCena({
               onPuxar={onPuxarPecaDaBandeja}
             />
             {peoesNaMesa.map((peao) => {
+              // Voo ativo (#242): o peão voador não renderiza estático na Mesa
+              // (Primeiro Turno: origem mesa→peça inicial) — só o overlay voa.
+              if (deveSuprimirPeaoNaMesa(vooPendente ?? null, peao.peaoId)) {
+                return null
+              }
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (
                 <PeaoPlaceholder

@@ -23,10 +23,11 @@ import {
   deveSuprimirPeaoEstatico,
   mundoDoPeaoSobreACelula,
   tocarBaqueDoPeao,
-  vooPoseNoProgresso,
+  vooPoseEntreMundos,
   vooReduceAtivo,
   VOO_DURACAO_MS,
 } from './vooDoPeao'
+import { peaoMesaParaMundo } from './contrato'
 import type { VooDoPeaoPendente } from './vooDoPeao'
 
 interface TabuleiroProps {
@@ -203,11 +204,13 @@ export function Tabuleiro({
 
 /**
  * Overlay do peão voador (issue #242): erguer→flutuar inclinado→aterrissar,
- * terminando pixel-igual ao destino estático. Interpola via `useFrame` +
- * `invalidate()` (Canvas em `frameloop="demand"`, sem trocar o modo);
- * conclui via callback, sem `setTimeout`. Sob `prefers-reduced-motion` vira
- * snap imediato no destino + baque. Inerte ao ponteiro (sem handlers): cliques
- * atravessam para a célula/peca abaixo e a câmera segue intacta.
+ * terminando pixel-igual ao destino estático. A origem pode ser uma célula ou
+ * a fileira da Mesa (Primeiro Turno, `PEAO_POSICIONADO` com `origem` null —
+ * o slot vai em `origemMesaIndice`). Interpola via `useFrame` + `invalidate()`
+ * (Canvas em `frameloop="demand"`, sem trocar o modo); conclui via callback,
+ * sem `setTimeout`. Sob `prefers-reduced-motion` vira snap imediato no
+ * destino + baque. Inerte ao ponteiro (sem handlers): cliques atravessam para
+ * a célula/peca abaixo e a câmera segue intacta.
  */
 function PeaoVoador({
   voo,
@@ -225,27 +228,36 @@ function PeaoVoador({
   // Reduce lido uma vez por voo (o overlay remonta por nonce): snap estável.
   const reduce = useMemo(() => vooReduceAtivo(), [])
   const destinoMundo = useMemo(() => mundoDoPeaoSobreACelula(voo.destino), [voo])
-  const origemMundo = useMemo(() => mundoDoPeaoSobreACelula(voo.origem), [voo])
+  const origemMundo = useMemo(
+    () =>
+      voo.origem !== null
+        ? mundoDoPeaoSobreACelula(voo.origem)
+        : peaoMesaParaMundo(voo.origemMesaIndice ?? 0),
+    [voo],
+  )
+  // Origem na Mesa sem slot (nunca emitido pela derivação): snap defensivo no
+  // destino, com baque e aviso de pouso como no reduce.
+  const semOrigem = voo.origem === null && voo.origemMesaIndice == null
 
   // Reduce: snap + baque imediato, uma vez por nonce (efeito, sem temporizador).
   useEffect(() => {
-    if (!reduce || concluido.current) return
+    if ((!reduce && !semOrigem) || concluido.current) return
     concluido.current = true
     tocarBaqueDoPeao()
     onAterrissou?.(voo.nonce)
-  }, [reduce, voo.nonce, onAterrissou])
+  }, [reduce, semOrigem, voo.nonce, onAterrissou])
 
   // Chute inicial do loop sob demanda: garante o primeiro frame do voo.
   useEffect(() => {
-    if (!reduce) invalidate()
-  }, [reduce, invalidate])
+    if (!reduce && !semOrigem) invalidate()
+  }, [reduce, semOrigem, invalidate])
 
   useFrame(() => {
-    if (reduce || concluido.current) return
+    if (reduce || semOrigem || concluido.current) return
     const agora = performance.now()
     if (inicio.current === null) inicio.current = agora
     const progresso = Math.min(1, (agora - inicio.current) / VOO_DURACAO_MS)
-    const pose = vooPoseNoProgresso(voo.origem, voo.destino, progresso)
+    const pose = vooPoseEntreMundos(origemMundo, destinoMundo, progresso)
     const alvo = grupo.current
     if (alvo) {
       alvo.position.set(pose.posicao[0], pose.posicao[1], pose.posicao[2])
@@ -260,7 +272,7 @@ function PeaoVoador({
     invalidate()
   })
 
-  if (reduce) {
+  if (reduce || semOrigem) {
     return <PeaoPlaceholder cor={cor} position={destinoMundo} />
   }
   return (

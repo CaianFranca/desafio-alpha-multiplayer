@@ -11,12 +11,14 @@ import {
   VOO_INCLINACAO_RAD,
   deveLimparVooNoSnapshot,
   deveSuprimirPeaoEstatico,
+  deveSuprimirPeaoNaMesa,
   deveTocarCliqueDoPeao,
   limparVooAoAterrissar,
   mundoDoPeaoSobreACelula,
   tocarBaqueDoPeao,
   tocarCliqueDoPeao,
   vooDoPeaoDoEvento,
+  vooPoseEntreMundos,
   vooPoseNoProgresso,
   vooReduceAtivo,
 } from '../web/src/game/tabuleiro/vooDoPeao'
@@ -27,6 +29,7 @@ import {
 } from '../web/src/game/tabuleiro/reducao'
 import {
   celulaParaMundo,
+  peaoMesaParaMundo,
   PEAO_Y,
 } from '../web/src/game/tabuleiro/contrato'
 import { motivoDeRecusaDoEvento } from '../web/src/components/partida/somDeRecusa'
@@ -136,23 +139,164 @@ describe('voo do peão — derivação do PEAO_MOVIDO (issue #242)', () => {
     ).toBeNull()
   })
 
-  it('PEAO_POSICIONADO e PEAO_PERMANECEU: snap, sem voo nem som', () => {
+  it('PEAO_PERMANECEU: snap, sem voo nem som', () => {
     const modelo = modeloComDuasPecas()
-    const posicionado: EventoDoCanalDaPartida = {
-      type: 'PEAO_POSICIONADO',
-      peaoId: 'peao-branco',
-      pecaId: 'inicial-1',
-      celula: ORIGEM,
-    }
     const permaneceu: EventoDoCanalDaPartida = {
       type: 'PEAO_PERMANECEU',
       peaoId: 'peao-branco',
       pecaId: 'inicial-1',
     }
-    expect(vooDoPeaoDoEvento(posicionado, modelo)).toBeNull()
     expect(vooDoPeaoDoEvento(permaneceu, modelo)).toBeNull()
-    expect(deveTocarCliqueDoPeao(posicionado)).toBe(false)
     expect(deveTocarCliqueDoPeao(permaneceu)).toBe(false)
+    expect(toquesDeAudio).toHaveLength(0)
+  })
+})
+
+describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (extensão #242)', () => {
+  function eventoPosicionado(): Extract<
+    EventoDoCanalDaPartida,
+    { type: 'PEAO_POSICIONADO' }
+  > {
+    return {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-2',
+      celula: DESTINO,
+    }
+  }
+
+  it('peão na Mesa voa até a peça inicial (origem Mesa + slot global)', () => {
+    // Peões nascem sobre a Mesa (celula null); peao-branco é o índice 0.
+    const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
+    expect(voo).not.toBeNull()
+    expect(voo?.peaoId).toBe('peao-branco')
+    expect(voo?.origem).toBeNull()
+    expect(voo?.origemMesaIndice).toBe(0)
+    expect(voo?.destino).toEqual(DESTINO)
+    expect(toquesDeAudio).toHaveLength(0)
+  })
+
+  it('voo mesa→inicial termina na peça certa (pixel-igual ao estático)', () => {
+    const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
+    expect(voo?.origem).toBeNull()
+    const origemMundo = peaoMesaParaMundo(voo?.origemMesaIndice ?? -1)
+    const destinoMundo = mundoDoPeaoSobreACelula(DESTINO)
+    expect(vooPoseEntreMundos(origemMundo, destinoMundo, 0).posicao).toEqual(
+      origemMundo,
+    )
+    expect(vooPoseEntreMundos(origemMundo, destinoMundo, 1).posicao).toEqual(
+      destinoMundo,
+    )
+  })
+
+  it('meio do voo mesa→inicial: elevado e inclinado', () => {
+    const origemMundo = peaoMesaParaMundo(0)
+    const destinoMundo = mundoDoPeaoSobreACelula(DESTINO)
+    const meio = vooPoseEntreMundos(origemMundo, destinoMundo, 0.5)
+    expect(meio.posicao[1]).toBeGreaterThan(origemMundo[1])
+    expect(meio.posicao[1]).toBeGreaterThan(destinoMundo[1])
+    expect(meio.inclinacao).not.toEqual([0, 0])
+    expect(vooPoseEntreMundos(origemMundo, destinoMundo, 0).inclinacao).toEqual([
+      0, 0,
+    ])
+    expect(vooPoseEntreMundos(origemMundo, destinoMundo, 1).inclinacao).toEqual([
+      0, 0,
+    ])
+  })
+
+  it('pouso do posicionado toca o mesmo baque (mesmo dono: a cena)', () => {
+    const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
+    expect(voo).not.toBeNull()
+    tocarBaqueDoPeao()
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]?.src).toBe(CAMINHO_SOM_BAQUE_PEAO)
+    expect(toquesDeAudio[0]?.volume).toBe(SOM_VOLUME_BASE_BAQUE_PEAO)
+  })
+
+  it('reduce não muda a derivação (snap vive na cena, mesmo overlay)', () => {
+    const original = window.matchMedia
+    try {
+      Object.defineProperty(window, 'matchMedia', {
+        writable: true,
+        configurable: true,
+        value: () => ({ matches: true }),
+      })
+      expect(vooReduceAtivo()).toBe(true)
+      const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
+      expect(voo).not.toBeNull()
+      expect(voo?.destino).toEqual(DESTINO)
+    } finally {
+      Object.defineProperty(window, 'matchMedia', {
+        writable: true,
+        configurable: true,
+        value: original,
+      })
+    }
+  })
+
+  it('origem irresolúvel vira snap: peão desconhecido, sem voo', () => {
+    const voo = vooDoPeaoDoEvento(
+      {
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-fantasma',
+        pecaId: 'inicial-2',
+        celula: DESTINO,
+      },
+      modeloComDuasPecas(),
+    )
+    expect(voo).toBeNull()
+    expect(toquesDeAudio).toHaveLength(0)
+  })
+
+  it('peão já na célula de destino vira snap (sem voo)', () => {
+    let modelo = modeloComDuasPecas()
+    modelo = reduzirEvento(modelo, {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-2',
+      celula: DESTINO,
+    })
+    expect(vooDoPeaoDoEvento(eventoPosicionado(), modelo)).toBeNull()
+  })
+
+  it('peão já posicionado em outra célula voa célula→célula', () => {
+    let modelo = modeloComDuasPecas()
+    modelo = reduzirEvento(modelo, {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-1',
+      celula: ORIGEM,
+    })
+    const voo = vooDoPeaoDoEvento(eventoPosicionado(), modelo)
+    expect(voo?.origem).toEqual(ORIGEM)
+    expect(voo?.destino).toEqual(DESTINO)
+    expect(voo?.origemMesaIndice).toBeUndefined()
+  })
+
+  it('sem duplicado: voador some do estático no destino e da Mesa', () => {
+    const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
+    expect(voo).not.toBeNull()
+    if (voo === null) throw new Error('voo do posicionado deveria existir')
+    const pendente: VooDoPeaoPendente = { nonce: 3, ...voo }
+    // Destino suprimido no tabuleiro (origem é a Mesa, sem chave de célula).
+    expect(deveSuprimirPeaoEstatico(pendente, 'peao-branco', '3:4')).toBe(true)
+    expect(deveSuprimirPeaoEstatico(pendente, 'peao-branco', '3:3')).toBe(false)
+    expect(deveSuprimirPeaoEstatico(pendente, 'peao-vermelho', '3:4')).toBe(false)
+    // Fileira da Mesa suprime pelo peaoId em voo — só com origem na Mesa.
+    expect(deveSuprimirPeaoNaMesa(pendente, 'peao-branco')).toBe(true)
+    expect(deveSuprimirPeaoNaMesa(pendente, 'peao-vermelho')).toBe(false)
+    expect(deveSuprimirPeaoNaMesa(null, 'peao-branco')).toBe(false)
+    const vooCelula: VooDoPeaoPendente = {
+      nonce: 4,
+      peaoId: 'peao-branco',
+      origem: ORIGEM,
+      destino: DESTINO,
+    }
+    expect(deveSuprimirPeaoNaMesa(vooCelula, 'peao-branco')).toBe(false)
+  })
+
+  it('clique continua só no PEAO_SELECIONADO (posicionado em silêncio)', () => {
+    expect(deveTocarCliqueDoPeao(eventoPosicionado())).toBe(false)
     expect(toquesDeAudio).toHaveLength(0)
   })
 })
@@ -328,11 +472,17 @@ describe('voo do peão — sem duplicado nem regressão (issue #242)', () => {
   it('derivações puras nunca tocam áudio (zero toques sem efeito colateral)', () => {
     const modelo = modeloComDuasPecas()
     vooDoPeaoDoEvento(eventoMovido(), modelo)
+    vooDoPeaoDoEvento(
+      { type: 'PEAO_POSICIONADO', peaoId: 'peao-branco', pecaId: 'inicial-2', celula: DESTINO },
+      modelo,
+    )
     deveTocarCliqueDoPeao(eventoMovido())
     limparVooAoAterrissar(null, 1)
     deveLimparVooNoSnapshot(eventoMovido())
     deveSuprimirPeaoEstatico(null, 'peao-branco', '3:4')
+    deveSuprimirPeaoNaMesa(null, 'peao-branco')
     vooPoseNoProgresso(ORIGEM, DESTINO, 0.5)
+    vooPoseEntreMundos(peaoMesaParaMundo(0), mundoDoPeaoSobreACelula(DESTINO), 0.5)
     vooReduceAtivo()
     expect(toquesDeAudio).toHaveLength(0)
   })
