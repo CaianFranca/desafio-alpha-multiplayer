@@ -94,7 +94,7 @@ export function tocarSomDeRecusa(motivo: MotivoDeRecusa): void {
   try {
     const audio = new Audio(SOM_POR_MOTIVO[motivo])
     // Sempre cheio — compatível com o futuro botão de volume sem recostura.
-    audio.volume = 1
+    audio.volume = 0.3
     const tocando: unknown = audio.play()
     // jsdom não implementa play(): retorna undefined em vez de Promise.
     if (
