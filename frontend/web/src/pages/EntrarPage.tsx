@@ -6,16 +6,17 @@ import { AuthCard } from '../components/auth/AuthCard'
 import { AuthField } from '../components/auth/AuthField'
 import { useAuthForm } from '../hooks/useAuthForm'
 import { validarEmailCredenciais, validarSenhaCredenciais } from '../utils/validacaoCredenciais'
+import { destinoSeguroDeAuth, type ProtectedLocationState } from '../app/RequireAuth'
 
-interface CredenciaisLocationState {
-  reason?: string
-}
+type CredenciaisLocationState = ProtectedLocationState
 
 export function EntrarPage() {
   const { entrarComCredenciais } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const reason = (location.state as CredenciaisLocationState | null)?.reason
+  const locationState = location.state as CredenciaisLocationState | null
+  const reason = locationState?.reason
+  const from = locationState?.from
 
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
@@ -34,7 +35,7 @@ export function EntrarPage() {
       },
       () => entrarComCredenciais({ email: email.trim(), senha }),
     )
-    if (ok) navigate('/')
+    if (ok) navigate(destinoSeguroDeAuth(from), { replace: true })
   }
 
   return (
@@ -98,7 +99,7 @@ export function EntrarPage() {
 
       <p className="text-sm text-center text-muted mt-6">
         Ainda não tem Cadastro?{' '}
-        <Link to="/cadastro" className="auth-link">
+        <Link to="/cadastro" state={location.state} className="auth-link">
           Crie seu Cadastro
         </Link>
       </p>
