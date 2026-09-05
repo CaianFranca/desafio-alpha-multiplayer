@@ -16,6 +16,7 @@ import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/i
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
+import { TransicaoLimpeza } from './TransicaoLimpeza'
 import type {
   PeaoId,
   PecaId,
@@ -180,6 +181,7 @@ export function AmbienteCena({
               estadoPeoes={estadoPeoes}
               onPuxar={onPuxarPecaDaBandeja}
             />
+            <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} />
             {peoesNaMesa.map((peao) => {
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (
