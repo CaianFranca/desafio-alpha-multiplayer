@@ -94,6 +94,7 @@ export function TransicaoLimpeza({ posicionadas, trigger = null }: TransicaoLimp
   const reduce = usePrefersReducedMotion()
   const posicionadasPorIdRef = useRef<Map<string, PecaPosicionada>>(new Map())
   const [saindo, setSaindo] = useState<readonly (PecaPosicionada & { inicioMs: number })[]>([])
+  const invalidate = useThree((s) => s.invalidate)
 
   // Trigger precisa ver o mapa ANTERIOR (antes da remoção). Este effect vem
   // ANTES do que atualiza o mapa a partir de `posicionadas` — quando ambos
@@ -114,8 +115,11 @@ export function TransicaoLimpeza({ posicionadas, trigger = null }: TransicaoLimp
         ...atuais,
         ...removidas.map((p) => ({ ...p, inicioMs: agora })),
       ])
+      // Arranque com frameloop="demand": sem invalidate explícito o primeiro
+      // tick do useFrame pode nunca acontecer e a animação congela no quadro 1.
+      invalidate()
     }
-  }, [trigger, reduce])
+  }, [trigger, reduce, invalidate])
 
   // Mantém mapa atualizado para o próximo trigger. Vem DEPOIS do trigger
   // para não sobrescrever o snapshot pré-remoção no mesmo commit.
