@@ -15,12 +15,12 @@
  * Gatilhos (só do canal, nunca do clique local otimista):
  *   - `PEAO_SELECIONADO` → a página toca o clique imediato;
  *   - `PEAO_MOVIDO` → a página registra o voo pendente (último vence);
- *   - `PEAO_POSICIONADO` (Primeiro Turno) → a página registra o voo pendente
- *     mesa→peça inicial (origem na célula anterior do peão, ou na fileira da
+  *   - `PEAO_POSICIONADO` (Primeiro Turno) → a página registra o voo pendente
+  *     mesa→Peça Inicial (origem na célula anterior do peão, ou na fileira da
  *     Mesa quando ele ainda não está posicionado);
  *   - o baque é tocado pela cena ao concluir o pouso (imediato sob reduce) —
  *     dono único por som, sem duplo.
- * `PEAO_PERMANECEU` pede snap, sem voo nem som.
+  * `PEAO_PERMANECEU` não voa: sem voo nem som.
  *
  * Puro onde dá: `vooDoPeaoDoEvento` e `deveTocarCliqueDoPeao` são 100% puras
  * (evento + modelo anterior → voo base | null / boolean); só
@@ -99,8 +99,8 @@ export function deveTocarCliqueDoPeao(evento: EventoDoCanalDaPartida): boolean {
  * peça de `pecaIdDe` em `posicionadas`, com fallback para a célula do peão no
  * modelo anterior. No `PEAO_POSICIONADO`, origem é a célula do peão no modelo
  * anterior — peão ainda sobre a Mesa vira voo mesa→peça com o slot global
- * em `peoes` carimbado em `origem.mesaIndice`. Origem irresolúvel (ou idêntica
- * ao destino) → `null` = snap, sem voo nem som.
+  * em `peoes` carimbado em `origem.mesaIndice`. Origem irresolúvel (ou idêntica
+  * ao destino) → `null` = sem voo (o modelo atual já é o estado final), sem som.
  * `PEAO_PERMANECEU`/demais eventos → `null`.
  */
 export function vooDoPeaoDoEvento(
@@ -313,7 +313,7 @@ export function vooPoseEntreMundos(
 }
 
 /**
- * `prefers-reduced-motion: reduce` → snap: sem interpolação, o peão aparece
+ * `prefers-reduced-motion: reduce` → sem voo: sem interpolação, o peão aparece
  * direto no destino (pixel-igual ao atual) e o baque toca imediato. Guarda
  * para SSR/testes sem `matchMedia` (falso = anima).
  */

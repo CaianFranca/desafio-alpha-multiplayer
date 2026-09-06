@@ -66,7 +66,7 @@ interface AmbienteDeJogoProps {
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
   /**
-   * Voo pendente do peão (issue #242): overlay até o pouso; null = snap.
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = sem voo.
    * Desce até a cena, que avisa o pouso via `onVooAterrissou(nonce)`.
    */
   vooPendente?: VooDoPeaoPendente | null

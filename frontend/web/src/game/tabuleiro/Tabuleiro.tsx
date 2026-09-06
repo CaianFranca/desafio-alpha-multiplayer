@@ -78,7 +78,7 @@ interface TabuleiroProps {
   /**
    * Voo pendente do peão (issue #242): overlay erguer→flutuar→aterrissar até
    * o pouso, quando a cena avisa via `onVooAterrissou(nonce)`. Null = sem voo
-   * (snap = modelo atual).
+   * (o modelo atual já é o estado final).
    */
   vooPendente?: VooDoPeaoPendente | null
   /** Pouso do voo concluído (nonce): a página limpa o pendente. */
@@ -226,7 +226,7 @@ export function Tabuleiro({
  * a fileira da Mesa (Primeiro Turno, `PEAO_POSICIONADO` com origem
  * `{ mesaIndice }`). Interpola via `useFrame` + `invalidate()`
  * (Canvas em `frameloop="demand"`, sem trocar o modo); conclui via callback,
- * sem `setTimeout`. Sob `prefers-reduced-motion` vira snap imediato no
+ * sem `setTimeout`. Sob `prefers-reduced-motion` vira chegada imediata ao
  * destino + baque. Inerte ao ponteiro (sem handlers): cliques atravessam para
  * a célula/peca abaixo e a câmera segue intacta.
  */
@@ -243,7 +243,7 @@ function PeaoVoador({
   const concluido = useRef(false)
   const inicio = useRef<number | null>(null)
   const invalidate = useThree((estado) => estado.invalidate)
-  // Reduce lido uma vez por voo (o overlay remonta por nonce): snap estável.
+  // Reduce lido uma vez por voo (o overlay remonta por nonce): leitura estável.
   const reduce = useMemo(() => vooReduceAtivo(), [])
   const destinoMundo = useMemo(() => mundoDoPeaoSobreACelula(voo.destino), [voo])
   const origemMundo = useMemo(
@@ -254,7 +254,7 @@ function PeaoVoador({
     [voo],
   )
 
-  // Reduce: snap + baque imediato, uma vez por nonce (efeito, sem temporizador).
+  // Reduce: chegada imediata + baque imediato, uma vez por nonce (efeito, sem temporizador).
   useEffect(() => {
     if (!reduce || concluido.current) return
     concluido.current = true

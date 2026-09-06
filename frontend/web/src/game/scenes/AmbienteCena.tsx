@@ -107,7 +107,7 @@ interface AmbienteCenaProps {
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
   pecaCorrente?: PecaCorrente | null
   /**
-   * Voo pendente do peão (issue #242): overlay até o pouso; null = snap.
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = sem voo.
    * Desce até o `Tabuleiro`, que avisa o pouso via `onVooAterrissou(nonce)`.
    */
   vooPendente?: VooDoPeaoPendente | null
@@ -219,7 +219,7 @@ export function AmbienteCena({
             <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
             {peoesNaMesa.map((peao) => {
               // Voo ativo (#242): o peão voador não renderiza estático na Mesa
-              // (Primeiro Turno: origem mesa→peça inicial) — só o overlay voa.
+              // (Primeiro Turno: origem mesa→Peça Inicial) — só o overlay voa.
               if (deveSuprimirPeaoNaMesa(vooPendente ?? null, peao.peaoId)) {
                 return null
               }

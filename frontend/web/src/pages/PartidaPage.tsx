@@ -139,7 +139,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Único dono dos disparos: reage aos mesmos eventos do canal que atualizam
   // o modelo, somente leitura do modelo anterior. `PEAO_SELECIONADO` toca o
   // clique imediato; `PEAO_MOVIDO` e `PEAO_POSICIONADO` (Primeiro Turno,
-  // mesa→peça inicial) registram o voo pendente (último vence — o
+  // mesa→Peça Inicial) registram o voo pendente (último vence — o
   // overlay remonta por nonce); o baque é tocado pela cena ao concluir o
   // pouso. `ESTADO_DA_PARTIDA` limpa o voo (snapshot é autoridade).
   const [vooPendente, setVooPendente] = useState<VooDoPeaoPendente | null>(null)

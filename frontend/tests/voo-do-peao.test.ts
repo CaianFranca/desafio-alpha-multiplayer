@@ -35,7 +35,7 @@ import {
 } from './helpers/mockAudio'
 
 // Voo do peão com sons (issue #242): comportamento externo — voo registrado
-// com origem/destino certos, clique + baque, reduce vira snap, demais eventos
+// com origem/destino certos, clique + baque, reduce sem voo, demais eventos
 // do ciclo sem voo/som. Áudio mockado globalmente (mockAudio.ts); eventos
 // mockados no padrão som-de-recusa.test.ts.
 
@@ -101,7 +101,7 @@ describe('voo do peão — derivação do PEAO_MOVIDO (issue #242)', () => {
     expect(voo?.destino).toEqual(DESTINO)
   })
 
-  it('snap irresolúvel: sem pecaIdDe nem célula anterior, sem voo', () => {
+  it('sem voo quando irresolúvel: sem pecaIdDe nem célula anterior, sem voo', () => {
     const voo = vooDoPeaoDoEvento(
       {
         type: 'PEAO_MOVIDO',
@@ -116,7 +116,7 @@ describe('voo do peão — derivação do PEAO_MOVIDO (issue #242)', () => {
     expect(toquesDeAudio).toHaveLength(0)
   })
 
-  it('origem idêntica ao destino vira snap (sem voo)', () => {
+  it('origem idêntica ao destino é sem voo', () => {
     const modelo = modeloComDuasPecas()
     expect(
       vooDoPeaoDoEvento(
@@ -132,7 +132,7 @@ describe('voo do peão — derivação do PEAO_MOVIDO (issue #242)', () => {
     ).toBeNull()
   })
 
-  it('PEAO_PERMANECEU: snap, sem voo nem som', () => {
+  it('PEAO_PERMANECEU: sem voo nem som', () => {
     const modelo = modeloComDuasPecas()
     const permaneceu: EventoDoCanalDaPartida = {
       type: 'PEAO_PERMANECEU',
@@ -158,7 +158,7 @@ describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (exte
     }
   }
 
-  it('peão na Mesa voa até a peça inicial (origem Mesa + slot global)', () => {
+  it('peão na Mesa voa até a Peça Inicial (origem Mesa + slot global)', () => {
     // Peões nascem sobre a Mesa (celula null); peao-branco é o índice 0.
     const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
     expect(voo).not.toBeNull()
@@ -177,7 +177,7 @@ describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (exte
     expect(toquesDeAudio[0]?.volume).toBe(SOM_VOLUME_BASE_BAQUE_PEAO)
   })
 
-  it('reduce não muda a derivação (snap vive na cena, mesmo overlay)', () => {
+  it('reduce não muda a derivação (chegada imediata vive na cena, mesmo overlay)', () => {
     const original = window.matchMedia
     try {
       Object.defineProperty(window, 'matchMedia', {
@@ -198,7 +198,7 @@ describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (exte
     }
   })
 
-  it('origem irresolúvel vira snap: peão desconhecido, sem voo', () => {
+  it('origem irresolúvel é sem voo: peão desconhecido, sem voo', () => {
     const voo = vooDoPeaoDoEvento(
       {
         type: 'PEAO_POSICIONADO',
@@ -212,7 +212,7 @@ describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (exte
     expect(toquesDeAudio).toHaveLength(0)
   })
 
-  it('peão já na célula de destino vira snap (sem voo)', () => {
+  it('peão já na célula de destino é sem voo', () => {
     let modelo = modeloComDuasPecas()
     modelo = reduzirEvento(modelo, {
       type: 'PEAO_POSICIONADO',
@@ -395,7 +395,7 @@ describe('voo do peão — transição e reduce (issue #242)', () => {
     expect(mundoDoPeaoSobreACelula(DESTINO)).toEqual([x, y + PEAO_Y, z])
   })
 
-  it('sem reduce por padrão; com reduce ativo vira snap', () => {
+  it('sem reduce por padrão; com reduce ativo é sem voo', () => {
     const original = window.matchMedia
     try {
       Object.defineProperty(window, 'matchMedia', {
