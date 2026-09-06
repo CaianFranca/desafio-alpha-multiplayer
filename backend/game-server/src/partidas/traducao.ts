@@ -144,6 +144,11 @@ export function traduzirEventos(
       // Ataque dos Monstros (issues #172/#173): shape 1:1 com o evento de
       // domínio — estadosAplicados carrega o estado resultante das
       // penalidades por Jogador mudado (eco do feedback da #173).
+      // Semântica centrada no atuante (ADR-0008, issues #237/#236): o gatilho
+      // é a decisão definitiva do Jogador Ativo (Confirmação de Posição com
+      // troca de Peça, Permanência e posicionamento do Peão no Primeiro
+      // Turno); fora→fora é silêncio — o lote nem emite o evento — e
+      // `atacantes` traz SÓ os Monstros envolvidos, nunca o roster inteiro.
       case 'ataque_resolvido':
         saida.push({
           type: 'ATAQUE_RESOLVIDO',
