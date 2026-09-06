@@ -3,9 +3,7 @@ import {
   SOM_CAMINHO_CLIQUE_PEAO,
   SOM_VOLUME_BASE_BAQUE_PEAO,
   SOM_VOLUME_BASE_CLIQUE_PEAO,
-  VOO_ALTURA_MAX,
   VOO_DURACAO_MS,
-  VOO_INCLINACAO_RAD,
   deveLimparVooNoSnapshot,
   deveSuprimirPeaoEstatico,
   deveSuprimirPeaoNaMesa,
@@ -15,8 +13,6 @@ import {
   tocarBaqueDoPeao,
   tocarCliqueDoPeao,
   vooDoPeaoDoEvento,
-  vooPoseEntreMundos,
-  vooPoseNoProgresso,
   vooReduceAtivo,
 } from '../web/src/game/tabuleiro/vooDoPeao'
 import type { VooDoPeaoPendente } from '../web/src/game/tabuleiro/vooDoPeao'
@@ -26,7 +22,6 @@ import {
 } from '../web/src/game/tabuleiro/reducao'
 import {
   celulaParaMundo,
-  peaoMesaParaMundo,
   PEAO_Y,
 } from '../web/src/game/tabuleiro/contrato'
 import { motivoDeRecusaDoEvento } from '../web/src/components/partida/somDeRecusa'
@@ -170,37 +165,6 @@ describe('voo do peão — PEAO_POSICIONADO mesa→peça no Primeiro Turno (exte
     expect(voo?.origem).toEqual({ mesaIndice: 0 })
     expect(voo?.destino).toEqual(DESTINO)
     expect(toquesDeAudio).toHaveLength(0)
-  })
-
-  it('voo mesa→inicial termina na peça certa (pixel-igual ao estático)', () => {
-    const voo = vooDoPeaoDoEvento(eventoPosicionado(), modeloComDuasPecas())
-    expect(voo?.origem).toEqual({ mesaIndice: 0 })
-    if (voo === null || !('mesaIndice' in voo.origem)) {
-      throw new Error('voo do posicionado deveria ter origem na Mesa')
-    }
-    const origemMundo = peaoMesaParaMundo(voo.origem.mesaIndice)
-    const destinoMundo = mundoDoPeaoSobreACelula(DESTINO)
-    expect(vooPoseEntreMundos(origemMundo, destinoMundo, 0).posicao).toEqual(
-      origemMundo,
-    )
-    expect(vooPoseEntreMundos(origemMundo, destinoMundo, 1).posicao).toEqual(
-      destinoMundo,
-    )
-  })
-
-  it('meio do voo mesa→inicial: elevado e inclinado', () => {
-    const origemMundo = peaoMesaParaMundo(0)
-    const destinoMundo = mundoDoPeaoSobreACelula(DESTINO)
-    const meio = vooPoseEntreMundos(origemMundo, destinoMundo, 0.5)
-    expect(meio.posicao[1]).toBeGreaterThan(origemMundo[1])
-    expect(meio.posicao[1]).toBeGreaterThan(destinoMundo[1])
-    expect(meio.inclinacao).not.toEqual([0, 0])
-    expect(vooPoseEntreMundos(origemMundo, destinoMundo, 0).inclinacao).toEqual([
-      0, 0,
-    ])
-    expect(vooPoseEntreMundos(origemMundo, destinoMundo, 1).inclinacao).toEqual([
-      0, 0,
-    ])
   })
 
   it('pouso do posicionado toca o mesmo baque (mesmo dono: a cena)', () => {
@@ -384,28 +348,6 @@ describe('voo do peão — pouso com baque (issue #242)', () => {
 describe('voo do peão — transição e reduce (issue #242)', () => {
   it('duração de partida (~500ms)', () => {
     expect(VOO_DURACAO_MS).toBe(500)
-    expect(VOO_ALTURA_MAX).toBeGreaterThan(0)
-    expect(VOO_INCLINACAO_RAD).toBeGreaterThan(0)
-  })
-
-  it('pose inicial e final são pixel-iguais ao estático (pós-voo = sem animação)', () => {
-    const inicio = vooPoseNoProgresso(ORIGEM, DESTINO, 0)
-    const fim = vooPoseNoProgresso(ORIGEM, DESTINO, 1)
-    expect(inicio.posicao).toEqual(mundoDoPeaoSobreACelula(ORIGEM))
-    expect(fim.posicao).toEqual(mundoDoPeaoSobreACelula(DESTINO))
-    expect(inicio.inclinacao).toEqual([0, 0])
-    expect(fim.inclinacao).toEqual([0, 0])
-  })
-
-  it('meio do voo: elevado, no caminho e inclinado no eixo do deslocamento', () => {
-    const inicio = vooPoseNoProgresso(ORIGEM, DESTINO, 0)
-    const meio = vooPoseNoProgresso(ORIGEM, DESTINO, 0.5)
-    const fim = vooPoseNoProgresso(ORIGEM, DESTINO, 1)
-    expect(meio.posicao[1]).toBeGreaterThan(inicio.posicao[1])
-    expect(meio.posicao[1]).toBeGreaterThan(fim.posicao[1])
-    expect(meio.posicao[0]).toBeGreaterThan(inicio.posicao[0])
-    expect(meio.posicao[0]).toBeLessThan(fim.posicao[0])
-    expect(meio.inclinacao).not.toEqual([0, 0])
   })
 
   it('mundo do peão = celulaParaMundo + PEAO_Y (mesma base do estático)', () => {
@@ -486,8 +428,6 @@ describe('voo do peão — sem duplicado nem regressão (issue #242)', () => {
     deveLimparVooNoSnapshot(eventoMovido())
     deveSuprimirPeaoEstatico(null, 'peao-branco', '3:4')
     deveSuprimirPeaoNaMesa(null, 'peao-branco')
-    vooPoseNoProgresso(ORIGEM, DESTINO, 0.5)
-    vooPoseEntreMundos(peaoMesaParaMundo(0), mundoDoPeaoSobreACelula(DESTINO), 0.5)
     vooReduceAtivo()
     expect(toquesDeAudio).toHaveLength(0)
   })

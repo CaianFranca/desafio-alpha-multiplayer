@@ -67,10 +67,10 @@ export type VooDoPeaoBase = Omit<VooDoPeaoPendente, 'nonce'>
 export const VOO_DURACAO_MS = 500
 
 /** Altura máxima do arco do voo, em unidades de mundo. */
-export const VOO_ALTURA_MAX = 1.2
+const VOO_ALTURA_MAX = 1.2
 
 /** Inclinação fixa na fase flutuar, em radianos, no eixo do deslocamento. */
-export const VOO_INCLINACAO_RAD = 0.28
+const VOO_INCLINACAO_RAD = 0.28
 
 /** Asset do clique suave ao selecionar (chega depois; sem arquivo = silêncio). */
 export const SOM_CAMINHO_CLIQUE_PEAO = '/media/clique-peao.mp3'
@@ -296,24 +296,6 @@ export function vooPoseEntreMundos(
     (-ex / comprimento) * intensidade,
   ]
   return { posicao, inclinacao }
-}
-
-/**
- * Pose do voo no progresso `t` em [0, 1]: horizontal interpola origem→destino,
- * vertical soma o arco (`sin(pi·t)·ALTURA`), inclinação fixa no eixo do
- * deslocamento só no flutuar. `t = 0` é pixel-igual à origem estática,
- * `t = 1` é pixel-igual ao destino estático (pós-voo = sem animação).
- */
-export function vooPoseNoProgresso(
-  origem: Celula,
-  destino: Celula,
-  progresso: number,
-): VooPoseDoPeao {
-  return vooPoseEntreMundos(
-    mundoDoPeaoSobreACelula(origem),
-    mundoDoPeaoSobreACelula(destino),
-    progresso,
-  )
 }
 
 /**

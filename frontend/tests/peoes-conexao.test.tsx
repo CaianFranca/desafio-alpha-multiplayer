@@ -703,6 +703,47 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(anuncio.getAttribute('data-motivo')).toBe('posicao_confirmada')
     expect(anuncio).toHaveTextContent('posição já confirmada')
   })
+
+  it('PR #254: eco do mesmo peão no mesmo tick toca 1 clique só', async () => {
+    const ws = await partidaDisponivel()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+  })
+
+  it('PR #254: re-clique do mesmo peão entre renders toca 1 clique só', async () => {
+    const ws = await partidaDisponivel()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+  })
+
+  it('PR #254: troca de peão toca 1 clique por seleção nova (2 toques)', async () => {
+    const ws = await partidaDisponivel()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-vermelho' })
+    })
+
+    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+    expect(toquesDeAudio[1]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+  })
 })
 
 // F3 (#145-exp): monstros na Caixa e resgate por clique ponta a ponta NA TELA

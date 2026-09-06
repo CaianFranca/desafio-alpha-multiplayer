@@ -129,6 +129,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     modeloRef.current = modelo
   }, [modelo])
+  // PR #254: guarda contra clique duplicado — re-clique no mesmo peão ou eco
+  // rápido do servidor repetem PEAO_SELECIONADO. Só seleção nova toca:
+  // `modeloRef` cobre duplicatas entre renders; `ultimoCliqueRef` (timestamp,
+  // sem setTimeout) cobre ecos no mesmo tick, quando o ref ainda está stale.
+  // Janela de 2000ms: a seleção do mesmo peão em sequência é quase sempre
+  // duplicata (comando duplo, eco, retry); trocar de peão nunca é afetado.
+  const ultimoCliqueRef = useRef<{ peaoId: string; t: number } | null>(null)
   const onVooAterrissou = useCallback((nonce: number) => {
     setVooPendente((atual) => limparVooAoAterrissar(atual, nonce))
   }, [])
@@ -150,6 +157,19 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     partidaId,
     onEvento: useCallback(
       (evento) => {
+        // PR #254: fim do episódio de seleção — movimento/permanência, virada
+        // de turno ou snapshot autoritativo encerram a seleção atual; a
+        // próxima seleção do mesmo peão é nova e deve tocar. Sem isso, o
+        // debounce abaixo silenciaria uma re-seleção legítima pós-movimento.
+        if (
+          evento.type === 'PEAO_MOVIDO' ||
+          evento.type === 'PEAO_PERMANECEU' ||
+          evento.type === 'TURNO_INICIADO' ||
+          evento.type === 'TURNO_ENCERRADO' ||
+          evento.type === 'ESTADO_DA_PARTIDA'
+        ) {
+          ultimoCliqueRef.current = null
+        }
         if (evento.type === 'PARTIDA_TERMINADA') {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante a
           // tela de resultado.
@@ -204,7 +224,21 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // Voo do peão (#242): gatilhos só do canal, sobre o modelo ANTES do
         // despacho (origem no estado anterior); o modelo atualiza instantâneo
         // e a cena interpola até o mesmo estado final.
-        if (deveTocarCliqueDoPeao(evento)) tocarCliqueDoPeao()
+        // PR #254: 1 clique por seleção nova — re-seleção do mesmo peão em
+        // sequência é silêncio (re-clique local ou eco do servidor). O filtro
+        // `deveTocarCliqueDoPeao` continua primeiro; o debounce de 2000ms por
+        // timestamp suprime a duplicata (sem setTimeout em produção).
+        if (deveTocarCliqueDoPeao(evento) && evento.type === 'PEAO_SELECIONADO') {
+          const peaoId = evento.peaoId
+          if (modeloRef.current.peaoSelecionadoId !== peaoId) {
+            const agora = Date.now()
+            const ultimo = ultimoCliqueRef.current
+            if (ultimo === null || ultimo.peaoId !== peaoId || agora - ultimo.t >= 2000) {
+              ultimoCliqueRef.current = { peaoId, t: agora }
+              tocarCliqueDoPeao()
+            }
+          }
+        }
         const vooBase = vooDoPeaoDoEvento(evento, modeloRef.current)
         if (vooBase !== null) {
           proximoNonceVoo.current += 1
