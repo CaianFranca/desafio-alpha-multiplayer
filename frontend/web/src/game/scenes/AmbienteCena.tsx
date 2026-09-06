@@ -26,6 +26,8 @@ import type {
   PecaCorrente,
   EstadoExibicaoTabuleiro,
 } from '../tabuleiro/contrato'
+import type { VooDoPeaoPendente } from '../tabuleiro/vooDoPeao'
+import { deveSuprimirPeaoNaMesa } from '../tabuleiro/vooDoPeao'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
@@ -104,6 +106,13 @@ interface AmbienteCenaProps {
   vagasSet?: ReadonlySet<string>
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
   pecaCorrente?: PecaCorrente | null
+  /**
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = sem voo.
+   * Desce até o `Tabuleiro`, que avisa o pouso via `onVooAterrissou(nonce)`.
+   */
+  vooPendente?: VooDoPeaoPendente | null
+  /** Pouso do voo concluído (nonce): a página limpa o pendente. */
+  onVooAterrissou?: (nonce: number) => void
   /** Trigger de limpeza evento-driven (issue #239, B1). */
   limpezaTrigger?: LimpezaTrigger | null
   /** Trigger de encaixe evento-driven (issue #241): voo mesa→célula. */
@@ -141,6 +150,8 @@ export function AmbienteCena({
   alvosPendentesSet,
   vagasSet,
   pecaCorrente = null,
+  vooPendente = null,
+  onVooAterrissou,
   limpezaTrigger = null,
   encaixeTrigger = null,
   onFimEncaixe,
@@ -188,6 +199,8 @@ export function AmbienteCena({
               onRejeicaoPeao={onRejeicaoPeao}
               alvosPendentesSet={alvosPendentesSet}
               vagasSet={vagasSet}
+              vooPendente={vooPendente}
+              onVooAterrissou={onVooAterrissou}
               ocultarPecaId={pecaEmVooId}
             />
             <TransicaoEncaixe
@@ -205,6 +218,11 @@ export function AmbienteCena({
             />
             <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
             {peoesNaMesa.map((peao) => {
+              // Voo ativo (#242): o peão voador não renderiza estático na Mesa
+              // (Primeiro Turno: origem mesa→Peça Inicial) — só o overlay voa.
+              if (deveSuprimirPeaoNaMesa(vooPendente ?? null, peao.peaoId)) {
+                return null
+              }
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (
                 <PeaoPlaceholder

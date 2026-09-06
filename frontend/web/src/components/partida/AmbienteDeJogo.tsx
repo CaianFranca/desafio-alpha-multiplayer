@@ -26,6 +26,7 @@ import {
 } from '../../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
+import type { VooDoPeaoPendente } from '../../game/tabuleiro/vooDoPeao'
 import type { LimpezaTrigger } from '../../game/scenes/TransicaoLimpeza'
 import type { EncaixeTrigger } from '../../game/tabuleiro/encaixe'
 
@@ -64,6 +65,13 @@ interface AmbienteDeJogoProps {
   peaoAtivoId?: PeaoId | null
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
+  /**
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = sem voo.
+   * Desce até a cena, que avisa o pouso via `onVooAterrissou(nonce)`.
+   */
+  vooPendente?: VooDoPeaoPendente | null
+  /** Pouso do voo concluído (nonce): a página limpa o pendente. */
+  onVooAterrissou?: (nonce: number) => void
   /** Trigger de limpeza evento-driven (issue #239, B1) — só LIMPEZA_APLICADA dispara, snapshot não. */
   limpezaTrigger?: LimpezaTrigger | null
   /** Trigger de encaixe evento-driven (issue #241): voo mesa→célula. */
@@ -83,6 +91,8 @@ export function AmbienteDeJogo({
   peaoSelecionadoIdServidor = null,
   peaoAtivoId = null,
   sanidadePorPeao = {},
+  vooPendente = null,
+  onVooAterrissou,
   limpezaTrigger = null,
   encaixeTrigger = null,
   onFimEncaixe,
@@ -268,6 +278,8 @@ export function AmbienteDeJogo({
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           pecaCorrente={pecaCorrente}
+          vooPendente={vooPendente}
+          onVooAterrissou={onVooAterrissou}
           limpezaTrigger={limpezaTrigger}
           encaixeTrigger={encaixeTrigger}
           onFimEncaixe={onFimEncaixe}

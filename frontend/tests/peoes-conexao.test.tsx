@@ -10,6 +10,10 @@ import {
   CAMINHO_SOM_DE_RECUSA,
   VOLUME_BASE_SOM_DE_RECUSA,
 } from '../web/src/components/partida/somDeRecusa'
+import {
+  SOM_CAMINHO_CLIQUE_PEAO,
+  SOM_VOLUME_BASE_CLIQUE_PEAO,
+} from '../web/src/game/tabuleiro/vooDoPeao'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 // Issue #91 + #143: conexão do frontend com o game-server para peões, ciclo e
@@ -432,8 +436,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
       })
     })
-    // Aprovações em silêncio: sem som, sem clarão.
-    expect(toquesDeAudio).toHaveLength(0)
+    // Aprovações sem recusa: só o clique da seleção (#242), sem clarão.
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     const comandosAntes = ws.sentMessages.length
@@ -452,8 +457,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
       })
     })
-    // Aprovações em silêncio.
-    expect(toquesDeAudio).toHaveLength(0)
+    // Aprovações sem recusa (só o clique da seleção, #242).
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     const comandosAntes = ws.sentMessages.length
@@ -463,9 +469,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(ws.sentMessages).toHaveLength(comandosAntes)
     expect(peaoDoEspelho('vermelho').getAttribute('data-selecionado')).toBe('false')
 
-    // Som de recusa com motivo + anúncio, sem clarão.
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
+    // Som de recusa com motivo + anúncio, sem clarão (após o clique da seleção).
+    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeAudio[1]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('pendencia_nao_resolvida')
@@ -650,9 +656,13 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         celula: { linha: 2, coluna: 3 },
       })
     })
-    // Movimento em silêncio (sem som de recusa, sem clarão — os sons do
-    // Encaixe da #241 convivem no mesmo array).
+    // Movimento sem recusa (só o clique da seleção anterior, #242; sem clarão;
+    // os sons do Encaixe da #241 convivem no mesmo array → filtro por src).
     expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_DE_RECUSA)).toHaveLength(0)
+    expect(toquesDeAudio.filter((t) => t.src === SOM_CAMINHO_CLIQUE_PEAO)).toHaveLength(1)
+    expect(toquesDeAudio.filter((t) => t.src === SOM_CAMINHO_CLIQUE_PEAO)[0]).toMatchObject({
+      volume: SOM_VOLUME_BASE_CLIQUE_PEAO,
+    })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Fase 'confirmar' → botão envia CONFIRMAR_POSICAO_DO_PEAO; servidor confirma.
@@ -670,7 +680,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         pecaId: 'reta-1',
       })
     })
-    // Confirmação em silêncio (sem som de recusa, sem clarão).
+    // Confirmação sem recusa (só o clique da seleção anterior, #242; sem clarão).
     expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_DE_RECUSA)).toHaveLength(0)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
@@ -685,15 +695,87 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     await user.click(celulaDoEspelho(3, 3))
 
     // Guard AC3: nenhum comando trafega e o som de recusa toca com motivo
-    // específico (espelha o FORA_DA_VEZ que o servidor responderia).
+    // específico (espelha o FORA_DA_VEZ que o servidor responderia) — após os
+    // 2 cliques de seleção (#242).
     expect(ws.sentMessages).toHaveLength(comandosAntes)
     const recusas = toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_DE_RECUSA)
     expect(recusas).toHaveLength(1)
     expect(recusas[0]).toMatchObject({ volume: VOLUME_BASE_SOM_DE_RECUSA })
+    // 2 cliques de seleção (#242): o primeiro antes do movimento, o segundo na
+    // re-seleção pós-confirmação (seleção nova — sem debounce temporal,
+    // revisão PR #254, spec #238).
+    expect(toquesDeAudio.filter((t) => t.src === SOM_CAMINHO_CLIQUE_PEAO)).toHaveLength(2)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('posicao_confirmada')
     expect(anuncio).toHaveTextContent('posição já confirmada')
+  })
+
+  it('PR #254: eco do mesmo peão no mesmo tick toca 1 clique por evento (2 toques)', async () => {
+    // Sem debounce temporal (spec #238, revisão PR #254): cada
+    // `PEAO_SELECIONADO` do canal toca — o ref do modelo ainda está stale no
+    // mesmo tick, então ambos são seleção nova. Eco de transporte soando
+    // duplo é preferível a silenciar seleção legítima.
+    const ws = await partidaDisponivel()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+
+    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+    expect(toquesDeAudio[1]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+  })
+
+  it('PR #254: re-clique do mesmo peão entre renders toca 1 clique só', async () => {
+    const ws = await partidaDisponivel()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+  })
+
+  it('PR #254: troca de peão toca 1 clique por seleção nova (2 toques)', async () => {
+    const ws = await partidaDisponivel()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-vermelho' })
+    })
+
+    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+    expect(toquesDeAudio[1]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+  })
+
+  it('PR #254: re-seleção legítima após desseleção toca de novo (2 toques)', async () => {
+    // Regressão do debounce por timestamp removido: selecionar, desselecionar
+    // e reselecionar o mesmo peão são duas seleções novas — ambas tocam
+    // (spec #238: "Clique ao selecionar", sem temporizador decidindo).
+    const ws = await partidaDisponivel()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+
+    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+    expect(toquesDeAudio[1]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
   })
 })
 
