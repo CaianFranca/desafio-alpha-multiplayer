@@ -1,7 +1,10 @@
-import { TAMANHO_CELULA, bordasAbertas } from './contrato'
-import type { TipoDaPeca, Orientacao, BordaCardinal } from './contrato'
-import type { ThreeEvent } from '@react-three/fiber'
+import { Suspense, useMemo } from 'react'
+import { useLoader, type ThreeEvent } from '@react-three/fiber'
+import * as THREE from 'three'
+import { TAMANHO_CELULA } from './contrato'
+import type { TipoDaPeca, Orientacao } from './contrato'
 import { handlersDeCursor } from './cursor'
+import { rotacaoDoMotivo, texturaDaPeca } from './texturasDasPecas'
 
 interface PecaPlaceholderProps {
   tipo: TipoDaPeca
@@ -19,6 +22,10 @@ interface PecaPlaceholderProps {
   onClick?: (event: ThreeEvent<MouseEvent>) => void
 }
 
+/**
+ * Cor chapada por tipo — agora só fallback até a textura carregar (face do
+ * `Suspense` interno). O corpo final é caixa lisa com topo texturizado.
+ */
 const COR_POR_TIPO: Record<TipoDaPeca, string> = {
   inicial: '#d9c6a5',
   reta: '#a5c7d9',
@@ -34,7 +41,8 @@ const COR_POR_TIPO: Record<TipoDaPeca, string> = {
   espectro: '#37474f',
 }
 
-const COR_CAMINHO = '#111111'
+/** Laterais em tom neutro escuro (o motivo vive só na face superior). */
+const COR_LATERAL = '#2b2521'
 
 // Destaque da peça selecionada/em manipulação: realce quente na borda para
 // distinguir visualmente da composição padrão.
@@ -48,18 +56,133 @@ const COR_DESTAQUE = '#ffe08a'
 export const COR_DESTAQUE_RESGATE = '#7fd1e0'
 const INTENSIDADE_DESTAQUE = 0.7
 
-const TAMANHO_PECA = TAMANHO_CELULA * 0.96
-const ESPESSURA_PECA = 0.12
-const LARGURA_TRILHA = TAMANHO_PECA * 0.22
-const COMPRIMENTO_BRACO = TAMANHO_PECA / 2 - LARGURA_TRILHA / 2
-const OFFSET_BRACO = (TAMANHO_PECA + LARGURA_TRILHA) / 4
-const Y_CAMINHO = 0.08 + ESPESSURA_PECA / 2 + 0.015
+export const TAMANHO_PECA = TAMANHO_CELULA * 0.96
+export const ESPESSURA_PECA = 0.12
+const Y_CORPO = 0.08
 
-const MAP_BORDA: Record<BordaCardinal, { pos: [number, number, number]; args: [number, number, number] }> = {
-  norte: { pos: [0, 0, -OFFSET_BRACO], args: [LARGURA_TRILHA, 0.02, COMPRIMENTO_BRACO] },
-  sul: { pos: [0, 0, OFFSET_BRACO], args: [LARGURA_TRILHA, 0.02, COMPRIMENTO_BRACO] },
-  leste: { pos: [OFFSET_BRACO, 0, 0], args: [COMPRIMENTO_BRACO, 0.02, LARGURA_TRILHA] },
-  oeste: { pos: [-OFFSET_BRACO, 0, 0], args: [COMPRIMENTO_BRACO, 0.02, LARGURA_TRILHA] },
+interface CorpoProps extends PecaPlaceholderProps {
+  destacada: boolean
+  corDestaque: string
+  cursor: 'default' | 'pointer'
+}
+
+function usarClique(
+  onClick: PecaPlaceholderProps['onClick'],
+): ((e: ThreeEvent<MouseEvent>) => void) | undefined {
+  if (!onClick) return undefined
+  return (e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation()
+    onClick(e)
+  }
+}
+
+/**
+ * Corpo final: caixa lisa nas mesmas dimensões, face superior (`material-2`,
+ * +y — mesmo precedente da Mesa em `AmbienteCena`) com map (sRGB) +
+ * normalMap (linear) do tipo, motivo girando com a `orientacao`; laterais
+ * neutras. O emissivo de destaque é preservado sobre a textura.
+ */
+function CorpoTexturizado({
+  tipo,
+  orientacao,
+  destacada,
+  corDestaque,
+  cursor,
+  onClick,
+}: CorpoProps) {
+  const { map, normalMap } = texturaDaPeca(tipo)
+  const [mapCarregado, normalCarregado] = useLoader(THREE.TextureLoader, [
+    map,
+    normalMap,
+  ])
+  // Clona para não mutar o cache do useLoader (precedente da Mesa): cor no
+  // map, dado linear no normal; centro no meio para girar o motivo.
+  const { mapaTopo, normalTopo } = useMemo(() => {
+    const rotacao = rotacaoDoMotivo(orientacao)
+    const mapa = mapCarregado.clone()
+    mapa.colorSpace = THREE.SRGBColorSpace
+    mapa.center.set(0.5, 0.5)
+    mapa.rotation = rotacao
+    mapa.needsUpdate = true
+    const normal = normalCarregado.clone()
+    normal.center.set(0.5, 0.5)
+    normal.rotation = rotacao
+    normal.needsUpdate = true
+    return { mapaTopo: mapa, normalTopo: normal }
+  }, [mapCarregado, normalCarregado, orientacao])
+
+  const cursorHandlers = handlersDeCursor(cursor)
+  const handleClick = usarClique(onClick)
+  const emissive = destacada ? corDestaque : '#000000'
+  const emissiveIntensity = destacada ? INTENSIDADE_DESTAQUE : 0
+
+  return (
+    <mesh position={[0, Y_CORPO, 0]} onClick={handleClick} {...cursorHandlers}>
+      <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
+      <meshStandardMaterial
+        attach="material-0"
+        color={COR_LATERAL}
+        emissive={emissive}
+        emissiveIntensity={emissiveIntensity}
+      />
+      <meshStandardMaterial
+        attach="material-1"
+        color={COR_LATERAL}
+        emissive={emissive}
+        emissiveIntensity={emissiveIntensity}
+      />
+      <meshStandardMaterial
+        attach="material-2"
+        map={mapaTopo}
+        normalMap={normalTopo}
+        emissive={emissive}
+        emissiveIntensity={emissiveIntensity}
+      />
+      <meshStandardMaterial
+        attach="material-3"
+        color={COR_LATERAL}
+        emissive={emissive}
+        emissiveIntensity={emissiveIntensity}
+      />
+      <meshStandardMaterial
+        attach="material-4"
+        color={COR_LATERAL}
+        emissive={emissive}
+        emissiveIntensity={emissiveIntensity}
+      />
+      <meshStandardMaterial
+        attach="material-5"
+        color={COR_LATERAL}
+        emissive={emissive}
+        emissiveIntensity={emissiveIntensity}
+      />
+    </mesh>
+  )
+}
+
+/** Fallback de suspensão: caixa lisa na cor chapada do tipo (sem braços). */
+function CorpoFallback({
+  tipo,
+  destacada,
+  corDestaque,
+  cursor,
+  onClick,
+}: CorpoProps) {
+  const cursorHandlers = handlersDeCursor(cursor)
+  const handleClick = usarClique(onClick)
+
+  return (
+    <mesh position={[0, Y_CORPO, 0]} onClick={handleClick} {...cursorHandlers}>
+      <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
+      <meshStandardMaterial
+        color={COR_POR_TIPO[tipo]}
+        transparent
+        opacity={0.88}
+        emissive={destacada ? corDestaque : '#000000'}
+        emissiveIntensity={destacada ? INTENSIDADE_DESTAQUE : 0}
+      />
+    </mesh>
+  )
 }
 
 export function PecaPlaceholder({
@@ -71,47 +194,20 @@ export function PecaPlaceholder({
   cursor = 'default',
   onClick,
 }: PecaPlaceholderProps) {
-  const bordas = bordasAbertas({ tipo, orientacao })
-  const cursorHandlers = handlersDeCursor(cursor)
-
-  const handleClick = onClick
-    ? (e: ThreeEvent<MouseEvent>) => {
-        e.stopPropagation()
-        onClick(e)
-      }
-    : undefined
+  const corpo: CorpoProps = {
+    tipo,
+    orientacao,
+    destacada,
+    corDestaque,
+    cursor,
+    onClick,
+  }
 
   return (
     <group position={position}>
-      <mesh
-        position={[0, 0.08, 0]}
-        onClick={handleClick}
-        {...cursorHandlers}
-      >
-        <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
-        <meshStandardMaterial
-          color={COR_POR_TIPO[tipo]}
-          transparent
-          opacity={0.88}
-          emissive={destacada ? corDestaque : '#000000'}
-          emissiveIntensity={destacada ? INTENSIDADE_DESTAQUE : 0}
-        />
-      </mesh>
-      <group position={[0, Y_CAMINHO, 0]}>
-        <mesh>
-          <boxGeometry args={[LARGURA_TRILHA, 0.02, LARGURA_TRILHA]} />
-          <meshStandardMaterial color={COR_CAMINHO} />
-        </mesh>
-        {bordas.map((borda) => {
-          const { pos, args } = MAP_BORDA[borda]
-          return (
-            <mesh key={borda} position={pos}>
-              <boxGeometry args={args} />
-              <meshStandardMaterial color={COR_CAMINHO} />
-            </mesh>
-          )
-        })}
-      </group>
+      <Suspense fallback={<CorpoFallback {...corpo} />}>
+        <CorpoTexturizado {...corpo} />
+      </Suspense>
     </group>
   )
 }
