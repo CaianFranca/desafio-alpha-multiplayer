@@ -12,8 +12,8 @@ import {
 } from '../web/src/components/partida/somDeRecusa'
 import {
   CAMINHO_SOM_ASSENTO_ENCAIXE,
-  CAMINHO_SOM_MOVIMENTO_ENCAIXE,
-  VOLUME_BASE_SOM_DO_ENCAIXE,
+  CAMINHO_SOM_GIRO_ENCAIXE,
+  VOLUME_BASE_SOM_DE_ASSENTO,
 } from '../web/src/components/partida/somDoEncaixe'
 import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../web/src/game/tabuleiro/animacao'
 import type { EstadoDaPartidaSnapshot, PecaPosicionadaNoSnapshot } from '@flicker/shared'
@@ -402,11 +402,17 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     await screen.findByTestId('peca-posicionada')
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('true')
 
-    // Encaixe com sons (issue #241): carta imediata no movimento, sem clarão.
-    expect(toquesDeAudio).toHaveLength(1)
+    // Encaixe com sons (issue #241 + mudança de spec): posicionamento sem
+    // carta (a carta vive no giro) — nada imediato, sem clarão; só o
+    // enigmático chega no assento.
+    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_GIRO_ENCAIXE)).toHaveLength(0)
+    await waitFor(() =>
+      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_ASSENTO_ENCAIXE)).toHaveLength(1),
+    )
     expect(toquesDeAudio[0]).toMatchObject({
-      src: CAMINHO_SOM_MOVIMENTO_ENCAIXE,
-      volume: VOLUME_BASE_SOM_DO_ENCAIXE,
+      src: CAMINHO_SOM_ASSENTO_ENCAIXE,
+      volume: VOLUME_BASE_SOM_DE_ASSENTO,
     })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
@@ -498,10 +504,9 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
         ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 }),
       )
       await screen.findByTestId('peca-posicionada')
-      // Encaixe com reduce = snap (issue #241): sem voo, estado final
-      // imediato e os dois sons sem espera pela duração.
+      // Encaixe com reduce = snap (issue #241 + mudança de spec): sem voo,
+      // estado final imediato e SÓ o enigmático (a carta vive no giro).
       expect(toquesDeAudio.map((t) => t.src)).toEqual([
-        CAMINHO_SOM_MOVIMENTO_ENCAIXE,
         CAMINHO_SOM_ASSENTO_ENCAIXE,
       ])
 
@@ -511,9 +516,8 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
       await waitFor(() => expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument())
       expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
       // Som único de limpeza mesmo com reduce ativo (ordem total determinística).
-      await waitFor(() => expect(toquesDeAudio).toHaveLength(3))
+      await waitFor(() => expect(toquesDeAudio).toHaveLength(2))
       expect(toquesDeAudio.map((t) => t.src)).toEqual([
-        CAMINHO_SOM_MOVIMENTO_ENCAIXE,
         CAMINHO_SOM_ASSENTO_ENCAIXE,
         CAMINHO_SOM_SOMBRIO_LIMPEZA,
       ])

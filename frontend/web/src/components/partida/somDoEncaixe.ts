@@ -1,19 +1,21 @@
 /**
- * Som do Encaixe da Partida (issue #241, spec #238).
+ * Sons do giro e do Encaixe da Partida (issue #241, spec #238 + mudança de
+ * spec verbal: a carta soa no GIRO, o posicionamento toca SÓ o enigmático).
  *
- * Ponto de som próprio do Encaixe (Peça viajando da mesa à Célula):
- * carta no movimento + toque enigmático ao assentar — sons distintos do
- * THUD de recusa (`somDeRecusa.ts`, intacto) e do som sombrio da limpeza.
- * Só coordenação entre os pontos: gatilhos opostos (aprovação vs. recusa),
- * mesma infra futura de volume.
+ * Dois pontos próprios: carta a cada `PECA_GIRADA` (giro aceito) + toque
+ * enigmático ao assentar o Encaixe (Peça viajando da mesa à Célula) — sons
+ * distintos do THUD de recusa (`somDeRecusa.ts`, intacto) e do som sombrio
+ * da limpeza. Só coordenação entre os pontos: gatilhos opostos (aprovação
+ * vs. recusa), mesma infra futura de volume.
  *
  * Duto canônico de mídia: `frontend/web/media/` → servido em `/media/` via
  * proxy/nginx (mesmo duto do som de recusa). Sem arquivo = no-op silencioso
  * (`new Audio(...)` + `play()` com `catch`, espelhando `somDeRecusa.ts`).
  *
- * Volume base próprio (VOLUME_BASE_SOM_DO_ENCAIXE): o futuro botão de volume
- * controlará este ponto sem recostura via `master * VOLUME_BASE_SOM_DO_ENCAIXE`
- * (contrato da ADR-0007) — não reutiliza a base 0.3 da recusa.
+ * Volumes base próprios (VOLUME_BASE_SOM_DE_GIRO, VOLUME_BASE_SOM_DE_ASSENTO):
+ * o futuro botão de volume controlará estes pontos sem recostura via
+ * `master * VOLUME_BASE_*` (contrato da ADR-0007) — não reutilizam a base
+ * 0.3 da recusa.
  *
  * Puro onde dá: `origemDoEncaixe` é 100% pura (estado anterior → mesa ou
  * bandeja, somente leitura, sem recalcular regra); só as funções de toque
@@ -26,18 +28,26 @@ import type { EstadoDoTabuleiroNoCliente } from '../../game/tabuleiro/reducao'
 
 export type { OrigemDoEncaixe }
 
-/** Carta no movimento do Encaixe (web/media → servido em /media/). */
-export const CAMINHO_SOM_MOVIMENTO_ENCAIXE = CAMINHO_SOM_CARTA
+/** Carta do giro da Peça (web/media → servido em /media/). */
+export const CAMINHO_SOM_GIRO_ENCAIXE = CAMINHO_SOM_CARTA
 
 /** Toque enigmático ao assentar o Encaixe (web/media → servido em /media/). */
 export const CAMINHO_SOM_ASSENTO_ENCAIXE = CAMINHO_TOQUE_ENIGMATICO
 
 /**
- * Volume base do som do Encaixe (contrato com o futuro botão de volume,
- * ADR-0007: `audio.volume = master * VOLUME_BASE_SOM_DO_ENCAIXE`, com
- * master em [0, 1]).
+ * Volume base da carta do giro (contrato com o futuro botão de volume,
+ * ADR-0007: `audio.volume = master * VOLUME_BASE_SOM_DE_GIRO`, com master
+ * em [0, 1]). Metade da carta original do movimento (0.7 → 0.35): o giro
+ * repete a cada ação, o assento é pontual.
  */
-export const VOLUME_BASE_SOM_DO_ENCAIXE = 0.7
+export const VOLUME_BASE_SOM_DE_GIRO = 0.35
+
+/**
+ * Volume base do toque enigmático do assento (contrato com o futuro botão
+ * de volume, ADR-0007: `audio.volume = master * VOLUME_BASE_SOM_DE_ASSENTO`,
+ * com master em [0, 1]). Mantém os 0.7 originais do Encaixe.
+ */
+export const VOLUME_BASE_SOM_DE_ASSENTO = 0.7
 
 export interface OrigemDoEncaixeResolvida {
   readonly origem: OrigemDoEncaixe
@@ -70,12 +80,12 @@ export function origemDoEncaixe(
   return null
 }
 
-function tocarAssetDoEncaixe(caminho: string): void {
+function tocarAssetDoEncaixe(caminho: string, volumeBase: number): void {
   try {
     const audio = new Audio(caminho)
-    // Contrato de volume (ADR-0007): base fixa; o futuro botão de volume
-    // aplica `audio.volume = master * VOLUME_BASE_SOM_DO_ENCAIXE`.
-    audio.volume = VOLUME_BASE_SOM_DO_ENCAIXE
+    // Contrato de volume (ADR-0007): base fixa do ponto; o futuro botão de
+    // volume aplica `audio.volume = master * VOLUME_BASE_*`.
+    audio.volume = volumeBase
     const tocando: unknown = audio.play()
     // jsdom não implementa play(): retorna undefined em vez de Promise.
     if (
@@ -92,11 +102,13 @@ function tocarAssetDoEncaixe(caminho: string): void {
 }
 
 /**
- * Toca a carta do movimento do Encaixe — habilitado por padrão, sem etapa
- * de habilitação. No-op silencioso se o áudio falhar.
+ * Toca a carta do giro da Peça — habilitado por padrão, sem etapa de
+ * habilitação. Uma vez por `PECA_GIRADA` (giros distintos em sequência soam
+ * múltiplo por design: cada giro é uma ação distinta). No-op silencioso se
+ * o áudio falhar.
  */
-export function tocarSomDeMovimentoDoEncaixe(): void {
-  tocarAssetDoEncaixe(CAMINHO_SOM_MOVIMENTO_ENCAIXE)
+export function tocarSomDeGiroDoEncaixe(): void {
+  tocarAssetDoEncaixe(CAMINHO_SOM_GIRO_ENCAIXE, VOLUME_BASE_SOM_DE_GIRO)
 }
 
 /**
@@ -104,5 +116,5 @@ export function tocarSomDeMovimentoDoEncaixe(): void {
  * No-op silencioso se o áudio falhar.
  */
 export function tocarSomDeAssentoDoEncaixe(): void {
-  tocarAssetDoEncaixe(CAMINHO_SOM_ASSENTO_ENCAIXE)
+  tocarAssetDoEncaixe(CAMINHO_SOM_ASSENTO_ENCAIXE, VOLUME_BASE_SOM_DE_ASSENTO)
 }

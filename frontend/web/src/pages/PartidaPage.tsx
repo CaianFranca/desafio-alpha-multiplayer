@@ -14,7 +14,7 @@ import { CAMINHO_SOM_SOMBRIO_LIMPEZA, DURACAO_ENCAIXE_MS } from '../game/tabulei
 import {
   origemDoEncaixe,
   tocarSomDeAssentoDoEncaixe,
-  tocarSomDeMovimentoDoEncaixe,
+  tocarSomDeGiroDoEncaixe,
 } from '../components/partida/somDoEncaixe'
 import type { EncaixeTrigger } from '../game/tabuleiro/encaixe'
 import { deveReduzirMovimento } from '../hooks/usePrefersReducedMotion'
@@ -232,17 +232,29 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           return
         }
-        // Encaixe (issue #241, spec #238): evento-driven para
-        // TransicaoEncaixe + sons próprios — só PECA_POSICIONADA dispara
-        // voo/som, snapshots não. A origem (mesa/bandeja) deriva do modelo
-        // pré-despacho; a carta toca no movimento e o toque enigmático no
-        // assento (após a duração do voo; imediato com movimento reduzido).
+        // Giro (issue #241, mudança de spec verbal): evento-driven para o
+        // som próprio — cada PECA_GIRADA toca a carta uma vez (giros
+        // distintos em sequência soam múltiplo por design: cada giro é uma
+        // ação distinta, sem debounce) e reduz no modelo. Cai antes do
+        // despacho genérico; `motivoDeRecusaDoEvento` retornaria null aqui
+        // (giro em silêncio na recusa) — o branch só adiciona o som.
+        if (evento.type === 'PECA_GIRADA') {
+          tocarSomDeGiroDoEncaixe()
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          return
+        }
+        // Encaixe (issue #241, spec #238 + mudança de spec verbal):
+        // evento-driven para TransicaoEncaixe + som próprio — só
+        // PECA_POSICIONADA dispara voo/som, snapshots não. A origem
+        // (mesa/bandeja) deriva do modelo pré-despacho; o posicionamento
+        // toca SÓ o toque enigmático no assento (após a duração do voo;
+        // imediato com movimento reduzido) — a carta saiu deste branch e
+        // vive no giro acima. Transição visual de voo inalterada.
         if (evento.type === 'PECA_POSICIONADA') {
           const origem = origemDoEncaixe(modeloRef.current, evento.pecaId)
-          // Snap com movimento reduzido: sem voo (trigger nunca nasce) e os
-          // dois sons imediatos — o estado final já renderiza pixel-igual.
+          // Snap com movimento reduzido: sem voo (trigger nunca nasce) e o
+          // enigmático imediato — o estado final já renderiza pixel-igual.
           const reduzir = deveReduzirMovimento()
-          tocarSomDeMovimentoDoEncaixe()
           if (reduzir) {
             tocarSomDeAssentoDoEncaixe()
           } else {
