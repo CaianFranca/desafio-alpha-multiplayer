@@ -49,6 +49,7 @@ import {
   vagasDisponiveis,
   vizinhasConectadas,
   type Celula,
+  type BordaCardinal,
   type ComandoDeTabuleiro,
   type CorDoPeao,
   type CodigoDeErroDeTabuleiro,
@@ -965,6 +966,10 @@ function atravessarOEscuroDaPartida(
 // travada; as pendências comuns (Recebimento do Primeiro Turno) só aceitam
 // vaga em célula NÃO iluminada. Rejeição DADOS_INVALIDOS; fora de Baixa,
 // delega direto (comportamento histórico intacto).
+// Req 4 do #272: a vaga deriva da Peça sob o Peão DO ATOR (ator.peaoId), não
+// da Seleção — Seleção nula não fragiliza a validação da vaga escura (o Peão
+// selecionado no turno do ator é sempre o próprio ator, então a referência é
+// equivalente na sequência normal).
 function escolherVagaDaPecaRecebidaDaPartida(
   estado: EstadoDaPartida,
   comando: EscolherVagaDaPecaRecebidaComando,
@@ -973,22 +978,12 @@ function escolherVagaDaPecaRecebidaDaPartida(
   if (!(ator.emBaixaIluminacao ?? false)) {
     return delegarAoTabuleiro(estado, comando);
   }
+  const celulaDaBorda = celulaDaVagaDoAtor(estado, ator, comando.borda);
   const recebida = estado.tabuleiro.recebidas.find(
     (item) => item.recebidaId === comando.recebidaId,
   );
   if (recebida !== undefined && recebida.celulaAlvo !== null) {
     // Pendência da Travessia: a borda deve mapear exatamente à célula travada.
-    const peaoSelecionado = estado.tabuleiro.peoes.find(
-      (item) => item.peaoId === estado.tabuleiro.peaoSelecionadoId,
-    );
-    const pecaSobOPeao = peaoSelecionado?.pecaId
-      ? estado.tabuleiro.posicionadas.find(
-          (item) => item.pecaId === peaoSelecionado.pecaId,
-        )
-      : undefined;
-    const celulaDaBorda = pecaSobOPeao
-      ? celulaVizinhaNaBorda(pecaSobOPeao.celula, comando.borda)
-      : null;
     const travada = recebida.celulaAlvo;
     if (
       celulaDaBorda === null ||
@@ -1003,17 +998,6 @@ function escolherVagaDaPecaRecebidaDaPartida(
     return delegarAoTabuleiro(estado, comando);
   }
   // Pendência comum em Baixa: a vaga não pode cair em célula iluminada.
-  const peaoSelecionado = estado.tabuleiro.peoes.find(
-    (item) => item.peaoId === estado.tabuleiro.peaoSelecionadoId,
-  );
-  const pecaSobOPeao = peaoSelecionado?.pecaId
-    ? estado.tabuleiro.posicionadas.find(
-        (item) => item.pecaId === peaoSelecionado.pecaId,
-      )
-    : undefined;
-  const celulaDaBorda = pecaSobOPeao
-    ? celulaVizinhaNaBorda(pecaSobOPeao.celula, comando.borda)
-    : null;
   if (
     celulaDaBorda !== null &&
     estado.celulasIluminadas.some(
@@ -1027,6 +1011,23 @@ function escolherVagaDaPecaRecebidaDaPartida(
     );
   }
   return delegarAoTabuleiro(estado, comando);
+}
+
+// Célula vizinha na direção da borda a partir da Peça sob o Peão do ator, ou
+// null quando o Peão do ator não está sobre uma Peça. Referência fixa no ator
+// (Req 4 do #272): a validação da vaga em Baixa não depende da Seleção.
+function celulaDaVagaDoAtor(
+  estado: EstadoDaPartida,
+  ator: JogadorDaPartida,
+  borda: BordaCardinal,
+): Celula | null {
+  const peao = estado.tabuleiro.peoes.find(
+    (item) => item.peaoId === ator.peaoId,
+  );
+  const pecaSobOPeao = peao?.pecaId
+    ? estado.tabuleiro.posicionadas.find((item) => item.pecaId === peao.pecaId)
+    : undefined;
+  return pecaSobOPeao ? celulaVizinhaNaBorda(pecaSobOPeao.celula, borda) : null;
 }
 
 // ST-11: a Permanência vale apenas com o Peão na Peça do início do turno —

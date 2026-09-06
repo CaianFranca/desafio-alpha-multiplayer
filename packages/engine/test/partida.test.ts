@@ -1499,3 +1499,52 @@ test('primeiro turno em Baixa: Recebimento de 1 peça e vaga obrigatoriamente es
   assert.equal(lesteIluminado.sucesso, true);
   assert.equal(lesteIluminado.estado.tabuleiro.recebidas[0].vaga, 'leste');
 });
+
+test('escolher vaga em Baixa com Seleção nula valida pela Peça do ator (Req 4 #272)', () => {
+  // Pendência comum do Primeiro Turno em Baixa (recebida-reta-1, vaga e
+  // célula-alvo nulas) sobre a inicial-1 em (3,3); a Seleção é zerada por
+  // injeção — a referência da vaga deve ser o Peão do ator (ator.peaoId).
+  let estado = comJogadorEmBaixa(partidaIniciada(), 'ana');
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const encaixe = aplicarComandoDePartida(
+    estado,
+    posicionarPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(encaixe.sucesso, true);
+  if (!encaixe.sucesso) return;
+  const semSelecao: EstadoDaPartida = {
+    ...encaixe.estado,
+    tabuleiro: { ...encaixe.estado.tabuleiro, peaoSelecionadoId: null },
+  };
+  assert.equal(semSelecao.tabuleiro.recebidas.length, 1);
+
+  // Vaga iluminada (norte (2,3) coberta por iluminação injetada): a validação
+  // da Partida NÃO é fragilizada pela Seleção nula — DADOS_INVALIDOS antes da
+  // delegação, em vez de aceitar vaga iluminada.
+  const comVagaIluminada: EstadoDaPartida = {
+    ...semSelecao,
+    celulasIluminadas: [
+      ...semSelecao.celulasIluminadas,
+      { linha: 2, coluna: 3 },
+    ],
+  };
+  assert.equal(
+    codigoDaRejeicao(
+      comVagaIluminada,
+      escolherVaga('recebida-reta-1', 'norte'),
+      'ana',
+    ),
+    'DADOS_INVALIDOS',
+  );
+
+  // Vaga escura (leste (3,4)): a validação da Partida passa e a delegação ao
+  // Tabuleiro mantém o requisito de Peão em sequência (PEAO_NAO_SELECIONADO) —
+  // o fluxo da Travessia re-adota a Seleção do ator, então não trava o escuro.
+  assert.equal(
+    codigoDaRejeicao(semSelecao, escolherVaga('recebida-reta-1', 'leste'), 'ana'),
+    'PEAO_NAO_SELECIONADO',
+  );
+});
