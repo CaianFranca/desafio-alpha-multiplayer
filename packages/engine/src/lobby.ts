@@ -550,6 +550,60 @@ export function entrarNaSala(
 
 export const admitirMembro = entrarNaSala;
 
+export function sairDaSalaEncaminhadaAbandonada(
+  estado: EstadoDoLobby,
+  comando: SairDaSalaComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(
+    comando.salaId,
+    comando.jogadorId,
+    ...(comando.membroId === undefined ? [] : [comando.membroId]),
+  );
+  if (dadosInvalidos) return dadosInvalidos;
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) return salaOuErro;
+  const { sala } = salaOuErro;
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) return salaInconsistente;
+  if (sala.estado !== 'encaminhada') {
+    return rejeitar('SALA_NAO_ENCAMINHADA', 'A Sala não está encaminhada.', { salaId: sala.id });
+  }
+  const membro = sala.membros.find(
+    (item) =>
+      item.estado === 'ativo' &&
+      item.jogadorId === comando.jogadorId &&
+      (comando.membroId === undefined || item.id === comando.membroId),
+  );
+  if (!membro) {
+    const membroDoJogador = sala.membros.find((item) => item.jogadorId === comando.jogadorId);
+    const membroAtivoComOutroId = membroDoJogador?.estado === 'ativo';
+    const codigo = membroAtivoComOutroId || !membroDoJogador ? 'MEMBRO_NAO_ENCONTRADO' : 'MEMBRO_NAO_ATIVO';
+    const mensagem = membroAtivoComOutroId || !membroDoJogador ? 'O Membro não pertence à Sala.' : 'O vínculo do Membro já está encerrado.';
+    return rejeitar(codigo, mensagem, {
+      salaId: sala.id,
+      jogadorId: comando.jogadorId,
+      ...(comando.membroId ? { membroId: comando.membroId } : {}),
+    });
+  }
+  const membroEncerrado: Membro = { ...membro, estado: 'encerrado', motivoEncerramento: 'saida' };
+  const membros = sala.membros.map((item) => (item.id === membro.id ? membroEncerrado : item));
+  const aindaHaMembrosAtivos = membros.some((item) => item.estado === 'ativo');
+  const anfitriaoSaiu = sala.anfitriaoId === membro.id;
+  const anfitriaoNovoId = aindaHaMembrosAtivos ? (anfitriaoSaiu ? sucederAnfitriao(membros, membro) : sala.anfitriaoId) : null;
+  const novaSala: Sala = {
+    ...sala,
+    membros,
+    estado: aindaHaMembrosAtivos ? sala.estado : 'encerrada',
+    anfitriaoId: anfitriaoNovoId,
+  };
+  const eventos: EventoDeDominio[] = [
+    { tipo: 'membro_saiu', salaId: sala.id, membroId: membro.id, jogadorId: membro.jogadorId, ordemDeEntrada: membro.ordemDeEntrada, motivo: 'saida' },
+  ];
+  if (anfitriaoSaiu && anfitriaoNovoId !== null) eventos.push({ tipo: 'anfitriao_sucedido', salaId: sala.id, anfitriaoAnteriorId: membro.id, anfitriaoNovoId });
+  if (!aindaHaMembrosAtivos) eventos.push({ tipo: 'sala_encerrada', salaId: sala.id, motivo: 'saida' });
+  return sucesso(substituirSala(estado, novaSala), eventos);
+}
+
 export function sairDaSala(
   estado: EstadoDoLobby,
   comando: SairDaSalaComando,

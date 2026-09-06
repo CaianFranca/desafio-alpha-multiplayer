@@ -8,6 +8,7 @@ import { PartidaBroadcaster } from './partidas/broadcast.ts';
 import { PartidaHandlers } from './partidas/handlers.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
 import { criarClienteDeRetorno } from './retorno/cliente.ts';
+import { configurarAbandono, definirRedisParaAbandono, rearmarAbandonosAposRestart } from './partidas/abandono.ts';
 import {
   iniciarHeartbeat,
   pararHeartbeat,
@@ -21,6 +22,7 @@ const {
   gameServerPort,
   partidaPreparadaTtlSegundos,
   partidaTerminadaTtlSegundos,
+  partidaAbandonoSegundos,
   lobbyRetornoCallbackUrl,
   gameServerHeartbeatIntervalMs,
   gameServerHeartbeatTtlMs,
@@ -33,6 +35,7 @@ const contexto: ContextoDoGameServer = {
   serverId,
   jwtSecret,
   partidaPreparadaTtlSegundos,
+  partidaAbandonoSegundos,
   partidaTerminadaTtlSegundos,
   lobbyRetornoCallbackUrl,
 };
@@ -40,15 +43,19 @@ const app = createApp(contexto);
 
 const server = http.createServer(app);
 
+const notificarRetorno = criarClienteDeRetorno({
+  lobbyRetornoCallbackUrl,
+  jwtSecret,
+});
+configurarAbandono(notificarRetorno, partidaAbandonoSegundos);
+definirRedisParaAbandono(redisClient);
+
 const broadcaster = new PartidaBroadcaster();
 const handlers = new PartidaHandlers({
   redis: redisClient,
   broadcaster,
   partidaTerminadaTtlSegundos,
-  notificarRetorno: criarClienteDeRetorno({
-    lobbyRetornoCallbackUrl,
-    jwtSecret,
-  }),
+  notificarRetorno,
 });
 
 criarWebSocketServer(server, contexto, {
@@ -98,6 +105,9 @@ async function iniciarRegistro(): Promise<void> {
   const meta = criarMeta();
   heartbeatHandle = iniciarHeartbeat(redisClient, meta, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, criarMeta);
   console.log(`[game-server] heartbeat iniciado interval=${gameServerHeartbeatIntervalMs}ms`);
+  void rearmarAbandonosAposRestart(redisClient).catch((err: unknown) =>
+    console.warn('[game-server] falha ao rearmar abandonos:', (err as Error).message),
+  );
 }
 
 server.listen(gameServerPort, () => {

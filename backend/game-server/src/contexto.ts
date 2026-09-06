@@ -6,6 +6,8 @@ export interface ContextoDoGameServer {
   readonly serverId: ServerId;
   readonly jwtSecret: string;
   readonly partidaPreparadaTtlSegundos: number;
+  readonly partidaPreparadaTtlSegundosHard?: number;
+  readonly partidaAbandonoSegundos?: number;
   readonly partidaTerminadaTtlSegundos?: number;
   readonly lobbyRetornoCallbackUrl?: string;
 }

@@ -6,6 +6,7 @@ import {
   inicializarEstadoDaPartida,
   removerEstadoDaPartida,
 } from './estado.ts';
+import { agendarAbandono, cancelarAbandono } from './abandono.ts';
 
 export type EstadoDaPartida = 'preparada' | 'em_andamento';
 
@@ -64,6 +65,9 @@ export async function criarPartidaPreparada(
     throw erro;
   }
 
+  const abandonoMs = (contexto.partidaAbandonoSegundos ?? 90) * 1000;
+  agendarAbandono(partida.partidaId, abandonoMs);
+
   return partida;
 }
 
@@ -80,6 +84,7 @@ export async function existePartida(redis: Redis, partidaId: PartidaId): Promise
 }
 
 export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promise<boolean> {
+  cancelarAbandono(partidaId);
   const removida = (await redis.del(chaveDaPartida(partidaId))) === 1;
   // Remove também o estado da partida associado (issue #117).
   await removerEstadoDaPartida(redis, partidaId);
@@ -139,16 +144,16 @@ if completo and partida.estado == 'preparada' and redis.call('EXISTS', KEYS[2]) 
   partida.estado = 'em_andamento'
   iniciou = true
 end
-local estadoAtual = partida.estado
+  local estadoAtual = partida.estado
 if mudou or iniciou then
-  local novo = cjson.encode(partida)
-  if iniciou then
-    -- ST-14: partida em_andamento persiste sem TTL (sem expiração)
-    redis.call('SET', KEYS[1], novo)
-    redis.call('PERSIST', KEYS[1])
-    if redis.call('EXISTS', KEYS[2]) == 1 then
-      redis.call('PERSIST', KEYS[2])
-    end
+   local novo = cjson.encode(partida)
+   if iniciou then
+     -- ST-14: partida em_andamento persiste sem TTL (sem expiração) + cancela abandono 90s
+     redis.call('SET', KEYS[1], novo)
+     redis.call('PERSIST', KEYS[1])
+     if redis.call('EXISTS', KEYS[2]) == 1 then
+       redis.call('PERSIST', KEYS[2])
+     end
   else
     salvarPreservandoTtl(KEYS[1], novo)
   end
@@ -216,8 +221,10 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
   try {
     const parsed = JSON.parse(json) as ResultadoTransicaoDePresenca;
     if (parsed.estado !== 'preparada' && parsed.estado !== 'em_andamento') {
-      // Estado vazio indica partida inexistente ou payload corrompido — não mascarar como 'preparada'
       return null;
+    }
+    if (parsed.iniciou) {
+      cancelarAbandono(partidaId);
     }
     return parsed;
   } catch {

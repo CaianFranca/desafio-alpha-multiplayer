@@ -154,6 +154,7 @@ export {
   registrarFalhaDoEncaminhamento,
   registrarReinicioDaSala,
   sairDaSala,
+  sairDaSalaEncaminhadaAbandonada,
 } from './lobby.ts';
 
 export {

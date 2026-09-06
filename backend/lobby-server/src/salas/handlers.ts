@@ -29,6 +29,7 @@ import {
   type Comando,
   type EstadoDoLobby,
   type Sala as SalaDominio,
+  sairDaSalaEncaminhadaAbandonada,
 } from '@flicker/engine';
 import type {
   SalaComandoDoCliente,
@@ -421,6 +422,23 @@ export class SalasHandlers {
 
     const membroId = randomUUID();
 
+    const associacaoExistente = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (associacaoExistente !== null && associacaoExistente !== salaId) {
+      const infoAssoc = this.estado.abertas.get(associacaoExistente);
+      if (infoAssoc?.sala.estado === 'encaminhada' && (await this.partidaDaSalaEstaOrfa(associacaoExistente))) {
+        await this.limparAssociacaoOrfaSeNecessario(jogadorId);
+      }
+    } else if (associacaoExistente === null) {
+      const pgAssoc = await this.repo.obterSalaAtivaDoJogador(jogadorId);
+      if (pgAssoc !== null && pgAssoc !== salaId) {
+        const infoPg = this.estado.abertas.get(pgAssoc);
+        if (infoPg?.sala.estado === 'encaminhada' && (await this.partidaDaSalaEstaOrfa(pgAssoc))) {
+          await this.projecao.limparAssociacaoJogador(jogadorId);
+          try { await this.repo.sairMembroAtomico(pgAssoc, jogadorId, 'saida', false); } catch {}
+        }
+      }
+    }
+
     const resultado = this.estado.aplicar({
       tipo: 'entrar_na_sala',
       salaId,
@@ -491,19 +509,26 @@ export class SalasHandlers {
     // Capturar codigo para limpar a projeção antes do engine (a referência
     // está no SalasState.abertas e também no Redis).
     const infoSala = this.estado.abertas.get(salaId);
+    let usarBypassOrfa = false;
     if (this.salaEstaEncaminhada(salaId)) {
-      this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e sua composição está congelada.');
-      return;
+      if (await this.partidaDaSalaEstaOrfa(salaId)) {
+        usarBypassOrfa = true;
+      } else {
+        this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e sua composição está congelada.');
+        return;
+      }
     }
     const codigoSala = infoSala?.sala.codigo
       ?? (await this.projecao.obterEstadoSala(salaId))?.codigo
       ?? null;
 
-    const resultado = this.estado.aplicar({
-      tipo: 'sair_da_sala',
-      salaId,
-      jogadorId,
-    });
+    const resultado = usarBypassOrfa
+      ? sairDaSalaEncaminhadaAbandonada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId })
+      : this.estado.aplicar({
+          tipo: 'sair_da_sala',
+          salaId,
+          jogadorId,
+        });
 
     if (!resultado.sucesso) {
       this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
@@ -1199,6 +1224,73 @@ export class SalasHandlers {
     } catch (e) {
       console.error(`[salas] falha ao cancelar partida ${partidaId}`, e);
     }
+  }
+
+  private async partidaDaSalaEstaOrfa(salaId: string): Promise<boolean> {
+    try {
+      const bruta = await this.repo.obterSalaBruta(salaId);
+      let partidaId: string | null | undefined = bruta?.partidaId ?? null;
+      if (!partidaId) {
+        const proj = await this.projecao.obterEstadoSala(salaId);
+        partidaId = proj?.encaminhamento?.partidaId ?? null;
+      }
+      if (!partidaId) return true;
+      const chave = `game-server:partida:${partidaId}`;
+      const existe = await this.redis.exists(chave);
+      if (existe === 1) {
+        const ttl = await this.redis.ttl(chave);
+        if (ttl === -1) return false;
+        try {
+          const raw = await this.redis.get(chave);
+          if (raw !== null) {
+            const partida = JSON.parse(raw) as { estado?: string; roster?: Array<{ presenca?: string }> };
+            if (partida.estado === 'preparada' && Array.isArray(partida.roster) && partida.roster.length > 0 && partida.roster.every((m) => m.presenca === 'em_reconexao')) {
+              return true;
+            }
+          }
+        } catch {}
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async limparAssociacaoOrfaSeNecessario(jogadorId: string): Promise<boolean> {
+    const salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      const pgSala = await this.repo.obterSalaAtivaDoJogador(jogadorId);
+      if (pgSala === null) return false;
+      const orfa = await this.partidaDaSalaEstaOrfa(pgSala);
+      if (!orfa) return false;
+      await this.projecao.limparAssociacaoJogador(jogadorId);
+      try { await this.repo.sairMembroAtomico(pgSala, jogadorId, 'saida', false); } catch {}
+      return true;
+    }
+    const info = this.estado.abertas.get(salaId);
+    if (info?.sala.estado !== 'encaminhada') return false;
+    const orfa = await this.partidaDaSalaEstaOrfa(salaId);
+    if (!orfa) return false;
+    await this.projecao.limparAssociacaoJogador(jogadorId);
+    try {
+      const res = sairDaSalaEncaminhadaAbandonada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
+      if (res.sucesso) {
+        this.estado.substituirEstado(res.estado);
+        await this.atualizarProjecaoEstado(res.estado, salaId);
+        const codigo = info.sala.codigo;
+        const salaEncerrada = res.eventos.some((e) => e.tipo === 'sala_encerrada');
+        if (salaEncerrada) {
+          await this.projecao.limparSala(salaId, codigo);
+          this.estado.abertas.delete(salaId);
+        }
+        const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+        this.difundir(eventos, salaId);
+        this.broadcast.removerSocket({ data: { jogadorId } } as unknown as AuthenticatedWebSocket);
+        await this.repo.sairMembroAtomico(salaId, jogadorId, 'saida', salaEncerrada).catch(() => undefined);
+      }
+    } catch {}
+    return true;
   }
 
   private salaEstaEncaminhada(salaId: string): boolean {
