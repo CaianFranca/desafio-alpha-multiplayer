@@ -36,26 +36,31 @@ export function cancelarAbandono(partidaId: string): void {
 }
 
 let globalRedis: Redis | undefined;
+let globalBroadcaster: { encerrarPorAbandono(partidaId: string, code?: number, reason?: string): void } | undefined;
 export function definirRedisParaAbandono(redis: Redis): void {
   globalRedis = redis;
+}
+export function definirBroadcasterParaAbandono(broadcaster: { encerrarPorAbandono(partidaId: string, code?: number, reason?: string): void }): void {
+  globalBroadcaster = broadcaster;
 }
 
 async function verificarEAbandonarSeNecessario(redis: Redis, partidaId: string): Promise<boolean> {
   const partida = await obterPartida(redis, partidaId as never);
   if (partida === null) return false;
   if (partida.estado !== 'preparada') return false;
-  const conectados = partida.roster.filter((m) => m.presenca === 'conectado').length;
-  if (conectados > 0) {
-    return false;
-  }
-  const todosEmReconexao = partida.roster.every((m) => m.presenca === 'em_reconexao');
   const idadeMs = Date.now() - Date.parse(partida.criadaEm);
+  const todosEmReconexao = partida.roster.every((m) => m.presenca === 'em_reconexao');
+  // Abandono preparada: se todos em_reconexao → abandono imediato (10s já agendado),
+  // senão se ainda não expirou 90s → reagenda restante, senão (idade >= 90s) abandona mesmo com 1-3 conectados parciais.
   if (!todosEmReconexao && idadeMs < abandonoSegundos * 1000) {
     const restante = abandonoSegundos * 1000 - idadeMs;
     agendarAbandono(partidaId, restante);
     return false;
   }
   const partidaIdTyped = partida.partidaId as string;
+  try {
+    globalBroadcaster?.encerrarPorAbandono(partidaIdTyped, 4000, 'PARTIDA_ABANDONADA');
+  } catch {}
   const cancelada = await cancelarPartida(redis, partidaIdTyped as never);
   if (!cancelada) return false;
   cancelarAbandono(partidaIdTyped);

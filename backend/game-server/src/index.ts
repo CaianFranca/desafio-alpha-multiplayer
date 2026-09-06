@@ -8,7 +8,7 @@ import { PartidaBroadcaster } from './partidas/broadcast.ts';
 import { PartidaHandlers } from './partidas/handlers.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
 import { criarClienteDeRetorno } from './retorno/cliente.ts';
-import { configurarAbandono, definirRedisParaAbandono, rearmarAbandonosAposRestart } from './partidas/abandono.ts';
+import { configurarAbandono, definirBroadcasterParaAbandono, definirRedisParaAbandono, rearmarAbandonosAposRestart } from './partidas/abandono.ts';
 import {
   iniciarHeartbeat,
   pararHeartbeat,
@@ -47,9 +47,6 @@ const notificarRetorno = criarClienteDeRetorno({
   lobbyRetornoCallbackUrl,
   jwtSecret,
 });
-configurarAbandono(notificarRetorno, partidaAbandonoSegundos);
-definirRedisParaAbandono(redisClient);
-
 const broadcaster = new PartidaBroadcaster();
 const handlers = new PartidaHandlers({
   redis: redisClient,
@@ -57,6 +54,9 @@ const handlers = new PartidaHandlers({
   partidaTerminadaTtlSegundos,
   notificarRetorno,
 });
+configurarAbandono(notificarRetorno, partidaAbandonoSegundos);
+definirRedisParaAbandono(redisClient);
+definirBroadcasterParaAbandono(broadcaster);
 
 criarWebSocketServer(server, contexto, {
   partida: { broadcaster, handlers },

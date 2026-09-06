@@ -212,6 +212,37 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
   let prontoAgendado = false;
   let tentativasEntrar = 0;
   const MAX_TENTATIVAS_ENTRAR = 1;
+  let gameWs: WebSocket | null = null;
+  let gameConectado = false;
+
+  function conectarNoGame(partidaId: string, serverId: string): void {
+    if (gameConectado || gameWs) return;
+    // Deriva URL do game-server a partir do base do lobby (8080→3002, 3001→3002) ou env GAME_WS_URL
+    const gameBase = process.env.GAME_WS_URL ?? process.env.GAME_SERVER_URL ?? baseUrl.replace(/:8080\b/, ':3002').replace(/:3001\b/, ':3002');
+    const wsGameUrl = `${gameBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:').replace(/\/$/, '')}/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}`;
+    const headers: Record<string, string> = { Cookie: cookieHeader(cookies) };
+    try {
+      gameWs = new WebSocket(wsGameUrl, { headers } as ClientOptions);
+    } catch (e) {
+      log(prefix, `game WS erro ao criar ${wsGameUrl}: ${(e as Error).message}`);
+      return;
+    }
+    log(prefix, `→ WS game ${wsGameUrl}`);
+    gameWs.on('open', () => log(prefix, 'game WS open'));
+    gameWs.on('message', (data) => {
+      try {
+        const m = JSON.parse(data.toString()) as { type?: string };
+        if (m.type === 'ADMISSAO_ACEITA') {
+          gameConectado = true;
+          log(prefix, `game ADMISSAO_ACEITA ${JSON.stringify(m).slice(0, 200)}`);
+        } else if (m.type === 'PARTIDA_INICIADA' || m.type === 'ESTADO_DA_PARTIDA') {
+          log(prefix, `game ${m.type}`);
+        }
+      } catch {}
+    });
+    gameWs.on('close', (code, reason) => log(prefix, `game WS close ${code} ${reason.toString().slice(0, 80)}`));
+    gameWs.on('error', (err) => log(prefix, `game WS error ${err.message}`));
+  }
 
   function enviarEntrar(): void {
     if (ws.readyState !== WebSocket.OPEN) return;
@@ -274,6 +305,10 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
       }
       if (t === 'PARTIDA_PREPARANDO' || t === 'PARTIDA_DISPONIVEL' || t === 'PARTIDA_RECUSADA' || t === 'PARTIDA_FALHOU') {
         log(prefix, t, JSON.stringify(msg));
+        if (t === 'PARTIDA_DISPONIVEL') {
+          const d = msg as { partidaId?: string; serverId?: string };
+          if (d.partidaId && d.serverId) conectarNoGame(d.partidaId, d.serverId);
+        }
       }
       return;
     }
@@ -287,6 +322,7 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
 
   ws.on('close', (code, reason) => {
     log(prefix, `WS close code=${code} reason=${reason.toString().slice(0, 100)} (sem reconexão automática; servidor suporta reconexão 60s via ws.ts)`);
+    if (gameWs) try { gameWs.close(1000, 'lobby fechado'); } catch {}
   });
 
   ws.on('error', (err) => {
@@ -294,6 +330,8 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
   });
 
   void salaId;
+  // compat: expõe gameWs para encerrar junto no SIGINT
+  (ws as unknown as { _gameWs?: WebSocket | null })._gameWs = gameWs;
   return ws;
 }
 
@@ -338,6 +376,8 @@ async function main(): Promise<void> {
     log('main', 'encerrando bots...');
     for (const ws of sockets) {
       try {
+        const gw = (ws as unknown as { _gameWs?: WebSocket })._gameWs;
+        if (gw) try { gw.close(1000, 'bots encerrados'); } catch {}
         ws.close(1000, 'bots encerrados');
       } catch {}
     }

@@ -74,4 +74,16 @@ export class PartidaBroadcaster {
       // engole; idem `enviar`.
     }
   }
+
+  /** Fecha todos os sockets de uma partida abandonada para forçar reconnect → ADMISSAO_REJEITADA no upgrade. */
+  encerrarPorAbandono(partidaId: string, code = 4000, reason = 'PARTIDA_ABANDONADA'): void {
+    const sockets = this.partidaParaSockets.get(partidaId);
+    if (sockets === undefined) return;
+    for (const socket of [...sockets]) {
+      try {
+        if (socket.readyState === socket.OPEN) socket.close(code, reason);
+        else socket.terminate();
+      } catch {}
+    }
+  }
 }

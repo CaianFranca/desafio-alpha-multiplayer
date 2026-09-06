@@ -318,6 +318,10 @@ export class SalasHandlers {
     socket: AuthenticatedWebSocket,
     jogadorId: string,
   ): Promise<void> {
+    // P0: se o jogador está preso a sala encaminhada órfã (partida preparada abandonada/expirada),
+    // limpa a associação antes de tentar criar nova sala — evita JOGADOR_JA_ASSOCIADO fantasma.
+    await this.limparAssociacaoOrfaSeNecessario(jogadorId);
+
     const salaId = randomUUID();
     const membroId = randomUUID();
 
@@ -1501,8 +1505,22 @@ export class SalasHandlers {
     // Atualizar cache de apelido antes do broadcast.
     this.atualizarApelidoSeConhecido(jogadorId, socket.data.apelido);
     // Se já está conectado, apenas registrar o novo socket (segunda aba).
+    // Fast-reload: novo WS antes de handleFechamento marcar em_reconexao — cliente com sala=null precisa snapshot.
     if (membro.presenca === 'conectado') {
       this.broadcast.registrarSocket(jogadorId, salaId, socket);
+      try {
+        let encMap: Map<string, EncaminhamentoDaSala> | undefined;
+        if (salaInfo.sala.estado === 'encaminhada') {
+          const proj = await this.projecao.obterEstadoSala(salaId).catch(() => null);
+          if (proj?.encaminhamento) encMap = new Map([[salaId, proj.encaminhamento]]);
+          else {
+            const rep = await this.repo.obterEncaminhamento(salaId).catch(() => null);
+            if (rep) encMap = new Map([[salaId, rep]]);
+          }
+        }
+        const salaWire = mapearSala(salaInfo.sala, this.estado.apelidoPorJogadorId, this.linkBase, encMap?.get(salaId));
+        this.broadcast.enviarParaSocket(socket, { type: 'SALA_ATUALIZADA', sala: salaWire });
+      } catch {}
       return;
     }
     // Está em reconexão — tentar reconectar via engine.
