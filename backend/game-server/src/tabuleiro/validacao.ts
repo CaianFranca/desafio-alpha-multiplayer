@@ -28,7 +28,6 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
   'PERMANECER',
-  'ATRAVESSAR_O_ESCURO',
 ]);
 
 function ehIdNaoVazio(valor: unknown): boolean {
@@ -100,8 +99,6 @@ export function ehComandoDoTabuleiro(
       return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     case 'PERMANECER':
       return ehIdNaoVazio(mensagem.peaoId);
-    case 'ATRAVESSAR_O_ESCURO':
-      return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     default:
       return false;
   }

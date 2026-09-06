@@ -195,9 +195,6 @@ function mapearComando(
       return { tipo: 'mover_peao', peaoId: comando.peaoId, celula: comando.celula };
     case 'PERMANECER':
       return { tipo: 'permanecer', peaoId: comando.peaoId };
-    case 'ATRAVESSAR_O_ESCURO':
-      // Nunca neste handler — roteado pelo canal de Partida (partidas/wire.ts).
-      throw new Error('ATRAVESSAR_O_ESCURO deveria ser roteado pelo canal de Partida');
     default: {
       // Exaustividade: um novo `type` sem case falha a compilação; em runtime
       // a entrada já foi validada por `ehComandoDoTabuleiro`.

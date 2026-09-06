@@ -10,7 +10,7 @@
 //   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' <-> engine tipo:'escolher_vaga_da_peca_recebida' (recebidaId, borda) — issue #138
 //   shared type:'MOVER_PEAO'                     <-> engine tipo:'mover_peao' (peaoId, celula)
 //   shared type:'PERMANECER'                     <-> engine tipo:'permanecer' (peaoId)
-//   shared type:'ATRAVESSAR_O_ESCURO'            <-> engine tipo:'atravessar_o_escuro' (peaoId, celula) — issue #264
+//   (ATRAVESSAR_O_ESCURO viaja só no canal de Partida — ./partida.ts — issue #264)
 //   Eventos:
 //   shared type:'PEAO_SELECIONADO'                <-> engine tipo:'peao_selecionado' (peaoId)
 //   shared type:'RECEBIMENTO_GERADO'              <-> engine tipo:'recebimento_gerado' (pendências sorteada da #138 em PendenciaDaPecaSorteada)
@@ -59,7 +59,7 @@ export interface PendenciaDaPecaSorteada {
   readonly celulaAlvo: Celula | null;
 }
 
-// --- Comandos cliente → servidor (6) ---
+// --- Comandos cliente → servidor (5) ---
 // girar/posicionar da Peça Recebida usam GirarPecaComando / PosicionarPecaComando de ./tabuleiro.ts.
 
 export interface SelecionarPeaoComando {
@@ -95,22 +95,16 @@ export interface PermanecerComando {
 
 // Atravessar o Escuro (issue #264 / spec #272): jogada exclusiva de Baixa
 // Iluminação — o Peão da vez atravessa para a célula escura conectada (vaga
-// não iluminada) adjacente à peça sob ele no Tabuleiro. O próprio comando não
-// carrega `jogadorId`: entra no wire de Partida com ele (AtravessarOEscuroPartidaComando);
-// aqui vive o contrato do Peão, pair do comando de domínio.
-export interface AtravessarOEscuroComando {
-  readonly type: 'ATRAVESSAR_O_ESCURO';
-  readonly peaoId: PeaoId;
-  readonly celula: Celula;
-}
-
+// não iluminada) adjacente à peça sob ele no Tabuleiro. NÃO entra neste
+// contrato de Peão: o comando viaja apenas pelo canal de Partida, com o
+// `jogadorId` de forma (AtravessarOEscuroPartidaComando em ./partida.ts) —
+// o tabuleiro só o vê como evento ATRAVESSOU_O_ESCURO na redução do cliente.
 export type PeaoComandoDoCliente =
   | SelecionarPeaoComando
   | PosicionarPeaoComando
   | EscolherVagaDaPecaRecebidaComando
   | MoverPeaoComando
-  | PermanecerComando
-  | AtravessarOEscuroComando;
+  | PermanecerComando;
 
 // --- Eventos servidor → cliente (7) ---
 // Reusos do ciclo via TabuleiroEventoDoServidor (SalaServerMessage), sem
