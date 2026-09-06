@@ -6,6 +6,12 @@ import {
 import { aplicarSnapshot } from '../web/src/game/tabuleiro/snapshot'
 import { criarIniciaisDaMesa, QUANTIDADE_INICIAIS } from '../web/src/game/tabuleiro/contrato'
 import { mapearCliqueNaCelula } from '../web/src/game/tabuleiro/interacao'
+import {
+  cicloAtivo,
+  despacharCliqueDeCelula,
+  mapearCliqueNaPecaDaMesa,
+  mapearDesselecaoDePeao,
+} from '../web/src/game/tabuleiro/interacaoPeoes'
 import type {
   EstadoDaPartidaSnapshot,
   PecaPosicionadaNoSnapshot,
@@ -1303,5 +1309,258 @@ describe('objetivos globais no modelo do cliente — baseline + derivação (iss
     ])
     expect(caminho.posicionadas.find((p) => p.pecaId === 'reta-1')?.tipo).toBe('reta')
     expect(caminho.pecaEmManipulacaoId).toBe('reta-1')
+  })
+})
+
+describe('reload do primeiro turno — peça de volta à mesa e turno destravado (issue #258)', () => {
+  function fotoReload(
+    tabuleiro: Partial<EstadoDaPartidaSnapshot['tabuleiro']> = {},
+    raiz: Partial<EstadoDaPartidaSnapshot> = {},
+  ): EstadoDaPartidaSnapshot {
+    return {
+      tabuleiro: {
+        posicionadas: [],
+        iniciais: [],
+        peoes: [],
+        recebidas: [],
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+        pecasRestantesNaCaixa: 83,
+        ...tabuleiro,
+      },
+      jogadores: [],
+      jogadorAtivoId: 'jogador-1',
+      rodada: 1,
+      pecaDoInicioDoTurnoId: null,
+      posicaoConfirmada: false,
+      celulasIluminadas: [],
+      estado: 'em_andamento',
+      resultado: null,
+      geradoresLigados: [],
+      cartaoDeAcessoObtido: false,
+      ...raiz,
+    }
+  }
+
+  it('foto divergente (seleção pendente sem a peça na lista) reconstrói só a peça em foco na mesa', () => {
+    // Invariante do engine: a Inicial selecionada está nas `iniciais`
+    // (selecionar exige estar na mesa; posicionar a move para
+    // `posicionadas`). Seleção pendente sem a peça em nenhuma das listas
+    // prova divergência da foto — o reparo devolve SÓ a peça em foco,
+    // nunca a lista cheia e nunca peça já posicionada.
+    const estado = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      fotoReload({
+        posicionadas: [],
+        iniciais: [],
+        pecaSelecionadaId: 'inicial-2',
+        peaoSelecionadoId: 'peao-branco',
+      }),
+    )
+    expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-2'])
+    expect(estado.pecaSelecionadaId).toBe('inicial-2')
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
+  })
+
+  it('foto consistente não inventa peça: a lista do motor governa exata', () => {
+    const estado = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      fotoReload({
+        posicionadas: [],
+        iniciais: [
+          { pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 },
+          { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 90 },
+        ],
+        pecaSelecionadaId: null,
+        peaoSelecionadoId: null,
+      }),
+    )
+    expect(estado.iniciais).toEqual([
+      { pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 },
+      { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 90 },
+    ])
+  })
+
+  it('inicial já posicionada nunca ressuscita na mesa (foto correta N-1, H2)', () => {
+    const estado = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      fotoReload({
+        posicionadas: [
+          { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+        ],
+        iniciais: [{ pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 }],
+        pecaSelecionadaId: null,
+        peaoSelecionadoId: null,
+      }),
+    )
+    expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-2'])
+    expect(estado.posicionadas.map((p) => p.pecaId)).toEqual(['inicial-1'])
+  })
+
+  it('seleção pendente de peça da Caixa não toca a mesa (só Inicial repara)', () => {
+    const estado = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      fotoReload({
+        posicionadas: [],
+        iniciais: [],
+        pecaSelecionadaId: 'reta-1',
+        peaoSelecionadoId: null,
+      }),
+    )
+    expect(estado.iniciais).toEqual([])
+    expect(estado.pecaSelecionadaId).toBe('reta-1')
+  })
+
+  it('reparo preserva o giro local da peça em foco (borda: peça girada)', () => {
+    // Giro confirmado antes do F5 vive no modelo local; a foto divergente
+    // não carrega orientação da peça ausente — o reparo a exibe como o
+    // jogador a deixou, sem inventar peça nova.
+    let local = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PECA_SELECIONADA',
+      pecaId: 'inicial-2',
+    })
+    local = reduzirEvento(local, {
+      type: 'PECA_GIRADA',
+      pecaId: 'inicial-2',
+      orientacaoAnterior: 0,
+      orientacao: 90,
+      sentido: 'horario',
+    })
+    const estado = aplicarSnapshot(
+      local,
+      fotoReload({
+        posicionadas: [],
+        iniciais: [],
+        pecaSelecionadaId: 'inicial-2',
+        peaoSelecionadoId: null,
+      }),
+    )
+    expect(estado.iniciais).toEqual([{ pecaId: 'inicial-2', tipo: 'inicial', orientacao: 90 }])
+  })
+
+  it('com peão selecionado o ciclo bloqueia a célula; DESELECIONAR_PEAO + ack libera SELECIONAR_PECA → POSICIONAR_PECA', () => {
+    // H1: a seleção restaurada do peão suprime o fallback ST-09 (ciclo
+    // binário #249) — o clique na célula não emite comando até a
+    // desseleção autoritativa com ack do servidor.
+    const estado = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      fotoReload({
+        posicionadas: [],
+        iniciais: [],
+        pecaSelecionadaId: 'inicial-2',
+        peaoSelecionadoId: 'peao-branco',
+      }),
+    )
+    expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-2'])
+    const estadoPeoes = {
+      peoes: estado.peoes,
+      posicionadas: estado.posicionadas,
+      recebidasPendentes: estado.recebidasPendentes,
+      peaoSelecionadoId: estado.peaoSelecionadoId,
+      pecaSelecionadaId: estado.pecaSelecionadaId,
+      posicaoConfirmadaNoTurno: estado.posicaoConfirmadaNoTurno,
+    }
+    const estadoTabuleiro = {
+      iniciais: estado.iniciais,
+      posicionadas: estado.posicionadas,
+      pecaSelecionadaId: estado.pecaSelecionadaId,
+      pecaEmManipulacaoId: estado.pecaEmManipulacaoId,
+    }
+    expect(cicloAtivo(estadoPeoes)).toBe(true)
+
+    // Clique na célula vazia com ciclo ativo: silencioso (sem comando).
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estadoPeoes, estadoTabuleiro, { linha: 3, coluna: 3 }, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: (c) => comandos.push(c),
+    })
+    expect(comandos).toEqual([])
+
+    // Caminho de destravamento: desseleção autoritativa ao servidor…
+    const desselecao = mapearDesselecaoDePeao({ ...estadoPeoes, recebidaPuxadaId: null })
+    expect(desselecao).toEqual({
+      tipo: 'comando',
+      comando: { type: 'DESELECIONAR_PEAO', peaoId: 'peao-branco' },
+    })
+    // …com ack o ciclo apaga e a sequência da Inicial libera.
+    const destravado = reduzirEvento(estado, { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })
+    expect(destravado.peaoSelecionadoId).toBeNull()
+    expect(cicloAtivo({
+      peoes: destravado.peoes,
+      posicionadas: destravado.posicionadas,
+      recebidasPendentes: destravado.recebidasPendentes,
+      peaoSelecionadoId: destravado.peaoSelecionadoId,
+      pecaSelecionadaId: destravado.pecaSelecionadaId,
+      posicaoConfirmadaNoTurno: destravado.posicaoConfirmadaNoTurno,
+    })).toBe(false)
+    expect(
+      mapearCliqueNaPecaDaMesa(
+        {
+          peoes: destravado.peoes,
+          posicionadas: destravado.posicionadas,
+          recebidasPendentes: destravado.recebidasPendentes,
+          peaoSelecionadoId: destravado.peaoSelecionadoId,
+          pecaSelecionadaId: destravado.pecaSelecionadaId,
+          posicaoConfirmadaNoTurno: destravado.posicaoConfirmadaNoTurno,
+        },
+        {
+          iniciais: destravado.iniciais,
+          posicionadas: destravado.posicionadas,
+          pecaSelecionadaId: destravado.pecaSelecionadaId,
+          pecaEmManipulacaoId: destravado.pecaEmManipulacaoId,
+        },
+        'inicial-2',
+      ),
+    ).toEqual({ type: 'SELECIONAR_PECA', pecaId: 'inicial-2' })
+    const selecionado = reduzirEvento(destravado, { type: 'PECA_SELECIONADA', pecaId: 'inicial-2' })
+    expect(mapearCliqueNaCelula(selecionado, { linha: 3, coluna: 3 })).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'inicial-2',
+      celula: { linha: 3, coluna: 3 },
+    })
+  })
+
+  it('TURNO_INICIADO repetido após a foto (replay do anúncio) preserva o ciclo; troca real reseta', () => {
+    // O game-server re-anuncia o turno corrente após ESTADO_DA_PARTIDA
+    // (ws.ts: anunciarTurnoAtual): o replay do MESMO turno não pode apagar
+    // a seleção/pendências que a foto restaurou — só a troca de turno reseta.
+    const restaurado = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      fotoReload(
+        {
+          posicionadas: [],
+          iniciais: [{ pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 }],
+          recebidas: [
+            {
+              recebidaId: 'r1',
+              pecaId: 'reta-1',
+              tipo: 'reta',
+              orientacao: 0,
+              vaga: null,
+              celulaAlvo: null,
+            },
+          ],
+          pecaSelecionadaId: 'inicial-2',
+          peaoSelecionadoId: 'peao-branco',
+        },
+        { jogadorAtivoId: 'jogador-1', rodada: 1 },
+      ),
+    )
+    expect(restaurado.recebidasPendentes).toHaveLength(1)
+
+    const replay = reduzirEvento(restaurado, { type: 'TURNO_INICIADO', jogadorId: 'jogador-1', rodada: 1 })
+    expect(replay.jogadorAtivoId).toBe('jogador-1')
+    expect(replay.rodada).toBe(1)
+    expect(replay.peaoSelecionadoId).toBe('peao-branco')
+    expect(replay.pecaSelecionadaId).toBe('inicial-2')
+    expect(replay.recebidasPendentes).toHaveLength(1)
+
+    // Troca real de turno (outro jogador): reset total como antes.
+    const troca = reduzirEvento(restaurado, { type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 1 })
+    expect(troca.jogadorAtivoId).toBe('jogador-2')
+    expect(troca.peaoSelecionadoId).toBeNull()
+    expect(troca.pecaSelecionadaId).toBeNull()
+    expect(troca.recebidasPendentes).toEqual([])
   })
 })
