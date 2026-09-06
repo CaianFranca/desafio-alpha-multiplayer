@@ -29,6 +29,8 @@ import {
 } from '../game/tabuleiro/vooDoPeao'
 import type { VooDoPeaoPendente } from '../game/tabuleiro/vooDoPeao'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
+import { useRequerModoPaisagem } from '../hooks/useModoPaisagemCelular'
+import { OverlayModoPaisagem } from '../components/partida/OverlayModoPaisagem'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
 import {
   chaveDeComandoPendente,
@@ -504,10 +506,35 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const encerrarTurno = useCallback(() => {
     enviarComJogador({ type: 'ENCERRAR_TURNO' })
   }, [enviarComJogador])
+  const requerModoPaisagem = useRequerModoPaisagem()
   const [bordaPx, setBordaPx] = useState(0)
+
+  // Devolução de foco do overlay bloqueante: rastreia o último foco fora
+  // do overlay (via focusin — o auto-focus do filho roda antes do efeito
+  // do pai, então salvar na transição já seria tarde) e restaura ao
+  // liberar (giro para paisagem).
+  const focoAnteriorRef = useRef<Element | null>(null)
+  useEffect(() => {
+    const aoFocar = (e: FocusEvent) => {
+      const alvo = e.target as Element | null
+      if (!alvo) return
+      if (typeof alvo.closest === 'function' && alvo.closest('[data-testid="overlay-modo-paisagem"]')) return
+      focoAnteriorRef.current = alvo
+    }
+    document.addEventListener('focusin', aoFocar)
+    return () => document.removeEventListener('focusin', aoFocar)
+  }, [])
+  useEffect(() => {
+    if (!requerModoPaisagem) {
+      const anterior = focoAnteriorRef.current
+      focoAnteriorRef.current = null
+      if (anterior instanceof HTMLElement && document.contains(anterior)) anterior.focus()
+    }
+  }, [requerModoPaisagem])
 
   return (
     <div className="relative min-h-[calc(100vh-5rem)] w-full overflow-hidden">
+      <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
       <AmbienteDeJogo
         bordaPx={bordaPx}
         estadoExibicao={estadoExibicao}
@@ -720,6 +747,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           </button>
         </div>
       ) : null}
+      </div>
+      {requerModoPaisagem ? <OverlayModoPaisagem /> : null}
       <PartidaMoldura onBordaChange={setBordaPx} />
     </div>
   )
