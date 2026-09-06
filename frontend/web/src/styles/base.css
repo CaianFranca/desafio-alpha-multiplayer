@@ -5,6 +5,14 @@
 @layer base {
   * {
     box-sizing: border-box;
+    /* Barras de rolagem ocultas em toda a aplicação — a rolagem continua
+       funcional (roda/teclado/toque), só o indicador visual some. */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* Edge legado */
+  }
+
+  *::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Edge */
   }
 
   body {

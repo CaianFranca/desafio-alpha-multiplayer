@@ -11,12 +11,12 @@ import {
   toquesDeAudio,
 } from './helpers/mockAudio'
 import {
-  CAMINHO_SOM_ASSENTO_ENCAIXE,
+  CAMINHO_SOM_MOVIMENTO_ENCAIXE,
   CAMINHO_SOM_GIRO_ENCAIXE,
-  VOLUME_BASE_SOM_DE_ASSENTO,
+  VOLUME_BASE_SOM_DE_MOVIMENTO,
   VOLUME_BASE_SOM_DE_GIRO,
   origemDoEncaixe,
-  tocarSomDeAssentoDoEncaixe,
+  tocarSomDeMovimentoDoEncaixe,
   tocarSomDeGiroDoEncaixe,
 } from '../web/src/components/partida/somDoEncaixe'
 import { DURACAO_ENCAIXE_MS } from '../web/src/game/tabuleiro/animacao'
@@ -32,10 +32,11 @@ import {
 } from '../web/src/game/tabuleiro/encaixe'
 import { criarEstadoInicialDoCliente } from '../web/src/game/tabuleiro/reducao'
 
-// Encaixe de peça com sons (issue #241, spec #238 + mudança de spec verbal):
+// Encaixe de peça com sons (issue #241, spec #238 + mudanças de spec verbais):
 // transição mesa→célula disparada por PECA_POSICIONADA com SÓ o toque
-// enigmático no assento, carta a cada PECA_GIRADA, snap com
-// prefers-reduced-motion e silêncio sem asset.
+// enigmático como som de movimento (no instante em que a peça começa a se
+// mover), carta a cada PECA_GIRADA, snap com prefers-reduced-motion e
+// silêncio sem asset.
 // Comportamento externo via espelho DOM (jsdom não vê WebGL) + áudio mockado.
 
 const JOGADOR_ID = mockAuthenticatedState.jogador.id
@@ -129,12 +130,12 @@ describe('som do encaixe — constantes centralizadas e toque (issue #241)', () 
   it('duração parte de ~250ms e caminhos apontam aos assets servidos em /media/', () => {
     expect(DURACAO_ENCAIXE_MS).toBe(250)
     expect(CAMINHO_SOM_GIRO_ENCAIXE).toBe('/media/card-flick.wav')
-    expect(CAMINHO_SOM_ASSENTO_ENCAIXE).toBe('/media/scary-sound.mp3')
+    expect(CAMINHO_SOM_MOVIMENTO_ENCAIXE).toBe('/media/scary-sound.mp3')
   })
 
-  it('giro toca a carta na base própria e assento toca o enigmático na dele (ADR-0007)', () => {
+  it('giro toca a carta na base própria e movimento toca o enigmático na dele (ADR-0007)', () => {
     tocarSomDeGiroDoEncaixe()
-    tocarSomDeAssentoDoEncaixe()
+    tocarSomDeMovimentoDoEncaixe()
 
     expect(toquesDeAudio).toHaveLength(2)
     expect(toquesDeAudio[0]).toMatchObject({
@@ -142,12 +143,12 @@ describe('som do encaixe — constantes centralizadas e toque (issue #241)', () 
       volume: VOLUME_BASE_SOM_DE_GIRO,
     })
     expect(toquesDeAudio[1]).toMatchObject({
-      src: CAMINHO_SOM_ASSENTO_ENCAIXE,
-      volume: VOLUME_BASE_SOM_DE_ASSENTO,
+      src: CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+      volume: VOLUME_BASE_SOM_DE_MOVIMENTO,
     })
-    // Mudança de spec: carta cai pela metade, enigmático mantém.
+    // Mudança de spec: carta cai pela metade, movimento em base própria.
     expect(VOLUME_BASE_SOM_DE_GIRO).toBe(0.35)
-    expect(VOLUME_BASE_SOM_DE_ASSENTO).toBe(0.7)
+    expect(VOLUME_BASE_SOM_DE_MOVIMENTO).toBe(1)
   })
 
   it('falha de play() não quebra (silêncio sem erro)', async () => {
@@ -158,7 +159,7 @@ describe('som do encaixe — constantes centralizadas e toque (issue #241)', () 
     await Promise.resolve()
 
     armarExcecaoNoProximoPlay()
-    expect(() => tocarSomDeAssentoDoEncaixe()).not.toThrow()
+    expect(() => tocarSomDeMovimentoDoEncaixe()).not.toThrow()
   })
 })
 
@@ -201,7 +202,7 @@ describe('som do giro — carta a cada PECA_GIRADA (issue #241, mudança de spec
       volume: VOLUME_BASE_SOM_DE_GIRO,
     })
     // Giro não é posicionamento: nenhum enigmático.
-    expect(toquesPorSrc(CAMINHO_SOM_ASSENTO_ENCAIXE)).toHaveLength(0)
+    expect(toquesPorSrc(CAMINHO_SOM_MOVIMENTO_ENCAIXE)).toHaveLength(0)
   })
 
   it('giros distintos em sequência soam múltiplo (cada giro é uma ação distinta)', async () => {
@@ -249,7 +250,7 @@ describe('som do giro — carta a cada PECA_GIRADA (issue #241, mudança de spec
 })
 
 describe('encaixe na tela — voo, sons e estado final (issue #241)', () => {
-  it('PECA_POSICIONADA da Inicial: voa da mesa, soa SÓ o enigmático e termina no estado certo', async () => {
+  it('PECA_POSICIONADA da Inicial: voa da mesa, soa SÓ o enigmático no início do movimento e termina no estado certo', async () => {
     const ws = await partidaDisponivel()
     expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(4)
 
@@ -274,12 +275,10 @@ describe('encaixe na tela — voo, sons e estado final (issue #241)', () => {
 
     // Sem carta no posicionamento (mudança de spec: carta vive no giro)…
     expect(toquesPorSrc(CAMINHO_SOM_GIRO_ENCAIXE)).toHaveLength(0)
-    // …toque enigmático no assento (após a duração do voo).
-    await waitFor(() =>
-      expect(toquesPorSrc(CAMINHO_SOM_ASSENTO_ENCAIXE)).toHaveLength(1),
-    )
-    expect(toquesPorSrc(CAMINHO_SOM_ASSENTO_ENCAIXE)[0]).toMatchObject({
-      volume: VOLUME_BASE_SOM_DE_ASSENTO,
+    // …toque enigmático imediato no início do movimento (chegada do evento).
+    expect(toquesPorSrc(CAMINHO_SOM_MOVIMENTO_ENCAIXE)).toHaveLength(1)
+    expect(toquesPorSrc(CAMINHO_SOM_MOVIMENTO_ENCAIXE)[0]).toMatchObject({
+      volume: VOLUME_BASE_SOM_DE_MOVIMENTO,
     })
   })
 
@@ -310,9 +309,8 @@ describe('encaixe na tela — voo, sons e estado final (issue #241)', () => {
     expect(celulaDoEspelho(2, 3).getAttribute('data-ocupada')).toBe('true')
 
     expect(toquesPorSrc(CAMINHO_SOM_GIRO_ENCAIXE)).toHaveLength(0)
-    await waitFor(() =>
-      expect(toquesPorSrc(CAMINHO_SOM_ASSENTO_ENCAIXE)).toHaveLength(1),
-    )
+    // Enigmático imediato no início do movimento.
+    expect(toquesPorSrc(CAMINHO_SOM_MOVIMENTO_ENCAIXE)).toHaveLength(1)
   })
 
   it('prefers-reduced-motion: snap instantâneo pixel-igual, sem voo, com SÓ o enigmático', async () => {
@@ -346,17 +344,17 @@ describe('encaixe na tela — voo, sons e estado final (issue #241)', () => {
       expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('true')
       expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(3)
 
-      // Só o enigmático imediato (sem espera pela duração do voo; a carta
+      // Só o enigmático, imediato no início do movimento (a carta
       // vive no giro, fora deste branch).
       expect(toquesDeAudio.map((t) => t.src)).toEqual([
-        CAMINHO_SOM_ASSENTO_ENCAIXE,
+        CAMINHO_SOM_MOVIMENTO_ENCAIXE,
       ])
     } finally {
       window.matchMedia = originalMatchMedia
     }
   })
 
-  it('asset ausente: silêncio sem erro, assento chega em seguida', async () => {
+  it('asset ausente: silêncio sem erro, movimento soa de imediato', async () => {
     const ws = await partidaDisponivel()
 
     armarFalhaNoProximoPlay()
@@ -370,10 +368,8 @@ describe('encaixe na tela — voo, sons e estado final (issue #241)', () => {
         }),
       ),
     ).not.toThrow()
-    // O assento foi tentado (toque registrado); a rejeição foi engolida.
-    await waitFor(() =>
-      expect(toquesPorSrc(CAMINHO_SOM_ASSENTO_ENCAIXE)).toHaveLength(1),
-    )
+    // O movimento foi tentado de imediato (toque registrado); a rejeição foi engolida.
+    expect(toquesPorSrc(CAMINHO_SOM_MOVIMENTO_ENCAIXE)).toHaveLength(1)
 
     expect(pecaPosicionadaDoEspelho('inicial-1').getAttribute('data-em-voo')).toBe('true')
   })

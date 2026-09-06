@@ -10,10 +10,10 @@ import {
   textoDoAnuncioDeRecusa,
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
-import { CAMINHO_SOM_SOMBRIO_LIMPEZA, DURACAO_ENCAIXE_MS } from '../game/tabuleiro/animacao'
+import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
 import {
   origemDoEncaixe,
-  tocarSomDeAssentoDoEncaixe,
+  tocarSomDeMovimentoDoEncaixe,
   tocarSomDeGiroDoEncaixe,
 } from '../components/partida/somDoEncaixe'
 import type { EncaixeTrigger } from '../game/tabuleiro/encaixe'
@@ -137,14 +137,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // do canal é estável e não re-subscreve a cada render).
   const [encaixeTrigger, setEncaixeTrigger] = useState<EncaixeTrigger | null>(null)
   const encaixeKeyRef = useRef(0)
-  const temposDoAssentoDoEncaixe = useRef<number[]>([])
-  useEffect(() => {
-    const tempos = temposDoAssentoDoEncaixe.current
-    return () => {
-      for (const id of tempos) window.clearTimeout(id)
-      tempos.length = 0
-    }
-  }, [])
   const onFimEncaixe = useCallback((key: number) => {
     setEncaixeTrigger((atual) => (atual?.key === key ? null : atual))
   }, [])
@@ -243,27 +235,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           return
         }
-        // Encaixe (issue #241, spec #238 + mudança de spec verbal):
+        // Encaixe (issue #241, spec #238 + mudanças de spec verbais):
         // evento-driven para TransicaoEncaixe + som próprio — só
         // PECA_POSICIONADA dispara voo/som, snapshots não. A origem
         // (mesa/bandeja) deriva do modelo pré-despacho; o posicionamento
-        // toca SÓ o toque enigmático no assento (após a duração do voo;
-        // imediato com movimento reduzido) — a carta saiu deste branch e
-        // vive no giro acima. Transição visual de voo inalterada.
+        // toca SÓ o toque enigmático como som de movimento, no instante em
+        // que a peça começa a se mover (chegada do evento — sem atraso de
+        // assento). Transição visual de voo inalterada.
         if (evento.type === 'PECA_POSICIONADA') {
           const origem = origemDoEncaixe(modeloRef.current, evento.pecaId)
-          // Snap com movimento reduzido: sem voo (trigger nunca nasce) e o
-          // enigmático imediato — o estado final já renderiza pixel-igual.
+          // Som imediato no início do movimento (com reduce, o voo vira
+          // snap mas o som segue igual — o estado final já renderiza
+          // pixel-igual).
+          tocarSomDeMovimentoDoEncaixe()
           const reduzir = deveReduzirMovimento()
-          if (reduzir) {
-            tocarSomDeAssentoDoEncaixe()
-          } else {
-            const id = window.setTimeout(
-              () => tocarSomDeAssentoDoEncaixe(),
-              DURACAO_ENCAIXE_MS,
-            )
-            temposDoAssentoDoEncaixe.current.push(id)
-          }
           if (origem !== null && !reduzir) {
             encaixeKeyRef.current += 1
             setEncaixeTrigger({
