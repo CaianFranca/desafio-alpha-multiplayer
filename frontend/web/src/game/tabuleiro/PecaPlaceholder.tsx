@@ -3,6 +3,11 @@ import { useLoader, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { TAMANHO_CELULA } from './contrato'
 import type { TipoDaPeca, Orientacao } from './contrato'
+import {
+  EXPANSAO_CONTORNO_PECA_XZ,
+  corDoContornoDaPeca,
+  propsDoMaterialDeContorno,
+} from './contorno'
 import { handlersDeCursor } from './cursor'
 import { rotacaoDoMotivo, texturaDaPeca } from './texturasDasPecas'
 
@@ -13,7 +18,7 @@ interface PecaPlaceholderProps {
   /** Destaque visual da peça selecionada/em manipulação. */
   destacada?: boolean
   /**
-   * Tom do destaque emissivo (default `COR_DESTAQUE` quente). Destino de
+   * Tom do contorno de destaque (default `COR_DESTAQUE` quente). Destino de
    * resgate passa `COR_DESTAQUE_RESGATE` — sóbria, sem arte nova.
    */
   corDestaque?: string
@@ -54,7 +59,6 @@ const COR_DESTAQUE = '#ffe08a'
  * do movimento sem exigir arte nova (issue #145-exp F1).
  */
 export const COR_DESTAQUE_RESGATE = '#7fd1e0'
-const INTENSIDADE_DESTAQUE = 0.7
 
 export const TAMANHO_PECA = TAMANHO_CELULA * 0.96
 export const ESPESSURA_PECA = 0.12
@@ -80,7 +84,8 @@ function usarClique(
  * Corpo final: caixa lisa nas mesmas dimensões, face superior (`material-2`,
  * +y — mesmo precedente da Mesa em `AmbienteCena`) com map (sRGB) +
  * normalMap (linear) do tipo, motivo girando com a `orientacao`; laterais
- * neutras. O emissivo de destaque é preservado sobre a textura.
+ * neutras. O topo ignora o tone mapping da cena (fiel à textura); o destaque
+ * é contorno por casca invertida, sem emissivo sobre a textura.
  */
 function CorpoTexturizado({
   tipo,
@@ -113,50 +118,43 @@ function CorpoTexturizado({
 
   const cursorHandlers = handlersDeCursor(cursor)
   const handleClick = usarClique(onClick)
-  const emissive = destacada ? corDestaque : '#000000'
-  const emissiveIntensity = destacada ? INTENSIDADE_DESTAQUE : 0
+  const contorno = propsDoMaterialDeContorno(corDoContornoDaPeca(corDestaque))
 
   return (
-    <mesh position={[0, Y_CORPO, 0]} onClick={handleClick} {...cursorHandlers}>
-      <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
-      <meshStandardMaterial
-        attach="material-0"
-        color={COR_LATERAL}
-        emissive={emissive}
-        emissiveIntensity={emissiveIntensity}
-      />
-      <meshStandardMaterial
-        attach="material-1"
-        color={COR_LATERAL}
-        emissive={emissive}
-        emissiveIntensity={emissiveIntensity}
-      />
-      <meshStandardMaterial
-        attach="material-2"
-        map={mapaTopo}
-        normalMap={normalTopo}
-        emissive={emissive}
-        emissiveIntensity={emissiveIntensity}
-      />
-      <meshStandardMaterial
-        attach="material-3"
-        color={COR_LATERAL}
-        emissive={emissive}
-        emissiveIntensity={emissiveIntensity}
-      />
-      <meshStandardMaterial
-        attach="material-4"
-        color={COR_LATERAL}
-        emissive={emissive}
-        emissiveIntensity={emissiveIntensity}
-      />
-      <meshStandardMaterial
-        attach="material-5"
-        color={COR_LATERAL}
-        emissive={emissive}
-        emissiveIntensity={emissiveIntensity}
-      />
-    </mesh>
+    <>
+      <mesh
+        position={[0, Y_CORPO, 0]}
+        onClick={handleClick}
+        {...cursorHandlers}
+      >
+        <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
+        <meshStandardMaterial attach="material-0" color={COR_LATERAL} />
+        <meshStandardMaterial attach="material-1" color={COR_LATERAL} />
+        <meshStandardMaterial
+          attach="material-2"
+          map={mapaTopo}
+          normalMap={normalTopo}
+          toneMapped={false}
+        />
+        <meshStandardMaterial attach="material-3" color={COR_LATERAL} />
+        <meshStandardMaterial attach="material-4" color={COR_LATERAL} />
+        <meshStandardMaterial attach="material-5" color={COR_LATERAL} />
+      </mesh>
+      <mesh
+        position={[0, Y_CORPO, 0]}
+        visible={destacada}
+        raycast={() => null}
+      >
+        <boxGeometry
+          args={[
+            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+            ESPESSURA_PECA,
+            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+          ]}
+        />
+        <meshBasicMaterial {...contorno} side={THREE.BackSide} />
+      </mesh>
+    </>
   )
 }
 
@@ -170,18 +168,37 @@ function CorpoFallback({
 }: CorpoProps) {
   const cursorHandlers = handlersDeCursor(cursor)
   const handleClick = usarClique(onClick)
+  const contorno = propsDoMaterialDeContorno(corDoContornoDaPeca(corDestaque))
 
   return (
-    <mesh position={[0, Y_CORPO, 0]} onClick={handleClick} {...cursorHandlers}>
-      <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
-      <meshStandardMaterial
-        color={COR_POR_TIPO[tipo]}
-        transparent
-        opacity={0.88}
-        emissive={destacada ? corDestaque : '#000000'}
-        emissiveIntensity={destacada ? INTENSIDADE_DESTAQUE : 0}
-      />
-    </mesh>
+    <>
+      <mesh
+        position={[0, Y_CORPO, 0]}
+        onClick={handleClick}
+        {...cursorHandlers}
+      >
+        <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
+        <meshStandardMaterial
+          color={COR_POR_TIPO[tipo]}
+          transparent
+          opacity={0.88}
+        />
+      </mesh>
+      <mesh
+        position={[0, Y_CORPO, 0]}
+        visible={destacada}
+        raycast={() => null}
+      >
+        <boxGeometry
+          args={[
+            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+            ESPESSURA_PECA,
+            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+          ]}
+        />
+        <meshBasicMaterial {...contorno} side={THREE.BackSide} />
+      </mesh>
+    </>
   )
 }
 
