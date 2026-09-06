@@ -772,7 +772,7 @@ function moverPeaoDaPartida(
 
   const estadoNovo: EstadoDaPartida = {
     ...estado,
-    tabuleiro: tabuleiroNovo,
+    tabuleiro: { ...tabuleiroNovo, peaoSelecionadoId: comando.peaoId },
     jogadores: jogadoresNovos,
     pecasEmPeriodoDeGraca,
   };

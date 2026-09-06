@@ -458,7 +458,7 @@ describe('redução do ciclo do peão — espelho do engine (issue #91, forma #1
     expect(estado.peaoSelecionadoId).toBe('peao-branco')
   })
 
-  it('PEAO_MOVIDO atualiza a posição e limpa a seleção (sem seleção remanescente)', () => {
+  it('PEAO_MOVIDO atualiza a posição e mantém a seleção do peão movido', () => {
     let estado = criarEstadoInicialDoCliente()
     estado = reduzirEvento(estado, { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
     estado = reduzirEvento(estado, {
@@ -470,7 +470,7 @@ describe('redução do ciclo do peão — espelho do engine (issue #91, forma #1
     })
     const peao = estado.peoes.find((p) => p.peaoId === 'peao-branco')
     expect(peao?.celula).toEqual({ linha: 2, coluna: 3 })
-    expect(estado.peaoSelecionadoId).toBeNull()
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
   })
 
   it('PEAO_PERMANECEU limpa a seleção sem alterar a posição', () => {

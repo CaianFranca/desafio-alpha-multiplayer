@@ -436,13 +436,13 @@ export function reduzirEvento(
       const peoes = estado.peoes.map((p) =>
         p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
       )
-      // mover_peao no engine limpa o peaoSelecionadoId — o cliente espelha
-      // para não manter seleção obsoleta. Dentro do turno, o movimento marca
-      // a fase e atribui o peão ao Jogador Ativo (issue #118).
+      // mover_peaoDaPartida re-seleciona o Peão para que o turno possa ser
+      // encerrado sem seleção intermediária. Dentro do turno, o movimento
+      // marca a fase e atribui o peão ao Jogador Ativo (issue #118).
       return {
         ...estado,
         peoes,
-        peaoSelecionadoId: null,
+        peaoSelecionadoId: evento.peaoId,
         movimentouNoTurno:
           estado.jogadorAtivoId !== null ? true : estado.movimentouNoTurno,
         peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
