@@ -64,10 +64,49 @@ export const TAMANHO_PECA = TAMANHO_CELULA * 0.96
 export const ESPESSURA_PECA = 0.12
 const Y_CORPO = 0.08
 
+/**
+ * Fator do relevo do topo (normalScale acima do default 1: ponto de partida
+ * afinado por screenshot; realça o relevo do normalMap sob a luz rasante da
+ * cena sem amplificar ruído além do motivo).
+ */
+const RELEVO_TOPO_NORMAL_SCALE: readonly [number, number] = [1.6, 1.6]
+
 interface CorpoProps extends PecaPlaceholderProps {
   destacada: boolean
   corDestaque: string
   cursor: 'default' | 'pointer'
+}
+
+/**
+ * Contorno da peça por casca invertida: caixa ligeiramente maior em XZ,
+ * mesma altura/centro, `BackSide`, sem handlers e com `raycast` nulo para
+ * nunca roubar clique. Extraído para uso único nos dois corpos (texturizado
+ * e fallback do `Suspense`) — a cor vem da semântica de `corDestaque`.
+ */
+function ContornoDaPeca({
+  visivel,
+  corDestaque,
+}: {
+  visivel: boolean
+  corDestaque: string
+}) {
+  const contorno = propsDoMaterialDeContorno(corDoContornoDaPeca(corDestaque))
+  return (
+    <mesh
+      position={[0, Y_CORPO, 0]}
+      visible={visivel}
+      raycast={() => null}
+    >
+      <boxGeometry
+        args={[
+          TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+          ESPESSURA_PECA,
+          TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+        ]}
+      />
+      <meshBasicMaterial {...contorno} side={THREE.BackSide} />
+    </mesh>
+  )
 }
 
 function usarClique(
@@ -118,7 +157,6 @@ function CorpoTexturizado({
 
   const cursorHandlers = handlersDeCursor(cursor)
   const handleClick = usarClique(onClick)
-  const contorno = propsDoMaterialDeContorno(corDoContornoDaPeca(corDestaque))
 
   return (
     <>
@@ -134,26 +172,14 @@ function CorpoTexturizado({
           attach="material-2"
           map={mapaTopo}
           normalMap={normalTopo}
+          normal-scale={RELEVO_TOPO_NORMAL_SCALE}
           toneMapped={false}
         />
         <meshStandardMaterial attach="material-3" color={COR_LATERAL} />
         <meshStandardMaterial attach="material-4" color={COR_LATERAL} />
         <meshStandardMaterial attach="material-5" color={COR_LATERAL} />
       </mesh>
-      <mesh
-        position={[0, Y_CORPO, 0]}
-        visible={destacada}
-        raycast={() => null}
-      >
-        <boxGeometry
-          args={[
-            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
-            ESPESSURA_PECA,
-            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
-          ]}
-        />
-        <meshBasicMaterial {...contorno} side={THREE.BackSide} />
-      </mesh>
+      <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
     </>
   )
 }
@@ -168,7 +194,6 @@ function CorpoFallback({
 }: CorpoProps) {
   const cursorHandlers = handlersDeCursor(cursor)
   const handleClick = usarClique(onClick)
-  const contorno = propsDoMaterialDeContorno(corDoContornoDaPeca(corDestaque))
 
   return (
     <>
@@ -184,20 +209,7 @@ function CorpoFallback({
           opacity={0.88}
         />
       </mesh>
-      <mesh
-        position={[0, Y_CORPO, 0]}
-        visible={destacada}
-        raycast={() => null}
-      >
-        <boxGeometry
-          args={[
-            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
-            ESPESSURA_PECA,
-            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
-          ]}
-        />
-        <meshBasicMaterial {...contorno} side={THREE.BackSide} />
-      </mesh>
+      <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
     </>
   )
 }

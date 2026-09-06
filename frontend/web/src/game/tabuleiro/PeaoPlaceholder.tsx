@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { HEX_COR_PEAO } from './contrato'
@@ -55,6 +56,27 @@ const Y_CABECA =
 
 const EMISSIVO_ATIVO = 0.35
 
+/**
+ * Casca de contorno de um segmento do peão: mesma geometria (via `children`),
+ * `BackSide` branca, sem clique. Extraída para uso único nos 4 segmentos —
+ * variam só `position` e geometria.
+ */
+function CascaContorno({
+  position,
+  children,
+}: {
+  position: [number, number, number]
+  children: ReactNode
+}) {
+  const contorno = propsDoMaterialDeContorno(COR_CONTORNO_PEAO_SELECIONADO)
+  return (
+    <mesh position={position} scale={ESCALA_CONTORNO_PEAO} raycast={() => null}>
+      {children}
+      <meshBasicMaterial {...contorno} side={THREE.BackSide} />
+    </mesh>
+  )
+}
+
 export function PeaoPlaceholder({
   cor,
   position,
@@ -68,9 +90,6 @@ export function PeaoPlaceholder({
   // branco, sem lavar a cor); só o Jogador Ativo usa brilho emissivo, suave,
   // e os dois indicadores coexistem no peão da vez selecionado.
   const emissiveIntensity = ativo ? EMISSIVO_ATIVO : 0
-  const contornoSelecionado = propsDoMaterialDeContorno(
-    COR_CONTORNO_PEAO_SELECIONADO,
-  )
 
   // Só interage ao ponteiro quando há handler de seleção.
   const handlers = aoClicar
@@ -134,54 +153,22 @@ export function PeaoPlaceholder({
       {selecionado ? (
         <>
           {/* Cascas de contorno: mesma geometria, BackSide, sem clique */}
-          <mesh
-            position={[0, Y_BASE, 0]}
-            scale={ESCALA_CONTORNO_PEAO}
-            raycast={() => null}
-          >
+          <CascaContorno position={[0, Y_BASE, 0]}>
             <cylinderGeometry args={[BASE_RAIO, BASE_RAIO, BASE_ALTURA, 20]} />
-            <meshBasicMaterial
-              {...contornoSelecionado}
-              side={THREE.BackSide}
-            />
-          </mesh>
-          <mesh
-            position={[0, Y_CORPO, 0]}
-            scale={ESCALA_CONTORNO_PEAO}
-            raycast={() => null}
-          >
+          </CascaContorno>
+          <CascaContorno position={[0, Y_CORPO, 0]}>
             <cylinderGeometry
               args={[CORPO_RAIO_TOPO, CORPO_RAIO_BASE, CORPO_ALTURA, 20]}
             />
-            <meshBasicMaterial
-              {...contornoSelecionado}
-              side={THREE.BackSide}
-            />
-          </mesh>
-          <mesh
-            position={[0, Y_COLARINHO, 0]}
-            scale={ESCALA_CONTORNO_PEAO}
-            raycast={() => null}
-          >
+          </CascaContorno>
+          <CascaContorno position={[0, Y_COLARINHO, 0]}>
             <cylinderGeometry
               args={[COLARINHO_RAIO, COLARINHO_RAIO, COLARINHO_ALTURA, 20]}
             />
-            <meshBasicMaterial
-              {...contornoSelecionado}
-              side={THREE.BackSide}
-            />
-          </mesh>
-          <mesh
-            position={[0, Y_CABECA, 0]}
-            scale={ESCALA_CONTORNO_PEAO}
-            raycast={() => null}
-          >
+          </CascaContorno>
+          <CascaContorno position={[0, Y_CABECA, 0]}>
             <sphereGeometry args={[CABECA_RAIO, 20, 16]} />
-            <meshBasicMaterial
-              {...contornoSelecionado}
-              side={THREE.BackSide}
-            />
-          </mesh>
+          </CascaContorno>
         </>
       ) : null}
     </group>
