@@ -1,15 +1,28 @@
+import { useEffect, useRef } from 'react'
+
 /**
  * Overlay bloqueante que pede para virar o aparelho.
  * Visível apenas em celular com tela em retrato vertical;
  * fica acima de moldura/flash e bloqueia interações subjacentes
- * sem desmontar o modelo/WS.
+ * sem desmontar o modelo/WS. É um `alertdialog` modal com foco
+ * inicial: teclado e leitor de tela ficam contidos enquanto o
+ * container do jogo está `inert`.
  */
 export function OverlayModoPaisagem() {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    ref.current?.focus()
+  }, [])
+
   return (
     <div
+      ref={ref}
       data-testid="overlay-modo-paisagem"
-      role="alert"
-      aria-live="assertive"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Vire o aparelho para jogar"
+      tabIndex={-1}
       className="pointer-events-auto absolute inset-0 z-50 flex items-center justify-center bg-zinc-900/80 px-6 text-center"
     >
       <div className="flex flex-col items-center gap-4">

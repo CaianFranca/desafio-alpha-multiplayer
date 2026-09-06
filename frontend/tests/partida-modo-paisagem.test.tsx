@@ -98,14 +98,16 @@ function renderPartida(estadoInicial: 'disponivel' | 'carregando' | 'falha' = 'd
 }
 
 describe('OverlayModoPaisagem — componente isolado', () => {
-  it('renderiza com data-testid, role alert, aria-live e texto observável', () => {
+  it('renderiza como alertdialog modal com foco e texto observável', () => {
     render(<OverlayModoPaisagem />)
     const overlay = screen.getByTestId('overlay-modo-paisagem')
     expect(overlay).toBeInTheDocument()
-    expect(overlay).toHaveAttribute('role', 'alert')
-    expect(overlay).toHaveAttribute('aria-live', 'assertive')
+    expect(overlay).toHaveAttribute('role', 'alertdialog')
+    expect(overlay).toHaveAttribute('aria-modal', 'true')
+    expect(overlay).toHaveAttribute('aria-label', 'Vire o aparelho para jogar')
     expect(overlay).toHaveTextContent('Vire o aparelho para jogar')
     expect(overlay).toHaveTextContent('modo paisagem')
+    expect(document.activeElement).toBe(overlay)
   })
 })
 
@@ -206,20 +208,24 @@ describe('useRequerModoPaisagem via PartidaPage', () => {
     expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
   })
 
-  it('overlay bloqueia de verdade: toque na camada não dispensa nem atinge o tabuleiro', () => {
+  it('overlay bloqueia de verdade: jogo inert, foco no overlay e toque não atinge o tabuleiro', () => {
     definirViewport(375, 812, true)
     renderPartida('disponivel')
 
     const overlay = screen.getByTestId('overlay-modo-paisagem')
+    const conteudo = screen.getByTestId('conteudo-jogo')
     const tabuleiro = screen.getByTestId('tabuleiro')
     const celulasAntes = screen.getAllByTestId('tabuleiro-celula').length
     const conteudoAntes = tabuleiro.textContent
+    const caixaAntes = screen.getByTestId('caixa').textContent
 
-    // Ordem observável no DOM: overlay após o tabuleiro → pinta por cima
-    // no mesmo contexto de empilhamento e recebe o toque primeiro.
-    expect(tabuleiro.compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // Tabuleiro marcado como oculto para leitor de tela enquanto bloqueado.
-    expect(tabuleiro).toHaveAttribute('aria-hidden', 'true')
+    // Jogo marcado como inert enquanto bloqueado; tabuleiro segue sob o
+    // overlay, dentro do conteúdo inert.
+    expect(conteudo).toHaveAttribute('inert')
+    expect(conteudo).toContainElement(tabuleiro)
+    // Foco programático vai ao overlay (alertdialog modal).
+    expect(overlay).toHaveAttribute('role', 'alertdialog')
+    expect(document.activeElement).toBe(overlay)
 
     // Toque do usuário na camada bloqueante: não dispensa o bloqueio…
     fireEvent.click(overlay)
@@ -230,6 +236,58 @@ describe('useRequerModoPaisagem via PartidaPage', () => {
     expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
     expect(screen.getAllByTestId('tabuleiro-celula')).toHaveLength(celulasAntes)
     expect(screen.getByTestId('tabuleiro').textContent).toBe(conteudoAntes)
+    expect(screen.getByTestId('caixa').textContent).toBe(caixaAntes)
+  })
+
+  it('teclado contido: Tab não alcança controles inertes e liberar remove o inert', () => {
+    definirViewport(375, 812, true)
+    renderPartida('disponivel')
+
+    const overlay = screen.getByTestId('overlay-modo-paisagem')
+    const conteudo = screen.getByTestId('conteudo-jogo')
+    expect(conteudo).toHaveAttribute('inert')
+    expect(document.activeElement).toBe(overlay)
+
+    // Controles de giro vivem dentro do conteúdo inert; turno quando presente.
+    expect(conteudo).toContainElement(screen.getByTestId('girar-horario'))
+    const encerrar = screen.queryByTestId('botao-encerrar-turno')
+    if (encerrar) expect(conteudo).toContainElement(encerrar)
+
+    // Tab a partir do overlay não cai nos controles: foco segue no dialog
+    // (jsdom não move foco sozinho; o bloqueio real é estrutural via inert).
+    fireEvent.keyDown(overlay, { key: 'Tab' })
+    expect(document.activeElement).toBe(overlay)
+    expect(conteudo).toHaveAttribute('inert')
+
+    // Giro para paisagem libera sem remontar e remove o inert.
+    const ambienteAntes = screen.getByTestId('ambiente-de-jogo')
+    girarPara(812, 375, false)
+    expect(screen.queryByTestId('overlay-modo-paisagem')).not.toBeInTheDocument()
+    expect(screen.getByTestId('conteudo-jogo')).not.toHaveAttribute('inert')
+    expect(screen.getByTestId('ambiente-de-jogo')).toBe(ambienteAntes)
+  })
+
+  it('devolve o foco ao controle anterior ao liberar o bloqueio', () => {
+    definirViewport(812, 375, false)
+    renderPartida('disponivel')
+    expect(screen.queryByTestId('overlay-modo-paisagem')).not.toBeInTheDocument()
+
+    // Botões de giro nascem desabilitados (sem peça alvo) e não recebem
+    // foco; usa um controle externo focável para provar a devolução.
+    const externo = document.createElement('button')
+    externo.textContent = 'voltar'
+    document.body.appendChild(externo)
+    externo.focus()
+    expect(document.activeElement).toBe(externo)
+
+    girarPara(375, 812, true)
+    expect(screen.getByTestId('overlay-modo-paisagem')).toBeInTheDocument()
+    expect(document.activeElement).toBe(screen.getByTestId('overlay-modo-paisagem'))
+
+    girarPara(812, 375, false)
+    expect(screen.queryByTestId('overlay-modo-paisagem')).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(externo)
+    externo.remove()
   })
 
   it('após liberar em paisagem, o tabuleiro recebe cliques sem overlay', () => {
@@ -272,5 +330,40 @@ describe('useRequerModoPaisagem via PartidaPage', () => {
     expect(screen.getByTestId('tabuleiro')).toBe(tabuleiroAntes)
     expect(screen.getByTestId('tabuleiro').textContent).toBe(conteudoAntes)
     expect(screen.getAllByTestId('tabuleiro-celula')).toHaveLength(celulasAntes)
+  })
+
+  it('clique no overlay não despacha ação e HUD observável sobrevive ao ida-volta', () => {
+    definirViewport(375, 812, true)
+    renderPartida('disponivel')
+
+    const tabuleiroAntes = screen.getByTestId('tabuleiro').textContent
+    const caixaAntes = screen.getByTestId('caixa').textContent
+    const celulasAntes = screen.getAllByTestId('tabuleiro-celula').length
+    const chipAntes = screen.queryByTestId('chip-jogador-ativo')?.textContent ?? null
+    const sanidadeAntes = screen.queryByTestId('chip-sanidade')?.textContent ?? null
+    const contagemAntes = screen.queryByTestId('contagem-caixa')?.textContent ?? null
+    const rodadaAntes = screen.queryByTestId('indicador-rodada')?.textContent ?? null
+
+    // Clique no overlay não despacha: bloqueio segue e conteúdo intacto.
+    fireEvent.click(screen.getByTestId('overlay-modo-paisagem'))
+    expect(screen.getByTestId('overlay-modo-paisagem')).toBeInTheDocument()
+    expect(screen.getByTestId('tabuleiro').textContent).toBe(tabuleiroAntes)
+    expect(screen.getByTestId('caixa').textContent).toBe(caixaAntes)
+
+    girarPara(812, 375, false)
+    expect(screen.queryByTestId('overlay-modo-paisagem')).not.toBeInTheDocument()
+    expect(screen.getByTestId('tabuleiro').textContent).toBe(tabuleiroAntes)
+    expect(screen.getByTestId('caixa').textContent).toBe(caixaAntes)
+
+    girarPara(375, 812, true)
+    expect(screen.getByTestId('overlay-modo-paisagem')).toBeInTheDocument()
+    expect(screen.getByTestId('tabuleiro').textContent).toBe(tabuleiroAntes)
+    expect(screen.getByTestId('caixa').textContent).toBe(caixaAntes)
+    expect(screen.getAllByTestId('tabuleiro-celula')).toHaveLength(celulasAntes)
+    // Quando presentes, os observáveis do HUD sobrevivem ao giro.
+    if (chipAntes !== null) expect(screen.getByTestId('chip-jogador-ativo').textContent).toBe(chipAntes)
+    if (sanidadeAntes !== null) expect(screen.getByTestId('chip-sanidade').textContent).toBe(sanidadeAntes)
+    if (contagemAntes !== null) expect(screen.getByTestId('contagem-caixa').textContent).toBe(contagemAntes)
+    if (rodadaAntes !== null) expect(screen.getByTestId('indicador-rodada').textContent).toBe(rodadaAntes)
   })
 })
