@@ -650,8 +650,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         celula: { linha: 2, coluna: 3 },
       })
     })
-    // Movimento em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
+    // Movimento em silêncio (sem som de recusa, sem clarão — os sons do
+    // Encaixe da #241 convivem no mesmo array).
+    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_DE_RECUSA)).toHaveLength(0)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Fase 'confirmar' → botão envia CONFIRMAR_POSICAO_DO_PEAO; servidor confirma.
@@ -669,8 +670,8 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         pecaId: 'reta-1',
       })
     })
-    // Confirmação em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
+    // Confirmação em silêncio (sem som de recusa, sem clarão).
+    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_DE_RECUSA)).toHaveLength(0)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Re-seleção aceita pelo servidor: a seleção volta ao peão confirmado.
@@ -686,7 +687,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     // Guard AC3: nenhum comando trafega e o som de recusa toca com motivo
     // específico (espelha o FORA_DA_VEZ que o servidor responderia).
     expect(ws.sentMessages).toHaveLength(comandosAntes)
-    expect(toquesDeAudio).toHaveLength(1)
+    const recusas = toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_DE_RECUSA)
+    expect(recusas).toHaveLength(1)
+    expect(recusas[0]).toMatchObject({ volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('posicao_confirmada')

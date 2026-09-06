@@ -27,6 +27,7 @@ import {
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 import type { LimpezaTrigger } from '../../game/scenes/TransicaoLimpeza'
+import type { EncaixeTrigger } from '../../game/tabuleiro/encaixe'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -65,6 +66,10 @@ interface AmbienteDeJogoProps {
   sanidadePorPeao?: SanidadePorPeao
   /** Trigger de limpeza evento-driven (issue #239, B1) — só LIMPEZA_APLICADA dispara, snapshot não. */
   limpezaTrigger?: LimpezaTrigger | null
+  /** Trigger de encaixe evento-driven (issue #241): voo mesa→célula. */
+  encaixeTrigger?: EncaixeTrigger | null
+  /** Fim do voo do Encaixe (key) → o pai limpa o trigger. */
+  onFimEncaixe?: (key: number) => void
 }
 
 export function AmbienteDeJogo({
@@ -79,6 +84,8 @@ export function AmbienteDeJogo({
   peaoAtivoId = null,
   sanidadePorPeao = {},
   limpezaTrigger = null,
+  encaixeTrigger = null,
+  onFimEncaixe,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -262,6 +269,8 @@ export function AmbienteDeJogo({
           vagasSet={vagasSet}
           pecaCorrente={pecaCorrente}
           limpezaTrigger={limpezaTrigger}
+          encaixeTrigger={encaixeTrigger}
+          onFimEncaixe={onFimEncaixe}
         />
       </Canvas>
       {estadoExibicao ? (
@@ -288,6 +297,7 @@ export function AmbienteDeJogo({
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           sanidadePorPeao={sanidadePorPeao}
+          encaixeTrigger={encaixeTrigger}
         />
       ) : null}
     </div>

@@ -11,6 +11,13 @@ import {
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
 import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
+import {
+  origemDoEncaixe,
+  tocarSomDeMovimentoDoEncaixe,
+  tocarSomDeGiroDoEncaixe,
+} from '../components/partida/somDoEncaixe'
+import type { EncaixeTrigger } from '../game/tabuleiro/encaixe'
+import { deveReduzirMovimento } from '../hooks/usePrefersReducedMotion'
 import { tocarSom } from '../game/audio/sons'
 import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
@@ -94,6 +101,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     (snapshot: EstadoDaPartidaSnapshot) => despachar({ type: 'APLICAR_SNAPSHOT', snapshot }),
     [],
   )
+  // Modelo pré-despacho para derivar a origem do Encaixe (issue #241): o
+  // callback do canal lê a ref (sempre o último modelo commitado) antes de
+  // despachar o evento — sem re-subscrever o socket a cada render.
+  const modeloRef = useRef(modelo)
+  useEffect(() => {
+    modeloRef.current = modelo
+  }, [modelo])
   // ── Som de recusa + anúncio ao leitor de tela (issue #228) ──
   // Único dono dos disparos: reage aos mesmos eventos do canal que antes
   // geravam flash, somente leitura do modelo. Aprovações/seleções/sorteios/
@@ -116,6 +130,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Evento-driven: só LIMPEZA_APLICADA dispara som/animação, snapshots não.
   const [limpezaTrigger, setLimpezaTrigger] = useState<{ pecasRemovidas: readonly string[]; key: number } | null>(null)
   const limpezaKeyRef = useRef(0)
+
+  // ── Trigger de encaixe para TransicaoEncaixe (issue #241, spec #238) ──
+  // Evento-driven: só PECA_POSICIONADA dispara voo/som, snapshots não. A
+  // origem (mesa/bandeja) deriva do modelo PRÉ-despacho via ref (o callback
+  // do canal é estável e não re-subscreve a cada render).
+  const [encaixeTrigger, setEncaixeTrigger] = useState<EncaixeTrigger | null>(null)
+  const encaixeKeyRef = useRef(0)
+  const onFimEncaixe = useCallback((key: number) => {
+    setEncaixeTrigger((atual) => (atual?.key === key ? null : atual))
+  }, [])
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
   const emResultado = estado === 'resultado'
@@ -198,6 +222,44 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
           }
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          return
+        }
+        // Giro (issue #241, mudança de spec verbal): evento-driven para o
+        // som próprio — cada PECA_GIRADA toca a carta uma vez (giros
+        // distintos em sequência soam múltiplo por design: cada giro é uma
+        // ação distinta, sem debounce) e reduz no modelo. Cai antes do
+        // despacho genérico; `motivoDeRecusaDoEvento` retornaria null aqui
+        // (giro em silêncio na recusa) — o branch só adiciona o som.
+        if (evento.type === 'PECA_GIRADA') {
+          tocarSomDeGiroDoEncaixe()
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          return
+        }
+        // Encaixe (issue #241, spec #238 + mudanças de spec verbais):
+        // evento-driven para TransicaoEncaixe + som próprio — só
+        // PECA_POSICIONADA dispara voo/som, snapshots não. A origem
+        // (mesa/bandeja) deriva do modelo pré-despacho; o posicionamento
+        // toca SÓ o toque enigmático como som de movimento, no instante em
+        // que a peça começa a se mover (chegada do evento — sem atraso de
+        // assento). Transição visual de voo inalterada.
+        if (evento.type === 'PECA_POSICIONADA') {
+          const origem = origemDoEncaixe(modeloRef.current, evento.pecaId)
+          // Som imediato no início do movimento (com reduce, o voo vira
+          // snap mas o som segue igual — o estado final já renderiza
+          // pixel-igual).
+          tocarSomDeMovimentoDoEncaixe()
+          const reduzir = deveReduzirMovimento()
+          if (origem !== null && !reduzir) {
+            encaixeKeyRef.current += 1
+            setEncaixeTrigger({
+              pecaId: evento.pecaId,
+              origem: origem.origem,
+              indiceNaMesa: origem.indiceNaMesa,
+              celula: evento.celula,
+              key: encaixeKeyRef.current,
+            })
+          }
+          despacharEvento(evento)
           return
         }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
@@ -419,6 +481,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}
         limpezaTrigger={limpezaTrigger}
+        encaixeTrigger={encaixeTrigger}
+        onFimEncaixe={onFimEncaixe}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*
