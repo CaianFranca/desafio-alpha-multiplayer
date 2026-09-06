@@ -87,6 +87,7 @@ export type {
   CodigoDeErroDeTabuleiro,
   ComandoDeTabuleiro,
   CorDoPeao,
+  DesselecionarPeaoComando,
   EntradaDoEstadoDoTabuleiro,
   ErroDeDominioDoTabuleiro,
   EscolherVagaDaPecaRecebidaComando,
@@ -101,6 +102,7 @@ export type {
   OperacaoRejeitadaDoTabuleiro,
   Orientacao,
   Peao,
+  PeaoDesselecionadoEvento,
   PeaoMovidoEvento,
   PeaoPermaneceuEvento,
   PeaoPosicionadoEvento,
@@ -163,6 +165,7 @@ export {
 export {
   calcularAlcance,
   resolverAtaques,
+  resolverAtaquesCentradoNoAtuante,
 } from './monstros.ts';
 
 export {

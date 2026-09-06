@@ -10,6 +10,7 @@
 //   shared type:'POSICIONAR_PECA' + jogadorId <-> engine tipo:'posicionar_peca' + ator
 //   shared type:'FINALIZAR_MANIPULACAO' + jogadorId <-> engine tipo:'finalizar_manipulacao' + ator
 //   shared type:'SELECIONAR_PEAO' + jogadorId <-> engine tipo:'selecionar_peao' + ator
+//   shared type:'DESELECIONAR_PEAO' + jogadorId <-> engine tipo:'desselecionar_peao' + ator — issue #249
 //   shared type:'POSICIONAR_PEAO' + jogadorId <-> engine tipo:'posicionar_peao' + ator
 //   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' + jogadorId <-> engine tipo:'escolher_vaga_da_peca_recebida' + ator — issue #138
 //   shared type:'MOVER_PEAO' + jogadorId <-> engine tipo:'mover_peao' + ator
@@ -19,7 +20,7 @@
 //   Eventos:
 //   shared type:'TURNO_INICIADO' { jogadorId, rodada } <-> engine tipo:'turno_iniciado' { jogadorId, rodada }
 //   shared type:'TURNO_ENCERRADO' { jogadorId } <-> engine tipo:'turno_encerrado' { jogadorId }
-//   shared type:'POSICAO_CONFIRMADA' { jogadorId, peaoId, pecaId } <-> engine tipo:'posicao_confirmada' { jogadorId, peaoId, pecaId }
+//   shared type:'POSICAO_CONFIRMADA' { jogadorId, peaoId, pecaId, protegido } <-> engine tipo:'posicao_confirmada' idem — protegido (issue #227) é o estado RESULTANTE do ator no fim do gatilho completo (concessão da Sala Médica, consumo pelo ataque do MESMO gatilho e Proteção prévia não consumida incluídos).
 //   shared type:'PECA_SORTEADA' { pecaId, tipoDaPeca, orientacao } <-> engine tipo:'peca_sorteada' idem — emitido pelo Recebimento da #138 (e pelo sorteio unitário da Caixa)
 //   shared type:'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO' { recebidaId, borda, celulaAlvo } <-> engine tipo:'vaga_da_peca_recebida_escolhida' idem — issue #138
 //   (Estes dois eventos novos vivem nesta união, e não em
@@ -48,6 +49,10 @@
 //   EstadoDaPartidaSnapshot.geradoresLigados <-> engine geradoresLigados
 //   (espelho exato: readonly string[] de pecaIds);
 //   EstadoDaPartidaSnapshot.cartaoDeAcessoObtido <-> engine cartaoDeAcessoObtido.
+//   EstadoDaPartidaSnapshot.jogadores[].protegido <-> engine jogador.protegido
+//   (baseline da Proteção da Sala Médica, issue #227: concessão vive na
+//   Confirmação de Posição e consumo em ATAQUE_RESOLVIDO.protegidos; o
+//   cliente reconcilia pelo snapshot sem derivar do histórico).
 //   Sync manual: o engine não conhece o wire; novos contadores de objetivo
 //   exigem estender as duas pontas à mão (projeção + modelo do cliente).
 //
@@ -66,7 +71,7 @@ import type {
 } from './tabuleiro.ts';
 import type { PeaoId, RecebidaId, BordaCardinal, VagaDaPecaRecebidaEscolhidaEvento } from './peoes.ts';
 
-// --- Comandos cliente → servidor (11) ---
+// --- Comandos cliente → servidor (12) ---
 
 export interface SelecionarPecaPartidaComando {
   readonly type: 'SELECIONAR_PECA';
@@ -95,6 +100,14 @@ export interface FinalizarManipulacaoPartidaComando {
 
 export interface SelecionarPeaoPartidaComando {
   readonly type: 'SELECIONAR_PEAO';
+  readonly jogadorId: string;
+  readonly peaoId: PeaoId;
+}
+
+// Desseleção autoritativa (issue #249): o servidor é a autoridade inclusive
+// para desselecionar; idempotente no domínio, rejeitada sob pendências.
+export interface DesselecionarPeaoPartidaComando {
+  readonly type: 'DESELECIONAR_PEAO';
   readonly jogadorId: string;
   readonly peaoId: PeaoId;
 }
@@ -145,6 +158,7 @@ export type PartidaComandoDoCliente =
   | PosicionarPecaPartidaComando
   | FinalizarManipulacaoPartidaComando
   | SelecionarPeaoPartidaComando
+  | DesselecionarPeaoPartidaComando
   | PosicionarPeaoPartidaComando
   | EscolherVagaDaPecaRecebidaPartidaComando
   | MoverPeaoPartidaComando
@@ -170,6 +184,12 @@ export interface PosicaoConfirmadaEvento {
   readonly jogadorId: string;
   readonly peaoId: PeaoId;
   readonly pecaId: PecaId;
+  // Proteção do ator RESULTANTE do gatilho (issue #227): o espelho exato do
+  // `protegido` do ator no ESTADO FINAL — true quando a Sala Médica a concedeu
+  // (sobrevive ao ataque do MESMO gatilho) OU quando uma Proteção prévia não
+  // foi consumida; false quando não havia Proteção ou ela foi consumida pelo
+  // ataque do próprio gatilho (sem Sala Médica no destino para restaurá-la).
+  readonly protegido: boolean;
 }
 
 // Uma peça retirada da Caixa por sorteio (issue #138: uma por peça do
@@ -233,6 +253,11 @@ export interface JogadorNoSnapshot {
   readonly sanidade: number;
   readonly emBaixaIluminacao: boolean;
   readonly amedrontado: boolean;
+  // Proteção da Sala Médica no snapshot (issue #227): baseline do estado da
+  // Proteção por Jogador — o cliente projeta sem derivar do histórico de
+  // eventos (a concessão vive na Confirmação de Posição e o consumo em
+  // ATAQUE_RESOLVIDO.protegidos).
+  readonly protegido: boolean;
 }
 
 export interface PecaPosicionadaNoSnapshot {

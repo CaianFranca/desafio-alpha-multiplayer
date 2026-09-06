@@ -20,7 +20,10 @@ export function Header() {
   const { authState, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const emLobby = location.pathname.startsWith('/salas') || location.pathname.startsWith('/sala')
+  const emLobby =
+    location.pathname.startsWith('/salas') ||
+    location.pathname.startsWith('/sala/') ||
+    location.pathname.startsWith('/convite')
   const { sala } = useSalaWebSocketContext()
   const emSala = sala !== null
   const autenticado = authState.status === 'authenticated'

@@ -42,10 +42,10 @@ function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): Es
       pecasRestantesNaCaixa: 83,
     },
     jogadores: [
-      { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ],
     jogadorAtivoId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
     rodada: 1,
@@ -411,8 +411,9 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     )
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
 
-    // Limpeza em silêncio: nenhum toque, nenhum clarão.
-    expect(toquesDeAudio).toHaveLength(0)
+    // Limpeza com som único (issue #239): um toque sombrio por comando, sem clarão.
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Célula liberada aceita novo posicionamento pela mesma via dos testes de
@@ -431,6 +432,104 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     })
     // A mesma conexão sobreviveu a todo o fluxo (nenhum socket novo).
     expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('LIMPEZA_APLICADA com N peças toca exatamente 1 som por comando, qualquer quantidade', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Prepara 3 peças posicionadas via deltas
+    act(() => {
+      ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 1, coluna: 1 }, orientacao: 0 })
+      ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-2', celula: { linha: 1, coluna: 2 }, orientacao: 0 })
+      ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-3', celula: { linha: 1, coluna: 3 }, orientacao: 0 })
+    })
+    await waitFor(() => expect(screen.getAllByTestId('peca-posicionada')).toHaveLength(3))
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'LIMPEZA_APLICADA',
+        pecasRemovidas: ['inicial-1', 'inicial-2', 'inicial-3'],
+      }),
+    )
+
+    await waitFor(() => expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(0))
+    // Exatamente 1 som por comando, mesmo com N=3 (nunca um por peça)
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
+    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    // Células liberadas
+    expect(celulaDoEspelho(1, 1).getAttribute('data-ocupada')).toBe('false')
+    expect(celulaDoEspelho(1, 2).getAttribute('data-ocupada')).toBe('false')
+    expect(celulaDoEspelho(1, 3).getAttribute('data-ocupada')).toBe('false')
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('LIMPEZA_APLICADA com prefers-reduced-motion faz snap instantâneo mas ainda toca 1 som', async () => {
+    const originalMatchMedia = window.matchMedia
+    // Mock reduce = true antes de montar a PartidaPage
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia
+
+    try {
+      const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+      act(() =>
+        ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 }),
+      )
+      await screen.findByTestId('peca-posicionada')
+      expect(toquesDeAudio).toHaveLength(0)
+
+      act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] }))
+
+      // Snap instantâneo: peça some sem precisar de animação, estado final pixel-igual
+      await waitFor(() => expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument())
+      expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
+      // Som único mesmo com reduce ativo
+      await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+      expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
+      expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    } finally {
+      window.matchMedia = originalMatchMedia
+    }
+  })
+
+  it('fade+encolher termina sem resíduos — peça removida desaparece e célula fica livre para reuso', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    act(() =>
+      ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 2, coluna: 2 }, orientacao: 0 }),
+    )
+    await screen.findByTestId('peca-posicionada')
+    expect(celulaDoEspelho(2, 2).getAttribute('data-ocupada')).toBe('true')
+
+    act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] }))
+
+    // Após LIMPEZA_APLICADA o reducer já filtra, e TransicaoLimpeza faz o fade
+    // com lerp scale 1→0.7 e opacity 0.88→0 terminando sem resíduos (onFim remove fantasma)
+    await waitFor(() => expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument())
+    expect(celulaDoEspelho(2, 2).getAttribute('data-ocupada')).toBe('false')
+
+    // Reuso imediato da célula liberada prova que não há resíduo lógico nem visual
+    act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'reta-1' }))
+    const user = userEvent.setup()
+    await user.click(celulaDoEspelho(2, 2))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'POSICIONAR_PECA',
+        pecaId: 'reta-1',
+        celula: { linha: 2, coluna: 2 },
+        jogadorId: mockAuthenticatedState.jogador.id,
+      })
+    })
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
   })
 })
 
@@ -697,10 +796,10 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
         pecasRestantesNaCaixa: 57,
       },
       jogadores: [
-        { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-        { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-        { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-        { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+        { jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90', apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+        { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+        { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+        { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: true, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
       ],
       jogadorAtivoId: 'jogador-2',
       rodada: 2,
@@ -1217,5 +1316,119 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
     // reflete o engine): giro segue desabilitado.
     expect(screen.getByTestId('girar-horario')).toBeDisabled()
     expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
+  })
+})
+
+describe('reload do primeiro turno — peça de volta à mesa e turno concluível (issue #258)', () => {
+  const MEU_JOGADOR_ID = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
+
+  function peaoDoEspelho(peaoId: string): HTMLElement | undefined {
+    return screen
+      .getAllByTestId('peao')
+      .find((el) => el.getAttribute('data-peao-id') === peaoId)
+  }
+
+  function pecaInicialDoEspelho(pecaId: string): HTMLElement {
+    const peca = screen
+      .getAllByTestId('mesa-peca-inicial')
+      .find((el) => el.getAttribute('data-peca-id') === pecaId)
+    if (!peca) throw new Error(`peça inicial ${pecaId} não encontrada na mesa`)
+    return peca
+  }
+
+  it('F5 com a inicial ainda não encaixada: peça reaparece e o turno conclui após DESELECIONAR_PEAO', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+
+    // Foto do reload: a inicial em foco sumiu da lista, mas a seleção
+    // pendente (`pecaSelecionadaId`) e o peão selecionado sobreviveram.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({
+          tabuleiro: {
+            posicionadas: [],
+            iniciais: [],
+            peoes: [
+              { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
+              { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: null },
+              { peaoId: 'peao-azul', cor: 'azul', pecaId: null },
+              { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+            ],
+            recebidas: [],
+            pecaSelecionadaId: 'inicial-2',
+            pecaEmManipulacaoId: null,
+            peaoSelecionadoId: 'peao-branco',
+            pecasRestantesNaCaixa: 83,
+          },
+          jogadorAtivoId: MEU_JOGADOR_ID,
+          rodada: 1,
+        }),
+      }),
+    )
+
+    // A peça em foco volta para a mesa (só ela — sem ressuscitar a lista cheia).
+    const iniciais = await screen.findAllByTestId('mesa-peca-inicial')
+    expect(iniciais.map((el) => el.getAttribute('data-peca-id'))).toEqual(['inicial-2'])
+
+    // O anúncio do turno corrente (replay) não apaga a reconstrução.
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 1 }))
+    await waitFor(() =>
+      expect(
+        screen.getAllByTestId('mesa-peca-inicial').map((el) => el.getAttribute('data-peca-id')),
+      ).toEqual(['inicial-2']),
+    )
+    expect(peaoDoEspelho('peao-branco')?.getAttribute('data-selecionado')).toBe('true')
+
+    // H1: com o peão selecionado o clique na célula é bloqueado (ciclo
+    // binário #249) — nenhum POSICIONAR_PECA sai.
+    const user = userEvent.setup()
+    const antesDoBloqueio = ws.sentMessages.length
+    await user.click(celulaDoEspelho(3, 3))
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 150))
+    })
+    expect(ws.sentMessages).toHaveLength(antesDoBloqueio)
+
+    // Caminho de destravamento: clicar fora da peça/peão desseleciona via
+    // comando autoritativo ao servidor (nunca só no local, #249).
+    await user.click(screen.getByTestId('tabuleiro'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'DESELECIONAR_PEAO',
+        peaoId: 'peao-branco',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+
+    // Ack do servidor: o ciclo apaga e a Inicial volta a ser selecionável.
+    act(() => ws.simulateMessage({ type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' }))
+    await waitFor(() =>
+      expect(peaoDoEspelho('peao-branco')?.getAttribute('data-selecionado')).toBe('false'),
+    )
+    await user.click(pecaInicialDoEspelho('inicial-2'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'SELECIONAR_PECA',
+        pecaId: 'inicial-2',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+
+    // Seleção confirmada → o clique na célula vazia posiciona a Inicial.
+    act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-2' }))
+    await user.click(celulaDoEspelho(3, 3))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'POSICIONAR_PECA',
+        pecaId: 'inicial-2',
+        celula: { linha: 3, coluna: 3 },
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+    // A mesma conexão sobreviveu ao roteiro inteiro (sem reload de verdade).
+    expect(MockWebSocket.instances).toHaveLength(1)
   })
 })

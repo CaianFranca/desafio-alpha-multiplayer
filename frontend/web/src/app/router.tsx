@@ -40,6 +40,14 @@ export const routes = [
         ),
       },
       {
+        path: 'convite/:codigoDeSala',
+        element: (
+          <RequireAuth>
+            <SalaPage />
+          </RequireAuth>
+        ),
+      },
+      {
         path: 'partida',
         element: (
           <RequireAuth>

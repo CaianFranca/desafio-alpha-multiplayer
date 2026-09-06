@@ -16,6 +16,7 @@ import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/i
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
+import { TransicaoLimpeza, type LimpezaTrigger } from './TransicaoLimpeza'
 import type {
   PeaoId,
   PecaId,
@@ -100,6 +101,8 @@ interface AmbienteCenaProps {
   vagasSet?: ReadonlySet<string>
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
   pecaCorrente?: PecaCorrente | null
+  /** Trigger de limpeza evento-driven (issue #239, B1). */
+  limpezaTrigger?: LimpezaTrigger | null
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -131,6 +134,7 @@ export function AmbienteCena({
   alvosPendentesSet,
   vagasSet,
   pecaCorrente = null,
+  limpezaTrigger = null,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
@@ -180,6 +184,7 @@ export function AmbienteCena({
               estadoPeoes={estadoPeoes}
               onPuxar={onPuxarPecaDaBandeja}
             />
+            <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
             {peoesNaMesa.map((peao) => {
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (

@@ -453,6 +453,28 @@ describe('header variations (issue #211)', () => {
     expect(enviouSair).toBe(false)
     await waitFor(() => expect(headerHome).toHaveClass('site-header'))
   })
+
+  it('regressão — Logado em Convite (/convite/:codigo, com sala): Voltar, nunca Retornar', async () => {
+    MockWebSocket.clean()
+    renderWithRouter(['/convite/H211AA'], autenticado)
+
+    // Antes da sala carregar já é lobby: sem âncoras, com Voltar.
+    const header = screen.getByRole('banner')
+    expect(within(header).queryByRole('navigation', { name: /navegação principal/i })).not.toBeInTheDocument()
+    expect(within(header).getByRole('button', { name: /voltar para o início/i })).toBeInTheDocument()
+    expect(within(header).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
+    expect(within(header).queryByRole('link', { name: /retornar para sala/i })).not.toBeInTheDocument()
+
+    // Após entrar na sala, o header continua com Voltar (não vira Retornar).
+    const ws = MockWebSocket.last()!
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: criarSalaParaHeader() })
+    await screen.findByText('H211AA')
+
+    const headerEmSala = screen.getByRole('banner')
+    expect(within(headerEmSala).getByRole('button', { name: /voltar para o início/i })).toBeInTheDocument()
+    expect(within(headerEmSala).queryByRole('link', { name: /retornar para sala/i })).not.toBeInTheDocument()
+    expect(within(headerEmSala).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
+  })
 })
 
 describe('responsive sections', () => {

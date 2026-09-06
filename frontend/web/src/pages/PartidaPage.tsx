@@ -10,9 +10,15 @@ import {
   textoDoAnuncioDeRecusa,
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
+import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
+import { tocarSom } from '../game/audio/sons'
 import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
+import {
+  chaveDeComandoPendente,
+  consumirAck,
+} from '../game/tabuleiro/pendentes'
 import {
   criarEstadoInicialDoCliente,
   reduzirEvento,
@@ -106,6 +112,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
   }, [])
 
+  // ── Trigger de limpeza para TransicaoLimpeza (issue #239, B1) ──
+  // Evento-driven: só LIMPEZA_APLICADA dispara som/animação, snapshots não.
+  const [limpezaTrigger, setLimpezaTrigger] = useState<{ pecasRemovidas: readonly string[]; key: number } | null>(null)
+  const limpezaKeyRef = useRef(0)
+
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
   const emResultado = estado === 'resultado'
   const emResultadoRef = useRef(emResultado)
@@ -113,12 +124,32 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     emResultadoRef.current = emResultado
   }, [emResultado])
 
+  // ── Pendentes otimistas anti-duplo-place (issue #249) ──
+  // Conjunto de alvos em voo (POSICIONAR_PECA/POSICIONAR_PEAO/
+  // DESELECIONAR_PEAO): bloqueia o reenvio do mesmo alvo até ack/erro/
+  // snapshot. O servidor é a autoridade — o cliente nunca permite duplo
+  // envio; o consumo acontece no onEvento abaixo (ack por evento, erro e
+  // snapshot limpam). Ref estável, fora do modelo (nunca persiste).
+  const pendentesEmVoo = useRef<Set<string>>(new Set())
+
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, conectar: reconectarSocket, desconectar } = usePartidaWebSocket({
     serverId,
     partidaId,
     onEvento: useCallback(
       (evento) => {
+        // Consumo dos pendentes otimistas (#249): ack remove o alvo em voo;
+        // erro e snapshot reconciliam (autoridade total — limpam).
+        if (
+          evento.type === 'PECA_POSICIONADA' ||
+          evento.type === 'PEAO_POSICIONADO' ||
+          evento.type === 'PEAO_DESELECIONADO'
+        ) {
+          consumirAck(pendentesEmVoo.current, evento)
+        }
+        if (evento.type === 'ERRO_DO_TABULEIRO') {
+          pendentesEmVoo.current.clear()
+        }
         if (evento.type === 'PARTIDA_TERMINADA') {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante a
           // tela de resultado.
@@ -128,6 +159,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           return
         }
         if (evento.type === 'ESTADO_DA_PARTIDA') {
+          // Snapshot é autoridade total da seleção (#249): reconcilia
+          // pendentes em voo contraditórios (limpa o conjunto).
+          pendentesEmVoo.current.clear()
           aplicarSnapshotNoModelo(evento.snapshot)
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
@@ -153,6 +187,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             const motivo = motivoDeRecusaDoEvento(evento)
             if (motivo !== null) tocarRecusa(motivo)
           }
+          return
+        }
+        // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
+        // LIMPEZA_APLICADA dispara som/animação, snapshots não.
+        if (evento.type === 'LIMPEZA_APLICADA') {
+          if (evento.pecasRemovidas.length > 0) {
+            limpezaKeyRef.current += 1
+            setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
+            tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
+          }
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           return
         }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
@@ -194,10 +239,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [desconectar, navigate, codigoDeSala])
 
   // ── Injeção única de jogadorId (issue #91) — bloqueada após término ──
+  // Com gate anti-duplo-place (#249): o mesmo alvo em voo não é reenviado.
   const enviarComJogador = useCallback(
     (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
       if (emResultado) return
+      const chave = chaveDeComandoPendente(comando)
+      if (chave !== null) {
+        if (pendentesEmVoo.current.has(chave)) return
+        pendentesEmVoo.current.add(chave)
+      }
       enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
     [enviar, jogadorId, emResultado],
@@ -367,6 +418,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}
+        limpezaTrigger={limpezaTrigger}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*

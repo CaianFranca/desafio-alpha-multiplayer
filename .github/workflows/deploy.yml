@@ -67,12 +67,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha || github.ref }}
 
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -92,12 +92,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha || github.ref }}
 
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -109,7 +109,7 @@ jobs:
         run: scripts/build-release.sh "$SHORT_SHA"
 
       - name: Upload do artefato
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flicker-${{ env.SHORT_SHA }}
           path: release/flicker-${{ env.SHORT_SHA }}.tar.gz
@@ -131,7 +131,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha || github.ref }}
 
@@ -139,7 +139,7 @@ jobs:
         run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       - name: Download do artefato gerado no job build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: flicker-${{ env.SHORT_SHA }}
           path: release
@@ -204,6 +204,9 @@ jobs:
             echo "POSTGRES_PASSWORD=${PROD_POSTGRES_PASSWORD}"
             echo 'REDIS_HOST=127.0.0.1'
             echo 'REDIS_PORT=6379'
+            # Lobby e game-server coabitam o mesmo host em prod nativa: o
+            # hostname default `game-server` só resolve na rede Docker Compose.
+            echo 'GAME_SERVER_ADVERTISE_HOST=127.0.0.1'
             echo "JWT_SECRET=${PROD_JWT_SECRET}"
             echo "JWT_REFRESH_SECRET=${PROD_JWT_REFRESH_SECRET}"
             echo "LOBBY_PUBLIC_URL=${LOBBY_PUBLIC_URL}"

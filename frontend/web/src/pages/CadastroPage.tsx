@@ -1,15 +1,18 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import type { AuthFieldErrors } from '../api/auth'
 import { useAuth } from '../state/useAuth'
 import { AuthCard } from '../components/auth/AuthCard'
 import { AuthField } from '../components/auth/AuthField'
 import { useAuthForm } from '../hooks/useAuthForm'
 import { validarApelido, validarEmailCadastro, validarSenhaCadastro } from '../utils/validacaoCredenciais'
+import { destinoSeguroDeAuth, type ProtectedLocationState } from '../app/RequireAuth'
 
 export function CadastroPage() {
   const { register } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const from = (location.state as ProtectedLocationState | null)?.from
   const [apelido, setApelido] = useState('')
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
@@ -30,7 +33,7 @@ export function CadastroPage() {
       },
       () => register({ apelido: apelido.trim(), email: email.trim(), senha }),
     )
-    if (ok) navigate('/')
+    if (ok) navigate(destinoSeguroDeAuth(from), { replace: true })
   }
 
   return (
@@ -105,7 +108,7 @@ export function CadastroPage() {
 
       <p className="text-sm text-center text-muted mt-6">
         Já tem Cadastro?{' '}
-        <Link to="/login" className="auth-link">
+        <Link to="/login" state={location.state} className="auth-link">
           Entre
         </Link>
       </p>

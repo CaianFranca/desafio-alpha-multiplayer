@@ -49,20 +49,46 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
 
   it('aplicarSnapshot popula sanidade e estados (fonte autoritativa para late-join)', () => {
     const snapshot = snapshotComJogadores([
-      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-      { jogadorId: 'j2', apelido: 'Bob', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 1, emBaixaIluminacao: true, amedrontado: false },
-      { jogadorId: 'j3', apelido: 'Carol', cor: 'azul', ordem: 2, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 0, emBaixaIluminacao: false, amedrontado: true },
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'j2', apelido: 'Bob', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 1, emBaixaIluminacao: true, amedrontado: false, protegido: false },
+      { jogadorId: 'j3', apelido: 'Carol', cor: 'azul', ordem: 2, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 0, emBaixaIluminacao: false, amedrontado: true, protegido: false },
     ])
     const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
-    expect(estado.jogadorPorId['j1']).toEqual({ apelido: 'Ana', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false })
-    expect(estado.jogadorPorId['j2']).toEqual({ apelido: 'Bob', cor: 'vermelho', sanidade: 1, emBaixaIluminacao: true, amedrontado: false })
-    expect(estado.jogadorPorId['j3']).toEqual({ apelido: 'Carol', cor: 'azul', sanidade: 0, emBaixaIluminacao: false, amedrontado: true })
+    expect(estado.jogadorPorId['j1']).toEqual({ apelido: 'Ana', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false })
+    expect(estado.jogadorPorId['j2']).toEqual({ apelido: 'Bob', cor: 'vermelho', sanidade: 1, emBaixaIluminacao: true, amedrontado: false, protegido: false })
+    expect(estado.jogadorPorId['j3']).toEqual({ apelido: 'Carol', cor: 'azul', sanidade: 0, emBaixaIluminacao: false, amedrontado: true, protegido: false })
     expect(estado.peaoPorJogador['j2']).toBe('peao-vermelho')
+  })
+
+  it('aplicarSnapshot reconcilia a Proteção pela baseline (issue #227)', () => {
+    const snapshot = snapshotComJogadores([
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: true },
+      { jogadorId: 'j2', apelido: 'Bob', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+    ])
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
+    expect(estado.jogadorPorId['j1'].protegido).toBe(true)
+    expect(estado.jogadorPorId['j2'].protegido).toBe(false)
+  })
+
+  it('aplicarSnapshot normaliza snapshot antigo sem protegido (defensivo, issue #227)', () => {
+    // Payload de binário anterior à #227: o campo não chega via WS replay.
+    const snapshot = snapshotComJogadores([
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false } as unknown as EstadoDaPartidaSnapshot['jogadores'][number],
+    ])
+    const bruto = {
+      ...snapshot,
+      jogadores: snapshot.jogadores.map((jogador) => {
+        const { protegido: _ignorado, ...resto } = jogador
+        return resto
+      }),
+    } as unknown as EstadoDaPartidaSnapshot
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), bruto)
+    expect(estado.jogadorPorId['j1'].protegido).toBe(false)
   })
 
   it('ATAQUE_RESOLVIDO com estadosAplicados atualiza sanidade e Baixa Iluminação', () => {
     let estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([
-      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ]))
     estado = reduzirEvento(estado, {
       type: 'ATAQUE_RESOLVIDO',
@@ -78,7 +104,7 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
 
   it('ATAQUE_RESOLVIDO do Espectro reduz sanidade e marca Amedrontado quando chega a zero', () => {
     let estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([
-      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 1, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 1, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ]))
     estado = reduzirEvento(estado, {
       type: 'ATAQUE_RESOLVIDO',
@@ -93,7 +119,7 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
 
   it('ATAQUE_RESOLVIDO vazio (sem estadosAplicados) não altera sanidade mas registra feedback', () => {
     const base = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([
-      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ]))
     const estado = reduzirEvento(base, {
       type: 'ATAQUE_RESOLVIDO',
@@ -109,8 +135,8 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
 
   it('RESGATE_REALIZADO remove Baixa Iluminação sem alterar sanidade', () => {
     let estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([
-      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 2, emBaixaIluminacao: true, amedrontado: false },
-      { jogadorId: 'j2', apelido: 'Bob', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 2, emBaixaIluminacao: true, amedrontado: false, protegido: false },
+      { jogadorId: 'j2', apelido: 'Bob', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ]))
     estado = reduzirEvento(estado, {
       type: 'RESGATE_REALIZADO',
@@ -126,8 +152,8 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
 
   it('RESGATE_REALIZADO de amedrontado restaura sanidade a 1 e limpa estados', () => {
     let estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([
-      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 0, emBaixaIluminacao: false, amedrontado: true },
-      { jogadorId: 'j2', apelido: 'Bob', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 0, emBaixaIluminacao: false, amedrontado: true, protegido: false },
+      { jogadorId: 'j2', apelido: 'Bob', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ]))
     estado = reduzirEvento(estado, {
       type: 'RESGATE_REALIZADO',
@@ -169,7 +195,7 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
       posicionadas: [...estado.posicionadas, { pecaId: 'vulto-1', tipo: 'vulto' as const, orientacao: 0 as const, celula: { linha: 1, coluna: 1 } }],
     }
     let comSanidade = aplicarSnapshot(comVulto, snapshotComJogadores([
-      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 2, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 2, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ]))
     comSanidade = reduzirEvento(comSanidade, {
       type: 'LIMPEZA_APLICADA',
@@ -181,7 +207,7 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
 
   it('lote ATAQUE + LIMPEZA coexistem sem interferência na sanidade', () => {
     let base = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([
-      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ]))
     const estado = reduzirEventos(base, [
       {
