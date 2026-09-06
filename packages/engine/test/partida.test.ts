@@ -1077,3 +1077,571 @@ test('limpeza: remove peça inicial, de caminho e especial fora da iluminação'
   assert.ok(!ids.includes('gerador-x'));
   assert.ok(ids.includes('inicial-1'));
 });
+
+// Travessia do Escuro (issue #264 / spec #272): comando exclusivo de Baixa
+// Iluminação. Helpers locais — o estado da travessia posiciona o Peão de ana
+// sobre a reta-1 em (2,3) e re-seleciona: a vaga norte (1,3) é escura, vazia
+// e conectada; as rodadas anteriores já consumiram as reta-1..6 da Caixa
+// (topo reta-7), então o sorteio de Baixa (1 peça) puxa o topo controlado.
+const atravessarOEscuro = (peaoId: string, linha: number, coluna: number) =>
+  ({ tipo: 'atravessar_o_escuro', peaoId, celula: { linha, coluna } } as const);
+
+function comJogadorEmBaixa(
+  estado: EstadoDaPartida,
+  jogadorId: string,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    jogadores: estado.jogadores.map((jogador) =>
+      jogador.jogadorId === jogadorId
+        ? { ...jogador, emBaixaIluminacao: true }
+        : jogador,
+    ),
+  };
+}
+
+function estadoDaTravessia(): EstadoDaPartida {
+  let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  return estado;
+}
+
+test('travessia do Escuro: atravessar, encaixar a Recebida travada, confirmar sem re-seleção e encerrar', () => {
+  let estado = estadoDaTravessia();
+  // Caixa controlada: o Recebimento de Baixa (1 peça) puxa o topo (reta-x),
+  // garantindo determinismo; a fora-esc em (0,5) garante limpeza na
+  // Confirmação sem depender da sequência completa do Recebimento.
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'reta-x', tipo: 'reta' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = comPecaFora(estado, 'fora-esc', 'reta', 0, 5);
+
+  const travessia = aplicarComandoDePartida(
+    estado,
+    atravessarOEscuro('peao-branco', 1, 3),
+    'ana',
+  );
+  assert.equal(travessia.sucesso, true);
+  if (!travessia.sucesso) return;
+  // Lote canônico: atravessou_o_escuro abre, seguido do sorteio único de
+  // Baixa (peca_sorteada + recebimento_gerado com a célula-alvo PRÉ-FIXADA
+  // na célula escura da travessia).
+  assert.deepEqual(travessia.eventos, [
+    {
+      tipo: 'atravessou_o_escuro',
+      peaoId: 'peao-branco',
+      celula: { linha: 1, coluna: 3 },
+    },
+    { tipo: 'peca_sorteada', pecaId: 'reta-x', tipoDaPeca: 'reta', orientacao: 0 },
+    {
+      tipo: 'recebimento_gerado',
+      recebidas: [
+        {
+          recebidaId: 'recebida-reta-x',
+          pecaId: 'reta-x',
+          tipoDaPeca: 'reta',
+          vaga: null,
+          celulaAlvo: { linha: 1, coluna: 3 },
+        },
+      ],
+    },
+  ]);
+  assert.equal(travessia.estado.atravessouNoTurno, true);
+  // A Seleção do Peão é preservada para a sequência (escolher → encaixar →
+  // mover); a pendência nasce SEM vaga — a escolha da borda é o passo
+  // seguinte — mas JÁ com a célula-alvo travada.
+  assert.equal(travessia.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+  assert.equal(travessia.estado.tabuleiro.recebidas.length, 1);
+  const pendencia = travessia.estado.tabuleiro.recebidas[0];
+  assert.equal(pendencia.vaga, null);
+  assert.deepEqual(pendencia.celulaAlvo, { linha: 1, coluna: 3 });
+  estado = travessia.estado;
+
+  // ST-15 / issue #264: a escolha da vaga aceita apenas a borda que mapeia à
+  // célula travada — leste (2,4) é DADOS_INVALIDOS; norte (1,3) flui.
+  assert.equal(
+    codigoDaRejeicao(estado, escolherVaga('recebida-reta-x', 'leste'), 'ana'),
+    'DADOS_INVALIDOS',
+  );
+  estado = aplicar(estado, escolherVaga('recebida-reta-x', 'norte'), 'ana');
+  assert.equal(
+    estado.tabuleiro.recebidas[0].vaga,
+    'norte',
+  );
+
+  estado = aplicar(estado, posicionarPeca('reta-x', 1, 3), 'ana');
+  assert.equal(estado.tabuleiro.recebidas.length, 0);
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  assert.equal(
+    estado.tabuleiro.peoes.find((peao) => peao.peaoId === 'peao-branco')?.pecaId,
+    'reta-x',
+  );
+
+  // AC-3 do #272: a Confirmação NÃO exige o Peão selecionado (o movimento o
+  // deseleciona) — o fluxo de Baixa continua até o Encerramento do Turno.
+  const confirmacao = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.deepEqual(confirmacao.eventos, [
+    {
+      tipo: 'posicao_confirmada',
+      jogadorId: 'ana',
+      peaoId: 'peao-branco',
+      pecaId: 'reta-x',
+      protegido: false,
+    },
+    {
+      tipo: 'celulas_iluminadas',
+      celulas: [
+        // peao-vermelho em (0,0)
+        { linha: 0, coluna: 0 },
+        { linha: 0, coluna: 1 },
+        { linha: 1, coluna: 0 },
+        // peao-branco em (1,3) — Baixa Iluminação: apenas a própria célula
+        { linha: 1, coluna: 3 },
+        // peao-amarelo em (6,0)
+        { linha: 5, coluna: 0 },
+        // peao-azul em (6,6)
+        { linha: 5, coluna: 6 },
+        { linha: 6, coluna: 0 },
+        { linha: 6, coluna: 1 },
+        { linha: 6, coluna: 5 },
+        { linha: 6, coluna: 6 },
+      ],
+    },
+    // Limpeza: inicial-1, reta-1, reta-2 e fora-esc ficaram fora da
+    // iluminação (Baixa cobre só a célula do peão); a reta-x (sob o peão) e
+    // as demais peças sob os peões são preservadas.
+    {
+      tipo: 'limpeza_aplicada',
+      pecasRemovidas: ['inicial-1', 'reta-1', 'reta-2', 'fora-esc'],
+    },
+  ]);
+  // Em Baixa a Confirmação NÃO sorteia (o Recebimento já ocorreu na
+  // Travessia): zero peça_sorteada/recebimento_gerado e zero pendências.
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
+  // A flag persiste até o avanço da vez — não é zerada na Confirmação.
+  assert.equal(confirmacao.estado.atravessouNoTurno, true);
+  estado = confirmacao.estado;
+
+  const encerramento = aplicarComandoDePartida(estado, encerrarTurno(), 'ana');
+  assert.equal(encerramento.sucesso, true);
+  if (!encerramento.sucesso) return;
+  // A reta-x (última encaixada) deixou a janela de Manipulação aberta; a
+  // Passagem de Vez a encerra antes do turno_iniciado e zera a flag.
+  assert.deepEqual(encerramento.eventos, [
+    { tipo: 'turno_encerrado', jogadorId: 'ana' },
+    { tipo: 'manipulacao_finalizada', pecaId: 'reta-x' },
+    { tipo: 'turno_iniciado', jogadorId: 'bruno', rodada: 2 },
+  ]);
+  assert.equal(encerramento.estado.jogadorAtivoId, 'bruno');
+  assert.equal(encerramento.estado.atravessouNoTurno, false);
+  assert.equal(encerramento.estado.posicaoConfirmada, false);
+});
+
+test('travessia do Escuro: mover para célula iluminada e confirmar em Baixa não sorteia nem marca a flag', () => {
+  // reta-2 girada para 90 em (3,4): oeste conectado à inicial-1 — movimento
+  // NORMAL para uma célula iluminada dentro da sequência do turno.
+  let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: estado.tabuleiro.posicionadas.map((peca) =>
+        peca.pecaId === 'reta-2' ? { ...peca, orientacao: 90 as const } : peca,
+      ),
+    },
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
+  assert.equal(
+    estado.tabuleiro.peoes.find((peao) => peao.peaoId === 'peao-branco')?.pecaId,
+    'reta-2',
+  );
+
+  // AC-3: a Confirmação direta (sem re-seleção) sucede em Baixa — e, sem
+  // Travessia, consome zero peças da Caixa (0 consumo) sem marcar a flag.
+  const confirmacao = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.posicaoConfirmada, true);
+  assert.equal(confirmacao.estado.atravessouNoTurno, false);
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
+});
+
+test('travessia do Escuro: guardas na ordem canônica', () => {
+  // Peão de outro Jogador e ator fora da vez: a vez precede a travessia.
+  assert.equal(
+    codigoDaRejeicao(
+      comJogadorEmBaixa(partidaEmRodada2(), 'ana'),
+      atravessarOEscuro('peao-vermelho', 1, 3),
+      'ana',
+    ),
+    'FORA_DA_VEZ',
+  );
+  assert.equal(
+    codigoDaRejeicao(estadoDaTravessia(), atravessarOEscuro('peao-branco', 1, 3), 'fantasma'),
+    'FORA_DA_VEZ',
+  );
+
+  // Sem Baixa Iluminação a travessia é vedada, mesmo com o Peão em sequência.
+  {
+    let semBaixa = partidaEmRodada2();
+    semBaixa = aplicar(semBaixa, selecionarPeao('peao-branco'), 'ana');
+    semBaixa = aplicar(semBaixa, moverPeao('peao-branco', 2, 3), 'ana');
+    semBaixa = aplicar(semBaixa, selecionarPeao('peao-branco'), 'ana');
+    assert.equal(
+      codigoDaRejeicao(semBaixa, atravessarOEscuro('peao-branco', 1, 3), 'ana'),
+      'MOVIMENTO_INDISPONIVEL',
+    );
+  }
+
+  // No Primeiro Turno a jogada ainda não existe.
+  assert.equal(
+    codigoDaRejeicao(partidaIniciada(), atravessarOEscuro('peao-branco', 1, 3), 'ana'),
+    'MOVIMENTO_INDISPONIVEL',
+  );
+
+  // Após a Confirmação de Posição (que em Baixa não sorteia) nada mais se move.
+  {
+    let confirmado = estadoDaTravessia();
+    confirmado = aplicar(confirmado, confirmarPosicao('peao-branco'), 'ana');
+    assert.equal(confirmado.atravessouNoTurno, false);
+    assert.equal(
+      codigoDaRejeicao(confirmado, atravessarOEscuro('peao-branco', 1, 3), 'ana'),
+      'POSICAO_CONFIRMADA',
+    );
+  }
+
+  // Única por turno: a segunda travessia é vedada com a flag já marcada.
+  {
+    let jaAtravessou = estadoDaTravessia();
+    jaAtravessou = aplicar(jaAtravessou, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+    assert.equal(jaAtravessou.atravessouNoTurno, true);
+    assert.equal(
+      codigoDaRejeicao(jaAtravessou, atravessarOEscuro('peao-branco', 2, 3), 'ana'),
+      'MOVIMENTO_INDISPONIVEL',
+    );
+  }
+
+  // AC-3 do #272: com a Seleção nula (após mover, que a limpa) a Travessia usa
+  // o Peão do ator como referência e NÃO trava — adota a Seleção na sequência.
+  {
+    let semSelecao = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+    semSelecao = aplicar(semSelecao, selecionarPeao('peao-branco'), 'ana');
+    semSelecao = aplicar(semSelecao, moverPeao('peao-branco', 2, 3), 'ana');
+    assert.equal(semSelecao.tabuleiro.peaoSelecionadoId, null);
+    const travessia = aplicarComandoDePartida(
+      semSelecao,
+      atravessarOEscuro('peao-branco', 1, 3),
+      'ana',
+    );
+    assert.equal(travessia.sucesso, true);
+    if (!travessia.sucesso) return;
+    // A Travessia re-adota o Peão do ator: a sequência (escolher → encaixar →
+    // mover) continua sem exigir re-seleção.
+    assert.equal(travessia.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+    assert.equal(travessia.estado.atravessouNoTurno, true);
+    // Seleção de outro Peão continua vedada.
+    const estadoComOutroSelecionado: EstadoDaPartida = {
+      ...estadoDaTravessia(),
+      tabuleiro: {
+        ...estadoDaTravessia().tabuleiro,
+        peaoSelecionadoId: 'peao-vermelho',
+      },
+    };
+    assert.equal(
+      codigoDaRejeicao(
+        estadoComOutroSelecionado,
+        atravessarOEscuro('peao-branco', 1, 3),
+        'ana',
+      ),
+      'PEAO_NAO_SELECIONADO',
+    );
+  }
+
+  // Alvos inválidos: ocupado, não conectado, fora da grade e iluminado.
+  const estado = estadoDaTravessia();
+  assert.equal(
+    codigoDaRejeicao(estado, atravessarOEscuro('peao-branco', 3, 3), 'ana'),
+    'CELULA_JA_OCUPADA',
+  );
+  assert.equal(
+    codigoDaRejeicao(estado, atravessarOEscuro('peao-branco', 4, 4), 'ana'),
+    'MOVIMENTO_NAO_CONECTADO',
+  );
+  assert.equal(
+    codigoDaRejeicao(estado, atravessarOEscuro('peao-branco', 7, 0), 'ana'),
+    'CELULA_NAO_ENCONTRADA',
+  );
+  // Iluminada: sem a reta-1, o Peão volta à inicial-1 e (2,3) — vaga norte
+  // dela — continua iluminada; a travessia exige uma célula ESCURA.
+  {
+    let semReta1 = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+    semReta1 = {
+      ...semReta1,
+      tabuleiro: {
+        ...semReta1.tabuleiro,
+        posicionadas: semReta1.tabuleiro.posicionadas.filter(
+          (peca) => peca.pecaId !== 'reta-1',
+        ),
+      },
+    };
+    semReta1 = aplicar(semReta1, selecionarPeao('peao-branco'), 'ana');
+    assert.equal(
+      codigoDaRejeicao(semReta1, atravessarOEscuro('peao-branco', 2, 3), 'ana'),
+      'MOVIMENTO_INDISPONIVEL',
+    );
+  }
+});
+
+test('travessia do Escuro: Caixa vazia entrega zero peças, sem evento e sem marcar a flag', () => {
+  let estado = estadoDaTravessia();
+  estado = { ...estado, tabuleiro: { ...estado.tabuleiro, caixa: [] } };
+
+  const travessia = aplicarComandoDePartida(
+    estado,
+    atravessarOEscuro('peao-branco', 1, 3),
+    'ana',
+  );
+  assert.equal(travessia.sucesso, true);
+  if (!travessia.sucesso) return;
+  // Sem sorteio não há lote de travessia (nem o evento, nem pendências) — e a
+  // flag não marca. O funil de término pode anexar partida_terminada
+  // (caixa_esgotada), fora das asserções deste cenário.
+  assert.ok(!travessia.eventos.some((evento) => evento.tipo === 'atravessou_o_escuro'));
+  assert.ok(!travessia.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!travessia.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(travessia.estado.tabuleiro.recebidas.length, 0);
+  assert.equal(travessia.estado.atravessouNoTurno, false);
+});
+
+test('travessia do Escuro: a Confirmação recusa a cadeia incompleta (cadeia obrigatória, Req 3 do #272)', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'reta-x', tipo: 'reta' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  const pendencia = estado.tabuleiro.recebidas[0];
+
+  // Atalho que pula escolher/posicionar/mover: o confirmar direto é rejeitado
+  // — sem o guard, a Confirmação em Baixa zeraria as recebidas e a peça da
+  // Caixa (reta-x) seria consumida sem nunca ser posicionada. A cadeia
+  // obrigatória (escolher → encaixar → mover → confirmar) é garantia do
+  // servidor, não do cliente.
+  assert.equal(
+    codigoDaRejeicao(estado, confirmarPosicao('peao-branco'), 'ana'),
+    'PENDENCIA_NAO_RESOLVIDA',
+  );
+  assert.equal(estado.posicaoConfirmada, false);
+  assert.equal(estado.tabuleiro.recebidas.length, 1);
+  assert.equal(estado.tabuleiro.recebidas[0], pendencia);
+
+  // A pendência persiste e a cadeia segue completável: escolher → encaixar →
+  // mover → confirmar.
+  estado = aplicar(estado, escolherVaga('recebida-reta-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('reta-x', 1, 3), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  const validacao = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(validacao.sucesso, true);
+  if (!validacao.sucesso) return;
+  assert.equal(validacao.estado.posicaoConfirmada, true);
+  assert.equal(validacao.estado.tabuleiro.recebidas.length, 0);
+});
+
+test('primeiro turno em Baixa: Recebimento de 1 peça e vaga obrigatoriamente escura', () => {
+  let estado = comJogadorEmBaixa(partidaIniciada(), 'ana');
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+
+  const encaixe = aplicarComandoDePartida(
+    estado,
+    posicionarPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(encaixe.sucesso, true);
+  if (!encaixe.sucesso) return;
+  // Baixa limita o Recebimento a UMA peça (reta-1 do topo), com pendência sem
+  // vaga (o fluxo normal pede a escolha); a Iluminação cobre apenas a célula
+  // do Peão em Baixa.
+  assert.deepEqual(encaixe.estado.tabuleiro.recebidas, [
+    { recebidaId: 'recebida-reta-1', pecaId: 'reta-1', tipo: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
+  ]);
+  assert.deepEqual(encaixe.estado.celulasIluminadas, [{ linha: 3, coluna: 3 }]);
+  estado = encaixe.estado;
+
+  // Vagas escuras (norte (2,3) e leste (3,4)): a escolha flui normalmente.
+  const norte = aplicarComandoDePartida(
+    estado,
+    escolherVaga('recebida-reta-1', 'norte'),
+    'ana',
+  );
+  assert.equal(norte.sucesso, true);
+  const leste = aplicarComandoDePartida(
+    estado,
+    escolherVaga('recebida-reta-1', 'leste'),
+    'ana',
+  );
+  assert.equal(leste.sucesso, true);
+
+  // ST-15 / issue #264: vaga iluminada é DADOS_INVALIDOS — o estado injetado
+  // simula outra iluminação cobrindo (2,3); a vaga escura segue válida.
+  const estadoIluminado: EstadoDaPartida = {
+    ...estado,
+    celulasIluminadas: [
+      ...estado.celulasIluminadas,
+      { linha: 2, coluna: 3 },
+    ],
+  };
+  assert.equal(
+    codigoDaRejeicao(
+      estadoIluminado,
+      escolherVaga('recebida-reta-1', 'norte'),
+      'ana',
+    ),
+    'DADOS_INVALIDOS',
+  );
+  const lesteIluminado = aplicarComandoDePartida(
+    estadoIluminado,
+    escolherVaga('recebida-reta-1', 'leste'),
+    'ana',
+  );
+  assert.equal(lesteIluminado.sucesso, true);
+  assert.equal(lesteIluminado.estado.tabuleiro.recebidas[0].vaga, 'leste');
+});
+
+test('escolher vaga em Baixa com Seleção nula valida pela Peça do ator (Req 4 #272)', () => {
+  // Pendência comum do Primeiro Turno em Baixa (recebida-reta-1, vaga e
+  // célula-alvo nulas) sobre a inicial-1 em (3,3); a Seleção é zerada por
+  // injeção — a referência da vaga deve ser o Peão do ator (ator.peaoId).
+  let estado = comJogadorEmBaixa(partidaIniciada(), 'ana');
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const encaixe = aplicarComandoDePartida(
+    estado,
+    posicionarPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(encaixe.sucesso, true);
+  if (!encaixe.sucesso) return;
+  const semSelecao: EstadoDaPartida = {
+    ...encaixe.estado,
+    tabuleiro: { ...encaixe.estado.tabuleiro, peaoSelecionadoId: null },
+  };
+  assert.equal(semSelecao.tabuleiro.recebidas.length, 1);
+
+  // Vaga iluminada (norte (2,3) coberta por iluminação injetada): a validação
+  // da Partida NÃO é fragilizada pela Seleção nula — DADOS_INVALIDOS antes da
+  // delegação, em vez de aceitar vaga iluminada.
+  const comVagaIluminada: EstadoDaPartida = {
+    ...semSelecao,
+    celulasIluminadas: [
+      ...semSelecao.celulasIluminadas,
+      { linha: 2, coluna: 3 },
+    ],
+  };
+  assert.equal(
+    codigoDaRejeicao(
+      comVagaIluminada,
+      escolherVaga('recebida-reta-1', 'norte'),
+      'ana',
+    ),
+    'DADOS_INVALIDOS',
+  );
+
+  // Vaga escura (leste (3,4)): a validação da Partida passa e a delegação ao
+  // Tabuleiro mantém o requisito de Peão em sequência (PEAO_NAO_SELECIONADO) —
+  // o fluxo da Travessia re-adota a Seleção do ator, então não trava o escuro.
+  assert.equal(
+    codigoDaRejeicao(semSelecao, escolherVaga('recebida-reta-1', 'leste'), 'ana'),
+    'PEAO_NAO_SELECIONADO',
+  );
+});
+
+test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem o confirmar (Req 3 #272)', () => {
+  // Entre a Travessia e o encaixe, o turno já não avança: sem posição
+  // confirmada o encerramento é inválido (a pendência do Recebimento também
+  // bloquearia) — a Limpeza do caminho escuro não pode ser pulada.
+  let estado = estadoDaTravessia();
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  assert.equal(
+    codigoDaRejeicao(estado, encerrarTurno(), 'ana'),
+    'ENCERRAMENTO_INVALIDO',
+  );
+
+  // Com a pendência resolvida (escolher → encaixar → mover) e SEM confirmar,
+  // o turno ainda não termina: encerrar exige posicaoConfirmada e permanecer
+  // exige a Peça do início do turno (inválida após a mudança) — o único ponto
+  // definitivo que fecha o caminho escuro (Iluminação + Limpeza) é o confirmar.
+  const recebidaId = estado.tabuleiro.recebidas[0].recebidaId;
+  const pecaRecebidaId = estado.tabuleiro.recebidas[0].pecaId;
+  estado = aplicar(estado, escolherVaga(recebidaId, 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca(pecaRecebidaId, 1, 3), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  assert.equal(estado.tabuleiro.recebidas.length, 0);
+  assert.equal(
+    codigoDaRejeicao(estado, encerrarTurno(), 'ana'),
+    'ENCERRAMENTO_INVALIDO',
+  );
+  // Permanência: sem o Peão selecionado é PEAO_NAO_SELECIONADO (guarda do
+  // Tabuleiro); mesmo selecionado, após a mudança de Peça é
+  // ENCERRAMENTO_INVALIDO — nenhum caminho fecha o turno sem o confirmar.
+  assert.equal(
+    codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
+    'PEAO_NAO_SELECIONADO',
+  );
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  assert.equal(
+    codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
+    'ENCERRAMENTO_INVALIDO',
+  );
+  // O confirmar fecha o gatilho com Limpeza (assinado pelo próprio fluxo):
+  // estado pós-confirmação pronto para o encerramento.
+  const confirmacao = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.posicaoConfirmada, true);
+  assert.equal(
+    aplicarComandoDePartida(confirmacao.estado, encerrarTurno(), 'ana').sucesso,
+    true,
+  );
+});

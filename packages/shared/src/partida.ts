@@ -147,6 +147,16 @@ export interface ConfirmarPosicaoDoPeaoComando {
   readonly peaoId: PeaoId;
 }
 
+// Atravessar o Escuro (issue #264 / spec #272): o comando wire do canal de
+// Partida — o `jogadorId` viaja aqui (forma do ST-11); o contrato do Peão em
+// si (sem `jogadorId`) vive em ./peoes.ts (AtravessarOEscuroComando).
+export interface AtravessarOEscuroPartidaComando {
+  readonly type: 'ATRAVESSAR_O_ESCURO';
+  readonly jogadorId: string;
+  readonly peaoId: PeaoId;
+  readonly celula: Celula;
+}
+
 export interface EncerrarTurnoComando {
   readonly type: 'ENCERRAR_TURNO';
   readonly jogadorId: string;
@@ -164,6 +174,7 @@ export type PartidaComandoDoCliente =
   | MoverPeaoPartidaComando
   | PermanecerPartidaComando
   | ConfirmarPosicaoDoPeaoComando
+  | AtravessarOEscuroPartidaComando
   | EncerrarTurnoComando;
 
 // --- Eventos servidor → cliente (5 + 2 da issue #138) ---

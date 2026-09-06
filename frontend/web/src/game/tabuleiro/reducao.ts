@@ -603,6 +603,11 @@ export function reduzirEvento(
       }
     }
 
+    case 'ATRAVESSOU_O_ESCURO': {
+      // Sem lógica visual — ticket #268. Marco para exibição futura.
+      return estado
+    }
+
     default: {
       // Exaustividade: novo evento wire sem case falha em compilação.
       const _exaustivo: never = evento
