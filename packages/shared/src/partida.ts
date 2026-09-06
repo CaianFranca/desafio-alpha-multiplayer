@@ -10,6 +10,7 @@
 //   shared type:'POSICIONAR_PECA' + jogadorId <-> engine tipo:'posicionar_peca' + ator
 //   shared type:'FINALIZAR_MANIPULACAO' + jogadorId <-> engine tipo:'finalizar_manipulacao' + ator
 //   shared type:'SELECIONAR_PEAO' + jogadorId <-> engine tipo:'selecionar_peao' + ator
+//   shared type:'DESELECIONAR_PEAO' + jogadorId <-> engine tipo:'desselecionar_peao' + ator — issue #249
 //   shared type:'POSICIONAR_PEAO' + jogadorId <-> engine tipo:'posicionar_peao' + ator
 //   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' + jogadorId <-> engine tipo:'escolher_vaga_da_peca_recebida' + ator — issue #138
 //   shared type:'MOVER_PEAO' + jogadorId <-> engine tipo:'mover_peao' + ator
@@ -70,7 +71,7 @@ import type {
 } from './tabuleiro.ts';
 import type { PeaoId, RecebidaId, BordaCardinal, VagaDaPecaRecebidaEscolhidaEvento } from './peoes.ts';
 
-// --- Comandos cliente → servidor (11) ---
+// --- Comandos cliente → servidor (12) ---
 
 export interface SelecionarPecaPartidaComando {
   readonly type: 'SELECIONAR_PECA';
@@ -99,6 +100,14 @@ export interface FinalizarManipulacaoPartidaComando {
 
 export interface SelecionarPeaoPartidaComando {
   readonly type: 'SELECIONAR_PEAO';
+  readonly jogadorId: string;
+  readonly peaoId: PeaoId;
+}
+
+// Desseleção autoritativa (issue #249): o servidor é a autoridade inclusive
+// para desselecionar; idempotente no domínio, rejeitada sob pendências.
+export interface DesselecionarPeaoPartidaComando {
+  readonly type: 'DESELECIONAR_PEAO';
   readonly jogadorId: string;
   readonly peaoId: PeaoId;
 }
@@ -149,6 +158,7 @@ export type PartidaComandoDoCliente =
   | PosicionarPecaPartidaComando
   | FinalizarManipulacaoPartidaComando
   | SelecionarPeaoPartidaComando
+  | DesselecionarPeaoPartidaComando
   | PosicionarPeaoPartidaComando
   | EscolherVagaDaPecaRecebidaPartidaComando
   | MoverPeaoPartidaComando

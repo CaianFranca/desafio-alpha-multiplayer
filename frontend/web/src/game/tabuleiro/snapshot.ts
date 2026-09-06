@@ -22,6 +22,36 @@ import type { PendenciaNoCliente } from './interacaoPeoes'
 import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
 
 /**
+ * Reparo defensivo de reload (issue #258) — ver comentário no corpo de
+ * `aplicarSnapshot`. Fora da divergência provada (seleção de Inicial
+ * ausente das duas listas) devolve a entrada intocada: a autoridade do
+ * snapshot é preservada no caminho comum.
+ */
+function repararInicialEmFoco(
+  estado: EstadoDoTabuleiroNoCliente,
+  snapshot: EstadoDaPartidaSnapshot,
+  iniciais: readonly PecaDaMesa[],
+  posicionadas: readonly PecaPosicionada[],
+): readonly PecaDaMesa[] {
+  const emFoco = snapshot.tabuleiro.pecaSelecionadaId
+  if (emFoco === null || !/^inicial-[1-4]$/.test(emFoco)) return iniciais
+  if (iniciais.some((p) => p.pecaId === emFoco)) return iniciais
+  if (posicionadas.some((p) => p.pecaId === emFoco)) return iniciais
+  const local = estado.iniciais.find((p) => p.pecaId === emFoco)
+  const reparada: PecaDaMesa = {
+    pecaId: emFoco,
+    tipo: 'inicial' as const,
+    orientacao: local?.orientacao ?? 0,
+  }
+  // Insere na ordem canônica (a lista do motor preserva `inicial-1..4` na
+  // ordem; o reparo preenche a lacuna sem reordenar o que a foto trouxe).
+  const ordem = Number(emFoco.split('-')[1])
+  const indice = iniciais.findIndex((p) => Number(p.pecaId.split('-')[1]) > ordem)
+  if (indice === -1) return [...iniciais, reparada]
+  return [...iniciais.slice(0, indice), reparada, ...iniciais.slice(indice)]
+}
+
+/**
  * Aplica um snapshot do servidor ao estado do cliente, produzindo um novo
  * estado. Mapeia posicionadas, iniciais, peões, celulasIluminadas,
  * pecaSelecionadaId/pecaEmManipulacaoId/peaoSelecionadoId,
@@ -44,11 +74,22 @@ export function aplicarSnapshot(
 
   // Peças Iniciais ainda não encaixadas (issue #143): a lista do motor é a
   // autoridade — recarregar reconstrói a mesa sem seed local.
-  const iniciais: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
+  const iniciaisDoSnapshot: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
     pecaId: p.pecaId,
     tipo: 'inicial' as const,
     orientacao: p.orientacao,
   }))
+
+  // Reparo defensivo de reload (issue #258): a Inicial em foco
+  // (`pecaSelecionadaId`) está nas `iniciais` por invariante do engine —
+  // selecionar exige a peça na mesa e posicionar a move para
+  // `posicionadas`. Seleção pendente sem a peça em NENHUMA das duas listas
+  // prova divergência da foto com o estado real: devolve SÓ a peça em foco
+  // à mesa (nunca a lista cheia, nunca peça já posicionada, nunca peça da
+  // Caixa — só `inicial-1..4`). A orientação reaproveita o giro local
+  // (confirmado antes do F5; a foto não a carrega para a peça ausente).
+  // Foto consistente (H2: inicial já encaixada) não dispara o reparo.
+  const iniciais = repararInicialEmFoco(estado, snapshot, iniciaisDoSnapshot, posicionadas)
 
   const mapPos = new Map<string, CelulaContrato>(
     posicionadas.map((p) => [p.pecaId, p.celula] as const),

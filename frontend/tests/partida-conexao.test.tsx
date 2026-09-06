@@ -10,6 +10,12 @@ import {
   CAMINHO_SOM_DE_RECUSA,
   VOLUME_BASE_SOM_DE_RECUSA,
 } from '../web/src/components/partida/somDeRecusa'
+import {
+  CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+  CAMINHO_SOM_GIRO_ENCAIXE,
+  VOLUME_BASE_SOM_DE_MOVIMENTO,
+} from '../web/src/components/partida/somDoEncaixe'
+import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../web/src/game/tabuleiro/animacao'
 import type { EstadoDaPartidaSnapshot, PecaPosicionadaNoSnapshot } from '@flicker/shared'
 
 function renderPartidaNaRota(entry: string) {
@@ -381,7 +387,7 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     expect(reIluminadas[0]).toBe(celulaDoEspelho(0, 0))
   })
 
-  it('LIMPEZA_APLICADA remove a peça da cena, libera a célula, em silêncio, e aceita novo posicionamento sem recarregar', async () => {
+  it('LIMPEZA_APLICADA remove a peça da cena, libera a célula, e aceita novo posicionamento sem recarregar', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
     // Posiciona inicial-1 em 3:3 via broadcast (mesma via dos eventos de #85).
@@ -396,8 +402,16 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     await screen.findByTestId('peca-posicionada')
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('true')
 
-    // Aprovação do posicionamento em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
+    // Encaixe com sons (issue #241 + mudanças de spec): posicionamento sem
+    // carta (a carta vive no giro) — o enigmático sai de imediato no início
+    // do movimento, sem clarão.
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_GIRO_ENCAIXE)).toHaveLength(0)
+    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_MOVIMENTO_ENCAIXE)).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({
+      src: CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+      volume: VOLUME_BASE_SOM_DE_MOVIMENTO,
+    })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // A Limpeza chega pelo MESMO socket — sem recarregar página, sem reconectar.
@@ -411,9 +425,11 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     )
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
 
-    // Limpeza com som único (issue #239): um toque sombrio por comando, sem clarão.
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
+    // Limpeza com som único (issue #239): um toque sombrio por comando, sem clarão
+    // (filtrado por asset: os sons do Encaixe da #241 convivem no mesmo array).
+    await waitFor(() =>
+      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+    )
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Célula liberada aceita novo posicionamento pela mesma via dos testes de
@@ -453,9 +469,11 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     )
 
     await waitFor(() => expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(0))
-    // Exatamente 1 som por comando, mesmo com N=3 (nunca um por peça)
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
+    // Exatamente 1 som de limpeza por comando, mesmo com N=3 (nunca um por
+    // peça) — filtrado por asset: os sons do Encaixe da #241 convivem no mesmo array.
+    await waitFor(() =>
+      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+    )
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     // Células liberadas
     expect(celulaDoEspelho(1, 1).getAttribute('data-ocupada')).toBe('false')
@@ -484,16 +502,23 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
         ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 }),
       )
       await screen.findByTestId('peca-posicionada')
-      expect(toquesDeAudio).toHaveLength(0)
+      // Encaixe com reduce = snap (issue #241 + mudança de spec): sem voo,
+      // estado final imediato e SÓ o enigmático (a carta vive no giro).
+      expect(toquesDeAudio.map((t) => t.src)).toEqual([
+        CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+      ])
 
       act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] }))
 
       // Snap instantâneo: peça some sem precisar de animação, estado final pixel-igual
       await waitFor(() => expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument())
       expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
-      // Som único mesmo com reduce ativo
-      await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
-      expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
+      // Som único de limpeza mesmo com reduce ativo (ordem total determinística).
+      await waitFor(() => expect(toquesDeAudio).toHaveLength(2))
+      expect(toquesDeAudio.map((t) => t.src)).toEqual([
+        CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+        CAMINHO_SOM_SOMBRIO_LIMPEZA,
+      ])
       expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     } finally {
       window.matchMedia = originalMatchMedia
@@ -529,7 +554,11 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
         jogadorId: mockAuthenticatedState.jogador.id,
       })
     })
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+    // A limpeza tocou seu som único (filtrado por asset: o Encaixe da #241
+    // convive no mesmo array).
+    await waitFor(() =>
+      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+    )
   })
 })
 
@@ -1316,5 +1345,119 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
     // reflete o engine): giro segue desabilitado.
     expect(screen.getByTestId('girar-horario')).toBeDisabled()
     expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
+  })
+})
+
+describe('reload do primeiro turno — peça de volta à mesa e turno concluível (issue #258)', () => {
+  const MEU_JOGADOR_ID = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
+
+  function peaoDoEspelho(peaoId: string): HTMLElement | undefined {
+    return screen
+      .getAllByTestId('peao')
+      .find((el) => el.getAttribute('data-peao-id') === peaoId)
+  }
+
+  function pecaInicialDoEspelho(pecaId: string): HTMLElement {
+    const peca = screen
+      .getAllByTestId('mesa-peca-inicial')
+      .find((el) => el.getAttribute('data-peca-id') === pecaId)
+    if (!peca) throw new Error(`peça inicial ${pecaId} não encontrada na mesa`)
+    return peca
+  }
+
+  it('F5 com a inicial ainda não encaixada: peça reaparece e o turno conclui após DESELECIONAR_PEAO', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+
+    // Foto do reload: a inicial em foco sumiu da lista, mas a seleção
+    // pendente (`pecaSelecionadaId`) e o peão selecionado sobreviveram.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({
+          tabuleiro: {
+            posicionadas: [],
+            iniciais: [],
+            peoes: [
+              { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
+              { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: null },
+              { peaoId: 'peao-azul', cor: 'azul', pecaId: null },
+              { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+            ],
+            recebidas: [],
+            pecaSelecionadaId: 'inicial-2',
+            pecaEmManipulacaoId: null,
+            peaoSelecionadoId: 'peao-branco',
+            pecasRestantesNaCaixa: 83,
+          },
+          jogadorAtivoId: MEU_JOGADOR_ID,
+          rodada: 1,
+        }),
+      }),
+    )
+
+    // A peça em foco volta para a mesa (só ela — sem ressuscitar a lista cheia).
+    const iniciais = await screen.findAllByTestId('mesa-peca-inicial')
+    expect(iniciais.map((el) => el.getAttribute('data-peca-id'))).toEqual(['inicial-2'])
+
+    // O anúncio do turno corrente (replay) não apaga a reconstrução.
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 1 }))
+    await waitFor(() =>
+      expect(
+        screen.getAllByTestId('mesa-peca-inicial').map((el) => el.getAttribute('data-peca-id')),
+      ).toEqual(['inicial-2']),
+    )
+    expect(peaoDoEspelho('peao-branco')?.getAttribute('data-selecionado')).toBe('true')
+
+    // H1: com o peão selecionado o clique na célula é bloqueado (ciclo
+    // binário #249) — nenhum POSICIONAR_PECA sai.
+    const user = userEvent.setup()
+    const antesDoBloqueio = ws.sentMessages.length
+    await user.click(celulaDoEspelho(3, 3))
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 150))
+    })
+    expect(ws.sentMessages).toHaveLength(antesDoBloqueio)
+
+    // Caminho de destravamento: clicar fora da peça/peão desseleciona via
+    // comando autoritativo ao servidor (nunca só no local, #249).
+    await user.click(screen.getByTestId('tabuleiro'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'DESELECIONAR_PEAO',
+        peaoId: 'peao-branco',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+
+    // Ack do servidor: o ciclo apaga e a Inicial volta a ser selecionável.
+    act(() => ws.simulateMessage({ type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' }))
+    await waitFor(() =>
+      expect(peaoDoEspelho('peao-branco')?.getAttribute('data-selecionado')).toBe('false'),
+    )
+    await user.click(pecaInicialDoEspelho('inicial-2'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'SELECIONAR_PECA',
+        pecaId: 'inicial-2',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+
+    // Seleção confirmada → o clique na célula vazia posiciona a Inicial.
+    act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-2' }))
+    await user.click(celulaDoEspelho(3, 3))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'POSICIONAR_PECA',
+        pecaId: 'inicial-2',
+        celula: { linha: 3, coluna: 3 },
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+    // A mesma conexão sobreviveu ao roteiro inteiro (sem reload de verdade).
+    expect(MockWebSocket.instances).toHaveLength(1)
   })
 })

@@ -19,6 +19,7 @@ import type {
   BordaCardinal,
   Celula,
   CodigoDeErroDeTabuleiro,
+  DesselecionarPeaoComando,
   EscolherVagaDaPecaRecebidaComando,
   EstadoDoTabuleiro,
   EventoDoTabuleiro,
@@ -213,6 +214,70 @@ export function selecionarPeao(
   // (posicionar_peao do Primeiro Turno e confirmar_posicao_do_peao).
   return sucesso(
     { ...estado, peaoSelecionadoId: comando.peaoId, pecaEmManipulacaoId },
+    eventos,
+  );
+}
+
+// Desseleção autoritativa (issue #249): o servidor é a autoridade inclusive
+// para desselecionar — elimina o deadlock do Primeiro Turno (ordem
+// peão→inicial travava a Inicial; após reload travava o peão).
+//
+//   - idempotente COM confirmação quando já desselecionado (seleção null)
+//     ou quando outro peão está em sequência (não rouba a sequência
+//     alheia): o estado sai inalterado, sem encerrar Manipulação, mas emite
+//     peao_desselecionado para que o autor receba o ack (libera o retry em
+//     `pendentesEmVoo`; nos demais clientes o redutor trata como no-op);
+//   - rejeitada com PENDENCIA_NAO_RESOLVIDA sob Recebidas pendentes — nunca
+//     órfã pendência de outro peão;
+//   - senão limpa peaoSelecionadoId e emite peao_desselecionado (a
+//     Manipulação em aberto, se houver, é encerrada junto, no mesmo padrão
+//     da seleção).
+export function desselecionarPeao(
+  estado: EstadoDoTabuleiro,
+  comando: DesselecionarPeaoComando,
+): ResultadoDoTabuleiro {
+  const dadosInvalidos = validarTexto(comando.peaoId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const peao = estado.peoes.find((item) => item.peaoId === comando.peaoId);
+  if (!peao) {
+    return rejeitar('PEAO_NAO_ENCONTRADO', 'O Peão não foi encontrado.');
+  }
+
+  // Idempotência com confirmação: sem seleção vigente ou com outro peão
+  // em sequência, não há o que desselecionar — estado inalterado, sem
+  // encerrar Manipulação, mas com peao_desselecionado para que todo
+  // DESELECIONAR_PEAO válido gere ack visível ao autor (não reabre nem
+  // rouba nada; nos demais clientes o evento é no-op).
+  if (estado.peaoSelecionadoId !== comando.peaoId) {
+    return sucesso(estado, [
+      { tipo: 'peao_desselecionado', peaoId: comando.peaoId },
+    ]);
+  }
+
+  // Desseleção com recebidas pendentes é rejeitada, nunca órfã pendência.
+  if (estado.recebidas.length > 0) {
+    return rejeitar(
+      'PENDENCIA_NAO_RESOLVIDA',
+      'Há Peças Recebidas pendentes; posicione-as antes de desselecionar o Peão.',
+    );
+  }
+
+  const eventos: EventoDoTabuleiro[] = [];
+  let pecaEmManipulacaoId = estado.pecaEmManipulacaoId;
+  if (pecaEmManipulacaoId !== null) {
+    eventos.push({
+      tipo: 'manipulacao_finalizada',
+      pecaId: pecaEmManipulacaoId,
+    });
+    pecaEmManipulacaoId = null;
+  }
+  eventos.push({ tipo: 'peao_desselecionado', peaoId: comando.peaoId });
+
+  return sucesso(
+    { ...estado, peaoSelecionadoId: null, pecaEmManipulacaoId },
     eventos,
   );
 }

@@ -12,6 +12,7 @@
  *
  * Contrato wire ↔ domínio documentado em `packages/shared/src/peoes.ts`:
  *   shared SELECIONAR_PEAO                  ↔ engine selecionar_peao (idempotente)
+ *   shared DESELECIONAR_PEAO                ↔ engine desselecionar_peao (idempotente, #249)
  *   shared POSICIONAR_PEAO                  ↔ engine posicionar_peao (1º posicionamento)
  *   shared ESCOLHER_VAGA_DA_PECA_RECEBIDA   ↔ engine escolher_vaga_da_peca_recebida (#138)
  *   shared MOVER_PEAO                       ↔ engine mover_peao (vizinha conectada)
@@ -95,9 +96,9 @@ export interface EstadoInteracaoPeoes {
   readonly posicaoConfirmadaNoTurno: boolean
   /**
    * Recebida "puxada" da bandeja (fluxo aprovado na revisão #199 da issue
-   * #143): estado visual LOCAL do jogador — fora do modelo autoritativo, no
-   * padrão `peaoSelecionadoIdLocal` (AmbienteDeJogo). Só com a corrente
-   * puxada o clique numa célula de vaga emite ESCOLHER_VAGA para ela.
+   * #143): estado visual LOCAL do jogador — fora do modelo autoritativo.
+   * Só com a corrente puxada o clique numa célula de vaga emite
+   * ESCOLHER_VAGA para ela.
    */
   readonly recebidaPuxadaId?: string | null
   /**
@@ -163,6 +164,68 @@ export function haRecebidasPendentes(
   return estado.recebidasPendentes.length > 0
 }
 
+// ── Gate "Inicial primeiro" (issue #249, decisão do usuário) ──
+
+const ORDEM_DA_COR_DO_PEAO: Readonly<Record<string, number>> = {
+  branco: 1,
+  vermelho: 2,
+  azul: 3,
+  amarelo: 4,
+}
+
+/**
+ * Cor inferida do peaoId (`peao-<cor>`, tolerando prefixos como
+ * `peao-1-branco` dos mocks): último segmento após `-` quando é cor
+ * canônica. Null quando o dono não é inferível (ids sintéticos sem cor).
+ */
+function corDoPeaoId(peaoId: string): string | null {
+  const ultimo = peaoId.split('-').pop() ?? ''
+  return ultimo in ORDEM_DA_COR_DO_PEAO ? ultimo : null
+}
+
+/**
+ * Gate "Inicial primeiro" (issue #249): SELECIONAR_PEAO só é emitido quando
+ * a própria Inicial do dono já está posicionada — sem ela em `posicionadas`,
+ * a seleção fica silenciosa (null no mapeador, sem comando ao servidor).
+ *
+ * O dono é inferido pela cor (`peao-branco` → `inicial-1`, espelhando
+ * `estadoInicialDaPartida` do engine: ordem ↔ cor ↔ inicial-<ordem>). Sem
+ * cor inferível o gate falha fechado (retorna false): ids fora do padrão
+ * `peao-<cor>` nunca furam a seleção — o engine só cria `peao-<cor>`.
+ */
+export function podeSelecionarPeao(
+  estado: Pick<EstadoInteracaoPeoes, 'posicionadas'>,
+  peaoId: string,
+): boolean {
+  const cor = corDoPeaoId(peaoId)
+  if (cor === null) return false
+  const ordem = ORDEM_DA_COR_DO_PEAO[cor]
+  const inicialDoDono = `inicial-${ordem}`
+  return estado.posicionadas.some((p) => p.pecaId === inicialDoDono)
+}
+
+/**
+ * Desseleção autoritativa (issue #249): com seleção vigente e sem pendências,
+ * emite DESELECIONAR_PEAO para o peão selecionado (o servidor é a autoridade
+ * — o cliente nunca desseleciona só no Local). Sem seleção é silenciosa
+ * (null); sob pendências retorna rejeição com motivo `pendencia_nao_resolvida`
+ * (o domínio rejeitaria com PENDENCIA_NAO_RESOLVIDA) para que o chamador toque
+ * a recusa em vez de silenciar o clique-fora.
+ */
+export function mapearDesselecaoDePeao(
+  estado: EstadoInteracaoPeoes,
+): ResultadoDeInteracaoDePeao {
+  const peaoId = estado.peaoSelecionadoId
+  if (peaoId === null) return null
+  if (haRecebidasPendentes(estado)) {
+    return {
+      tipo: 'rejeicao',
+      rejeicao: { motivo: 'pendencia_nao_resolvida' },
+    }
+  }
+  return { tipo: 'comando', comando: { type: 'DESELECIONAR_PEAO', peaoId } }
+}
+
 // ── Mapeamento clique → comando ──
 
 /**
@@ -172,7 +235,8 @@ export function haRecebidasPendentes(
  * Recebidas pendentes (permanência exige tudo posicionado e re-seleção não
  * emite comando). Com pendências, clicar em OUTRO Peão não emite comando e
  * retorna rejeição local (espelha PENDENCIA_NAO_RESOLVIDA). Peão
- * inexistente → null (não reage).
+ * inexistente → null (não reage). Gate "Inicial primeiro" (#249): sem a
+ * própria Inicial posicionada, SELECIONAR_PEAO é silencioso (null).
  */
 export function mapearCliqueNoPeao(
   estado: EstadoInteracaoPeoes,
@@ -195,6 +259,9 @@ export function mapearCliqueNoPeao(
       rejeicao: { motivo: 'pendencia_nao_resolvida' },
     }
   }
+  // Gate "Inicial primeiro" (#249): travar SELECIONAR_PEAO até a própria
+  // Inicial estar posicionada — silencioso, sem comando.
+  if (!podeSelecionarPeao(estado, peaoId)) return null
   return { tipo: 'comando', comando: { type: 'SELECIONAR_PEAO', peaoId } }
 }
 
@@ -484,14 +551,43 @@ function resultadoDoMapeadorParaCelula(
     : { rejeicao: resultado.rejeicao }
 }
 
-/** Ciclo ativo: há Recebidas pendentes OU peão selecionado (suprime o fallback ST-09). */
+/**
+ * Peão ainda sobre a Mesa: nunca ocupou uma célula do tabuleiro
+ * (`celula === null` — seed do cliente e do engine antes do primeiro
+ * POSICIONAR_PEAO). Predicado mantido para destaque/seleção visual — NÃO é
+ * mais gate de ciclo (issue #249: a exceção quebrava o invariante
+ * ciclo/fallback e foi removida; o ciclo é binário).
+ */
+export function peaoSobreAMesa(peao: PeaoDaExibicao | undefined): boolean {
+  return peao !== undefined && peao.celula === null
+}
+
+/**
+ * Ciclo ativo (issue #249 — invariante binário restaurado): há Recebidas
+ * pendentes OU peão selecionado (qualquer posição, inclusive sobre a Mesa).
+ * O servidor é a autoridade da seleção — o cliente nunca roteia por estado
+ * local divergente, e a desseleção via DESELECIONAR_PEAO é o único caminho
+ * para liberar o fallback ST-09.
+ *
+ * Tabela de decisão:
+ *   - com Recebidas pendentes → true (o encaixe governa; alvos inválidos com
+ *     ciclo ativo não reagem em vez de cair no fallback — decisão #91);
+ *   - sem seleção → false (fallback ST-09 livre);
+ *   - com seleção (posicionado ou sobre a Mesa) → true (suprime o fallback;
+ *     a Inicial só posiciona após DESELECIONAR_PEAO + ack — "Inicial primeiro"
+ *     exige a ordem: desselecionar o peão antes de POSICIONAR_PECA);
+ *   - seleção de peão inexistente → true conservador (estado inconsistente
+ *     não libera o fallback).
+ */
 export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
-  return haRecebidasPendentes(estado) || estado.peaoSelecionadoId !== null
+  if (haRecebidasPendentes(estado)) return true
+  return estado.peaoSelecionadoId !== null
 }
 
 /**
  * Roteador puro do clique em célula durante o ciclo do Peão (issue #91;
- * fluxo de puxar da revisão #199 da issue #143). Tabela exata de prioridades:
+ * fluxo de puxar da revisão #199 da issue #143; desseleção autoritativa e
+ * ciclo binário da issue #249). Tabela exata de prioridades:
  *
  * Com pendências:
  *   - célula = vaga disponível E há pendência PUXADA sem vaga →
@@ -503,12 +599,14 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *     célula-alvo + vaga escolhida + peça em foco).
  *   - demais (alvo em foco divergente da seleção, célula não-alvo) → null.
  *
- * Sem pendências, com peão selecionado:
+ * Sem pendências, com peão selecionado (ciclo ativo — inclusive sobre a
+ * Mesa, invariante binário #249):
  *   - célula do próprio peão → PERMANECER (ou rejeição âmbar se a posição já
  *     foi confirmada — AC3).
  *   - destino conectado → MOVER_PEAO (ou rejeição âmbar pós-confirmação).
  *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO.
- *   - demais → null.
+ *   - demais → null (com ciclo ativo o chamador NÃO aplica o fallback ST-09:
+ *     a Inicial só posiciona após DESELECIONAR_PEAO + ack — "Inicial primeiro").
  *
  * Sem ciclo ativo → null (o chamador aplica o fallback ST-09).
  */
@@ -592,6 +690,7 @@ function fallbackST09ParaCelula(
 
 const TIPOS_DE_COMANDO_DE_PEAO: ReadonlySet<string> = new Set([
   'SELECIONAR_PEAO',
+  'DESELECIONAR_PEAO',
   'POSICIONAR_PEAO',
   'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
@@ -640,7 +739,9 @@ export function despacharCliqueDeCelula(
     return
   }
   // Sem resultado do roteador: fallback ST-09 só quando o ciclo está inativo
-  // (alvos inválidos com ciclo ativo não reagem — decisão aprovada #91).
+  // (alvos inválidos com ciclo ativo não reagem — decisão aprovada #91;
+  // com seleção vigente o ciclo está ativo por definição binária — #249 — e
+  // só DESELECIONAR_PEAO + ack libera o fallback para a Inicial).
   if (estadoPeoes !== null && cicloAtivo(estadoPeoes)) return
   despacho.onComando?.(fallbackST09ParaCelula(estadoInteracao, celula))
 }

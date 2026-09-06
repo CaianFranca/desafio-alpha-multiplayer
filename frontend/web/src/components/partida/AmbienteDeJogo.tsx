@@ -20,6 +20,7 @@ import type { PeaoId } from '../../game/tabuleiro/contrato'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 import {
   mapearCliqueNoPeao,
+  mapearDesselecaoDePeao,
   puxadaVigenteNaBandeja,
   vagasDisponiveisDoPeao,
 } from '../../game/tabuleiro/interacaoPeoes'
@@ -27,6 +28,7 @@ import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } 
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 import type { VooDoPeaoPendente } from '../../game/tabuleiro/vooDoPeao'
 import type { LimpezaTrigger } from '../../game/scenes/TransicaoLimpeza'
+import type { EncaixeTrigger } from '../../game/tabuleiro/encaixe'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -72,6 +74,10 @@ interface AmbienteDeJogoProps {
   onVooAterrissou?: (nonce: number) => void
   /** Trigger de limpeza evento-driven (issue #239, B1) — só LIMPEZA_APLICADA dispara, snapshot não. */
   limpezaTrigger?: LimpezaTrigger | null
+  /** Trigger de encaixe evento-driven (issue #241): voo mesa→célula. */
+  encaixeTrigger?: EncaixeTrigger | null
+  /** Fim do voo do Encaixe (key) → o pai limpa o trigger. */
+  onFimEncaixe?: (key: number) => void
 }
 
 export function AmbienteDeJogo({
@@ -88,24 +94,19 @@ export function AmbienteDeJogo({
   vooPendente = null,
   onVooAterrissou,
   limpezaTrigger = null,
+  encaixeTrigger = null,
+  onFimEncaixe,
 }: AmbienteDeJogoProps) {
-  // ── Seleção de peão: o servidor é a autoridade ──
-  // `peaoSelecionadoIdLocal` espelha o servidor, mas permite desseleção visual
-  // por clique em área inerte (sem comando de desseleção no ciclo). A seleção
-  // do servidor é aplicada à renderização sempre que o valor muda (padrão
-  // "ajustar estado quando a prop muda", sem efeito).
-  const [peaoSelecionadoIdLocal, setPeaoSelecionadoIdLocal] = useState<PeaoId | null>(peaoSelecionadoIdServidor)
-  const [servidorAnterior, setServidorAnterior] = useState<PeaoId | null>(peaoSelecionadoIdServidor)
-  if (peaoSelecionadoIdServidor !== servidorAnterior) {
-    setServidorAnterior(peaoSelecionadoIdServidor)
-    // Nova seleção do servidor re-estabelece a autoridade sobre o estado local.
-    setPeaoSelecionadoIdLocal(peaoSelecionadoIdServidor)
-  }
+  // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
+  // Sem espelho local divergente: o highlight e o roteamento derivam da prop
+  // `peaoSelecionadoIdServidor` (modelo + snapshot/eventos). A desseleção é
+  // autoritativa — `aoDesselecionar` despacha DESELECIONAR_PEAO ao servidor e
+  // o ack/snapshot reconcilia; nunca se limpa só no Local.
+  const peaoSelecionadoIdLocal: PeaoId | null = peaoSelecionadoIdServidor ?? null
 
-  // Clicar um peão seleciona (ou emite comando ao servidor se disponível);
-  // clicar destino inerte/Mesa/vazio desseleciona. A seleção otimista acontece
-  // APÓS o mapeamento: rejeição (pendências bloqueando outro peão) não altera
-  // a seleção local (#91 — antes selecionava antes de mapear).
+  // Clicar um peão seleciona via mapeador puro (com gate "Inicial primeiro" e
+  // bloqueio de pendências); rejeição não altera nada (#91). Sem estado
+  // otimista: o servidor confirma via PEAO_SELECIONADO.
   const aoSelecionarPeao = useCallback(
     (peaoId: PeaoId) => {
       if (estadoInteracaoPeoes && onComandoPeao) {
@@ -118,13 +119,21 @@ export function AmbienteDeJogo({
           onComandoPeao(resultado.comando)
         }
       }
-      setPeaoSelecionadoIdLocal(peaoId)
     },
     [estadoInteracaoPeoes, onComandoPeao, onRejeicaoPeao],
   )
   const aoDesselecionar = useCallback(() => {
-    setPeaoSelecionadoIdLocal(null)
-  }, [])
+    if (estadoInteracaoPeoes && onComandoPeao) {
+      const resultado = mapearDesselecaoDePeao(estadoInteracaoPeoes)
+      if (resultado?.tipo === 'rejeicao') {
+        onRejeicaoPeao?.(resultado.rejeicao.motivo)
+        return
+      }
+      if (resultado?.tipo === 'comando') {
+        onComandoPeao(resultado.comando)
+      }
+    }
+  }, [estadoInteracaoPeoes, onComandoPeao, onRejeicaoPeao])
 
   // ── Caixa sobre a mesa (issue #143): corrente da bandeja e vagas ──
   // Pendências do ciclo (forma #138): a CORRENTE é a primeira sem vaga — a
@@ -134,12 +143,13 @@ export function AmbienteDeJogo({
   const recebidasPendentes = estadoInteracaoPeoes?.recebidasPendentes ?? []
 
   // ── Pull da bandeja (fluxo aprovado na revisão #199) ──
-  // Estado visual LOCAL, fora do modelo autoritativo (padrão
-  // `peaoSelecionadoIdLocal`): clicar a corrente "puxa" a peça, e só então o
-  // clique em vaga escolhe a vaga para ela. O pull é consumido quando a
-  // pendência sai da lista (encaixe, troca de turno) — a próxima corrente
-  // exige novo pull. O reset é um update-de-render na mesma fase (padrão
-  // do estado espelhado acima), sem efeito colateral.
+  // Estado visual LOCAL, fora do modelo autoritativo: clicar a corrente
+  // "puxa" a peça, e só então o clique em vaga escolhe a vaga para ela. O
+  // pull é consumido quando a pendência sai da lista (encaixe, troca de
+  // turno) — a próxima corrente exige novo pull. O reset é um update-de-
+  // render na mesma fase, sem efeito colateral. A seleção do peão, ao
+  // contrário do pull, é autoritativa do servidor (#249) e nunca é mesclada
+  // aqui — o roteador usa o estado do modelo + pull.
   const [recebidaPuxadaId, setRecebidaPuxadaId] = useState<string | null>(null)
   if (
     recebidaPuxadaId !== null &&
@@ -147,8 +157,10 @@ export function AmbienteDeJogo({
   ) {
     setRecebidaPuxadaId(null)
   }
-  // Estado do ciclo com o pull mesclado: roteador, cena e espelho veem a
-  // mesma fonte (o pull nunca vai ao wire — segue local até ESCOLHER_VAGA).
+  // Estado do ciclo com o pull mesclado (issue #249): roteador, cena e
+  // espelho veem a mesma fonte — o modelo autoritativo + pull local; a
+  // seleção vem do servidor (snapshot/eventos), nunca de espelho divergente.
+  // O pull nunca vai ao wire (segue local até ESCOLHER_VAGA).
   const estadoPeoesComPuxada: EstadoInteracaoPeoes | null =
     estadoInteracaoPeoes !== null
       ? { ...estadoInteracaoPeoes, recebidaPuxadaId }
@@ -269,6 +281,8 @@ export function AmbienteDeJogo({
           vooPendente={vooPendente}
           onVooAterrissou={onVooAterrissou}
           limpezaTrigger={limpezaTrigger}
+          encaixeTrigger={encaixeTrigger}
+          onFimEncaixe={onFimEncaixe}
         />
       </Canvas>
       {estadoExibicao ? (
@@ -295,6 +309,7 @@ export function AmbienteDeJogo({
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           sanidadePorPeao={sanidadePorPeao}
+          encaixeTrigger={encaixeTrigger}
         />
       ) : null}
     </div>

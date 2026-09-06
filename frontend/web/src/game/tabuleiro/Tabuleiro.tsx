@@ -82,6 +82,12 @@ interface TabuleiroProps {
   vooPendente?: VooDoPeaoPendente | null
   /** Pouso do voo concluído (nonce): a página limpa o pendente. */
   onVooAterrissou?: (nonce: number) => void
+  /**
+   * Peça em voo do Encaixe (issue #241): escondida aqui enquanto a
+   * TransicaoEncaixe a anima na cena — ao fim do voo o overlay some e esta
+   * peça assume pixel-igual. Null = sem voo.
+   */
+  ocultarPecaId?: PecaId | null
 }
 
 export function Tabuleiro({
@@ -102,9 +108,13 @@ export function Tabuleiro({
   vagasSet = new Set<string>(),
   vooPendente = null,
   onVooAterrissou,
+  ocultarPecaId = null,
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
+    // Peça em voo do Encaixe some da grade durante o voo (só o overlay a
+    // exibe); ao fim, o overlay some e ela reassume aqui pixel-igual.
+    if (p.pecaId === ocultarPecaId) continue
     posicionadasPorChave.set(chaveCelula(p.celula), p)
   }
 

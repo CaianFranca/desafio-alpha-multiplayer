@@ -103,7 +103,19 @@ export function SalaPage() {
   const possuiSala = sala !== null
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-[#111]" data-testid="sala-page">
+    <div
+      className="flex flex-1 min-h-0 flex-col overflow-hidden bg-[#111]"
+      data-testid="sala-page"
+      style={{
+        // Fundo da Sala (criar e lobby): foto full-bleed com véu escuro.
+        // `fixed` ancora a imagem no viewport — o scroll do container
+        // interno (ou a barra de rolagem entrando/saindo) não desloca nem
+        // recalcula o `cover`.
+        background:
+          'linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url("/assets/criar-sala-background.jpeg") center / cover no-repeat',
+        backgroundAttachment: 'fixed',
+      }}
+    >
       {/* Container bipartido */}
       <div className="max-w-[1100px] mx-auto px-6 lg:px-8 py-10 lg:py-12 flex-1 min-h-0 overflow-y-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-0 relative">

@@ -236,6 +236,10 @@ _Avoid_: mover, andar
 Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento.
 _Avoid_: ficar, pular
 
+**Desseleção**:
+Ato de encerrar a seleção vigente do peão via comando autoritativo ao servidor, que confirma com evento idempotente; sem ela a seleção obsoleta segue suprimindo o posicionamento da Peça Inicial.
+_Avoid_: desseleção local, limpar seleção no cliente
+
 ## Turnos
 
 **Jogador Ativo**:
