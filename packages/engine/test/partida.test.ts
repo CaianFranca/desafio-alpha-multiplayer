@@ -1548,3 +1548,56 @@ test('escolher vaga em Baixa com Seleção nula valida pela Peça do ator (Req 4
     'PEAO_NAO_SELECIONADO',
   );
 });
+
+test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem o confirmar (Req 3 #272)', () => {
+  // Entre a Travessia e o encaixe, o turno já não avança: sem posição
+  // confirmada o encerramento é inválido (a pendência do Recebimento também
+  // bloquearia) — a Limpeza do caminho escuro não pode ser pulada.
+  let estado = estadoDaTravessia();
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  assert.equal(
+    codigoDaRejeicao(estado, encerrarTurno(), 'ana'),
+    'ENCERRAMENTO_INVALIDO',
+  );
+
+  // Com a pendência resolvida (escolher → encaixar → mover) e SEM confirmar,
+  // o turno ainda não termina: encerrar exige posicaoConfirmada e permanecer
+  // exige a Peça do início do turno (inválida após a mudança) — o único ponto
+  // definitivo que fecha o caminho escuro (Iluminação + Limpeza) é o confirmar.
+  const recebidaId = estado.tabuleiro.recebidas[0].recebidaId;
+  const pecaRecebidaId = estado.tabuleiro.recebidas[0].pecaId;
+  estado = aplicar(estado, escolherVaga(recebidaId, 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca(pecaRecebidaId, 1, 3), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  assert.equal(estado.tabuleiro.recebidas.length, 0);
+  assert.equal(
+    codigoDaRejeicao(estado, encerrarTurno(), 'ana'),
+    'ENCERRAMENTO_INVALIDO',
+  );
+  // Permanência: sem o Peão selecionado é PEAO_NAO_SELECIONADO (guarda do
+  // Tabuleiro); mesmo selecionado, após a mudança de Peça é
+  // ENCERRAMENTO_INVALIDO — nenhum caminho fecha o turno sem o confirmar.
+  assert.equal(
+    codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
+    'PEAO_NAO_SELECIONADO',
+  );
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  assert.equal(
+    codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
+    'ENCERRAMENTO_INVALIDO',
+  );
+  // O confirmar fecha o gatilho com Limpeza (assinado pelo próprio fluxo):
+  // estado pós-confirmação pronto para o encerramento.
+  const confirmacao = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.posicaoConfirmada, true);
+  assert.equal(
+    aplicarComandoDePartida(confirmacao.estado, encerrarTurno(), 'ana').sucesso,
+    true,
+  );
+});
