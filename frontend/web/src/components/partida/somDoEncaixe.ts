@@ -38,8 +38,8 @@ export const CAMINHO_SOM_MOVIMENTO_ENCAIXE = CAMINHO_TOQUE_ENIGMATICO
 /**
  * Volume base da carta do giro (contrato com o futuro botão de volume,
  * ADR-0007: `audio.volume = master * VOLUME_BASE_SOM_DE_GIRO`, com master
-  * em [0, 1]). Metade da carta original do movimento (0.7 → 0.35): o giro
- * repete a cada ação, o movimento de cada peça é pontual.
+ * em [0, 1]). Base baixa por decisão humana: o giro repete a cada ação e
+ * não pode gritar; o movimento de cada peça é pontual.
  */
 export const VOLUME_BASE_SOM_DE_GIRO = 0.15
 

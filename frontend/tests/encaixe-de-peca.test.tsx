@@ -146,8 +146,9 @@ describe('som do encaixe — constantes centralizadas e toque (issue #241)', () 
       src: CAMINHO_SOM_MOVIMENTO_ENCAIXE,
       volume: VOLUME_BASE_SOM_DE_MOVIMENTO,
     })
-    // Mudança de spec: carta cai pela metade, movimento em base própria.
-    expect(VOLUME_BASE_SOM_DE_GIRO).toBe(0.35)
+    // Volumes intencionais (decisão humana): carta baixa para giros
+    // repetidos não gritarem, movimento em base própria.
+    expect(VOLUME_BASE_SOM_DE_GIRO).toBe(0.15)
     expect(VOLUME_BASE_SOM_DE_MOVIMENTO).toBe(1)
   })
 
