@@ -27,23 +27,31 @@ function PecaSaindo({ peca, inicioMs, onFim }: SaindoProps) {
   const pos = celulaParaMundo(peca.celula)
 
   // Coleta TODOS os materiais no mount, força transparent e guarda opacity
-  // original para que base (0.88) e trilhas opacas (1) desvanecam juntas sem pop.
-  // Clona por instância para não vazar mutação para outras peças.
+  // original para que base e topo texturizado desvanecam juntos sem pop.
+  // Clona por instância para não vazar mutação para outras peças. Suporta
+  // mesh de material único e de múltiplos materiais (peça texturizada com
+  // as 6 faces — issues #275/#276/#277).
   useEffect(() => {
     if (!groupRef.current) return
     const mats: MaterialComOrigem[] = []
     groupRef.current.traverse((obj) => {
       if ((obj as THREE.Mesh).isMesh) {
         const mesh = obj as THREE.Mesh
-        const matOriginal = mesh.material as THREE.MeshStandardMaterial
-        // Clona para isolar esta instância (evita vazar transparent/opacity)
-        const mat = matOriginal.clone() as THREE.MeshStandardMaterial
-        mesh.material = mat
-        const opacityOriginal = mat.opacity
-        mat.transparent = true
-        // Garante que needsUpdate reflita a mudança de transparent
-        mat.needsUpdate = true
-        mats.push({ mat, opacityOriginal })
+        const origem = mesh.material as
+          | THREE.MeshStandardMaterial
+          | THREE.MeshStandardMaterial[]
+        const lista = Array.isArray(origem) ? origem : [origem]
+        const clones = lista.map((matOriginal) => {
+          // Clona para isolar esta instância (evita vazar transparent/opacity)
+          const mat = matOriginal.clone() as THREE.MeshStandardMaterial
+          const opacityOriginal = mat.opacity
+          mat.transparent = true
+          // Garante que needsUpdate reflita a mudança de transparent
+          mat.needsUpdate = true
+          mats.push({ mat, opacityOriginal })
+          return mat
+        })
+        mesh.material = Array.isArray(origem) ? clones : clones[0]
       }
     })
     materiaisRef.current = mats

@@ -32,13 +32,17 @@ import { deveSuprimirPeaoNaMesa } from '../tabuleiro/vooDoPeao'
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
  * (centro claro, bordas escuras). As luzes existem só para leve modelagem
- * e profundidade — não devem lavar a textura.
+ * e profundidade — não devem lavar a textura. A segunda direcional é rasante
+ * (~25° de elevação, azimute girado ~45° em torno de Y em relação à existente)
+ * para realçar o relevo do normalMap das peças; intensidade conservadora para
+ * manter a Mesa como referência visual.
  */
 function Iluminacao() {
   return (
     <>
-      <ambientLight intensity={0.45} />
-      <directionalLight position={[8, 14, 6]} intensity={0.85} />
+      <ambientLight intensity={0.22} />
+      <directionalLight position={[8, 14, 6]} intensity={1.0} />
+      <directionalLight position={[1.4, 4.7, 9.9]} intensity={0.35} />
     </>
   )
 }
