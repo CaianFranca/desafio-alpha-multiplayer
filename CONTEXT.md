@@ -285,7 +285,7 @@ _Avoid_: peça de criatura
 _Avoid_: área de ataque, visão
 
 **Ataque**:
-Evento disparado pela Confirmação de Posição quando a mudança de posição altera o Alcance de um Monstro; atinge todos os peões dentro do Alcance e é negado pela Proteção.
+Evento avaliado por Monstro quando a Peça decidida do peão do Jogador Ativo (confirmada, mantida ou posicionada) entra, sai ou permanece no Alcance dele; disparam a Confirmação de Posição com troca, a Permanência e o posicionamento do peão no Primeiro Turno (como entrada); fora→fora é silêncio e só os Monstros envolvidos atacam; atinge todos os peões dentro do Alcance dos envolvidos e é negado pela Proteção.
 _Avoid_: golpe, dano, ofensiva
 
 **O Vulto**:
