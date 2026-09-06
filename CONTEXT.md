@@ -41,7 +41,7 @@ _Avoid_: login ativo, conexão
 ## Partidas
 
 **Sala**:
-Reunião criada por um jogador para reunir membros antes de uma partida; aceita até quatro e só pode ser encaminhada à partida com exatamente quatro.
+Reunião criada por um jogador para reunir membros antes de uma partida; aceita até quatro e só pode ser encaminhada à partida com de 2 a 4 membros, todos conectados e prontos.
 _Avoid_: room, sessão de jogo
 
 **Lobby**:
@@ -61,7 +61,7 @@ Volta dos Jogadores à Sala de origem após o término da Partida; a Sala reabre
 _Avoid_: retorno ao lobby, volta ao lobby
 
 **Encaminhamento**:
-Atividade iniciada pelo Anfitrião que leva uma Sala aberta com quatro Membros conectados e prontos a uma Partida; a composição congela somente quando o game-server aceita, e a recusa ou a falha mantém a Sala aberta.
+Atividade iniciada pelo Anfitrião que leva uma Sala aberta com de 2 a 4 Membros conectados e prontos a uma Partida; a composição congela somente quando o game-server aceita, e a recusa ou a falha mantém a Sala aberta.
 _Avoid_: handoff, transição
 
 **AFK**:

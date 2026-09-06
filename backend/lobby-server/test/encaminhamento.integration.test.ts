@@ -129,49 +129,40 @@ beforeEach(async()=>{
 });
 
 // Helpers de sala
-async function criarSalaCom4Prontos(servidor:{baseUrl:string;wsUrl:string}, opcoes: CriarContextoOpcoes={}){
-  // já cria via WS usando servidor efêmero passado por comServidor; este helper assume servidor já criado externo
-  throw new Error('usar inline');
+interface JogadorDaSala { id: string; cookies: Record<string,string>; apelido: string; ws: WebSocket }
+
+// Monta sala com n membros, sendo os `prontos` primeiros com prontidão alternada.
+// Drena os broadcasts de forma determinística (padrão: 2 eventos por entrada/prontidão por cliente conectado).
+async function montarSalaNProntos(baseUrl: string, wsUrl: string, n: number, prontos: number = n): Promise<{jogadores: JogadorDaSala[]; codigo: string}> {
+  const jogadores: JogadorDaSala[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = await registrarJogador(baseUrl);
+    const ws = await conectarWs(wsUrl, j.cookies);
+    jogadores.push({ ...j, ws });
+  }
+  const wss = jogadores.map((j) => j.ws);
+  enviar(wss[0], {type:'CRIAR_SALA'});
+  const criacao = JSON.parse(await esperarMensagem(wss[0])) as SalaAtualizadaEvento;
+  assert.equal(criacao.type,'SALA_ATUALIZADA');
+  const codigo = criacao.sala.codigoDeSala;
+  for (let i = 1; i < n; i++) {
+    enviar(wss[i], {type:'ENTRAR_NA_SALA', codigoDeSala: codigo});
+    await esperarMensagem(wss[i]); // MEMBRO_ENTROU
+    await esperarMensagem(wss[i]); // SALA_ATUALIZADA
+  }
+  // entradas: jogador i (0-index) recebe 2*(n-1-i) broadcasts das entradas seguintes
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < 2 * (n - 1 - i); k++) await esperarMensagem(wss[i]);
+  }
+  // prontidões: cada alternância gera 2 eventos para cada um dos n clientes
+  for (let i = 0; i < prontos; i++) enviar(wss[i], {type:'ALTERNAR_PRONTIDAO'});
+  for (const ws of wss) for (let k = 0; k < 2 * prontos; k++) await esperarMensagem(ws);
+  return { jogadores, codigo };
 }
 
-async function montarSala4Prontos(baseUrl:string, wsUrl:string, opcoes: CriarContextoOpcoes): Promise<{a:{id:string;cookies:Record<string,string>;apelido:string;ws:WebSocket}; b:any; c:any; d:any; codigo:string}> {
-  const a=await registrarJogador(baseUrl);
-  const b=await registrarJogador(baseUrl);
-  const c=await registrarJogador(baseUrl);
-  const d=await registrarJogador(baseUrl);
-  const wsA=await conectarWs(wsUrl,a.cookies);
-  const wsB=await conectarWs(wsUrl,b.cookies);
-  const wsC=await conectarWs(wsUrl,c.cookies);
-  const wsD=await conectarWs(wsUrl,d.cookies);
-  enviar(wsA,{type:'CRIAR_SALA'});
-  const criacao=JSON.parse(await esperarMensagem(wsA)) as SalaAtualizadaEvento;
-  assert.equal(criacao.type,'SALA_ATUALIZADA');
-  const codigo=criacao.sala.codigoDeSala;
-  for(const ws of [wsB,wsC,wsD]){
-    enviar(ws,{type:'ENTRAR_NA_SALA',codigoDeSala:codigo});
-    await esperarMensagem(ws); // MEMBRO_ENTROU
-    await esperarMensagem(ws); // SALA_ATUALIZADA
-  }
-  // drenar broadcasts nos antigos
-  for(let i=0;i<3;i++){ // 3 entradas *2 eventos cada =6 para A, 4 para B etc – simplificar drenando até silence
-  }
-  // forma simples: esperar silencio não garantido; vamos coletar esperados de forma robusta:
-  // Após as 3 entradas, A recebeu 6 eventos, B 4, C 2
-  // Drenar exatamente
-  for(let i=0;i<6;i++) await esperarMensagem(wsA);
-  for(let i=0;i<4;i++) await esperarMensagem(wsB);
-  for(let i=0;i<2;i++) await esperarMensagem(wsC);
-  // D não tem pendente
-
-  // Todos alternam prontidão
-  for(const {ws} of [{ws:wsA},{ws:wsB},{ws:wsC},{ws:wsD}]){
-    enviar(ws,{type:'ALTERNAR_PRONTIDAO'});
-  }
-  // cada alternância gera 2 eventos para cada um dos 4 => 8 eventos por ws
-  for(const ws of [wsA,wsB,wsC,wsD]){
-    for(let i=0;i<8;i++) await esperarMensagem(ws);
-  }
-  return {a:{...a,ws:wsA}, b:{...b,ws:wsB}, c:{...c,ws:wsC}, d:{...d,ws:wsD}, codigo};
+function fecharTodos(wss: WebSocket[]): Promise<unknown> {
+  for (const ws of wss) ws.close();
+  return Promise.all(wss.map((ws) => esperarClose(ws).catch(() => undefined)));
 }
 
 test('INICIAR_PARTIDA só aceito do Anfitrião com 4 conectados e prontos', async()=>{
@@ -591,4 +582,111 @@ test('timeout real via AbortController mantém aberta com PARTIDA_FALHOU (B2/R1)
     await redis.del('game-servers:disponiveis:fake-timeout');
     await new Promise<void>((r) => fake.close(() => r()));
   }
+});
+
+// --- Composição 2 a 4 membros (issue #282) ---
+
+test('INICIAR_PARTIDA aceita com 2 membros conectados e prontos — encaminhada + PARTIDA_DISPONIVEL', async()=>{
+  const ofertarStub=async (oferta: OfertaDeEncaminhamento): Promise<AceiteDoEncaminhamento>=>{
+    assert.equal(oferta.roster.length,2);
+    assert.ok(oferta.roster[0].ordemDeEntrada < oferta.roster[1].ordemDeEntrada);
+    return {partidaId:'partida-2p', serverId:'server-2p'};
+  };
+  await comServidor(async (servidor)=>{
+    const {jogadores, codigo} = await montarSalaNProntos(servidor.baseUrl, servidor.wsUrl, 2);
+    const [wsA, wsB] = jogadores.map((j)=>j.ws);
+    enviar(wsA,{type:'INICIAR_PARTIDA'});
+    for(const ws of [wsA,wsB]){
+      const e1=JSON.parse(await esperarMensagem(ws)) as {type:string};
+      assert.equal(e1.type,'PARTIDA_PREPARANDO');
+      const e2=JSON.parse(await esperarMensagem(ws)) as {type:string};
+      assert.equal(e2.type,'SALA_ATUALIZADA');
+    }
+    for(const ws of [wsA,wsB]){
+      const ev=JSON.parse(await esperarMensagem(ws,3000)) as PartidaDisponivelEvento;
+      assert.equal(ev.type,'PARTIDA_DISPONIVEL');
+      assert.equal(ev.partidaId,'partida-2p');
+      assert.equal(ev.serverId,'server-2p');
+      const salaEv=JSON.parse(await esperarMensagem(ws)) as SalaAtualizadaEvento;
+      assert.equal(salaEv.sala.estado,'encaminhada');
+    }
+    const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE codigo_sala=$1`,[codigo]);
+    assert.equal(linha.rows[0]?.status,'encaminhada');
+    await fecharTodos([wsA,wsB]);
+  }, {ofertarEncaminhamento: ofertarStub});
+});
+
+test('INICIAR_PARTIDA aceita com 3 membros conectados e prontos — encaminhada + PARTIDA_DISPONIVEL', async()=>{
+  const ofertarStub=async (oferta: OfertaDeEncaminhamento): Promise<AceiteDoEncaminhamento>=>{
+    assert.equal(oferta.roster.length,3);
+    return {partidaId:'partida-3p', serverId:'server-3p'};
+  };
+  await comServidor(async (servidor)=>{
+    const {jogadores, codigo} = await montarSalaNProntos(servidor.baseUrl, servidor.wsUrl, 3);
+    const [wsA, wsB, wsC] = jogadores.map((j)=>j.ws);
+    enviar(wsA,{type:'INICIAR_PARTIDA'});
+    for(const ws of [wsA,wsB,wsC]){
+      const e1=JSON.parse(await esperarMensagem(ws)) as {type:string};
+      assert.equal(e1.type,'PARTIDA_PREPARANDO');
+      const e2=JSON.parse(await esperarMensagem(ws)) as {type:string};
+      assert.equal(e2.type,'SALA_ATUALIZADA');
+    }
+    for(const ws of [wsA,wsB,wsC]){
+      const ev=JSON.parse(await esperarMensagem(ws,3000)) as PartidaDisponivelEvento;
+      assert.equal(ev.type,'PARTIDA_DISPONIVEL');
+      assert.equal(ev.partidaId,'partida-3p');
+      const salaEv=JSON.parse(await esperarMensagem(ws)) as SalaAtualizadaEvento;
+      assert.equal(salaEv.sala.estado,'encaminhada');
+    }
+    const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE codigo_sala=$1`,[codigo]);
+    assert.equal(linha.rows[0]?.status,'encaminhada');
+    await fecharTodos([wsA,wsB,wsC]);
+  }, {ofertarEncaminhamento: ofertarStub});
+});
+
+test('INICIAR_PARTIDA com 1 membro recusa ENCAMINHAMENTO_INVALIDO e sala segue aberta', async()=>{
+  let ofertado=false;
+  const ofertarStub=async (): Promise<AceiteDoEncaminhamento>=>{ ofertado=true; return {partidaId:'p-solo', serverId:'s-solo'}; };
+  await comServidor(async (servidor)=>{
+    const {jogadores, codigo} = await montarSalaNProntos(servidor.baseUrl, servidor.wsUrl, 1);
+    const wsA = jogadores[0].ws;
+    enviar(wsA,{type:'INICIAR_PARTIDA'});
+    const erro=JSON.parse(await esperarMensagem(wsA)) as {type:string;codigo:string};
+    assert.equal(erro.type,'ERRO_DA_SALA');
+    assert.equal(erro.codigo,'ENCAMINHAMENTO_INVALIDO');
+    assert.equal(ofertado,false,'não deve ofertar com menos de 2 membros');
+    const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE codigo_sala=$1`,[codigo]);
+    assert.equal(linha.rows[0]?.status,'aberta');
+    await fecharTodos([wsA]);
+  }, {ofertarEncaminhamento: ofertarStub});
+});
+
+test('5º membro recebe SALA_CHEIA ao tentar entrar (teto de entrada permanece 4)', async()=>{
+  await comServidor(async (servidor)=>{
+    const {jogadores, codigo} = await montarSalaNProntos(servidor.baseUrl, servidor.wsUrl, 4);
+    const quinto=await registrarJogador(servidor.baseUrl);
+    const wsE=await conectarWs(servidor.wsUrl,quinto.cookies);
+    enviar(wsE,{type:'ENTRAR_NA_SALA',codigoDeSala:codigo});
+    const erro=JSON.parse(await esperarMensagem(wsE)) as {type:string;codigo:string};
+    assert.equal(erro.type,'ERRO_DA_SALA');
+    assert.equal(erro.codigo,'SALA_CHEIA');
+    await fecharTodos([...jogadores.map((j)=>j.ws), wsE]);
+  }, {});
+});
+
+test('3 presentes com 1 pronto: INICIAR_PARTIDA não encaminha e sala segue aberta', async()=>{
+  let ofertado=false;
+  const ofertarStub=async (): Promise<AceiteDoEncaminhamento>=>{ ofertado=true; return {partidaId:'p-parcial', serverId:'s-parcial'}; };
+  await comServidor(async (servidor)=>{
+    const {jogadores, codigo} = await montarSalaNProntos(servidor.baseUrl, servidor.wsUrl, 3, 1);
+    const wss = jogadores.map((j)=>j.ws);
+    enviar(wss[0],{type:'INICIAR_PARTIDA'});
+    const erro=JSON.parse(await esperarMensagem(wss[0])) as {type:string;codigo:string};
+    assert.equal(erro.type,'ERRO_DA_SALA');
+    assert.equal(erro.codigo,'ENCAMINHAMENTO_INVALIDO');
+    assert.equal(ofertado,false,'não deve ofertar com presentes > prontos');
+    const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE codigo_sala=$1`,[codigo]);
+    assert.equal(linha.rows[0]?.status,'aberta');
+    await fecharTodos(wss);
+  }, {ofertarEncaminhamento: ofertarStub});
 });
