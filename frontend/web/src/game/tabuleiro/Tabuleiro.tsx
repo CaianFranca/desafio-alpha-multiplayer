@@ -20,6 +20,7 @@ import type {
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
 import {
+  corDoVooPendente,
   deveSuprimirPeaoEstatico,
   mundoDoPeaoSobreACelula,
   tocarBaqueDoPeao,
@@ -134,12 +135,19 @@ export function Tabuleiro({
   // Voo do peão (#242): o modelo atualiza instantâneo, então o destino já
   // renderizaria o peão estático — durante o voo ativo ele é suprimido em
   // origem/destino e só o overlay voador aparece (sem peão duplicado). Sem
-  // cor conhecida (peão fora do modelo), snap = modelo atual, sem overlay.
-  const corDoVoo: CorDoPeao | null =
-    vooPendente !== null
-      ? (peoes.find((p) => p.peaoId === vooPendente.peaoId)?.cor ?? null)
-      : null
+  // cor conhecida (peão fora do modelo), sem overlay — o modelo atual já é
+  // o estado final — mas o pouso sonoro é mantido (baque imediato abaixo,
+  // revisão PR #254: "baque ao aterrissar", nunca silêncio total).
+  const corDoVoo: CorDoPeao | null = corDoVooPendente(vooPendente ?? null, peoes)
   const vooEfetivo = vooPendente !== null && corDoVoo !== null ? vooPendente : null
+  // Voo sem cor para o overlay: sem overlay, mas com baque imediato + aviso
+  // de aterrissagem, uma vez por nonce (efeito, sem temporizador).
+  const vooSemOverlay = vooPendente !== null && corDoVoo === null ? vooPendente : null
+  useEffect(() => {
+    if (vooSemOverlay === null) return
+    tocarBaqueDoPeao()
+    onVooAterrissou?.(vooSemOverlay.nonce)
+  }, [vooSemOverlay, onVooAterrissou])
 
   return (
     <group>

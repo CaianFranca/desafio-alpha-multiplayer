@@ -4,6 +4,7 @@ import {
   SOM_VOLUME_BASE_BAQUE_PEAO,
   SOM_VOLUME_BASE_CLIQUE_PEAO,
   VOO_DURACAO_MS,
+  corDoVooPendente,
   deveLimparVooNoSnapshot,
   deveSuprimirPeaoEstatico,
   deveSuprimirPeaoNaMesa,
@@ -342,6 +343,45 @@ describe('voo do peão — pouso com baque (issue #242)', () => {
     expect(
       deveLimparVooNoSnapshot({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' }),
     ).toBe(false)
+  })
+})
+
+describe('voo do peão — cor do overlay e pouso sonoro sem cor (revisão PR #254)', () => {
+  it('resolve a cor do voador pelo peaoId no modelo atual', () => {
+    const modelo = modeloComDuasPecas()
+    const voo: VooDoPeaoPendente = {
+      nonce: 1,
+      peaoId: 'peao-branco',
+      origem: ORIGEM,
+      destino: DESTINO,
+    }
+    expect(corDoVooPendente(voo, modelo.peoes)).toBe(
+      modelo.peoes.find((p) => p.peaoId === 'peao-branco')?.cor ?? null,
+    )
+    expect(corDoVooPendente(voo, modelo.peoes)).not.toBeNull()
+  })
+
+  it('peão fora do modelo → sem overlay, mas o pouso sonoro é mantido', () => {
+    const modelo = modeloComDuasPecas()
+    const voo: VooDoPeaoPendente = {
+      nonce: 2,
+      peaoId: 'peao-fantasma',
+      origem: ORIGEM,
+      destino: DESTINO,
+    }
+    // Sem cor: a cena não monta overlay (o modelo atual já é o estado final).
+    expect(corDoVooPendente(voo, modelo.peoes)).toBeNull()
+    // Mas nunca silêncio total ("baque ao aterrissar", #242): baque imediato
+    // + limpeza do pendente pelo nonce.
+    tocarBaqueDoPeao()
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]?.src).toBe(SOM_CAMINHO_BAQUE_PEAO)
+    expect(limparVooAoAterrissar(voo, 2)).toBeNull()
+  })
+
+  it('sem voo → sem cor, sem som', () => {
+    expect(corDoVooPendente(null, modeloComDuasPecas().peoes)).toBeNull()
+    expect(toquesDeAudio).toHaveLength(0)
   })
 })
 

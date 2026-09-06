@@ -30,7 +30,7 @@
 
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
 import { celulaParaMundo, chaveCelula, PEAO_Y } from './contrato'
-import type { Celula } from './contrato'
+import type { Celula, CorDoPeao, PeaoDaExibicao } from './contrato'
 import type { EstadoDoTabuleiroNoCliente } from './reducao'
 
 /**
@@ -183,6 +183,20 @@ export function deveSuprimirPeaoNaMesa(
 ): boolean {
   if (voo === null || voo.peaoId !== peaoId) return false
   return 'mesaIndice' in voo.origem
+}
+
+/**
+ * Cor do peão em voo para o overlay (issue #242, revisão PR #254): resolve
+ * pelo `peaoId` no modelo atual. Sem voo → `null`. Peão fora do modelo →
+ * `null` = sem overlay (o modelo atual já é o estado final), mas o pouso
+ * sonoro é mantido pela cena — nunca silêncio total ("baque ao aterrissar").
+ */
+export function corDoVooPendente(
+  voo: VooDoPeaoPendente | null,
+  peoes: readonly PeaoDaExibicao[],
+): CorDoPeao | null {
+  if (voo === null) return null
+  return peoes.find((p) => p.peaoId === voo.peaoId)?.cor ?? null
 }
 
 function tocarArquivoDeAudio(caminho: string, volumeBase: number): void {
