@@ -41,7 +41,7 @@ _Avoid_: login ativo, conexão
 ## Partidas
 
 **Sala**:
-Reunião criada por um jogador para reunir membros antes de uma partida; aceita até quatro e só pode ser encaminhada à partida com exatamente quatro.
+Reunião criada por um jogador para reunir membros antes de uma partida; aceita até quatro e só pode ser encaminhada à partida com de 2 a 4 membros, todos conectados e prontos.
 _Avoid_: room, sessão de jogo
 
 **Lobby**:
@@ -61,7 +61,7 @@ Volta dos Jogadores à Sala de origem após o término da Partida; a Sala reabre
 _Avoid_: retorno ao lobby, volta ao lobby
 
 **Encaminhamento**:
-Atividade iniciada pelo Anfitrião que leva uma Sala aberta com quatro Membros conectados e prontos a uma Partida; a composição congela somente quando o game-server aceita, e a recusa ou a falha mantém a Sala aberta.
+Atividade iniciada pelo Anfitrião que leva uma Sala aberta com de 2 a 4 Membros conectados e prontos a uma Partida; a composição congela somente quando o game-server aceita, e a recusa ou a falha mantém a Sala aberta.
 _Avoid_: handoff, transição
 
 **AFK**:
@@ -236,6 +236,10 @@ _Avoid_: mover, andar
 Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento.
 _Avoid_: ficar, pular
 
+**Desseleção**:
+Ato de encerrar a seleção vigente do peão via comando autoritativo ao servidor, que confirma com evento idempotente; sem ela a seleção obsoleta segue suprimindo o posicionamento da Peça Inicial.
+_Avoid_: desseleção local, limpar seleção no cliente
+
 ## Turnos
 
 **Jogador Ativo**:
@@ -281,7 +285,7 @@ _Avoid_: peça de criatura
 _Avoid_: área de ataque, visão
 
 **Ataque**:
-Evento disparado pela Confirmação de Posição quando a mudança de posição altera o Alcance de um Monstro; atinge todos os peões dentro do Alcance e é negado pela Proteção.
+Evento avaliado por Monstro quando a Peça decidida do peão do Jogador Ativo (confirmada, mantida ou posicionada) entra, sai ou permanece no Alcance dele; disparam a Confirmação de Posição com troca, a Permanência e o posicionamento do peão no Primeiro Turno (como entrada); fora→fora é silêncio e só os Monstros envolvidos atacam; atinge todos os peões dentro do Alcance dos envolvidos e é negado pela Proteção.
 _Avoid_: golpe, dano, ofensiva
 
 **O Vulto**:

@@ -17,12 +17,17 @@ import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/s
 import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
 import { TransicaoLimpeza, type LimpezaTrigger } from './TransicaoLimpeza'
+import { TransicaoEncaixe } from './TransicaoEncaixe'
+import type { EncaixeTrigger } from '../tabuleiro/encaixe'
+import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion'
 import type {
   PeaoId,
   PecaId,
   PecaCorrente,
   EstadoExibicaoTabuleiro,
 } from '../tabuleiro/contrato'
+import type { VooDoPeaoPendente } from '../tabuleiro/vooDoPeao'
+import { deveSuprimirPeaoNaMesa } from '../tabuleiro/vooDoPeao'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
@@ -101,8 +106,19 @@ interface AmbienteCenaProps {
   vagasSet?: ReadonlySet<string>
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
   pecaCorrente?: PecaCorrente | null
+  /**
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = sem voo.
+   * Desce até o `Tabuleiro`, que avisa o pouso via `onVooAterrissou(nonce)`.
+   */
+  vooPendente?: VooDoPeaoPendente | null
+  /** Pouso do voo concluído (nonce): a página limpa o pendente. */
+  onVooAterrissou?: (nonce: number) => void
   /** Trigger de limpeza evento-driven (issue #239, B1). */
   limpezaTrigger?: LimpezaTrigger | null
+  /** Trigger de encaixe evento-driven (issue #241): voo mesa→célula. */
+  encaixeTrigger?: EncaixeTrigger | null
+  /** Fim do voo do Encaixe (key) → o pai limpa o trigger. */
+  onFimEncaixe?: (key: number) => void
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -134,13 +150,21 @@ export function AmbienteCena({
   alvosPendentesSet,
   vagasSet,
   pecaCorrente = null,
+  vooPendente = null,
+  onVooAterrissou,
   limpezaTrigger = null,
+  encaixeTrigger = null,
+  onFimEncaixe,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
   const peoesNaMesa = (estadoExibicao?.peoes ?? []).filter(
     (peao) => peao.celula === null,
   )
+  // Snap com movimento reduzido: sem peça oculta — o estado final já está
+  // renderizado e a TransicaoEncaixe também não anima (mesma leitura do hook).
+  const reduce = usePrefersReducedMotion()
+  const pecaEmVooId = reduce ? null : (encaixeTrigger?.pecaId ?? null)
 
   return (
     <>
@@ -175,6 +199,14 @@ export function AmbienteCena({
               onRejeicaoPeao={onRejeicaoPeao}
               alvosPendentesSet={alvosPendentesSet}
               vagasSet={vagasSet}
+              vooPendente={vooPendente}
+              onVooAterrissou={onVooAterrissou}
+              ocultarPecaId={pecaEmVooId}
+            />
+            <TransicaoEncaixe
+              posicionadas={estadoExibicao.posicionadas}
+              trigger={encaixeTrigger}
+              onFim={onFimEncaixe}
             />
             <Caixa
               iniciais={estadoExibicao.iniciais}
@@ -186,6 +218,11 @@ export function AmbienteCena({
             />
             <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
             {peoesNaMesa.map((peao) => {
+              // Voo ativo (#242): o peão voador não renderiza estático na Mesa
+              // (Primeiro Turno: origem mesa→Peça Inicial) — só o overlay voa.
+              if (deveSuprimirPeaoNaMesa(vooPendente ?? null, peao.peaoId)) {
+                return null
+              }
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (
                 <PeaoPlaceholder

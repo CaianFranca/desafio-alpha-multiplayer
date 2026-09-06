@@ -1,11 +1,16 @@
+import { useEffect, useMemo, useRef } from 'react'
+import { useFrame, useThree } from '@react-three/fiber'
+import type { Group } from 'three'
 import { chaveCelula, todasAsCelulas } from './contrato'
 import type {
+  CorDoPeao,
   PeaoDaExibicao,
   PeaoId,
   PecaId,
   PecaPosicionada,
 } from './contrato'
 import { Celula } from './Celula'
+import { PeaoPlaceholder } from './PeaoPlaceholder'
 import { cursorParaCelula, cursorParaPecaPosicionada } from './interacao'
 import type { EstadoInteracaoTabuleiro } from './interacao'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from './interacaoPeoes'
@@ -14,6 +19,17 @@ import type {
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
+import {
+  corDoVooPendente,
+  deveSuprimirPeaoEstatico,
+  mundoDoPeaoSobreACelula,
+  tocarBaqueDoPeao,
+  vooPoseEntreMundos,
+  vooReduceAtivo,
+  VOO_DURACAO_MS,
+} from './vooDoPeao'
+import { peaoMesaParaMundo } from './contrato'
+import type { VooDoPeaoPendente } from './vooDoPeao'
 
 interface TabuleiroProps {
   posicionadas: readonly PecaPosicionada[]
@@ -59,6 +75,20 @@ interface TabuleiroProps {
    * mesma fonte do espelho DOM.
    */
   vagasSet?: ReadonlySet<string>
+  /**
+   * Voo pendente do peão (issue #242): overlay erguer→flutuar→aterrissar até
+   * o pouso, quando a cena avisa via `onVooAterrissou(nonce)`. Null = sem voo
+   * (o modelo atual já é o estado final).
+   */
+  vooPendente?: VooDoPeaoPendente | null
+  /** Pouso do voo concluído (nonce): a página limpa o pendente. */
+  onVooAterrissou?: (nonce: number) => void
+  /**
+   * Peça em voo do Encaixe (issue #241): escondida aqui enquanto a
+   * TransicaoEncaixe a anima na cena — ao fim do voo o overlay some e esta
+   * peça assume pixel-igual. Null = sem voo.
+   */
+  ocultarPecaId?: PecaId | null
 }
 
 export function Tabuleiro({
@@ -77,9 +107,15 @@ export function Tabuleiro({
   onRejeicaoPeao,
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
+  vooPendente = null,
+  onVooAterrissou,
+  ocultarPecaId = null,
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
+    // Peça em voo do Encaixe some da grade durante o voo (só o overlay a
+    // exibe); ao fim, o overlay some e ela reassume aqui pixel-igual.
+    if (p.pecaId === ocultarPecaId) continue
     posicionadasPorChave.set(chaveCelula(p.celula), p)
   }
 
@@ -96,6 +132,23 @@ export function Tabuleiro({
 
   const celulas = todasAsCelulas()
 
+  // Voo do peão (#242): o modelo atualiza instantâneo, então o destino já
+  // renderizaria o peão estático — durante o voo ativo ele é suprimido em
+  // origem/destino e só o overlay voador aparece (sem peão duplicado). Sem
+  // cor conhecida (peão fora do modelo), sem overlay — o modelo atual já é
+  // o estado final — mas o pouso sonoro é mantido (baque imediato abaixo,
+  // revisão PR #254: "baque ao aterrissar", nunca silêncio total).
+  const corDoVoo: CorDoPeao | null = corDoVooPendente(vooPendente ?? null, peoes)
+  const vooEfetivo = vooPendente !== null && corDoVoo !== null ? vooPendente : null
+  // Voo sem cor para o overlay: sem overlay, mas com baque imediato + aviso
+  // de aterrissagem, uma vez por nonce (efeito, sem temporizador).
+  const vooSemOverlay = vooPendente !== null && corDoVoo === null ? vooPendente : null
+  useEffect(() => {
+    if (vooSemOverlay === null) return
+    tocarBaqueDoPeao()
+    onVooAterrissou?.(vooSemOverlay.nonce)
+  }, [vooSemOverlay, onVooAterrissou])
+
   return (
     <group>
       {celulas.map((celula) => {
@@ -111,6 +164,13 @@ export function Tabuleiro({
           (estadoInteracao.pecaSelecionadaId === peca.pecaId ||
             estadoInteracao.pecaEmManipulacaoId === peca.pecaId)
         const peao = peoesPorChave.get(chave) ?? null
+        // Voo ativo (#242): suprime o estático de mesmo peaoId confinado a
+        // origem/destino — só o overlay voa; os demais peões (ex.: Portão
+        // com 4) e as demais células seguem intactos.
+        const peaoSuprimido =
+          peao !== null &&
+          vooEfetivo !== null &&
+          deveSuprimirPeaoEstatico(vooEfetivo, peao.peaoId, chave)
         // Destaques do ciclo: alvos de pendência com vaga escolhida (#91) e
         // vagas disponíveis para a escolha sequencial (#143) aquecem o plano.
         const alvoPendente = alvosPendentesSet.has(chave)
@@ -136,7 +196,7 @@ export function Tabuleiro({
                   : undefined,
               })
             }}
-            peao={peao}
+            peao={peaoSuprimido ? null : peao}
             destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
             destinoResgate={peca !== null && resgateSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}
@@ -148,6 +208,91 @@ export function Tabuleiro({
           />
         )
       })}
+      {vooEfetivo !== null && corDoVoo !== null ? (
+        <PeaoVoador
+          key={vooEfetivo.nonce}
+          voo={vooEfetivo}
+          cor={corDoVoo}
+          onAterrissou={onVooAterrissou}
+        />
+      ) : null}
+    </group>
+  )
+}
+
+/**
+ * Overlay do peão voador (issue #242): erguer→flutuar inclinado→aterrissar,
+ * terminando pixel-igual ao destino estático. A origem pode ser uma célula ou
+ * a fileira da Mesa (Primeiro Turno, `PEAO_POSICIONADO` com origem
+ * `{ mesaIndice }`). Interpola via `useFrame` + `invalidate()`
+ * (Canvas em `frameloop="demand"`, sem trocar o modo); conclui via callback,
+ * sem `setTimeout`. Sob `prefers-reduced-motion` vira chegada imediata ao
+ * destino + baque. Inerte ao ponteiro (sem handlers): cliques atravessam para
+ * a célula/peca abaixo e a câmera segue intacta.
+ */
+function PeaoVoador({
+  voo,
+  cor,
+  onAterrissou,
+}: {
+  voo: VooDoPeaoPendente
+  cor: CorDoPeao
+  onAterrissou?: (nonce: number) => void
+}) {
+  const grupo = useRef<Group | null>(null)
+  const concluido = useRef(false)
+  const inicio = useRef<number | null>(null)
+  const invalidate = useThree((estado) => estado.invalidate)
+  // Reduce lido uma vez por voo (o overlay remonta por nonce): leitura estável.
+  const reduce = useMemo(() => vooReduceAtivo(), [])
+  const destinoMundo = useMemo(() => mundoDoPeaoSobreACelula(voo.destino), [voo])
+  const origemMundo = useMemo(
+    () =>
+      'mesaIndice' in voo.origem
+        ? peaoMesaParaMundo(voo.origem.mesaIndice)
+        : mundoDoPeaoSobreACelula(voo.origem),
+    [voo],
+  )
+
+  // Reduce: chegada imediata + baque imediato, uma vez por nonce (efeito, sem temporizador).
+  useEffect(() => {
+    if (!reduce || concluido.current) return
+    concluido.current = true
+    tocarBaqueDoPeao()
+    onAterrissou?.(voo.nonce)
+  }, [reduce, voo.nonce, onAterrissou])
+
+  // Chute inicial do loop sob demanda: garante o primeiro frame do voo.
+  useEffect(() => {
+    if (!reduce) invalidate()
+  }, [reduce, invalidate])
+
+  useFrame(() => {
+    if (reduce || concluido.current) return
+    const agora = performance.now()
+    if (inicio.current === null) inicio.current = agora
+    const progresso = Math.min(1, (agora - inicio.current) / VOO_DURACAO_MS)
+    const pose = vooPoseEntreMundos(origemMundo, destinoMundo, progresso)
+    const alvo = grupo.current
+    if (alvo) {
+      alvo.position.set(pose.posicao[0], pose.posicao[1], pose.posicao[2])
+      alvo.rotation.set(pose.inclinacao[0], 0, pose.inclinacao[1])
+    }
+    if (progresso >= 1) {
+      concluido.current = true
+      tocarBaqueDoPeao()
+      onAterrissou?.(voo.nonce)
+      return
+    }
+    invalidate()
+  })
+
+  if (reduce) {
+    return <PeaoPlaceholder cor={cor} position={destinoMundo} />
+  }
+  return (
+    <group ref={grupo} position={origemMundo}>
+      <PeaoPlaceholder cor={cor} />
     </group>
   )
 }

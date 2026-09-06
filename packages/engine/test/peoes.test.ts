@@ -32,6 +32,9 @@ const escolherVaga = (recebidaId: string, borda: BordaCardinal) =>
 const moverPeao = (peaoId: string, linha: number, coluna: number) =>
   ({ tipo: 'mover_peao', peaoId, celula: { linha, coluna } } as const);
 
+const desselecionarPeao = (peaoId: string) =>
+  ({ tipo: 'desselecionar_peao', peaoId } as const);
+
 const permanecer = (peaoId: string) =>
   ({ tipo: 'permanecer', peaoId } as const);
 
@@ -764,4 +767,77 @@ test('comandos inválidos de peões e recebidas são rejeitados com códigos fec
     ),
     'DADOS_INVALIDOS',
   );
+});
+
+test('desselecionar_peao limpa a seleção vigente e emite peao_desselecionado (issue #249)', () => {
+  let estado = aplicar(estadoInicialDoTabuleiro(), selecionarPeao('peao-branco'));
+  assert.equal(estado.peaoSelecionadoId, 'peao-branco');
+  const resultado = aplicarComandoDeTabuleiro(estado, desselecionarPeao('peao-branco'));
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) throw new Error('inacessível');
+  assert.equal(resultado.estado.peaoSelecionadoId, null);
+  assert.deepEqual(
+    resultado.eventos.map((e) => e.tipo),
+    ['peao_desselecionado'],
+  );
+});
+
+test('desselecionar_peao idempotente emite confirmação sem alterar o estado (já desselecionado ou outro peão, #249)', () => {
+  // Sem seleção vigente: estado inalterado + ack para o autor (libera retry).
+  const semSelecao = estadoInicialDoTabuleiro();
+  const vazio = aplicarComandoDeTabuleiro(semSelecao, desselecionarPeao('peao-branco'));
+  assert.equal(vazio.sucesso, true);
+  if (!vazio.sucesso) throw new Error('inacessível');
+  assert.equal(vazio.estado.peaoSelecionadoId, null);
+  assert.deepEqual(
+    vazio.eventos.map((e) => e.tipo),
+    ['peao_desselecionado'],
+  );
+  assert.deepEqual(vazio.estado, semSelecao);
+  // Outro peão em sequência: não rouba a sequência alheia, mas confirma.
+  const comSelecao = aplicar(semSelecao, selecionarPeao('peao-branco'));
+  const alheia = aplicarComandoDeTabuleiro(comSelecao, desselecionarPeao('peao-vermelho'));
+  assert.equal(alheia.sucesso, true);
+  if (!alheia.sucesso) throw new Error('inacessível');
+  assert.equal(alheia.estado.peaoSelecionadoId, 'peao-branco');
+  assert.deepEqual(
+    alheia.eventos.map((e) => e.tipo),
+    ['peao_desselecionado'],
+  );
+  assert.deepEqual(alheia.estado, comSelecao);
+});
+
+test('desselecionar_peao idempotente não encerra manipulação em aberto (#249)', () => {
+  // Seleção vigente de outro peão + manipulação: o no-op confirmatório não
+  // pode encerrar nem reabrir manipulação alheia.
+  let estado = aplicar(estadoInicialDoTabuleiro(), selecionarPeao('peao-branco'));
+  estado = { ...estado, pecaEmManipulacaoId: 'inicial-1' };
+  const resultado = aplicarComandoDeTabuleiro(estado, desselecionarPeao('peao-vermelho'));
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) throw new Error('inacessível');
+  assert.equal(resultado.estado.pecaEmManipulacaoId, 'inicial-1');
+  assert.equal(resultado.estado.peaoSelecionadoId, 'peao-branco');
+  assert.deepEqual(
+    resultado.eventos.map((e) => e.tipo),
+    ['peao_desselecionado'],
+  );
+});
+
+test('desselecionar_peao sob Recebidas pendentes rejeita PENDENCIA_NAO_RESOLVIDA (#249)', () => {
+  const estado = estadoComRecebidasPendentes();
+  assert.equal(
+    codigoDaRejeicao(estado, desselecionarPeao('peao-branco')),
+    'PENDENCIA_NAO_RESOLVIDA',
+  );
+  // Estado preservado: a seleção segue vigente.
+  assert.equal(estado.peaoSelecionadoId, 'peao-branco');
+});
+
+test('desselecionar_peao de peão inexistente rejeita PEAO_NAO_ENCONTRADO', () => {
+  const estado = estadoInicialDoTabuleiro();
+  assert.equal(
+    codigoDaRejeicao(estado, desselecionarPeao('peao-inexistente')),
+    'PEAO_NAO_ENCONTRADO',
+  );
+  assert.equal(codigoDaRejeicao(estado, desselecionarPeao('   ')), 'DADOS_INVALIDOS');
 });

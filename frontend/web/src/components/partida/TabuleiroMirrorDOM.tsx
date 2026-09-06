@@ -21,6 +21,7 @@ import type {
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
+import type { EncaixeTrigger } from '../../game/tabuleiro/encaixe'
 
 interface TabuleiroMirrorDOMProps {
   todasCelulas: readonly Celula[]
@@ -63,6 +64,8 @@ interface TabuleiroMirrorDOMProps {
   vagasSet?: ReadonlySet<string>
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
+  /** Trigger de encaixe evento-driven (issue #241): espelha o voo mesa→célula. */
+  encaixeTrigger?: EncaixeTrigger | null
 }
 
 /**
@@ -102,6 +105,7 @@ export function TabuleiroMirrorDOM({
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
   sanidadePorPeao = {},
+  encaixeTrigger = null,
 }: TabuleiroMirrorDOMProps) {
   // Mesma derivação pura usada pela cena: resolve a peça sob o peão selecionado
   // (null quando o peão está sobre a Mesa ou sem peça → sem conexões destacadas).
@@ -216,6 +220,13 @@ export function TabuleiroMirrorDOM({
           // Tipo derivado do modelo local (AC1 issue #145): prova de que peças
           // especiais entram no tabuleiro com o tipo correto no espelho DOM.
           data-tipo={p.tipo}
+          // Voo do Encaixe (issue #241): a peça em voo carrega a origem
+          // (mesa/bandeja) — costura de teste do espelho; a cena usa o mesmo
+          // trigger para animar o voo mesa→célula.
+          data-em-voo={encaixeTrigger?.pecaId === p.pecaId ? 'true' : undefined}
+          data-origem-encaixe={
+            encaixeTrigger?.pecaId === p.pecaId ? encaixeTrigger.origem : undefined
+          }
           data-conectada={
             selecao ? (destinosSet.has(p.pecaId) ? 'true' : 'false') : undefined
           }

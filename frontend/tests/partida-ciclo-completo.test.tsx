@@ -91,10 +91,10 @@ function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): Es
       pecasRestantesNaCaixa: 83,
     },
     jogadores: [
-      { jogadorId: MEU_JOGADOR_ID, apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+      { jogadorId: MEU_JOGADOR_ID, apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
     ],
     jogadorAtivoId: MEU_JOGADOR_ID,
     rodada: 2,
@@ -153,6 +153,26 @@ const INICIAL_1: PecaPosicionadaNoSnapshot = {
   orientacao: 0,
   celula: { linha: 3, coluna: 3 },
 }
+// Demais Iniciais longe da cena (rodada 2 = Primeiros Turnos concluídos;
+// gate "Inicial primeiro" da #249 exige cada uma em mesa).
+const INICIAL_2: PecaPosicionadaNoSnapshot = {
+  pecaId: 'inicial-2',
+  tipo: 'inicial',
+  orientacao: 0,
+  celula: { linha: 0, coluna: 0 },
+}
+const INICIAL_3: PecaPosicionadaNoSnapshot = {
+  pecaId: 'inicial-3',
+  tipo: 'inicial',
+  orientacao: 0,
+  celula: { linha: 6, coluna: 6 },
+}
+const INICIAL_4: PecaPosicionadaNoSnapshot = {
+  pecaId: 'inicial-4',
+  tipo: 'inicial',
+  orientacao: 0,
+  celula: { linha: 6, coluna: 0 },
+}
 const PORTAO_1: PecaPosicionadaNoSnapshot = {
   pecaId: 'portao-1',
   tipo: 'portao_de_saida',
@@ -194,13 +214,27 @@ describe('ciclo completo pela UI — vitória no Portão e retorno à sala (#145
 
     // Tabuleiro: os 4 peões na Inicial vizinha conectada ao Portão (leste);
     // geradores e sala do diretor posicionados para a derivação dos chips.
+    // Rodada 2 = Primeiros Turnos concluídos: as 4 Iniciais posicionadas
+    // (gate "Inicial primeiro" da #249 exige a própria Inicial em mesa para
+    // SELECIONAR_PEAO; as demais ficam longe sem quebrar a conexão
+    // inicial-1↔portão).
     act(() =>
       ws.simulateMessage({
         type: 'ESTADO_DA_PARTIDA',
         snapshot: criarSnapshotBase({
           tabuleiro: {
             ...criarSnapshotBase().tabuleiro,
-            posicionadas: [INICIAL_1, PORTAO_1, GERADOR_1, GERADOR_2, GERADOR_3, SALA_DIRETOR_1],
+            posicionadas: [
+              INICIAL_1,
+              INICIAL_2,
+              INICIAL_3,
+              INICIAL_4,
+              PORTAO_1,
+              GERADOR_1,
+              GERADOR_2,
+              GERADOR_3,
+              SALA_DIRETOR_1,
+            ],
             peoes: [
               { peaoId: 'peao-branco', cor: 'branco', pecaId: 'inicial-1' },
               { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'inicial-1' },

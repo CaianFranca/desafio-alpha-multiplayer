@@ -137,18 +137,24 @@ async function criarPartidaViaPost(baseUrl: string): Promise<AceiteDoEncaminhame
   return (await resposta.json()) as AceiteDoEncaminhamento;
 }
 
-// Semeia a Caixa do estado persistido: vulto-1 e espectro-1 na cabeça, para o
-// Recebimento do Primeiro Turno de jogador-1 sortear os Monstros. O TTL da
-// chave é preservado por salvarEstadoDaPartida.
+// Semeia a Caixa do estado persistido: vulto-1 e espectro-1 na cabeça, NESSA
+// ORDEM, para o Recebimento do Primeiro Turno de jogador-1 sortear os Monstros
+// na ordem esperada pelo assert — a ordem relativa herdada do embaralhamento
+// da criação da partida varia entre execuções, então ela é imposta aqui. O
+// TTL da chave é preservado por salvarEstadoDaPartida.
 async function semearCaixaComMonstros(partidaId: string): Promise<void> {
   const estado = await obterEstadoDaPartida(redis, partidaId);
   assert.ok(estado !== null, 'estado da partida deve existir para a semeadura');
-  const monstros = estado!.tabuleiro.caixa.filter(
-    (peca) => peca.pecaId === 'vulto-1' || peca.pecaId === 'espectro-1',
+  const porPecaId = new Map(
+    estado!.tabuleiro.caixa.map((peca) => [peca.pecaId, peca]),
   );
-  assert.equal(monstros.length, 2);
+  const monstros = ['vulto-1', 'espectro-1'].map(
+    (pecaId) => porPecaId.get(pecaId)!,
+  );
+  assert.ok(monstros.every((peca) => peca !== undefined));
+  const idsDosMonstros = new Set(['vulto-1', 'espectro-1']);
   const resto = estado!.tabuleiro.caixa.filter(
-    (peca) => !monstros.includes(peca),
+    (peca) => !idsDosMonstros.has(peca.pecaId),
   );
   await salvarEstadoDaPartida(redis, partidaId, {
     ...estado!,
@@ -300,6 +306,23 @@ async function encerrarTurnoEAvancar(
   await iniciadoEspera;
 }
 
+// Primeiro Turno completo de posicionamento: Peça Inicial + Peão; devolve as
+// Recebidas pendentes (para o encaixe escolher as vagas).
+async function selecionarEPosicionarInicialEPosicionarPeao(
+  ws: WebSocket,
+  jogadorN: number,
+  celula: { linha: number; coluna: number },
+): Promise<Array<Record<string, unknown>>> {
+  await selecionarEPosicionarInicial(ws, jogadorN, celula);
+  const corMap: Record<number, string> = {
+    1: 'peao-branco',
+    2: 'peao-vermelho',
+    3: 'peao-azul',
+    4: 'peao-amarelo',
+  };
+  return selecionarEPosicionarPeao(ws, jogadorN, corMap[jogadorN]!, celula);
+}
+
 before(async () => {
   try {
     await redis.connect();
@@ -317,7 +340,13 @@ after(async () => {
   }
 });
 
-test('broadcast: ATAQUE_RESOLVIDO com estadosAplicados e LIMPEZA_APLICADA chegam aos 4 sockets; snapshot expõe sanidade/estados', async () => {
+// Issue #236: o ATAQUE_RESOLVIDO sai do gatilho do ATUANTE — a Permanência
+// do jogador cujo peão está dentro do Alcance dispara (antes = depois,
+// dentro), com LIMPEZA_APLICADA no mesmo lote quando a Baixa nova do Vulto
+// encolhe a luz do atingido. O cenário de "terceiro dispara o ataque do
+// primeiro turno alheio" (delta global do legado, bug #262) é impossível na
+// regra centrada no atuante.
+test('broadcast: ATAQUE_RESOLVIDO com estadosAplicados e LIMPEZA_APLICADA chegam aos 4 sockets na Permanência; snapshot expõe sanidade/estados', async () => {
   const servidor = await subirServidor(600);
   try {
     const aceite = await criarPartidaViaPost(servidor.baseUrl);
@@ -330,7 +359,9 @@ test('broadcast: ATAQUE_RESOLVIDO com estadosAplicados e LIMPEZA_APLICADA chegam
     try {
       // ── Primeiro Turno de jogador-1: Vulto e Espectro na Vizinhança ──
       // Inicial-1 em (3,3), Peão em cima; o Recebimento (Caixa semeada) sorteia
-      // vulto-1 e espectro-1, encaixados ao norte (2,3) e ao leste (3,4).
+      // vulto-1 e espectro-1, encaixados ao norte (2,3) e ao leste (3,4). O
+      // gatilho do posicionamento do Peão roda ANTES dos encaixes (monstros
+      // ainda na Caixa): silêncio; o encaixe de peça NUNCA dispara.
       await selecionarEPosicionarInicial(ws, 1, { linha: 3, coluna: 3 });
       const recebidas = await selecionarEPosicionarPeao(ws, 1, 'peao-branco', { linha: 3, coluna: 3 });
       assert.deepEqual(recebidas.map((r) => r.pecaId), ['vulto-1', 'espectro-1']);
@@ -338,17 +369,37 @@ test('broadcast: ATAQUE_RESOLVIDO com estadosAplicados e LIMPEZA_APLICADA chegam
       await escolherVagaEPosicionar(ws, 1, 'espectro-1', 'leste', { linha: 3, coluna: 4 });
       await encerrarTurnoEAvancar(ws, ws2, 1, 2, 1);
 
-      // ── Primeiro Turno de jogador-2: gatilho do Ataque ──────────────
-      // O Vulto (2,3) e o Espectro (3,4) têm o peão-branco (sobre a
-      // inicial-1 em (3,3)) dentro do Alcance: delta do snapshot vazio ⇒
-      // ataque simultâneo. Penalidades: Baixa Iluminação (Vulto) +
-      // sanidade 3 → 2 (Espectro); a Baixa nova encolhe a luz de jogador-1
-      // à própria célula ⇒ segunda Limpeza remove os dois Monstros.
-      await selecionarEPosicionarInicial(ws2, 2, { linha: 0, coluna: 0 });
+      // ── Primeiros Turnos de jogador-2/3/4: fora→fora é silêncio ─────
+      // O peão de jogador-1 fica DENTRO do Alcance dos Monstros encaixados,
+      // mas quem atua (jogador-2/3/4) posiciona FORA do Alcance: o peão
+      // parado de terceiro não é atingido (issue #262 eliminada).
+      const rec2 = await selecionarEPosicionarInicialEPosicionarPeao(ws2, 2, { linha: 0, coluna: 0 });
+      assert.equal(rec2.length, 1); // inicial-2 em (0,0): única vaga leste (0,1)
+      await escolherVagaEPosicionar(ws2, 2, rec2[0]!.pecaId as string, 'leste', { linha: 0, coluna: 1 });
+      await encerrarTurnoEAvancar(ws2, ws3, 2, 3, 1);
+
+      const rec3 = await selecionarEPosicionarInicialEPosicionarPeao(ws3, 3, { linha: 6, coluna: 6 });
+      assert.equal(rec3.length, 1); // inicial-3 em (6,6): única vaga norte (5,6)
+      await escolherVagaEPosicionar(ws3, 3, rec3[0]!.pecaId as string, 'norte', { linha: 5, coluna: 6 });
+      await encerrarTurnoEAvancar(ws3, ws4, 3, 4, 1);
+
+      const rec4 = await selecionarEPosicionarInicialEPosicionarPeao(ws4, 4, { linha: 6, coluna: 0 });
+      assert.equal(rec4.length, 2); // inicial-4 em (6,0): vagas norte (5,0) e leste (6,1)
+      await escolherVagaEPosicionar(ws4, 4, rec4[0]!.pecaId as string, 'norte', { linha: 5, coluna: 0 });
+      await escolherVagaEPosicionar(ws4, 4, rec4[1]!.pecaId as string, 'leste', { linha: 6, coluna: 1 });
+      await encerrarTurnoEAvancar(ws4, ws, 4, 1, 2);
+
+      // ── Rodada 2, jogador-1: gatilho da Permanência ──────────────────
+      // O peão-branco segue na inicial-1 (3,3), DENTRO do Alcance do Vulto
+      // (2,3) e do Espectro (3,4): permanecer dentro dispara (antes = depois).
+      // Penalidades: Baixa Iluminação (Vulto) + sanidade 3 → 2 (Espectro); a
+      // Baixa nova encolhe a luz de jogador-1 à própria célula ⇒ a Iluminação
+      // é reaplicada e a Limpeza remove os dois Monstros.
       const ataquesEsperas = [ws, ws2, ws3, ws4].map((s) => esperarEvento(s, 'ATAQUE_RESOLVIDO'));
       const limpezasEsperas = [ws, ws2, ws3, ws4].map((s) => esperarEvento(s, 'LIMPEZA_APLICADA'));
-      const recebidas2 = await selecionarEPosicionarPeao(ws2, 2, 'peao-vermelho', { linha: 0, coluna: 0 });
-      assert.equal(recebidas2.length, 1); // inicial-2 em (0,0): única vaga leste
+      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
+      await esperarEvento(ws, 'PEAO_SELECIONADO');
+      enviar(ws, { type: 'PERMANECER', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
 
       const ataques = await Promise.all(ataquesEsperas);
       const limpezas = await Promise.all(limpezasEsperas);
@@ -401,6 +452,12 @@ test('broadcast: ATAQUE_RESOLVIDO com estadosAplicados e LIMPEZA_APLICADA chegam
         wsTardio.close();
       }
     } finally {
+      // ws fecha idempotente (no caminho feliz ele já foi fechado antes da
+      // reconexão tardia). Sem ele, um assert lançado cedo deixaria o socket
+      // do jogador-1 aberto e o servidor.fechar() penduraria no wss.close()
+      // esperando o último cliente — mascarando o erro real até o timeout do
+      // arquivo (relato do flake: recebidas em ordem trocada).
+      ws.close();
       ws2.close();
       ws3.close();
       ws4.close();

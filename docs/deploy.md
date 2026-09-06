@@ -271,8 +271,14 @@ REDIS_PORT=6379
 JWT_SECRET=<secret PROD_JWT_SECRET>
 JWT_REFRESH_SECRET=<secret PROD_JWT_REFRESH_SECRET>
 LOBBY_PUBLIC_URL=<variable PROD_LOBBY_PUBLIC_URL>
+GAME_SERVER_ADVERTISE_HOST=127.0.0.1
 COOKIE_SECURE=false
 ```
+
+> **`GAME_SERVER_ADVERTISE_HOST=127.0.0.1`**: em prod nativa o lobby e o
+> game-server coabitam o mesmo host, e o encaminhamento usa o host anunciado
+> no registro do Redis; o default (`game-server`, em `packages/config`) só
+> resolve na rede Docker Compose.
 
 > **`COOKIE_SECURE=false` é obrigatório no ambiente atual (sem TLS).** O
 > default em `packages/config` é `Secure=true` quando `NODE_ENV=production`;

@@ -1,8 +1,8 @@
 // Type-guard fechado dos comandos de tabuleiro e de Peões vindo do cliente WS
 // (issues #80 e #88).
 //
-// Apenas os 4 comandos do contrato wire do #80 mais os 5 do ciclo de Peões do
-// #88 são aceitos; campos obrigatórios são validados estruturalmente. Qualquer
+// Apenas os 4 comandos do contrato wire do #80 mais os 6 do ciclo de Peões do
+// #88/#249 são aceitos; campos obrigatórios são validados estruturalmente. Qualquer
 // coisa fora disso é rejeitada pelo `handlers.ts` com `ERRO_DO_TABULEIRO {
 // codigo: 'DADOS_INVALIDOS' }`.
 
@@ -24,6 +24,7 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'POSICIONAR_PECA',
   'FINALIZAR_MANIPULACAO',
   'SELECIONAR_PEAO',
+  'DESELECIONAR_PEAO',
   'POSICIONAR_PEAO',
   'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
@@ -90,6 +91,8 @@ export function ehComandoDoTabuleiro(
     case 'FINALIZAR_MANIPULACAO':
       return true;
     case 'SELECIONAR_PEAO':
+      return ehIdNaoVazio(mensagem.peaoId);
+    case 'DESELECIONAR_PEAO':
       return ehIdNaoVazio(mensagem.peaoId);
     case 'POSICIONAR_PEAO':
       return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);

@@ -1,6 +1,6 @@
 // Handlers WS do canal de Partida (issue #117).
 //
-// Roteia os 11 comandos wire de Partida (`@flicker/shared`) para o domínio
+// Roteia os 12 comandos wire de Partida (`@flicker/shared`) para o domínio
 // (`@flicker/engine`) via `aplicarComandoDePartida`, persiste o novo estado
 // (tabuleiro + Turnos) no Redis e faz broadcast dos eventos traduzidos. O
 // ator do dispatch é sempre a sessão autenticada do socket (passada por

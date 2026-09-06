@@ -119,3 +119,39 @@ test('paraSnapshotWire normaliza estados Redis antigos sem os campos de objetivo
   assert.deepEqual(snapshot.geradoresLigados, []);
   assert.equal(snapshot.cartaoDeAcessoObtido, false);
 });
+
+// Proteção no snapshot (issue #227): baseline do estado da Proteção por
+// Jogador — a reconexão reconcilia pela projeção sem derivar do histórico.
+test('paraSnapshotWire projeta o protegido de cada jogador (#227)', () => {
+  const estado = estadoDaPartida();
+  const comProtecao = {
+    ...estado,
+    jogadores: estado.jogadores.map((jogador, indice) => ({
+      ...jogador,
+      protegido: indice === 0,
+    })),
+  };
+  const snapshot = paraSnapshotWire(comProtecao, roster(), 'em_andamento');
+  assert.equal(snapshot.jogadores[0]!.protegido, true);
+  assert.equal(snapshot.jogadores[1]!.protegido, false);
+  assert.equal(snapshot.jogadores[2]!.protegido, false);
+  assert.equal(snapshot.jogadores[3]!.protegido, false);
+});
+
+test('paraSnapshotWire normaliza estados Redis antigos sem protegido (#227)', () => {
+  // Binário anterior à #227: o protegido simplesmente não existe no jogador
+  // parseado — a normalização defensiva projeta false (mesmo padrão da #173).
+  const estado = estadoDaPartida();
+  const bruto = JSON.stringify({
+    ...estado,
+    jogadores: estado.jogadores.map((jogador) => ({
+      ...jogador,
+      protegido: undefined,
+    })),
+  });
+  const antigo = JSON.parse(bruto) as EstadoDaPartida;
+  const snapshot = paraSnapshotWire(antigo, roster(), 'em_andamento');
+  for (const jogador of snapshot.jogadores) {
+    assert.equal(jogador.protegido, false);
+  }
+});

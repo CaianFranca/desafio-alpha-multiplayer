@@ -18,15 +18,29 @@
 // funil do dispatch (vitória antes da derrota); pós-término, qualquer
 // comando é recusado com PARTIDA_TERMINADA.
 //
-// Ataque dos Monstros (issue #172): nos dois gatilhos definitivos — o
-// posicionamento do Peão do Primeiro Turno e a Confirmação de Posição com
-// mudança de Peça — o Ataque é resolvido APÓS a Iluminação e a Limpeza
-// (monstros.ts), comparando os peões no Alcance de cada Monstro com o
-// snapshot anterior (peoesNoAlcance). Mover, Permanecer, Encerrar o Turno e
-// o posicionamento de peças NUNCA disparam: a movimentação desfeita não
-// altera o snapshot e não gera Ataque. A Proteção concedida pela Sala Médica
-// na Confirmação não é consumida pelo Ataque do MESMO gatilho — permanece
+// Ataque dos Monstros (issue #172, centrado no atuante pela #237 — fiação
+// na Partida pela #236): a avaliação é POR MONSTRO, comparando a Peça do
+// início do turno com a Peça decidida (confirmada, mantida ou posicionada)
+// do peão do ATUANTE, no Tabuleiro PÓS-Limpeza. Os gatilhos são as ações
+// definitivas do atuante: o posicionamento do Peão do Primeiro Turno
+// (entrada — a Peça do início é null ≡ fora), a Confirmação de Posição com
+// mudança de Peça e a Permanência (antes = depois — permanecer dentro
+// dispara). Mover e a movimentação desfeita NUNCA disparam (só a decisão
+// definitiva vale) e Encerrar o Turno e o posicionamento de peças nunca
+// disparam. Fora→fora é silêncio — só os Monstros envolvidos atacam, mesmo
+// com peões de terceiros parados dentro do Alcance (a causa do bug #262
+// desaparece por construção). O Ataque é resolvido APÓS a Iluminação e a
+// Limpeza (monstros.ts). A Proteção concedida pela Sala Médica na
+// Confirmação não é consumida pelo Ataque do MESMO gatilho — permanece
 // para o próximo (CONTEXT.md: "permanece até ser consumida").
+//
+// Proteção observável (issue #227): o evento posicao_confirmada carrega o
+// `protegido` RESULTANTE do ator no fim do gatilho completo — concessão da
+// Sala Médica e consumo pelo ataque do MESMO gatilho incluídos. O snapshot
+// da partida (projeção no game-server) leva o `protegido` por Jogador como
+// baseline autoritativa de reconciliação de reconexão; o consumo corrente
+// continua observável em ataque_resolvido.protegidos. Espelho no wire:
+// shared/src/partida.ts (cabeçalho de fronteira).
 
 import {
   aplicarComandoDeTabuleiro,
@@ -52,7 +66,7 @@ import {
   type SelecionarPecaComando,
 } from './tabuleiro.ts';
 import {
-  resolverAtaques,
+  resolverAtaquesCentradoNoAtuante,
   type AtaqueResolvidoEvento,
   type EstadoResultanteDoAtaque,
 } from './monstros.ts';
@@ -105,10 +119,12 @@ export interface EstadoDaPartida {
   readonly geradoresLigados: readonly string[];
   readonly cartaoDeAcessoObtido: boolean;
   // Ataque (issue #172): snapshot dos peões dentro do Alcance de cada Monstro
-  // no último gatilho (posicionamento do Peão do Primeiro Turno ou
-  // Confirmação de Posição com mudança de Peça) — a base do delta que dispara
-  // o Ataque. Chave = pecaId do Monstro; valor = peaoIds. Monstros removidos
-  // pela Limpeza têm a entrada podada no gatilho seguinte.
+  // no último gatilho (posicionamento do Peão do Primeiro Turno, Confirmação
+  // de Posição com mudança de Peça ou Permanência) — observabilidade do
+  // Alcance atual (a decisão de disparar é centrada no atuante desde a
+  // issue #236/#237 e não usa mais este snapshot). Chave = pecaId do Monstro;
+  // valor = peaoIds. Monstros removidos pela Limpeza têm a entrada podada no
+  // gatilho seguinte.
   readonly peoesNoAlcance: Readonly<Record<string, readonly string[]>>;
   // Resgate (issue #171): peças em período de graça — Permanência bloqueada
   // até saída de um peão. Retrocompatível: estados antigos persistem sem o
@@ -157,6 +173,12 @@ export interface PosicaoConfirmadaEvento {
   readonly jogadorId: string;
   readonly peaoId: string;
   readonly pecaId: string;
+  // Proteção do ator RESULTANTE do gatilho (issue #227): o espelho exato do
+  // `protegido` do ator no ESTADO FINAL — true quando a Sala Médica a concedeu
+  // (sobrevive ao ataque do MESMO gatilho) OU quando uma Proteção prévia não
+  // foi consumida; false quando não havia Proteção ou ela foi consumida pelo
+  // ataque do próprio gatilho (sem Sala Médica no destino para restaurá-la).
+  readonly protegido: boolean;
 }
 
 export interface CelulasIluminadasEvento {
@@ -370,6 +392,13 @@ function rotearComandoDaPartida(
       }
       return delegarAoTabuleiro(estado, comando);
     }
+    case 'desselecionar_peao': {
+      const alheio = exigirPeaoDoAtor(comando.peaoId, jogadorAtivo);
+      if (alheio) {
+        return alheio;
+      }
+      return delegarAoTabuleiro(estado, comando);
+    }
     case 'posicionar_peca':
       return posicionarPecaDaPartida(estado, comando, jogadorAtivo);
     case 'posicionar_peao':
@@ -518,13 +547,23 @@ function posicionarPeaoDaPartida(
   // depois de travar o Peão e recalcular a Iluminação, antes de retornar. As
   // Recebidas caem na Vizinhança do Peão (sempre iluminadas) e não são
   // removidas. O estado é filtrado e o evento só sai quando há remoção.
-  // Ataque (issue #172): resolvido logo após a Limpeza — Monstro removido
-  // não ataca e tem a entrada podada do snapshot.
+  // Ataque (issues #172/#236): resolvido logo após a Limpeza — Monstro
+  // removido não ataca e tem a entrada podada do snapshot. O posicionamento
+  // do Peão no Primeiro Turno é ENTRADA por definição: a Peça do início do
+  // turno é null (≡ fora) e a Peça decidida é a recém-ocupada.
   // ST-15 / issue #170: se o Ataque impôs Baixa Iluminação nova, a Iluminação
   // é recalculada e a Limpeza reaplicada no MESMO gatilho.
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
-  const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
+  // Sem Peça sob o Peão (estado inconsistente defensivo), '' nunca casa com
+  // um pecaId de Alcance: avalia como fora→fora, silêncio.
+  const ataque = resolverAtaqueNoGatilho(
+    estado,
+    tabuleiroPosLimpeza,
+    eventos,
+    null,
+    peao?.pecaId ?? '',
+  );
   const { celulasIluminadas, posicionadas: posicionadasFinais } =
     reaplicarIluminacaoSeBaixaNova(
       estado,
@@ -797,9 +836,43 @@ function permanecerNaPartida(
     );
   }
 
+  // Ataque centrado no atuante (issues #172/#236): a Permanência é gatilho —
+  // a Peça do início do turno e a Peça decidida são a MESMA (antes = depois),
+  // então permanecer DENTRO do Alcance dispara e fora→fora é silêncio. A
+  // permanência não muda a Iluminação: sem recálculo nem Limpeza aqui
+  // (ADR-0005) — se o Vulto impor Baixa Iluminação nova, a Iluminação é
+  // recalculada e a Limpeza reaplicada no MESMO gatilho, mesmo funil dos
+  // demais. O lote mantém ataque_resolvido ANTES de turno_encerrado.
+  const pecaMantidaId = estado.pecaDoInicioDoTurnoId ?? null;
+  const eventos: EventoDaPartida[] = [...resultado.eventos];
+  const ataque = resolverAtaqueNoGatilho(
+    estado,
+    resultado.estado,
+    eventos,
+    pecaMantidaId,
+    pecaMantidaId ?? '',
+  );
+  const { celulasIluminadas, posicionadas: posicionadasFinais } =
+    reaplicarIluminacaoSeBaixaNova(
+      estado,
+      ataque.jogadores,
+      resultado.estado,
+      {
+        celulasIluminadas: estado.celulasIluminadas,
+        posicionadas: resultado.estado.posicionadas,
+      },
+      eventos,
+    );
+
   return avancarVez(
-    { ...estado, tabuleiro: resultado.estado },
-    [...resultado.eventos, { tipo: 'turno_encerrado', jogadorId: ator.jogadorId }],
+    {
+      ...estado,
+      tabuleiro: { ...resultado.estado, posicionadas: posicionadasFinais },
+      celulasIluminadas,
+      peoesNoAlcance: ataque.peoesNoAlcance,
+      jogadores: ataque.jogadores,
+    },
+    [...eventos, { tipo: 'turno_encerrado', jogadorId: ator.jogadorId }],
   );
 }
 
@@ -867,15 +940,13 @@ function confirmarPosicaoDoPeao(
   // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
   const emBaixa = ator.emBaixaIluminacao ?? false;
   const sorteio = gerarRecebidas(estado.tabuleiro, peca, emBaixa);
-  const eventos: EventoDaPartida[] = [
-    {
-      tipo: 'posicao_confirmada',
-      jogadorId: ator.jogadorId,
-      peaoId: peao.peaoId,
-      pecaId: peca.pecaId,
-    },
-    ...sorteio.eventos,
-  ];
+  // Issue #227: o posicao_confirmada só entra no lote ao FINAL da computação —
+  // o evento carrega o protegido RESULTANTE do ator no gatilho completo, que
+  // inclui a concessão da Sala Médica e o consumo pelo ataque do MESMO gatilho
+  // (ambos computados abaixo). A ordem do lote é preservada: ele permanece em
+  // PRIMEIRO, antes de peca_sorteada/recebimento_gerado/celulas_iluminadas/
+  // ataque_resolvido.
+  const eventos: EventoDaPartida[] = [...sorteio.eventos];
   if (sorteio.recebidas.length > 0) {
     eventos.push({
       tipo: 'recebimento_gerado',
@@ -883,11 +954,21 @@ function confirmarPosicaoDoPeao(
     });
   }
   const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
-  // Limpeza e Ataque (issue #172) na mesma ordem do Primeiro Turno:
-  // Iluminação → Limpeza → Ataque → atualização do snapshot do Alcance.
+  // Limpeza e Ataque (issues #172/#236) na mesma ordem do Primeiro Turno:
+  // Iluminação → Limpeza → Ataque → atualização do snapshot do Alcance. A
+  // avaliação é centrada no atuante: Peça do início do turno (antes) vs Peça
+  // confirmada (depois).
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
-  const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
+  const ataque = resolverAtaqueNoGatilho(
+    estado,
+    tabuleiroPosLimpeza,
+    eventos,
+    // ?? null: defensivo para estados persistidos sem o campo (binário
+    // anterior) — sem Peça do início, o "antes" avalia como fora.
+    estado.pecaDoInicioDoTurnoId ?? null,
+    peca.pecaId,
+  );
   const { celulasIluminadas, posicionadas: posicionadasPosAtaque } =
     reaplicarIluminacaoSeBaixaNova(
       estado,
@@ -925,6 +1006,15 @@ function confirmarPosicaoDoPeao(
           : jogador,
       )
     : ataque.jogadores;
+  // Proteção do ator no fim do gatilho completo (issue #227): true quando a
+  // Sala Médica acabou de conceder (sobrevive ao ataque do MESMO gatilho) ou
+  // quando uma Proteção prévia não foi consumida; false quando não havia
+  // Proteção ou ela foi consumida pelo ataque do próprio gatilho. `?? false`
+  // no padrão defensivo de estados persistidos sem o campo.
+  const atorFinal = jogadores.find(
+    (jogador) => jogador.jogadorId === ator.jogadorId,
+  );
+  const protegidoFinal = atorFinal?.protegido ?? false;
   return sucessoDaPartida(
     {
       ...estado,
@@ -937,7 +1027,18 @@ function confirmarPosicaoDoPeao(
       jogadores,
       pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
     },
-    eventos,
+    // O posicao_confirmada abre o lote (ordem canônica da Confirmação
+    // preservada) já com o protegido RESULTANTE (issue #227).
+    [
+      {
+        tipo: 'posicao_confirmada',
+        jogadorId: ator.jogadorId,
+        peaoId: peao.peaoId,
+        pecaId: peca.pecaId,
+        protegido: protegidoFinal,
+      },
+      ...eventos,
+    ],
   );
 }
 
@@ -1336,10 +1437,15 @@ function reaplicarIluminacaoSeBaixaNova(
 }
 
 /**
- * Resolução do Ataque (issue #172, estados issue #170) no gatilho — sempre
- * sobre o tabuleiro PÓS-Limpeza: Monstro removido não ataca e tem a entrada
- * podada do snapshot. ST-15 / issue #170 aplica as penalidades APÓS o consumo
- * da Proteção: Vulto → emBaixaIluminacao (idempotente), Espectro →
+ * Resolução do Ataque no gatilho (issues #172/#170/#173, centrado no atuante
+ * pela #237 — fiação na Partida pela #236) — sempre sobre o tabuleiro
+ * PÓS-Limpeza: Monstro removido não ataca e tem a entrada podada do snapshot.
+ * A avaliação é POR MONSTRO sobre a Peça do início do turno (antes) e a Peça
+ * decidida do peão do atuante (depois): fora→fora é silêncio e só os
+ * Monstros envolvidos atacam — o snapshot peoesNoAlcance de binários
+ * anteriores não é mais insumo da decisão (o legado delta-based permanece
+ * @deprecated em monstros.ts). ST-15 / issue #170 aplica as penalidades APÓS
+ * o consumo da Proteção: Vulto → emBaixaIluminacao (idempotente), Espectro →
  * sanidade-1 com piso 0 → amedrontado; jogador já amedrontado é imune a novo
  * Espectro; protegido nega a penalidade do MESMO gatilho.
  * Issue #173: o evento ataque_resolvido sai do gatilho com `estadosAplicados`
@@ -1352,18 +1458,21 @@ function resolverAtaqueNoGatilho(
   estado: EstadoDaPartida,
   tabuleiro: EstadoDoTabuleiro,
   eventos: EventoDaPartida[],
+  pecaDoInicioId: string | null,
+  pecaDecididaId: string,
 ): {
   peoesNoAlcance: Readonly<Record<string, readonly string[]>>;
   jogadores: readonly JogadorDaPartida[];
 } {
-  const resolucao = resolverAtaques(
+  const resolucao = resolverAtaquesCentradoNoAtuante(
     tabuleiro,
-    // Acesso defensivo: estados de binários anteriores persistidos em Redis
-    // sem os campos novos (mesmo padrão de resultado ?? null).
-    estado.peoesNoAlcance ?? {},
+    pecaDoInicioId,
+    pecaDecididaId,
     estado.jogadores.map((jogador) => ({
       jogadorId: jogador.jogadorId,
       peaoId: jogador.peaoId,
+      // ?? false: estados de binários anteriores persistidos em Redis sem o
+      // campo (mesmo padrão de resultado ?? null).
       protegido: jogador.protegido ?? false,
     })),
   );

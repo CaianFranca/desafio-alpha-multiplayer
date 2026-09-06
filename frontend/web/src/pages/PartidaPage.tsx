@@ -12,10 +12,29 @@ import {
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
 import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
+import {
+  origemDoEncaixe,
+  tocarSomDeMovimentoDoEncaixe,
+  tocarSomDeGiroDoEncaixe,
+} from '../components/partida/somDoEncaixe'
+import type { EncaixeTrigger } from '../game/tabuleiro/encaixe'
+import { deveReduzirMovimento } from '../hooks/usePrefersReducedMotion'
 import { tocarSom } from '../game/audio/sons'
 import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
+import {
+  deveLimparVooNoSnapshot,
+  deveTocarCliqueDoPeao,
+  limparVooAoAterrissar,
+  tocarCliqueDoPeao,
+  vooDoPeaoDoEvento,
+} from '../game/tabuleiro/vooDoPeao'
+import type { VooDoPeaoPendente } from '../game/tabuleiro/vooDoPeao'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
+import {
+  chaveDeComandoPendente,
+  consumirAck,
+} from '../game/tabuleiro/pendentes'
 import {
   criarEstadoInicialDoCliente,
   reduzirEvento,
@@ -90,6 +109,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     (snapshot: EstadoDaPartidaSnapshot) => despachar({ type: 'APLICAR_SNAPSHOT', snapshot }),
     [],
   )
+  // Modelo pré-despacho para derivar a origem do Encaixe (issue #241) e do
+  // voo do peão (issue #242): o callback do canal lê a ref (sempre o último
+  // modelo commitado) antes de despachar o evento — sem re-subscrever o
+  // socket a cada render.
+  const modeloRef = useRef(modelo)
+  useEffect(() => {
+    modeloRef.current = modelo
+  }, [modelo])
   // ── Som de recusa + anúncio ao leitor de tela (issue #228) ──
   // Único dono dos disparos: reage aos mesmos eventos do canal que antes
   // geravam flash, somente leitura do modelo. Aprovações/seleções/sorteios/
@@ -108,10 +135,32 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
   }, [])
 
+  // ── Voo do peão com sons (issue #242) ──
+  // Único dono dos disparos: reage aos mesmos eventos do canal que atualizam
+  // o modelo, somente leitura do modelo anterior. `PEAO_SELECIONADO` toca o
+  // clique imediato; `PEAO_MOVIDO` e `PEAO_POSICIONADO` (Primeiro Turno,
+  // mesa→Peça Inicial) registram o voo pendente (último vence — o
+  // overlay remonta por nonce); o baque é tocado pela cena ao concluir o
+  // pouso. `ESTADO_DA_PARTIDA` limpa o voo (snapshot é autoridade).
+  const [vooPendente, setVooPendente] = useState<VooDoPeaoPendente | null>(null)
+  const proximoNonceVoo = useRef(0)
+  const onVooAterrissou = useCallback((nonce: number) => {
+    setVooPendente((atual) => limparVooAoAterrissar(atual, nonce))
+  }, [])
   // ── Trigger de limpeza para TransicaoLimpeza (issue #239, B1) ──
   // Evento-driven: só LIMPEZA_APLICADA dispara som/animação, snapshots não.
   const [limpezaTrigger, setLimpezaTrigger] = useState<{ pecasRemovidas: readonly string[]; key: number } | null>(null)
   const limpezaKeyRef = useRef(0)
+
+  // ── Trigger de encaixe para TransicaoEncaixe (issue #241, spec #238) ──
+  // Evento-driven: só PECA_POSICIONADA dispara voo/som, snapshots não. A
+  // origem (mesa/bandeja) deriva do modelo PRÉ-despacho via ref (o callback
+  // do canal é estável e não re-subscreve a cada render).
+  const [encaixeTrigger, setEncaixeTrigger] = useState<EncaixeTrigger | null>(null)
+  const encaixeKeyRef = useRef(0)
+  const onFimEncaixe = useCallback((key: number) => {
+    setEncaixeTrigger((atual) => (atual?.key === key ? null : atual))
+  }, [])
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
   const emResultado = estado === 'resultado'
@@ -120,12 +169,32 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     emResultadoRef.current = emResultado
   }, [emResultado])
 
+  // ── Pendentes otimistas anti-duplo-place (issue #249) ──
+  // Conjunto de alvos em voo (POSICIONAR_PECA/POSICIONAR_PEAO/
+  // DESELECIONAR_PEAO): bloqueia o reenvio do mesmo alvo até ack/erro/
+  // snapshot. O servidor é a autoridade — o cliente nunca permite duplo
+  // envio; o consumo acontece no onEvento abaixo (ack por evento, erro e
+  // snapshot limpam). Ref estável, fora do modelo (nunca persiste).
+  const pendentesEmVoo = useRef<Set<string>>(new Set())
+
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, conectar: reconectarSocket, desconectar } = usePartidaWebSocket({
     serverId,
     partidaId,
     onEvento: useCallback(
       (evento) => {
+        // Consumo dos pendentes otimistas (#249): ack remove o alvo em voo;
+        // erro e snapshot reconciliam (autoridade total — limpam).
+        if (
+          evento.type === 'PECA_POSICIONADA' ||
+          evento.type === 'PEAO_POSICIONADO' ||
+          evento.type === 'PEAO_DESELECIONADO'
+        ) {
+          consumirAck(pendentesEmVoo.current, evento)
+        }
+        if (evento.type === 'ERRO_DO_TABULEIRO') {
+          pendentesEmVoo.current.clear()
+        }
         if (evento.type === 'PARTIDA_TERMINADA') {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante a
           // tela de resultado.
@@ -135,7 +204,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           return
         }
         if (evento.type === 'ESTADO_DA_PARTIDA') {
+          // Snapshot é autoridade total da seleção (#249): reconcilia
+          // pendentes em voo contraditórios (limpa o conjunto).
+          pendentesEmVoo.current.clear()
           aplicarSnapshotNoModelo(evento.snapshot)
+          if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
@@ -173,9 +246,64 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           return
         }
+        // Giro (issue #241, mudança de spec verbal): evento-driven para o
+        // som próprio — cada PECA_GIRADA toca a carta uma vez (giros
+        // distintos em sequência soam múltiplo por design: cada giro é uma
+        // ação distinta, sem debounce) e reduz no modelo. Cai antes do
+        // despacho genérico; `motivoDeRecusaDoEvento` retornaria null aqui
+        // (giro em silêncio na recusa) — o branch só adiciona o som.
+        if (evento.type === 'PECA_GIRADA') {
+          tocarSomDeGiroDoEncaixe()
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          return
+        }
+        // Encaixe (issue #241, spec #238 + mudanças de spec verbais):
+        // evento-driven para TransicaoEncaixe + som próprio — só
+        // PECA_POSICIONADA dispara voo/som, snapshots não. A origem
+        // (mesa/bandeja) deriva do modelo pré-despacho; o posicionamento
+        // toca SÓ o toque enigmático como som de movimento, no instante em
+        // que a peça começa a se mover (chegada do evento — sem atraso de
+        // assento). Transição visual de voo inalterada.
+        if (evento.type === 'PECA_POSICIONADA') {
+          const origem = origemDoEncaixe(modeloRef.current, evento.pecaId)
+          // Som imediato no início do movimento (com reduce, o voo vira
+          // snap mas o som segue igual — o estado final já renderiza
+          // pixel-igual).
+          tocarSomDeMovimentoDoEncaixe()
+          const reduzir = deveReduzirMovimento()
+          if (origem !== null && !reduzir) {
+            encaixeKeyRef.current += 1
+            setEncaixeTrigger({
+              pecaId: evento.pecaId,
+              origem: origem.origem,
+              indiceNaMesa: origem.indiceNaMesa,
+              celula: evento.celula,
+              key: encaixeKeyRef.current,
+            })
+          }
+          despacharEvento(evento)
+          return
+        }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
         // ESTADO_DA_PARTIDA (em_andamento): eventos de turno avulsos não
         // abrem o tabuleiro sem snapshot — descreve a própria PR.
+        // Voo do peão (#242): gatilhos só do canal, sobre o modelo ANTES do
+        // despacho (origem no estado anterior); o modelo atualiza instantâneo
+        // e a cena interpola até o mesmo estado final.
+        // Clique ao selecionar (#242, spec #238): cada `PEAO_SELECIONADO` do
+        // canal que representa seleção nova (modelo anterior sem esse peão)
+        // toca 1 clique — sem debounce por timestamp, que silenciaria
+        // re-seleção legítima (revisão PR #254).
+        if (deveTocarCliqueDoPeao(evento) && evento.type === 'PEAO_SELECIONADO') {
+          if (modeloRef.current.peaoSelecionadoId !== evento.peaoId) {
+            tocarCliqueDoPeao()
+          }
+        }
+        const vooBase = vooDoPeaoDoEvento(evento, modeloRef.current)
+        if (vooBase !== null) {
+          proximoNonceVoo.current += 1
+          setVooPendente({ nonce: proximoNonceVoo.current, ...vooBase })
+        }
         despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
         // Som de recusa unificado (issue #228): erros do tabuleiro incluindo
         // FORA_DA_VEZ (#118), pendências e Caixa esgotada (#143/#151); seleção,
@@ -212,10 +340,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [desconectar, navigate, codigoDeSala])
 
   // ── Injeção única de jogadorId (issue #91) — bloqueada após término ──
+  // Com gate anti-duplo-place (#249): o mesmo alvo em voo não é reenviado.
   const enviarComJogador = useCallback(
     (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
       if (emResultado) return
+      const chave = chaveDeComandoPendente(comando)
+      if (chave !== null) {
+        if (pendentesEmVoo.current.has(chave)) return
+        pendentesEmVoo.current.add(chave)
+      }
       enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
     [enviar, jogadorId, emResultado],
@@ -381,7 +515,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}
+        vooPendente={vooPendente}
+        onVooAterrissou={onVooAterrissou}
         limpezaTrigger={limpezaTrigger}
+        encaixeTrigger={encaixeTrigger}
+        onFimEncaixe={onFimEncaixe}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*

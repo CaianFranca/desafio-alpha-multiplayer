@@ -988,17 +988,18 @@ export class SalasHandlers {
 
     this.encaminhamentosEmVoo.add(salaId);
 
-    // Construir roster para encaminhamento — ordenar por ordemDeEntrada (A1: valida 4)
+    // Construir roster para encaminhamento — ordenar por ordemDeEntrada
+    // (composição válida: 2 a 4 Membros ativos; teto garantido pelo engine)
     const sala = this.estado.abertas.get(salaId)?.sala ?? salaInfo.sala;
     const membrosAtivosOrdenados = [...sala.membros]
       .filter((m) => m.estado === 'ativo')
       .sort((a, b) => a.ordemDeEntrada - b.ordemDeEntrada);
-    if (membrosAtivosOrdenados.length !== 4) {
+    if (membrosAtivosOrdenados.length < 2 || membrosAtivosOrdenados.length > 4) {
       this.encaminhamentosEmVoo.delete(salaId);
-      this.enviarErro(socket, 'ENCAMINHAMENTO_INVALIDO', 'Composição inválida para encaminhamento — esperado 4 membros ativos.');
+      this.enviarErro(socket, 'ENCAMINHAMENTO_INVALIDO', 'Composição inválida para encaminhamento — esperado de 2 a 4 Membros ativos.');
       return;
     }
-    const membrosRoster = membrosAtivosOrdenados.slice(0, 4).map((m) => ({
+    const roster: MembroDaSala[] = membrosAtivosOrdenados.map((m) => ({
       id: m.id,
       jogadorId: m.jogadorId,
       apelido: this.estado.apelidoPorJogadorId.get(m.jogadorId) ?? '',
@@ -1006,7 +1007,6 @@ export class SalasHandlers {
       presenca: m.presenca,
       prontidao: m.pronto,
     }));
-    const roster = membrosRoster as [MembroDaSala, MembroDaSala, MembroDaSala, MembroDaSala];
 
     const oferta: OfertaDeEncaminhamento = {
       salaId,

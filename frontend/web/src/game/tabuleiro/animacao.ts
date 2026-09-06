@@ -16,8 +16,8 @@ export const DURACAO_VOO_PEAO_MS = 500
 export const DURACAO_FADE_LIMPEZA_MS = 300
 export const DURACAO_SLIDE_CAIXA_MS = 400
 
-export const CAMINHO_SOM_CARTA = '/media/som-carta.mp3'
-export const CAMINHO_TOQUE_ENIGMATICO = '/media/toque-enigmatico.mp3'
+export const CAMINHO_SOM_CARTA = '/media/card-flick.wav'
+export const CAMINHO_TOQUE_ENIGMATICO = '/media/scary-sound.mp3'
 export const CAMINHO_SOM_SOMBRIO_LIMPEZA = '/media/toque-sombrio-limpeza.mp3'
 export const CAMINHO_SOM_SLIDE_CAIXA = '/media/som-slide-caixa.mp3'
 
