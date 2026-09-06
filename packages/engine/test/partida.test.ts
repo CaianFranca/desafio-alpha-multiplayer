@@ -1346,13 +1346,38 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
     );
   }
 
-  // Peão não selecionado: após mover (que limpa a Seleção) sem re-selecionar.
+  // AC-3 do #272: com a Seleção nula (após mover, que a limpa) a Travessia usa
+  // o Peão do ator como referência e NÃO trava — adota a Seleção na sequência.
   {
     let semSelecao = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
     semSelecao = aplicar(semSelecao, selecionarPeao('peao-branco'), 'ana');
     semSelecao = aplicar(semSelecao, moverPeao('peao-branco', 2, 3), 'ana');
+    assert.equal(semSelecao.tabuleiro.peaoSelecionadoId, null);
+    const travessia = aplicarComandoDePartida(
+      semSelecao,
+      atravessarOEscuro('peao-branco', 1, 3),
+      'ana',
+    );
+    assert.equal(travessia.sucesso, true);
+    if (!travessia.sucesso) return;
+    // A Travessia re-adota o Peão do ator: a sequência (escolher → encaixar →
+    // mover) continua sem exigir re-seleção.
+    assert.equal(travessia.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+    assert.equal(travessia.estado.atravessouNoTurno, true);
+    // Seleção de outro Peão continua vedada.
+    const estadoComOutroSelecionado: EstadoDaPartida = {
+      ...estadoDaTravessia(),
+      tabuleiro: {
+        ...estadoDaTravessia().tabuleiro,
+        peaoSelecionadoId: 'peao-vermelho',
+      },
+    };
     assert.equal(
-      codigoDaRejeicao(semSelecao, atravessarOEscuro('peao-branco', 1, 3), 'ana'),
+      codigoDaRejeicao(
+        estadoComOutroSelecionado,
+        atravessarOEscuro('peao-branco', 1, 3),
+        'ana',
+      ),
       'PEAO_NAO_SELECIONADO',
     );
   }

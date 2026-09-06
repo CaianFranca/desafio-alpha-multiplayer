@@ -805,7 +805,8 @@ function moverPeaoDaPartida(
 //   exigirPeaoDoAtor → FORA_DA_VEZ; Primeiro Turno → MOVIMENTO_INDISPONIVEL;
 //   posicaoConfirmada → POSICAO_CONFIRMADA; sem Baixa →
 //   MOVIMENTO_INDISPONIVEL; já atravessou no turno → MOVIMENTO_INDISPONIVEL;
-//   peão não selecionado/não posicionado → PEAO_NAO_SELECIONADO; alvo fora da
+//   Seleção de OUTRO Peão → PEAO_NAO_SELECIONADO (Seleção nula usa o Peão do
+//   ator, AC-3 do #272); Peão sobre a Mesa → PEAO_NAO_SELECIONADO; alvo fora da
 //   grade → CELULA_NAO_ENCONTRADA; ocupado → CELULA_JA_OCUPADA; não-vizinho
 //   via borda aberta → MOVIMENTO_NAO_CONECTADO; iluminado →
 //   MOVIMENTO_INDISPONIVEL.
@@ -853,10 +854,17 @@ function atravessarOEscuroDaPartida(
   if (!peao) {
     return rejeitarDaPartida('PEAO_NAO_ENCONTRADO', 'O Peão não foi encontrado.');
   }
-  if (estado.tabuleiro.peaoSelecionadoId !== peao.peaoId) {
+  // Issue #264 / AC-3 do #272: a Travessia não exige o Peão selecionado — com
+  // Seleção nula a referência é o Peão próprio do ator (já garantido por
+  // exigirPeaoDoAtor); apenas a Seleção de OUTRO Peão permanece inválida,
+  // mesmo fallback da Confirmação de Posição.
+  if (
+    estado.tabuleiro.peaoSelecionadoId !== null &&
+    estado.tabuleiro.peaoSelecionadoId !== peao.peaoId
+  ) {
     return rejeitarDaPartida(
       'PEAO_NAO_SELECIONADO',
-      'O Peão indicado não é o selecionado.',
+      'Outro Peão está selecionado; a Travessia exige o Peão do ator.',
     );
   }
   if (peao.pecaId === null) {
@@ -919,13 +927,19 @@ function atravessarOEscuroDaPartida(
   // Efeito: Recebimento de Baixa (limite 1) com a célula-alvo pré-fixada na
   // célula da travessia. A ordem canônica do lote abre com atravessou_o_escuro
   // e segue com peca_sorteada (do sorteio) + recebimento_gerado. A Seleção do
-  // Peão é preservada para a sequência (escolher vaga → encaixar → mover).
+  // Peão é preservada para a sequência (escolher vaga → encaixar → mover) —
+  // e, quando nula (AC-3 do #272), adotada a partir do Peão do ator: nenhum
+  // passo intermediário exige re-seleção.
   const sorteio = gerarRecebidas(estado.tabuleiro, pecaSobOPeao, true);
   const recebidas = sorteio.recebidas.map((recebida) => ({
     ...recebida,
     celulaAlvo: alvo,
   }));
-  const tabuleiro = { ...sorteio.estado, recebidas };
+  const tabuleiro = {
+    ...sorteio.estado,
+    recebidas,
+    peaoSelecionadoId: estado.tabuleiro.peaoSelecionadoId ?? comando.peaoId,
+  };
   let atravessouNoTurno = false;
   const eventos: EventoDaPartida[] = [];
   if (recebidas.length > 0) {
