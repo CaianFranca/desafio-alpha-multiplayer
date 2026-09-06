@@ -164,6 +164,8 @@ test('traduzirEventos mapeia peao_desselecionado para PEAO_DESELECIONADO (issue 
   const saida = traduzirEventos(eventos);
   assert.equal(saida.length, 1);
   assert.deepEqual(saida[0], { type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' });
+});
+
 // Proteção no canal (issue #227): o POSICAO_CONFIRMADA transporta o estado
 // RESULTANTE do ator no gatilho completo — a tradução é pass-through; a
 // concessão/consumo vivem no domínio (engine).
