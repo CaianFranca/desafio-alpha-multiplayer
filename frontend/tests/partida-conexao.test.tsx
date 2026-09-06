@@ -10,6 +10,12 @@ import {
   CAMINHO_SOM_DE_RECUSA,
   VOLUME_BASE_SOM_DE_RECUSA,
 } from '../web/src/components/partida/somDeRecusa'
+import {
+  CAMINHO_SOM_ASSENTO_ENCAIXE,
+  CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+  VOLUME_BASE_SOM_DO_ENCAIXE,
+} from '../web/src/components/partida/somDoEncaixe'
+import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../web/src/game/tabuleiro/animacao'
 import type { EstadoDaPartidaSnapshot, PecaPosicionadaNoSnapshot } from '@flicker/shared'
 
 function renderPartidaNaRota(entry: string) {
@@ -381,7 +387,7 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     expect(reIluminadas[0]).toBe(celulaDoEspelho(0, 0))
   })
 
-  it('LIMPEZA_APLICADA remove a peça da cena, libera a célula, em silêncio, e aceita novo posicionamento sem recarregar', async () => {
+  it('LIMPEZA_APLICADA remove a peça da cena, libera a célula, e aceita novo posicionamento sem recarregar', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
     // Posiciona inicial-1 em 3:3 via broadcast (mesma via dos eventos de #85).
@@ -396,8 +402,12 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     await screen.findByTestId('peca-posicionada')
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('true')
 
-    // Aprovação do posicionamento em silêncio (sem som, sem clarão).
-    expect(toquesDeAudio).toHaveLength(0)
+    // Encaixe com sons (issue #241): carta imediata no movimento, sem clarão.
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({
+      src: CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+      volume: VOLUME_BASE_SOM_DO_ENCAIXE,
+    })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // A Limpeza chega pelo MESMO socket — sem recarregar página, sem reconectar.
@@ -411,9 +421,11 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     )
     expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
 
-    // Limpeza com som único (issue #239): um toque sombrio por comando, sem clarão.
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
+    // Limpeza com som único (issue #239): um toque sombrio por comando, sem clarão
+    // (filtrado por asset: os sons do Encaixe da #241 convivem no mesmo array).
+    await waitFor(() =>
+      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+    )
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Célula liberada aceita novo posicionamento pela mesma via dos testes de
@@ -453,9 +465,11 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     )
 
     await waitFor(() => expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(0))
-    // Exatamente 1 som por comando, mesmo com N=3 (nunca um por peça)
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
-    expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
+    // Exatamente 1 som de limpeza por comando, mesmo com N=3 (nunca um por
+    // peça) — filtrado por asset: os sons do Encaixe da #241 convivem no mesmo array.
+    await waitFor(() =>
+      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+    )
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     // Células liberadas
     expect(celulaDoEspelho(1, 1).getAttribute('data-ocupada')).toBe('false')
@@ -484,16 +498,25 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
         ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 3, coluna: 3 }, orientacao: 0 }),
       )
       await screen.findByTestId('peca-posicionada')
-      expect(toquesDeAudio).toHaveLength(0)
+      // Encaixe com reduce = snap (issue #241): sem voo, estado final
+      // imediato e os dois sons sem espera pela duração.
+      expect(toquesDeAudio.map((t) => t.src)).toEqual([
+        CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+        CAMINHO_SOM_ASSENTO_ENCAIXE,
+      ])
 
       act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['inicial-1'] }))
 
       // Snap instantâneo: peça some sem precisar de animação, estado final pixel-igual
       await waitFor(() => expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument())
       expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
-      // Som único mesmo com reduce ativo
-      await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
-      expect(toquesDeAudio[0]).toMatchObject({ src: '/media/toque-sombrio-limpeza.mp3' })
+      // Som único de limpeza mesmo com reduce ativo (ordem total determinística).
+      await waitFor(() => expect(toquesDeAudio).toHaveLength(3))
+      expect(toquesDeAudio.map((t) => t.src)).toEqual([
+        CAMINHO_SOM_MOVIMENTO_ENCAIXE,
+        CAMINHO_SOM_ASSENTO_ENCAIXE,
+        CAMINHO_SOM_SOMBRIO_LIMPEZA,
+      ])
       expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     } finally {
       window.matchMedia = originalMatchMedia
@@ -529,7 +552,11 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
         jogadorId: mockAuthenticatedState.jogador.id,
       })
     })
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1))
+    // A limpeza tocou seu som único (filtrado por asset: o Encaixe da #241
+    // convive no mesmo array).
+    await waitFor(() =>
+      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+    )
   })
 })
 

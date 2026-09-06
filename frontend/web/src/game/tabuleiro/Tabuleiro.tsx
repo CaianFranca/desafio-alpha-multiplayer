@@ -59,6 +59,12 @@ interface TabuleiroProps {
    * mesma fonte do espelho DOM.
    */
   vagasSet?: ReadonlySet<string>
+  /**
+   * Peça em voo do Encaixe (issue #241): escondida aqui enquanto a
+   * TransicaoEncaixe a anima na cena — ao fim do voo o overlay some e esta
+   * peça assume pixel-igual. Null = sem voo.
+   */
+  ocultarPecaId?: PecaId | null
 }
 
 export function Tabuleiro({
@@ -77,9 +83,13 @@ export function Tabuleiro({
   onRejeicaoPeao,
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
+  ocultarPecaId = null,
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
+    // Peça em voo do Encaixe some da grade durante o voo (só o overlay a
+    // exibe); ao fim, o overlay some e ela reassume aqui pixel-igual.
+    if (p.pecaId === ocultarPecaId) continue
     posicionadasPorChave.set(chaveCelula(p.celula), p)
   }
 
