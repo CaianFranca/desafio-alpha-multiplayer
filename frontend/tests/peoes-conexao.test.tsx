@@ -702,7 +702,8 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(recusas).toHaveLength(1)
     expect(recusas[0]).toMatchObject({ volume: VOLUME_BASE_SOM_DE_RECUSA })
     // 2 cliques de seleção (#242): o primeiro antes do movimento, o segundo na
-    // re-seleção pós-confirmação (novo episódio — o debounce não silencia).
+    // re-seleção pós-confirmação (seleção nova — sem debounce temporal,
+    // revisão PR #254, spec #238).
     expect(toquesDeAudio.filter((t) => t.src === SOM_CAMINHO_CLIQUE_PEAO)).toHaveLength(2)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
@@ -710,7 +711,11 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(anuncio).toHaveTextContent('posição já confirmada')
   })
 
-  it('PR #254: eco do mesmo peão no mesmo tick toca 1 clique só', async () => {
+  it('PR #254: eco do mesmo peão no mesmo tick toca 1 clique por evento (2 toques)', async () => {
+    // Sem debounce temporal (spec #238, revisão PR #254): cada
+    // `PEAO_SELECIONADO` do canal toca — o ref do modelo ainda está stale no
+    // mesmo tick, então ambos são seleção nova. Eco de transporte soando
+    // duplo é preferível a silenciar seleção legítima.
     const ws = await partidaDisponivel()
 
     act(() => {
@@ -718,8 +723,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
       ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
     })
 
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio).toHaveLength(2)
     expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+    expect(toquesDeAudio[1]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
   })
 
   it('PR #254: re-clique do mesmo peão entre renders toca 1 clique só', async () => {
@@ -744,6 +750,27 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     })
     act(() => {
       ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-vermelho' })
+    })
+
+    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeAudio[0]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+    expect(toquesDeAudio[1]).toMatchObject({ src: SOM_CAMINHO_CLIQUE_PEAO, volume: SOM_VOLUME_BASE_CLIQUE_PEAO })
+  })
+
+  it('PR #254: re-seleção legítima após desseleção toca de novo (2 toques)', async () => {
+    // Regressão do debounce por timestamp removido: selecionar, desselecionar
+    // e reselecionar o mesmo peão são duas seleções novas — ambas tocam
+    // (spec #238: "Clique ao selecionar", sem temporizador decidindo).
+    const ws = await partidaDisponivel()
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_DESELECIONADO', peaoId: 'peao-branco' })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
     })
 
     expect(toquesDeAudio).toHaveLength(2)
