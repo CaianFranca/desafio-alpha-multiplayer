@@ -72,12 +72,16 @@ function codigoDaRejeicao(
 
 const JOGADORES = ['ana', 'bruno', 'carla', 'diogo'];
 
-function partidaIniciada(): EstadoDaPartida {
-  const resultado = estadoInicialDaPartida(JOGADORES);
+function partidaIniciadaCom(roster: readonly string[]): EstadoDaPartida {
+  const resultado = estadoInicialDaPartida(roster);
   if (!resultado.sucesso) {
     throw new Error('roster válido deveria iniciar a Partida');
   }
   return resultado.estado;
+}
+
+function partidaIniciada(): EstadoDaPartida {
+  return partidaIniciadaCom(JOGADORES);
 }
 
 const jogadorAtivo = (estado: EstadoDaPartida) => {
@@ -197,12 +201,71 @@ test('estadoInicialDaPartida monta o roster, a vez e o evento de abertura', () =
   ]);
 });
 
-test('estadoInicialDaPartida rejeita rosters com quantidade, duplicidade ou id inválido', () => {
-  assert.equal(estadoInicialDaPartida(['ana', 'bruno', 'carla']).sucesso, false);
-  assert.equal(
-    estadoInicialDaPartida(['ana', 'bruno', 'carla', 'diogo', 'extra']).sucesso,
-    false,
+test('estadoInicialDaPartida aceita rosters de 2 e 3 com N cores, iniciais e peões', () => {
+  const dois = estadoInicialDaPartida(['ana', 'bruno']);
+  assert.equal(dois.sucesso, true);
+  if (!dois.sucesso) return;
+  assert.deepEqual(
+    dois.estado.jogadores.map((jogador) => jogador.jogadorId),
+    ['ana', 'bruno'],
   );
+  assert.deepEqual(
+    dois.estado.jogadores.map((jogador) => [jogador.cor, jogador.peaoId]),
+    [
+      ['branco', 'peao-branco'],
+      ['vermelho', 'peao-vermelho'],
+    ],
+  );
+  assert.deepEqual(
+    dois.estado.tabuleiro.iniciais.map((peca) => peca.pecaId),
+    ['inicial-1', 'inicial-2'],
+  );
+  assert.deepEqual(
+    dois.estado.tabuleiro.peoes.map((peao) => peao.peaoId),
+    ['peao-branco', 'peao-vermelho'],
+  );
+  assert.equal(dois.estado.tabuleiro.caixa.length, 83);
+  assert.equal(dois.estado.jogadorAtivoId, 'ana');
+  assert.equal(dois.estado.rodada, 1);
+
+  const tres = estadoInicialDaPartida(['ana', 'bruno', 'carla']);
+  assert.equal(tres.sucesso, true);
+  if (!tres.sucesso) return;
+  assert.deepEqual(
+    tres.estado.jogadores.map((jogador) => jogador.cor),
+    ['branco', 'vermelho', 'azul'],
+  );
+  assert.deepEqual(
+    tres.estado.tabuleiro.iniciais.map((peca) => peca.pecaId),
+    ['inicial-1', 'inicial-2', 'inicial-3'],
+  );
+  assert.deepEqual(
+    tres.estado.tabuleiro.peoes.map((peao) => peao.peaoId),
+    ['peao-branco', 'peao-vermelho', 'peao-azul'],
+  );
+  assert.equal(tres.estado.tabuleiro.caixa.length, 83);
+});
+
+test('estadoInicialDaPartida rejeita rosters com 1 e 5+ jogadores, duplicidade ou id inválido', () => {
+  const solo = estadoInicialDaPartida(['ana']);
+  assert.equal(solo.sucesso, false);
+  if (!solo.sucesso) {
+    assert.equal(solo.erro.codigo, 'DADOS_INVALIDOS');
+    assert.equal(solo.erro.mensagem, 'A Partida exige de dois a quatro jogadores.');
+  }
+  const quinteto = estadoInicialDaPartida([
+    'ana',
+    'bruno',
+    'carla',
+    'diogo',
+    'extra',
+  ]);
+  assert.equal(quinteto.sucesso, false);
+  if (!quinteto.sucesso) {
+    assert.equal(quinteto.erro.codigo, 'DADOS_INVALIDOS');
+    assert.equal(quinteto.erro.mensagem, 'A Partida exige de dois a quatro jogadores.');
+  }
+  assert.equal(estadoInicialDaPartida([]).sucesso, false);
   const duplicado = estadoInicialDaPartida(['ana', 'bruno', 'ana', 'diogo']);
   assert.equal(duplicado.sucesso, false);
   if (!duplicado.sucesso) {
@@ -213,6 +276,34 @@ test('estadoInicialDaPartida rejeita rosters com quantidade, duplicidade ou id i
   if (!vazio.sucesso) {
     assert.equal(vazio.erro.codigo, 'DADOS_INVALIDOS');
   }
+});
+
+test('rodada com N=2: os dois Primeiros Turnos devolvem a vez à ana na rodada 2', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  assert.equal(estado.rodada, 1);
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  assert.equal(estado.rodada, 2);
+  assert.ok(
+    estado.jogadores.every((jogador) => !jogador.primeiroTurnoPendente),
+  );
+});
+
+test('rodada com N=3: os três Primeiros Turnos devolvem a vez à ana na rodada 2', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno', 'carla']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  assert.equal(estado.jogadorAtivoId, 'carla');
+  assert.equal(estado.rodada, 1);
+  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  assert.equal(estado.rodada, 2);
+  assert.ok(
+    estado.jogadores.every((jogador) => !jogador.primeiroTurnoPendente),
+  );
 });
 
 test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático e Passagem de Vez', () => {

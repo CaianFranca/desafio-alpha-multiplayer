@@ -137,10 +137,10 @@ export interface ConfirmarPosicaoDoPeaoComando {
   readonly peaoId: string;
 }
 
-// Desfecho da Partida (issue #176): vitória, ou derrota com motivo. A
-// vitória exige as TRÊS condições simultâneas — 3 geradores ligados, cartão
-// de acesso obtido e os 4 peões no mesmo Portão de Saída; a definição da
-// posição dos peões cobre apenas essa terceira condição.
+// Desfecho da Partida (issue #176, roster variável N = 2–4 pela #285): vitória,
+// ou derrota com motivo. A vitória exige as TRÊS condições simultâneas — 3
+// geradores ligados, cartão de acesso obtido e os N peões no mesmo Portão de
+// Saída; a definição da posição dos peões cobre apenas essa terceira condição.
 export type DesfechoDaPartida =
   | { readonly tipo: 'vitoria' }
   | {
@@ -243,8 +243,9 @@ export type ResultadoDaPartida =
   | OperacaoBemSucedidaDaPartida
   | OperacaoRejeitadaDaPartida;
 
-// Cores canônicas dos 4 Peões, atribuídas pela ordem de entrada dos Jogadores
-// (mesma ordem dos Peões do Tabuleiro, em estadoInicialDoTabuleiro).
+// Cores canônicas dos Peões, atribuídas pela ordem de entrada dos Jogadores
+// (mesma ordem dos Peões do Tabuleiro, em estadoInicialDoTabuleiro). O roster
+// é variável (N = 2–4, issue #285): fatiam-se as N primeiras cores na criação.
 const CORES_PELA_ORDEM: readonly CorDoPeao[] = [
   'branco',
   'vermelho',
@@ -265,10 +266,10 @@ export function estadoInicialDaPartida(
   if (idsInvalidos) {
     return { sucesso: false, erro: idsInvalidos.erro };
   }
-  if (jogadoresEmOrdem.length !== 4) {
+  if (jogadoresEmOrdem.length < 2 || jogadoresEmOrdem.length > 4) {
     return rejeitarDaPartida(
       'DADOS_INVALIDOS',
-      'A Partida exige exatamente quatro jogadores.',
+      'A Partida exige de dois a quatro jogadores.',
     );
   }
   if (new Set(jogadoresEmOrdem).size !== jogadoresEmOrdem.length) {
@@ -278,9 +279,10 @@ export function estadoInicialDaPartida(
     );
   }
 
+  const cores = CORES_PELA_ORDEM.slice(0, jogadoresEmOrdem.length);
   const jogadores: JogadorDaPartida[] = jogadoresEmOrdem.map(
     (jogadorId, indice) => {
-      const cor = CORES_PELA_ORDEM[indice];
+      const cor = cores[indice];
       return {
         jogadorId,
         ordem: indice + 1,
@@ -296,7 +298,10 @@ export function estadoInicialDaPartida(
   );
 
   const estado: EstadoDaPartida = {
-    tabuleiro: estadoInicialDoTabuleiro(entrada),
+    tabuleiro: estadoInicialDoTabuleiro({
+      ...(entrada ?? {}),
+      numeroDeJogadores: jogadoresEmOrdem.length,
+    }),
     jogadores,
     jogadorAtivoId: jogadores[0].jogadorId,
     rodada: 1,
@@ -1281,17 +1286,22 @@ function desfechoDaPartida(estado: EstadoDaPartida): DesfechoDaPartida | null {
   return null;
 }
 
-// Vitória (issue #176): 3 geradores ligados, cartão obtido e TODOS os peões
-// sobre a MESMA peça posicionada do tipo portao_de_saida (mesmo pecaId não
-// nulo). Sobre os peões vale apenas a posição — estados dos jogadores (ex.:
-// sanidade 0) não os impedem de vencer.
+// Vitória (issue #176, roster variável N = 2–4 pela #285): 3 geradores
+// ligados, cartão obtido e TODOS os N peões sobre a MESMA peça posicionada do
+// tipo portao_de_saida (mesmo pecaId não nulo). Sobre os peões vale apenas a
+// posição — estados dos jogadores (ex.: sanidade 0) não os impedem de vencer.
 function equipeVenceu(estado: EstadoDaPartida): boolean {
   if (estado.geradoresLigados.length < 3 || !estado.cartaoDeAcessoObtido) {
     return false;
   }
+  const totalDePeoes = estado.jogadores.length;
   const peoes = estado.tabuleiro.peoes;
   const referencia = peoes[0];
-  if (peoes.length !== 4 || !referencia || referencia.pecaId === null) {
+  if (
+    peoes.length !== totalDePeoes ||
+    !referencia ||
+    referencia.pecaId === null
+  ) {
     return false;
   }
   return (
@@ -1596,7 +1606,9 @@ function temAfetadoNaPeca(pecaId: string, estado: EstadoDaPartida): boolean {
 }
 
 function tetoOcupacao(peca: PecaPosicionada, estado: EstadoDaPartida): number {
-  const tetoNormal = peca.tipo === 'portao_de_saida' ? 4 : 1;
+  // O Portão de Saída escala com o roster (issue #285): teto = N peões, com o
+  // +1 da exceção de Resgate já existente; as demais peças seguem no máximo 1.
+  const tetoNormal = peca.tipo === 'portao_de_saida' ? estado.jogadores.length : 1;
   return temAfetadoNaPeca(peca.pecaId, estado) ? tetoNormal + 1 : tetoNormal;
 }
 

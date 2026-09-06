@@ -53,6 +53,32 @@ function peçaNasIniciais(estado: EstadoDoTabuleiro, pecaId: string) {
   return peca;
 }
 
+test('estado inicial com N jogadores tem N iniciais e N peões; fora de 2–4 lança', () => {
+  const dois = estadoInicialDoTabuleiro({ numeroDeJogadores: 2 });
+  assert.deepEqual(
+    dois.iniciais.map((peca) => peca.pecaId),
+    ['inicial-1', 'inicial-2'],
+  );
+  assert.deepEqual(
+    dois.peoes.map((peao) => peao.peaoId),
+    ['peao-branco', 'peao-vermelho'],
+  );
+  assert.equal(dois.caixa.length, 83);
+
+  const tres = estadoInicialDoTabuleiro({ numeroDeJogadores: 3 });
+  assert.deepEqual(
+    tres.iniciais.map((peca) => peca.pecaId),
+    ['inicial-1', 'inicial-2', 'inicial-3'],
+  );
+  assert.deepEqual(
+    tres.peoes.map((peao) => peao.peaoId),
+    ['peao-branco', 'peao-vermelho', 'peao-azul'],
+  );
+
+  assert.throws(() => estadoInicialDoTabuleiro({ numeroDeJogadores: 1 }));
+  assert.throws(() => estadoInicialDoTabuleiro({ numeroDeJogadores: 5 }));
+});
+
 test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças', () => {
   const estado = estadoInicialDoTabuleiro();
 

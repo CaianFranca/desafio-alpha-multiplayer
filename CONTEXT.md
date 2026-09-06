@@ -1,6 +1,6 @@
 # Flicker of Sanity
 
-Vocabulário de domínio do Flicker of Sanity, jogo cooperativo de tabuleiro digital em que quatro jogadores exploram um sanatório e tentam escapar. Este glossário define os termos canônicos usados nas specs, no código e nas conversas.
+Vocabulário de domínio do Flicker of Sanity, jogo cooperativo de tabuleiro digital em que de dois a quatro jogadores exploram um sanatório e tentam escapar. Este glossário define os termos canônicos usados nas specs, no código e nas conversas.
 
 ## Pessoas
 
@@ -49,7 +49,7 @@ _Avoid_: room, sessão de jogo
 _Avoid_: sala de espera
 
 **Partida**:
-Jogo entre os quatro Jogadores de uma Sala, do Encaminhamento até a vitória ou derrota; estados: preparada, em andamento, terminada.
+Jogo entre os 2 a 4 Jogadores de uma Sala, do Encaminhamento até a vitória ou derrota; estados: preparada, em andamento, terminada.
 _Avoid_: jogo, sessão
 
 **Resultado**:
@@ -217,7 +217,7 @@ _Avoid_: confirmação, travar
 ## Peões e Conexões
 
 **Peão**:
-Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até quatro, e a peça com jogador precisando de Resgate, que aceita um peão a mais enquanto o afetado permanecer nela; move-se entre peças conectadas; não é uma Peça.
+Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até N (o número de Jogadores da Partida, de 2 a 4), e a peça com jogador precisando de Resgate, que aceita um peão a mais enquanto o afetado permanecer nela; move-se entre peças conectadas; não é uma Peça.
 _Avoid_: pawn, token, boneco
 
 **Conexão**:
@@ -251,7 +251,7 @@ Janela de ação de um Jogador Ativo, da Passagem de Vez anterior ao Encerrament
 _Avoid_: rodada, vez
 
 **Rodada**:
-Sequência completa em que os quatro Jogadores exerceram o turno uma vez.
+Sequência completa em que todos os Jogadores da Partida (2 a 4) exerceram o turno uma vez.
 _Avoid_: ciclo, volta
 
 **Passagem de Vez**:
@@ -319,7 +319,7 @@ Item obtido pela equipe na Sala do Diretor; componente do Objetivo Global.
 _Avoid_: chave, cartão-chave
 
 **Portão de Saída**:
-Peça Especial por onde a equipe escapa; a vitória exige os quatro peões reunidos nele; aceita até quatro peões simultaneamente.
+Peça Especial por onde a equipe escapa; a vitória exige os N peões da Partida (2 a 4) reunidos nele; aceita até N peões simultaneamente.
 _Avoid_: saída, porta
 
 **Sala do Diretor**:
@@ -335,7 +335,7 @@ Estado de um Jogador que nega o próximo ataque de monstro; não acumulável; pe
 Efeito imediato concedido quando a posição de um peão é confirmada sobre uma Peça Especial.
 
 **Objetivo Global**:
-Condição de vitória acompanhada coletivamente pela equipe: geradores ligados, Cartão de Acesso obtido e os quatro peões reunidos no Portão de Saída.
+Condição de vitória acompanhada coletivamente pela equipe: geradores ligados, Cartão de Acesso obtido e os N peões da Partida (2 a 4) reunidos no Portão de Saída.
 
 **Peça**:
 Componente do tabuleiro posicionado pelos Jogadores durante a exploração; pode reconstruir o caminho do sanatório ou conceder conquistas (Peça Especial).
