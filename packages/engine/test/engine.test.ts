@@ -90,15 +90,19 @@ function aplicar(estado: EstadoDoLobby, comando: Comando): EstadoDoLobby {
   return resultado.estado;
 }
 
-function salaComQuatroProntos(): EstadoDoLobby {
+function salaComMembrosProntos(quantidade: number): EstadoDoLobby {
   let estado = aplicar(estadoDoLobbyVazio(), criar());
-  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
-  estado = aplicar(estado, entrar('jogador-3', 'membro-3'));
-  estado = aplicar(estado, entrar('jogador-4', 'membro-4'));
-  estado = aplicar(estado, alternar('jogador-1'));
-  estado = aplicar(estado, alternar('jogador-2'));
-  estado = aplicar(estado, alternar('jogador-3'));
-  return aplicar(estado, alternar('jogador-4'));
+  for (let i = 2; i <= quantidade; i++) {
+    estado = aplicar(estado, entrar(`jogador-${i}`, `membro-${i}`));
+  }
+  for (let i = 1; i <= quantidade; i++) {
+    estado = aplicar(estado, alternar(`jogador-${i}`));
+  }
+  return estado;
+}
+
+function salaComQuatroProntos(): EstadoDoLobby {
+  return salaComMembrosProntos(4);
 }
 
 test('cria Sala com o criador como primeiro Membro e Anfitrião', () => {
@@ -930,18 +934,59 @@ test('encaminhar_sala é ação exclusiva do Anfitrião atual', () => {
   assert.equal(resultado.erro.codigo, 'APENAS_ANFITRIAO');
 });
 
-test('encaminhar_sala exige exatamente quatro Membros ativos', () => {
+test('encaminhar_sala recusa Sala com apenas 1 Membro ativo (mínimo é 2)', () => {
   let estado = aplicar(estadoDoLobbyVazio(), criar());
-  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
-  estado = aplicar(estado, entrar('jogador-3', 'membro-3'));
   estado = aplicar(estado, alternar('jogador-1'));
-  estado = aplicar(estado, alternar('jogador-2'));
-  estado = aplicar(estado, alternar('jogador-3'));
 
   const resultado = encaminharSala(estado, encaminhar('membro-1'));
   assert.equal(resultado.sucesso, false);
   if (resultado.sucesso) return;
   assert.equal(resultado.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.ok(
+    resultado.erro.mensagem.includes('2 a 4'),
+    `mensagem deve citar a faixa 2 a 4: ${resultado.erro.mensagem}`,
+  );
+});
+
+test('encaminhar_sala encaminha com 2 Membros ativos conectados e prontos', () => {
+  const estado = salaComMembrosProntos(2);
+  const resultado = encaminharSala(estado, encaminhar('membro-1'));
+
+  assert.deepEqual(resultado, {
+    sucesso: true,
+    estado,
+    eventos: [{ tipo: 'encaminhamento_iniciado', salaId: 'sala-1' }],
+  });
+});
+
+test('encaminhar_sala encaminha com 3 Membros ativos conectados e prontos', () => {
+  const estado = salaComMembrosProntos(3);
+  const resultado = encaminharSala(estado, encaminhar('membro-1'));
+
+  assert.deepEqual(resultado, {
+    sucesso: true,
+    estado,
+    eventos: [{ tipo: 'encaminhamento_iniciado', salaId: 'sala-1' }],
+  });
+});
+
+test('encaminhar_sala exige todos os Membros prontos com 2 e 3 presentes', () => {
+  // 2 presentes, apenas 1 pronto
+  let estado = aplicar(estadoDoLobbyVazio(), criar());
+  estado = aplicar(estado, entrar('jogador-2', 'membro-2'));
+  estado = aplicar(estado, alternar('jogador-1'));
+  const comDois = encaminharSala(estado, encaminhar('membro-1'));
+  assert.equal(comDois.sucesso, false);
+  if (comDois.sucesso) return;
+  assert.equal(comDois.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+
+  // 3 presentes, apenas 2 prontos
+  estado = aplicar(estado, entrar('jogador-3', 'membro-3'));
+  estado = aplicar(estado, alternar('jogador-2'));
+  const comTres = encaminharSala(estado, encaminhar('membro-1'));
+  assert.equal(comTres.sucesso, false);
+  if (comTres.sucesso) return;
+  assert.equal(comTres.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
 });
 
 test('encaminhar_sala exige todos os Membros conectados', () => {
@@ -1010,7 +1055,14 @@ test('aceitar_encaminhamento revalida a composição entre a oferta e o aceite',
   const base = salaComQuatroProntos();
   encaminharSala(base, encaminhar('membro-1'));
 
-  const aposSaida = aplicar(base, sair('jogador-4'));
+  // saída que deixa 3 ativos (dentro da faixa 2–4): aceite prossegue
+  const aposUmaSaida = aplicar(base, sair('jogador-4'));
+  const comTresAtivos = aceitarEncaminhamento(aposUmaSaida, aceitar());
+  assert.equal(comTresAtivos.sucesso, true);
+
+  // saídas que deixam 1 ativo (abaixo do mínimo 2): recusa
+  const aposDuasSaidas = aplicar(aposUmaSaida, sair('jogador-3'));
+  const aposSaida = aplicar(aposDuasSaidas, sair('jogador-2'));
   const comSaida = aceitarEncaminhamento(aposSaida, aceitar());
   assert.equal(comSaida.sucesso, false);
   if (comSaida.sucesso) return;
@@ -1025,6 +1077,38 @@ test('aceitar_encaminhamento revalida a composição entre a oferta e o aceite',
   assert.equal(aposDesconexao.salas[0].estado, 'aberta');
 
   const aposToggle = aplicar(base, alternar('jogador-4'));
+  const semPronto = aceitarEncaminhamento(aposToggle, aceitar());
+  assert.equal(semPronto.sucesso, false);
+  if (semPronto.sucesso) return;
+  assert.equal(semPronto.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.equal(aposToggle.salas[0].estado, 'aberta');
+});
+
+test('aceitar_encaminhamento congela a Sala com 2 e 3 Membros prontos', () => {
+  for (const quantidade of [2, 3]) {
+    const estado = salaComMembrosProntos(quantidade);
+    const resultado = aceitarEncaminhamento(estado, aceitar());
+
+    assert.equal(resultado.sucesso, true);
+    if (!resultado.sucesso) return;
+    const sala = resultado.estado.salas[0];
+    assert.equal(sala.estado, 'encaminhada');
+    assert.equal(sala.membros.length, quantidade);
+  }
+});
+
+test('aceitar_encaminhamento com 2 Membros revalida: saída que deixa 1 recusa', () => {
+  const base = salaComMembrosProntos(2);
+  encaminharSala(base, encaminhar('membro-1'));
+
+  const aposSaida = aplicar(base, sair('jogador-2'));
+  const comSaida = aceitarEncaminhamento(aposSaida, aceitar());
+  assert.equal(comSaida.sucesso, false);
+  if (comSaida.sucesso) return;
+  assert.equal(comSaida.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.equal(aposSaida.salas[0].estado, 'aberta');
+
+  const aposToggle = aplicar(base, alternar('jogador-2'));
   const semPronto = aceitarEncaminhamento(aposToggle, aceitar());
   assert.equal(semPronto.sucesso, false);
   if (semPronto.sucesso) return;

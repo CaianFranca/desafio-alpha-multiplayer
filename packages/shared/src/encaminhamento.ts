@@ -5,7 +5,7 @@
 // Fronteira shared (DTO de transporte) vs engine (domínio): propositalmente
 // divergem para desacoplar wire do modelo interno. Sync manual quando engine evolui.
 //   shared.MembroDaSala                         <-> engine.Membro (shared tem apelido/presenca/prontidao)
-//   shared.OfertaDeEncaminhamento.roster (tupla 4×MembroDaSala) <-> engine.Sala.membros (readonly Membro[])
+//   shared.OfertaDeEncaminhamento.roster (lista de MembroDaSala, 2–4) <-> engine.Sala.membros (readonly Membro[])
 //   shared type:'PARTIDA_DISPONIVEL'             <-> engine tipo futuro ('partida_disponivel' / Partida.*)
 //   shared ServerId/PartidaId (string opaca)     <-> engine Partida.id / GameServer.id
 // Ver sala.ts e ADR-0003 para convenção wire (UPPER_SNAKE em type, snake em Presenca, camelCase nos demais campos).
@@ -30,7 +30,9 @@ export type CodigoDeErroDoEncaminhamento =
 export interface OfertaDeEncaminhamento {
   readonly salaId: string;
   readonly codigoDeSala: CodigoDeSala;
-  readonly roster: readonly [MembroDaSala, MembroDaSala, MembroDaSala, MembroDaSala];
+  // Lista (não tupla): o Encaminhamento aceita de 2 a 4 Membros ativos —
+  // o teto de 4 é garantido pelo entrar_na_sala do engine.
+  readonly roster: readonly MembroDaSala[];
 }
 
 export interface AceiteDoEncaminhamento {

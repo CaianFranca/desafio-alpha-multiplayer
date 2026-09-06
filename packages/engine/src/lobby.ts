@@ -343,6 +343,7 @@ export interface OperacaoRejeitada {
 export type Resultado = OperacaoBemSucedida | OperacaoRejeitada;
 
 const LIMITE_DE_MEMBROS = 4;
+const MINIMO_DE_MEMBROS = 2;
 
 export function estadoDoLobbyVazio(): EstadoDoLobby {
   return { salas: [] };
@@ -1383,16 +1384,16 @@ function exigirSalaAberta(
   return undefined;
 }
 
-// Condições de encaminhamento (ST-03): exatamente LIMITE_DE_MEMBROS vínculos
-// ativos, todos conectados e prontos.
+// Condições de encaminhamento (ST-03): de MINIMO_DE_MEMBROS a LIMITE_DE_MEMBROS
+// vínculos ativos (o teto vem do entrar_na_sala), todos conectados e prontos.
 function validarComposicaoParaEncaminhamento(
   sala: Sala,
 ): OperacaoRejeitada | undefined {
   const ativos = sala.membros.filter((membro) => membro.estado === 'ativo');
-  if (ativos.length !== LIMITE_DE_MEMBROS) {
+  if (ativos.length < MINIMO_DE_MEMBROS || ativos.length > LIMITE_DE_MEMBROS) {
     return rejeitar(
       'ENCAMINHAMENTO_INVALIDO',
-      `O encaminhamento exige exatamente ${LIMITE_DE_MEMBROS} Membros ativos; a Sala possui ${ativos.length}.`,
+      `O encaminhamento exige de ${MINIMO_DE_MEMBROS} a ${LIMITE_DE_MEMBROS} Membros ativos; a Sala possui ${ativos.length}.`,
       { salaId: sala.id },
     );
   }
