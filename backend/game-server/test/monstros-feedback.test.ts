@@ -137,18 +137,24 @@ async function criarPartidaViaPost(baseUrl: string): Promise<AceiteDoEncaminhame
   return (await resposta.json()) as AceiteDoEncaminhamento;
 }
 
-// Semeia a Caixa do estado persistido: vulto-1 e espectro-1 na cabeça, para o
-// Recebimento do Primeiro Turno de jogador-1 sortear os Monstros. O TTL da
-// chave é preservado por salvarEstadoDaPartida.
+// Semeia a Caixa do estado persistido: vulto-1 e espectro-1 na cabeça, NESSA
+// ORDEM, para o Recebimento do Primeiro Turno de jogador-1 sortear os Monstros
+// na ordem esperada pelo assert — a ordem relativa herdada do embaralhamento
+// da criação da partida varia entre execuções, então ela é imposta aqui. O
+// TTL da chave é preservado por salvarEstadoDaPartida.
 async function semearCaixaComMonstros(partidaId: string): Promise<void> {
   const estado = await obterEstadoDaPartida(redis, partidaId);
   assert.ok(estado !== null, 'estado da partida deve existir para a semeadura');
-  const monstros = estado!.tabuleiro.caixa.filter(
-    (peca) => peca.pecaId === 'vulto-1' || peca.pecaId === 'espectro-1',
+  const porPecaId = new Map(
+    estado!.tabuleiro.caixa.map((peca) => [peca.pecaId, peca]),
   );
-  assert.equal(monstros.length, 2);
+  const monstros = ['vulto-1', 'espectro-1'].map(
+    (pecaId) => porPecaId.get(pecaId)!,
+  );
+  assert.ok(monstros.every((peca) => peca !== undefined));
+  const idsDosMonstros = new Set(['vulto-1', 'espectro-1']);
   const resto = estado!.tabuleiro.caixa.filter(
-    (peca) => !monstros.includes(peca),
+    (peca) => !idsDosMonstros.has(peca.pecaId),
   );
   await salvarEstadoDaPartida(redis, partidaId, {
     ...estado!,
@@ -446,6 +452,12 @@ test('broadcast: ATAQUE_RESOLVIDO com estadosAplicados e LIMPEZA_APLICADA chegam
         wsTardio.close();
       }
     } finally {
+      // ws fecha idempotente (no caminho feliz ele já foi fechado antes da
+      // reconexão tardia). Sem ele, um assert lançado cedo deixaria o socket
+      // do jogador-1 aberto e o servidor.fechar() penduraria no wss.close()
+      // esperando o último cliente — mascarando o erro real até o timeout do
+      // arquivo (relato do flake: recebidas em ordem trocada).
+      ws.close();
       ws2.close();
       ws3.close();
       ws4.close();
