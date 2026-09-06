@@ -1438,6 +1438,50 @@ test('travessia do Escuro: Caixa vazia entrega zero peças, sem evento e sem mar
   assert.equal(travessia.estado.atravessouNoTurno, false);
 });
 
+test('travessia do Escuro: a Confirmação recusa a cadeia incompleta (cadeia obrigatória, Req 3 do #272)', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'reta-x', tipo: 'reta' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  const pendencia = estado.tabuleiro.recebidas[0];
+
+  // Atalho que pula escolher/posicionar/mover: o confirmar direto é rejeitado
+  // — sem o guard, a Confirmação em Baixa zeraria as recebidas e a peça da
+  // Caixa (reta-x) seria consumida sem nunca ser posicionada. A cadeia
+  // obrigatória (escolher → encaixar → mover → confirmar) é garantia do
+  // servidor, não do cliente.
+  assert.equal(
+    codigoDaRejeicao(estado, confirmarPosicao('peao-branco'), 'ana'),
+    'PENDENCIA_NAO_RESOLVIDA',
+  );
+  assert.equal(estado.posicaoConfirmada, false);
+  assert.equal(estado.tabuleiro.recebidas.length, 1);
+  assert.equal(estado.tabuleiro.recebidas[0], pendencia);
+
+  // A pendência persiste e a cadeia segue completável: escolher → encaixar →
+  // mover → confirmar.
+  estado = aplicar(estado, escolherVaga('recebida-reta-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('reta-x', 1, 3), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  const validacao = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(validacao.sucesso, true);
+  if (!validacao.sucesso) return;
+  assert.equal(validacao.estado.posicaoConfirmada, true);
+  assert.equal(validacao.estado.tabuleiro.recebidas.length, 0);
+});
+
 test('primeiro turno em Baixa: Recebimento de 1 peça e vaga obrigatoriamente escura', () => {
   let estado = comJogadorEmBaixa(partidaIniciada(), 'ana');
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');

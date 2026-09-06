@@ -819,13 +819,14 @@ function moverPeaoDaPartida(
 // CADEIA OBRIGATÓRIA (Req 3 do #272 / Expected do #264): a Limpeza do caminho
 // escuro acontece no ponto definitivo que FECHA a sequência — atravessar →
 // escolher_vaga (borda da célula travada) → posicionar_peca → mover_peao →
-// confirmar_posicao_do_peao. O confirmar SEMPRE recalcula a Iluminação e
-// reaplica a Limpeza (partida.ts recalcularIluminacaoEAplicarLimpeza), então
-// o estado intermediário persistente nunca fica sem Limpeza: sem o confirmar o
-// turno não avança (encerrar_turno exige posicaoConfirmada; permanecer exige a
-// Peça do início do turno, inválida após a mudança; a pendência do Recebimento
-// bloqueia o encerramento). A iluminação materializada apenas nos pontos
-// definitivos é a garantia do ADR-0005 ("preserva o desfazer").
+// confirmar_posicao_do_peao. Garantia estrutural do servidor: com o
+// Recebimento da travessia pendente, o confirmar recusa
+// (PENDENCIA_NAO_RESOLVIDA), o mover recusa (mesma pendência, peoes.ts) e o
+// encerrar recusa — sem atalho que descarte a peça sorteada nem estado
+// intermediário sem Limpeza. O confirmar SEMPRE recalcula a Iluminação e
+// reaplica a Limpeza (recalcularIluminacaoEAplicarLimpeza); a iluminação
+// materializada apenas nos pontos definitivos é a garantia do ADR-0005
+// ("preserva o desfazer").
 function atravessarOEscuroDaPartida(
   estado: EstadoDaPartida,
   comando: AtravessarOEscuroDaPartidaComando,
@@ -1125,6 +1126,19 @@ function confirmarPosicaoDoPeao(
     return rejeitarDaPartida(
       'POSICAO_CONFIRMADA',
       'A posição do Peão já foi confirmada neste turno.',
+    );
+  }
+
+  // Cadeia obrigatória do Escuro (Req 3 do #272 / issue #264): a Confirmação
+  // é o ponto definitivo que fecha a sequência da Travessia — com o
+  // Recebimento da travessia ainda pendente, confirmar direto descartaria a
+  // peça sorteada da Caixa sem nunca posicioná-la. A pendência bloqueia o
+  // encerramento (e o mover), então o guard aqui garante a cadeia no servidor:
+  // escolher → encaixar → mover só então confirmar.
+  if (estado.tabuleiro.recebidas.length > 0) {
+    return rejeitarDaPartida(
+      'PENDENCIA_NAO_RESOLVIDA',
+      'Há Peças Recebidas pendentes; a Confirmação exige completar a Travessia (encaixar e mover) antes.',
     );
   }
 
