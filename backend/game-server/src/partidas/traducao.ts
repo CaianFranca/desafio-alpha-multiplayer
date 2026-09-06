@@ -87,6 +87,16 @@ export function traduzirEventos(
           pecaId: evento.pecaId,
         });
         break;
+      // Travessia do Escuro (issue #264): shape 1:1 com o domínio — o Peão
+      // alcançou a célula escura conectada; o Recebimento gerado chega pelos
+      // eventos PECA_SORTEADA/RECEBIMENTO_GERADO do mesmo lote.
+      case 'atravessou_o_escuro':
+        saida.push({
+          type: 'ATRAVESSOU_O_ESCURO',
+          peaoId: evento.peaoId,
+          celula: evento.celula,
+        });
+        break;
       case 'turno_iniciado':
         saida.push({
           type: 'TURNO_INICIADO',

@@ -37,6 +37,7 @@ export {
   celulaVizinhaNaBorda,
   ehPecaDeMonstro,
   ehPecaEspecial,
+  estaDentroDaGrade,
   gerarRecebidas,
   validarTexto,
   vagasDisponiveis,

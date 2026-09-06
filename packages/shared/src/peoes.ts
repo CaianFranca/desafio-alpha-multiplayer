@@ -10,6 +10,7 @@
 //   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' <-> engine tipo:'escolher_vaga_da_peca_recebida' (recebidaId, borda) — issue #138
 //   shared type:'MOVER_PEAO'                     <-> engine tipo:'mover_peao' (peaoId, celula)
 //   shared type:'PERMANECER'                     <-> engine tipo:'permanecer' (peaoId)
+//   shared type:'ATRAVESSAR_O_ESCURO'            <-> engine tipo:'atravessar_o_escuro' (peaoId, celula) — issue #264
 //   Eventos:
 //   shared type:'PEAO_SELECIONADO'                <-> engine tipo:'peao_selecionado' (peaoId)
 //   shared type:'RECEBIMENTO_GERADO'              <-> engine tipo:'recebimento_gerado' (pendências sorteada da #138 em PendenciaDaPecaSorteada)
@@ -17,6 +18,7 @@
 //   shared type:'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO' <-> engine tipo:'vaga_da_peca_recebida_escolhida' (recebidaId, borda, celulaAlvo) — issue #138
 //   shared type:'PEAO_MOVIDO'                     <-> engine tipo:'peao_movido' (peaoId, pecaIdDe, pecaIdPara, celula)
 //   shared type:'PEAO_PERMANECEU'                 <-> engine tipo:'peao_permaneceu' (peaoId, pecaId)
+//   shared type:'ATRAVESSOU_O_ESCURO'             <-> engine tipo:'atravessou_o_escuro' (peaoId, celula) — issue #264
 //   shared type:UPPER_SNAKE no wire vs engine tipo:snake no domínio; campos em camelCase nos dois lados
 //
 // Reuso do contrato do Tabuleiro (./tabuleiro.ts): girar/posicionar da Peça
@@ -57,7 +59,7 @@ export interface PendenciaDaPecaSorteada {
   readonly celulaAlvo: Celula | null;
 }
 
-// --- Comandos cliente → servidor (5) ---
+// --- Comandos cliente → servidor (6) ---
 // girar/posicionar da Peça Recebida usam GirarPecaComando / PosicionarPecaComando de ./tabuleiro.ts.
 
 export interface SelecionarPeaoComando {
@@ -91,14 +93,26 @@ export interface PermanecerComando {
   readonly peaoId: PeaoId;
 }
 
+// Atravessar o Escuro (issue #264 / spec #272): jogada exclusiva de Baixa
+// Iluminação — o Peão da vez atravessa para a célula escura conectada (vaga
+// não iluminada) adjacente à peça sob ele no Tabuleiro. O próprio comando não
+// carrega `jogadorId`: entra no wire de Partida com ele (AtravessarOEscuroPartidaComando);
+// aqui vive o contrato do Peão, pair do comando de domínio.
+export interface AtravessarOEscuroComando {
+  readonly type: 'ATRAVESSAR_O_ESCURO';
+  readonly peaoId: PeaoId;
+  readonly celula: Celula;
+}
+
 export type PeaoComandoDoCliente =
   | SelecionarPeaoComando
   | PosicionarPeaoComando
   | EscolherVagaDaPecaRecebidaComando
   | MoverPeaoComando
-  | PermanecerComando;
+  | PermanecerComando
+  | AtravessarOEscuroComando;
 
-// --- Eventos servidor → cliente (6) ---
+// --- Eventos servidor → cliente (7) ---
 // Reusos do ciclo via TabuleiroEventoDoServidor (SalaServerMessage), sem
 // redefinição aqui: peca_selecionada, peca_deselecionada, peca_girada,
 // peca_posicionada, manipulacao_finalizada e erro_do_tabuleiro.
@@ -144,9 +158,20 @@ export interface PeaoPermaneceuEvento {
   readonly pecaId: PecaId;
 }
 
+// Travessia do Escuro (issue #264 / spec #272): o Peão em Baixa Iluminação
+// alcançou a célula escura conectada. O evento carrega apenas o Peão e a
+// célula de destino — a peça sorteada do Recebimento gerado pela travessia
+// chega pelos eventos RECEBIMENTO_GERADO/PECA_SORTEADA do mesmo lote.
+export interface AtravessouOEscuroEvento {
+  readonly type: 'ATRAVESSOU_O_ESCURO';
+  readonly peaoId: PeaoId;
+  readonly celula: Celula;
+}
+
 export type PeaoEventoDoServidor =
   | PeaoSelecionadoEvento
   | RecebimentoGeradoEvento
   | PeaoPosicionadoEvento
   | PeaoMovidoEvento
-  | PeaoPermaneceuEvento;
+  | PeaoPermaneceuEvento
+  | AtravessouOEscuroEvento;

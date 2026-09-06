@@ -45,6 +45,8 @@ export type {
 } from './lobby.ts';
 
 export type {
+  AtravessarOEscuroDaPartidaComando,
+  AtravessouOEscuroEvento,
   CelulasIluminadasEvento,
   CodigoDeErroDaPartida,
   ComandoDePartida,
