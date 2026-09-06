@@ -793,6 +793,51 @@ test('avanço circular: os quatro encerram o Primeiro Turno e a vez volta ao pri
   assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
 });
 
+test('rotação pós-Primeiros Turnos N=2: wrap ana→bruno→ana abre a rodada 3', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  assert.equal(estado.rodada, 2);
+
+  // Turno normal sem mudança de Peça encerra direto (permanecer).
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  assert.equal(estado.rodada, 2);
+
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  estado = aplicar(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  assert.equal(estado.rodada, 3);
+  assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
+});
+
+test('rotação pós-Primeiros Turnos N=3: wrap ana→bruno→carla→ana abre a rodada 3', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno', 'carla']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  assert.equal(estado.rodada, 2);
+
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  assert.equal(estado.rodada, 2);
+
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  estado = aplicar(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(estado.jogadorAtivoId, 'carla');
+  assert.equal(estado.rodada, 2);
+
+  estado = aplicar(estado, selecionarPeao('peao-azul'), 'carla');
+  estado = aplicar(estado, permanecer('peao-azul'), 'carla');
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  assert.equal(estado.rodada, 3);
+  assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
+});
+
 test('após qualquer rejeição o estado da Partida fica inalterado, com um único Jogador Ativo', () => {
   let estado = partidaIniciada();
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');

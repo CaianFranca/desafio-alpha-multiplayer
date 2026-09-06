@@ -49,6 +49,7 @@ import {
   ehPecaDeMonstro,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
+  tetoDoPortao,
   validarTexto,
   vizinhasConectadas,
   type Celula,
@@ -663,7 +664,10 @@ function moverPeaoDaPartida(
   if (!resultadoTab.sucesso) {
     // Se a rejeição foi por ocupação mas a exceção de resgate permite, realiza
     // o movimento manualmente (evita tocar peoes.ts com roster e mantém a
-    // dependência unidirecional partida→tabuleiro→peoes).
+    // dependência unidirecional partida→tabuleiro→peoes). O fallback segue
+    // vivo (issue #285): com afetado no destino o teto da Partida (N+1 via
+    // tetoDoPortao) supera o teto base do Tabuleiro (N), então a delegação
+    // rejeita e só este caminho autoriza a entrada do resgatador.
     if (resultadoTab.erro.codigo === 'PECA_JA_TEM_PEAO' && destino) {
       const teto = tetoOcupacao(destino, estado);
       const ocupantes = estado.tabuleiro.peoes.filter(
@@ -1606,10 +1610,18 @@ function temAfetadoNaPeca(pecaId: string, estado: EstadoDaPartida): boolean {
 }
 
 function tetoOcupacao(peca: PecaPosicionada, estado: EstadoDaPartida): number {
-  // O Portão de Saída escala com o roster (issue #285): teto = N peões, com o
-  // +1 da exceção de Resgate já existente; as demais peças seguem no máximo 1.
-  const tetoNormal = peca.tipo === 'portao_de_saida' ? estado.jogadores.length : 1;
-  return temAfetadoNaPeca(peca.pecaId, estado) ? tetoNormal + 1 : tetoNormal;
+  // O Portão de Saída escala com o roster (issue #285) via a fonte única
+  // tetoDoPortao (peoes.ts): teto = N peões, com o +1 da exceção de Resgate
+  // já existente; as demais peças seguem no máximo 1 (+1 com afetado). O
+  // rosterN é o tamanho do roster (estado.jogadores.length), com o clamp
+  // min(N,4) preservado para estados artesanais.
+  if (peca.tipo !== 'portao_de_saida') {
+    return temAfetadoNaPeca(peca.pecaId, estado) ? 2 : 1;
+  }
+  return tetoDoPortao(
+    estado.jogadores.length,
+    temAfetadoNaPeca(peca.pecaId, estado),
+  );
 }
 
 // Pré-condição: ambos arrays devem vir do mesmo calcularIluminacao, que retorna

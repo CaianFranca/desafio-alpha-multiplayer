@@ -180,6 +180,7 @@ export {
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   sortearDaCaixa,
+  tetoDoPortao,
   vagasDisponiveis,
   vizinhasConectadas,
   vizinhos,

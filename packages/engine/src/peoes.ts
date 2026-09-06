@@ -124,11 +124,15 @@ function ehPortaoDeSaida(tipo: TipoDaPeca): boolean {
   return tipo === 'portao_de_saida';
 }
 
-// Teto do Portão de Saída (issue #285): N peões do estado, limitado ao roster
-// máximo de 4 — estados artesanais com mais de 4 peões (inalcançáveis pela
-// API, que rejeita N > 4) seguem com o teto rígido de 4.
-function tetoDoPortaoPara(quantidadeDePeoes: number): number {
-  return Math.min(quantidadeDePeoes, 4);
+// Teto do Portão de Saída (issue #285): fonte única do teto — N peões do
+// roster, limitado ao roster máximo de 4, mais 1 quando a peça abriga um
+// Jogador afetado (exceção de Resgate da issue #171). Estados artesanais com
+// rosterN acima de 4 (inalcançáveis pela API, que rejeita N > 4) seguem com
+// o teto rígido de 4. A camada do Tabuleiro (posicionar/mover abaixo) não
+// conhece afetado e chama sempre com temAfetado = false; a camada da Partida
+// (tetoOcupacao em partida.ts) informa o afetado real.
+export function tetoDoPortao(rosterN: number, temAfetado: boolean): number {
+  return Math.min(rosterN, 4) + (temAfetado ? 1 : 0);
 }
 
 // Célula vizinha na direção da borda, ou null quando cai fora da grade.
@@ -427,9 +431,11 @@ export function posicionarPeao(
     (item) => item.pecaId === peca.pecaId,
   ).length;
   // O Portão de Saída escala com o roster (issue #285); as demais peças
-  // seguem no máximo 1.
+  // seguem no máximo 1. O rosterN é o tamanho do roster
+  // (estado.peoes.length); a exceção de Resgate (+1 com afetado) vive na
+  // camada da Partida — aqui o teto é sempre o base.
   const tetoPosicionar = ehPortaoDeSaida(peca.tipo)
-    ? tetoDoPortaoPara(estado.peoes.length)
+    ? tetoDoPortao(estado.peoes.length, false)
     : 1;
   if (ocupantesNaPeca >= tetoPosicionar) {
     return rejeitar('PECA_JA_TEM_PEAO', 'A Peça já abriga outro Peão.');
@@ -624,15 +630,18 @@ export function moverPeao(
   }
 
   // Ocupação (issue #142 + #176, teto do Portão escalado com o roster pela
-  // #285): a peça de destino portao_de_saida aceita até N peões (a reunião
-  // deles no Portão é condição de vitória); as demais peças continuam no
-  // máximo 1. Com N peões no jogo, o teto do portão é inalcançável — nenhum
-  // código de erro novo; peça comum ocupada segue PECA_JA_TEM_PEAO. O peão em
-  // movimento ainda aponta para a origem, então não se conta a si mesmo.
+  // #285 via tetoDoPortao): a peça de destino portao_de_saida aceita até N
+  // peões (a reunião deles no Portão é condição de vitória); as demais peças
+  // continuam no máximo 1. O rosterN é o tamanho do roster
+  // (estado.peoes.length); a exceção de Resgate (+1 com afetado) vive na
+  // camada da Partida — aqui o teto é sempre o base. Com N peões no jogo, o
+  // teto do portão é inalcançável — nenhum código de erro novo; peça comum
+  // ocupada segue PECA_JA_TEM_PEAO. O peão em movimento ainda aponta para a
+  // origem, então não se conta a si mesmo.
   const ocupantes = estado.peoes.filter(
     (item) => item.pecaId === alvo.pecaId,
   ).length;
-  const teto = ehPortaoDeSaida(alvo.tipo) ? tetoDoPortaoPara(estado.peoes.length) : 1;
+  const teto = ehPortaoDeSaida(alvo.tipo) ? tetoDoPortao(estado.peoes.length, false) : 1;
   if (ocupantes >= teto) {
     return rejeitar('PECA_JA_TEM_PEAO', 'A Peça de destino já abriga outro Peão.');
   }

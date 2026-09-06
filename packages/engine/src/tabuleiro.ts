@@ -39,6 +39,7 @@ export {
   ehPecaDeMonstro,
   ehPecaEspecial,
   gerarRecebidas,
+  tetoDoPortao,
   validarTexto,
   vagasDisponiveis,
   vizinhasConectadas,
@@ -496,8 +497,15 @@ export interface EntradaDoEstadoDoTabuleiro {
 // Partida recém-preparada: Caixa com a composição fixa de 83 peças
 // (embaralhada quando a seed é fornecida) e as N Peças Iniciais fora dela
 // (N = numeroDeJogadores, 4 por padrão).
-// @throws Error quando numeroDeJogadores é informado fora de 2–4 (a Partida
-// rejeita esses rosters com DADOS_INVALIDOS antes de chegar aqui).
+//
+// Não é entry-point público para N: o roster inválido é rejeitado com
+// DADOS_INVALIDOS em estadoInicialDaPartida (partida.ts), que valida antes
+// de delegar para cá. A chamada direta com numeroDeJogadores fora de 2–4
+// lança Error (em vez de retornar Resultado rejeitado) para preservar a
+// assinatura pública consumida pelo backend
+// (backend/game-server/src/partidas/tabuleiro.ts chama
+// estadoInicialDoTabuleiro() sem argumentos) — Opção B da issue #285.
+// @throws Error quando numeroDeJogadores é informado fora de 2–4.
 export function estadoInicialDoTabuleiro(
   entrada?: EntradaDoEstadoDoTabuleiro,
 ): EstadoDoTabuleiro {
