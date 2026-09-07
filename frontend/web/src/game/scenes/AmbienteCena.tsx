@@ -41,7 +41,24 @@ function Iluminacao() {
   return (
     <>
       <ambientLight intensity={0.22} />
-      <directionalLight position={[8, 14, 6]} intensity={1.0} />
+      {/*
+        Luz principal projeta sombra (auto-sombra da caixa/cesta): cobre a
+        Mesa 20×20 com folga; `bias`/`normalBias` conservadores contra acne.
+      */}
+      <directionalLight
+        position={[8, 14, 6]}
+        intensity={1.0}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-left={-12}
+        shadow-camera-right={12}
+        shadow-camera-top={12}
+        shadow-camera-bottom={-12}
+        shadow-camera-near={1}
+        shadow-camera-far={40}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.02}
+      />
       <directionalLight position={[1.4, 4.7, 9.9]} intensity={0.35} />
     </>
   )
@@ -64,7 +81,7 @@ function Mesa() {
   }, [texturaCarregada])
 
   return (
-    <mesh position={[0, -ESPESSURA_MESA / 2, 0]}>
+    <mesh position={[0, -ESPESSURA_MESA / 2, 0]} receiveShadow>
       <boxGeometry args={[LARGURA_MESA, ESPESSURA_MESA, PROFUNDIDADE_MESA]} />
       <meshStandardMaterial attach="material-0" color={COR_LATERAIS_MESA} />
       <meshStandardMaterial attach="material-1" color={COR_LATERAIS_MESA} />
