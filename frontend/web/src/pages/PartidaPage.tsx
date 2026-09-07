@@ -30,6 +30,8 @@ import {
 } from '../game/tabuleiro/vooDoPeao'
 import type { VooDoPeaoPendente } from '../game/tabuleiro/vooDoPeao'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
+import { useRequerModoPaisagem } from '../hooks/useModoPaisagemCelular'
+import { OverlayModoPaisagem } from '../components/partida/OverlayModoPaisagem'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
 import {
   chaveDeComandoPendente,
@@ -39,10 +41,12 @@ import {
   criarEstadoInicialDoCliente,
   reduzirEvento,
   estadoDeExibicaoDoModelo,
+  peoesEmBaixaIluminacaoDe,
 } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
+import type { PeaoId } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
 import type {
@@ -401,6 +405,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     return out
   }, [sanidadePorPeao])
 
+  // ── Peões em Baixa Iluminação (issue #297): avatar do Diretor apagado ──
+  // Projeção de exibição do estado do Vulto por jogador (`emBaixaIluminacao`,
+  // per-player — não por célula); deriva do mesmo `sanidadePorPeao` acima.
+  const emBaixaIluminacaoPorPeaoId: ReadonlySet<PeaoId> = useMemo(
+    () => peoesEmBaixaIluminacaoDe(sanidadePorPeao),
+    [sanidadePorPeao],
+  )
+
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
@@ -500,10 +512,35 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const encerrarTurno = useCallback(() => {
     enviarComJogador({ type: 'ENCERRAR_TURNO' })
   }, [enviarComJogador])
+  const requerModoPaisagem = useRequerModoPaisagem()
   const [bordaPx, setBordaPx] = useState(0)
+
+  // Devolução de foco do overlay bloqueante: rastreia o último foco fora
+  // do overlay (via focusin — o auto-focus do filho roda antes do efeito
+  // do pai, então salvar na transição já seria tarde) e restaura ao
+  // liberar (giro para paisagem).
+  const focoAnteriorRef = useRef<Element | null>(null)
+  useEffect(() => {
+    const aoFocar = (e: FocusEvent) => {
+      const alvo = e.target as Element | null
+      if (!alvo) return
+      if (typeof alvo.closest === 'function' && alvo.closest('[data-testid="overlay-modo-paisagem"]')) return
+      focoAnteriorRef.current = alvo
+    }
+    document.addEventListener('focusin', aoFocar)
+    return () => document.removeEventListener('focusin', aoFocar)
+  }, [])
+  useEffect(() => {
+    if (!requerModoPaisagem) {
+      const anterior = focoAnteriorRef.current
+      focoAnteriorRef.current = null
+      if (anterior instanceof HTMLElement && document.contains(anterior)) anterior.focus()
+    }
+  }, [requerModoPaisagem])
 
   return (
     <div className="relative h-screen w-screen overflow-hidden">
+      <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
       <AmbienteDeJogo
         bordaPx={bordaPx}
         estadoExibicao={estadoExibicao}
@@ -520,6 +557,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         limpezaTrigger={limpezaTrigger}
         encaixeTrigger={encaixeTrigger}
         onFimEncaixe={onFimEncaixe}
+        emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*
@@ -628,6 +666,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           </button>
         </div>
       ) : null}
+      </div>
+      {requerModoPaisagem ? <OverlayModoPaisagem /> : null}
       <PartidaMoldura onBordaChange={setBordaPx} />
     </div>
   )

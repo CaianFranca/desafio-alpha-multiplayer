@@ -10,7 +10,7 @@ import type {
   PecaPosicionada,
 } from './contrato'
 import { Celula } from './Celula'
-import { PeaoPlaceholder } from './PeaoPlaceholder'
+import { PeaoVisual } from './PeaoVisual'
 import { cursorParaCelula, cursorParaPecaPosicionada } from './interacao'
 import type { EstadoInteracaoTabuleiro } from './interacao'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from './interacaoPeoes'
@@ -84,6 +84,12 @@ interface TabuleiroProps {
   /** Pouso do voo concluído (nonce): a página limpa o pendente. */
   onVooAterrissou?: (nonce: number) => void
   /**
+   * Peões em Baixa Iluminação do dono (issue #297): peaoIds derivados uma vez
+   * no pai (mesma fonte do espelho DOM) — o avatar do Diretor troca para a
+   * variante apagado só no peão afetado, em todas as posições (célula/voo).
+   */
+  emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
+  /**
    * Peça em voo do Encaixe (issue #241): escondida aqui enquanto a
    * TransicaoEncaixe a anima na cena — ao fim do voo o overlay some e esta
    * peça assume pixel-igual. Null = sem voo.
@@ -110,6 +116,7 @@ export function Tabuleiro({
   vooPendente = null,
   onVooAterrissou,
   ocultarPecaId = null,
+  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
@@ -204,6 +211,9 @@ export function Tabuleiro({
             iluminada={iluminada}
             peaoSelecionadoId={peaoSelecionadoId}
             peaoAtivoId={peaoAtivoId}
+            emBaixaIluminacao={
+              peao !== null && emBaixaIluminacaoPorPeaoId.has(peao.peaoId)
+            }
             onSelecionarPeao={onSelecionarPeao}
           />
         )
@@ -213,6 +223,7 @@ export function Tabuleiro({
           key={vooEfetivo.nonce}
           voo={vooEfetivo}
           cor={corDoVoo}
+          emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(vooEfetivo.peaoId)}
           onAterrissou={onVooAterrissou}
         />
       ) : null}
@@ -233,10 +244,12 @@ export function Tabuleiro({
 function PeaoVoador({
   voo,
   cor,
+  emBaixaIluminacao,
   onAterrissou,
 }: {
   voo: VooDoPeaoPendente
   cor: CorDoPeao
+  emBaixaIluminacao: boolean
   onAterrissou?: (nonce: number) => void
 }) {
   const grupo = useRef<Group | null>(null)
@@ -288,11 +301,17 @@ function PeaoVoador({
   })
 
   if (reduce) {
-    return <PeaoPlaceholder cor={cor} position={destinoMundo} />
+    return (
+      <PeaoVisual
+        cor={cor}
+        position={destinoMundo}
+        emBaixaIluminacao={emBaixaIluminacao}
+      />
+    )
   }
   return (
     <group ref={grupo} position={origemMundo}>
-      <PeaoPlaceholder cor={cor} />
+      <PeaoVisual cor={cor} emBaixaIluminacao={emBaixaIluminacao} />
     </group>
   )
 }

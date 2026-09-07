@@ -1,7 +1,7 @@
 // Guarda wire e mapeamento wire→domínio do canal de Partida (issue #117).
 //
 // O canal de Partida substitui o seam isolado de tabuleiro/Peões (issues #80
-// e #88): os mesmos 11 comandos agora viajam com o `jogadorId` da mensagem
+// e #88): os 12 comandos agora viajam com o `jogadorId` da mensagem
 // (contrato do ST-11). O ator do dispatch, porém, é a sessão autenticada do
 // socket (#155): o `jogadorId` do wire é vestigial no dispatch — segue
 // obrigatório só pela guarda de forma, e comandos com `jogadorId` alheio são
@@ -38,6 +38,7 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'MOVER_PEAO',
   'PERMANECER',
   'CONFIRMAR_POSICAO_DO_PEAO',
+  'ATRAVESSAR_O_ESCURO',
   'ENCERRAR_TURNO',
 ]);
 
@@ -117,6 +118,8 @@ export function ehComandoDaPartida(value: unknown): value is ComandoDaPartidaAce
       return ehIdNaoVazio(mensagem.peaoId);
     case 'CONFIRMAR_POSICAO_DO_PEAO':
       return ehIdNaoVazio(mensagem.peaoId);
+    case 'ATRAVESSAR_O_ESCURO':
+      return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     case 'ENCERRAR_TURNO':
       return true;
     default:
@@ -160,6 +163,12 @@ export function mapearComandoDaPartida(
       return { tipo: 'permanecer', peaoId: comando.peaoId };
     case 'CONFIRMAR_POSICAO_DO_PEAO':
       return { tipo: 'confirmar_posicao_do_peao', peaoId: comando.peaoId };
+    case 'ATRAVESSAR_O_ESCURO':
+      return {
+        tipo: 'atravessar_o_escuro',
+        peaoId: comando.peaoId,
+        celula: comando.celula,
+      };
     case 'ENCERRAR_TURNO':
       return { tipo: 'encerrar_turno' };
     default: {

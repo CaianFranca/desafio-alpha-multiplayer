@@ -78,6 +78,12 @@ interface AmbienteDeJogoProps {
   encaixeTrigger?: EncaixeTrigger | null
   /** Fim do voo do Encaixe (key) → o pai limpa o trigger. */
   onFimEncaixe?: (key: number) => void
+  /**
+   * Peões em Baixa Iluminação do dono (issue #297): peaoIds derivados uma vez
+   * no pai — avatar do Diretor troca para a variante apagado só no peão
+   * afetado, em todas as posições (célula/fileira/voo).
+   */
+  emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
 }
 
 export function AmbienteDeJogo({
@@ -96,6 +102,7 @@ export function AmbienteDeJogo({
   limpezaTrigger = null,
   encaixeTrigger = null,
   onFimEncaixe,
+  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -283,6 +290,7 @@ export function AmbienteDeJogo({
           limpezaTrigger={limpezaTrigger}
           encaixeTrigger={encaixeTrigger}
           onFimEncaixe={onFimEncaixe}
+          emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
         />
       </Canvas>
       {estadoExibicao ? (

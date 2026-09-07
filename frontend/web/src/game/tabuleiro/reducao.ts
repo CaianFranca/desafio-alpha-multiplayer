@@ -70,6 +70,7 @@ import {
   type PecaDaMesa,
   type PecaPosicionada,
   type PeaoDaExibicao,
+  type PeaoId,
   type TipoDaPeca,
 } from './contrato'
 import type { PendenciaNoCliente } from './interacaoPeoes'
@@ -106,6 +107,21 @@ export type PercepcaoDeJogador = {
 export type SanidadePorPeao = Readonly<
   Record<string, { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }>
 >
+
+/**
+ * Peões em Baixa Iluminação (issue #297): projeção de exibição do estado do
+ * Vulto por jogador (`emBaixaIluminacao` — per-player, não por célula), para o
+ * avatar 3D do Diretor alternar para a variante *apagado*.
+ */
+export function peoesEmBaixaIluminacaoDe(
+  sanidadePorPeao: SanidadePorPeao,
+): ReadonlySet<PeaoId> {
+  const out = new Set<string>()
+  for (const [peaoId, dados] of Object.entries(sanidadePorPeao)) {
+    if (dados.emBaixaIluminacao) out.add(peaoId)
+  }
+  return out
+}
 
 /**
  * Eventos que o canal da Partida entrega ao redutor: tabuleiro (ST-09),
@@ -605,6 +621,11 @@ export function reduzirEvento(
           },
         },
       }
+    }
+
+    case 'ATRAVESSOU_O_ESCURO': {
+      // Sem lógica visual — ticket #268. Marco para exibição futura.
+      return estado
     }
 
     default: {
