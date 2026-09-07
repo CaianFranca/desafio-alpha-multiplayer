@@ -424,10 +424,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       peaoSelecionadoId: modelo.peaoSelecionadoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
-      // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no
-      // turno o clique no próprio Peão fica silencioso — encerrar depois de
-      // mover é confirmar → encerrar, e Permanecer só vale antes de mover.
-      movimentouNoTurno: modelo.movimentouNoTurno,
       // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
       // bandeja continua pública (as pendências vêm do broadcast sem filtro).
       donoDoCiclo: minhaVez,

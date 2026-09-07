@@ -589,7 +589,8 @@ test('selecionar_peao reentra na sequência sem Recebimento (ST-11)', () => {
   // Muda de Peça e re-seleciona: a Peça recém-ocupada (reta-1, norte vazio)
   // NÃO gera recebimento na seleção.
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
-  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+  assert.equal(estado.tabuleiro.peaoSelecionadoId, null);
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   assert.deepEqual(estado.tabuleiro.recebidas, []);
 
   // Permanecer fora da Peça do início do turno: encerramento inválido, sem
