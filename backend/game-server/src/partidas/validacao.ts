@@ -24,8 +24,8 @@ export function validarOfertaDeEncaminhamento(value: unknown): RecusaDoEncaminha
     return recusa('codigoDeSala é obrigatório');
   }
 
-  if (!Array.isArray(oferta.roster) || oferta.roster.length !== 4) {
-    return recusa('roster deve conter exatamente 4 membros');
+  if (!Array.isArray(oferta.roster) || oferta.roster.length < 2 || oferta.roster.length > 4) {
+    return recusa('roster deve conter de 2 a 4 membros');
   }
 
   for (const membro of oferta.roster) {
@@ -37,6 +37,7 @@ export function validarOfertaDeEncaminhamento(value: unknown): RecusaDoEncaminha
 
   const ids = new Set<string>();
   const jogadorIds = new Set<string>();
+  const ordens = new Set<number>();
   for (const membro of oferta.roster as MembroDaSala[]) {
     if (ids.has(membro.id)) {
       return recusa(`id de membro duplicado: ${membro.id}`);
@@ -46,6 +47,19 @@ export function validarOfertaDeEncaminhamento(value: unknown): RecusaDoEncaminha
       return recusa(`jogadorId duplicado: ${membro.jogadorId}`);
     }
     jogadorIds.add(membro.jogadorId);
+    if (ordens.has(membro.ordemDeEntrada)) {
+      return recusa(`ordemDeEntrada duplicada: ${membro.ordemDeEntrada}`);
+    }
+    ordens.add(membro.ordemDeEntrada);
+    if (membro.ordemDeEntrada < 1 || membro.ordemDeEntrada > 10000) {
+      return recusa(`ordemDeEntrada fora do intervalo: ${membro.ordemDeEntrada}`);
+    }
+    if (membro.presenca !== 'conectado') {
+      return recusa(`membro ${membro.jogadorId} deve estar conectado`);
+    }
+    if (membro.prontidao !== true) {
+      return recusa(`membro ${membro.jogadorId} deve estar pronto`);
+    }
   }
 
   return null;
@@ -114,5 +128,5 @@ function problemaNoMembro(value: unknown): string | null {
 }
 
 function ehStringNaoVazia(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
+  return typeof value === 'string' && value.trim().length > 0;
 }

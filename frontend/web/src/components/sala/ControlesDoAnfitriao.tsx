@@ -20,10 +20,12 @@ export function ControlesDoAnfitriao({
 }: Props) {
   if (!ehAnfitriao) return null
 
-  // O servidor revalida: 4 Membros (o Anfitrião incluso), todos conectados e prontos.
+  // O servidor revalida: 2 a 4 Membros (o Anfitrião incluso), todos conectados e prontos.
   const podeIniciar =
-    sala.membros.length === 4 && sala.membros.every((m) => m.presenca === 'conectado' && m.prontidao)
-  const motivoIniciar = podeIniciar ? undefined : 'Requer 4 Membros conectados e prontos'
+    sala.membros.length >= 2 &&
+    sala.membros.length <= 4 &&
+    sala.membros.every((m) => m.presenca === 'conectado' && m.prontidao)
+  const motivoIniciar = podeIniciar ? undefined : 'Requer 2 a 4 Membros conectados e prontos'
 
   const confirmarEncerramento = () => {
     if (window.confirm('Encerrar a Sala para todos os Membros?')) aoEncerrarSala()

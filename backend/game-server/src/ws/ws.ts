@@ -287,9 +287,9 @@ export function criarWebSocketServer(
           } satisfies ServerMessage));
 
           // Admissão concluída após upgrade: transição atômica dentro do
-          // callback garante que a partida só inicie com 4 sockets vivos
-          // (ST-14). Ordem: ADMISSAO_ACEITA (já enviada) → PARTIDA_INICIADA
-          // broadcast (se 4ª admissão) → ESTADO_DA_PARTIDA unicast →
+          // callback garante que a partida só inicie com N sockets vivos
+          // (ST-14, N=2..4). Ordem: ADMISSAO_ACEITA (já enviada) → PARTIDA_INICIADA
+          // broadcast (se N-ésima admissão) → ESTADO_DA_PARTIDA unicast →
           // anunciarTurnoAtual (TURNO_INICIADO). Snapshot e turno são unicast
           // ao socket admitido; PARTIDA_INICIADA é broadcast a todos da partida
           // e garantido mesmo se o snapshot falhar.

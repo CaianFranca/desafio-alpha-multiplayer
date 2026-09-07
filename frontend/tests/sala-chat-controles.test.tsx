@@ -275,11 +275,44 @@ describe('lobby - chat e controles do Anfitrião', () => {
 
   // --- Iniciar ---
 
-  it('Iniciar Partida desabilitado com apenas 3 Membros', async () => {
-    await montarLobbyComoAnfitriao([
+  it('Iniciar Partida habilitado com 3 Membros conectados e prontos', async () => {
+    const user = userEvent.setup()
+    const ws = await montarLobbyComoAnfitriao([
       criarEu(),
       criarMembro({ id: 'm2', jogadorId: 'j2', apelido: 'Beto', ordemDeEntrada: 1, prontidao: true }),
       criarMembro({ id: 'm3', jogadorId: 'j3', apelido: 'Carla', ordemDeEntrada: 2, prontidao: true }),
+    ])
+
+    const botao = screen.getByRole('button', { name: /iniciar partida/i })
+    expect(botao).toBeEnabled()
+    await user.click(botao)
+    expect(JSON.parse(ws.sentMessages[ws.sentMessages.length - 1] as string)).toEqual({ type: 'INICIAR_PARTIDA' })
+  })
+
+  it('Iniciar Partida habilitado com 2 Membros conectados e prontos', async () => {
+    const user = userEvent.setup()
+    const ws = await montarLobbyComoAnfitriao([
+      criarEu(),
+      criarMembro({ id: 'm2', jogadorId: 'j2', apelido: 'Beto', ordemDeEntrada: 1, prontidao: true }),
+    ])
+
+    const botao = screen.getByRole('button', { name: /iniciar partida/i })
+    expect(botao).toBeEnabled()
+    await user.click(botao)
+    expect(JSON.parse(ws.sentMessages[ws.sentMessages.length - 1] as string)).toEqual({ type: 'INICIAR_PARTIDA' })
+  })
+
+  it('Iniciar Partida desabilitado com apenas 1 Membro', async () => {
+    await montarLobbyComoAnfitriao([criarEu()])
+
+    expect(screen.getByRole('button', { name: /iniciar partida/i })).toBeDisabled()
+  })
+
+  it('Iniciar Partida desabilitado com 3 Membros mas um não pronto', async () => {
+    await montarLobbyComoAnfitriao([
+      criarEu(),
+      criarMembro({ id: 'm2', jogadorId: 'j2', apelido: 'Beto', ordemDeEntrada: 1, prontidao: true }),
+      criarMembro({ id: 'm3', jogadorId: 'j3', apelido: 'Carla', ordemDeEntrada: 2, prontidao: false }),
     ])
 
     expect(screen.getByRole('button', { name: /iniciar partida/i })).toBeDisabled()
@@ -291,6 +324,16 @@ describe('lobby - chat e controles do Anfitrião', () => {
       criarMembro({ id: 'm2', jogadorId: 'j2', apelido: 'Beto', ordemDeEntrada: 1, prontidao: true }),
       criarMembro({ id: 'm3', jogadorId: 'j3', apelido: 'Carla', ordemDeEntrada: 2, prontidao: true }),
       criarMembro({ id: 'm4', jogadorId: 'j4', apelido: 'Diogo', ordemDeEntrada: 3, prontidao: true, presenca: 'em_reconexao' }),
+    ])
+
+    expect(screen.getByRole('button', { name: /iniciar partida/i })).toBeDisabled()
+  })
+
+  it('Iniciar Partida desabilitado com 3 Membros mas um em reconexão', async () => {
+    await montarLobbyComoAnfitriao([
+      criarEu(),
+      criarMembro({ id: 'm2', jogadorId: 'j2', apelido: 'Beto', ordemDeEntrada: 1, prontidao: true }),
+      criarMembro({ id: 'm3', jogadorId: 'j3', apelido: 'Carla', ordemDeEntrada: 2, prontidao: true, presenca: 'em_reconexao' }),
     ])
 
     expect(screen.getByRole('button', { name: /iniciar partida/i })).toBeDisabled()
