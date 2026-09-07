@@ -331,8 +331,6 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
   });
 
   void salaId;
-  // compat: expõe gameWs para encerrar junto no SIGINT
-  (ws as unknown as { _gameWs?: WebSocket | null })._gameWs = gameWs;
   return ws;
 }
 
