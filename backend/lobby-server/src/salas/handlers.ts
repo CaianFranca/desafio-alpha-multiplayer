@@ -1230,6 +1230,7 @@ export class SalasHandlers {
     }
   }
 
+  // Órfã = chave ausente ou preparada com todos em_reconexao. Parcial libera só no teto 90s do game-server (#222).
   private async partidaDaSalaEstaOrfa(salaId: string): Promise<boolean> {
     try {
       const bruta = await this.repo.obterSalaBruta(salaId);

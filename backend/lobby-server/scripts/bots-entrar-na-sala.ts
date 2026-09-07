@@ -223,6 +223,7 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
     const headers: Record<string, string> = { Cookie: cookieHeader(cookies) };
     try {
       gameWs = new WebSocket(wsGameUrl, { headers } as ClientOptions);
+      (ws as unknown as { _gameWs?: WebSocket | null })._gameWs = gameWs;
     } catch (e) {
       log(prefix, `game WS erro ao criar ${wsGameUrl}: ${(e as Error).message}`);
       return;

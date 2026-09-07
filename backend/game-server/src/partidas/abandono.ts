@@ -52,6 +52,7 @@ async function verificarEAbandonarSeNecessario(redis: Redis, partidaId: string):
   const todosEmReconexao = partida.roster.every((m) => m.presenca === 'em_reconexao');
   // Abandono preparada: se todos em_reconexao → abandono imediato (10s já agendado),
   // senão se ainda não expirou 90s → reagenda restante, senão (idade >= 90s) abandona mesmo com 1-3 conectados parciais.
+  // Parcial <90s mantém SALA_ENCAMINHADA no lobby; teto é comportamento desejado (#222).
   if (!todosEmReconexao && idadeMs < abandonoSegundos * 1000) {
     const restante = abandonoSegundos * 1000 - idadeMs;
     agendarAbandono(partidaId, restante);
@@ -98,10 +99,10 @@ export async function rearmarAbandonosAposRestart(redis: Redis): Promise<void> {
   try {
     let cursor = '0';
     do {
-      const [next, keys] = await redis.scan(cursor, 'MATCH', 'partida:*', 'COUNT', 100);
+      const [next, keys] = await redis.scan(cursor, 'MATCH', 'game-server:partida:*', 'COUNT', 100);
       cursor = next;
       for (const key of keys) {
-        if (key.startsWith('partida:estado:')) continue;
+        if (key.startsWith('game-server:partida-estado:')) continue;
         const raw = await redis.get(key);
         if (raw === null) continue;
         try {
