@@ -23,9 +23,10 @@ interface PeaoVisualProps {
 }
 
 /**
- * Facade do peão (issue #297): slot com avatar 3D (Diretor, slot 0) renderiza
- * o `PeaoAvatar` (GLBs cacheados); os demais slots seguem no `PeaoPlaceholder`
- * de primitivas (issues #299-301) — sem baixar os GLBs. O placeholder também
+ * Facade do peão (issue #297): slot com avatar 3D (Diretor, slot 0 —
+ * Enfermeira, slot 1 — Janitor, slot 2) renderiza o `PeaoAvatar` (GLBs
+ * cacheados); apenas o slot 3 (Paciente, issue #299) segue no
+ * `PeaoPlaceholder` de primitivas — sem baixar os GLBs. O placeholder também
  * cobre a suspensão do carregamento do avatar (progressivo, sem flash de
  * privilégio para quem não tem os assets ainda).
  */
