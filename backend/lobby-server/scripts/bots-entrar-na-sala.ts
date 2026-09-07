@@ -198,7 +198,81 @@ async function obterCredenciaisBot(
   throw new Error(`bot-${indice}: falha ao obter credenciais para ${emailBase} (login/register falharam)`);
 }
 
-function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: string, apelido: string, indice: number): WebSocket {
+function entrarNaPartida(
+  baseUrl: string,
+  serverId: string,
+  partidaId: string,
+  accessToken: string,
+  apelido: string,
+  indice: number,
+  sockets: WebSocket[],
+  prefix: string,
+): WebSocket {
+  const wsGameUrl =
+    baseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') +
+    `/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}&token=${encodeURIComponent(accessToken)}`;
+  log(prefix, `entrando na partida → ${wsGameUrl}`);
+  const ws = new WebSocket(wsGameUrl);
+  sockets.push(ws);
+
+  ws.on('open', () => {
+    log(prefix, `WS de partida conectado (aguardando admissão)`);
+  });
+
+  ws.on('message', (data) => {
+    let msg: unknown;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    const t = (msg as { type?: string }).type ?? '?';
+    if (t === 'ADMISSAO_ACEITA') {
+      const a = msg as { jogadorId: string; apelido: string; partidaId: string; estado: string };
+      log(prefix, `ADMISSAO_ACEITA jogador=${a.apelido} partida=${a.partidaId} estado=${a.estado} — dentro da partida`);
+      return;
+    }
+    if (t === 'PARTIDA_INICIADA') {
+      log(prefix, `PARTIDA_INICIADA ${JSON.stringify(msg)}`);
+      return;
+    }
+    if (t === 'ESTADO_DA_PARTIDA') {
+      log(prefix, `ESTADO_DA_PARTIDA recebido (snapshot)`);
+      return;
+    }
+    if (t === 'TURNO_INICIADO') {
+      log(prefix, `TURNO_INICIADO ${JSON.stringify(msg).slice(0, 200)}`);
+      return;
+    }
+    if (t === 'ADMISSAO_REJEITADA' || t === 'ERRO_DO_TABULEIRO') {
+      const e = msg as { codigo?: string; motivo?: string; mensagem?: string };
+      log(prefix, `${t} ${e.codigo ?? ''} ${e.motivo ?? e.mensagem ?? ''}`.trim());
+      return;
+    }
+    log(prefix, `partida evento ${t} ${JSON.stringify(msg).slice(0, 200)}`);
+  });
+
+  ws.on('error', (err) => {
+    log(prefix, `WS partida error: ${err.message}`);
+  });
+
+  ws.on('close', (code, reason) => {
+    log(prefix, `WS partida close code=${code} reason=${reason.toString().slice(0, 100)}`);
+  });
+
+  return ws;
+}
+
+function criarWs(
+  baseUrl: string,
+  codigo: string,
+  cookies: Cookies,
+  jogadorId: string,
+  apelido: string,
+  indice: number,
+  sockets: WebSocket[],
+): WebSocket {
+  const accessToken = cookies.access_token ?? '';
   const wsUrl = baseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') + '/ws/lobby';
   const headers: Record<string, string> = { Cookie: cookieHeader(cookies) };
   const wsOptions: ClientOptions = { headers };
@@ -211,6 +285,7 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
   let prontoEnviado = false;
   let prontoAgendado = false;
   let tentativasEntrar = 0;
+  let partidaConectada = false;
   const MAX_TENTATIVAS_ENTRAR = 1;
 
   function enviarEntrar(): void {
@@ -272,7 +347,18 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
         const p = msg as { membroId: string; prontidao: boolean };
         if (p.membroId === membroId) log(prefix, `PRONTIDAO_ATUALIZADA pronto=${p.prontidao}`);
       }
-      if (t === 'PARTIDA_PREPARANDO' || t === 'PARTIDA_DISPONIVEL' || t === 'PARTIDA_RECUSADA' || t === 'PARTIDA_FALHOU') {
+      if (t === 'PARTIDA_PREPARANDO') {
+        log(prefix, `PARTIDA_PREPARANDO`);
+      } else if (t === 'PARTIDA_DISPONIVEL') {
+        const d = msg as { partidaId: string; serverId: string };
+        log(prefix, `PARTIDA_DISPONIVEL partida=${d.partidaId} server=${d.serverId}`);
+        if (!partidaConectada && accessToken) {
+          partidaConectada = true;
+          entrarNaPartida(baseUrl, d.serverId, d.partidaId, accessToken, apelido, indice, sockets, prefix);
+        } else if (!accessToken) {
+          log(prefix, `sem access_token — não é possível entrar na partida`);
+        }
+      } else if (t === 'PARTIDA_RECUSADA' || t === 'PARTIDA_FALHOU') {
         log(prefix, t, JSON.stringify(msg));
       }
       return;
@@ -327,12 +413,12 @@ async function main(): Promise<void> {
   const sockets: WebSocket[] = [];
   for (let i = 0; i < bots.length; i++) {
     const b = bots[i]!;
-    const ws = criarWs(baseUrl, codigo, b.cookies, b.jogador.id, b.jogador.apelido, i + 1);
+    const ws = criarWs(baseUrl, codigo, b.cookies, b.jogador.id, b.jogador.apelido, i + 1, sockets);
     sockets.push(ws);
     await new Promise((r) => setTimeout(r, 150));
   }
 
-  log('main', '3 bots conectados, prontidão enviada. Permanecendo conectados — Ctrl+C para sair. (sem keep-alive ping/pong; /ws/lobby é convenção — servidor aceita qualquer path via new WebSocketServer({ server }) em src/ws/ws.ts:70)');
+  log('main', '3 bots conectados ao lobby, prontidão enviada. Quando o anfitrião iniciar a partida, cada bot conecta no game-server via /ws/game/<serverId>. Permanecendo conectados — Ctrl+C para sair.');
 
   const encerrar = () => {
     log('main', 'encerrando bots...');
