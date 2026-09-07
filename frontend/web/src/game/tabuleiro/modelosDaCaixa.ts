@@ -58,6 +58,6 @@ export const AJUSTES_DOS_MODELOS_DA_CAIXA: Record<
   NomeDoModeloDaCaixa,
   AjusteDoModeloDaCaixa
 > = {
-  caixa: { escala: 1, rotacaoY: 0 },
-  cesta: { escala: 1, rotacaoY: 0 },
+  caixa: { escala: 4, rotacaoY: 2 },
+  cesta: { escala: 2, rotacaoY: 1.5 },
 }

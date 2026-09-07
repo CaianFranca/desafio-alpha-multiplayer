@@ -132,6 +132,20 @@ function ModeloNormalizado({
   const { objeto, escala, deslocamento } = useMemo(() => {
     // Clona para não mutar a cena cacheada pelo useLoader.
     const objeto = gltf.scene.clone(true)
+    // Cor original do modelo prevalece: os materiais ignoram o tone mapping
+    // ACES da cena (mesmo precedente do topo em `PecaPlaceholder`: fiel à
+    // textura, sem o avermelhado do mapeamento de tons). Flag idempotente
+    // nos materiais compartilhados do cache — só estes modelos os usam.
+    objeto.traverse((filho) => {
+      if (filho instanceof THREE.Mesh) {
+        const materiais = Array.isArray(filho.material)
+          ? filho.material
+          : [filho.material]
+        for (const material of materiais) {
+          material.toneMapped = false
+        }
+      }
+    })
     const caixa = new THREE.Box3().setFromObject(objeto)
     const tamanho = caixa.getSize(new THREE.Vector3())
     const centro = caixa.getCenter(new THREE.Vector3())

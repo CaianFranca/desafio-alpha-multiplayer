@@ -76,6 +76,24 @@ describe('visuais das peças', () => {
     expect(new Set(caminhos).size).toBe(TODOS_OS_TIPOS.length)
   })
 
+  it('todos os tipos emitem luz própria: emissiveMap .jpg próprio por tipo', () => {
+    const emissivos = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).emissiveMap)
+    for (const tipo of TODOS_OS_TIPOS) {
+      const par = texturaDaPeca(tipo)
+      expect(par.emissiveMap).toContain('assets/textures/')
+      expect(par.emissiveMap?.endsWith('.jpg')).toBe(true)
+      expect(par.emissiveMap).not.toBe(par.map)
+      expect(par.emissiveMap).not.toBe(par.normalMap)
+    }
+    // 10 emissivos distintos, sem colisão entre tipos nem com map/normal.
+    expect(new Set(emissivos).size).toBe(TODOS_OS_TIPOS.length)
+    const maps = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).map)
+    const normals = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).normalMap)
+    expect(new Set([...maps, ...normals, ...emissivos]).size).toBe(
+      TODOS_OS_TIPOS.length * 3,
+    )
+  })
+
   it('motivo gira com a orientação (4 ângulos distintos, 0 na origem)', () => {
     expect(rotacaoDoMotivo(0)).toBe(0)
     const angulos = [0, 90, 180, 270].map(
