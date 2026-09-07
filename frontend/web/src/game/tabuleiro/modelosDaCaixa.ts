@@ -66,8 +66,41 @@ export const AJUSTES_DOS_MODELOS_DA_CAIXA: Record<
   NomeDoModeloDaCaixa,
   AjusteDoModeloDaCaixa
 > = {
-  // Tamanhos finais aprovados pelo PO via screenshot (prevalecem sobre o
-  // "tamanho inalterado" da issue #274): caixa imponente, cesta contida.
+  // TAMANHOS OBRIGATÓRIOS — aprovados pelo PO via screenshot para coerência
+  // em tela (caixa imponente, cesta contida). Não reduzir para caber na
+  // pegada do contrato: o excedente é intencional e prevalece sobre o
+  // "tamanho inalterado" da issue #274. Alterar estes números quebra a
+  // composição visual da mesa.
   caixa: { escala: 4, rotacaoY: 2 },
   cesta: { escala: 2, rotacaoY: 1.5 },
+}
+
+/**
+ * Escala efetiva pós-ajuste (tamanho obrigatório do PO).
+ *
+ * Aplica o multiplicador de `AJUSTES_DOS_MODELOS_DA_CAIXA` sobre a escala de
+ * encaixe (`Math.min` da pegada) SEM clamp: o resultado pode exceder a
+ * pegada `largura × profundidade (× alturaMaxima)` — isso é intencional.
+ * A caixa imponente (×4) e a cesta contida (×2) foram afinadas por screenshot
+ * para coerência em tela e precisam sair exatamente nesses tamanhos.
+ *
+ * Pura (sem three.js/DOM): `tamanho` é a dimensão do `Box3` do clone antes
+ * da escala; a rotação Y (`rotacaoY`) afeta só a apresentação, não a escala.
+ */
+export function escalaEfetivaDoModelo(
+  largura: number,
+  profundidade: number,
+  alturaMaxima: number | undefined,
+  tamanho: { readonly x: number; readonly y: number; readonly z: number },
+  ajuste: AjusteDoModeloDaCaixa,
+): number {
+  const base = Math.min(
+    largura / (tamanho.x || 1),
+    profundidade / (tamanho.z || 1),
+    alturaMaxima === undefined
+      ? Number.POSITIVE_INFINITY
+      : alturaMaxima / (tamanho.y || 1),
+  )
+  // Sem clamp — o tamanho obrigatório do PO sai exato (ver doc acima).
+  return base * ajuste.escala
 }

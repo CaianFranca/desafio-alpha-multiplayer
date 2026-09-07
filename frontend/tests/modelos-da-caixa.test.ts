@@ -25,6 +25,7 @@ import {
   MODELOS_DA_CAIXA,
   NOMES_DOS_MODELOS_DA_CAIXA,
   TEXTURA_OBSCURO_DA_CESTA,
+  escalaEfetivaDoModelo,
   modeloDaCaixa,
 } from '../web/src/game/tabuleiro/modelosDaCaixa'
 
@@ -51,8 +52,11 @@ describe('modelos 3D da zona da Caixa', () => {
   })
 
   it('ajuste fino parametrizado por modelo (ponto do feedback humano)', () => {
-    // Os valores são afinados por screenshot no jogo — o teste guarda a
-    // forma (escala positiva finita, giro finito), nunca os números.
+    // TAMANHOS OBRIGATÓRIOS para coerência em tela (PO via screenshot):
+    // caixa ×4 imponente, cesta ×2 contida. Trava os números exatos —
+    // alterar quebra a composição visual da mesa.
+    expect(AJUSTES_DOS_MODELOS_DA_CAIXA.caixa.escala).toBe(4)
+    expect(AJUSTES_DOS_MODELOS_DA_CAIXA.cesta.escala).toBe(2)
     for (const nome of NOMES_DOS_MODELOS_DA_CAIXA) {
       const ajuste = AJUSTES_DOS_MODELOS_DA_CAIXA[nome]
       expect(ajuste.escala).toBeGreaterThan(0)
@@ -103,5 +107,56 @@ describe('modelos 3D da zona da Caixa', () => {
         )
       }
     }
+  })
+
+  it('escala efetiva aplica o tamanho obrigatório sem clamp (coerência em tela)', () => {
+    // O multiplicador do PO sai exato sobre a escala de encaixe — sem clamp.
+    // Cubo unitário na pegada da Caixa: base = min(2.4, 1.8, 0.7) = 0.7.
+    const escalaCaixa = escalaEfetivaDoModelo(
+      CAIXA_LARGURA,
+      CAIXA_PROFUNDIDADE,
+      CAIXA_ALTURA,
+      { x: 1, y: 1, z: 1 },
+      AJUSTES_DOS_MODELOS_DA_CAIXA.caixa,
+    )
+    expect(escalaCaixa).toBeCloseTo(
+      4 * Math.min(CAIXA_LARGURA, CAIXA_PROFUNDIDADE, CAIXA_ALTURA),
+    )
+    // Cesta sem teto de altura: base = min(2.0, 2.0) = 2.0, ×2 = 4.0.
+    const escalaCesta = escalaEfetivaDoModelo(
+      BANDEJA_LARGURA,
+      BANDEJA_PROFUNDIDADE,
+      undefined,
+      { x: 1, y: 1, z: 1 },
+      AJUSTES_DOS_MODELOS_DA_CAIXA.cesta,
+    )
+    expect(escalaCesta).toBeCloseTo(
+      2 * Math.min(BANDEJA_LARGURA, BANDEJA_PROFUNDIDADE),
+    )
+  })
+
+  it('escala efetiva preserva a proporção do encaixe (multiplicador puro)', () => {
+    // Sem multiplicador e sem giro, a escala de encaixe sai intacta; o
+    // mesmo vale para um multiplicador fracionário.
+    const intacta = escalaEfetivaDoModelo(
+      CAIXA_LARGURA,
+      CAIXA_PROFUNDIDADE,
+      CAIXA_ALTURA,
+      { x: 1, y: 1, z: 1 },
+      { escala: 1, rotacaoY: 0 },
+    )
+    expect(intacta).toBeCloseTo(
+      Math.min(CAIXA_LARGURA, CAIXA_PROFUNDIDADE, CAIXA_ALTURA),
+    )
+    const fracionaria = escalaEfetivaDoModelo(
+      CAIXA_LARGURA,
+      CAIXA_PROFUNDIDADE,
+      CAIXA_ALTURA,
+      { x: 1, y: 1, z: 1 },
+      { escala: 0.5, rotacaoY: 0 },
+    )
+    expect(fracionaria).toBeCloseTo(
+      0.5 * Math.min(CAIXA_LARGURA, CAIXA_PROFUNDIDADE, CAIXA_ALTURA),
+    )
   })
 })

@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react'
+import { Suspense, useEffect, useMemo } from 'react'
 import {
   BORDA_OFFSET,
   BORDA_Y,
@@ -25,6 +25,7 @@ import type {
 } from './contrato'
 import { PeaoPlaceholder } from './PeaoPlaceholder'
 import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
+import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { handlersDeCursor } from './cursor'
 
 interface CelulaProps {
@@ -110,6 +111,9 @@ function PlanoTexturizado({
     copia.needsUpdate = true
     return copia
   }, [base, celula])
+  // B1: descarta o clone no unmount/troca (49 células por mount) — o cache
+  // do `useLoader` segue intacto.
+  useEffect(() => () => mapa.dispose(), [mapa])
   return (
     <mesh
       position={[0, CELULA_Y_BASE, 0]}
@@ -131,29 +135,36 @@ function PlanoTexturizado({
 /**
  * Fundo da célula com `Suspense` interno (padrão do `PecaPlaceholder`):
  * enquanto o `obscuro` carrega, o plano chapado atual — a grade nunca some.
+ * O limite de erro cobre a falha (404 derrubaria o Canvas inteiro — B4):
+ * o mesmo plano chapado vira a face do erro.
  */
 function PlanoDeFundoDaCelula(props: PlanoDeFundoProps) {
   const { cor, opacidade, onClick, cursorHandlers } = props
-  return (
-    <Suspense
-      fallback={
-        <mesh
-          position={[0, CELULA_Y_BASE, 0]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          onClick={onClick}
-          {...cursorHandlers}
-        >
-          <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
-          <meshStandardMaterial
-            color={cor}
-            transparent
-            opacity={opacidade}
-          />
-        </mesh>
-      }
+  const planoChapado = (
+    <mesh
+      position={[0, CELULA_Y_BASE, 0]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      onClick={onClick}
+      {...cursorHandlers}
     >
-      <PlanoTexturizado {...props} />
-    </Suspense>
+      <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
+      <meshStandardMaterial
+        color={cor}
+        transparent
+        opacity={opacidade}
+      />
+    </mesh>
+  )
+  return (
+    <LimiteDeErroDoModelo
+      key={TEXTURA_OBSCURO_DA_GRADE}
+      resetKey={TEXTURA_OBSCURO_DA_GRADE}
+      fallback={planoChapado}
+    >
+      <Suspense fallback={planoChapado}>
+        <PlanoTexturizado {...props} />
+      </Suspense>
+    </LimiteDeErroDoModelo>
   )
 }
 

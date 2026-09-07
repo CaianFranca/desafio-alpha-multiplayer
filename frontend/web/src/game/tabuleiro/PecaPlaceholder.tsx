@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react'
+import { Suspense, useEffect, useMemo } from 'react'
 import { useLoader, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { TAMANHO_CELULA } from './contrato'
@@ -9,6 +9,7 @@ import {
   propsDoMaterialDeContorno,
 } from './contorno'
 import { handlersDeCursor } from './cursor'
+import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { rotacaoDoMotivo, texturaDaPeca } from './texturasDasPecas'
 
 interface PecaPlaceholderProps {
@@ -169,6 +170,16 @@ function CorpoTexturizado({
     emissao.needsUpdate = true
     return { mapaTopo: mapa, normalTopo: normal, emissaoTopo: emissao }
   }, [mapCarregado, normalCarregado, emissaoCarregada, orientacao])
+  // B1: descarta os 3 clones no unmount/troca (~90 peças por mount) — o
+  // cache do `useLoader` segue intacto.
+  useEffect(
+    () => () => {
+      mapaTopo.dispose()
+      normalTopo.dispose()
+      emissaoTopo.dispose()
+    },
+    [mapaTopo, normalTopo, emissaoTopo],
+  )
 
   const cursorHandlers = handlersDeCursor(cursor)
   const handleClick = usarClique(onClick)
@@ -249,12 +260,22 @@ export function PecaPlaceholder({
     cursor,
     onClick,
   }
+  const fallback = <CorpoFallback {...corpo} />
 
   return (
     <group position={position}>
-      <Suspense fallback={<CorpoFallback {...corpo} />}>
-        <CorpoTexturizado {...corpo} />
-      </Suspense>
+      {/* B4: falha da textura (404) cai no fallback chapado em vez de
+          derrubar o Canvas inteiro; o reset segue a troca de tipo (as URLs
+          derivam do tipo). */}
+      <LimiteDeErroDoModelo
+        key={tipo}
+        resetKey={tipo}
+        fallback={fallback}
+      >
+        <Suspense fallback={fallback}>
+          <CorpoTexturizado {...corpo} />
+        </Suspense>
+      </LimiteDeErroDoModelo>
     </group>
   )
 }
