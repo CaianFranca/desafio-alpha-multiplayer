@@ -40,11 +40,13 @@ import {
   criarEstadoInicialDoCliente,
   reduzirEvento,
   estadoDeExibicaoDoModelo,
+  peoesEmBaixaIluminacaoDe,
 } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS } from '../game/tabuleiro/contrato'
+import type { PeaoId } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
 import type {
@@ -403,6 +405,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     return out
   }, [sanidadePorPeao])
 
+  // ── Peões em Baixa Iluminação (issue #297): avatar do Diretor apagado ──
+  // Projeção de exibição do estado do Vulto por jogador (`emBaixaIluminacao`,
+  // per-player — não por célula); deriva do mesmo `sanidadePorPeao` acima.
+  const emBaixaIluminacaoPorPeaoId: ReadonlySet<PeaoId> = useMemo(
+    () => peoesEmBaixaIluminacaoDe(sanidadePorPeao),
+    [sanidadePorPeao],
+  )
+
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
@@ -551,6 +561,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         limpezaTrigger={limpezaTrigger}
         encaixeTrigger={encaixeTrigger}
         onFimEncaixe={onFimEncaixe}
+        emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*
