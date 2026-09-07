@@ -1,4 +1,4 @@
-import { Component, Suspense, useMemo, type ReactNode } from 'react'
+import { Suspense, useLayoutEffect, useMemo } from 'react'
 import { useLoader } from '@react-three/fiber'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
@@ -27,9 +27,11 @@ import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 import {
   AJUSTES_DOS_MODELOS_DA_CAIXA,
   TEXTURA_OBSCURO_DA_CESTA,
+  escalaEfetivaDoModelo,
   modeloDaCaixa,
   type AjusteDoModeloDaCaixa,
 } from './modelosDaCaixa'
+import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 
 interface CaixaProps {
   iniciais: readonly PecaDaMesa[]
@@ -55,11 +57,11 @@ interface CaixaProps {
 function BlocoDaCaixaFallback() {
   return (
     <>
-      <mesh position={[0, CAIXA_ALTURA / 2, 0]}>
+      <mesh position={[0, CAIXA_ALTURA / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[CAIXA_LARGURA, CAIXA_ALTURA, CAIXA_PROFUNDIDADE]} />
         <meshStandardMaterial color="#241a12" />
       </mesh>
-      <mesh position={[0, CAIXA_ALTURA + 0.02, 0]}>
+      <mesh position={[0, CAIXA_ALTURA + 0.02, 0]} castShadow receiveShadow>
         <boxGeometry args={[CAIXA_LARGURA * 0.92, 0.04, CAIXA_PROFUNDIDADE * 0.92]} />
         <meshStandardMaterial color="#3b2c1c" />
       </mesh>
@@ -74,32 +76,15 @@ function BlocoDaCaixaFallback() {
  */
 function PlanoDaBandejaFallback() {
   return (
-    <mesh position={[0, -0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh
+      position={[0, -0.005, 0]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      receiveShadow
+    >
       <planeGeometry args={[BANDEJA_LARGURA, BANDEJA_PROFUNDIDADE]} />
       <meshStandardMaterial color="#1f1a18" transparent opacity={0.9} />
     </mesh>
   )
-}
-
-/**
- * Limite de erro local dos modelos (issue #274): se o GLB falhar
- * (rede/parse), renderiza as primitivas atuais em vez de quebrar a cena.
- * O `Suspense` acima cobre o carregamento; este cobre a falha.
- */
-class LimiteDeErroDoModelo extends Component<{
-  fallback: ReactNode
-  children: ReactNode
-}> {
-  state = { falhou: false }
-
-  static getDerivedStateFromError(): { falhou: boolean } {
-    return { falhou: true }
-  }
-
-  render() {
-    if (this.state.falhou) return this.props.fallback
-    return this.props.children
-  }
 }
 
 interface ModeloNormalizadoProps {
@@ -118,14 +103,58 @@ interface ModeloNormalizadoProps {
 }
 
 /**
+ * Prepara os meshes do clone para mutação segura (B2/B3/B6 da revisão da
+ * PR #317): clona cada material compartilhado do cache do `useLoader`
+ * antes de mutar (sem tocar no singleton), desliga o tone mapping e o
+ * raycast decorativo. Idempotente via `userData` — o efeito do pai e o do
+ * `AlbedoSobreModelo` podem chamar em qualquer ordem sem clonar duas vezes.
+ * Retorna os materiais do clone (para o `dispose` no cleanup do efeito).
+ *
+ * Auto-sombra: cada mesh do clone projeta e recebe sombra (`castShadow` +
+ * `receiveShadow`) — as paredes/tampo da caixa e a borda da cesta sombreiam
+ * o próprio interior, escurecendo-o de forma coerente com o sanatório
+ * (o interior claro não fazia sentido com a proposta). O mapa de sombras é
+ * ligado no `Canvas` (`AmbienteDeJogo`) e a luz principal projeta sombra
+ * (`Iluminacao` em `AmbienteCena`).
+ */
+function prepararMeshesDoClone(objeto: THREE.Object3D): THREE.Material[] {
+  const materiaisDoClone: THREE.Material[] = []
+  objeto.traverse((filho) => {
+    if (filho instanceof THREE.Mesh) {
+      const atual = filho.material
+      const lista = (Array.isArray(atual) ? atual : [atual]).map((m) => {
+        if (m.userData.__cloneDaCaixa === true) return m
+        const clonado = m.clone()
+        clonado.toneMapped = false
+        clonado.userData.__cloneDaCaixa = true
+        return clonado
+      })
+      filho.material = (
+        Array.isArray(atual) ? lista : lista[0]
+      ) as THREE.Mesh['material']
+      // Decorativo nunca intercepta clique (B6): a cesta/caixa não rouba o
+      // `onClick` de puxar da Peça Corrente (irmã, fora do `Suspense`).
+      filho.raycast = () => null
+      // Auto-sombra (caixa e cesta): o mesh projeta e recebe — o interior
+      // da caixa/cesta é sombreado pelas próprias paredes/tampo.
+      filho.castShadow = true
+      filho.receiveShadow = true
+      materiaisDoClone.push(...lista)
+    }
+  })
+  return materiaisDoClone
+}
+
+/**
  * GLB normalizado na pegada do contrato (issue #274): bounding box →
- * escala uniforme para caber em `largura × profundidade` (× `alturaMaxima`
+ * escala uniforme de encaixe em `largura × profundidade` (× `alturaMaxima`
  * quando houver), centralizado em XZ e com a base em y = 0 do grupo.
- * Tamanho e proporção inalterados: sem tocar no contrato, sem overlay.
+ * Sem tocar no contrato, sem overlay.
  *
  * O `ajuste` (ponto único em `AJUSTES_DOS_MODELOS_DA_CAIXA`) aplica o
- * refinamento humano pós-screenshot: multiplicador de escala + rotação Y
- * pós-normalização (só apresentação, não a pegada calculada).
+ * TAMANHO OBRIGATÓRIO pós-screenshot (caixa ×4 imponente, cesta ×2 contida):
+ * o multiplicador sai exato, sem clamp — o excedente sobre a pegada é
+ * intencional para coerência em tela (decisão do PO). Não reduzir.
  */
 function ModeloNormalizado({
   largura,
@@ -136,33 +165,22 @@ function ModeloNormalizado({
   mapUrl,
 }: ModeloNormalizadoProps) {
   const gltf = useLoader(GLTFLoader, url)
+  // Puro no memo: clona a hierarquia, mede o `Box3` e deriva escala
+  // (tamanho obrigatório do PO, sem clamp) + deslocamento — nenhuma mutação de
+  // material/cena compartilhada na fase de render.
   const { objeto, escala, deslocamento } = useMemo(() => {
     // Clona para não mutar a cena cacheada pelo useLoader.
     const objeto = gltf.scene.clone(true)
-    // Cor original do modelo prevalece: os materiais ignoram o tone mapping
-    // ACES da cena (mesmo precedente do topo em `PecaPlaceholder`: fiel à
-    // textura, sem o avermelhado do mapeamento de tons). Flag idempotente
-    // nos materiais compartilhados do cache — só estes modelos os usam.
-    objeto.traverse((filho) => {
-      if (filho instanceof THREE.Mesh) {
-        const materiais = Array.isArray(filho.material)
-          ? filho.material
-          : [filho.material]
-        for (const material of materiais) {
-          material.toneMapped = false
-        }
-      }
-    })
     const caixa = new THREE.Box3().setFromObject(objeto)
     const tamanho = caixa.getSize(new THREE.Vector3())
     const centro = caixa.getCenter(new THREE.Vector3())
-    const escalaX = largura / (tamanho.x || 1)
-    const escalaZ = profundidade / (tamanho.z || 1)
-    const escalaY =
-      alturaMaxima === undefined
-        ? Number.POSITIVE_INFINITY
-        : alturaMaxima / (tamanho.y || 1)
-    const escala = Math.min(escalaX, escalaZ, escalaY) * ajuste.escala
+    const escala = escalaEfetivaDoModelo(
+      largura,
+      profundidade,
+      alturaMaxima,
+      tamanho,
+      ajuste,
+    )
     const deslocamento: [number, number, number] = [
       -centro.x,
       -caixa.min.y,
@@ -170,6 +188,19 @@ function ModeloNormalizado({
     ]
     return { objeto, escala, deslocamento }
   }, [gltf, largura, profundidade, alturaMaxima, ajuste])
+
+  // Mutação do clone fora da fase de render (B2/B3/B6): clona os materiais
+  // compartilhados do cache antes de mutar e desliga o raycast decorativo.
+  // `useLayoutEffect` roda antes do paint: o primeiro frame já sai correto.
+  useLayoutEffect(() => {
+    const materiaisDoClone = prepararMeshesDoClone(objeto)
+    return () => {
+      // B1: descarta os materiais clonados no unmount/troca. As geometrias
+      // seguem compartilhadas com o cache do `useLoader` — sem `dispose`
+      // (não tocar no cache).
+      for (const material of materiaisDoClone) material.dispose()
+    }
+  }, [objeto])
 
   return (
     <group scale={[escala, escala, escala]} rotation={[0, ajuste.rotacaoY, 0]}>
@@ -193,31 +224,29 @@ function AlbedoSobreModelo({
   mapUrl: string
 }) {
   const mapaProprio = useLoader(THREE.TextureLoader, mapUrl)
-  // Aplica no clone durante o render (mesma fase do clone no pai):
-  // idempotente e síncrono, então o primeiro frame já sai com o albedo.
-  // O memo retorna a textura (regra de hooks) e o `void` abaixo marca o
-  // uso: o valor real já foi aplicado nos materiais do clone.
+  // Clone sRGB (precedente da Mesa): não muta o cache do useLoader. Criar e
+  // configurar o objeto próprio no memo é puro (sem cena compartilhada).
   const albedo = useMemo((): THREE.Texture => {
-    // Clone sRGB (precedente da Mesa): não muta o cache do useLoader.
     const albedo = mapaProprio.clone()
     albedo.colorSpace = THREE.SRGBColorSpace
     albedo.needsUpdate = true
-    objeto.traverse((filho) => {
-      if (filho instanceof THREE.Mesh) {
-        const materiais = Array.isArray(filho.material)
-          ? filho.material
-          : [filho.material]
-        for (const material of materiais) {
-          if (material instanceof THREE.MeshStandardMaterial) {
-            material.map = albedo
-            material.needsUpdate = true
-          }
-        }
-      }
-    })
     return albedo
-  }, [objeto, mapaProprio])
-  void albedo
+  }, [mapaProprio])
+  // Mutação do clone fora da fase de render (B3): aplica o albedo nos
+  // materiais já clonados pelo efeito do pai (preparo idempotente — a ordem
+  // entre os dois efeitos não importa). O cleanup descarta o clone (B1).
+  useLayoutEffect(() => {
+    const materiaisDoClone = prepararMeshesDoClone(objeto)
+    for (const material of materiaisDoClone) {
+      if (material instanceof THREE.MeshStandardMaterial) {
+        material.map = albedo
+        material.needsUpdate = true
+      }
+    }
+    return () => {
+      albedo.dispose()
+    }
+  }, [objeto, albedo])
   return null
 }
 
@@ -289,7 +318,11 @@ export function Caixa({
       {/* Caixa fechada e opaca: corpo do GLB normalizado na pegada (tampo do
           próprio modelo, sem overlay); primitivas como fallback/erro. */}
       <group position={[POSICAO_CAIXA[0], POSICAO_CAIXA[1], POSICAO_CAIXA[2]]}>
-        <LimiteDeErroDoModelo fallback={<BlocoDaCaixaFallback />}>
+        <LimiteDeErroDoModelo
+          key={modeloDaCaixa('caixa')}
+          resetKey={modeloDaCaixa('caixa')}
+          fallback={<BlocoDaCaixaFallback />}
+        >
           <Suspense fallback={<BlocoDaCaixaFallback />}>
             <ModeloDaCaixa />
           </Suspense>
@@ -301,7 +334,11 @@ export function Caixa({
           A corrente vive fora do Suspense: sobre a cesta quando há corrente,
           clicável para puxar com o destaque do placeholder. */}
       <group position={[POSICAO_BANDEJA[0], POSICAO_BANDEJA[1], POSICAO_BANDEJA[2]]}>
-        <LimiteDeErroDoModelo fallback={<PlanoDaBandejaFallback />}>
+        <LimiteDeErroDoModelo
+          key={modeloDaCaixa('cesta')}
+          resetKey={modeloDaCaixa('cesta')}
+          fallback={<PlanoDaBandejaFallback />}
+        >
           <Suspense fallback={<PlanoDaBandejaFallback />}>
             <ModeloDaCesta />
           </Suspense>

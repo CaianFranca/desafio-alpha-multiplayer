@@ -246,6 +246,8 @@ export function AmbienteDeJogo({
       <Canvas
         camera={{ fov: FOV_CAMERA, position: cameraFixa.posicao }}
         frameloop="demand"
+        // Sombras ligadas (auto-sombra da caixa/cesta + sombra na Mesa).
+        shadows
         // Alpha desativado: o canvas é opaco e o vazio vem do clear do fundo.
         // Com alpha ativo, o alpha da textura vaza para o compositor (issue #75).
         gl={{ alpha: false }}
