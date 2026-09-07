@@ -62,10 +62,11 @@
  */
 
 import {
-  CORES_DOS_PEOES,
   abreJanelaDeManipulacao,
   chaveCelula,
+  coresParaN,
   criarIniciaisDaMesa,
+  quantidadeValidaDeJogadores,
   type CorDoPeao,
   type EstadoExibicaoTabuleiro,
   type Orientacao,
@@ -204,10 +205,10 @@ export interface EstadoDoTabuleiroNoCliente {
     */
   readonly geradoresLigados: readonly string[]
   /**
-    * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
-    * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
-    * engine). O snapshot substitui a baseline (reconexão reconcilia).
-    */
+     * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
+     * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
+     * engine). O snapshot substitui a baseline (reconexão reconcilia).
+     */
   readonly cartaoDeAcessoObtido: boolean
   /**
    * Fila de chegada dos peões por célula (issue #298): a ordem em que os peões
@@ -218,19 +219,23 @@ export interface EstadoDoTabuleiroNoCliente {
    * desempate visual em recarregamentos.
    */
   readonly ordemDeChegadaPorChave: Readonly<Record<string, readonly PeaoId[]>>
+  /** Quantidade de jogadores N=2..4 derivada do roster (snapshot); null antes do snapshot. */
+  readonly quantidadeDeJogadores: number | null
 }
 
-/** Estado inicial determinístico do cliente (deltas a partir do zero). */
-export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
+/** Estado inicial determinístico do cliente (deltas a partir do zero). Suporta N=2..4; fallback 4. */
+export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): EstadoDoTabuleiroNoCliente {
+  const n = quantidadeValidaDeJogadores(quantidadeDeJogadores)
+  const cores = coresParaN(n)
   return {
-    iniciais: criarIniciaisDaMesa(),
+    iniciais: criarIniciaisDaMesa(n),
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
     // Seed dos peões (issue #91): ids determinísticos por cor, espelhando o
-    // engine (`peaoId: peao-${cor}`, `pecaId: null` na origem); os 4 nascem
+    // engine (`peaoId: peao-${cor}`, `pecaId: null` na origem); N peões nascem
     // sobre a Mesa (celula: null) e o servidor confirma cada movimento.
-    peoes: CORES_DOS_PEOES.map((cor) => ({
+    peoes: cores.map((cor) => ({
       peaoId: `peao-${cor}`,
       cor,
       celula: null,
@@ -254,6 +259,7 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     cartaoDeAcessoObtido: false,
     // Sem fila de chegada até o primeiro posicionamento/movimento (issue #298).
     ordemDeChegadaPorChave: {},
+    quantidadeDeJogadores: n,
   }
 }
 
