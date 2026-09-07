@@ -176,3 +176,33 @@ test('A3: criadaEm inválida (NaN) nunca agenda nem abandona', async () => {
     cancelarAbandono(PARTIDA_ID);
   }
 });
+
+test('A4: DEL falho não chuta sockets (só após cancelarPartida=true)', async () => {
+  const store = new Map<string, string>([
+    [CHAVE_PARTIDA, partidaPreparadaJson({ criadaEm: new Date('2000-01-01T00:00:00.000Z').toISOString() })],
+  ]);
+  const redis = {
+    async get(chave: string): Promise<string | null> {
+      return store.get(chave) ?? null;
+    },
+    async del(): Promise<number> {
+      return 0;
+    },
+  } as unknown as Redis;
+  let encerramentos = 0;
+  definirBroadcasterParaAbandono({
+    encerrarPorAbandono() {
+      encerramentos += 1;
+    },
+  });
+  try {
+    configurarAbandono(undefined, 90);
+    const abandonou = await verificarEAbandonarSeNecessario(redis, PARTIDA_ID);
+    assert.equal(abandonou, false, 'DEL falho não deve concluir o abandono');
+    assert.equal(encerramentos, 0, 'sockets devem permanecer intactos com cancelarPartida=false');
+    assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
+  } finally {
+    definirBroadcasterParaAbandono({ encerrarPorAbandono() {} });
+    cancelarAbandono(PARTIDA_ID);
+  }
+});

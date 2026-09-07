@@ -113,11 +113,16 @@ export async function verificarEAbandonarSeNecessario(redis: Redis, partidaId: s
     return false;
   }
   const partidaIdTyped = partida.partidaId as string;
+  const cancelada = await cancelarPartida(redis, partidaIdTyped as never);
+  if (!cancelada) {
+    // DEL falhou sob carga: não chuta os sockets (evita clientes caídos com
+    // chave fantasma até o TTL); reagenda para a próxima verificação.
+    agendarAbandono(partidaIdTyped);
+    return false;
+  }
   try {
     globalBroadcaster?.encerrarPorAbandono(partidaIdTyped, 4000, 'PARTIDA_ABANDONADA');
   } catch {}
-  const cancelada = await cancelarPartida(redis, partidaIdTyped as never);
-  if (!cancelada) return false;
   cancelarAbandono(partidaIdTyped);
   if (notificarRetorno !== undefined) {
     const aviso: AvisoDeRetorno = {
