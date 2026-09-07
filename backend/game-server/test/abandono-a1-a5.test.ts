@@ -4,7 +4,9 @@ import type { Redis } from 'ioredis';
 import {
   cancelarAbandono,
   configurarAbandono,
+  definirBroadcasterParaAbandono,
   rearmarAbandonosAposRestart,
+  verificarEAbandonarSeNecessario,
 } from '../src/partidas/abandono.ts';
 
 const PARTIDA_ID = '22222222-2222-4222-8222-222222222222';
@@ -121,6 +123,56 @@ test('A2: rearme lê o lote via pipeline (GET + TTL em 1 RTT)', async () => {
       'pipeline deveria enfileirar GET + TTL da chave da partida',
     );
   } finally {
+    cancelarAbandono(PARTIDA_ID);
+  }
+});
+
+test('A3: criadaEm inválida (NaN) nunca agenda nem abandona', async () => {
+  const parcial = [1, 2, 3, 4].map((n) => ({
+    id: `membro-${n}`,
+    jogadorId: `jogador-${n}`,
+    presenca: n === 1 ? 'conectado' : 'em_reconexao',
+  }));
+  const store = new Map<string, string>([
+    [CHAVE_PARTIDA, partidaPreparadaJson({ criadaEm: 'data-invalida', roster: parcial })],
+  ]);
+  const redis = {
+    async get(chave: string): Promise<string | null> {
+      return store.get(chave) ?? null;
+    },
+    async del(chave: string): Promise<number> {
+      return store.delete(chave) ? 1 : 0;
+    },
+  } as unknown as Redis;
+  let encerramentos = 0;
+  definirBroadcasterParaAbandono({
+    encerrarPorAbandono() {
+      encerramentos += 1;
+    },
+  });
+  const delays: unknown[] = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  (globalThis as unknown as { setTimeout: unknown }).setTimeout = ((
+    cb: (...args: unknown[]) => void,
+    ms?: number,
+    ...rest: unknown[]
+  ) => {
+    delays.push(ms);
+    return (originalSetTimeout as (...a: unknown[]) => unknown)(cb, ms, ...rest);
+  }) as typeof setTimeout;
+  try {
+    configurarAbandono(undefined, 90);
+    const abandonou = await verificarEAbandonarSeNecessario(redis, PARTIDA_ID);
+    assert.equal(abandonou, false, 'criadaEm inválida não deve abandonar');
+    assert.equal(encerramentos, 0, 'não deve chutar sockets com idade NaN');
+    assert.ok(
+      delays.every((d) => typeof d === 'number' && Number.isFinite(d)),
+      `nenhum timer com delay NaN, agendados: ${JSON.stringify(delays)}`,
+    );
+    assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
+  } finally {
+    (globalThis as unknown as { setTimeout: unknown }).setTimeout = originalSetTimeout;
+    definirBroadcasterParaAbandono({ encerrarPorAbandono() {} });
     cancelarAbandono(PARTIDA_ID);
   }
 });

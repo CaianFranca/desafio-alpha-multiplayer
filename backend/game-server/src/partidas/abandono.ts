@@ -93,11 +93,16 @@ export function definirBroadcasterParaAbandono(broadcaster: { encerrarPorAbandon
   globalBroadcaster = broadcaster;
 }
 
-async function verificarEAbandonarSeNecessario(redis: Redis, partidaId: string): Promise<boolean> {
+/** Exportado para testes de regressão (A3/A4): executa uma verificação imediata. */
+export async function verificarEAbandonarSeNecessario(redis: Redis, partidaId: string): Promise<boolean> {
   const partida = await obterPartida(redis, partidaId as never);
   if (partida === null) return false;
   if (partida.estado !== 'preparada') return false;
   const idadeMs = Date.now() - Date.parse(partida.criadaEm);
+  if (!Number.isFinite(idadeMs)) {
+    console.warn('[abandono] criadaEm inválida; abandono ignorado', { partidaId });
+    return false;
+  }
   const todosEmReconexao = partida.roster.every((m) => m.presenca === 'em_reconexao');
   // Abandono preparada: se todos em_reconexao → abandono imediato (10s já agendado),
   // senão se ainda não expirou 90s → reagenda restante, senão (idade >= 90s) abandona mesmo com 1-3 conectados parciais.
@@ -161,6 +166,10 @@ export async function rearmarAbandonosAposRestart(redis: Redis): Promise<void> {
           const partida = JSON.parse(raw) as { partidaId: string; estado: string; criadaEm: string; roster?: unknown[] };
           if (partida.estado !== 'preparada') continue;
           const idadeMs = Date.now() - Date.parse(partida.criadaEm);
+          if (!Number.isFinite(idadeMs)) {
+            console.warn('[abandono] criadaEm inválida no rearme; partida ignorada', { chave: linha.chave });
+            continue;
+          }
           const ttl = linha.ttl;
           if (ttl === -2) continue;
           const todosEmReconexao = (partida.roster as Array<{ presenca: string }> | undefined)?.every((m) => m.presenca === 'em_reconexao') ?? false;
