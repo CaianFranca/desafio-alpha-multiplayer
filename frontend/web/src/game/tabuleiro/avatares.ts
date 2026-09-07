@@ -1,9 +1,10 @@
 /**
- * Avatares 3D dos peões (issue #297, spec #296).
+ * Avatares 3D dos peões (issues #297 e #300, spec #296).
  *
  * Seam puro: slot → par de GLBs (aceso/apagado) cobrindo os 4 slots de
- * `CORES_DOS_PEOES` (ordem = slot). Só o slot 0 (`branco` — Diretor) tem
- * avatar nesta etapa; os demais seguem no `PeaoPlaceholder` (issues #299-301).
+ * `CORES_DOS_PEOES` (ordem = slot). Os slots 0 (`branco` — Diretor) e
+ * 1 (`vermelho` — Enfermeira) têm avatar nesta etapa; os demais seguem no
+ * `PeaoPlaceholder` (issues #299 e #301).
  * Os GLBs vivem em `web/public/assets/` (servidos sob
  * `import.meta.env.BASE_URL + assets/…`, empacotados no `dist` via
  * `publicDir` — ver `frontend/vite.config.ts`), no mesmo precedente de
@@ -28,7 +29,8 @@ function baseAssets(): string {
 /**
  * Mapa slot → par de GLBs. Slot = índice em `CORES_DOS_PEOES` (espelho do
  * engine `packages/engine/src/tabuleiro.ts`, mesmo critério de "ordem de
- * entrada"); só o slot 0 (Diretor/branco) está preenchido nesta issue.
+ * entrada"); preenchidos os slots 0 (Diretor/branco) e 1
+ * (Enfermeira/vermelho) nesta etapa.
  */
 export const AVATARES_POR_SLOT: ReadonlyMap<number, AvatarConfig> = new Map([
   [
@@ -36,6 +38,13 @@ export const AVATARES_POR_SLOT: ReadonlyMap<number, AvatarConfig> = new Map([
     {
       urlAcesa: `${baseAssets()}assets/diretor_base_acesa.glb`,
       urlApagada: `${baseAssets()}assets/diretor_base_apagado.glb`,
+    },
+  ],
+  [
+    1,
+    {
+      urlAcesa: `${baseAssets()}assets/enfermeira_base_acesa.glb`,
+      urlApagada: `${baseAssets()}assets/enfermeira_base_apagada.glb`,
     },
   ],
 ])
