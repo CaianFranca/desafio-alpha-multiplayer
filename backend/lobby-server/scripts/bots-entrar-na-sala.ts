@@ -1,5 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import WebSocket, { type ClientOptions } from 'ws';
+import type { EstadoDaPartidaSnapshot } from '@flicker/shared';
+import { JogadorBot } from '../src/bots/jogador-bot.ts';
 
 type Cookies = { access_token?: string; refresh_token?: string };
 
@@ -203,6 +205,7 @@ function entrarNaPartida(
   serverId: string,
   partidaId: string,
   accessToken: string,
+  jogadorId: string,
   apelido: string,
   indice: number,
   sockets: WebSocket[],
@@ -214,6 +217,18 @@ function entrarNaPartida(
   log(prefix, `entrando na partida → ${wsGameUrl}`);
   const ws = new WebSocket(wsGameUrl);
   sockets.push(ws);
+  // Driver do turno (Random Walk): o espelho é semeado pelo snapshot da
+  // admissão e avança pelos eventos do broadcast; o turno roda no
+  // TURNO_INICIADO do próprio bot.
+  const bot = new JogadorBot({
+    jogadorId,
+    enviar: (comando) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(comando));
+      }
+    },
+    log: (...args) => log(prefix, '[bot]', ...args),
+  });
 
   ws.on('open', () => {
     log(prefix, `WS de partida conectado (aguardando admissão)`);
@@ -238,17 +253,29 @@ function entrarNaPartida(
     }
     if (t === 'ESTADO_DA_PARTIDA') {
       log(prefix, `ESTADO_DA_PARTIDA recebido (snapshot)`);
+      bot.aoReceberSnapshot(
+        (msg as { snapshot: EstadoDaPartidaSnapshot }).snapshot,
+      );
       return;
     }
-    if (t === 'TURNO_INICIADO') {
-      log(prefix, `TURNO_INICIADO ${JSON.stringify(msg).slice(0, 200)}`);
+    if (t === 'ERRO_DO_TABULEIRO') {
+      const e = msg as { codigo?: string; motivo?: string; mensagem?: string };
+      log(prefix, `ERRO_DO_TABULEIRO ${e.codigo ?? ''} ${e.motivo ?? e.mensagem ?? ''}`.trim());
+      bot.aoReceberErro(e.codigo ?? 'DADOS_INVALIDOS');
       return;
     }
-    if (t === 'ADMISSAO_REJEITADA' || t === 'ERRO_DO_TABULEIRO') {
+    if (t === 'ADMISSAO_REJEITADA') {
       const e = msg as { codigo?: string; motivo?: string; mensagem?: string };
       log(prefix, `${t} ${e.codigo ?? ''} ${e.motivo ?? e.mensagem ?? ''}`.trim());
       return;
     }
+    if (t === 'TURNO_INICIADO') {
+      log(prefix, `TURNO_INICIADO ${JSON.stringify(msg).slice(0, 200)}`);
+      bot.aoReceberEvento(msg);
+      return;
+    }
+    // Demais eventos do canal da partida alimentam o espelho do bot.
+    bot.aoReceberEvento(msg);
     log(prefix, `partida evento ${t} ${JSON.stringify(msg).slice(0, 200)}`);
   });
 
@@ -354,7 +381,7 @@ function criarWs(
         log(prefix, `PARTIDA_DISPONIVEL partida=${d.partidaId} server=${d.serverId}`);
         if (!partidaConectada && accessToken) {
           partidaConectada = true;
-          entrarNaPartida(baseUrl, d.serverId, d.partidaId, accessToken, apelido, indice, sockets, prefix);
+          entrarNaPartida(baseUrl, d.serverId, d.partidaId, accessToken, jogadorId, apelido, indice, sockets, prefix);
         } else if (!accessToken) {
           log(prefix, `sem access_token — não é possível entrar na partida`);
         }
