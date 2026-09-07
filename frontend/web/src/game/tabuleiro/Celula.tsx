@@ -18,7 +18,7 @@ import type {
   PeaoId,
   PecaPosicionada,
 } from './contrato'
-import { PeaoPlaceholder } from './PeaoPlaceholder'
+import { PeaoVisual } from './PeaoVisual'
 import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
 import { handlersDeCursor } from './cursor'
 
@@ -31,9 +31,10 @@ interface CelulaProps {
   pecaDestacada?: boolean
   onClick?: (event: ThreeEvent<MouseEvent>) => void
   /**
-   * Peão posicionado sobre a peça desta célula. A cena exibe um placeholder
-   * por célula; a regra de ocupação (Portão 4, resgate +1) vive no engine e
-   * no espelho de destinos (`destinosConectadosDoPeao`).
+   * Peão posicionado sobre a peça desta célula. A cena exibe um visual por
+   * célula (avatar 3D no slot do Diretor, placeholder nos demais); a regra de
+   * ocupação (Portão 4, resgate +1) vive no engine e no espelho de destinos
+   * (`destinosConectadosDoPeao`).
    */
   peao?: PeaoDaExibicao | null
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
@@ -60,6 +61,8 @@ interface CelulaProps {
   peaoSelecionadoId?: PeaoId | null
   /** Peão do Jogador Ativo da vez: destaque emissivo suave (#118). */
   peaoAtivoId?: PeaoId | null
+  /** Peão em Baixa Iluminação do dono: avatar 3D na variante apagado (#297). */
+  emBaixaIluminacao?: boolean
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
 
@@ -84,6 +87,7 @@ export function Celula({
   iluminada = false,
   peaoSelecionadoId = null,
   peaoAtivoId = null,
+  emBaixaIluminacao = false,
   onSelecionarPeao,
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
@@ -146,11 +150,12 @@ export function Celula({
         />
       ) : null}
       {peao ? (
-        <PeaoPlaceholder
+        <PeaoVisual
           cor={peao.cor}
           position={[0, PEAO_Y, 0]}
           selecionado={peao.peaoId === peaoSelecionadoId}
           ativo={peao.peaoId === peaoAtivoId}
+          emBaixaIluminacao={emBaixaIluminacao}
           aoClicar={
             onSelecionarPeao
               ? () => onSelecionarPeao(peao.peaoId)

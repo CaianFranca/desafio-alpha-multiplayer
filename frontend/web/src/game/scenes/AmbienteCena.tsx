@@ -14,7 +14,7 @@ import { Caixa } from '../tabuleiro/Caixa'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
-import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
+import { PeaoVisual } from '../tabuleiro/PeaoVisual'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
 import { TransicaoLimpeza, type LimpezaTrigger } from './TransicaoLimpeza'
 import { TransicaoEncaixe } from './TransicaoEncaixe'
@@ -123,6 +123,12 @@ interface AmbienteCenaProps {
   encaixeTrigger?: EncaixeTrigger | null
   /** Fim do voo do Encaixe (key) → o pai limpa o trigger. */
   onFimEncaixe?: (key: number) => void
+  /**
+   * Peões em Baixa Iluminação do dono (issue #297): peaoIds derivados uma vez
+   * no pai — avatar do Diretor troca para a variante apagado só no peão
+   * afetado, em todas as posições (célula/fileira/voo).
+   */
+  emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -159,6 +165,7 @@ export function AmbienteCena({
   limpezaTrigger = null,
   encaixeTrigger = null,
   onFimEncaixe,
+  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
@@ -206,6 +213,7 @@ export function AmbienteCena({
               vooPendente={vooPendente}
               onVooAterrissou={onVooAterrissou}
               ocultarPecaId={pecaEmVooId}
+              emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
             />
             <TransicaoEncaixe
               posicionadas={estadoExibicao.posicionadas}
@@ -229,12 +237,13 @@ export function AmbienteCena({
               }
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (
-                <PeaoPlaceholder
+                <PeaoVisual
                   key={peao.peaoId}
                   cor={peao.cor}
                   position={peaoMesaParaMundo(indiceGlobal)}
                   selecionado={peao.peaoId === peaoSelecionadoId}
                   ativo={peao.peaoId === peaoAtivoId}
+                  emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(peao.peaoId)}
                   aoClicar={
                     onSelecionarPeao
                       ? () => onSelecionarPeao(peao.peaoId)
