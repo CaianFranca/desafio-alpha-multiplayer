@@ -57,7 +57,6 @@ export function PeaoVisual({
         position={position}
         escala={escala}
         selecionado={selecionado}
-        ativo={ativo}
         emBaixaIluminacao={emBaixaIluminacao}
         aoClicar={aoClicar}
       />

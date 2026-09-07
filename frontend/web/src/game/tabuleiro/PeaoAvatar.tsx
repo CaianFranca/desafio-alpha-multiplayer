@@ -1,12 +1,11 @@
-import { useEffect, useMemo } from 'react'
-import { useLoader, useThree, type ThreeEvent } from '@react-three/fiber'
+import { useMemo } from 'react'
+import { useLoader, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import type { CorDoPeao } from './contrato'
 import { AVATARES_POR_SLOT, slotDoAvatar } from './avatares'
 import {
   COR_CONTORNO_PEAO_SELECIONADO,
-  ESCALA_CONTORNO_PEAO,
   propsDoMaterialDeContorno,
 } from './contorno'
 
@@ -15,10 +14,8 @@ interface PeaoAvatarProps {
   position?: [number, number, number]
   /** Escala uniforme; mantém a silhueta em proporção quando o slot é menor. */
   escala?: number
-  /** Destaque branco do selecionado (casca BackSide, mesma linguagem visual). */
+  /** Destaque branco do selecionado (anel no chão; nunca pinta o corpo). */
   selecionado?: boolean
-  /** Destaque emissivo suave quando este peão é o do Jogador Ativo (#118). */
-  ativo?: boolean
   /**
    * Baixa Iluminação do jogador dono do peão (estado do Vulto): troca a
    * renderização para a variante *apagado* do modelo — sinal de perigo.
@@ -35,18 +32,25 @@ interface PeaoAvatarProps {
  */
 const LIMIAR_AMPLITUDE_MUNDO = 5
 
-/** Altura alvo após a normalização (pegada do placeholder: altura 0.5). */
-const ALTURA_ALVO = 0.5
+/** Altura alvo após a normalização: maior que a pegada do placeholder (0.5)
+ * para dar presença de Diretor na cena. */
+const ALTURA_ALVO = 1.16
 
-/** Diâmetro máximo alvo da base após a normalização (pegada: ∅ 0.4). */
-const BASE_ALVO = 0.4
+/** Diâmetro máximo alvo da base após a normalização (mesma proporção da altura). */
+const BASE_ALVO = 0.93
 
-const EMISSIVO_ATIVO = 0.35
+/**
+ * Raio interno/externo do anel de seleção (unidades do grupo normalizado,
+ * escala default 1): fica logo além da pegada do corpo (escalado junto com o
+ * modelo), sem invadir o corpo — nenhum branco sobre a textura.
+ */
+const ANEL_SELECAO_INTERNO = 0.56
+const ANEL_SELECAO_EXTERNO = 0.79
 
 /**
  * Clona os materiais da cena: o `useLoader` cacheia o GLTF bruto e o
- * `clone()` do Object3D compartilha materiais — sem clonar, mutar o emissivo
- * vazaria para todos os peões (precedente das texturas em `PecaPlaceholder`).
+ * `clone()` do Object3D compartilha materiais — o clone por instância isola
+ * os materiais do modelo aqui (precedente das texturas em `PecaPlaceholder`).
  */
 function clonarMateriais(cena: THREE.Object3D): void {
   cena.traverse((obj) => {
@@ -117,7 +121,6 @@ export function PeaoAvatar({
   position,
   escala = 1,
   selecionado = false,
-  ativo = false,
   emBaixaIluminacao = false,
   aoClicar,
 }: PeaoAvatarProps) {
@@ -138,43 +141,29 @@ export function PeaoAvatar({
   )
   const cena = emBaixaIluminacao ? cenaApagada : cenaAcesa
 
-  // Brilho emissivo no Jogador Ativo (suave, mesmo tom de linguagem do
-  // placeholder); muta só o material clonado desta instância. Sob
-  // `frameloop="demand"`, material mutado fora do commit React precisa de
-  // invalidação explícita para re-renderizar.
-  const invalidate = useThree((estado) => estado.invalidate)
-  useEffect(() => {
-    cena.traverse((obj) => {
-      if (
-        obj instanceof THREE.Mesh &&
-        obj.material instanceof THREE.MeshStandardMaterial
-      ) {
-        obj.material.emissive.set(0xffffff)
-        obj.material.emissiveIntensity = ativo ? EMISSIVO_ATIVO : 0
-      }
-    })
-    invalidate()
-  }, [cena, ativo, invalidate])
-
-  // Casca de contorno branca BackSide (mesma linguagem do placeholder),
-  // derivada do modelo corrente; sem clique (`raycast` nulo) e sem geometria
-  // nova (clone compartilha os BufferAttributes do corpo).
-  const cascaContorno = useMemo(() => {
+  // Destaque do selecionado: anel branco chapado no chão (sem `tone mapping`,
+  // fiel à semântica em cena ACES). A casca BackSide usada no placeholder não
+  // se aplica ao avatar: a geometria artística (figura não hermética) deixa o
+  // branco da casca vazar por cima da textura do GLB — o anel sinaliza a
+  // seleção sem tocar nos materiais do modelo (issue #297).
+  const anelDeSelecao = useMemo(() => {
     if (!selecionado) return null
-    const casca = cena.clone(true)
-    casca.traverse((obj) => {
-      if (!(obj instanceof THREE.Mesh)) return
-      const material = new THREE.MeshBasicMaterial(
+    const anel = new THREE.Mesh(
+      new THREE.RingGeometry(ANEL_SELECAO_INTERNO, ANEL_SELECAO_EXTERNO, 64),
+      new THREE.MeshBasicMaterial(
         propsDoMaterialDeContorno(COR_CONTORNO_PEAO_SELECIONADO),
-      )
-      material.side = THREE.BackSide
-      obj.material = material
-      // Nunca rouba clique do corpo selecionável.
-      obj.raycast = () => {}
-    })
-    casca.scale.multiplyScalar(ESCALA_CONTORNO_PEAO)
-    return casca
-  }, [cena, selecionado])
+      ),
+    )
+    anel.rotation.x = -Math.PI / 2
+    anel.position.y = 0.005
+    anel.material.side = THREE.FrontSide
+    anel.material.transparent = true
+    anel.material.opacity = 0.9
+    anel.material.depthWrite = false
+    // Nunca rouba clique do corpo selecionável.
+    anel.raycast = () => {}
+    return anel
+  }, [selecionado])
 
   // Só interage ao ponteiro quando há handler de seleção (idêntico ao
   // PeaoPlaceholder): os meshes do modelo borbulham até o grupo pai.
@@ -197,7 +186,7 @@ export function PeaoAvatar({
   return (
     <group position={position} scale={[escala, escala, escala]} {...handlers}>
       <primitive object={cena} />
-      {cascaContorno !== null ? <primitive object={cascaContorno} /> : null}
+      {anelDeSelecao !== null ? <primitive object={anelDeSelecao} /> : null}
     </group>
   )
 }
