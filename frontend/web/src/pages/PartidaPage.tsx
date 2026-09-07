@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AmbienteDeJogo } from '../components/partida/AmbienteDeJogo'
+import { HudDaPartida } from '../components/partida/HudDaPartida'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
 import { usePartidaTela } from '../components/partida/usePartidaTela'
@@ -45,7 +46,6 @@ import {
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
-import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS } from '../game/tabuleiro/contrato'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
@@ -459,10 +459,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           ? 'confirmar'
           : 'permanecer'
 
-  // ── Chip Jogador Ativo (apelido/cor do snapshot, #156) ──
-  const jogadorAtivoDados =
-    modelo.jogadorAtivoId !== null ? modelo.jogadorPorId[modelo.jogadorAtivoId] ?? null : null
-
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao
     ? (estadoInteracao.pecaEmManipulacaoId ?? estadoInteracao.pecaSelecionadaId)
@@ -543,7 +539,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [requerModoPaisagem])
 
   return (
-    <div className="relative min-h-[calc(100vh-5rem)] w-full overflow-hidden">
+    <div className="relative h-screen w-screen overflow-hidden">
       <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
       <AmbienteDeJogo
         bordaPx={bordaPx}
@@ -583,121 +579,31 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       >
         {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa.motivo) : ''}
       </div>
-      {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
-        <div
-          data-testid="indicador-rodada"
-          className="pointer-events-none absolute right-4 top-4 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
-        >
-          Rodada {modelo.rodada}
-        </div>
-      ) : null}
-      {estadoEmAndamento && modelo.pecasRestantesNaCaixa !== null ? (
-        // Contagem da Caixa no HUD (issue #145): baseline do snapshot +
-        // decremento ao vivo em PECA_SORTEADA. Oculta enquanto null (antes do
-        // primeiro ESTADO_DA_PARTIDA nunca se mostra contagem inventada).
-        <div
-          data-testid="contagem-caixa"
-          className="pointer-events-none absolute right-4 top-12 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
-        >
-          Caixa: {modelo.pecasRestantesNaCaixa}
-        </div>
-      ) : null}
-      {(estadoEmAndamento || emResultado) && jogadorAtivoDados ? (
-        <div
-          data-testid="chip-jogador-ativo"
-          data-cor={jogadorAtivoDados.cor}
-          data-sanidade={String(jogadorAtivoDados.sanidade)}
-          data-em-baixa={jogadorAtivoDados.emBaixaIluminacao ? 'true' : undefined}
-          data-amedrontado={jogadorAtivoDados.amedrontado ? 'true' : undefined}
-          className="pointer-events-none absolute left-4 top-4 z-30 flex items-center gap-2 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-100"
-          style={{ borderLeft: `4px solid ${HEX_COR_PEAO[jogadorAtivoDados.cor] ?? '#fff'}` }}
-        >
-          <span>{jogadorAtivoDados.apelido}</span>
-          <span data-testid="chip-sanidade" className="text-xs text-zinc-300">
-            {jogadorAtivoDados.sanidade}/3
-          </span>
-          {jogadorAtivoDados.emBaixaIluminacao ? (
-            <span data-testid="chip-baixa-iluminacao" className="text-xs text-amber-300" title="Baixa Iluminação">
-              ◐
-            </span>
-          ) : null}
-          {jogadorAtivoDados.amedrontado ? (
-            <span data-testid="chip-amedrontado" className="text-xs text-red-400" title="Amedrontado">
-              ⚠
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {/* Percepção mínima de todos os jogadores (issue #174): sem controles
-          completos — apenas 4 chips com sanidade/estados no Ambiente de Jogo.
-          O chip do Jogador Ativo acima é o destaque da vez; esta lista é a
-          visão “cada Jogador” exigida no critério, sem barras/painéis. */}
-      {(estadoEmAndamento || emResultado) && Object.keys(modelo.jogadorPorId).length > 0 ? (
-        <div
-          data-testid="indicadores-sanidade"
-          className="pointer-events-none absolute left-4 top-16 z-30 flex flex-col gap-1"
-        >
-          {Object.entries(modelo.jogadorPorId).map(([jid, dados]) => (
-            <div
-              key={jid}
-              data-testid="indicador-sanidade-jogador"
-              data-jogador-id={jid}
-              data-sanidade={String(dados.sanidade)}
-              data-em-baixa={dados.emBaixaIluminacao ? 'true' : undefined}
-              data-amedrontado={dados.amedrontado ? 'true' : undefined}
-              data-cor={dados.cor}
-              className="flex items-center gap-2 rounded bg-zinc-900/70 px-2 py-0.5 text-xs text-zinc-200"
-              style={{ borderLeft: `3px solid ${HEX_COR_PEAO[dados.cor] ?? '#fff'}` }}
-            >
-              <span>{dados.apelido}</span>
-              <span>{dados.sanidade}/3</span>
-              {dados.emBaixaIluminacao ? <span title="Baixa Iluminação">◐</span> : null}
-              {dados.amedrontado ? <span title="Amedrontado">⚠</span> : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {estadoEmAndamento ? (
-        // Chips de Objetivo Global na moldura (issue #145, spec pai ST-12):
-        // overlay IRMÃO sobre a moldura — o PartidaMoldura é decoração
-        // aria-hidden, os chips são informativos (aria-label) e nunca captam
-        // ponteiro. Fonte: modelo local (baseline do snapshot + derivação ao
-        // vivo pelos eventos existentes; sem novos eventos de conquista).
-        <div className="pointer-events-none absolute left-1/2 top-4 z-30 flex -translate-x-1/2 gap-2">
-          <div
-            data-testid="chip-geradores-ligados"
-            role="status"
-            data-geradores={modelo.geradoresLigados.length}
-            aria-label={`Geradores ligados: ${modelo.geradoresLigados.length} de ${ALVO_GERADORES_LIGADOS}`}
-            className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
-              modelo.geradoresLigados.length >= ALVO_GERADORES_LIGADOS
-                ? 'text-amber-300'
-                : 'text-zinc-200'
-            }`}
-          >
-            Geradores {modelo.geradoresLigados.length}/{ALVO_GERADORES_LIGADOS}
-          </div>
-          <div
-            data-testid="chip-cartao-de-acesso"
-            role="status"
-            data-obtido={modelo.cartaoDeAcessoObtido ? 'true' : 'false'}
-            aria-label={
-              modelo.cartaoDeAcessoObtido
-                ? 'Cartão de Acesso obtido'
-                : 'Cartão de Acesso ainda não obtido'
-            }
-            className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
-              modelo.cartaoDeAcessoObtido ? 'text-emerald-300' : 'text-zinc-500'
-            }`}
-          >
-            Cartão de Acesso
-          </div>
-        </div>
+      {/*
+        HUD definitivo da Partida (issue #226, spec pai #224): irmão de
+        AmbienteDeJogo/PartidaMoldura no ponto mais alto, somente leitura do
+        modelo existente (reducao.ts/snapshot.ts). Substitui os indicadores
+        provisórios (rodada, caixa, jogador ativo em texto, lista de sanidade
+        em texto, chips de geradores/cartão em texto) — sem card de Proteção.
+      */}
+      {(estadoEmAndamento || emResultado) ? (
+        <HudDaPartida
+          jogadorPorId={modelo.jogadorPorId}
+          jogadorAtivoId={modelo.jogadorAtivoId}
+          jogadorLocalId={jogadorId}
+          geradoresLigados={modelo.geradoresLigados}
+          cartaoDeAcessoObtido={modelo.cartaoDeAcessoObtido}
+          emAndamento={estadoEmAndamento}
+          emResultado={emResultado}
+          partidaId={partidaId}
+          onSair={voltarASala}
+        />
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (
+        // Botões de turno acima do card de Turno do HUD (inf-dir, #226).
         <div
           data-testid="controles-de-turno"
-          className="pointer-events-auto absolute bottom-6 right-6 z-30 flex gap-2"
+          className="pointer-events-auto absolute bottom-32 right-6 z-30 flex gap-2"
         >
           {faseDoTurno === 'permanecer' ? (
             <button
@@ -734,9 +640,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         </div>
       ) : null}
       {estadoEmAndamento ? (
+        // Controles de giro acima das conquistas soltas do HUD (inf-centro,
+        // #226) para não sobrepor Geradores/Cartão.
         <div
           data-testid="controles-de-giro"
-          className="pointer-events-auto absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 gap-2"
+          className="pointer-events-auto absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 gap-2"
         >
           <button
             type="button"

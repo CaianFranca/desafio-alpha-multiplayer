@@ -95,9 +95,13 @@ export type PercepcaoDeJogador = {
   readonly sanidade: number
   readonly emBaixaIluminacao: boolean
   readonly amedrontado: boolean
-  // Baseline da Proteção da Sala Médica (issue #227): o cliente só projeta
-  // pelo snapshot (reconciliação); deltas ao vivo ficam para a UI (#225/#226).
   readonly protegido: boolean
+  /**
+   * Ordem de entrada na Sala (snapshot `jogadores[].ordem`, issue #226):
+   * base da fila circular do Turno no HUD. Preservada nos deltas por spread
+   * (`...anterior`); projeções sem snapshot ficam sem ordem até a baseline.
+   */
+  readonly ordem: number
 }
 
 export type SanidadePorPeao = Readonly<
