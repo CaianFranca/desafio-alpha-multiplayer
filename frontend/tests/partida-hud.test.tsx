@@ -169,7 +169,7 @@ describe('HUD da Partida — tela cheia sem cabeçalho (#226 [1])', () => {
     renderViaApp('/partida')
     expect(document.querySelector('.site-header')).toBeNull()
     expect(document.querySelector('header.site-header')).toBeNull()
-    const raiz = screen.getByTestId('ambiente-de-jogo').parentElement!
+    const raiz = screen.getByTestId('conteudo-jogo').parentElement!
     expect(raiz).toHaveClass('h-screen')
     expect(raiz).toHaveClass('w-screen')
     expect(raiz).toHaveClass('overflow-hidden')
