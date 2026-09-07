@@ -60,12 +60,16 @@ function codigoDaRejeicao(
 
 const JOGADORES = ['ana', 'bruno', 'carla', 'diogo'];
 
-function partidaBase(): EstadoDaPartida {
-  const resultado = estadoInicialDaPartida(JOGADORES);
+function partidaBaseCom(roster: readonly string[]): EstadoDaPartida {
+  const resultado = estadoInicialDaPartida(roster);
   if (!resultado.sucesso) {
     throw new Error('roster válido deveria iniciar a Partida');
   }
   return resultado.estado;
+}
+
+function partidaBase(): EstadoDaPartida {
+  return partidaBaseCom(JOGADORES);
 }
 
 const peca = (
@@ -86,25 +90,28 @@ const peca = (
 // mover e confirmar — seguem pelo caminho de domínio. Peão sem peça indicada
 // fica sobre a Mesa (pecaId null). O peão-branco (do Jogador Ativo ana) é o
 // ator padrão das Confirmações, já selecionado.
-function construirEstado(opcoes: {
-  readonly posicionadas: readonly PecaPosicionada[];
-  // Peça sob o Peão do ator da Confirmação (peão-branco).
-  readonly pecaDoPeao: string | null;
-  // pecaIds dos peões vermelho, azul e amarelo (null → Mesa).
-  readonly peoesRestantes?: readonly (string | null)[];
-  readonly pecaDoInicioDoTurnoId?: string | null;
-  readonly jogadorAtivoId?: string;
-  readonly caixa?: readonly PecaDaCaixa[];
-  readonly geradoresLigados?: readonly string[];
-  readonly cartaoDeAcessoObtido?: boolean;
-  // Sanidades na ordem do roster [ana, bruno, carla, diogo].
-  readonly sanidades?: readonly number[];
-}): EstadoDaPartida {
-  const base = partidaBase();
+function construirEstado(
+  opcoes: {
+    readonly posicionadas: readonly PecaPosicionada[];
+    // Peça sob o Peão do ator da Confirmação (o primeiro peão do roster).
+    readonly pecaDoPeao: string | null;
+    // pecaIds dos demais peões na ordem do roster (null → Mesa).
+    readonly peoesRestantes?: readonly (string | null)[];
+    readonly pecaDoInicioDoTurnoId?: string | null;
+    readonly jogadorAtivoId?: string;
+    readonly caixa?: readonly PecaDaCaixa[];
+    readonly geradoresLigados?: readonly string[];
+    readonly cartaoDeAcessoObtido?: boolean;
+    // Sanidades na ordem do roster.
+    readonly sanidades?: readonly number[];
+  },
+  roster: readonly string[] = JOGADORES,
+): EstadoDaPartida {
+  const base = partidaBaseCom(roster);
   const peoesRestantes = opcoes.peoesRestantes ?? [];
   return {
     ...base,
-    jogadorAtivoId: opcoes.jogadorAtivoId ?? 'ana',
+    jogadorAtivoId: opcoes.jogadorAtivoId ?? roster[0],
     pecaDoInicioDoTurnoId:
       opcoes.pecaDoInicioDoTurnoId === undefined
         ? 'inicial-1'
@@ -122,14 +129,13 @@ function construirEstado(opcoes: {
     tabuleiro: {
       ...base.tabuleiro,
       posicionadas: opcoes.posicionadas,
-      peoes: base.tabuleiro.peoes.map((peao) => {
-        if (peao.cor === 'branco') {
+      peoes: base.tabuleiro.peoes.map((peao, indiceDoPeao) => {
+        if (indiceDoPeao === 0) {
           return { ...peao, pecaId: opcoes.pecaDoPeao };
         }
-        const indiceRestante = { vermelho: 0, azul: 1, amarelo: 2 }[peao.cor];
-        return { ...peao, pecaId: peoesRestantes[indiceRestante] ?? null };
+        return { ...peao, pecaId: peoesRestantes[indiceDoPeao - 1] ?? null };
       }),
-      peaoSelecionadoId: 'peao-branco',
+      peaoSelecionadoId: base.tabuleiro.peoes[0].peaoId,
       recebidas: [],
       caixa: opcoes.caixa ?? base.tabuleiro.caixa,
       pecaSelecionadaId: null,
@@ -823,4 +829,412 @@ test('Portão de Saída aceita do 2º ao 4º Peão; peça comum ocupada segue PE
     'os 4 peões deveriam estar reunidos no Portão de Saída',
   );
   assert.equal(estado.resultado, null);
+});
+
+// Roster variável (issue #285): condições de vitória pendentes apenas da
+// Confirmação, com os N peões do roster sobre o portao-1.
+function estadoDaVitoriaPendenteComN(
+  roster: readonly string[],
+  extra?: {
+    readonly caixa?: readonly PecaDaCaixa[];
+    readonly sanidades?: readonly number[];
+  },
+): EstadoDaPartida {
+  return construirEstado(
+    {
+      posicionadas: [
+        peca('inicial-1', 'inicial', 3, 3),
+        peca('portao-1', 'portao_de_saida', 3, 2),
+      ],
+      pecaDoPeao: 'portao-1',
+      peoesRestantes: Array.from(
+        { length: roster.length - 1 },
+        () => 'portao-1' as const,
+      ),
+      geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+      cartaoDeAcessoObtido: true,
+      ...extra,
+    },
+    roster,
+  );
+}
+
+function afirmarVitoria(resultado: ReturnType<typeof aplicarComandoDePartida>) {
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const ultimo = resultado.eventos[resultado.eventos.length - 1];
+  assert.equal(ultimo?.tipo, 'partida_terminada');
+  if (ultimo?.tipo !== 'partida_terminada') return;
+  assert.deepEqual(ultimo.desfecho, { tipo: 'vitoria' });
+  assert.deepEqual(resultado.estado.resultado, { tipo: 'vitoria' });
+}
+
+test('vitória com N=2: os 2 peões no Portão + 3 geradores + cartão', () => {
+  const estado = estadoDaVitoriaPendenteComN(['ana', 'bruno']);
+  afirmarVitoria(
+    aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana'),
+  );
+});
+
+test('vitória com N=3: os 3 peões no Portão + 3 geradores + cartão', () => {
+  const estado = estadoDaVitoriaPendenteComN(['ana', 'bruno', 'carla']);
+  afirmarVitoria(
+    aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana'),
+  );
+});
+
+test('sem vitória com N=2 quando só 1 peão está no Portão', () => {
+  const estado = construirEstado(
+    {
+      posicionadas: [
+        peca('inicial-1', 'inicial', 3, 3),
+        peca('portao-1', 'portao_de_saida', 3, 2),
+      ],
+      pecaDoPeao: 'portao-1',
+      peoesRestantes: [null],
+      geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+      cartaoDeAcessoObtido: true,
+    },
+    ['ana', 'bruno'],
+  );
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.resultado, null);
+  assert.ok(
+    !resultado.eventos.some((evento) => evento.tipo === 'partida_terminada'),
+  );
+});
+
+test('derrota equipe_amedrontada com N=2: sanidade zerada em todo o roster', () => {
+  const estado = construirEstado(
+    {
+      posicionadas: [
+        peca('inicial-1', 'inicial', 3, 3),
+        peca('reta-1', 'reta', 3, 2),
+      ],
+      pecaDoPeao: 'reta-1',
+      sanidades: [0, 0],
+    },
+    ['ana', 'bruno'],
+  );
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const ultimo = resultado.eventos[resultado.eventos.length - 1];
+  assert.equal(ultimo?.tipo, 'partida_terminada');
+  if (ultimo?.tipo !== 'partida_terminada') return;
+  assert.deepEqual(ultimo.desfecho, {
+    tipo: 'derrota',
+    motivo: 'equipe_amedrontada',
+  });
+});
+
+test('derrota caixa_esgotada com N=3: nenhum portao_de_saida no tabuleiro', () => {
+  const estado = construirEstado(
+    {
+      posicionadas: [
+        peca('inicial-1', 'inicial', 3, 3),
+        peca('reta-1', 'reta', 3, 2),
+      ],
+      pecaDoPeao: 'reta-1',
+      caixa: [],
+      geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+      cartaoDeAcessoObtido: true,
+    },
+    ['ana', 'bruno', 'carla'],
+  );
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const ultimo = resultado.eventos[resultado.eventos.length - 1];
+  assert.equal(ultimo?.tipo, 'partida_terminada');
+  if (ultimo?.tipo !== 'partida_terminada') return;
+  assert.deepEqual(ultimo.desfecho, {
+    tipo: 'derrota',
+    motivo: 'caixa_esgotada',
+  });
+});
+
+test('Portão com N=2 aceita o 2º Peão; peça comum ocupada segue PECA_JA_TEM_PEAO', () => {
+  // cruz-1 conecta ao portao-1 (oeste↔leste). Vermelho já no Portão (1º),
+  // branco na cruz-1.
+  let estado = construirEstado(
+    {
+      posicionadas: [
+        peca('cruz-1', 'cruz', 3, 3),
+        peca('portao-1', 'portao_de_saida', 3, 2),
+      ],
+      pecaDoPeao: 'cruz-1',
+      peoesRestantes: ['portao-1'],
+    },
+    ['ana', 'bruno'],
+  );
+
+  // 2º Peão entra no Portão (1 ocupante): o teto N=2 é atingido.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 2), 'ana');
+  assert.ok(
+    estado.tabuleiro.peoes.every((peao) => peao.pecaId === 'portao-1'),
+    'os 2 peões deveriam estar reunidos no Portão de Saída',
+  );
+
+  // Peça comum ocupada: vermelho de volta à cruz-1 e branco tenta entrar.
+  const vezDeBruno = { ...estado, jogadorAtivoId: 'bruno' };
+  const vermelhoSelecionado = aplicar(
+    vezDeBruno,
+    selecionarPeao('peao-vermelho'),
+    'bruno',
+  );
+  const vermelhoFora = aplicar(
+    vermelhoSelecionado,
+    moverPeao('peao-vermelho', 3, 3),
+    'bruno',
+  );
+  const vezDeAna = { ...vermelhoFora, jogadorAtivoId: 'ana' };
+  const brancoSelecionado = aplicar(
+    vezDeAna,
+    selecionarPeao('peao-branco'),
+    'ana',
+  );
+  assert.equal(
+    codigoDaRejeicao(brancoSelecionado, moverPeao('peao-branco', 3, 3), 'ana'),
+    'PECA_JA_TEM_PEAO',
+  );
+});
+
+test('Portão com N=3 aceita o 2º e o 3º Peão (teto do roster)', () => {
+  // cruz-1 conecta ao portao-1 (oeste↔leste); reta-1 conecta ao portao-1
+  // (sul↔norte). Azul já no Portão (1º), branco na cruz-1, vermelho na reta-1.
+  let estado = construirEstado(
+    {
+      posicionadas: [
+        peca('cruz-1', 'cruz', 3, 3),
+        peca('portao-1', 'portao_de_saida', 3, 2),
+        peca('reta-1', 'reta', 2, 2),
+      ],
+      pecaDoPeao: 'cruz-1',
+      peoesRestantes: ['reta-1', 'portao-1'],
+    },
+    ['ana', 'bruno', 'carla'],
+  );
+
+  // 2º Peão entra no Portão (1 ocupante).
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 2), 'ana');
+
+  // 3º Peão entra no Portão (2 ocupantes): o teto N=3 é atingido.
+  const vezDeBruno = { ...estado, jogadorAtivoId: 'bruno' };
+  const vermelhoSelecionado = aplicar(
+    vezDeBruno,
+    selecionarPeao('peao-vermelho'),
+    'bruno',
+  );
+  estado = aplicar(
+    vermelhoSelecionado,
+    moverPeao('peao-vermelho', 3, 2),
+    'bruno',
+  );
+  assert.ok(
+    estado.tabuleiro.peoes.every((peao) => peao.pecaId === 'portao-1'),
+    'os 3 peões deveriam estar reunidos no Portão de Saída',
+  );
+  assert.equal(estado.resultado, null);
+});
+
+test('Portão com N=2 rejeita o 3º Peão sem afetado; com afetado o Resgate autoriza (teto N+1)', () => {
+  // cruz-1 conecta ao portao-1 (oeste↔leste). Vermelho no Portão (1º) e um
+  // Peão artesanal extra também no Portão (2 ocupantes = teto N=2); branco na
+  // cruz-1 tenta entrar como 3º. O extra simula o (N+1)-ésimo sem elevar o
+  // roster — o teto da Partida deriva de jogadores.length, não de
+  // tabuleiro.peoes.length.
+  const montar = (afetado: boolean): EstadoDaPartida => {
+    const base = construirEstado(
+      {
+        posicionadas: [
+          peca('cruz-1', 'cruz', 3, 3),
+          peca('portao-1', 'portao_de_saida', 3, 2),
+        ],
+        pecaDoPeao: 'cruz-1',
+        peoesRestantes: ['portao-1'],
+      },
+      ['ana', 'bruno'],
+    );
+    return {
+      ...base,
+      jogadores: afetado
+        ? base.jogadores.map((jogador) =>
+            jogador.jogadorId === 'bruno'
+              ? { ...jogador, emBaixaIluminacao: true }
+              : jogador,
+          )
+        : base.jogadores,
+      tabuleiro: {
+        ...base.tabuleiro,
+        peoes: [
+          ...base.tabuleiro.peoes,
+          { peaoId: 'peao-extra', cor: 'amarelo' as const, pecaId: 'portao-1' },
+        ],
+      },
+    };
+  };
+
+  // Sem afetado: teto N=2 com 2 ocupantes — a entrada do 3º é rejeitada.
+  const cheio = montar(false);
+  const brancoSelecionado = aplicar(cheio, selecionarPeao('peao-branco'), 'ana');
+  assert.equal(
+    codigoDaRejeicao(brancoSelecionado, moverPeao('peao-branco', 3, 2), 'ana'),
+    'PECA_JA_TEM_PEAO',
+  );
+
+  // Com afetado (bruno em Baixa no Portão): teto N+1=3 — o 3º entra e resgata.
+  const comAfetado = montar(true);
+  const entrando = aplicar(comAfetado, selecionarPeao('peao-branco'), 'ana');
+  const resultado = aplicarComandoDePartida(
+    entrando,
+    moverPeao('peao-branco', 3, 2),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(
+    resultado.estado.tabuleiro.peoes.filter((peao) => peao.pecaId === 'portao-1')
+      .length,
+    3,
+  );
+  assert.ok(
+    resultado.eventos.some((evento) => evento.tipo === 'resgate_realizado'),
+    'esperava o resgate do afetado no Portão',
+  );
+});
+
+test('Portão com N=3 rejeita o 4º Peão sem afetado; com afetado o Resgate autoriza (teto N+1)', () => {
+  // Mesmo arranjo do N=2 com um Jogador a mais: azul no Portão (2º) e o extra
+  // como 3º ocupante (= teto N=3); branco tenta entrar como 4º.
+  const montar = (afetado: boolean): EstadoDaPartida => {
+    const base = construirEstado(
+      {
+        posicionadas: [
+          peca('cruz-1', 'cruz', 3, 3),
+          peca('portao-1', 'portao_de_saida', 3, 2),
+        ],
+        pecaDoPeao: 'cruz-1',
+        peoesRestantes: ['portao-1', 'portao-1'],
+      },
+      ['ana', 'bruno', 'carla'],
+    );
+    return {
+      ...base,
+      jogadores: afetado
+        ? base.jogadores.map((jogador) =>
+            jogador.jogadorId === 'bruno'
+              ? { ...jogador, emBaixaIluminacao: true }
+              : jogador,
+          )
+        : base.jogadores,
+      tabuleiro: {
+        ...base.tabuleiro,
+        peoes: [
+          ...base.tabuleiro.peoes,
+          { peaoId: 'peao-extra', cor: 'amarelo' as const, pecaId: 'portao-1' },
+        ],
+      },
+    };
+  };
+
+  const cheio = montar(false);
+  const brancoSelecionado = aplicar(cheio, selecionarPeao('peao-branco'), 'ana');
+  assert.equal(
+    codigoDaRejeicao(brancoSelecionado, moverPeao('peao-branco', 3, 2), 'ana'),
+    'PECA_JA_TEM_PEAO',
+  );
+
+  const comAfetado = montar(true);
+  const entrando = aplicar(comAfetado, selecionarPeao('peao-branco'), 'ana');
+  const resultado = aplicarComandoDePartida(
+    entrando,
+    moverPeao('peao-branco', 3, 2),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(
+    resultado.estado.tabuleiro.peoes.filter((peao) => peao.pecaId === 'portao-1')
+      .length,
+    4,
+  );
+  assert.ok(
+    resultado.eventos.some((evento) => evento.tipo === 'resgate_realizado'),
+    'esperava o resgate do afetado no Portão',
+  );
+});
+
+test('derrota equipe_amedrontada com N=3: sanidade zerada em todo o roster', () => {
+  const estado = construirEstado(
+    {
+      posicionadas: [
+        peca('inicial-1', 'inicial', 3, 3),
+        peca('reta-1', 'reta', 3, 2),
+      ],
+      pecaDoPeao: 'reta-1',
+      sanidades: [0, 0, 0],
+    },
+    ['ana', 'bruno', 'carla'],
+  );
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const ultimo = resultado.eventos[resultado.eventos.length - 1];
+  assert.equal(ultimo?.tipo, 'partida_terminada');
+  if (ultimo?.tipo !== 'partida_terminada') return;
+  assert.deepEqual(ultimo.desfecho, {
+    tipo: 'derrota',
+    motivo: 'equipe_amedrontada',
+  });
+});
+
+test('derrota caixa_esgotada com N=2: nenhum portao_de_saida no tabuleiro', () => {
+  const estado = construirEstado(
+    {
+      posicionadas: [
+        peca('inicial-1', 'inicial', 3, 3),
+        peca('reta-1', 'reta', 3, 2),
+      ],
+      pecaDoPeao: 'reta-1',
+      caixa: [],
+      geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+      cartaoDeAcessoObtido: true,
+    },
+    ['ana', 'bruno'],
+  );
+  const resultado = aplicarComandoDePartida(
+    estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  const ultimo = resultado.eventos[resultado.eventos.length - 1];
+  assert.equal(ultimo?.tipo, 'partida_terminada');
+  if (ultimo?.tipo !== 'partida_terminada') return;
+  assert.deepEqual(ultimo.desfecho, {
+    tipo: 'derrota',
+    motivo: 'caixa_esgotada',
+  });
 });

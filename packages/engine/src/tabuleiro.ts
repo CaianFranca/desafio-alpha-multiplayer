@@ -2,7 +2,7 @@
 // issue #144).
 //
 // Seam único das regras de tabuleiro: grade fixa 7x7 (ADR-0004), Caixa
-// (ST-12) com as 4 Peças Iniciais fora dela, Seleção única e janela de
+// (ST-12) com as N Peças Iniciais fora dela, Seleção única e janela de
 // Manipulação (ST-09), e os tipos do ciclo de Peões com o dispatch
 // aplicarComandoDeTabuleiro (ST-10) — que produz eventos de domínio e
 // rejeições com códigos fechados, no mesmo padrão do domínio do lobby
@@ -40,6 +40,7 @@ export {
   ehPecaEspecial,
   estaDentroDaGrade,
   gerarRecebidas,
+  tetoDoPortao,
   validarTexto,
   vagasDisponiveis,
   vizinhasConectadas,
@@ -90,8 +91,8 @@ export interface PecaDaCaixa {
   readonly orientacao: Orientacao;
 }
 
-// As 4 Peças Iniciais de partida, fora da Caixa; cada Jogador encaixa a
-// própria diretamente no Primeiro Turno (ST-11).
+// As Peças Iniciais de partida, fora da Caixa; cada Jogador encaixa a
+// própria diretamente no Primeiro Turno (ST-11). São N (2–4, issue #285).
 export interface PecaInicial {
   readonly pecaId: string;
   readonly tipo: 'inicial';
@@ -147,7 +148,7 @@ export interface EstadoDoTabuleiro {
   // criação do estado; consumo da primeira peça, sem reposição, pelo sorteio
   // unitário (sortearDaCaixa) e pelo Recebimento (gerarRecebidas, issue #138).
   readonly caixa: readonly PecaDaCaixa[];
-  // As 4 Peças Iniciais, fora da Caixa, encaixadas diretamente.
+  // As N Peças Iniciais (2–4, issue #285), fora da Caixa, encaixadas diretamente.
   readonly iniciais: readonly PecaInicial[];
   readonly posicionadas: readonly PecaPosicionada[];
   readonly pecaSelecionadaId: string | null;
@@ -395,7 +396,8 @@ export type ResultadoDoTabuleiro =
   | OperacaoBemSucedidaDoTabuleiro
   | OperacaoRejeitadaDoTabuleiro;
 
-// Cores canônicas (placeholder) dos 4 Peões; ids determinísticos por cor.
+// Cores canônicas (placeholder) dos Peões — N = 2–4 fatiadas pela ordem
+// (issue #285); ids determinísticos por cor.
 const CORES_DOS_PEOES: readonly CorDoPeao[] = [
   'branco',
   'vermelho',
@@ -404,7 +406,7 @@ const CORES_DOS_PEOES: readonly CorDoPeao[] = [
 ];
 
 // Composição fixa da Caixa (ST-12 / issue #144, ampliada pela ST-15 / issue
-// #169): 54 peças de caminho, 17 especiais e 12 monstros, 83 no total. As 4
+// #169): 54 peças de caminho, 17 especiais e 12 monstros, 83 no total. As N
 // Peças Iniciais ficam fora da Caixa.
 export const COMPOSICAO_DA_CAIXA: readonly {
   readonly tipo: TipoDePecaDaCaixa;
@@ -487,29 +489,54 @@ export interface EntradaDoEstadoDoTabuleiro {
   // ordem de composição (determinismo preservado para testes). O game-server
   // passa a seed real na integração da Partida (issue #139).
   readonly seed?: number;
+  // Tamanho do roster (issue #285): quantas Peças Iniciais e Peões criar
+  // (inicial-1..N, N cores pela ordem). Ausente ≡ 4 (retrocompatível com os
+  // estados e testes que assumem o roster cheio); a Partida sempre informa N.
+  readonly numeroDeJogadores?: number;
 }
 
 // Partida recém-preparada: Caixa com a composição fixa de 83 peças
-// (embaralhada quando a seed é fornecida) e as 4 Peças Iniciais fora dela.
+// (embaralhada quando a seed é fornecida) e as N Peças Iniciais fora dela
+// (N = numeroDeJogadores, 4 por padrão).
+//
+// Não é entry-point público para N: o roster inválido é rejeitado com
+// DADOS_INVALIDOS em estadoInicialDaPartida (partida.ts), que valida antes
+// de delegar para cá. A chamada direta com numeroDeJogadores fora de 2–4
+// lança Error (em vez de retornar Resultado rejeitado) para preservar a
+// assinatura pública consumida pelo backend
+// (backend/game-server/src/partidas/tabuleiro.ts chama
+// estadoInicialDoTabuleiro() sem argumentos) — Opção B da issue #285.
+// @throws Error quando numeroDeJogadores é informado fora de 2–4.
 export function estadoInicialDoTabuleiro(
   entrada?: EntradaDoEstadoDoTabuleiro,
 ): EstadoDoTabuleiro {
   const caixa = montarCaixa();
+  const numeroDeJogadores = entrada?.numeroDeJogadores ?? CORES_DOS_PEOES.length;
+  if (
+    !Number.isInteger(numeroDeJogadores) ||
+    numeroDeJogadores < 2 ||
+    numeroDeJogadores > CORES_DOS_PEOES.length
+  ) {
+    throw new Error(
+      'O Tabuleiro exige de dois a quatro jogadores.',
+    );
+  }
+  const cores = CORES_DOS_PEOES.slice(0, numeroDeJogadores);
   return {
     caixa:
       entrada?.seed === undefined
         ? caixa
         : embaralharCaixa(caixa, entrada.seed),
-    iniciais: [1, 2, 3, 4].map((ordem) => ({
-      pecaId: `inicial-${ordem}`,
+    iniciais: Array.from({ length: numeroDeJogadores }, (_, indice) => ({
+      pecaId: `inicial-${indice + 1}`,
       tipo: 'inicial' as const,
       orientacao: 0 as const,
     })),
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
-    // Os 4 Peões começam sobre a Mesa, sem Peça.
-    peoes: CORES_DOS_PEOES.map((cor) => ({
+    // Os N Peões começam sobre a Mesa, sem Peça.
+    peoes: cores.map((cor) => ({
       peaoId: `peao-${cor}`,
       cor,
       pecaId: null,

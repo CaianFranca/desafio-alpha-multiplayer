@@ -5,6 +5,7 @@ import {
   aplicarComandoDeTabuleiro,
   bordasAbertas,
   estadoInicialDoTabuleiro,
+  tetoDoPortao,
   vizinhos,
   type ComandoDeTabuleiro,
   type CodigoDeErroDeTabuleiro,
@@ -52,6 +53,58 @@ function peçaNasIniciais(estado: EstadoDoTabuleiro, pecaId: string) {
   }
   return peca;
 }
+
+test('estado inicial com N jogadores tem N iniciais e N peões; fora de 2–4 lança', () => {
+  const dois = estadoInicialDoTabuleiro({ numeroDeJogadores: 2 });
+  assert.deepEqual(
+    dois.iniciais.map((peca) => peca.pecaId),
+    ['inicial-1', 'inicial-2'],
+  );
+  assert.deepEqual(
+    dois.peoes.map((peao) => peao.peaoId),
+    ['peao-branco', 'peao-vermelho'],
+  );
+  assert.equal(dois.caixa.length, 83);
+
+  const tres = estadoInicialDoTabuleiro({ numeroDeJogadores: 3 });
+  assert.deepEqual(
+    tres.iniciais.map((peca) => peca.pecaId),
+    ['inicial-1', 'inicial-2', 'inicial-3'],
+  );
+  assert.deepEqual(
+    tres.peoes.map((peao) => peao.peaoId),
+    ['peao-branco', 'peao-vermelho', 'peao-azul'],
+  );
+
+  assert.throws(() => estadoInicialDoTabuleiro({ numeroDeJogadores: 1 }));
+  assert.throws(() => estadoInicialDoTabuleiro({ numeroDeJogadores: 5 }));
+});
+
+test('N inválido no Tabuleiro lança com a mensagem do roster (Opção B da issue #285)', () => {
+  // Consistência com a Partida: o mesmo intervalo 2–4 é rejeitado com
+  // DADOS_INVALIDOS em estadoInicialDaPartida; o Tabuleiro não é entry-point
+  // público e preserva a assinatura (throw), documentada no JSDoc.
+  assert.throws(
+    () => estadoInicialDoTabuleiro({ numeroDeJogadores: 1 }),
+    /O Tabuleiro exige de dois a quatro jogadores\./,
+  );
+  assert.throws(
+    () => estadoInicialDoTabuleiro({ numeroDeJogadores: 5 }),
+    /O Tabuleiro exige de dois a quatro jogadores\./,
+  );
+});
+
+test('tetoDoPortao é a fonte única do teto: N limitado a 4, +1 com afetado', () => {
+  assert.equal(tetoDoPortao(2, false), 2);
+  assert.equal(tetoDoPortao(3, false), 3);
+  assert.equal(tetoDoPortao(4, false), 4);
+  assert.equal(tetoDoPortao(2, true), 3);
+  assert.equal(tetoDoPortao(3, true), 4);
+  assert.equal(tetoDoPortao(4, true), 5);
+  // Clamp para estados artesanais acima do roster máximo.
+  assert.equal(tetoDoPortao(9, false), 4);
+  assert.equal(tetoDoPortao(9, true), 5);
+});
 
 test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças', () => {
   const estado = estadoInicialDoTabuleiro();
