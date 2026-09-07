@@ -94,6 +94,7 @@ export type PercepcaoDeJogador = {
   readonly sanidade: number
   readonly emBaixaIluminacao: boolean
   readonly amedrontado: boolean
+  readonly protegido: boolean
   /**
    * Ordem de entrada na Sala (snapshot `jogadores[].ordem`, issue #226):
    * base da fila circular do Turno no HUD. Preservada nos deltas por spread

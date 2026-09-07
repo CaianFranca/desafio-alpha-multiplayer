@@ -24,6 +24,11 @@ function chaveDoInicio(partidaId: string): string {
   return `hud-cronometro-inicio:${partidaId}`
 }
 
+/** Guard único de partidaId opcional (ausente/null/'' = sem persistência). */
+function temPartidaId(partidaId: string | null | undefined): partidaId is string {
+  return partidaId !== null && partidaId !== undefined && partidaId !== ''
+}
+
 function lerInicio(chave: string): number | null {
   try {
     const bruto = window.sessionStorage.getItem(chave)
@@ -35,13 +40,28 @@ function lerInicio(chave: string): number | null {
   }
 }
 
+function persistirInicio(chave: string): void {
+  try {
+    window.sessionStorage.setItem(chave, String(Date.now()))
+  } catch {
+    // Sem persistência: o intervalo abaixo conta de forma incremental.
+  }
+}
+
+function limparInicio(chave: string): void {
+  try {
+    window.sessionStorage.removeItem(chave)
+  } catch {
+    // Sem persistência: nada a limpar.
+  }
+}
+
 function segundosDesde(inicio: number, agora: number = Date.now()): number {
   return Math.max(0, Math.floor((agora - inicio) / 1000))
 }
 
 function segundosIniciais(partidaId: string | null | undefined): number {
-  if (partidaId === null || partidaId === undefined || partidaId === '') return 0
-  if (typeof window === 'undefined') return 0
+  if (!temPartidaId(partidaId) || typeof window === 'undefined') return 0
   const inicio = lerInicio(chaveDoInicio(partidaId))
   return inicio === null ? 0 : segundosDesde(inicio)
 }
@@ -62,16 +82,12 @@ export function useCronometroDaPartida({ emAndamento, emResultado, partidaId = n
 
   useEffect(() => {
     // Resultado congela e dispensa o marco: sem intervalo e sem chave órfã.
-    if (emResultado && partidaId !== null && partidaId !== undefined && partidaId !== '') {
-      try {
-        window.sessionStorage.removeItem(chaveDoInicio(partidaId))
-      } catch {
-        // Sem persistência: nada a limpar.
-      }
+    if (emResultado && temPartidaId(partidaId)) {
+      limparInicio(chaveDoInicio(partidaId))
       return
     }
     if (!contando) return
-    if (partidaId === null || partidaId === undefined || partidaId === '') {
+    if (!temPartidaId(partidaId)) {
       const id = window.setInterval(() => {
         setSegundos((atual) => atual + 1)
       }, 1000)
@@ -80,13 +96,7 @@ export function useCronometroDaPartida({ emAndamento, emResultado, partidaId = n
       }
     }
     const chave = chaveDoInicio(partidaId)
-    if (lerInicio(chave) === null) {
-      try {
-        window.sessionStorage.setItem(chave, String(Date.now()))
-      } catch {
-        // Sem persistência: o intervalo abaixo conta de forma incremental.
-      }
-    }
+    if (lerInicio(chave) === null) persistirInicio(chave)
     const id = window.setInterval(() => {
       const marco = lerInicio(chave)
       if (marco === null) {

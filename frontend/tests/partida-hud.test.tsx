@@ -26,10 +26,10 @@ import type { UseSalaWebSocketReturn } from '../web/src/hooks/useSalaWebSocket'
 const MEU_JOGADOR_ID = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
 
 const JOGADORES_BASE: EstadoDaPartidaSnapshot['jogadores'] = [
-  { jogadorId: MEU_JOGADOR_ID, apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-  { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-  { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
-  { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false },
+  { jogadorId: MEU_JOGADOR_ID, apelido: 'JogadorTeste', cor: 'branco', ordem: 1, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+  { jogadorId: 'jogador-2', apelido: 'Ana', cor: 'vermelho', ordem: 2, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+  { jogadorId: 'jogador-3', apelido: 'Beto', cor: 'azul', ordem: 3, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+  { jogadorId: 'jogador-4', apelido: 'Cara', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
 ]
 
 function criarSnapshotBase(overrides: Partial<EstadoDaPartidaSnapshot> = {}): EstadoDaPartidaSnapshot {
@@ -335,8 +335,8 @@ describe('HUD da Partida — Sanidade e estados (#226 [3])', () => {
   })
 })
 
-describe('HUD da Partida — Turno em ordem fixa de entrada (#226 [4])', () => {
-  it('slots fixos na ordem de entrada; só o anel da vez transita', async () => {
+describe('HUD da Partida — Turno em fila circular a partir do ativo (#226 [4])', () => {
+  it('fila circular: os slots giram iniciando no Jogador Ativo, na ordem de entrada', async () => {
     const ws = await partidaDisponivel()
     act(() =>
       ws.simulateMessage({
@@ -350,12 +350,12 @@ describe('HUD da Partida — Turno em ordem fixa de entrada (#226 [4])', () => {
       within(screen.getByTestId('hud-turno'))
         .getAllByRole('img')
         .map((el) => el.getAttribute('data-jogador-id'))
-    // Slots fixos 1→2→3→4; anel no Beto.
-    expect(ordemDosSlots()).toEqual([MEU_JOGADOR_ID, 'jogador-2', 'jogador-3', 'jogador-4'])
+    // A leitura começa no ativo (Beto) e segue a ordem de entrada com wrap.
+    expect(ordemDosSlots()).toEqual(['jogador-3', 'jogador-4', MEU_JOGADOR_ID, 'jogador-2'])
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-3')
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('aria-label', 'Vez de Beto')
 
-    // A vez passa para o Cara: ninguém muda de lugar, só o anel transita.
+    // A vez passa para o Cara: a fila rotaciona para abrir nele.
     act(() =>
       ws.simulateMessage({
         type: 'ESTADO_DA_PARTIDA',
@@ -365,7 +365,7 @@ describe('HUD da Partida — Turno em ordem fixa de entrada (#226 [4])', () => {
     await waitFor(() =>
       expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-4'),
     )
-    expect(ordemDosSlots()).toEqual([MEU_JOGADOR_ID, 'jogador-2', 'jogador-3', 'jogador-4'])
+    expect(ordemDosSlots()).toEqual(['jogador-4', MEU_JOGADOR_ID, 'jogador-2', 'jogador-3'])
     expect(screen.getByTestId('hud-turno-anel-da-vez').parentElement).toContainElement(
       screen.getByTestId('hud-turno-ativo'),
     )
@@ -414,12 +414,29 @@ describe('HUD da Partida — conquistas redondas (#226 [5])', () => {
     ).toHaveClass('border-amber-300')
     expect(screen.getByTestId('hud-conquista-cartao')).toHaveClass('border-emerald-300')
   })
+
+  it('gerador duplicado no array não acende conquista em dobro (dedupe de IDs)', async () => {
+    const ws = await partidaDisponivel()
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({ geradoresLigados: ['gerador-1', 'gerador-1'] }),
+      }),
+    )
+    await screen.findByTestId('hud-da-partida')
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByTestId('hud-conquista-gerador').filter((el) => el.getAttribute('data-acesa') === 'true'),
+      ).toHaveLength(1),
+    )
+  })
 })
 
 describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
   const JOGADORES_HUD: Record<string, PercepcaoDeJogador> = {
-    [MEU_JOGADOR_ID]: { apelido: 'JogadorTeste', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 1 },
-    ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2 },
+    [MEU_JOGADOR_ID]: { apelido: 'JogadorTeste', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 1, protegido: false },
+    ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
   }
 
   function renderHudUnitario(props: { emAndamento: boolean; emResultado: boolean }) {

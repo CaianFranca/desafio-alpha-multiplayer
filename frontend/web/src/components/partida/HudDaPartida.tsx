@@ -14,7 +14,7 @@
  * mantidas com escala reduzida (portrait de celular fora do escopo).
  */
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS, type CorDoPeao } from '../../game/tabuleiro/contrato'
 import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
 import { useCronometroDaPartida } from './useCronometroDaPartida'
@@ -26,7 +26,7 @@ export interface HudDaPartidaProps {
   jogadorAtivoId: string | null
   /** Jogador local (Sessão autenticada); null quando desconhecido. */
   jogadorLocalId: string | null
-  /** pecaIds dos Geradores ligados (o length acende as conquistas). */
+  /** pecaIds dos Geradores ligados (os IDs únicos acendem as conquistas). */
   geradoresLigados: readonly string[]
   /** Cartão de Acesso obtido (Sala do Diretor). */
   cartaoDeAcessoObtido: boolean
@@ -55,7 +55,7 @@ interface JogadorOrdenado {
 
 /** Iniciais do Apelido para o avatar placeholder (cor do peão). */
 function iniciaisDoApelido(apelido: string): string {
-  const letras = apelido.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ0-9]/g, '')
+  const letras = apelido.replace(/[^\p{L}\p{N}]/gu, '')
   return (letras.slice(0, 2) || '??').toUpperCase()
 }
 
@@ -97,6 +97,50 @@ function ordenarPorOrdemDeEntrada(jogadorPorId: Readonly<Record<string, Percepca
     .sort((a, b) => a.dados.ordem - b.dados.ordem)
 }
 
+/**
+ * Fila circular do card de Turno (issue #226): a leitura dos "próximos"
+ * começa no Jogador Ativo e segue a ordem de entrada da Sala com wrap.
+ * Entre turnos (`jogadorAtivoId` null) e ativo desconhecido mantém a ordem
+ * de entrada — sem slot inventado.
+ */
+function ordenarCircularPorAtivo(
+  ordenados: readonly JogadorOrdenado[],
+  jogadorAtivoId: string | null,
+): readonly JogadorOrdenado[] {
+  if (jogadorAtivoId === null) return ordenados
+  const indice = ordenados.findIndex((j) => j.jogadorId === jogadorAtivoId)
+  if (indice === -1) return ordenados
+  return [...ordenados.slice(indice), ...ordenados.slice(0, indice)]
+}
+
+/**
+ * Cronômetro isolado do resto do HUD (revisão PR #279): o tick de 1×/s fica
+ * confinado a este subcomponente, então re-renderiza só o MM:SS — as 6
+ * regiões não reconciliam a cada segundo.
+ */
+function CronometroDoHud({
+  emAndamento,
+  emResultado,
+  partidaId = null,
+}: {
+  emAndamento: boolean
+  emResultado: boolean
+  partidaId?: string | null
+}) {
+  const { texto: tempo, segundos } = useCronometroDaPartida({ emAndamento, emResultado, partidaId })
+  return (
+    <span
+      data-testid="hud-cronometro"
+      data-segundos={String(segundos)}
+      role="timer"
+      aria-label={`Tempo de partida: ${tempo}`}
+      className="text-sm tabular-nums text-zinc-100"
+    >
+      {tempo}
+    </span>
+  )
+}
+
 // Anel de Sanidade ao redor do avatar do adversário: 3 arcos de 120° com
 // folga entre eles; o arco `i` acende quando `i < sanidade` (mesma linguagem
 // da barra segmentada local).
@@ -118,23 +162,31 @@ export function HudDaPartida({
   onSair,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
-  const { texto: tempo, segundos } = useCronometroDaPartida({ emAndamento, emResultado, partidaId })
 
-  const ordenados = ordenarPorOrdemDeEntrada(jogadorPorId)
+  // Ordenação estável: recomputada apenas quando o modelo muda — o cronômetro
+  // vive isolado em <CronometroDoHud>, então o tick de 1×/s não re-renderiza
+  // as 6 regiões (revisão PR #279).
+  const ordenados = useMemo(() => ordenarPorOrdemDeEntrada(jogadorPorId), [jogadorPorId])
   // Sem snapshot o HUD fica oculto (sem dados inventados — critério #226).
   if (ordenados.length === 0) return null
 
-  const local =
+  const jogadorLocal =
     (jogadorLocalId !== null ? ordenados.find((j) => j.jogadorId === jogadorLocalId) : undefined) ??
     ordenados.find((j) => j.jogadorId === jogadorAtivoId) ??
     ordenados[0]
   // Anel da vez: só pisca quando a vez é de fato do jogador local.
   const ehMinhaVez =
     jogadorLocalId !== null &&
-    local.jogadorId === jogadorLocalId &&
+    jogadorLocal.jogadorId === jogadorLocalId &&
     jogadorAtivoId === jogadorLocalId
-  const adversarios = ordenados.filter((j) => j.jogadorId !== local.jogadorId)
-  const geradoresAcesos = Math.min(geradoresLigados.length, ALVO_GERADORES_LIGADOS)
+  const adversarios = ordenados.filter((j) => j.jogadorId !== jogadorLocal.jogadorId)
+  // Fila circular do Turno (#226): a leitura começa no Jogador Ativo e segue
+  // a ordem de entrada com wrap. Só o card de Turno rotaciona — os avatares
+  // de adversários (sup-esq) mantêm a ordem de entrada fixa.
+  const ordemDoTurno = ordenarCircularPorAtivo(ordenados, jogadorAtivoId)
+  // Conquistas de Gerador: conta IDs ÚNICOS — um gerador repetido no array
+  // (ex.: snapshot com duplicata) não acende duas conquistas (revisão PR #279).
+  const geradoresAcesos = Math.min(new Set(geradoresLigados).size, ALVO_GERADORES_LIGADOS)
 
   return (
     <div
@@ -242,15 +294,7 @@ export function HudDaPartida({
         data-testid="hud-controles-partida"
         className="absolute right-6 top-6 flex origin-top-right scale-90 items-center gap-3 rounded bg-zinc-900/80 px-3 py-1.5 lg:scale-100"
       >
-        <span
-          data-testid="hud-cronometro"
-          data-segundos={String(segundos)}
-          role="timer"
-          aria-label={`Tempo de partida: ${tempo}`}
-          className="text-sm tabular-nums text-zinc-100"
-        >
-          {tempo}
-        </span>
+        <CronometroDoHud emAndamento={emAndamento} emResultado={emResultado} partidaId={partidaId} />
         <span
           data-testid="hud-volume"
           role="img"
@@ -309,7 +353,7 @@ export function HudDaPartida({
 
       {/* ── inf-esq: jogador local (retrato + Apelido + Sanidade + estados) ── */}
       <div className="absolute bottom-6 left-6 flex origin-bottom-left scale-90 flex-col gap-3 lg:scale-100">
-        <div data-testid="hud-jogador-local" data-jogador-id={local.jogadorId} className="flex items-center gap-3">
+        <div data-testid="hud-jogador-local" data-jogador-id={jogadorLocal.jogadorId} className="flex items-center gap-3">
           <div className="relative flex h-20 w-20 items-center justify-center">
             {ehMinhaVez ? (
               <span
@@ -320,40 +364,40 @@ export function HudDaPartida({
             ) : null}
             <div
               role="img"
-              aria-label={`Retrato de ${local.dados.apelido}${ehMinhaVez ? ', com a vez' : ''}`}
+              aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMinhaVez ? ', com a vez' : ''}`}
               className={`flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display text-2xl font-semibold transition-colors duration-500 ${
                 ehMinhaVez ? 'border-amber-300/40' : 'border-zinc-700'
               }`}
             >
               <ConteudoDoAvatar
-                apelido={local.dados.apelido}
-                cor={local.dados.cor}
-                imagemUrl={imagemPorJogador[local.jogadorId] ?? null}
+                apelido={jogadorLocal.dados.apelido}
+                cor={jogadorLocal.dados.cor}
+                imagemUrl={imagemPorJogador[jogadorLocal.jogadorId] ?? null}
               />
             </div>
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-100">
-              {local.dados.apelido}
+              {jogadorLocal.dados.apelido}
             </span>
             <span className="text-xs uppercase tracking-[0.18em] text-amber-300">Sanidade</span>
             <div
               data-testid="hud-sanidade"
-              data-sanidade={String(local.dados.sanidade)}
+              data-sanidade={String(jogadorLocal.dados.sanidade)}
               role="meter"
-              aria-label={`Sanidade ${local.dados.sanidade} de 3`}
+              aria-label={`Sanidade ${jogadorLocal.dados.sanidade} de 3`}
               aria-valuemin={0}
               aria-valuemax={3}
-              aria-valuenow={local.dados.sanidade}
+              aria-valuenow={jogadorLocal.dados.sanidade}
               className="flex gap-1"
             >
               {[0, 1, 2].map((indice) => (
                 <span
                   key={indice}
                   data-testid="hud-sanidade-segmento"
-                  data-preenchido={indice < local.dados.sanidade ? 'true' : 'false'}
+                  data-preenchido={indice < jogadorLocal.dados.sanidade ? 'true' : 'false'}
                   aria-hidden="true"
-                  className={`h-2 w-8 rounded-sm ${indice < local.dados.sanidade ? 'bg-amber-400' : 'bg-zinc-700'}`}
+                  className={`h-2 w-8 rounded-sm ${indice < jogadorLocal.dados.sanidade ? 'bg-amber-400' : 'bg-zinc-700'}`}
                 />
               ))}
             </div>
@@ -362,18 +406,18 @@ export function HudDaPartida({
         <div className="flex gap-2">
           <div
             data-testid="hud-card-baixa-iluminacao"
-            data-ativo={local.dados.emBaixaIluminacao ? 'true' : 'false'}
+            data-ativo={jogadorLocal.dados.emBaixaIluminacao ? 'true' : 'false'}
             role="status"
-            aria-label={local.dados.emBaixaIluminacao ? 'Baixa Iluminação ativa' : 'Baixa Iluminação inativa'}
+            aria-label={jogadorLocal.dados.emBaixaIluminacao ? 'Baixa Iluminação ativa' : 'Baixa Iluminação inativa'}
             className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
-              local.dados.emBaixaIluminacao
+              jogadorLocal.dados.emBaixaIluminacao
                 ? 'border-amber-400/70 bg-amber-400/10 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.35)]'
                 : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
             }`}
           >
             <span
               aria-hidden="true"
-              className={`block text-sm ${local.dados.emBaixaIluminacao ? 'text-amber-300' : 'text-zinc-600'}`}
+              className={`block text-sm ${jogadorLocal.dados.emBaixaIluminacao ? 'text-amber-300' : 'text-zinc-600'}`}
             >
               ◐
             </span>
@@ -381,18 +425,18 @@ export function HudDaPartida({
           </div>
           <div
             data-testid="hud-card-amedrontado"
-            data-ativo={local.dados.amedrontado ? 'true' : 'false'}
+            data-ativo={jogadorLocal.dados.amedrontado ? 'true' : 'false'}
             role="status"
-            aria-label={local.dados.amedrontado ? 'Amedrontado ativo' : 'Amedrontado inativo'}
+            aria-label={jogadorLocal.dados.amedrontado ? 'Amedrontado ativo' : 'Amedrontado inativo'}
             className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
-              local.dados.amedrontado
+              jogadorLocal.dados.amedrontado
                 ? 'border-red-400/70 bg-red-400/10 text-red-200 shadow-[0_0_16px_rgba(248,113,113,0.35)]'
                 : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
             }`}
           >
             <span
               aria-hidden="true"
-              className={`block text-sm ${local.dados.amedrontado ? 'text-red-300' : 'text-zinc-600'}`}
+              className={`block text-sm ${jogadorLocal.dados.amedrontado ? 'text-red-300' : 'text-zinc-600'}`}
             >
               ⚠
             </span>
@@ -456,9 +500,11 @@ export function HudDaPartida({
         </div>
       </div>
 
-      {/* ── inf-dir: Turno em slots fixos (ordem de entrada): só o anel da
-          vez transita entre os jogadores, ninguém muda de lugar ── */}
-      {ordenados.length > 0 ? (
+      {/* ── inf-dir: Turno em fila CIRCULAR a partir do Jogador Ativo (#226):
+          a leitura começa na vez atual e os próximos seguem a ordem de
+          entrada da Sala com wrap (o ativo abre a fila em destaque); sem
+          ativo (entre turnos) os slots seguem a ordem de entrada ── */}
+      {ordemDoTurno.length > 0 ? (
         <div
           data-testid="hud-turno"
           aria-label="Turno"
@@ -468,7 +514,7 @@ export function HudDaPartida({
             Turno
           </span>
           <div className="flex items-center gap-1.5">
-            {ordenados.map(({ jogadorId, dados }) => {
+            {ordemDoTurno.map(({ jogadorId, dados }) => {
               const ehAtivo = jogadorId === jogadorAtivoId
               return (
                 <div key={jogadorId} className="relative flex h-10 w-10 items-center justify-center">
