@@ -95,14 +95,18 @@ export function aplicarSnapshot(
     posicionadas.map((p) => [p.pecaId, p.celula] as const),
   )
 
-  const peoes: readonly PeaoDaExibicao[] = snapshot.tabuleiro.peoes.map((peao) => {
-    const celula = peao.pecaId !== null ? (mapPos.get(peao.pecaId) ?? null) : null
-    return {
-      peaoId: peao.peaoId,
-      cor: peao.cor,
-      celula: celula ? { linha: celula.linha, coluna: celula.coluna } : null,
-    }
-  })
+  // Roster variável N=2..4: filtra peões para N quando servidor ainda envia 4 (fallback)
+  const quantidadeSnapshot = snapshot.jogadores.length
+  const peoes: readonly PeaoDaExibicao[] = snapshot.tabuleiro.peoes
+    .slice(0, quantidadeSnapshot > 0 ? quantidadeSnapshot : snapshot.tabuleiro.peoes.length)
+    .map((peao) => {
+      const celula = peao.pecaId !== null ? (mapPos.get(peao.pecaId) ?? null) : null
+      return {
+        peaoId: peao.peaoId,
+        cor: peao.cor,
+        celula: celula ? { linha: celula.linha, coluna: celula.coluna } : null,
+      }
+    })
 
   // Toda Recebida do snapshot é da forma sorteada (#138): map direto para
   // PendenciaNoCliente, sem cast. `orientacao` da peça é copiado para que a
@@ -189,5 +193,6 @@ export function aplicarSnapshot(
     pecasRestantesNaCaixa: snapshot.tabuleiro.pecasRestantesNaCaixa ?? null,
     geradoresLigados: snapshot.geradoresLigados ?? [],
     cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido ?? false,
+    quantidadeDeJogadores: quantidadeSnapshot > 0 ? quantidadeSnapshot : null,
   }
 }

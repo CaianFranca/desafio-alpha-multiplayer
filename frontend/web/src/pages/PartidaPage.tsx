@@ -430,7 +430,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       // Projeção dos afetados (exceção de resgate #171 no espelho de destinos).
       afetadosPorPeaoId,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa
@@ -538,8 +538,37 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
   }, [requerModoPaisagem])
 
+  // N dinâmico da partida: jogadores reais do snapshot (fallback peoes length)
+  const quantidadeDeJogadores = useMemo(() => {
+    const doSnapshot = Object.keys(modelo.jogadorPorId).length
+    if (doSnapshot >= 2 && doSnapshot <= 4) return doSnapshot
+    if (modelo.peoes.length >= 2 && modelo.peoes.length <= 4) return modelo.peoes.length
+    return doSnapshot || modelo.peoes.length || 4
+  }, [modelo.jogadorPorId, modelo.peoes.length])
+  const textoVez = modelo.jogadorAtivoId ? (modelo.jogadorPorId[modelo.jogadorAtivoId]?.apelido ?? 'desconhecido') : 'nenhum'
+  const proxOrdem = useMemo(() => {
+    const ordem = Object.entries(modelo.jogadorPorId)
+      .map(([id, d]) => ({ id, ordem: d.ordem }))
+      .sort((a, b) => a.ordem - b.ordem)
+    const idx = ordem.findIndex((o) => o.id === modelo.jogadorAtivoId)
+    if (idx === -1) return ordem.map((o) => modelo.jogadorPorId[o.id]?.apelido ?? o.id).join(', ')
+    return [...ordem.slice(idx), ...ordem.slice(0, idx)].map((o) => modelo.jogadorPorId[o.id]?.apelido ?? o.id).join(' → ')
+  }, [modelo.jogadorPorId, modelo.jogadorAtivoId])
+
   return (
     <div className="relative h-screen w-screen overflow-hidden">
+      {/* Anúncio de estado da partida para leitor de tela com N real */}
+      <div
+        data-testid="anuncio-partida"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {estadoEmAndamento
+          ? `Partida com ${quantidadeDeJogadores} jogadores, rodada ${modelo.rodada ?? 1}, vez de ${textoVez}, ordem ${proxOrdem}, Portão teto ${quantidadeDeJogadores}`
+          : ''}
+      </div>
       <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
       <AmbienteDeJogo
         bordaPx={bordaPx}

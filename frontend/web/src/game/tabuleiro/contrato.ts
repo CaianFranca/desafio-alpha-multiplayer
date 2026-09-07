@@ -197,6 +197,17 @@ export interface EstadoExibicaoTabuleiro {
 /** 4 Peões, um por cor; ordem espelha `CORES_DOS_PEOES` do engine. */
 export const QUANTIDADE_PEOES = 4
 
+/** Quantidade válida de jogadores/peões/iniciais N=2..4, com clamp e fallback. */
+export function quantidadeValidaDeJogadores(quantidade: number): number {
+  if (!Number.isFinite(quantidade)) return QUANTIDADE_PEOES
+  return Math.max(2, Math.min(4, Math.floor(quantidade)))
+}
+
+/** Cores fatiadas para N jogadores, mantendo ordem canônica. */
+export function coresParaN(quantidade: number): readonly CorDoPeao[] {
+  return CORES_DOS_PEOES.slice(0, quantidadeValidaDeJogadores(quantidade))
+}
+
 /**
  * Alvo de Geradores ligados para a vitória (chip `Geradores n/3`, issue #145).
  * Espelha o limiar de vitória do engine (`geradoresLigados.length < 3` em
@@ -239,9 +250,10 @@ export const OFFSET_FILEIRA_PEOES_X = -8.0
 // a `inicial-4`, orientação 0) nascem fora da Caixa, aguardando encaixe no
 // Primeiro Turno. O resto das peças vem sorteado da Caixa (nunca semeado).
 
-/** Semente determinística das 4 Peças Iniciais (mesmos ids do engine). */
-export function criarIniciaisDaMesa(): PecaDaMesa[] {
-  return [1, 2, 3, 4].map((ordem) => ({
+/** Semente determinística das N Peças Iniciais (mesmos ids do engine, N=2..4). */
+export function criarIniciaisDaMesa(quantidade: number = QUANTIDADE_PEOES): PecaDaMesa[] {
+  const n = quantidadeValidaDeJogadores(quantidade)
+  return Array.from({ length: n }, (_, i) => i + 1).map((ordem) => ({
     pecaId: `inicial-${ordem}`,
     tipo: 'inicial' as const,
     orientacao: 0 as const,
@@ -452,9 +464,14 @@ export function ehPecaDeMonstro(tipo: TipoDaPeca): boolean {
 /**
  * Teto de ocupação do Portão de Saída (espelha peoes.ts:558 e
  * partida.ts:1490): a reunião dos peões no Portão é condição de vitória;
- * as demais peças continuam no máximo 1.
+ * as demais peças continuam no máximo 1. Para N jogadores, teto = N.
  */
 export const TETO_DE_OCUPACAO_DO_PORTAO = 4
+
+/** Teto dinâmico do Portão para N jogadores (fallback 4 quando N fora de 2..4). */
+export function tetoDeOcupacaoDoPortaoParaN(quantidadeDeJogadores: number): number {
+  return quantidadeValidaDeJogadores(quantidadeDeJogadores)
+}
 
 /** Classe do destino: movimento comum ou resgate de peão afetado. */
 export type TipoDeDestinoDoPeao = 'movimento' | 'resgate'
@@ -508,9 +525,9 @@ export function destinosConectadosDoPeao(
     const ocupantes = peoes.filter(
       (p) => p.peaoId !== peaoId && p.celula !== null && chaveCelula(p.celula) === chave,
     )
-    // (3) teto espelhado: Portão 4, demais 1; +1 com afetado na peça.
+    // (3) teto espelhado: Portão N, demais 1; +1 com afetado na peça.
     const tetoBase =
-      peca.tipo === 'portao_de_saida' ? TETO_DE_OCUPACAO_DO_PORTAO : 1
+      peca.tipo === 'portao_de_saida' ? tetoDeOcupacaoDoPortaoParaN(peoes.length) : 1
     const temAfetado = ocupantes.some((p) => afetadosPorPeaoId.has(p.peaoId))
     const teto = temAfetado ? tetoBase + 1 : tetoBase
     if (ocupantes.length >= teto) continue
@@ -519,8 +536,9 @@ export function destinosConectadosDoPeao(
   return destinos
 }
 
-/** Posição mundo da fileira de peões sobre a Mesa (índice = posição em `peoes`). */
-export function peaoMesaParaMundo(indice: number): [number, number, number] {
-  const z = (indice - (QUANTIDADE_PEOES - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA
+/** Posição mundo da fileira de peões sobre a Mesa (índice = posição em `peoes`, quantidade = N). */
+export function peaoMesaParaMundo(indice: number, quantidadeDePeoes: number = QUANTIDADE_PEOES): [number, number, number] {
+  const n = quantidadeValidaDeJogadores(quantidadeDePeoes)
+  const z = (indice - (n - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA
   return [OFFSET_FILEIRA_PEOES_X, 0, z]
 }

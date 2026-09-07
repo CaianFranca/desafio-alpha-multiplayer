@@ -130,7 +130,7 @@ export function SalaPage() {
                 {possuiSala ? `Sala ${sala.codigoDeSala}` : 'Criar Sala'}
               </h1>
               <p className="text-white/60 text-sm leading-relaxed max-w-sm mt-2">
-                Reúna sua equipe de 4 investigadores. O Monte Sérion aguarda. A sanidade é escassa, a cooperação é vital.
+                Reúna sua equipe de 2 a 4 investigadores. O Monte Sérion aguarda. A sanidade é escassa, a cooperação é vital.
               </p>
             </div>
 
