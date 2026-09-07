@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Redis } from 'ioredis';
 import {
+  agendarAbandono,
   cancelarAbandono,
   configurarAbandono,
   definirBroadcasterParaAbandono,
+  definirRedisParaAbandono,
   rearmarAbandonosAposRestart,
   verificarEAbandonarSeNecessario,
 } from '../src/partidas/abandono.ts';
@@ -203,6 +205,43 @@ test('A4: DEL falho não chuta sockets (só após cancelarPartida=true)', async 
     assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
   } finally {
     definirBroadcasterParaAbandono({ encerrarPorAbandono() {} });
+    cancelarAbandono(PARTIDA_ID);
+  }
+});
+
+test('A5: fire sem redis global reagenda em vez de explodir', async () => {
+  const avisos: unknown[][] = [];
+  const originalWarn = console.warn;
+  (console as unknown as { warn: unknown }).warn = (...args: unknown[]) => {
+    avisos.push(args);
+  };
+  try {
+    definirRedisParaAbandono(undefined);
+    configurarAbandono(undefined, 90);
+    agendarAbandono(PARTIDA_ID, 5);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(
+      avisos.some((a) => String(a[0]).includes('sem redis')),
+      `deveria avisar e reagendar, avisos: ${JSON.stringify(avisos)}`,
+    );
+  } finally {
+    (console as unknown as { warn: unknown }).warn = originalWarn;
+    cancelarAbandono(PARTIDA_ID);
+  }
+});
+
+test('A5: redis injetado no agendamento é usado (assinatura compatível)', async () => {
+  const redis = {
+    async get(): Promise<null> {
+      return null;
+    },
+  } as unknown as Redis;
+  try {
+    definirRedisParaAbandono(undefined);
+    configurarAbandono(undefined, 90);
+    agendarAbandono(PARTIDA_ID, 5, redis);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
     cancelarAbandono(PARTIDA_ID);
   }
 });

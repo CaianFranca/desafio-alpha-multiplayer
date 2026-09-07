@@ -65,12 +65,20 @@ export function configurarAbandono(
   abandonoSegundos = segundos;
 }
 
-export function agendarAbandono(partidaId: string, delayMs?: number): void {
+export function agendarAbandono(partidaId: string, delayMs?: number, redis?: Redis): void {
   cancelarAbandono(partidaId);
   const ms = delayMs ?? abandonoSegundos * 1000;
   const timer = setTimeout(() => {
     timers.delete(partidaId);
-    void verificarEAbandonarSeNecessario(globalRedis!, partidaId);
+    const client = redis ?? globalRedis;
+    if (client === undefined) {
+      // Sem wiring de Redis (ex.: inversão futura): reagenda em vez de
+      // explodir em promise void e perder o abandono em silêncio.
+      console.warn('[abandono] sem redis para verificar; reagendando', { partidaId });
+      agendarAbandono(partidaId, ms, redis);
+      return;
+    }
+    void verificarEAbandonarSeNecessario(client, partidaId);
   }, ms);
   if (typeof timer.unref === 'function') timer.unref();
   timers.set(partidaId, timer);
@@ -86,7 +94,7 @@ export function cancelarAbandono(partidaId: string): void {
 
 let globalRedis: Redis | undefined;
 let globalBroadcaster: { encerrarPorAbandono(partidaId: string, code?: number, reason?: string): void } | undefined;
-export function definirRedisParaAbandono(redis: Redis): void {
+export function definirRedisParaAbandono(redis: Redis | undefined): void {
   globalRedis = redis;
 }
 export function definirBroadcasterParaAbandono(broadcaster: { encerrarPorAbandono(partidaId: string, code?: number, reason?: string): void }): void {
