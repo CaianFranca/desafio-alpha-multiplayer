@@ -7,6 +7,9 @@
  * humano via screenshot) e o contrato da zona da Caixa segue inalterado.
  */
 
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   BANDEJA_LARGURA,
   BANDEJA_PROFUNDIDADE,
@@ -68,5 +71,30 @@ describe('modelos 3D da zona da Caixa', () => {
     // Ordem da zona +X, de trás (−z) para frente (+z): Caixa → bandeja → iniciais.
     expect(POSICAO_CAIXA[2]).toBeLessThan(POSICAO_BANDEJA[2])
     expect(POSICAO_BANDEJA[2]).toBeLessThan(POSICAO_INICIAIS[2])
+  })
+
+  it('GLBs sem extensões obrigatórias fora do padrão: textura carrega no three atual', () => {
+    // Regressão da caixa branca: o GLB original usava
+    // KHR_materials_pbrSpecularGlossiness (removida do GLTFLoader atual), e o
+    // mapa embutido caía — o material renderizava branco. Todo material dos
+    // 2 GLBs precisa levar a textura pelo caminho padrão (baseColorTexture).
+    const raiz = join(dirname(fileURLToPath(import.meta.url)), '..')
+    const arquivos: Record<string, string> = {
+      caixa: 'web/public/assets/3d-models/wooden_box_with_maori_carving.glb',
+      cesta: 'web/public/assets/3d-models/serving_tray_model__realistic.glb',
+    }
+    for (const relativo of Object.values(arquivos)) {
+      const bytes = readFileSync(join(raiz, relativo))
+      expect(bytes.subarray(0, 4).toString('ascii')).toBe('glTF')
+      const tamanhoJson = bytes.readUInt32LE(12)
+      const glb = JSON.parse(bytes.subarray(20, 20 + tamanhoJson).toString('utf-8'))
+      expect(glb.extensionsRequired ?? []).toEqual([])
+      expect(glb.materials.length).toBeGreaterThan(0)
+      for (const material of glb.materials) {
+        expect(material?.pbrMetallicRoughness?.baseColorTexture?.index).toEqual(
+          expect.any(Number),
+        )
+      }
+    }
   })
 })

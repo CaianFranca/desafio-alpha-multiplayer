@@ -58,10 +58,9 @@ export class MockWebSocket {
   }
 }
 
-// @ts-expect-error overwrite global for tests
+// @types/node declara o global WebSocket: o mock atribui sem supressão.
 global.WebSocket = MockWebSocket as unknown as typeof WebSocket
 // garante OPEN no global para o hook comparar
-// @ts-expect-error ensure static property
 if ((global.WebSocket as unknown as { OPEN?: number }).OPEN === undefined) {
   // @ts-expect-error assign
   global.WebSocket.OPEN = 1
