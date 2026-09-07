@@ -71,6 +71,13 @@ const Y_CORPO = 0.08
  */
 const RELEVO_TOPO_NORMAL_SCALE: readonly [number, number] = [1.6, 1.6]
 
+/**
+ * Intensidade da emissão própria do topo (só Vulto tem `emissiveMap`):
+ * ponto único de ajuste do brilho da aparição — 0 apaga, 1 é o neutro,
+ * acima disso estoura para o branco. Afinado por screenshot no jogo.
+ */
+export const INTENSIDADE_EMISSAO_DO_TOPO = 0.4
+
 interface CorpoProps extends PecaPlaceholderProps {
   destacada: boolean
   corDestaque: string
@@ -122,9 +129,10 @@ function usarClique(
 /**
  * Corpo final: caixa lisa nas mesmas dimensões, face superior (`material-2`,
  * +y — mesmo precedente da Mesa em `AmbienteCena`) com map (sRGB) +
- * normalMap (linear) do tipo, motivo girando com a `orientacao`; laterais
- * neutras. O topo ignora o tone mapping da cena (fiel à textura); o destaque
- * é contorno por casca invertida, sem emissivo sobre a textura.
+ * normalMap (linear) do tipo, motivo girando com a `orientacao`; tipos
+ * assombrados somam o `emissiveMap` próprio (só Vulto); laterais neutras.
+ * O topo ignora o tone mapping da cena (fiel à textura); o destaque de
+ * seleção segue por contorno em casca invertida, sem interferir na emissão.
  */
 function CorpoTexturizado({
   tipo,
@@ -134,14 +142,18 @@ function CorpoTexturizado({
   cursor,
   onClick,
 }: CorpoProps) {
-  const { map, normalMap } = texturaDaPeca(tipo)
-  const [mapCarregado, normalCarregado] = useLoader(THREE.TextureLoader, [
-    map,
-    normalMap,
-  ])
+  const { map, normalMap, emissiveMap } = texturaDaPeca(tipo)
+  // Terceiro slot sempre carregado (reaproveita o normal quando o tipo não
+  // tem emissão — o useLoader cacheia por URL, sem fetch extra): mantém os
+  // hooks estáveis quando a instância troca de tipo (ex.: corrente da
+  // bandeja entre sorteios).
+  const [mapCarregado, normalCarregado, emissaoCarregada] = useLoader(
+    THREE.TextureLoader,
+    [map, normalMap, emissiveMap ?? normalMap],
+  )
   // Clona para não mutar o cache do useLoader (precedente da Mesa): cor no
   // map, dado linear no normal; centro no meio para girar o motivo.
-  const { mapaTopo, normalTopo } = useMemo(() => {
+  const { mapaTopo, normalTopo, emissaoTopo } = useMemo(() => {
     const rotacao = rotacaoDoMotivo(orientacao)
     const mapa = mapCarregado.clone()
     mapa.colorSpace = THREE.SRGBColorSpace
@@ -152,8 +164,15 @@ function CorpoTexturizado({
     normal.center.set(0.5, 0.5)
     normal.rotation = rotacao
     normal.needsUpdate = true
-    return { mapaTopo: mapa, normalTopo: normal }
-  }, [mapCarregado, normalCarregado, orientacao])
+    // Emissão própria do tipo (só Vulto): mesmo giro do motivo, cor no
+    // emissivo; `emissive` branco em intensidade 1 — o mapa dita o brilho.
+    const emissao = emissaoCarregada.clone()
+    emissao.colorSpace = THREE.SRGBColorSpace
+    emissao.center.set(0.5, 0.5)
+    emissao.rotation = rotacao
+    emissao.needsUpdate = true
+    return { mapaTopo: mapa, normalTopo: normal, emissaoTopo: emissao }
+  }, [mapCarregado, normalCarregado, emissaoCarregada, orientacao])
 
   const cursorHandlers = handlersDeCursor(cursor)
   const handleClick = usarClique(onClick)
@@ -173,6 +192,9 @@ function CorpoTexturizado({
           map={mapaTopo}
           normalMap={normalTopo}
           normal-scale={RELEVO_TOPO_NORMAL_SCALE}
+          emissiveMap={emissiveMap ? emissaoTopo : undefined}
+          emissive={emissiveMap ? '#ffffff' : '#000000'}
+          emissiveIntensity={INTENSIDADE_EMISSAO_DO_TOPO}
           toneMapped={false}
         />
         <meshStandardMaterial attach="material-3" color={COR_LATERAL} />
