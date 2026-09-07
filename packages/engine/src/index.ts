@@ -154,6 +154,8 @@ export {
   registrarFalhaDoEncaminhamento,
   registrarReinicioDaSala,
   sairDaSala,
+  // @internal (#222): bypass de sala encaminhada abandonada — só após
+  // `partidaDaSalaEstaOrfa` confirmar a orfandade. Ver JSDoc em lobby.ts.
   sairDaSalaEncaminhadaAbandonada,
 } from './lobby.ts';
 

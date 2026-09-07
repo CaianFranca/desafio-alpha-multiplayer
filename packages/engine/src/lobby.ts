@@ -550,6 +550,13 @@ export function entrarNaSala(
 
 export const admitirMembro = entrarNaSala;
 
+/**
+ * Bypass de saída para sala `encaminhada` cuja partida foi abandonada (#222).
+ *
+ * @internal Só chame após `partidaDaSalaEstaOrfa` confirmar a orfandade — a
+ * função confia no chamador e não verifica o Redis. Uso fora desse guarda
+ * libera sala indevidamente.
+ */
 export function sairDaSalaEncaminhadaAbandonada(
   estado: EstadoDoLobby,
   comando: SairDaSalaComando,
