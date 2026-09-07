@@ -42,14 +42,6 @@
  * os alvos que seriam válidos (permanecer/mover) retornam rejeição com motivo
  * `posicao_confirmada` — espelhando o FORA_DA_VEZ do servidor; alvos
  * inválidos seguem silenciosos (null).
- *
- * Gate do PERMANECER por `movimentouNoTurno` (revisão PR #309): como
- * PEAO_MOVIDO mantém o Peão selecionado (#263), o clique no próprio Peão
- * após mover rotearia para PERMANECER — que o engine rejeita com
- * ENCERRAMENTO_INVALIDO (mover já consumiu a decisão do turno). Com
- * `movimentouNoTurno` o clique no próprio Peão fica silencioso; o caminho
- * canônico de encerrar após mover é confirmar → encerrar, e o botão
- * Permanecer só vale ANTES de mover.
  */
 
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao'
@@ -102,14 +94,6 @@ export interface EstadoInteracaoPeoes {
   readonly pecaSelecionadaId: string | null
   /** A posição do Peão do Jogador Ativo já foi confirmada neste turno (POSICAO_CONFIRMADA). */
   readonly posicaoConfirmadaNoTurno: boolean
-  /**
-   * O Peão do Jogador Ativo já se moveu neste turno (PEAO_MOVIDO marca a fase
-   * no espelho — issue #118). Com o movimento consumado, PERMANECER perde o
-   * sentido (o engine rejeita com ENCERRAMENTO_INVALIDO — revisão PR #309):
-   * o clique no próprio Peão após mover fica silencioso; encerrar depois de
-   * mover é confirmar → encerrar, e Permanecer só vale ANTES de mover.
-   */
-  readonly movimentouNoTurno: boolean
   /**
    * Recebida "puxada" da bandeja (fluxo aprovado na revisão #199 da issue
    * #143): estado visual LOCAL do jogador — fora do modelo autoritativo.
@@ -249,13 +233,10 @@ export function mapearDesselecaoDePeao(
  * responde RECEBIMENTO_GERADO quando o contexto gera Recebimento). No
  * próprio Peão (já selecionado) → PERMANECER (AC 5) — ou null quando há
  * Recebidas pendentes (permanência exige tudo posicionado e re-seleção não
- * emite comando) ou quando o Peão já se moveu no turno
- * (`movimentouNoTurno` — revisão PR #309: após mover, PERMANECER é
- * ENCERRAMENTO_INVALIDO no engine; o clique fica silencioso). Com
- * pendências, clicar em OUTRO Peão não emite comando e retorna rejeição
- * local (espelha PENDENCIA_NAO_RESOLVIDA). Peão inexistente → null (não
- * reage). Gate "Inicial primeiro" (#249): sem a própria Inicial posicionada,
- * SELECIONAR_PEAO é silencioso (null).
+ * emite comando). Com pendências, clicar em OUTRO Peão não emite comando e
+ * retorna rejeição local (espelha PENDENCIA_NAO_RESOLVIDA). Peão
+ * inexistente → null (não reage). Gate "Inicial primeiro" (#249): sem a
+ * própria Inicial posicionada, SELECIONAR_PEAO é silencioso (null).
  */
 export function mapearCliqueNoPeao(
   estado: EstadoInteracaoPeoes,
@@ -265,13 +246,11 @@ export function mapearCliqueNoPeao(
   if (!peao) return null
   if (peao.peaoId === estado.peaoSelecionadoId) {
     // Próprio Peão: permanência (AC 5) exige Peão posicionado e tudo
-    // posicionado; sobre a Mesa, com Recebidas pendentes ou após mover no
-    // turno → null (silencioso). Posição já confirmada neste turno →
-    // rejeição âmbar (AC3, review #165).
+    // posicionado; sobre a Mesa ou com Recebidas pendentes → null. Posição
+    // já confirmada neste turno → rejeição âmbar (AC3, review #165).
     if (peao.celula === null) return null
     if (haRecebidasPendentes(estado)) return null
     if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
-    if (estado.movimentouNoTurno) return null
     return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
   }
   if (haRecebidasPendentes(estado)) {
@@ -500,11 +479,8 @@ export function mapearPosicionarRecebida(
  * Clique no próprio Peão ou na Peça sob ele (ambos na célula do Peão
  * selecionado) → PERMANECER. Exige tudo posicionado (US 15: recebidas
  * pendentes antes de permanecer → não reage). Posição já confirmada neste
- * turno → rejeição âmbar (AC3). Após mover no turno (`movimentouNoTurno`) →
- * silencioso (null — revisão PR #309: PERMANECER pós-movimento é
- * ENCERRAMENTO_INVALIDO no engine; encerrar depois de mover é confirmar →
- * encerrar). Fora da célula do Peão, Peão não selecionado ou ainda sobre a
- * Mesa → null (não reage).
+ * turno → rejeição âmbar (AC3). Fora da célula do Peão, Peão não selecionado
+ * ou ainda sobre a Mesa → null (não reage).
  */
 export function mapearPermanencia(
   estado: EstadoInteracaoPeoes,
@@ -517,7 +493,6 @@ export function mapearPermanencia(
   if (!peao || peao.celula === null) return null
   if (chaveCelula(peao.celula) !== chaveCelula(celula)) return null
   if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
-  if (estado.movimentouNoTurno) return null
   return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
 }
 
@@ -627,8 +602,7 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  * Sem pendências, com peão selecionado (ciclo ativo — inclusive sobre a
  * Mesa, invariante binário #249):
  *   - célula do próprio peão → PERMANECER (ou rejeição âmbar se a posição já
- *     foi confirmada — AC3; silencioso se o peão já se moveu no turno —
- *     revisão PR #309).
+ *     foi confirmada — AC3).
  *   - destino conectado → MOVER_PEAO (ou rejeição âmbar pós-confirmação).
  *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO.
  *   - demais → null (com ciclo ativo o chamador NÃO aplica o fallback ST-09:

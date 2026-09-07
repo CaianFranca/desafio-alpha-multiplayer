@@ -71,7 +71,6 @@ function estadoBase(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPe
     peaoSelecionadoId: null,
     pecaSelecionadaId: null,
     posicaoConfirmadaNoTurno: false,
-    movimentouNoTurno: false,
     ...opts,
   }
 }
@@ -101,7 +100,6 @@ function estadoComMock(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteraca
     peaoSelecionadoId: 'peao-1-branco',
     pecaSelecionadaId: null,
     posicaoConfirmadaNoTurno: false,
-    movimentouNoTurno: false,
     ...opts,
   }
 }
@@ -405,35 +403,6 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
       tipo: 'comando',
       comando: { type: 'PERMANECER', peaoId: 'peao-1-branco' },
     })
-  })
-
-  it('clique no próprio peão após mover no turno é silencioso (PERMANECER inválido — revisão PR #309)', () => {
-    // PEAO_MOVIDO mantém a seleção (#263); PERMANECER pós-movimento o engine
-    // rejeita com ENCERRAMENTO_INVALIDO — o clique no próprio Peão fica mudo.
-    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
-      movimentouNoTurno: true,
-    })
-    expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toBeNull()
-    expect(mapearPermanencia(estado, INICIAL)).toBeNull()
-  })
-
-  it('permanência pós-movimento: o Peão já movido (célula nova) também fica silencioso', () => {
-    // Peão movido para a reta-1: clique na célula da nova Peça → sem PERMANECER.
-    const estado: EstadoInteracaoPeoes = {
-      ...estadoBase(),
-      posicionadas: [
-        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
-        pecaPosicionada('reta-1', 'reta', 90, 3, 4),
-      ],
-      peoes: [
-        peao('peao-1-branco', { linha: 3, coluna: 4 }),
-        peao('peao-2-vermelho', null),
-      ],
-      peaoSelecionadoId: 'peao-1-branco',
-      movimentouNoTurno: true,
-    }
-    expect(mapearPermanencia(estado, { linha: 3, coluna: 4 })).toBeNull()
-    expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toBeNull()
   })
 
   it('clique na Peça sob o peão emite PERMANECER (mesma célula do peão)', () => {
@@ -903,19 +872,6 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     })
   })
 
-  it('célula do próprio peão após mover → silencioso (rota não emite PERMANECER inválido)', () => {
-    // Revisão PR #309: com a seleção mantida pós-movimento (#263), o clique no
-    // próprio peão não roteia PERMANECER (o engine rejeitaria com
-    // ENCERRAMENTO_INVALIDO) — o roteador fica mudo; encerrar é confirmar →
-    // encerrar.
-    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
-      movimentouNoTurno: true,
-    })
-    expect(
-      rotearCliqueDeCelula(estado, estadoTabuleiro(estado), INICIAL),
-    ).toBeNull()
-  })
-
   it('destino conectado → MOVER_PEAO', () => {
     const estado = estadoComMock()
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), { linha: 3, coluna: 4 })).toEqual({
@@ -1296,7 +1252,6 @@ describe('desseleção autoritativa do peão (issue #249)', () => {
       peaoSelecionadoId: null,
       pecaSelecionadaId: null,
       posicaoConfirmadaNoTurno: false,
-      movimentouNoTurno: false,
       ...opts,
     }
   }

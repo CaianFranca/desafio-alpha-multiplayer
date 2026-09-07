@@ -287,7 +287,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
       jogadorId: JOGADOR_ID,
     })
 
-    // ── 10. PEAO_MOVIDO mantém a seleção: o peão segue selecionado ──
+    // ── 10. PEAO_MOVIDO limpa a seleção: destinos deixam de reagir ──
     act(() => {
       ws.simulateMessage({
         type: 'PEAO_MOVIDO',
@@ -297,10 +297,9 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         celula: { linha: 2, coluna: 3 },
       })
     })
-    expect(peaoDoEspelho('branco').getAttribute('data-selecionado')).toBe('true')
+    expect(peaoDoEspelho('branco').getAttribute('data-selecionado')).toBe('false')
     const comandosAteAqui = ws.sentMessages.length
-    // Clique em célula vazia (sem peça em manipulação): nada enviado —
-    // sem seleção de peça fantasma → sem POSICIONAR_PECA.
+    // Clique em célula vazia SEM seleção: sem seleção fantasma → nada enviado.
     await user.click(celulaDoEspelho(3, 4))
     expect(ws.sentMessages).toHaveLength(comandosAteAqui)
   })
@@ -702,11 +701,10 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     const recusas = toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_DE_RECUSA)
     expect(recusas).toHaveLength(1)
     expect(recusas[0]).toMatchObject({ volume: VOLUME_BASE_SOM_DE_RECUSA })
-    // 1 clique de seleção (#242): apenas o primeiro PEAO_SELECIONADO; a
-    // re-seleção pós-confirmação não representa seleção nova porque o
-    // PEAO_MOVIDO manteve o peão selecionado (issue #263) — sem debounce
-    // temporal, revisão PR #254, spec #238.
-    expect(toquesDeAudio.filter((t) => t.src === SOM_CAMINHO_CLIQUE_PEAO)).toHaveLength(1)
+    // 2 cliques de seleção (#242): o primeiro antes do movimento, o segundo na
+    // re-seleção pós-confirmação (seleção nova — sem debounce temporal,
+    // revisão PR #254, spec #238).
+    expect(toquesDeAudio.filter((t) => t.src === SOM_CAMINHO_CLIQUE_PEAO)).toHaveLength(2)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('posicao_confirmada')
