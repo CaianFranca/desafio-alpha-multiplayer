@@ -33,7 +33,7 @@ export { chaveDaPartida, chaveDoEstadoDaPartida };
 
 /**
  * Grava o estado inicial da partida no Redis com o TTL da partida preparada.
- * O domínio exige sucesso (roster com exatamente 4 jogadores únicos); a falha
+ * O domínio exige sucesso (roster com de 2 a 4 jogadores únicos); a falha
  * é propagada para o rollback em `criarPartidaPreparada`. `KEEPTTL` não é
  * usado aqui pois a chave ainda não existe.
  */
