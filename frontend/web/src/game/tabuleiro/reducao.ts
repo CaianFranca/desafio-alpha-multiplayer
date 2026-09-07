@@ -527,9 +527,19 @@ export function reduzirEvento(
       // mesmo lote, então o tipo é resolvido no estado anterior — a peça ainda
       // está em `posicionadas`; `pecasDeRecebimento` é o fallback se ela já
       // saiu do tabuleiro local em outro lote.
+      // Proteção da Sala Médica (issue #225): o wire traz o estado RESULTANTE
+      // do ator (`evento.protegido` já inclui concessão da Sala Médica e consumo
+      // do ataque do MESMO gatilho) — projeta sem derivar.
       const tipo =
         estado.posicionadas.find((p) => p.pecaId === evento.pecaId)?.tipo ??
         estado.pecasDeRecebimento[evento.pecaId]
+      const anteriorProtegido = estado.jogadorPorId[evento.jogadorId]
+      const jogadorPorIdComProtecao = anteriorProtegido
+        ? {
+            ...estado.jogadorPorId,
+            [evento.jogadorId]: { ...anteriorProtegido, protegido: evento.protegido },
+          }
+        : estado.jogadorPorId
       return {
         ...estado,
         posicaoConfirmadaNoTurno: true,
@@ -539,6 +549,7 @@ export function reduzirEvento(
             : estado.geradoresLigados,
         cartaoDeAcessoObtido:
           estado.cartaoDeAcessoObtido || tipo === 'sala_do_diretor',
+        jogadorPorId: jogadorPorIdComProtecao,
       }
     }
 
@@ -570,14 +581,18 @@ export function reduzirEvento(
       }
     }
 
-    // ── Monstros e estados (ST-15, issue #174) ──
+    // ── Monstros e estados (ST-15, issue #174) — Proteção (issue #225) ──
     case 'ATAQUE_RESOLVIDO': {
       // estadosAplicados carrega o estado resultante por Jogador mudado
       // (Baixa Iluminação, sanidade, Amedrontado) — issue #173. O cliente
       // apenas projeta no dicionário, sem derivar (mesma semântica do
       // snapshot). Ataque sem alvos ⇒ array vazio — estado permanece, a
       // recusa (som) é tratada na camada PartidaPage.
-      if (evento.estadosAplicados.length === 0) {
+      // Proteção (issue #225): `protegidos` lista os Jogadores cuja Proteção
+      // foi consumida nesta resolução — zera `protegido` no modelo. Jogadores
+      // já Amedrontados/protegidos não aparecem em `estadosAplicados`, então
+      // o consumo precisa ser tratado à parte; snapshot reconcilia em seguida.
+      if (evento.estadosAplicados.length === 0 && evento.protegidos.length === 0) {
         return estado
       }
       // Atualiza apenas jogadores já conhecidos via snapshot; eventos antes do
@@ -595,6 +610,13 @@ export function reduzirEvento(
           emBaixaIluminacao: aplicado.emBaixaIluminacao,
           amedrontado: aplicado.amedrontado,
         }
+      }
+      for (const jogadorId of evento.protegidos) {
+        const anterior = jogadorPorId[jogadorId]
+        if (!anterior) continue
+        if (!anterior.protegido) continue
+        mudou = true
+        jogadorPorId[jogadorId] = { ...anterior, protegido: false }
       }
       return mudou ? { ...estado, jogadorPorId } : estado
     }
