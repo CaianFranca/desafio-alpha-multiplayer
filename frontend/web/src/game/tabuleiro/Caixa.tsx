@@ -26,6 +26,7 @@ import {
 import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 import {
   AJUSTES_DOS_MODELOS_DA_CAIXA,
+  TEXTURA_OBSCURO_DA_CESTA,
   modeloDaCaixa,
   type AjusteDoModeloDaCaixa,
 } from './modelosDaCaixa'
@@ -109,6 +110,11 @@ interface ModeloNormalizadoProps {
   alturaMaxima?: number
   ajuste: AjusteDoModeloDaCaixa
   url: string
+  /**
+   * Albedo próprio sobre o GLB (só a cesta): substitui o `map` dos materiais
+   * do modelo, preservando normal/roughness dele. `undefined` = cor do GLB.
+   */
+  mapUrl?: string
 }
 
 /**
@@ -127,6 +133,7 @@ function ModeloNormalizado({
   alturaMaxima,
   ajuste,
   url,
+  mapUrl,
 }: ModeloNormalizadoProps) {
   const gltf = useLoader(GLTFLoader, url)
   const { objeto, escala, deslocamento } = useMemo(() => {
@@ -167,8 +174,51 @@ function ModeloNormalizado({
   return (
     <group scale={[escala, escala, escala]} rotation={[0, ajuste.rotacaoY, 0]}>
       <primitive object={objeto} position={deslocamento} />
+      {mapUrl ? <AlbedoSobreModelo objeto={objeto} mapUrl={mapUrl} /> : null}
     </group>
   )
+}
+
+/**
+ * Albedo próprio sobre o clone do modelo (só a cesta): substitui o `map` de
+ * todos os materiais, preservando normal/roughness do GLB. Componente
+ * separado para o `useLoader` da textura não correr na Caixa (sem `mapUrl`
+ * o gancho nem monta — hooks do pai seguem estáveis).
+ */
+function AlbedoSobreModelo({
+  objeto,
+  mapUrl,
+}: {
+  objeto: THREE.Object3D
+  mapUrl: string
+}) {
+  const mapaProprio = useLoader(THREE.TextureLoader, mapUrl)
+  // Aplica no clone durante o render (mesma fase do clone no pai):
+  // idempotente e síncrono, então o primeiro frame já sai com o albedo.
+  // O memo retorna a textura (regra de hooks) e o `void` abaixo marca o
+  // uso: o valor real já foi aplicado nos materiais do clone.
+  const albedo = useMemo((): THREE.Texture => {
+    // Clone sRGB (precedente da Mesa): não muta o cache do useLoader.
+    const albedo = mapaProprio.clone()
+    albedo.colorSpace = THREE.SRGBColorSpace
+    albedo.needsUpdate = true
+    objeto.traverse((filho) => {
+      if (filho instanceof THREE.Mesh) {
+        const materiais = Array.isArray(filho.material)
+          ? filho.material
+          : [filho.material]
+        for (const material of materiais) {
+          if (material instanceof THREE.MeshStandardMaterial) {
+            material.map = albedo
+            material.needsUpdate = true
+          }
+        }
+      }
+    })
+    return albedo
+  }, [objeto, mapaProprio])
+  void albedo
+  return null
 }
 
 /** Corpo da Caixa: GLB `wooden_box` normalizado na pegada `CAIXA_*`. */
@@ -184,7 +234,7 @@ function ModeloDaCaixa() {
   )
 }
 
-/** Visual da bandeja: GLB `serving_tray` normalizado na pegada `BANDEJA_*`. */
+/** Visual da bandeja: GLB `serving_tray` com o albedo `obscuro` na pegada `BANDEJA_*`. */
 function ModeloDaCesta() {
   return (
     <ModeloNormalizado
@@ -192,6 +242,7 @@ function ModeloDaCesta() {
       profundidade={BANDEJA_PROFUNDIDADE}
       ajuste={AJUSTES_DOS_MODELOS_DA_CAIXA.cesta}
       url={modeloDaCaixa('cesta')}
+      mapUrl={TEXTURA_OBSCURO_DA_CESTA}
     />
   )
 }

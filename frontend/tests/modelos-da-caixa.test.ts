@@ -3,8 +3,8 @@
  *
  * Só comportamento externo observável, nunca detalhe interno de material ou
  * asset: os 2 modelos resolvem URLs distintas sob `assets/3d-models/` com
- * extensão `.glb`, o ajuste fino nasce neutro (parametrizado para o feedback
- * humano via screenshot) e o contrato da zona da Caixa segue inalterado.
+ * extensão `.glb`, o ajuste fino guarda os tamanhos finais aprovados pelo PO
+ * via screenshot e o contrato da zona da Caixa segue inalterado.
  */
 
 import { readFileSync } from 'node:fs'
@@ -24,6 +24,7 @@ import {
   AJUSTES_DOS_MODELOS_DA_CAIXA,
   MODELOS_DA_CAIXA,
   NOMES_DOS_MODELOS_DA_CAIXA,
+  TEXTURA_OBSCURO_DA_CESTA,
   modeloDaCaixa,
 } from '../web/src/game/tabuleiro/modelosDaCaixa'
 
@@ -49,14 +50,20 @@ describe('modelos 3D da zona da Caixa', () => {
     )
   })
 
-  it('ajuste fino nasce neutro e parametrizado (escala 1, sem giro)', () => {
+  it('ajuste fino parametrizado por modelo (ponto do feedback humano)', () => {
+    // Os valores são afinados por screenshot no jogo — o teste guarda a
+    // forma (escala positiva finita, giro finito), nunca os números.
     for (const nome of NOMES_DOS_MODELOS_DA_CAIXA) {
       const ajuste = AJUSTES_DOS_MODELOS_DA_CAIXA[nome]
-      expect(ajuste.escala).toBe(1)
-      expect(ajuste.rotacaoY).toBe(0)
+      expect(ajuste.escala).toBeGreaterThan(0)
       expect(Number.isFinite(ajuste.escala)).toBe(true)
       expect(Number.isFinite(ajuste.rotacaoY)).toBe(true)
     }
+  })
+
+  it('cesta usa o albedo obscuro sob assets/textures/', () => {
+    expect(TEXTURA_OBSCURO_DA_CESTA).toContain('assets/textures/')
+    expect(TEXTURA_OBSCURO_DA_CESTA.endsWith('obscuro.jpg')).toBe(true)
   })
 
   it('contrato da zona da Caixa inalterado: posições e pegadas', () => {

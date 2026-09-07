@@ -42,6 +42,14 @@ export function modeloDaCaixa(nome: NomeDoModeloDaCaixa): string {
 }
 
 /**
+ * Textura de albedo da cesta (visual da bandeja): `obscuro.jpg` sobre o GLB
+ * `serving_tray` — o normal/roughness do próprio modelo são preservados, só
+ * a cor vem desta textura (sRGB, fiel ao arquivo).
+ */
+export const TEXTURA_OBSCURO_DA_CESTA =
+  `${baseAssets()}assets/textures/obscuro.jpg`
+
+/**
  * Ajuste fino pós-normalização, por modelo — ponto único para o feedback
  * humano de orientação/escala (via screenshot):
  * - `escala`: multiplicador sobre a escala uniforme que cabe o modelo na
@@ -58,6 +66,8 @@ export const AJUSTES_DOS_MODELOS_DA_CAIXA: Record<
   NomeDoModeloDaCaixa,
   AjusteDoModeloDaCaixa
 > = {
+  // Tamanhos finais aprovados pelo PO via screenshot (prevalecem sobre o
+  // "tamanho inalterado" da issue #274): caixa imponente, cesta contida.
   caixa: { escala: 4, rotacaoY: 2 },
   cesta: { escala: 2, rotacaoY: 1.5 },
 }

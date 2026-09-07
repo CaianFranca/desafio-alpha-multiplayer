@@ -77,7 +77,8 @@ export const CELULA_INSET = TAMANHO_CELULA * 0.98
 export const ESPESSURA_BORDA = 0.04
 export const BORDA_OFFSET = 0.02
 export const BORDA_Y = 0.01
-export const COR_BORDA_CELULA = '#f2e0b6'
+/** Bordas da grade: cinza-grafite escuro, coerente com o fundo `obscuro`. */
+export const COR_BORDA_CELULA = '#2e3138'
 export const CELULA_Y_BASE = 0.012
 export const CELULA_Y_BORDA = 0.018
 export const PECA_Y = 0.02

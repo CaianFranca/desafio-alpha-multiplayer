@@ -1,8 +1,8 @@
 /**
  * Texturas das peças (issues #275/#276/#277, spec #273).
  *
- * Seam puro: `TipoDaPeca → { map, normalMap }` cobrindo os 10 tipos com os 30
- * JPGs já commitados em `web/public/assets/textures/` (servidos sob
+ * Seam puro: `TipoDaPeca → { map, normalMap, emissiveMap }` cobrindo os 10
+ * tipos com os 30 JPGs já commitados em `web/public/assets/textures/` (servidos sob
  * `import.meta.env.BASE_URL + assets/textures/…`, empacotados no `dist` via
  * `publicDir` — ver `frontend/vite.config.ts`). Sem three.js/DOM: só URLs e
  * o ângulo do motivo por orientação — testável em jsdom.
@@ -10,15 +10,15 @@
 
 import type { Orientacao, TipoDaPeca } from './contrato'
 
-/** Par de texturas de um tipo de peça: cor (sRGB) + relevo (linear). */
+/** Texturas de um tipo de peça: cor (sRGB) + relevo (linear) + emissão (sRGB). */
 export interface TexturaDaPeca {
   readonly map: string
   readonly normalMap: string
   /**
-   * Mapa de emissão próprio (sRGB, opcional): só os tipos assombrados têm —
-   * o motivo claro emite luz própria sobre o topo escuro (ex.: Vulto).
+   * Mapa de emissão próprio (sRGB): os 10 tipos têm — o motivo claro emite
+   * luz própria sobre o topo (aparições, geradores, caminhos).
    */
-  readonly emissiveMap?: string
+  readonly emissiveMap: string
 }
 
 function baseAssets(): string {
@@ -106,6 +106,14 @@ export const TIPOS_COM_TEXTURA: readonly TipoDaPeca[] = [
 export function texturaDaPeca(tipo: TipoDaPeca): TexturaDaPeca {
   return TEXTURAS_DAS_PECAS[tipo]
 }
+
+/**
+ * Fundo do grid do tabuleiro: `obscuro.jpg` contínuo sobre as 7×7 células
+ * (cada célula amostra 1/7 da textura — a escuridão atravessa o tabuleiro
+ * inteiro, coerente com a Limpeza). URL pura, testável em jsdom.
+ */
+export const TEXTURA_OBSCURO_DA_GRADE =
+  `${baseAssets()}assets/textures/obscuro.jpg`
 
 /**
  * Rotação do motivo pela orientação da peça (radianos, para
