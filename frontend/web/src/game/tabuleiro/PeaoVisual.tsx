@@ -15,7 +15,7 @@ interface PeaoVisualProps {
   ativo?: boolean
   /**
    * Baixa Iluminação do jogador dono (issue #297): troca o avatar 3D do
-   * Diretor para a variante *apagado*; sem avatar no slot, é ignorado.
+   * peão para a variante *apagado*; sem avatar no slot, é ignorado.
    */
   emBaixaIluminacao?: boolean
   /** Clique simples seleciona; sem handler, o peão é inerte ao ponteiro. */
@@ -23,12 +23,11 @@ interface PeaoVisualProps {
 }
 
 /**
- * Facade do peão (issue #297): slot com avatar 3D (Diretor, slot 0 —
- * Enfermeira, slot 1 — Janitor, slot 2) renderiza o `PeaoAvatar` (GLBs
- * cacheados); apenas o slot 3 (Paciente, issue #299) segue no
- * `PeaoPlaceholder` de primitivas — sem baixar os GLBs. O placeholder também
- * cobre a suspensão do carregamento do avatar (progressivo, sem flash de
- * privilégio para quem não tem os assets ainda).
+ * Facade do peão (issue #297): os 4 slots (0 — Diretor, 1 — Enfermeira,
+ * 2 — Janitor, 3 — Paciente) têm avatar 3D e renderizam o `PeaoAvatar`
+ * (GLBs cacheados). O `PeaoPlaceholder` de primitivas agora é apenas o
+ * fallback do `Suspense` durante o carregamento do avatar (progressivo, sem
+ * flash de privilégio para quem ainda não tem os assets baixados).
  */
 export function PeaoVisual({
   cor,
