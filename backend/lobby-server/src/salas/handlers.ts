@@ -1239,7 +1239,18 @@ export class SalasHandlers {
         const proj = await this.projecao.obterEstadoSala(salaId);
         partidaId = proj?.encaminhamento?.partidaId ?? null;
       }
-      if (!partidaId) return true;
+      if (!partidaId) {
+        // Fail-closed: sem partida nas duas primeiras fontes, consulta a
+        // terceira (encaminhamento persistido) antes de liberar. Se as 3
+        // concordarem em "sem partida", não libera — a sala segue o caminho
+        // existente de expiração/TTL em vez de bypass silencioso.
+        const encaminhado = await this.repo.obterEncaminhamento(salaId).catch(() => null);
+        if (encaminhado === null) {
+          console.warn('[salas] sala sem partida nas 3 fontes; mantida até expiração', { salaId });
+          return false;
+        }
+        partidaId = encaminhado.partidaId;
+      }
       const chave = `game-server:partida:${partidaId}`;
       const existe = await this.redis.exists(chave);
       if (existe === 1) {
