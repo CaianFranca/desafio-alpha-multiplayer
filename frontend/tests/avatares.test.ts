@@ -1,10 +1,10 @@
 /**
- * Avatares 3D dos peões (issue #297, spec #296).
+ * Avatares 3D dos peões (issues #297 e #300, spec #296).
  *
  * Só comportamento externo observável do seam puro: o slot por cor espelha a
- * ordem canônica do engine, o mapa de slots aponta os 2 GLBs do Diretor (só
- * slot 0 nesta etapa) e a derivação de Baixa Iluminação projeta o estado do
- * Vulto por peão. Nada de three.js/DOM — jsdom-safe.
+ * ordem canônica do engine, o mapa de slots aponta os 2 GLBs do Diretor e da
+ * Enfermeira (slots 0 e 1 nesta etapa) e a derivação de Baixa Iluminação
+ * projeta o estado do Vulto por peão. Nada de three.js/DOM — jsdom-safe.
  */
 
 import { CORES_DOS_PEOES } from '../web/src/game/tabuleiro/contrato'
@@ -18,7 +18,7 @@ import {
   type SanidadePorPeao,
 } from '../web/src/game/tabuleiro/reducao'
 
-describe('avatares dos peões (issue #297)', () => {
+describe('avatares dos peões (issues #297 e #300)', () => {
   it('slot espelha a ordem canônica do engine (branco = 0 = Diretor)', () => {
     expect(CORES_DOS_PEOES).toEqual(['branco', 'vermelho', 'azul', 'amarelo'])
     expect(slotDoAvatar('branco')).toBe(0)
@@ -27,9 +27,10 @@ describe('avatares dos peões (issue #297)', () => {
     expect(slotDoAvatar('amarelo')).toBe(3)
   })
 
-  it('só o slot 0 (Diretor) tem avatar nesta etapa; demais seguem placeholder', () => {
+  it('slots 0 (Diretor) e 1 (Enfermeira) têm avatar; demais seguem placeholder', () => {
     expect(temAvatarNoSlot(0)).toBe(true)
-    for (const slot of [1, 2, 3, -1, 4]) {
+    expect(temAvatarNoSlot(1)).toBe(true)
+    for (const slot of [2, 3, -1, 4]) {
       expect(temAvatarNoSlot(slot)).toBe(false)
     }
   })
@@ -41,6 +42,16 @@ describe('avatares dos peões (issue #297)', () => {
     expect(avatar?.urlAcesa.endsWith('diretor_base_acesa.glb')).toBe(true)
     expect(avatar?.urlApagada).toContain('assets/')
     expect(avatar?.urlApagada.endsWith('diretor_base_apagado.glb')).toBe(true)
+    expect(avatar?.urlAcesa).not.toBe(avatar?.urlApagada)
+  })
+
+  it('mapa do slot 1 aponta os 2 GLBs da Enfermeira servidos por URL', () => {
+    const avatar = AVATARES_POR_SLOT.get(1)
+    expect(avatar).toBeDefined()
+    expect(avatar?.urlAcesa).toContain('assets/')
+    expect(avatar?.urlAcesa.endsWith('enfermeira_base_acesa.glb')).toBe(true)
+    expect(avatar?.urlApagada).toContain('assets/')
+    expect(avatar?.urlApagada.endsWith('enfermeira_base_apagada.glb')).toBe(true)
     expect(avatar?.urlAcesa).not.toBe(avatar?.urlApagada)
   })
 
