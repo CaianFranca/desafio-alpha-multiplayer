@@ -4,6 +4,17 @@ import { cancelarPartida, obterPartida } from './partidas.ts';
 import type { AvisoDeRetorno } from '../retorno/cliente.ts';
 
 const ABANDONO_IMEDIATO_MS = 10_000;
+// Anti-thundering-herd (A1): o rearme pós-restart reagenda N partidas de uma
+// vez; sem dispersão, as expirações simultâneas atingem a fila mononodo do
+// lobby em rajada (timeout 5s → 503 → retry amplifica).
+const JITTER_REARME_MS = 5_000;
+const REARME_SCAN_COUNT = 500;
+const REARME_ROSTER_VAZIO_MS = 1_000;
+const REARME_TETO_MS = 5_000;
+
+function jitterAte(maxMs: number): number {
+  return Math.floor(Math.random() * (maxMs + 1));
+}
 const timers = new Map<string, NodeJS.Timeout>();
 let notificarRetorno: ((aviso: AvisoDeRetorno) => Promise<void>) | undefined;
 let abandonoSegundos = 90;
@@ -96,13 +107,16 @@ export async function verificarAbandonoAposDesconexao(redis: Redis, partidaId: s
 
 export async function rearmarAbandonosAposRestart(redis: Redis): Promise<void> {
   globalRedis = redis;
+  let verificadas = 0;
+  let reagendadas = 0;
   try {
     let cursor = '0';
     do {
-      const [next, keys] = await redis.scan(cursor, 'MATCH', 'game-server:partida:*', 'COUNT', 100);
+      const [next, keys] = await redis.scan(cursor, 'MATCH', 'game-server:partida:*', 'COUNT', REARME_SCAN_COUNT);
       cursor = next;
       for (const key of keys) {
         if (key.startsWith('game-server:partida-estado:')) continue;
+        verificadas += 1;
         const raw = await redis.get(key);
         if (raw === null) continue;
         try {
@@ -113,22 +127,31 @@ export async function rearmarAbandonosAposRestart(redis: Redis): Promise<void> {
           if (ttl === -2) continue;
           const todosEmReconexao = (partida.roster as Array<{ presenca: string }> | undefined)?.every((m) => m.presenca === 'em_reconexao') ?? false;
           if (todosEmReconexao) {
-            agendarAbandono(partida.partidaId, ABANDONO_IMEDIATO_MS);
+            agendarAbandono(partida.partidaId, ABANDONO_IMEDIATO_MS + jitterAte(JITTER_REARME_MS));
+            reagendadas += 1;
             continue;
           }
           if (idadeMs >= abandonoSegundos * 1000) {
             if ((partida.roster as unknown[] | undefined)?.length === 0) {
-              void verificarEAbandonarSeNecessario(redis, partida.partidaId);
+              agendarAbandono(partida.partidaId, REARME_ROSTER_VAZIO_MS + jitterAte(JITTER_REARME_MS));
             } else {
-              agendarAbandono(partida.partidaId, 5000);
+              agendarAbandono(partida.partidaId, REARME_TETO_MS + jitterAte(JITTER_REARME_MS));
             }
+            reagendadas += 1;
           } else {
+            // Ramo `restante`: já é naturalmente disperso (idade varia por
+            // partida), então mantém o delay exato sem jitter para não
+            // estourar o teto documentado de 90s.
             const restante = abandonoSegundos * 1000 - idadeMs;
             agendarAbandono(partida.partidaId, restante);
+            reagendadas += 1;
           }
         } catch {}
       }
+      // Yield por lote: não monopoliza o event loop no boot com N partidas.
+      await new Promise<void>((resolve) => setImmediate(resolve));
     } while (cursor !== '0');
+    console.info('[abandono] rearme concluído', { verificadas, reagendadas });
   } catch (err) {
     console.error('[abandono] falha ao rearmar abandonos', { erro: (err as Error).message });
   }
