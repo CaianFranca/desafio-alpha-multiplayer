@@ -1460,6 +1460,7 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
       peaoSelecionadoId: estado.peaoSelecionadoId,
       pecaSelecionadaId: estado.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: estado.posicaoConfirmadaNoTurno,
+      movimentouNoTurno: estado.movimentouNoTurno,
     }
     const estadoTabuleiro = {
       iniciais: estado.iniciais,
@@ -1493,6 +1494,7 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
       peaoSelecionadoId: destravado.peaoSelecionadoId,
       pecaSelecionadaId: destravado.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: destravado.posicaoConfirmadaNoTurno,
+      movimentouNoTurno: destravado.movimentouNoTurno,
     })).toBe(false)
     expect(
       mapearCliqueNaPecaDaMesa(
@@ -1503,6 +1505,7 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
           peaoSelecionadoId: destravado.peaoSelecionadoId,
           pecaSelecionadaId: destravado.pecaSelecionadaId,
           posicaoConfirmadaNoTurno: destravado.posicaoConfirmadaNoTurno,
+          movimentouNoTurno: destravado.movimentouNoTurno,
         },
         {
           iniciais: destravado.iniciais,
