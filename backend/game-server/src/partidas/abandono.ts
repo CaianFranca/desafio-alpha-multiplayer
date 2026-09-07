@@ -15,6 +15,44 @@ const REARME_TETO_MS = 5_000;
 function jitterAte(maxMs: number): number {
   return Math.floor(Math.random() * (maxMs + 1));
 }
+
+// Pipeline mínimo usado no rearme (A2): GET + TTL por chave em 1 RTT.
+// Mantém o boot O(lotes) em vez de O(chaves) sob N partidas simultâneas.
+interface PipelineDeLeitura {
+  get(chave: string): unknown;
+  ttl(chave: string): unknown;
+  exec(): Promise<Array<[Error | null, unknown]> | null>;
+}
+
+interface LinhaDoLote {
+  readonly chave: string;
+  readonly raw: string | null;
+  readonly ttl: number;
+}
+
+async function lerLoteDoRearme(redis: Redis, chaves: string[]): Promise<LinhaDoLote[]> {
+  const uteis = chaves.filter((chave) => !chave.startsWith('game-server:partida-estado:'));
+  const fábrica = (redis as unknown as { pipeline?: unknown }).pipeline;
+  if (typeof fábrica !== 'function') {
+    // Fallback sequencial (ex.: fakes de teste sem pipeline).
+    const lote: LinhaDoLote[] = [];
+    for (const chave of uteis) {
+      lote.push({ chave, raw: await redis.get(chave), ttl: await redis.ttl(chave) });
+    }
+    return lote;
+  }
+  const pipeline = (fábrica as () => PipelineDeLeitura).call(redis);
+  for (const chave of uteis) {
+    pipeline.get(chave);
+    pipeline.ttl(chave);
+  }
+  const respostas = (await pipeline.exec()) ?? [];
+  return uteis.map((chave, i) => ({
+    chave,
+    raw: (respostas[i * 2]?.[1] as string | null) ?? null,
+    ttl: Number(respostas[i * 2 + 1]?.[1] ?? -2),
+  }));
+}
 const timers = new Map<string, NodeJS.Timeout>();
 let notificarRetorno: ((aviso: AvisoDeRetorno) => Promise<void>) | undefined;
 let abandonoSegundos = 90;
@@ -114,16 +152,16 @@ export async function rearmarAbandonosAposRestart(redis: Redis): Promise<void> {
     do {
       const [next, keys] = await redis.scan(cursor, 'MATCH', 'game-server:partida:*', 'COUNT', REARME_SCAN_COUNT);
       cursor = next;
-      for (const key of keys) {
-        if (key.startsWith('game-server:partida-estado:')) continue;
-        verificadas += 1;
-        const raw = await redis.get(key);
+      const lote = await lerLoteDoRearme(redis, keys);
+      verificadas += lote.length;
+      for (const linha of lote) {
+        const raw = linha.raw;
         if (raw === null) continue;
         try {
           const partida = JSON.parse(raw) as { partidaId: string; estado: string; criadaEm: string; roster?: unknown[] };
           if (partida.estado !== 'preparada') continue;
           const idadeMs = Date.now() - Date.parse(partida.criadaEm);
-          const ttl = await redis.ttl(key);
+          const ttl = linha.ttl;
           if (ttl === -2) continue;
           const todosEmReconexao = (partida.roster as Array<{ presenca: string }> | undefined)?.every((m) => m.presenca === 'em_reconexao') ?? false;
           if (todosEmReconexao) {

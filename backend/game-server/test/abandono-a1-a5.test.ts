@@ -68,3 +68,59 @@ test('A1: rearme usa COUNT 500 no SCAN (anti-thundering-herd)', async () => {
     cancelarAbandono(PARTIDA_ID);
   }
 });
+
+test('A2: rearme lê o lote via pipeline (GET + TTL em 1 RTT)', async () => {
+  const store = new Map<string, string>([[CHAVE_PARTIDA, partidaPreparadaJson()]]);
+  const comandos: Array<{ cmd: string; chave: string }> = [];
+  let pipelines = 0;
+  let execs = 0;
+  const redis = {
+    async scan(_cursor: string, ...args: unknown[]): Promise<[string, string[]]> {
+      const idx = args.indexOf('MATCH');
+      const pattern = idx >= 0 ? String(args[idx + 1]) : '*';
+      const prefixo = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern;
+      return ['0', [...store.keys()].filter((k) => k.startsWith(prefixo))];
+    },
+    pipeline() {
+      pipelines += 1;
+      return {
+        get(chave: string) {
+          comandos.push({ cmd: 'get', chave });
+        },
+        ttl(chave: string) {
+          comandos.push({ cmd: 'ttl', chave });
+        },
+        async exec(): Promise<Array<[Error | null, unknown]>> {
+          execs += 1;
+          const out: Array<[Error | null, unknown]> = [];
+          for (const c of comandos) {
+            out.push([null, c.cmd === 'get' ? (store.get(c.chave) ?? null) : 100]);
+          }
+          return out;
+        },
+      };
+    },
+    async get(): Promise<never> {
+      throw new Error('deveria usar pipeline, não GET sequencial');
+    },
+    async ttl(): Promise<never> {
+      throw new Error('deveria usar pipeline, não TTL sequencial');
+    },
+  } as unknown as Redis;
+  configurarAbandono(undefined, 90);
+  try {
+    await rearmarAbandonosAposRestart(redis);
+    assert.equal(pipelines, 1, 'deveria abrir 1 pipeline por lote');
+    assert.equal(execs, 1, 'deveria executar o pipeline do lote');
+    assert.deepEqual(
+      comandos,
+      [
+        { cmd: 'get', chave: CHAVE_PARTIDA },
+        { cmd: 'ttl', chave: CHAVE_PARTIDA },
+      ],
+      'pipeline deveria enfileirar GET + TTL da chave da partida',
+    );
+  } finally {
+    cancelarAbandono(PARTIDA_ID);
+  }
+});
