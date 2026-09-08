@@ -422,6 +422,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       posicionadas: modelo.posicionadas,
       recebidasPendentes: modelo.recebidasPendentes,
       peaoSelecionadoId: modelo.peaoSelecionadoId,
+      // Fallback da sequência pendente (#326): se o espelho ficar sem seleção
+      // pós-confirmação, vagas/escolha/destaque usam o peão do Jogador Ativo.
+      peaoDoTurnoId:
+        modelo.jogadorAtivoId !== null
+          ? (modelo.peaoPorJogador[modelo.jogadorAtivoId] ?? null)
+          : null,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
       // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no

@@ -15,6 +15,7 @@ import {
   mapearMovimentacao,
   mapearPermanencia,
   mapearPosicionarRecebida,
+  peaoDeReferenciaDaSequencia,
   peaoSobreAMesa,
   podeSelecionarPeao,
   puxadaVigenteNaBandeja,
@@ -1519,5 +1520,68 @@ describe('integração dos 8 passos da issue #249 (ordem Inicial-primeiro)', () 
       tipo: 'comando',
       comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' },
     })
+  })
+})
+
+describe('fallback do peão do turno com pendências (issue #326)', () => {
+  const posicionadas = [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)]
+  const pendencias = [pendencia('recebida-reta-1', 'reta-1', 'reta', null, null)]
+
+  test('com seleção nula e pendências, vagas e escolha usam o peão do turno', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    const vagas = vagasDisponiveisDoPeao(estado)
+    assert.ok(vagas.length > 0, 'fallback deveria derivar vagas do peão do turno')
+
+    const comando = mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', vagas[0]!.borda)
+    assert.equal(comando?.type, 'ESCOLHER_VAGA_DA_PECA_RECEBIDA')
+    assert.equal((comando as { recebidaId?: string }).recebidaId, 'recebida-reta-1')
+  })
+
+  test('sem pendências, o fallback não atua (comportamento inalterado)', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: [],
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
+    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
+    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
+  })
+
+  test('seleção vigente tem precedência sobre o peão do turno', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: 'peao-branco',
+      peaoDoTurnoId: 'peao-vermelho',
+      peoes: [peao('peao-branco', INICIAL), peao('peao-vermelho', null)],
+    })
+
+    assert.equal(peaoDeReferenciaDaSequencia(estado), 'peao-branco')
+    assert.ok(vagasDisponiveisDoPeao(estado).length > 0)
+  })
+
+  test('sem fallback disponível (peão do turno nulo), segue silencioso', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: null,
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
+    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
+    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
   })
 })
