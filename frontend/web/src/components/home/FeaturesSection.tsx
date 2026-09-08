@@ -37,10 +37,10 @@ function useReveal<T extends HTMLElement>() {
 
 const featureIcons: Record<string, string> = {
   'Cooperação': '/assets/group_icon.svg',
-  'Exploração': '/assets/explore_icon.svg',
-  'Minigames': '/assets/psychologt_icon.svg',
-  'Monstros': '/assets/visibility_icon.svg',
-  'Sanidade': '/assets/sound_detection_glass_break_icon.svg',
+  'O tabuleiro vivo': '/assets/explore_icon.svg',
+  'Iluminação & visibilidade': '/assets/visibility_icon.svg',
+  'Salas estratégicas': '/assets/psychologt_icon.svg',
+  'Ameaças sobrenaturais': '/assets/sound_detection_glass_break_icon.svg',
 }
 
 function FeaturesRevealItem({ index, children }: { index: number; children: ReactNode }) {

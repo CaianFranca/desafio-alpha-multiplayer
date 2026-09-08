@@ -4,24 +4,21 @@
    sem equivalente 1:1, fica no CSS). */
 
 @layer components {
-  /* Hero: fundo com sangria de 14% (parallax só via `transform` JS/rAF)
-     + overlay em gradiente para contraste AA. */
+  /* Hero: fundo com sangria de 14% (parallax só via `transform` JS/rAF).
+     Sem overlay — legibilidade via sombra de texto em `#hero`. */
   .hero-media {
     position: absolute;
     inset: -14% 0;
     background: var(--background-image-hero) center 35% / cover no-repeat, var(--color-background);
     will-change: transform;
   }
-  .hero-media::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      to bottom,
-      rgba(5, 5, 7, 0.8),
-      rgba(5, 5, 7, 0.62) 42%,
-      rgba(5, 5, 7, 0.86)
-    );
+  /* Texto da Hero legível sem véu: sombra sobre a imagem. */
+  #hero h1,
+  #hero p {
+    text-shadow:
+      0 1px 3px rgba(0, 0, 0, 0.9),
+      0 2px 12px rgba(0, 0, 0, 0.85),
+      0 0 1px rgba(0, 0, 0, 0.9);
   }
 
   /* Reveal escalonado da Hero (só `opacity` + `transform`, reveal único;

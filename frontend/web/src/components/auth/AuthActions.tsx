@@ -4,7 +4,7 @@ import { SalaWebSocketContext } from '../../state/sala-web-socket-context'
 import { CtaLink } from '../ui/CtaLink'
 
 /** Rótulo único da ação de criar sala, compartilhado por cabeçalho e seções. */
-export const criarSalaLabel = 'Criar/Entrar Sala'
+export const criarSalaLabel = 'Criar / Entrar na Sala'
 /** Rótulo do CTA quando o jogador já está em uma sala (melhor-esforço). */
 export const retornarParaSalaLabel = 'Retornar para Sala'
 
@@ -16,7 +16,7 @@ export function AuthActions({ className }: AuthActionsProps) {
   const { authState } = useAuth()
   // O provider (SalaWebSocketProvider) normalmente envolve o App; quando
   // renderizado fora dele (ex.: testes com router customizado), o contexto é
-  // null e o rótulo cai para o padrão "Criar/Entrar Sala" (melhor-esforço).
+  // null e o rótulo cai para o padrão "Criar / Entrar na Sala" (melhor-esforço).
   const value = useContext(SalaWebSocketContext)
   const emSala = value?.sala != null
 
