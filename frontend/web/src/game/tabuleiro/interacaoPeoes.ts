@@ -98,6 +98,13 @@ export interface EstadoInteracaoPeoes {
   /** Recebidas aguardando escolha de vaga e encaixe (bloqueiam a seleção de outro Peão). */
   readonly recebidasPendentes: readonly PendenciaNoCliente[]
   readonly peaoSelecionadoId: string | null
+  /**
+   * Peão do Jogador Ativo da vez (fonte: PartidaPage, do snapshot/turno).
+   * Fallback da sequência pendente (#326): se o espelho ficou sem seleção
+   * (dessincronia pós-confirmação), as vagas/escolha usam o peão do turno —
+   * o engine preserva a seleção do peão confirmado enquanto há pendências.
+   */
+  readonly peaoDoTurnoId?: PeaoId | null
   /** Peça em foco: após a escolha da vaga (#138), o pecaId da Recebida sorteada. */
   readonly pecaSelecionadaId: string | null
   /** A posição do Peão do Jogador Ativo já foi confirmada neste turno (POSICAO_CONFIRMADA). */
@@ -324,10 +331,24 @@ function celulaVizinhaNaBorda(celula: Celula, borda: BordaCardinal): Celula | nu
   return vizinha
 }
 
+/**
+ * Peão de referência da sequência pendente (#326): a seleção vigente; com
+ * Recebidas pendentes e espelho dessincronizado (seleção nula pós-confirmação
+ * em bases sem a re-seleção do mover), o Peão do Jogador Ativo cobre a
+ * sequência — o engine mantém a seleção do Peão confirmado até o Encerramento.
+ * Sem pendências, a referência é só a seleção (comportamento inalterado).
+ */
+export function peaoDeReferenciaDaSequencia(
+  estado: EstadoInteracaoPeoes,
+): string | null {
+  if (estado.peaoSelecionadoId !== null) return estado.peaoSelecionadoId
+  return haRecebidasPendentes(estado) ? (estado.peaoDoTurnoId ?? null) : null
+}
+
 export function vagasDisponiveisDoPeao(
   estado: EstadoInteracaoPeoes,
 ): { borda: BordaCardinal; celula: Celula }[] {
-  const peaoId = estado.peaoSelecionadoId
+  const peaoId = peaoDeReferenciaDaSequencia(estado)
   if (peaoId === null) return []
   const peao = estado.peoes.find((p) => p.peaoId === peaoId)
   if (!peao || peao.celula === null) return []
@@ -354,7 +375,7 @@ export function mapearEscolhaDeVagaDaRecebida(
   recebidaId: string,
   borda: BordaCardinal,
 ): PeaoComandoDoCliente | null {
-  if (estado.peaoSelecionadoId === null) return null
+  if (peaoDeReferenciaDaSequencia(estado) === null) return null
   const pendente = estado.recebidasPendentes.find(
     (r) => r.recebidaId === recebidaId,
   )

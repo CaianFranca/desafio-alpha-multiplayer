@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { acoesValidasDaSubfase } from '@flicker/engine';
 import {
   adaptarSnapshotParaEspelho,
   aplicarEventoNoEspelho,
@@ -191,7 +192,7 @@ test('fold da vaga: fixa borda, alvo e seleciona a sorteada', () => {
   assert.equal(espelho.estado.tabuleiro.pecaSelecionadaId, 'reta-1');
 });
 
-test('fold do turno normal: mover limpa a seleção; turno avança e limpa', () => {
+test('fold do turno normal: mover re-seleciona; turno avança e limpa', () => {
   let espelho = espelhoInicial(adaptarSnapshotParaEspelho(snapshotFresco()));
   espelho = dobrar(espelho, [
     { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
@@ -203,7 +204,10 @@ test('fold do turno normal: mover limpa a seleção; turno avança e limpa', () 
       celula: { linha: 2, coluna: 3 },
     },
   ]);
-  assert.equal(espelho.estado.tabuleiro.peaoSelecionadoId, null);
+  // Espelha o engine (moverPeaoDaPartida re-seleciona silenciosamente,
+  // re-land da #263 pela #324): a FSM pós-confirmação não propõe
+  // selecionar_peao fantasma.
+  assert.equal(espelho.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   assert.equal(
     espelho.estado.tabuleiro.peoes.find((p) => p.peaoId === 'peao-branco')
       ?.pecaId,
@@ -516,4 +520,108 @@ test('loop: servidor responsivo sem progresso leva ao failsafe', async () => {
     logs.flat().join(' ').includes('failsafe'),
     'failsafe deveria ser logado',
   );
+});
+
+test('fold: TURNO_ENCERRADO baixa o primeiroTurnoPendente de quem encerrou', () => {
+  let espelho = espelhoInicial(adaptarSnapshotParaEspelho(snapshotFresco()));
+  assert.equal(
+    espelho.estado.jogadores.find((j) => j.jogadorId === 'ana')
+      ?.primeiroTurnoPendente,
+    true,
+  );
+  espelho = dobrar(espelho, [{ type: 'TURNO_ENCERRADO', jogadorId: 'ana' }]);
+  // Quem encerrou necessariamente atuou: o flag dele cai; o do outro fica.
+  assert.equal(
+    espelho.estado.jogadores.find((j) => j.jogadorId === 'ana')
+      ?.primeiroTurnoPendente,
+    false,
+  );
+  assert.equal(
+    espelho.estado.jogadores.find((j) => j.jogadorId === 'bruno')
+      ?.primeiroTurnoPendente,
+    true,
+  );
+  // Sem evento do wire para o campo, o flag do pulado (Amedrontado que nunca
+  // encerra turno) permanece true — a semântica correta do engine.
+});
+
+test('FSM do bot: na rodada 2 sem pendência de Primeiro Turno, sem Inicial fantasma', () => {
+  let espelho = espelhoInicial(adaptarSnapshotParaEspelho(snapshotFresco()));
+  espelho = dobrar(espelho, [
+    { type: 'TURNO_ENCERRADO', jogadorId: 'ana' },
+    { type: 'TURNO_INICIADO', jogadorId: 'bruno', rodada: 1 },
+    // Bruno concluiu o Primeiro Turno na rodada 1 e a vez volta a ele na 2.
+    { type: 'TURNO_ENCERRADO', jogadorId: 'bruno' },
+    { type: 'TURNO_INICIADO', jogadorId: 'bruno', rodada: 2 },
+  ]);
+  const validas = acoesValidasDaSubfase(espelho.estado, 'bruno');
+  // Pré-fix o flag travava em true e a FSM caía no caso (c) propondo
+  // selecionar_peca da Inicial — recusada pelo engine, turno órfão.
+  assert.ok(
+    !validas.some(
+      (a) => a.tipo === 'selecionar_peca' && a.pecaId === 'inicial-2',
+    ),
+    'FSM não deve propor a Inicial do Primeiro Turno na rodada 2',
+  );
+});
+
+test('FSM do bot: pós-mover+confirmar com recebidas, propõe encaixe (não re-seleção)', () => {
+  const comPosicionada: EstadoDaPartidaSnapshot = {
+    ...snapshotFresco(),
+    tabuleiro: {
+      ...snapshotFresco().tabuleiro,
+      posicionadas: [
+        {
+          pecaId: 'reta-1',
+          tipo: 'reta',
+          orientacao: 0,
+          celula: { linha: 2, coluna: 3 },
+        },
+      ],
+    },
+  };
+  let espelho = espelhoInicial(adaptarSnapshotParaEspelho(comPosicionada));
+  espelho = dobrar(espelho, [
+    { type: 'TURNO_INICIADO', jogadorId: 'bruno', rodada: 2 },
+    { type: 'PEAO_SELECIONADO', peaoId: 'peao-vermelho' },
+    {
+      type: 'PEAO_MOVIDO',
+      peaoId: 'peao-vermelho',
+      pecaIdDe: 'inicial-2',
+      pecaIdPara: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+    },
+    {
+      type: 'POSICAO_CONFIRMADA',
+      jogadorId: 'bruno',
+      peaoId: 'peao-vermelho',
+      pecaId: 'reta-1',
+      protegido: false,
+    },
+    {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [
+        {
+          recebidaId: 'recebida-reta-9',
+          pecaId: 'reta-9',
+          tipoDaPeca: 'reta',
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  ]);
+  // O mover re-seleciona no engine sem evento: o espelho segue a seleção.
+  assert.equal(
+    espelho.estado.tabuleiro.peaoSelecionadoId,
+    'peao-vermelho',
+  );
+  const validas = acoesValidasDaSubfase(espelho.estado, 'bruno');
+  // Pré-fix a seleção zerava e a FSM propunha selecionar_peao — aceito
+  // idempotente SEM eventos pelo engine, timeout de 8s e desistência.
+  assert.ok(
+    !validas.some((a) => a.tipo === 'selecionar_peao'),
+    'FSM deve encaixar, não re-selecionar',
+  );
+  assert.equal(validas[0]?.tipo, 'escolher_vaga_da_peca_recebida');
 });

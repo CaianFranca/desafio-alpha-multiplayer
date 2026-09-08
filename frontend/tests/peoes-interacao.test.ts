@@ -15,6 +15,7 @@ import {
   mapearMovimentacao,
   mapearPermanencia,
   mapearPosicionarRecebida,
+  peaoDeReferenciaDaSequencia,
   peaoSobreAMesa,
   podeSelecionarPeao,
   puxadaVigenteNaBandeja,
@@ -1519,5 +1520,68 @@ describe('integração dos 8 passos da issue #249 (ordem Inicial-primeiro)', () 
       tipo: 'comando',
       comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' },
     })
+  })
+})
+
+describe('fallback do peão do turno com pendências (issue #326)', () => {
+  const posicionadas = [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)]
+  const pendencias = [pendencia('recebida-reta-1', 'reta-1', 'reta', null, null)]
+
+  it('com seleção nula e pendências, vagas e escolha usam o peão do turno', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    expect(vagasDisponiveisDoPeao(estado).length).toBeGreaterThan(0)
+
+    const vagas = vagasDisponiveisDoPeao(estado)
+    const comando = mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', vagas[0]!.borda)
+    expect(comando?.type).toBe('ESCOLHER_VAGA_DA_PECA_RECEBIDA')
+    expect((comando as { recebidaId?: string }).recebidaId).toBe('recebida-reta-1')
+  })
+
+  it('sem pendências, o fallback não atua (comportamento inalterado)', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: [],
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    expect(vagasDisponiveisDoPeao(estado)).toEqual([])
+    expect(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte')).toBeNull()
+    expect(peaoDeReferenciaDaSequencia(estado)).toBeNull()
+  })
+
+  it('seleção vigente tem precedência sobre o peão do turno', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: 'peao-branco',
+      peaoDoTurnoId: 'peao-vermelho',
+      peoes: [peao('peao-branco', INICIAL), peao('peao-vermelho', null)],
+    })
+
+    expect(peaoDeReferenciaDaSequencia(estado)).toBe('peao-branco')
+    expect(vagasDisponiveisDoPeao(estado).length).toBeGreaterThan(0)
+  })
+
+  it('sem fallback disponível (peão do turno nulo), segue silencioso', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: null,
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    expect(peaoDeReferenciaDaSequencia(estado)).toBeNull()
+    expect(vagasDisponiveisDoPeao(estado)).toEqual([])
+    expect(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte')).toBeNull()
   })
 })

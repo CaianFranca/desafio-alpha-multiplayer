@@ -21,6 +21,7 @@ import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 import {
   mapearCliqueNoPeao,
   mapearDesselecaoDePeao,
+  peaoDeReferenciaDaSequencia,
   puxadaVigenteNaBandeja,
   vagasDisponiveisDoPeao,
 } from '../../game/tabuleiro/interacaoPeoes'
@@ -203,7 +204,7 @@ export function AmbienteDeJogo({
   // compartilhado com cena e espelho.
   const vagasSet = new Set<string>(
     estadoPeoesComPuxada !== null &&
-      estadoPeoesComPuxada.peaoSelecionadoId !== null &&
+      peaoDeReferenciaDaSequencia(estadoPeoesComPuxada) !== null &&
       puxadaVigenteNaBandeja(estadoPeoesComPuxada)
       ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
       : [],

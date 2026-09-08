@@ -343,11 +343,14 @@ test('turno normal: após mover, confirmar substitui o permanecer', () => {
   let estado = partidaEmRodada2();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
-  assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
-    { tipo: 'selecionar_peao', peaoId: 'peao-branco' },
-  ]);
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // O mover re-seleciona o Peão (semântica única, issue #334): sem
+  // re-seleção intermediária, a FSM já propõe mover/confirmar.
+  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   const acoes = acoesValidasDaSubfase(estado, 'ana');
+  assert.ok(
+    !acoes.some((acao) => acao.tipo === 'selecionar_peao'),
+    'com o peão re-selecionado, re-selecionar é redundante',
+  );
   assert.ok(
     acoes.some(
       (acao) =>

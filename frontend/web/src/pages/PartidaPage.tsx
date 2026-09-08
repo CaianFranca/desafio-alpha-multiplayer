@@ -204,6 +204,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         if (evento.type === 'ERRO_DO_TABULEIRO') {
           pendentesEmVoo.current.clear()
         }
+        if (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') {
+          // Virada de turno invalida gates de posicionamento em voo: se o
+          // ack/erro da jogada anterior se perdeu no canal, o alvo não pode
+          // ficar bloqueado no turno seguinte (bloqueio silencioso).
+          pendentesEmVoo.current.clear()
+        }
         if (evento.type === 'PARTIDA_TERMINADA') {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante a
           // tela de resultado.
@@ -438,6 +444,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       posicionadas: modelo.posicionadas,
       recebidasPendentes: modelo.recebidasPendentes,
       peaoSelecionadoId: modelo.peaoSelecionadoId,
+      // Fallback da sequência pendente (#326): se o espelho ficar sem seleção
+      // pós-confirmação, vagas/escolha/destaque usam o peão do Jogador Ativo.
+      peaoDoTurnoId:
+        modelo.jogadorAtivoId !== null
+          ? (modelo.peaoPorJogador[modelo.jogadorAtivoId] ?? null)
+          : null,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
       // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no

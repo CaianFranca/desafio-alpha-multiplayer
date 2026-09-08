@@ -705,6 +705,90 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
   assert.equal(encerramento.estado.tabuleiro.peaoSelecionadoId, null);
 });
 
+// Issue #326: a Confirmação preserva a seleção do Peão confirmado — a
+// re-seleção do mover (#263, partida.ts) atravessa a Confirmação e as
+// Recebidas ficam encaixáveis sem re-seleção intermediária.
+test('confirmação preserva a seleção do peão confirmado — Recebidas encaixáveis sem re-seleção (#326)', () => {
+  let estado = partidaEmRodada2();
+
+  // A re-seleção do mover (#263) já devolve a seleção: mover direto, sem
+  // selecionar_peao depois.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+
+  // Escolher a vaga e encaixar direto, sem selecionar_peao no meio.
+  estado = resolverRecebidas(confirmacao.estado, 'ana');
+  // aplicar lança em rejeição: o encerramento válido é a prova final.
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+  assert.equal(estado.posicaoConfirmada, false);
+});
+
+// Defesa do restore (#326): mesmo quando o estado chega à Confirmação SEM
+// seleção (base sem a re-seleção do mover, ou estado persistido antigo), a
+// Confirmação adota o Peão confirmado e a sequência continua encaixável.
+test('confirmação com seleção nula no estado restaura o peão confirmado (#326)', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  // Zera a seleção como um motor sem a re-seleção do mover deixaria.
+  const semSelecao: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: null },
+  };
+
+  const confirmacao = aplicarComandoDePartida(semSelecao, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+
+  estado = resolverRecebidas(confirmacao.estado, 'ana');
+  // aplicar lança em rejeição: o encerramento válido é a prova final.
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+  assert.equal(estado.posicaoConfirmada, false);
+});
+
+// Guarda de outra seleção com pendências: a proteção PENDENCIA_NAO_RESOLVIDA
+// (tabuleiro) e o guard de peão alheio (partida) seguem de pé pós-confirmação.
+test('com pendências pós-confirmação, peão alheio segue rejeitado (FORA_DA_VEZ)', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.ok(confirmacao.estado.tabuleiro.recebidas.length > 0);
+
+  assert.equal(
+    codigoDaRejeicao(confirmacao.estado, selecionarPeao('peao-vermelho'), 'ana'),
+    'FORA_DA_VEZ',
+  );
+});
+
+// Guarda da #332: a Confirmação com OUTRO Peão selecionado segue recusada —
+// o estado artesanal é o único caminho (no fluxo válido o Peão alheio nunca
+// é selecionável pelo ator), e o guard existe exatamente para estados
+// divergentes/derivados de bases antigas.
+test('confirmação com outro peão selecionado é recusada (PEAO_NAO_SELECIONADO)', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  const outroSelecionado: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: 'peao-vermelho' },
+  };
+
+  assert.equal(
+    codigoDaRejeicao(outroSelecionado, confirmarPosicao('peao-branco'), 'ana'),
+    'PEAO_NAO_SELECIONADO',
+  );
+});
+
 test('confirmar sem mudança de Peça e no Primeiro Turno são ENCERRAMENTO_INVALIDO', () => {
   let estado = partidaEmRodada2();
 
@@ -1481,13 +1565,20 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
     );
   }
 
-  // AC-3 do #272: com a Seleção nula (após mover, que a limpa) a Travessia usa
-  // o Peão do ator como referência e NÃO trava — adota a Seleção na sequência.
+  // AC-3 do #272: com a Seleção nula a Travessia usa o Peão do ator como
+  // referência e NÃO trava — adota a Seleção na sequência. (Semântica única,
+  // issue #334: o mover re-seleciona; o nulo aqui é artesanal, simulando um
+  // estado persistido de base antiga ou a janela entre Travessia e seleção.)
   {
     let semSelecao = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
     semSelecao = aplicar(semSelecao, selecionarPeao('peao-branco'), 'ana');
     semSelecao = aplicar(semSelecao, moverPeao('peao-branco', 2, 3), 'ana');
-    assert.equal(semSelecao.tabuleiro.peaoSelecionadoId, null);
+    assert.equal(semSelecao.tabuleiro.peaoSelecionadoId, 'peao-branco');
+    const estadoAntigo: EstadoDaPartida = {
+      ...semSelecao,
+      tabuleiro: { ...semSelecao.tabuleiro, peaoSelecionadoId: null },
+    };
+    semSelecao = estadoAntigo;
     const travessia = aplicarComandoDePartida(
       semSelecao,
       atravessarOEscuro('peao-branco', 1, 3),
@@ -1753,13 +1844,17 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
     codigoDaRejeicao(estado, encerrarTurno(), 'ana'),
     'ENCERRAMENTO_INVALIDO',
   );
-  // Permanência: sem o Peão selecionado é PEAO_NAO_SELECIONADO (guarda do
-  // Tabuleiro); mesmo selecionado, após a mudança de Peça é
-  // ENCERRAMENTO_INVALIDO — nenhum caminho fecha o turno sem o confirmar.
+  // Permanência: o mover re-seleciona o Peão (semântica única, issue #334),
+  // então o guarda do Tabuleiro não barra por seleção — após a mudança de
+  // Peça é direto ENCERRAMENTO_INVALIDO. Nenhum caminho fecha o turno sem o
+  // confirmar.
+  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   assert.equal(
     codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
-    'PEAO_NAO_SELECIONADO',
+    'ENCERRAMENTO_INVALIDO',
   );
+  // Re-selecionar o próprio Peão é idempotente (sem novo Recebimento) e não
+  // muda o veredito.
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   assert.equal(
     codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),

@@ -319,6 +319,12 @@ export function aplicarEventoNoEspelho(
         gracas = gracas.filter((id) => id !== pecaIdDe);
       }
       gracas = podarGracasOrfas(tab.posicionadas, gracas);
+      // O mover re-seleciona o Peão no engine (partida.ts, re-land da #263
+      // pela #324) sem emitir peao_selecionado: o espelho segue a mesma
+      // semântica (reducao.ts faz o mesmo no cliente). Zerar aqui
+      // dessincronizava a FSM: com recebidas pendentes ela propunha
+      // selecionar_peao, o engine aceitava idempotente SEM eventos e o
+      // driver estourava o timeout de 8s desistindo do turno (rodada 2).
       return {
         ...espelho,
         estado: {
@@ -328,7 +334,7 @@ export function aplicarEventoNoEspelho(
             peoes: tab.peoes.map((peao) =>
               peao.peaoId === peaoId ? { ...peao, pecaId: pecaIdPara } : peao,
             ),
-            peaoSelecionadoId: null,
+            peaoSelecionadoId: peaoId,
           },
           pecasEmPeriodoDeGraca: gracas,
         },
@@ -485,7 +491,27 @@ export function aplicarEventoNoEspelho(
       };
     }
     case 'TURNO_ENCERRADO': {
-      return { ...espelho, ultimaConfirmacao: null };
+      // O engine vira primeiroTurnoPendente em avancarVez sem emitir evento
+      // para o campo (nenhum tipo no wire o carrega): quem encerrou o turno
+      // necessariamente já atuou, então o espelho baixa o flag dele aqui. O
+      // jogador pulado por Amedrontado nunca encerra turno e mantém o flag —
+      // a semântica correta.
+      const { jogadorId } = evento as { jogadorId?: unknown };
+      return {
+        ...espelho,
+        ultimaConfirmacao: null,
+        estado: {
+          ...estado,
+          jogadores:
+            typeof jogadorId === 'string'
+              ? estado.jogadores.map((jogador) =>
+                  jogador.jogadorId === jogadorId
+                    ? { ...jogador, primeiroTurnoPendente: false }
+                    : jogador,
+                )
+              : estado.jogadores,
+        },
+      };
     }
     case 'TURNO_INICIADO': {
       const { jogadorId, rodada } = evento as {
