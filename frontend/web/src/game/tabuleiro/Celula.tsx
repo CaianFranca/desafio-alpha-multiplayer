@@ -1,3 +1,4 @@
+import { Suspense, useEffect, useMemo } from 'react'
 import {
   BORDA_OFFSET,
   BORDA_Y,
@@ -7,19 +8,24 @@ import {
   celulaParaMundo,
   COR_BORDA_CELULA,
   ESPESSURA_BORDA,
+  LADO_DA_GRADE,
   PEAO_Y,
   PECA_Y,
   TAMANHO_CELULA,
 } from './contrato'
+import { useLoader } from '@react-three/fiber'
 import type { ThreeEvent } from '@react-three/fiber'
+import * as THREE from 'three'
+import { TEXTURA_OBSCURO_DA_GRADE } from './texturasDasPecas'
 import type {
   Celula as CelulaTipo,
   PeaoDaExibicao,
   PeaoId,
   PecaPosicionada,
 } from './contrato'
-import { PeaoPlaceholder } from './PeaoPlaceholder'
+import { PeaoVisual } from './PeaoVisual'
 import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
+import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { handlersDeCursor } from './cursor'
 
 interface CelulaProps {
@@ -31,9 +37,10 @@ interface CelulaProps {
   pecaDestacada?: boolean
   onClick?: (event: ThreeEvent<MouseEvent>) => void
   /**
-   * Peão posicionado sobre a peça desta célula. A cena exibe um placeholder
-   * por célula; a regra de ocupação (Portão 4, resgate +1) vive no engine e
-   * no espelho de destinos (`destinosConectadosDoPeao`).
+   * Peão posicionado sobre a peça desta célula. A cena exibe um visual por
+   * célula (avatar 3D no slot do Diretor, placeholder nos demais); a regra de
+   * ocupação (Portão 4, resgate +1) vive no engine e no espelho de destinos
+   * (`destinosConectadosDoPeao`).
    */
   peao?: PeaoDaExibicao | null
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
@@ -60,6 +67,8 @@ interface CelulaProps {
   peaoSelecionadoId?: PeaoId | null
   /** Peão do Jogador Ativo da vez: destaque emissivo suave (#118). */
   peaoAtivoId?: PeaoId | null
+  /** Peão em Baixa Iluminação do dono: avatar 3D na variante apagado (#297). */
+  emBaixaIluminacao?: boolean
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
 
@@ -69,6 +78,98 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
   { pos: [TAMANHO_CELULA / 2 - BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
   { pos: [-TAMANHO_CELULA / 2 + BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
 ]
+
+interface PlanoDeFundoProps {
+  celula: CelulaTipo
+  /** Tom do estado (alvo/vaga/ocupada/iluminada/base): tinge a textura. */
+  cor: string
+  opacidade: number
+  onClick?: (event: ThreeEvent<MouseEvent>) => void
+  cursorHandlers: ReturnType<typeof handlersDeCursor>
+}
+
+/**
+ * Plano texturizado da célula: amostra 1/7 do `obscuro` (posição da célula
+ * na grade), então a textura atravessa o tabuleiro contínua — uma escuridão
+ * só, não 49 repetições. A cor do estado multiplica o mapa (destaques de
+ * interação/ocupação/iluminação intactos).
+ */
+function PlanoTexturizado({
+  celula,
+  cor,
+  opacidade,
+  onClick,
+  cursorHandlers,
+}: PlanoDeFundoProps) {
+  const base = useLoader(THREE.TextureLoader, TEXTURA_OBSCURO_DA_GRADE)
+  const mapa = useMemo(() => {
+    // Clone sRGB (precedente da Mesa): não muta o cache do useLoader.
+    const copia = base.clone()
+    copia.colorSpace = THREE.SRGBColorSpace
+    copia.repeat.set(1 / LADO_DA_GRADE, 1 / LADO_DA_GRADE)
+    copia.offset.set(
+      celula.coluna / LADO_DA_GRADE,
+      1 - (celula.linha + 1) / LADO_DA_GRADE,
+    )
+    copia.needsUpdate = true
+    return copia
+  }, [base, celula])
+  // B1: descarta o clone no unmount/troca (49 células por mount) — o cache
+  // do `useLoader` segue intacto.
+  useEffect(() => () => mapa.dispose(), [mapa])
+  return (
+    <mesh
+      position={[0, CELULA_Y_BASE, 0]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      onClick={onClick}
+      {...cursorHandlers}
+    >
+      <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
+      <meshStandardMaterial
+        map={mapa}
+        color={cor}
+        transparent
+        opacity={opacidade}
+      />
+    </mesh>
+  )
+}
+
+/**
+ * Fundo da célula com `Suspense` interno (padrão do `PecaPlaceholder`):
+ * enquanto o `obscuro` carrega, o plano chapado atual — a grade nunca some.
+ * O limite de erro cobre a falha (404 derrubaria o Canvas inteiro — B4):
+ * o mesmo plano chapado vira a face do erro.
+ */
+function PlanoDeFundoDaCelula(props: PlanoDeFundoProps) {
+  const { cor, opacidade, onClick, cursorHandlers } = props
+  const planoChapado = (
+    <mesh
+      position={[0, CELULA_Y_BASE, 0]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      onClick={onClick}
+      {...cursorHandlers}
+    >
+      <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
+      <meshStandardMaterial
+        color={cor}
+        transparent
+        opacity={opacidade}
+      />
+    </mesh>
+  )
+  return (
+    <LimiteDeErroDoModelo
+      key={TEXTURA_OBSCURO_DA_GRADE}
+      resetKey={TEXTURA_OBSCURO_DA_GRADE}
+      fallback={planoChapado}
+    >
+      <Suspense fallback={planoChapado}>
+        <PlanoTexturizado {...props} />
+      </Suspense>
+    </LimiteDeErroDoModelo>
+  )
+}
 
 export function Celula({
   celula,
@@ -84,6 +185,7 @@ export function Celula({
   iluminada = false,
   peaoSelecionadoId = null,
   peaoAtivoId = null,
+  emBaixaIluminacao = false,
   onSelecionarPeao,
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
@@ -113,19 +215,13 @@ export function Celula({
 
   return (
     <group position={pos}>
-      <mesh
-        position={[0, CELULA_Y_BASE, 0]}
-        rotation={[-Math.PI / 2, 0, 0]}
+      <PlanoDeFundoDaCelula
+        celula={celula}
+        cor={corPlano}
+        opacidade={opacidadePlano}
         onClick={planeOnClick}
-        {...cursorHandlers}
-      >
-        <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
-        <meshStandardMaterial
-          color={corPlano}
-          transparent
-          opacity={opacidadePlano}
-        />
-      </mesh>
+        cursorHandlers={cursorHandlers}
+      />
       <group position={[0, CELULA_Y_BORDA, 0]}>
         {BORDAS_CONFIG.map((b, i) => (
           <mesh key={i} position={b.pos}>
@@ -146,11 +242,12 @@ export function Celula({
         />
       ) : null}
       {peao ? (
-        <PeaoPlaceholder
+        <PeaoVisual
           cor={peao.cor}
           position={[0, PEAO_Y, 0]}
           selecionado={peao.peaoId === peaoSelecionadoId}
           ativo={peao.peaoId === peaoAtivoId}
+          emBaixaIluminacao={emBaixaIluminacao}
           aoClicar={
             onSelecionarPeao
               ? () => onSelecionarPeao(peao.peaoId)

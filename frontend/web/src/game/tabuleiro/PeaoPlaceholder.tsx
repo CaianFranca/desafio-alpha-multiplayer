@@ -1,6 +1,13 @@
+import type { ReactNode } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
+import * as THREE from 'three'
 import { HEX_COR_PEAO } from './contrato'
 import type { CorDoPeao } from './contrato'
+import {
+  COR_CONTORNO_PEAO_SELECIONADO,
+  ESCALA_CONTORNO_PEAO,
+  propsDoMaterialDeContorno,
+} from './contorno'
 
 /**
  * Placeholder do Peão (issue #90 — ST-10).
@@ -23,7 +30,7 @@ interface PeaoPlaceholderProps {
   position?: [number, number, number]
   /** Escala uniforme; mantém a silhueta em proporção quando o slot é menor. */
   escala?: number
-  /** Destaque emissivo quando este peão é o selecionado. */
+  /** Destaque por contorno branco quando este peão é o selecionado. */
   selecionado?: boolean
   /** Destaque emissivo suave quando este peão é o do Jogador Ativo (#118). */
   ativo?: boolean
@@ -47,8 +54,28 @@ const Y_COLARINHO = BASE_ALTURA + CORPO_ALTURA + COLARINHO_ALTURA / 2
 const Y_CABECA =
   BASE_ALTURA + CORPO_ALTURA + COLARINHO_ALTURA + CABECA_RAIO * 0.9
 
-const EMISSIVO_SELECIONADO = 0.6
 const EMISSIVO_ATIVO = 0.35
+
+/**
+ * Casca de contorno de um segmento do peão: mesma geometria (via `children`),
+ * `BackSide` branca, sem clique. Extraída para uso único nos 4 segmentos —
+ * variam só `position` e geometria.
+ */
+function CascaContorno({
+  position,
+  children,
+}: {
+  position: [number, number, number]
+  children: ReactNode
+}) {
+  const contorno = propsDoMaterialDeContorno(COR_CONTORNO_PEAO_SELECIONADO)
+  return (
+    <mesh position={position} scale={ESCALA_CONTORNO_PEAO} raycast={() => null}>
+      {children}
+      <meshBasicMaterial {...contorno} side={THREE.BackSide} />
+    </mesh>
+  )
+}
 
 export function PeaoPlaceholder({
   cor,
@@ -59,13 +86,10 @@ export function PeaoPlaceholder({
   aoClicar,
 }: PeaoPlaceholderProps) {
   const hex = HEX_COR_PEAO[cor]
-  // A seleção domina o brilho; o destaque de Jogador Ativo é mais suave e
-  // pode coexistir visualmente com a seleção do próprio peão.
-  const emissiveIntensity = selecionado
-    ? EMISSIVO_SELECIONADO
-    : ativo
-      ? EMISSIVO_ATIVO
-      : 0
+  // A seleção virou contorno branco por casca invertida (legível até no peão
+  // branco, sem lavar a cor); só o Jogador Ativo usa brilho emissivo, suave,
+  // e os dois indicadores coexistem no peão da vez selecionado.
+  const emissiveIntensity = ativo ? EMISSIVO_ATIVO : 0
 
   // Só interage ao ponteiro quando há handler de seleção.
   const handlers = aoClicar
@@ -126,6 +150,27 @@ export function PeaoPlaceholder({
           emissiveIntensity={emissiveIntensity}
         />
       </mesh>
+      {selecionado ? (
+        <>
+          {/* Cascas de contorno: mesma geometria, BackSide, sem clique */}
+          <CascaContorno position={[0, Y_BASE, 0]}>
+            <cylinderGeometry args={[BASE_RAIO, BASE_RAIO, BASE_ALTURA, 20]} />
+          </CascaContorno>
+          <CascaContorno position={[0, Y_CORPO, 0]}>
+            <cylinderGeometry
+              args={[CORPO_RAIO_TOPO, CORPO_RAIO_BASE, CORPO_ALTURA, 20]}
+            />
+          </CascaContorno>
+          <CascaContorno position={[0, Y_COLARINHO, 0]}>
+            <cylinderGeometry
+              args={[COLARINHO_RAIO, COLARINHO_RAIO, COLARINHO_ALTURA, 20]}
+            />
+          </CascaContorno>
+          <CascaContorno position={[0, Y_CABECA, 0]}>
+            <sphereGeometry args={[CABECA_RAIO, 20, 16]} />
+          </CascaContorno>
+        </>
+      ) : null}
     </group>
   )
 }

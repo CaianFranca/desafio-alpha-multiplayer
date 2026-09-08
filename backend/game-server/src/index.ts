@@ -27,6 +27,7 @@ const {
   gameServerHeartbeatIntervalMs,
   gameServerHeartbeatTtlMs,
   gameServerId: configServerId,
+  gameServerAdvertiseHost,
   jwtSecret,
 } = getConfig();
 const serverId: ServerId = resolverServerId(configServerId) as ServerId;
@@ -69,8 +70,8 @@ let encerrando = false;
 function criarMeta(): GameServerRegistro {
   return {
     serverId,
-    url: `http://game-server:${gameServerPort}`,
-    host: 'game-server',
+    url: `http://${gameServerAdvertiseHost}:${gameServerPort}`,
+    host: gameServerAdvertiseHost,
     port: gameServerPort,
     atualizadoEm: new Date().toISOString(),
   };

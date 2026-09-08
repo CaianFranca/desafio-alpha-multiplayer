@@ -14,26 +14,52 @@ import { Caixa } from '../tabuleiro/Caixa'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
-import { PeaoPlaceholder } from '../tabuleiro/PeaoPlaceholder'
+import { PeaoVisual } from '../tabuleiro/PeaoVisual'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
 import { TransicaoLimpeza, type LimpezaTrigger } from './TransicaoLimpeza'
+import { TransicaoEncaixe } from './TransicaoEncaixe'
+import type { EncaixeTrigger } from '../tabuleiro/encaixe'
+import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion'
 import type {
   PeaoId,
   PecaId,
   PecaCorrente,
   EstadoExibicaoTabuleiro,
 } from '../tabuleiro/contrato'
+import type { VooDoPeaoPendente } from '../tabuleiro/vooDoPeao'
+import { deveSuprimirPeaoNaMesa } from '../tabuleiro/vooDoPeao'
 
 /**
  * Luzes sutis: o volume claro/escuro já vem "assado" na textura da Mesa
  * (centro claro, bordas escuras). As luzes existem só para leve modelagem
- * e profundidade — não devem lavar a textura.
+ * e profundidade — não devem lavar a textura. A segunda direcional é rasante
+ * (~25° de elevação, azimute girado ~45° em torno de Y em relação à existente)
+ * para realçar o relevo do normalMap das peças; intensidade conservadora para
+ * manter a Mesa como referência visual.
  */
 function Iluminacao() {
   return (
     <>
-      <ambientLight intensity={0.45} />
-      <directionalLight position={[8, 14, 6]} intensity={0.85} />
+      <ambientLight intensity={0.22} />
+      {/*
+        Luz principal projeta sombra (auto-sombra da caixa/cesta): cobre a
+        Mesa 20×20 com folga; `bias`/`normalBias` conservadores contra acne.
+      */}
+      <directionalLight
+        position={[8, 14, 6]}
+        intensity={1.0}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-left={-12}
+        shadow-camera-right={12}
+        shadow-camera-top={12}
+        shadow-camera-bottom={-12}
+        shadow-camera-near={1}
+        shadow-camera-far={40}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.02}
+      />
+      <directionalLight position={[1.4, 4.7, 9.9]} intensity={0.35} />
     </>
   )
 }
@@ -55,7 +81,7 @@ function Mesa() {
   }, [texturaCarregada])
 
   return (
-    <mesh position={[0, -ESPESSURA_MESA / 2, 0]}>
+    <mesh position={[0, -ESPESSURA_MESA / 2, 0]} receiveShadow>
       <boxGeometry args={[LARGURA_MESA, ESPESSURA_MESA, PROFUNDIDADE_MESA]} />
       <meshStandardMaterial attach="material-0" color={COR_LATERAIS_MESA} />
       <meshStandardMaterial attach="material-1" color={COR_LATERAIS_MESA} />
@@ -101,8 +127,25 @@ interface AmbienteCenaProps {
   vagasSet?: ReadonlySet<string>
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
   pecaCorrente?: PecaCorrente | null
+  /**
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = sem voo.
+   * Desce até o `Tabuleiro`, que avisa o pouso via `onVooAterrissou(nonce)`.
+   */
+  vooPendente?: VooDoPeaoPendente | null
+  /** Pouso do voo concluído (nonce): a página limpa o pendente. */
+  onVooAterrissou?: (nonce: number) => void
   /** Trigger de limpeza evento-driven (issue #239, B1). */
   limpezaTrigger?: LimpezaTrigger | null
+  /** Trigger de encaixe evento-driven (issue #241): voo mesa→célula. */
+  encaixeTrigger?: EncaixeTrigger | null
+  /** Fim do voo do Encaixe (key) → o pai limpa o trigger. */
+  onFimEncaixe?: (key: number) => void
+  /**
+   * Peões em Baixa Iluminação do dono (issue #297): peaoIds derivados uma vez
+   * no pai — avatar do Diretor troca para a variante apagado só no peão
+   * afetado, em todas as posições (célula/fileira/voo).
+   */
+  emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -134,13 +177,22 @@ export function AmbienteCena({
   alvosPendentesSet,
   vagasSet,
   pecaCorrente = null,
+  vooPendente = null,
+  onVooAterrissou,
   limpezaTrigger = null,
+  encaixeTrigger = null,
+  onFimEncaixe,
+  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
   const peoesNaMesa = (estadoExibicao?.peoes ?? []).filter(
     (peao) => peao.celula === null,
   )
+  // Snap com movimento reduzido: sem peça oculta — o estado final já está
+  // renderizado e a TransicaoEncaixe também não anima (mesma leitura do hook).
+  const reduce = usePrefersReducedMotion()
+  const pecaEmVooId = reduce ? null : (encaixeTrigger?.pecaId ?? null)
 
   return (
     <>
@@ -175,6 +227,15 @@ export function AmbienteCena({
               onRejeicaoPeao={onRejeicaoPeao}
               alvosPendentesSet={alvosPendentesSet}
               vagasSet={vagasSet}
+              vooPendente={vooPendente}
+              onVooAterrissou={onVooAterrissou}
+              ocultarPecaId={pecaEmVooId}
+              emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
+            />
+            <TransicaoEncaixe
+              posicionadas={estadoExibicao.posicionadas}
+              trigger={encaixeTrigger}
+              onFim={onFimEncaixe}
             />
             <Caixa
               iniciais={estadoExibicao.iniciais}
@@ -186,14 +247,20 @@ export function AmbienteCena({
             />
             <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
             {peoesNaMesa.map((peao) => {
+              // Voo ativo (#242): o peão voador não renderiza estático na Mesa
+              // (Primeiro Turno: origem mesa→Peça Inicial) — só o overlay voa.
+              if (deveSuprimirPeaoNaMesa(vooPendente ?? null, peao.peaoId)) {
+                return null
+              }
               const indiceGlobal = estadoExibicao.peoes.indexOf(peao)
               return (
-                <PeaoPlaceholder
+                <PeaoVisual
                   key={peao.peaoId}
                   cor={peao.cor}
                   position={peaoMesaParaMundo(indiceGlobal)}
                   selecionado={peao.peaoId === peaoSelecionadoId}
                   ativo={peao.peaoId === peaoAtivoId}
+                  emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(peao.peaoId)}
                   aoClicar={
                     onSelecionarPeao
                       ? () => onSelecionarPeao(peao.peaoId)

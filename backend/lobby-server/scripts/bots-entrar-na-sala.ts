@@ -1,5 +1,8 @@
 #!/usr/bin/env -S npx tsx
+import { randomBytes } from 'node:crypto';
 import WebSocket, { type ClientOptions } from 'ws';
+import type { EstadoDaPartidaSnapshot } from '@flicker/shared';
+import { JogadorBot } from '../src/bots/jogador-bot.ts';
 
 type Cookies = { access_token?: string; refresh_token?: string };
 
@@ -26,22 +29,24 @@ type SalaWire = {
 const SENHA_PADRAO = 'senha_dev_123';
 const BASE_PADRAO = 'http://localhost:8080';
 const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
-const BOTS_DETERMINISTICOS: readonly JogadorCredenciais[] = [
-  { email: 'bot-teste-1@exemplo.local', senha: SENHA_PADRAO, apelido: 'bot-teste-1' },
-  { email: 'bot-teste-2@exemplo.local', senha: SENHA_PADRAO, apelido: 'bot-teste-2' },
-  { email: 'bot-teste-3@exemplo.local', senha: SENHA_PADRAO, apelido: 'bot-teste-3' },
-];
+// Bots são sempre efêmeros: cada execução gera email/apelido/senha únicos
+// para nunca reutilizar um Jogador ainda associado a outra Sala (evita
+// JOGADOR_JA_ASSOCIADO após Ctrl+C). Contas antigas expiram sozinhas no
+// servidor (janela de reconexão 60s); limpar no banco quando desejado com:
+//   DELETE FROM usuarios WHERE email LIKE 'bot-%@exemplo.local';
+const MAX_TENTATIVAS_REGISTRO = 8;
 
 function log(prefix: string, ...args: unknown[]): void {
   console.log(`[${new Date().toISOString().slice(11, 19)}] ${prefix}`, ...args);
 }
 
-function parseArgs(): { codigo: string; baseUrl: string; emails: string[] | null; senha: string } {
+function parseArgs(): { codigo: string; baseUrl: string; emails: string[] | null; senha: string; quantidade: number } {
   const raw = process.argv.slice(2).filter((a) => a !== '--');
   let codigo = '';
   let baseUrl = process.env.LOBBY_PUBLIC_URL ?? process.env.LOBBY_URL ?? BASE_PADRAO;
   let emails: string[] | null = null;
   let senha = SENHA_PADRAO;
+  let quantidade = 3;
 
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i]!;
@@ -53,20 +58,34 @@ function parseArgs(): { codigo: string; baseUrl: string; emails: string[] | null
     } else if (arg.startsWith('--base-url=')) {
       baseUrl = arg.slice('--base-url='.length);
     } else if (arg === '--emails' && raw[i + 1]) {
-      emails = raw[++i]!.split(',').map((s) => s.trim()).filter(Boolean);
+      emails = raw[++i]!.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
     } else if (arg.startsWith('--emails=')) {
-      emails = arg.slice('--emails='.length).split(',').map((s) => s.trim()).filter(Boolean);
+      emails = arg.slice('--emails='.length).split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
     } else if (arg === '--senha' && raw[i + 1]) {
       senha = raw[++i]!;
     } else if (arg.startsWith('--senha=')) {
       senha = arg.slice('--senha='.length);
+    } else if (arg === '--quantidade' && raw[i + 1]) {
+      const v = Number(raw[++i]!);
+      if (!Number.isInteger(v) || v < 1 || v > 3) {
+        console.error(`--quantidade inválida "${raw[i]!}": esperado 1, 2 ou 3`);
+        process.exit(1);
+      }
+      quantidade = v;
+    } else if (arg.startsWith('--quantidade=')) {
+      const v = Number(arg.slice('--quantidade='.length));
+      if (!Number.isInteger(v) || v < 1 || v > 3) {
+        console.error(`--quantidade inválida "${arg}": esperado 1, 2 ou 3`);
+        process.exit(1);
+      }
+      quantidade = v;
     } else if (!arg.startsWith('--') && !codigo) {
       codigo = arg.toUpperCase().trim();
     }
   }
 
   if (!codigo) {
-    console.error('Uso: npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts <CODIGO> [--emails a@x,b@x,c@x] [--senha ...] [--base-url http://localhost:8080]');
+    console.error('Uso: npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts <CODIGO> [--quantidade 1|2|3] [--emails a@x,b@x,c@x] [--senha ...] [--base-url http://localhost:8080]');
     process.exit(1);
   }
   if (!CODIGO_REGEX.test(codigo)) {
@@ -74,7 +93,7 @@ function parseArgs(): { codigo: string; baseUrl: string; emails: string[] | null
     process.exit(1);
   }
   baseUrl = baseUrl.replace(/\/$/, '');
-  return { codigo, baseUrl, emails, senha };
+  return { codigo, baseUrl, emails, senha, quantidade };
 }
 
 function printHelp(): void {
@@ -86,21 +105,23 @@ Uso: npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts <CODIGO> [opç�
   CODIGO              Código de Sala (6 chars A-Z0-9)
 
 Opções:
-  --emails a,b,c      Emails de contas já criadas (tenta login primeiro)
-  --senha SENHA       Senha das contas (padrão: ${SENHA_PADRAO})
+  --quantidade N      Quantidade de bots (1..3, padrão 3) — N+1 total na sala
+  --emails a,b,c      Emails de contas já criadas (tenta login primeiro; usa --senha)
+  --senha SENHA       Senha das contas de --emails (padrão: ${SENHA_PADRAO}; ignorada sem --emails)
   --base-url URL      Base do lobby (padrão: ${BASE_PADRAO} ou env LOBBY_PUBLIC_URL)
 
-Opção C (padrão sem --emails):
-  1) login com bot-teste-1..3@exemplo.local
-  2) se 401 → register
-  3) se 409 → login novamente
-  4) se falhar → conta efêmera bot-<timestamp>-<i>@exemplo.local (pode poluir contas; limpar manualmente)
+Padrão (sem --emails): gera --quantidade contas efêmeras por execução, com
+  email/apelido/senha aleatórios e únicos, e registra direto (sem login).
+  Em 409 (apelido/email em uso) gera novas credenciais e repete (até
+  ${MAX_TENTATIVAS_REGISTRO}x). Cada execução cria N linhas em usuarios;
+  para limpar: DELETE FROM usuarios WHERE email LIKE 'bot-%@exemplo.local';
 
 Exemplos:
   npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts ABCDEF
-  npm run bots -- ABCDEF
-  npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts ABCDEF --emails bot1@x,bot2@x,bot3@x --senha minhasenha
-  LOBBY_PUBLIC_URL=http://localhost:8080 npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts ABCDEF
+  npm run bots -- ABCDEF --quantidade 1   # sala de 2 (humana + 1 bot)
+  npm run bots -- ABCDEF --quantidade 2   # sala de 3
+  npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts ABCDEF --emails bot1@x,bot2@x --senha minhasenha --quantidade 2
+  LOBBY_PUBLIC_URL=http://localhost:8080 npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts ABCDEF --quantidade 3
 `.trim());
 }
 
@@ -144,7 +165,11 @@ async function tentarLogin(baseUrl: string, email: string, senha: string): Promi
   return null;
 }
 
-async function tentarRegister(baseUrl: string, apelido: string, email: string, senha: string): Promise<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } } | { conflito: true } | null> {
+type ResultadoRegister =
+  | { ok: true; cookies: Cookies; jogador: { id: string; apelido: string; email: string } }
+  | { ok: false; motivo: 'conflito' | 'validacao' | 'http'; status: number; corpo: string };
+
+async function tentarRegister(baseUrl: string, apelido: string, email: string, senha: string): Promise<ResultadoRegister> {
   const res = await fetch(`${baseUrl}/api/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -152,53 +177,175 @@ async function tentarRegister(baseUrl: string, apelido: string, email: string, s
   });
   if (res.status === 201) {
     const jogador = (await res.json()) as { id: string; apelido: string; email: string };
-    return { cookies: extrairCookies(res), jogador };
+    return { ok: true, cookies: extrairCookies(res), jogador };
   }
-  if (res.status === 409) return { conflito: true };
-  return null;
+  const corpo = await res.text().catch(() => '');
+  if (res.status === 409) return { ok: false, motivo: 'conflito', status: res.status, corpo: corpo.slice(0, 300) };
+  if (res.status === 400) return { ok: false, motivo: 'validacao', status: res.status, corpo: corpo.slice(0, 300) };
+  return { ok: false, motivo: 'http', status: res.status, corpo: corpo.slice(0, 300) };
 }
 
-async function obterCredenciaisBot(
+function gerarCredenciaisEfemeras(): JogadorCredenciais {
+  // email: válido, minúsculo, único (timestamp base36 + 6 bytes hex).
+  // apelido: 3–20 chars, só [a-z0-9-], único.
+  // senha: 16 chars base64url (sempre >= 8, sem espaços).
+  const uniq = `${Date.now().toString(36)}${randomBytes(6).toString('hex')}`.toLowerCase();
+  const email = `bot-${uniq}@exemplo.local`;
+  const apelido = `b-${Date.now().toString(36).slice(-4)}-${randomBytes(3).toString('hex')}`.toLowerCase().slice(0, 20);
+  const senha = randomBytes(12).toString('base64url');
+  return { email, senha, apelido };
+}
+
+async function registrarBotEfemero(
+  baseUrl: string,
+  indice: number,
+): Promise<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } }> {
+  let ultimoErro = '';
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_REGISTRO; tentativa++) {
+    const cred = gerarCredenciaisEfemeras();
+    const res = await tentarRegister(baseUrl, cred.apelido, cred.email, cred.senha);
+    if (res.ok) {
+      if (!res.cookies.access_token) throw new Error(`bot-${indice}: register sem access_token`);
+      log(`bot-${indice}`, `register efêmero ok (${res.jogador.apelido}) tentativa=${tentativa}`);
+      return res;
+    }
+    ultimoErro = `${res.motivo} http=${res.status} ${res.corpo}`;
+    if (res.motivo === 'conflito') {
+      log(`bot-${indice}`, `conflito 409 na tentativa ${tentativa}, gerando novas credenciais...`);
+      await new Promise((r) => setTimeout(r, 100 * tentativa));
+      continue;
+    }
+    throw new Error(`bot-${indice}: falha no register (${ultimoErro})`);
+  }
+  throw new Error(`bot-${indice}: falha ao registrar após ${MAX_TENTATIVAS_REGISTRO} tentativas (último: ${ultimoErro})`);
+}
+
+async function obterCredenciaisContaExistente(
   baseUrl: string,
   cred: JogadorCredenciais,
   indice: number,
 ): Promise<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } }> {
-  const apelidoBase = cred.apelido;
-  const emailBase = cred.email;
-  const senha = cred.senha;
-
-  const login1 = await tentarLogin(baseUrl, emailBase, senha);
-  if (login1 && login1.cookies.access_token) {
-    log(`bot-${indice}`, `login ok (${login1.jogador.apelido})`);
-    return login1;
+  const login = await tentarLogin(baseUrl, cred.email, cred.senha);
+  if (login && login.cookies.access_token) {
+    log(`bot-${indice}`, `login ok (${login.jogador.apelido})`);
+    return login;
   }
-
-  const reg = await tentarRegister(baseUrl, apelidoBase, emailBase, senha);
-  if (reg && 'cookies' in reg && reg.cookies.access_token) {
+  const reg = await tentarRegister(baseUrl, cred.apelido, cred.email, cred.senha);
+  if (reg.ok) {
+    if (!reg.cookies.access_token) throw new Error(`bot-${indice}: register sem access_token`);
     log(`bot-${indice}`, `register ok (${reg.jogador.apelido})`);
     return reg;
   }
-  if (reg && 'conflito' in reg) {
-    const login2 = await tentarLogin(baseUrl, emailBase, senha);
+  if (!reg.ok && reg.motivo === 'conflito') {
+    const login2 = await tentarLogin(baseUrl, cred.email, cred.senha);
     if (login2 && login2.cookies.access_token) {
       log(`bot-${indice}`, `login após 409 ok (${login2.jogador.apelido})`);
       return login2;
     }
   }
-
-  const sufixo = `${Date.now()}-${indice}-${Math.random().toString(36).slice(2, 6)}`;
-  const emailRand = `bot-${sufixo}@exemplo.local`;
-  const apelidoRand = `bot-${sufixo}`.slice(0, 20);
-  log(`bot-${indice}`, `fallback efêmero ${emailRand} — pode poluir contas; limpar manualmente se falhar sempre`);
-  const regRand = await tentarRegister(baseUrl, apelidoRand, emailRand, senha);
-  if (regRand && 'cookies' in regRand && regRand.cookies.access_token) {
-    log(`bot-${indice}`, `register efêmero ok (${regRand.jogador.apelido})`);
-    return regRand;
-  }
-  throw new Error(`bot-${indice}: falha ao obter credenciais para ${emailBase} (login/register falharam)`);
+  throw new Error(`bot-${indice}: falha ao obter credenciais para ${cred.email} (${reg.ok ? 'sem token' : `${reg.motivo} http=${reg.status} ${reg.corpo}`})`);
 }
 
-function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: string, apelido: string, indice: number): WebSocket {
+function entrarNaPartida(
+  baseUrl: string,
+  serverId: string,
+  partidaId: string,
+  accessToken: string,
+  jogadorId: string,
+  apelido: string,
+  indice: number,
+  sockets: WebSocket[],
+  prefix: string,
+): WebSocket {
+  const wsGameUrl =
+    baseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') +
+    `/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}&token=${encodeURIComponent(accessToken)}`;
+  log(prefix, `entrando na partida → ${wsGameUrl}`);
+  const ws = new WebSocket(wsGameUrl);
+  sockets.push(ws);
+  // Driver do turno (Random Walk): o espelho é semeado pelo snapshot da
+  // admissão e avança pelos eventos do broadcast; o turno roda no
+  // TURNO_INICIADO do próprio bot.
+  const bot = new JogadorBot({
+    jogadorId,
+    enviar: (comando) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(comando));
+      }
+    },
+    log: (...args) => log(prefix, '[bot]', ...args),
+  });
+
+  ws.on('open', () => {
+    log(prefix, `WS de partida conectado (aguardando admissão)`);
+  });
+
+  ws.on('message', (data) => {
+    let msg: unknown;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    const t = (msg as { type?: string }).type ?? '?';
+    if (t === 'ADMISSAO_ACEITA') {
+      const a = msg as { jogadorId: string; apelido: string; partidaId: string; estado: string };
+      log(prefix, `ADMISSAO_ACEITA jogador=${a.apelido} partida=${a.partidaId} estado=${a.estado} — dentro da partida`);
+      return;
+    }
+    if (t === 'PARTIDA_INICIADA') {
+      log(prefix, `PARTIDA_INICIADA ${JSON.stringify(msg)}`);
+      return;
+    }
+    if (t === 'ESTADO_DA_PARTIDA') {
+      log(prefix, `ESTADO_DA_PARTIDA recebido (snapshot)`);
+      bot.aoReceberSnapshot(
+        (msg as { snapshot: EstadoDaPartidaSnapshot }).snapshot,
+      );
+      return;
+    }
+    if (t === 'ERRO_DO_TABULEIRO') {
+      const e = msg as { codigo?: string; motivo?: string; mensagem?: string };
+      log(prefix, `ERRO_DO_TABULEIRO ${e.codigo ?? ''} ${e.motivo ?? e.mensagem ?? ''}`.trim());
+      bot.aoReceberErro(e.codigo ?? 'DADOS_INVALIDOS');
+      return;
+    }
+    if (t === 'ADMISSAO_REJEITADA') {
+      const e = msg as { codigo?: string; motivo?: string; mensagem?: string };
+      log(prefix, `${t} ${e.codigo ?? ''} ${e.motivo ?? e.mensagem ?? ''}`.trim());
+      return;
+    }
+    if (t === 'TURNO_INICIADO') {
+      log(prefix, `TURNO_INICIADO ${JSON.stringify(msg).slice(0, 200)}`);
+      bot.aoReceberEvento(msg);
+      return;
+    }
+    // Demais eventos do canal da partida alimentam o espelho do bot.
+    bot.aoReceberEvento(msg);
+    log(prefix, `partida evento ${t} ${JSON.stringify(msg).slice(0, 200)}`);
+  });
+
+  ws.on('error', (err) => {
+    log(prefix, `WS partida error: ${err.message}`);
+  });
+
+  ws.on('close', (code, reason) => {
+    log(prefix, `WS partida close code=${code} reason=${reason.toString().slice(0, 100)}`);
+  });
+
+  return ws;
+}
+
+function criarWs(
+  baseUrl: string,
+  codigo: string,
+  cookies: Cookies,
+  jogadorId: string,
+  apelido: string,
+  indice: number,
+  sockets: WebSocket[],
+): WebSocket {
+  const accessToken = cookies.access_token ?? '';
   const wsUrl = baseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') + '/ws/lobby';
   const headers: Record<string, string> = { Cookie: cookieHeader(cookies) };
   const wsOptions: ClientOptions = { headers };
@@ -211,39 +358,18 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
   let prontoEnviado = false;
   let prontoAgendado = false;
   let tentativasEntrar = 0;
+  let partidaConectada = false;
   const MAX_TENTATIVAS_ENTRAR = 1;
-  let gameWs: WebSocket | null = null;
-  let gameConectado = false;
-
-  function conectarNoGame(partidaId: string, serverId: string): void {
-    if (gameConectado || gameWs) return;
-    // Deriva URL do game-server a partir do base do lobby (8080→3002, 3001→3002) ou env GAME_WS_URL
-    const gameBase = process.env.GAME_WS_URL ?? process.env.GAME_SERVER_URL ?? baseUrl.replace(/:8080\b/, ':3002').replace(/:3001\b/, ':3002');
-    const wsGameUrl = `${gameBase.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:').replace(/\/$/, '')}/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}`;
-    const headers: Record<string, string> = { Cookie: cookieHeader(cookies) };
-    try {
-      gameWs = new WebSocket(wsGameUrl, { headers } as ClientOptions);
-      (ws as unknown as { _gameWs?: WebSocket | null })._gameWs = gameWs;
-    } catch (e) {
-      log(prefix, `game WS erro ao criar ${wsGameUrl}: ${(e as Error).message}`);
-      return;
-    }
-    log(prefix, `→ WS game ${wsGameUrl}`);
-    gameWs.on('open', () => log(prefix, 'game WS open'));
-    gameWs.on('message', (data) => {
-      try {
-        const m = JSON.parse(data.toString()) as { type?: string };
-        if (m.type === 'ADMISSAO_ACEITA') {
-          gameConectado = true;
-          log(prefix, `game ADMISSAO_ACEITA ${JSON.stringify(m).slice(0, 200)}`);
-        } else if (m.type === 'PARTIDA_INICIADA' || m.type === 'ESTADO_DA_PARTIDA') {
-          log(prefix, `game ${m.type}`);
-        }
-      } catch {}
-    });
-    gameWs.on('close', (code, reason) => log(prefix, `game WS close ${code} ${reason.toString().slice(0, 80)}`));
-    gameWs.on('error', (err) => log(prefix, `game WS error ${err.message}`));
-  }
+  // Contas efêmeras nunca deveriam cair aqui; se cair, é fatal (não adianta
+  // repetir: conta nova não tem associação prévia — o problema é a sala).
+  const ERROS_FATAIS_ENTRADA = new Set([
+    'JOGADOR_JA_ASSOCIADO',
+    'JOGADOR_EXPULSO',
+    'SALA_CHEIA',
+    'SALA_ENCERRADA',
+    'SALA_NAO_ENCONTRADA',
+    'SALA_ENCAMINHADA',
+  ]);
 
   function enviarEntrar(): void {
     if (ws.readyState !== WebSocket.OPEN) return;
@@ -267,10 +393,12 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
     if (t === 'ERRO_DA_SALA') {
       const e = msg as { codigo: string; mensagem: string };
       log(prefix, `ERRO_DA_SALA ${e.codigo}: ${e.mensagem}`);
-      if (tentativasEntrar <= MAX_TENTATIVAS_ENTRAR) {
+      if (!ERROS_FATAIS_ENTRADA.has(e.codigo) && tentativasEntrar <= MAX_TENTATIVAS_ENTRAR) {
         const delay = 500;
         log(prefix, `retry ENTRAR_NA_SALA em ${delay}ms (single-shot com retry dev)`);
         setTimeout(() => enviarEntrar(), delay);
+      } else if (ERROS_FATAIS_ENTRADA.has(e.codigo)) {
+        log(prefix, `erro fatal — sem retry (conta efêmera nova; verifique a sala/código)`);
       }
       return;
     }
@@ -304,12 +432,19 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
         const p = msg as { membroId: string; prontidao: boolean };
         if (p.membroId === membroId) log(prefix, `PRONTIDAO_ATUALIZADA pronto=${p.prontidao}`);
       }
-      if (t === 'PARTIDA_PREPARANDO' || t === 'PARTIDA_DISPONIVEL' || t === 'PARTIDA_RECUSADA' || t === 'PARTIDA_FALHOU') {
-        log(prefix, t, JSON.stringify(msg));
-        if (t === 'PARTIDA_DISPONIVEL') {
-          const d = msg as { partidaId?: string; serverId?: string };
-          if (d.partidaId && d.serverId) conectarNoGame(d.partidaId, d.serverId);
+      if (t === 'PARTIDA_PREPARANDO') {
+        log(prefix, `PARTIDA_PREPARANDO`);
+      } else if (t === 'PARTIDA_DISPONIVEL') {
+        const d = msg as { partidaId: string; serverId: string };
+        log(prefix, `PARTIDA_DISPONIVEL partida=${d.partidaId} server=${d.serverId}`);
+        if (!partidaConectada && accessToken) {
+          partidaConectada = true;
+          entrarNaPartida(baseUrl, d.serverId, d.partidaId, accessToken, jogadorId, apelido, indice, sockets, prefix);
+        } else if (!accessToken) {
+          log(prefix, `sem access_token — não é possível entrar na partida`);
         }
+      } else if (t === 'PARTIDA_RECUSADA' || t === 'PARTIDA_FALHOU') {
+        log(prefix, t, JSON.stringify(msg));
       }
       return;
     }
@@ -323,7 +458,6 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
 
   ws.on('close', (code, reason) => {
     log(prefix, `WS close code=${code} reason=${reason.toString().slice(0, 100)} (sem reconexão automática; servidor suporta reconexão 60s via ws.ts)`);
-    if (gameWs) try { gameWs.close(1000, 'lobby fechado'); } catch {}
   });
 
   ws.on('error', (err) => {
@@ -335,48 +469,59 @@ function criarWs(baseUrl: string, codigo: string, cookies: Cookies, jogadorId: s
 }
 
 async function main(): Promise<void> {
-  const { codigo, baseUrl, emails, senha } = parseArgs();
-  const credenciais: JogadorCredenciais[] = emails
-    ? emails.map((email, i) => ({ email, senha, apelido: email.split('@')[0]!.slice(0, 20) || `bot-${i}` }))
-    : BOTS_DETERMINISTICOS.map((b) => ({ ...b, senha }));
-
-  const lista = credenciais.slice(0, 3);
-  while (lista.length < 3) {
-    const i = lista.length;
-    lista.push({ email: `bot-teste-${i + 1}@exemplo.local`, senha, apelido: `bot-teste-${i + 1}` });
+  const { codigo, baseUrl, emails, senha, quantidade } = parseArgs();
+  if (emails !== null && emails.length !== quantidade) {
+    console.error(`--quantidade ${quantidade} conflita com --emails (${emails.length} emails): informe exatamente ${quantidade} emails ou omita --emails para usar contas efêmeras`);
+    process.exit(1);
   }
 
-  log('main', `código=${codigo} base=${baseUrl} bots=${lista.map((b) => b.email).join(', ')}`);
-
   const bots: Array<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } }> = [];
-  for (let i = 0; i < lista.length; i++) {
-    const cred = lista[i]!;
-    try {
-      const res = await obterCredenciaisBot(baseUrl, cred, i + 1);
-      if (!res.cookies.access_token) throw new Error('sem access_token');
-      bots.push(res);
-    } catch (e) {
-      log(`bot-${i + 1}`, `falha credenciais: ${(e as Error).message}`);
-      process.exit(1);
+  if (emails) {
+    const lista = emails.slice(0, quantidade).map((email, i) => ({
+      email,
+      senha,
+      apelido: email.split('@')[0]!.slice(0, 20) || `bot-${i}`,
+    }));
+    log('main', `código=${codigo} base=${baseUrl} modo=contas-existentes bots=${lista.map((b) => b.email).join(', ')} (quantidade=${quantidade}, sala N=${quantidade + 1})`);
+    for (let i = 0; i < lista.length; i++) {
+      const cred = lista[i]!;
+      try {
+        const res = await obterCredenciaisContaExistente(baseUrl, cred, i + 1);
+        if (!res.cookies.access_token) throw new Error('sem access_token');
+        bots.push(res);
+      } catch (e) {
+        log(`bot-${i + 1}`, `falha credenciais: ${(e as Error).message}`);
+        process.exit(1);
+      }
     }
+  } else {
+    log('main', `código=${codigo} base=${baseUrl} modo=efêmero (${quantidade} contas novas por execução, sala N=${quantidade + 1})`);
+    for (let i = 0; i < quantidade; i++) {
+      try {
+        const res = await registrarBotEfemero(baseUrl, i + 1);
+        bots.push(res);
+      } catch (e) {
+        log(`bot-${i + 1}`, `falha credenciais: ${(e as Error).message}`);
+        process.exit(1);
+      }
+    }
+    log('main', `bots=${bots.map((b) => b.jogador.email).join(', ')}`);
   }
 
   const sockets: WebSocket[] = [];
   for (let i = 0; i < bots.length; i++) {
     const b = bots[i]!;
-    const ws = criarWs(baseUrl, codigo, b.cookies, b.jogador.id, b.jogador.apelido, i + 1);
+    const ws = criarWs(baseUrl, codigo, b.cookies, b.jogador.id, b.jogador.apelido, i + 1, sockets);
     sockets.push(ws);
     await new Promise((r) => setTimeout(r, 150));
   }
 
-  log('main', '3 bots conectados, prontidão enviada. Permanecendo conectados — Ctrl+C para sair. (sem keep-alive ping/pong; /ws/lobby é convenção — servidor aceita qualquer path via new WebSocketServer({ server }) em src/ws/ws.ts:70)');
+  log('main', `${quantidade} bot(s) conectado(s) ao lobby, prontidão enviada. Quando o anfitrião iniciar a partida, cada bot conecta no game-server via /ws/game/<serverId>. Permanecendo conectados — Ctrl+C para sair.`);
 
   const encerrar = () => {
     log('main', 'encerrando bots...');
     for (const ws of sockets) {
       try {
-        const gw = (ws as unknown as { _gameWs?: WebSocket })._gameWs;
-        if (gw) try { gw.close(1000, 'bots encerrados'); } catch {}
         ws.close(1000, 'bots encerrados');
       } catch {}
     }

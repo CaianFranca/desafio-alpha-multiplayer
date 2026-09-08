@@ -11,6 +11,7 @@
 //   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' <-> engine tipo:'escolher_vaga_da_peca_recebida' (recebidaId, borda) — issue #138
 //   shared type:'MOVER_PEAO'                     <-> engine tipo:'mover_peao' (peaoId, celula)
 //   shared type:'PERMANECER'                     <-> engine tipo:'permanecer' (peaoId)
+//   (ATRAVESSAR_O_ESCURO viaja só no canal de Partida — ./partida.ts — issue #264)
 //   Eventos:
 //   shared type:'PEAO_SELECIONADO'                <-> engine tipo:'peao_selecionado' (peaoId)
 //   shared type:'PEAO_DESELECIONADO'              <-> engine tipo:'peao_desselecionado' (peaoId) — issue #249
@@ -19,6 +20,7 @@
 //   shared type:'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO' <-> engine tipo:'vaga_da_peca_recebida_escolhida' (recebidaId, borda, celulaAlvo) — issue #138
 //   shared type:'PEAO_MOVIDO'                     <-> engine tipo:'peao_movido' (peaoId, pecaIdDe, pecaIdPara, celula)
 //   shared type:'PEAO_PERMANECEU'                 <-> engine tipo:'peao_permaneceu' (peaoId, pecaId)
+//   shared type:'ATRAVESSOU_O_ESCURO'             <-> engine tipo:'atravessou_o_escuro' (peaoId, celula) — issue #264
 //   shared type:UPPER_SNAKE no wire vs engine tipo:snake no domínio; campos em camelCase nos dois lados
 //
 // Reuso do contrato do Tabuleiro (./tabuleiro.ts): girar/posicionar da Peça
@@ -102,6 +104,12 @@ export interface PermanecerComando {
   readonly peaoId: PeaoId;
 }
 
+// Atravessar o Escuro (issue #264 / spec #272): jogada exclusiva de Baixa
+// Iluminação — o Peão da vez atravessa para a célula escura conectada (vaga
+// não iluminada) adjacente à peça sob ele no Tabuleiro. NÃO entra neste
+// contrato de Peão: o comando viaja apenas pelo canal de Partida, com o
+// `jogadorId` de forma (AtravessarOEscuroPartidaComando em ./partida.ts) —
+// o tabuleiro só o vê como evento ATRAVESSOU_O_ESCURO na redução do cliente.
 export type PeaoComandoDoCliente =
   | SelecionarPeaoComando
   | DesselecionarPeaoComando
@@ -165,10 +173,21 @@ export interface PeaoPermaneceuEvento {
   readonly pecaId: PecaId;
 }
 
+// Travessia do Escuro (issue #264 / spec #272): o Peão em Baixa Iluminação
+// alcançou a célula escura conectada. O evento carrega apenas o Peão e a
+// célula de destino — a peça sorteada do Recebimento gerado pela travessia
+// chega pelos eventos RECEBIMENTO_GERADO/PECA_SORTEADA do mesmo lote.
+export interface AtravessouOEscuroEvento {
+  readonly type: 'ATRAVESSOU_O_ESCURO';
+  readonly peaoId: PeaoId;
+  readonly celula: Celula;
+}
+
 export type PeaoEventoDoServidor =
   | PeaoSelecionadoEvento
   | PeaoDesselecionadoEvento
   | RecebimentoGeradoEvento
   | PeaoPosicionadoEvento
   | PeaoMovidoEvento
-  | PeaoPermaneceuEvento;
+  | PeaoPermaneceuEvento
+  | AtravessouOEscuroEvento;

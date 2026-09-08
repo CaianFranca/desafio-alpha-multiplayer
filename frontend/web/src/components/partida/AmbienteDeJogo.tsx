@@ -26,7 +26,9 @@ import {
 } from '../../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
+import type { VooDoPeaoPendente } from '../../game/tabuleiro/vooDoPeao'
 import type { LimpezaTrigger } from '../../game/scenes/TransicaoLimpeza'
+import type { EncaixeTrigger } from '../../game/tabuleiro/encaixe'
 
 const cameraFixa = descreverCameraFixa(LARGURA_MESA, PROFUNDIDADE_MESA, FOV_CAMERA)
 
@@ -63,8 +65,25 @@ interface AmbienteDeJogoProps {
   peaoAtivoId?: PeaoId | null
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
+  /**
+   * Voo pendente do peão (issue #242): overlay até o pouso; null = sem voo.
+   * Desce até a cena, que avisa o pouso via `onVooAterrissou(nonce)`.
+   */
+  vooPendente?: VooDoPeaoPendente | null
+  /** Pouso do voo concluído (nonce): a página limpa o pendente. */
+  onVooAterrissou?: (nonce: number) => void
   /** Trigger de limpeza evento-driven (issue #239, B1) — só LIMPEZA_APLICADA dispara, snapshot não. */
   limpezaTrigger?: LimpezaTrigger | null
+  /** Trigger de encaixe evento-driven (issue #241): voo mesa→célula. */
+  encaixeTrigger?: EncaixeTrigger | null
+  /** Fim do voo do Encaixe (key) → o pai limpa o trigger. */
+  onFimEncaixe?: (key: number) => void
+  /**
+   * Peões em Baixa Iluminação do dono (issue #297): peaoIds derivados uma vez
+   * no pai — avatar do Diretor troca para a variante apagado só no peão
+   * afetado, em todas as posições (célula/fileira/voo).
+   */
+  emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
 }
 
 export function AmbienteDeJogo({
@@ -78,7 +97,12 @@ export function AmbienteDeJogo({
   peaoSelecionadoIdServidor = null,
   peaoAtivoId = null,
   sanidadePorPeao = {},
+  vooPendente = null,
+  onVooAterrissou,
   limpezaTrigger = null,
+  encaixeTrigger = null,
+  onFimEncaixe,
+  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -229,6 +253,8 @@ export function AmbienteDeJogo({
       <Canvas
         camera={{ fov: FOV_CAMERA, position: cameraFixa.posicao }}
         frameloop="demand"
+        // Sombras ligadas (auto-sombra da caixa/cesta + sombra na Mesa).
+        shadows
         // Alpha desativado: o canvas é opaco e o vazio vem do clear do fundo.
         // Com alpha ativo, o alpha da textura vaza para o compositor (issue #75).
         gl={{ alpha: false }}
@@ -261,7 +287,12 @@ export function AmbienteDeJogo({
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           pecaCorrente={pecaCorrente}
+          vooPendente={vooPendente}
+          onVooAterrissou={onVooAterrissou}
           limpezaTrigger={limpezaTrigger}
+          encaixeTrigger={encaixeTrigger}
+          onFimEncaixe={onFimEncaixe}
+          emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
         />
       </Canvas>
       {estadoExibicao ? (
@@ -288,6 +319,7 @@ export function AmbienteDeJogo({
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
           sanidadePorPeao={sanidadePorPeao}
+          encaixeTrigger={encaixeTrigger}
         />
       ) : null}
     </div>

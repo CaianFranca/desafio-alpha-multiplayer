@@ -204,6 +204,9 @@ jobs:
             echo "POSTGRES_PASSWORD=${PROD_POSTGRES_PASSWORD}"
             echo 'REDIS_HOST=127.0.0.1'
             echo 'REDIS_PORT=6379'
+            # Lobby e game-server coabitam o mesmo host em prod nativa: o
+            # hostname default `game-server` só resolve na rede Docker Compose.
+            echo 'GAME_SERVER_ADVERTISE_HOST=127.0.0.1'
             echo "JWT_SECRET=${PROD_JWT_SECRET}"
             echo "JWT_REFRESH_SECRET=${PROD_JWT_REFRESH_SECRET}"
             echo "LOBBY_PUBLIC_URL=${LOBBY_PUBLIC_URL}"

@@ -18,14 +18,20 @@
 // funil do dispatch (vitória antes da derrota); pós-término, qualquer
 // comando é recusado com PARTIDA_TERMINADA.
 //
-// Ataque dos Monstros (issue #172): nos dois gatilhos definitivos — o
-// posicionamento do Peão do Primeiro Turno e a Confirmação de Posição com
-// mudança de Peça — o Ataque é resolvido APÓS a Iluminação e a Limpeza
-// (monstros.ts), comparando os peões no Alcance de cada Monstro com o
-// snapshot anterior (peoesNoAlcance). Mover, Permanecer, Encerrar o Turno e
-// o posicionamento de peças NUNCA disparam: a movimentação desfeita não
-// altera o snapshot e não gera Ataque. A Proteção concedida pela Sala Médica
-// na Confirmação não é consumida pelo Ataque do MESMO gatilho — permanece
+// Ataque dos Monstros (issue #172, centrado no atuante pela #237 — fiação
+// na Partida pela #236): a avaliação é POR MONSTRO, comparando a Peça do
+// início do turno com a Peça decidida (confirmada, mantida ou posicionada)
+// do peão do ATUANTE, no Tabuleiro PÓS-Limpeza. Os gatilhos são as ações
+// definitivas do atuante: o posicionamento do Peão do Primeiro Turno
+// (entrada — a Peça do início é null ≡ fora), a Confirmação de Posição com
+// mudança de Peça e a Permanência (antes = depois — permanecer dentro
+// dispara). Mover e a movimentação desfeita NUNCA disparam (só a decisão
+// definitiva vale) e Encerrar o Turno e o posicionamento de peças nunca
+// disparam. Fora→fora é silêncio — só os Monstros envolvidos atacam, mesmo
+// com peões de terceiros parados dentro do Alcance (a causa do bug #262
+// desaparece por construção). O Ataque é resolvido APÓS a Iluminação e a
+// Limpeza (monstros.ts). A Proteção concedida pela Sala Médica na
+// Confirmação não é consumida pelo Ataque do MESMO gatilho — permanece
 // para o próximo (CONTEXT.md: "permanece até ser consumida").
 //
 // Proteção observável (issue #227): o evento posicao_confirmada carrega o
@@ -40,15 +46,21 @@ import {
   aplicarComandoDeTabuleiro,
   aplicarLimpeza,
   calcularIluminacao,
+  celulaVizinhaNaBorda,
   ehPecaDeMonstro,
+  estaDentroDaGrade,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
+  tetoDoPortao,
   validarTexto,
+  vagasDisponiveis,
   vizinhasConectadas,
   type Celula,
+  type BordaCardinal,
   type ComandoDeTabuleiro,
   type CorDoPeao,
   type CodigoDeErroDeTabuleiro,
+  type EscolherVagaDaPecaRecebidaComando,
   type EstadoDoTabuleiro,
   type EventoDoTabuleiro,
   type MoverPeaoComando,
@@ -60,7 +72,7 @@ import {
   type SelecionarPecaComando,
 } from './tabuleiro.ts';
 import {
-  resolverAtaques,
+  resolverAtaquesCentradoNoAtuante,
   type AtaqueResolvidoEvento,
   type EstadoResultanteDoAtaque,
 } from './monstros.ts';
@@ -103,6 +115,11 @@ export interface EstadoDaPartida {
   // está sobre a Mesa (Primeiro Turno ainda não concluído).
   readonly pecaDoInicioDoTurnoId: string | null;
   readonly posicaoConfirmada: boolean;
+  // Travessia do Escuro (issue #264): a jogada exclusiva de Baixa Iluminação é
+  // única por turno — o Peão da vez atravessa para a célula escura conectada
+  // uma única vez; a flag é zerada no avanço da vez. Retrocompatível: estados
+  // antigos persistem sem o campo (acesso via ?? false).
+  readonly atravessouNoTurno: boolean;
   readonly celulasIluminadas: readonly Celula[];
   // Término da Partida (issue #176): o Desfecho !== null é a própria
   // condição "terminada" — sem flag duplicada. Os contadores globais de
@@ -113,10 +130,12 @@ export interface EstadoDaPartida {
   readonly geradoresLigados: readonly string[];
   readonly cartaoDeAcessoObtido: boolean;
   // Ataque (issue #172): snapshot dos peões dentro do Alcance de cada Monstro
-  // no último gatilho (posicionamento do Peão do Primeiro Turno ou
-  // Confirmação de Posição com mudança de Peça) — a base do delta que dispara
-  // o Ataque. Chave = pecaId do Monstro; valor = peaoIds. Monstros removidos
-  // pela Limpeza têm a entrada podada no gatilho seguinte.
+  // no último gatilho (posicionamento do Peão do Primeiro Turno, Confirmação
+  // de Posição com mudança de Peça ou Permanência) — observabilidade do
+  // Alcance atual (a decisão de disparar é centrada no atuante desde a
+  // issue #236/#237 e não usa mais este snapshot). Chave = pecaId do Monstro;
+  // valor = peaoIds. Monstros removidos pela Limpeza têm a entrada podada no
+  // gatilho seguinte.
   readonly peoesNoAlcance: Readonly<Record<string, readonly string[]>>;
   // Resgate (issue #171): peças em período de graça — Permanência bloqueada
   // até saída de um peão. Retrocompatível: estados antigos persistem sem o
@@ -129,10 +148,10 @@ export interface ConfirmarPosicaoDoPeaoComando {
   readonly peaoId: string;
 }
 
-// Desfecho da Partida (issue #176): vitória, ou derrota com motivo. A
-// vitória exige as TRÊS condições simultâneas — 3 geradores ligados, cartão
-// de acesso obtido e os 4 peões no mesmo Portão de Saída; a definição da
-// posição dos peões cobre apenas essa terceira condição.
+// Desfecho da Partida (issue #176, roster variável N = 2–4 pela #285): vitória,
+// ou derrota com motivo. A vitória exige as TRÊS condições simultâneas — 3
+// geradores ligados, cartão de acesso obtido e os N peões no mesmo Portão de
+// Saída; a definição da posição dos peões cobre apenas essa terceira condição.
 export type DesfechoDaPartida =
   | { readonly tipo: 'vitoria' }
   | {
@@ -144,9 +163,23 @@ export interface EncerrarTurnoComando {
   readonly tipo: 'encerrar_turno';
 }
 
+// Travessia do Escuro (issue #264 / spec #272): comando de domínio da jogada
+// exclusiva de Baixa Iluminação — o alvo é a célula ESCURA (fora de
+// celulasIluminadas) conectada à peça sob o Peão (vaga de borda aberta com
+// célula vizinha vazia). Guardas na ordem canônica: Peão do ator, Primeiro
+// Turno, posição confirmada, Baixa obrigatória, travessia única por turno,
+// seleção/posicionamento e validade do alvo (grade, ocupação, conexão,
+// escuridão).
+export interface AtravessarOEscuroDaPartidaComando {
+  readonly tipo: 'atravessar_o_escuro';
+  readonly peaoId: string;
+  readonly celula: Celula;
+}
+
 export type ComandoDePartida =
   | ComandoDeTabuleiro
   | ConfirmarPosicaoDoPeaoComando
+  | AtravessarOEscuroDaPartidaComando
   | EncerrarTurnoComando;
 
 export interface TurnoIniciadoEvento {
@@ -195,6 +228,17 @@ export interface PartidaTerminadaEvento {
   readonly desfecho: DesfechoDaPartida;
 }
 
+// Travessia do Escuro (issue #264): eco do domínio — o Peão em Baixa
+// Iluminação alcançou a célula escura conectada. O lote segue com o
+// Recebimento de Baixa (peca_sorteada + recebimento_gerado) quando o sorteio
+// produz peça; a travessia NÃO é ponto definitivo (sem Limpeza/Ataque,
+// ADR-0005).
+export interface AtravessouOEscuroEvento {
+  readonly tipo: 'atravessou_o_escuro';
+  readonly peaoId: string;
+  readonly celula: Celula;
+}
+
 export type EventoDaPartida =
   | EventoDoTabuleiro
   | TurnoIniciadoEvento
@@ -203,6 +247,7 @@ export type EventoDaPartida =
   | CelulasIluminadasEvento
   | AtaqueResolvidoEvento
   | ResgateRealizadoEvento
+  | AtravessouOEscuroEvento
   | PartidaTerminadaEvento;
 
 export type CodigoDeErroDaPartida =
@@ -235,8 +280,9 @@ export type ResultadoDaPartida =
   | OperacaoBemSucedidaDaPartida
   | OperacaoRejeitadaDaPartida;
 
-// Cores canônicas dos 4 Peões, atribuídas pela ordem de entrada dos Jogadores
-// (mesma ordem dos Peões do Tabuleiro, em estadoInicialDoTabuleiro).
+// Cores canônicas dos Peões, atribuídas pela ordem de entrada dos Jogadores
+// (mesma ordem dos Peões do Tabuleiro, em estadoInicialDoTabuleiro). O roster
+// é variável (N = 2–4, issue #285): fatiam-se as N primeiras cores na criação.
 const CORES_PELA_ORDEM: readonly CorDoPeao[] = [
   'branco',
   'vermelho',
@@ -257,10 +303,10 @@ export function estadoInicialDaPartida(
   if (idsInvalidos) {
     return { sucesso: false, erro: idsInvalidos.erro };
   }
-  if (jogadoresEmOrdem.length !== 4) {
+  if (jogadoresEmOrdem.length < 2 || jogadoresEmOrdem.length > 4) {
     return rejeitarDaPartida(
       'DADOS_INVALIDOS',
-      'A Partida exige exatamente quatro jogadores.',
+      'A Partida exige de dois a quatro jogadores.',
     );
   }
   if (new Set(jogadoresEmOrdem).size !== jogadoresEmOrdem.length) {
@@ -270,9 +316,10 @@ export function estadoInicialDaPartida(
     );
   }
 
+  const cores = CORES_PELA_ORDEM.slice(0, jogadoresEmOrdem.length);
   const jogadores: JogadorDaPartida[] = jogadoresEmOrdem.map(
     (jogadorId, indice) => {
-      const cor = CORES_PELA_ORDEM[indice];
+      const cor = cores[indice];
       return {
         jogadorId,
         ordem: indice + 1,
@@ -288,12 +335,16 @@ export function estadoInicialDaPartida(
   );
 
   const estado: EstadoDaPartida = {
-    tabuleiro: estadoInicialDoTabuleiro(entrada),
+    tabuleiro: estadoInicialDoTabuleiro({
+      ...(entrada ?? {}),
+      numeroDeJogadores: jogadoresEmOrdem.length,
+    }),
     jogadores,
     jogadorAtivoId: jogadores[0].jogadorId,
     rodada: 1,
     pecaDoInicioDoTurnoId: null,
     posicaoConfirmada: false,
+    atravessouNoTurno: false,
     celulasIluminadas: [],
     resultado: null,
     geradoresLigados: [],
@@ -375,8 +426,9 @@ function rotearComandoDaPartida(
       return selecionarPecaDaPartida(estado, comando, jogadorAtivo);
     case 'girar_peca':
     case 'finalizar_manipulacao':
-    case 'escolher_vaga_da_peca_recebida':
       return delegarAoTabuleiro(estado, comando);
+    case 'escolher_vaga_da_peca_recebida':
+      return escolherVagaDaPecaRecebidaDaPartida(estado, comando, jogadorAtivo);
     case 'selecionar_peao': {
       const alheio = exigirPeaoDoAtor(comando.peaoId, jogadorAtivo);
       if (alheio) {
@@ -399,6 +451,8 @@ function rotearComandoDaPartida(
       return moverPeaoDaPartida(estado, comando, jogadorAtivo);
     case 'permanecer':
       return permanecerNaPartida(estado, comando, jogadorAtivo);
+    case 'atravessar_o_escuro':
+      return atravessarOEscuroDaPartida(estado, comando, jogadorAtivo);
     case 'confirmar_posicao_do_peao':
       return confirmarPosicaoDoPeao(estado, comando, jogadorAtivo);
     case 'encerrar_turno':
@@ -539,13 +593,23 @@ function posicionarPeaoDaPartida(
   // depois de travar o Peão e recalcular a Iluminação, antes de retornar. As
   // Recebidas caem na Vizinhança do Peão (sempre iluminadas) e não são
   // removidas. O estado é filtrado e o evento só sai quando há remoção.
-  // Ataque (issue #172): resolvido logo após a Limpeza — Monstro removido
-  // não ataca e tem a entrada podada do snapshot.
+  // Ataque (issues #172/#236): resolvido logo após a Limpeza — Monstro
+  // removido não ataca e tem a entrada podada do snapshot. O posicionamento
+  // do Peão no Primeiro Turno é ENTRADA por definição: a Peça do início do
+  // turno é null (≡ fora) e a Peça decidida é a recém-ocupada.
   // ST-15 / issue #170: se o Ataque impôs Baixa Iluminação nova, a Iluminação
   // é recalculada e a Limpeza reaplicada no MESMO gatilho.
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
-  const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
+  // Sem Peça sob o Peão (estado inconsistente defensivo), '' nunca casa com
+  // um pecaId de Alcance: avalia como fora→fora, silêncio.
+  const ataque = resolverAtaqueNoGatilho(
+    estado,
+    tabuleiroPosLimpeza,
+    eventos,
+    null,
+    peao?.pecaId ?? '',
+  );
   const { celulasIluminadas, posicionadas: posicionadasFinais } =
     reaplicarIluminacaoSeBaixaNova(
       estado,
@@ -640,7 +704,10 @@ function moverPeaoDaPartida(
   if (!resultadoTab.sucesso) {
     // Se a rejeição foi por ocupação mas a exceção de resgate permite, realiza
     // o movimento manualmente (evita tocar peoes.ts com roster e mantém a
-    // dependência unidirecional partida→tabuleiro→peoes).
+    // dependência unidirecional partida→tabuleiro→peoes). O fallback segue
+    // vivo (issue #285): com afetado no destino o teto da Partida (N+1 via
+    // tetoDoPortao) supera o teto base do Tabuleiro (N), então a delegação
+    // rejeita e só este caminho autoriza a entrada do resgatador.
     if (resultadoTab.erro.codigo === 'PECA_JA_TEM_PEAO' && destino) {
       const teto = tetoOcupacao(destino, estado);
       const ocupantes = estado.tabuleiro.peoes.filter(
@@ -754,12 +821,259 @@ function moverPeaoDaPartida(
 
   const estadoNovo: EstadoDaPartida = {
     ...estado,
-    tabuleiro: tabuleiroNovo,
+    tabuleiro: { ...tabuleiroNovo, peaoSelecionadoId: comando.peaoId },
     jogadores: jogadoresNovos,
     pecasEmPeriodoDeGraca,
   };
 
   return sucessoDaPartida(estadoNovo, [...eventosTab, ...eventosResgate]);
+}
+
+// Travessia do Escuro (issue #264 / spec #272): jogada exclusiva de Baixa
+// Iluminação — o Peão da vez (selecionado e posicionado) atravessa para uma
+// célula ESCURA (fora de celulasIluminadas) conectada à peça sob ele (vaga de
+// borda aberta com célula vizinha vazia). Efeito: um único Recebimento de
+// Baixa (limite de 1 peça) nasce com a célula-alvo PRÉ-FIXADA na célula da
+// travessia; o Jogador escolhe a borda correspondente (escolher_vaga), encaixa
+// a Peça (posicionar_peca) e move o Peão para ela (mover_peao). Guardas na
+// ordem canônica do plano:
+//   exigirPeaoDoAtor → FORA_DA_VEZ; Primeiro Turno → MOVIMENTO_INDISPONIVEL;
+//   posicaoConfirmada → POSICAO_CONFIRMADA; sem Baixa →
+//   MOVIMENTO_INDISPONIVEL; já atravessou no turno → MOVIMENTO_INDISPONIVEL;
+//   Seleção de OUTRO Peão → PEAO_NAO_SELECIONADO (Seleção nula usa o Peão do
+//   ator, AC-3 do #272); Peão sobre a Mesa → PEAO_NAO_SELECIONADO; alvo fora da
+//   grade → CELULA_NAO_ENCONTRADA; ocupado → CELULA_JA_OCUPADA; não-vizinho
+//   via borda aberta → MOVIMENTO_NAO_CONECTADO; iluminado →
+//   MOVIMENTO_INDISPONIVEL.
+// NÃO é ponto definitivo: não recalcula Iluminação, não aplica Limpeza nem
+// Ataque (ADR-0005 — pontos definitivos são apenas Primeiro Turno e
+// Confirmação de Posição). Caixa vazia ou sem vagas → 0 peças, sem evento de
+// travessia e sem marcar a flag (espelha "Caixa vazia não é erro").
+//
+// CADEIA OBRIGATÓRIA (Req 3 do #272 / Expected do #264): a Limpeza do caminho
+// escuro acontece no ponto definitivo que FECHA a sequência — atravessar →
+// escolher_vaga (borda da célula travada) → posicionar_peca → mover_peao →
+// confirmar_posicao_do_peao. Garantia estrutural do servidor: com o
+// Recebimento da travessia pendente, o confirmar recusa
+// (PENDENCIA_NAO_RESOLVIDA), o mover recusa (mesma pendência, peoes.ts) e o
+// encerrar recusa — sem atalho que descarte a peça sorteada nem estado
+// intermediário sem Limpeza. O confirmar SEMPRE recalcula a Iluminação e
+// reaplica a Limpeza (recalcularIluminacaoEAplicarLimpeza); a iluminação
+// materializada apenas nos pontos definitivos é a garantia do ADR-0005
+// ("preserva o desfazer").
+function atravessarOEscuroDaPartida(
+  estado: EstadoDaPartida,
+  comando: AtravessarOEscuroDaPartidaComando,
+  ator: JogadorDaPartida,
+): ResultadoDaPartida {
+  const alheio = exigirPeaoDoAtor(comando.peaoId, ator);
+  if (alheio) {
+    return alheio;
+  }
+  if (ator.primeiroTurnoPendente) {
+    return rejeitarDaPartida(
+      'MOVIMENTO_INDISPONIVEL',
+      'A Travessia do Escuro não existe no Primeiro Turno.',
+    );
+  }
+  if (estado.posicaoConfirmada) {
+    return rejeitarDaPartida(
+      'POSICAO_CONFIRMADA',
+      'A posição do Peão já foi confirmada; encerre o turno.',
+    );
+  }
+  if (!(ator.emBaixaIluminacao ?? false)) {
+    return rejeitarDaPartida(
+      'MOVIMENTO_INDISPONIVEL',
+      'A Travessia do Escuro é exclusiva de Baixa Iluminação.',
+    );
+  }
+  if (estado.atravessouNoTurno ?? false) {
+    return rejeitarDaPartida(
+      'MOVIMENTO_INDISPONIVEL',
+      'O Peão já atravessou o Escuro neste turno.',
+    );
+  }
+
+  const peao = estado.tabuleiro.peoes.find(
+    (item) => item.peaoId === comando.peaoId,
+  );
+  if (!peao) {
+    return rejeitarDaPartida('PEAO_NAO_ENCONTRADO', 'O Peão não foi encontrado.');
+  }
+  // Issue #264 / AC-3 do #272: a Travessia não exige o Peão selecionado — com
+  // Seleção nula a referência é o Peão próprio do ator (já garantido por
+  // exigirPeaoDoAtor); apenas a Seleção de OUTRO Peão permanece inválida,
+  // mesmo fallback da Confirmação de Posição.
+  if (
+    estado.tabuleiro.peaoSelecionadoId !== null &&
+    estado.tabuleiro.peaoSelecionadoId !== peao.peaoId
+  ) {
+    return rejeitarDaPartida(
+      'PEAO_NAO_SELECIONADO',
+      'Outro Peão está selecionado; a Travessia exige o Peão do ator.',
+    );
+  }
+  if (peao.pecaId === null) {
+    return rejeitarDaPartida(
+      'PEAO_NAO_SELECIONADO',
+      'O Peão está sobre a Mesa; não há como atravessar o Escuro.',
+    );
+  }
+  const pecaSobOPeao = estado.tabuleiro.posicionadas.find(
+    (item) => item.pecaId === peao.pecaId,
+  );
+  if (!pecaSobOPeao) {
+    return rejeitarDaPartida(
+      'PEAO_NAO_ENCONTRADO',
+      'A Peça do Peão não foi encontrada.',
+    );
+  }
+
+  const alvo = comando.celula;
+  if (!estaDentroDaGrade(alvo.linha) || !estaDentroDaGrade(alvo.coluna)) {
+    return rejeitarDaPartida(
+      'CELULA_NAO_ENCONTRADA',
+      'A célula de destino está fora da grade.',
+    );
+  }
+  const ocupada = estado.tabuleiro.posicionadas.some(
+    (peca) => peca.celula.linha === alvo.linha && peca.celula.coluna === alvo.coluna,
+  );
+  if (ocupada) {
+    return rejeitarDaPartida(
+      'CELULA_JA_OCUPADA',
+      'A célula de destino já está ocupada.',
+    );
+  }
+  const ehVagaDaPeca = vagasDisponiveis(
+    estado.tabuleiro,
+    pecaSobOPeao,
+    estado.tabuleiro.recebidas,
+  ).some(
+    (candidata) =>
+      candidata.celula.linha === alvo.linha && candidata.celula.coluna === alvo.coluna,
+  );
+  if (!ehVagaDaPeca) {
+    return rejeitarDaPartida(
+      'MOVIMENTO_NAO_CONECTADO',
+      'A célula de destino não é uma vaga escura conectada à Peça sob o Peão.',
+    );
+  }
+  if (
+    estado.celulasIluminadas.some(
+      (celula) => celula.linha === alvo.linha && celula.coluna === alvo.coluna,
+    )
+  ) {
+    return rejeitarDaPartida(
+      'MOVIMENTO_INDISPONIVEL',
+      'A célula de destino está iluminada; use a Movimentação normal.',
+    );
+  }
+
+  // Efeito: Recebimento de Baixa (limite 1) com a célula-alvo pré-fixada na
+  // célula da travessia. A ordem canônica do lote abre com atravessou_o_escuro
+  // e segue com peca_sorteada (do sorteio) + recebimento_gerado. A Seleção do
+  // Peão é preservada para a sequência (escolher vaga → encaixar → mover) —
+  // e, quando nula (AC-3 do #272), adotada a partir do Peão do ator: nenhum
+  // passo intermediário exige re-seleção.
+  const sorteio = gerarRecebidas(estado.tabuleiro, pecaSobOPeao, true);
+  const recebidas = sorteio.recebidas.map((recebida) => ({
+    ...recebida,
+    celulaAlvo: alvo,
+  }));
+  const tabuleiro = {
+    ...sorteio.estado,
+    recebidas,
+    peaoSelecionadoId: estado.tabuleiro.peaoSelecionadoId ?? comando.peaoId,
+  };
+  let atravessouNoTurno = false;
+  const eventos: EventoDaPartida[] = [];
+  if (recebidas.length > 0) {
+    atravessouNoTurno = true;
+    eventos.push(
+      { tipo: 'atravessou_o_escuro', peaoId: comando.peaoId, celula: alvo },
+      ...sorteio.eventos,
+      {
+        tipo: 'recebimento_gerado',
+        recebidas: projetarRecebidas(recebidas),
+      },
+    );
+  }
+  return sucessoDaPartida(
+    { ...estado, tabuleiro, atravessouNoTurno },
+    eventos,
+  );
+}
+
+// ST-15 / issue #264: em Baixa Iluminação a escolha de vaga é restrita na
+// camada da Partida antes de delegar ao Tabuleiro — a pendência da Travessia
+// do Escuro (celulaAlvo pré-fixada) só aceita a borda que mapeia à célula
+// travada; as pendências comuns (Recebimento do Primeiro Turno) só aceitam
+// vaga em célula NÃO iluminada. Rejeição DADOS_INVALIDOS; fora de Baixa,
+// delega direto (comportamento histórico intacto).
+// Req 4 do #272: a vaga deriva da Peça sob o Peão DO ATOR (ator.peaoId), não
+// da Seleção — Seleção nula não fragiliza a validação da vaga escura (o Peão
+// selecionado no turno do ator é sempre o próprio ator, então a referência é
+// equivalente na sequência normal).
+function escolherVagaDaPecaRecebidaDaPartida(
+  estado: EstadoDaPartida,
+  comando: EscolherVagaDaPecaRecebidaComando,
+  ator: JogadorDaPartida,
+): ResultadoDaPartida {
+  if (!(ator.emBaixaIluminacao ?? false)) {
+    return delegarAoTabuleiro(estado, comando);
+  }
+  const celulaDaBorda = celulaDaVagaDoAtor(estado, ator, comando.borda);
+  const recebida = estado.tabuleiro.recebidas.find(
+    (item) => item.recebidaId === comando.recebidaId,
+  );
+  if (recebida !== undefined && recebida.celulaAlvo !== null) {
+    // Pendência da Travessia: a borda deve mapear exatamente à célula travada.
+    const travada = recebida.celulaAlvo;
+    if (
+      celulaDaBorda === null ||
+      celulaDaBorda.linha !== travada.linha ||
+      celulaDaBorda.coluna !== travada.coluna
+    ) {
+      return rejeitarDaPartida(
+        'DADOS_INVALIDOS',
+        'A borda indicada não é a vaga da Travessia do Escuro.',
+      );
+    }
+    return delegarAoTabuleiro(estado, comando);
+  }
+  // Pendência comum em Baixa: a vaga não pode cair em célula iluminada.
+  if (
+    celulaDaBorda !== null &&
+    estado.celulasIluminadas.some(
+      (celula) =>
+        celula.linha === celulaDaBorda.linha && celula.coluna === celulaDaBorda.coluna,
+    )
+  ) {
+    return rejeitarDaPartida(
+      'DADOS_INVALIDOS',
+      'Em Baixa Iluminação a vaga deve ser uma célula escura.',
+    );
+  }
+  return delegarAoTabuleiro(estado, comando);
+}
+
+// Célula vizinha na direção da borda a partir da Peça sob o Peão do ator, ou
+// null quando o Peão do ator não está sobre uma Peça. Referência fixa no ator
+// (Req 4 do #272): a validação da vaga em Baixa não depende da Seleção.
+function celulaDaVagaDoAtor(
+  estado: EstadoDaPartida,
+  ator: JogadorDaPartida,
+  borda: BordaCardinal,
+): Celula | null {
+  const peao = estado.tabuleiro.peoes.find(
+    (item) => item.peaoId === ator.peaoId,
+  );
+  const pecaSobOPeao = peao?.pecaId
+    ? estado.tabuleiro.posicionadas.find((item) => item.pecaId === peao.pecaId)
+    : undefined;
+  return pecaSobOPeao ? celulaVizinhaNaBorda(pecaSobOPeao.celula, borda) : null;
 }
 
 // ST-11: a Permanência vale apenas com o Peão na Peça do início do turno —
@@ -818,9 +1132,43 @@ function permanecerNaPartida(
     );
   }
 
+  // Ataque centrado no atuante (issues #172/#236): a Permanência é gatilho —
+  // a Peça do início do turno e a Peça decidida são a MESMA (antes = depois),
+  // então permanecer DENTRO do Alcance dispara e fora→fora é silêncio. A
+  // permanência não muda a Iluminação: sem recálculo nem Limpeza aqui
+  // (ADR-0005) — se o Vulto impor Baixa Iluminação nova, a Iluminação é
+  // recalculada e a Limpeza reaplicada no MESMO gatilho, mesmo funil dos
+  // demais. O lote mantém ataque_resolvido ANTES de turno_encerrado.
+  const pecaMantidaId = estado.pecaDoInicioDoTurnoId ?? null;
+  const eventos: EventoDaPartida[] = [...resultado.eventos];
+  const ataque = resolverAtaqueNoGatilho(
+    estado,
+    resultado.estado,
+    eventos,
+    pecaMantidaId,
+    pecaMantidaId ?? '',
+  );
+  const { celulasIluminadas, posicionadas: posicionadasFinais } =
+    reaplicarIluminacaoSeBaixaNova(
+      estado,
+      ataque.jogadores,
+      resultado.estado,
+      {
+        celulasIluminadas: estado.celulasIluminadas,
+        posicionadas: resultado.estado.posicionadas,
+      },
+      eventos,
+    );
+
   return avancarVez(
-    { ...estado, tabuleiro: resultado.estado },
-    [...resultado.eventos, { tipo: 'turno_encerrado', jogadorId: ator.jogadorId }],
+    {
+      ...estado,
+      tabuleiro: { ...resultado.estado, posicionadas: posicionadasFinais },
+      celulasIluminadas,
+      peoesNoAlcance: ataque.peoesNoAlcance,
+      jogadores: ataque.jogadores,
+    },
+    [...eventos, { tipo: 'turno_encerrado', jogadorId: ator.jogadorId }],
   );
 }
 
@@ -849,16 +1197,37 @@ function confirmarPosicaoDoPeao(
     );
   }
 
+  // Cadeia obrigatória do Escuro (Req 3 do #272 / issue #264): a Confirmação
+  // é o ponto definitivo que fecha a sequência da Travessia — com o
+  // Recebimento da travessia ainda pendente, confirmar direto descartaria a
+  // peça sorteada da Caixa sem nunca posicioná-la. A pendência bloqueia o
+  // encerramento (e o mover), então o guard aqui garante a cadeia no servidor:
+  // escolher → encaixar → mover só então confirmar.
+  if (estado.tabuleiro.recebidas.length > 0) {
+    return rejeitarDaPartida(
+      'PENDENCIA_NAO_RESOLVIDA',
+      'Há Peças Recebidas pendentes; a Confirmação exige completar a Travessia (encaixar e mover) antes.',
+    );
+  }
+
   const peao = estado.tabuleiro.peoes.find(
     (item) => item.peaoId === comando.peaoId,
   );
   if (!peao) {
     return rejeitarDaPartida('PEAO_NAO_ENCONTRADO', 'O Peão não foi encontrado.');
   }
-  if (estado.tabuleiro.peaoSelecionadoId !== peao.peaoId) {
+  // Issue #264: a Confirmação não exige o Peão selecionado — o movimento (que
+  // limpa a seleção no Tabuleiro) precede a Confirmação nos dois fluxos de
+  // Baixa Iluminação (Movimentação em célula iluminada e Travessia do Escuro);
+  // exigir re-seleção aí travaria o turno (AC-3 do #272). A seleção de OUTRO
+  // Peão permanece inválida.
+  if (
+    estado.tabuleiro.peaoSelecionadoId !== null &&
+    estado.tabuleiro.peaoSelecionadoId !== peao.peaoId
+  ) {
     return rejeitarDaPartida(
       'PEAO_NAO_SELECIONADO',
-      'O Peão indicado não é o selecionado.',
+      'Outro Peão está selecionado; é ele que deve ser confirmado.',
     );
   }
   if (peao.pecaId === null) {
@@ -886,8 +1255,13 @@ function confirmarPosicaoDoPeao(
 
   // O Recebimento sorteia as peças da Caixa (#138): peca_sorteada por peça e
   // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
+  // Issue #264 / spec #272: em Baixa o Recebimento acontece na Travessia do
+  // Escuro (ou não acontece — célula iluminada consome 0); a Confirmação em
+  // Baixa NÃO sorteia (recebidas = []), mantendo Limpeza/Ataque do gatilho.
   const emBaixa = ator.emBaixaIluminacao ?? false;
-  const sorteio = gerarRecebidas(estado.tabuleiro, peca, emBaixa);
+  const sorteio = emBaixa
+    ? { estado: estado.tabuleiro, recebidas: [] as readonly PecaRecebida[], eventos: [] as readonly EventoDoTabuleiro[] }
+    : gerarRecebidas(estado.tabuleiro, peca, emBaixa);
   // Issue #227: o posicao_confirmada só entra no lote ao FINAL da computação —
   // o evento carrega o protegido RESULTANTE do ator no gatilho completo, que
   // inclui a concessão da Sala Médica e o consumo pelo ataque do MESMO gatilho
@@ -902,11 +1276,21 @@ function confirmarPosicaoDoPeao(
     });
   }
   const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
-  // Limpeza e Ataque (issue #172) na mesma ordem do Primeiro Turno:
-  // Iluminação → Limpeza → Ataque → atualização do snapshot do Alcance.
+  // Limpeza e Ataque (issues #172/#236) na mesma ordem do Primeiro Turno:
+  // Iluminação → Limpeza → Ataque → atualização do snapshot do Alcance. A
+  // avaliação é centrada no atuante: Peça do início do turno (antes) vs Peça
+  // confirmada (depois).
   const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
-  const ataque = resolverAtaqueNoGatilho(estado, tabuleiroPosLimpeza, eventos);
+  const ataque = resolverAtaqueNoGatilho(
+    estado,
+    tabuleiroPosLimpeza,
+    eventos,
+    // ?? null: defensivo para estados persistidos sem o campo (binário
+    // anterior) — sem Peça do início, o "antes" avalia como fora.
+    estado.pecaDoInicioDoTurnoId ?? null,
+    peca.pecaId,
+  );
   const { celulasIluminadas, posicionadas: posicionadasPosAtaque } =
     reaplicarIluminacaoSeBaixaNova(
       estado,
@@ -1106,6 +1490,7 @@ function avancarVez(
           (item) => item.peaoId === ordenados[0].peaoId,
         )?.pecaId ?? null,
       posicaoConfirmada: false,
+      atravessouNoTurno: false,
       celulasIluminadas: estado.celulasIluminadas,
       resultado: estado.resultado,
       geradoresLigados: estado.geradoresLigados,
@@ -1130,6 +1515,7 @@ function avancarVez(
     rodada: rodadaAlvo,
     pecaDoInicioDoTurnoId: peaoDoAlvo?.pecaId ?? null,
     posicaoConfirmada: false,
+    atravessouNoTurno: false,
     celulasIluminadas: estado.celulasIluminadas,
     resultado: estado.resultado,
     geradoresLigados: estado.geradoresLigados,
@@ -1219,17 +1605,22 @@ function desfechoDaPartida(estado: EstadoDaPartida): DesfechoDaPartida | null {
   return null;
 }
 
-// Vitória (issue #176): 3 geradores ligados, cartão obtido e TODOS os peões
-// sobre a MESMA peça posicionada do tipo portao_de_saida (mesmo pecaId não
-// nulo). Sobre os peões vale apenas a posição — estados dos jogadores (ex.:
-// sanidade 0) não os impedem de vencer.
+// Vitória (issue #176, roster variável N = 2–4 pela #285): 3 geradores
+// ligados, cartão obtido e TODOS os N peões sobre a MESMA peça posicionada do
+// tipo portao_de_saida (mesmo pecaId não nulo). Sobre os peões vale apenas a
+// posição — estados dos jogadores (ex.: sanidade 0) não os impedem de vencer.
 function equipeVenceu(estado: EstadoDaPartida): boolean {
   if (estado.geradoresLigados.length < 3 || !estado.cartaoDeAcessoObtido) {
     return false;
   }
+  const totalDePeoes = estado.jogadores.length;
   const peoes = estado.tabuleiro.peoes;
   const referencia = peoes[0];
-  if (peoes.length !== 4 || !referencia || referencia.pecaId === null) {
+  if (
+    peoes.length !== totalDePeoes ||
+    !referencia ||
+    referencia.pecaId === null
+  ) {
     return false;
   }
   return (
@@ -1375,10 +1766,15 @@ function reaplicarIluminacaoSeBaixaNova(
 }
 
 /**
- * Resolução do Ataque (issue #172, estados issue #170) no gatilho — sempre
- * sobre o tabuleiro PÓS-Limpeza: Monstro removido não ataca e tem a entrada
- * podada do snapshot. ST-15 / issue #170 aplica as penalidades APÓS o consumo
- * da Proteção: Vulto → emBaixaIluminacao (idempotente), Espectro →
+ * Resolução do Ataque no gatilho (issues #172/#170/#173, centrado no atuante
+ * pela #237 — fiação na Partida pela #236) — sempre sobre o tabuleiro
+ * PÓS-Limpeza: Monstro removido não ataca e tem a entrada podada do snapshot.
+ * A avaliação é POR MONSTRO sobre a Peça do início do turno (antes) e a Peça
+ * decidida do peão do atuante (depois): fora→fora é silêncio e só os
+ * Monstros envolvidos atacam — o snapshot peoesNoAlcance de binários
+ * anteriores não é mais insumo da decisão (o legado delta-based permanece
+ * @deprecated em monstros.ts). ST-15 / issue #170 aplica as penalidades APÓS
+ * o consumo da Proteção: Vulto → emBaixaIluminacao (idempotente), Espectro →
  * sanidade-1 com piso 0 → amedrontado; jogador já amedrontado é imune a novo
  * Espectro; protegido nega a penalidade do MESMO gatilho.
  * Issue #173: o evento ataque_resolvido sai do gatilho com `estadosAplicados`
@@ -1391,18 +1787,21 @@ function resolverAtaqueNoGatilho(
   estado: EstadoDaPartida,
   tabuleiro: EstadoDoTabuleiro,
   eventos: EventoDaPartida[],
+  pecaDoInicioId: string | null,
+  pecaDecididaId: string,
 ): {
   peoesNoAlcance: Readonly<Record<string, readonly string[]>>;
   jogadores: readonly JogadorDaPartida[];
 } {
-  const resolucao = resolverAtaques(
+  const resolucao = resolverAtaquesCentradoNoAtuante(
     tabuleiro,
-    // Acesso defensivo: estados de binários anteriores persistidos em Redis
-    // sem os campos novos (mesmo padrão de resultado ?? null).
-    estado.peoesNoAlcance ?? {},
+    pecaDoInicioId,
+    pecaDecididaId,
     estado.jogadores.map((jogador) => ({
       jogadorId: jogador.jogadorId,
       peaoId: jogador.peaoId,
+      // ?? false: estados de binários anteriores persistidos em Redis sem o
+      // campo (mesmo padrão de resultado ?? null).
       protegido: jogador.protegido ?? false,
     })),
   );
@@ -1526,8 +1925,18 @@ function temAfetadoNaPeca(pecaId: string, estado: EstadoDaPartida): boolean {
 }
 
 function tetoOcupacao(peca: PecaPosicionada, estado: EstadoDaPartida): number {
-  const tetoNormal = peca.tipo === 'portao_de_saida' ? 4 : 1;
-  return temAfetadoNaPeca(peca.pecaId, estado) ? tetoNormal + 1 : tetoNormal;
+  // O Portão de Saída escala com o roster (issue #285) via a fonte única
+  // tetoDoPortao (peoes.ts): teto = N peões, com o +1 da exceção de Resgate
+  // já existente; as demais peças seguem no máximo 1 (+1 com afetado). O
+  // rosterN é o tamanho do roster (estado.jogadores.length), com o clamp
+  // min(N,4) preservado para estados artesanais.
+  if (peca.tipo !== 'portao_de_saida') {
+    return temAfetadoNaPeca(peca.pecaId, estado) ? 2 : 1;
+  }
+  return tetoDoPortao(
+    estado.jogadores.length,
+    temAfetadoNaPeca(peca.pecaId, estado),
+  );
 }
 
 // Pré-condição: ambos arrays devem vir do mesmo calcularIluminacao, que retorna

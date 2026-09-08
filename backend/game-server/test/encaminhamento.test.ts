@@ -163,9 +163,41 @@ test('POST com roster válido cria partida preparada e responde aceite', async (
   });
 });
 
-test('POST com roster de 3 membros responde ROSTER_INVALIDO', async () => {
+test('POST com roster de 3 membros cria partida preparada', async () => {
   await comServidor(600, async (servidor) => {
-    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2), membro(3)] }));
+    const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2), membro(3)] }));
+    assert.equal(aceite.serverId, SERVER_ID);
+    assert.ok(typeof aceite.partidaId === 'string' && aceite.partidaId.length > 0);
+    const del = await deletePartida(servidor.baseUrl, aceite.partidaId);
+    assert.equal(del.status, 204);
+  });
+});
+
+test('POST com roster de 2 membros cria partida preparada', async () => {
+  await comServidor(600, async (servidor) => {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2)] }));
+    assert.equal(aceite.serverId, SERVER_ID);
+    assert.ok(typeof aceite.partidaId === 'string' && aceite.partidaId.length > 0);
+    const del = await deletePartida(servidor.baseUrl, aceite.partidaId);
+    assert.equal(del.status, 204);
+  });
+});
+
+test('POST com roster de 1 membro responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1)] }));
+  });
+});
+
+test('POST com roster de 5 membros responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2), membro(3), membro(4), membro(5)] }));
+  });
+});
+
+test('POST com roster vazio responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [] }));
   });
 });
 
@@ -187,6 +219,41 @@ test('POST com jogadorIds duplicados responde ROSTER_INVALIDO', async () => {
   });
 });
 
+test('POST com membro em_reconexao responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2, { presenca: 'em_reconexao' }), membro(3)] }));
+  });
+});
+
+test('POST com membro não pronto responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2, { prontidao: false }), membro(3)] }));
+  });
+});
+
+test('POST com ordemDeEntrada duplicada responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2, { ordemDeEntrada: 1 }), membro(3)] }));
+  });
+});
+
+test('POST com ordemDeEntrada fora do intervalo responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2, { ordemDeEntrada: 0 }), membro(3)] }));
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2, { ordemDeEntrada: -1 }), membro(3)] }));
+  });
+});
+
+test('POST com ordemDeEntrada alta monotônica aceita roster pós-churn', async () => {
+  await comServidor(600, async (servidor) => {
+    // lobby gera ordens monotônicas: após churn, ordem 5 é válida
+    const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(3, { ordemDeEntrada: 3 }), membro(4, { ordemDeEntrada: 5 })] }));
+    assert.equal(aceite.serverId, SERVER_ID);
+    const del = await deletePartida(servidor.baseUrl, aceite.partidaId);
+    assert.equal(del.status, 204);
+  });
+});
+
 test('POST com membro sem campo essencial responde ROSTER_INVALIDO', async () => {
   await comServidor(600, async (servidor) => {
     const membroIncompleto = { ...membro(2) } as Partial<MembroDaSala>;
@@ -205,6 +272,19 @@ test('POST com salaId vazio responde ROSTER_INVALIDO', async () => {
 test('POST com codigoDeSala vazio responde ROSTER_INVALIDO', async () => {
   await comServidor(600, async (servidor) => {
     await postOfertaInvalida(servidor.baseUrl, ofertaValida({ codigoDeSala: '' }));
+  });
+});
+
+test('POST com salaId só espaços e codigo só espaços responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ salaId: '   ' }));
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ codigoDeSala: '   ' }));
+  });
+});
+
+test('POST com ordemDeEntrada excedendo teto responde ROSTER_INVALIDO', async () => {
+  await comServidor(600, async (servidor) => {
+    await postOfertaInvalida(servidor.baseUrl, ofertaValida({ roster: [membro(1), membro(2, { ordemDeEntrada: 10001 }), membro(3)] }));
   });
 });
 

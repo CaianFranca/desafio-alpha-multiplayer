@@ -439,7 +439,7 @@ test('sem memória nem projeção retorna 503 sem dados fabricados', async()=>{
     const codigo='ZZZ999';
     const jogadorId=randomUUID();
     // usuario
-    await pool.query(`INSERT INTO usuarios (id, apelido, email, senha_hash) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,[jogadorId, 'fantasma', `fantasma-${salaId}@ex.local`, 'hash']);
+    await pool.query(`INSERT INTO usuarios (id, apelido, email, senha) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,[jogadorId, 'fantasma', `fantasma-${salaId}@ex.local`, 'hash']);
     await pool.query(`INSERT INTO salas_historico (id, codigo_sala, status, anfitriao_id, server_id, partida_id) VALUES ($1,$2,'aberta', $3, NULL, NULL)`,[salaId, codigo, jogadorId]);
     await pool.query(`INSERT INTO membros (sala_id, usuario_id, ordem_de_entrada, bloqueado) VALUES ($1,$2,1,false)`,[salaId, jogadorId]);
     await pool.query(`INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,[salaId]);

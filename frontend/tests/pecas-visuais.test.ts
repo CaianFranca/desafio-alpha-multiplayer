@@ -1,0 +1,129 @@
+/**
+ * Visuais das peças (issues #275/#276/#277, spec #273).
+ *
+ * Só comportamento externo observável, nunca detalhe interno de material ou
+ * asset: cada um dos 10 tipos resolve um par map/normal distinto, os caminhos
+ * se distinguem sem depender de cor, o motivo gira com a orientação e as
+ * dimensões do contrato seguem quadradas.
+ */
+
+import {
+  LADO_DA_GRADE,
+  LARGURA_TABULEIRO,
+  PEAO_Y,
+  PECA_Y,
+  PROFUNDIDADE_TABULEIRO,
+  TAMANHO_CELULA,
+} from '../web/src/game/tabuleiro/contrato'
+import type { TipoDaPeca } from '../web/src/game/tabuleiro/contrato'
+import {
+  TEXTURAS_DAS_PECAS,
+  TEXTURA_OBSCURO_DA_GRADE,
+  TIPOS_COM_TEXTURA,
+  rotacaoDoMotivo,
+  texturaDaPeca,
+} from '../web/src/game/tabuleiro/texturasDasPecas'
+import {
+  COR_CONTORNO_PADRAO,
+  COR_CONTORNO_PEAO_SELECIONADO,
+  corDoContornoDaPeca,
+  propsDoMaterialDeContorno,
+} from '../web/src/game/tabuleiro/contorno'
+import { COR_DESTAQUE_RESGATE } from '../web/src/game/tabuleiro/PecaPlaceholder'
+
+const TODOS_OS_TIPOS: readonly TipoDaPeca[] = [
+  'inicial',
+  'reta',
+  'T',
+  'cruz',
+  'gerador',
+  'sala_do_diretor',
+  'sala_medica',
+  'portao_de_saida',
+  'vulto',
+  'espectro',
+]
+
+describe('visuais das peças', () => {
+  it('cobre os 10 tipos com trio map/normal/emissive distinto por tipo', () => {
+    expect([...TIPOS_COM_TEXTURA].sort()).toEqual([...TODOS_OS_TIPOS].sort())
+    expect(Object.keys(TEXTURAS_DAS_PECAS).sort()).toEqual([
+      ...TODOS_OS_TIPOS,
+    ].sort())
+    for (const tipo of TODOS_OS_TIPOS) {
+      const par = texturaDaPeca(tipo)
+      expect(par.map).toContain('assets/textures/')
+      expect(par.map.endsWith('.jpg')).toBe(true)
+      expect(par.normalMap).toContain('assets/textures/')
+      expect(par.normalMap.endsWith('.jpg')).toBe(true)
+      expect(par.normalMap).not.toBe(par.map)
+      expect(par.emissiveMap).toContain('assets/textures/')
+      expect(par.emissiveMap.endsWith('.jpg')).toBe(true)
+    }
+    // 30 arquivos distintos: 10 maps + 10 normals + 10 emissives, sem colisão.
+    const maps = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).map)
+    const normals = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).normalMap)
+    const emissives = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).emissiveMap)
+    expect(new Set(maps).size).toBe(TODOS_OS_TIPOS.length)
+    expect(new Set(normals).size).toBe(TODOS_OS_TIPOS.length)
+    expect(new Set(emissives).size).toBe(TODOS_OS_TIPOS.length)
+    expect(new Set([...maps, ...normals, ...emissives]).size).toBe(
+      TODOS_OS_TIPOS.length * 3,
+    )
+  })
+
+  it('peças de caminho distinguíveis sem depender de cor (map próprio)', () => {
+    const caminhos = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).map)
+    // Inicial, reta, T e cruz não compartilham o map entre si.
+    const caminhosBase = ['inicial', 'reta', 'T', 'cruz'] as const
+    const mapsBase = caminhosBase.map((t) => texturaDaPeca(t).map)
+    expect(new Set(mapsBase).size).toBe(caminhosBase.length)
+    expect(new Set(caminhos).size).toBe(TODOS_OS_TIPOS.length)
+  })
+
+  it('fundo do grid resolve o obscuro sob assets/textures/', () => {
+    expect(TEXTURA_OBSCURO_DA_GRADE).toContain('assets/textures/')
+    expect(TEXTURA_OBSCURO_DA_GRADE.endsWith('obscuro.jpg')).toBe(true)
+  })
+
+  it('motivo gira com a orientação (4 ângulos distintos, 0 na origem)', () => {
+    expect(rotacaoDoMotivo(0)).toBe(0)
+    const angulos = [0, 90, 180, 270].map(
+      (o) => rotacaoDoMotivo(o as 0 | 90 | 180 | 270),
+    )
+    expect(new Set(angulos).size).toBe(4)
+    // 90° equivalem a meio π em módulo (sentido horário visto de cima).
+    expect(Math.abs(rotacaoDoMotivo(90))).toBeCloseTo(Math.PI / 2)
+    expect(Math.abs(rotacaoDoMotivo(180))).toBeCloseTo(Math.PI)
+  })
+
+  it('dimensões do contrato inalteradas: peças seguem quadradas', () => {
+    expect(TAMANHO_CELULA).toBeGreaterThan(0)
+    expect(LARGURA_TABULEIRO).toBe(LADO_DA_GRADE * TAMANHO_CELULA)
+    expect(PROFUNDIDADE_TABULEIRO).toBe(LADO_DA_GRADE * TAMANHO_CELULA)
+    expect(LARGURA_TABULEIRO).toBe(PROFUNDIDADE_TABULEIRO)
+    // Derivação peça→peão intacta (PECA_Y + 0.14 = topo da peça).
+    expect(PEAO_Y).toBeCloseTo(PECA_Y + 0.14)
+  })
+
+  it('contorno preserva a semântica do destaque: âmbar default, azul no resgate', () => {
+    // Destino comum (corDestaque undefined em Celula) → âmbar.
+    expect(corDoContornoDaPeca(undefined)).toBe(COR_CONTORNO_PADRAO)
+    // Destino de resgate mantém o tom frio sóbrio — só muda o render.
+    expect(corDoContornoDaPeca(COR_DESTAQUE_RESGATE)).toBe(
+      COR_DESTAQUE_RESGATE,
+    )
+    expect(corDoContornoDaPeca(COR_DESTAQUE_RESGATE)).not.toBe(
+      COR_CONTORNO_PADRAO,
+    )
+  })
+
+  it('contorno do peão selecionado é branco e sem tone mapping', () => {
+    expect(COR_CONTORNO_PEAO_SELECIONADO).toBe('#ffffff')
+    const material = propsDoMaterialDeContorno(COR_CONTORNO_PEAO_SELECIONADO)
+    expect(material).toEqual({
+      color: COR_CONTORNO_PEAO_SELECIONADO,
+      toneMapped: false,
+    })
+  })
+})

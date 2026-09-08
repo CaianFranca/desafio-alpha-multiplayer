@@ -32,6 +32,8 @@ export interface Config {
   gameServerHeartbeatIntervalMs: number;
   gameServerHeartbeatTtlMs: number;
   gameServerId: string | undefined;
+  /** Host que o game-server anuncia no registro do Redis, consumido pelo lobby no encaminhamento. */
+  gameServerAdvertiseHost: string;
 }
 
 // Alinhado com .env.example e docker-compose.yml (1234), como o lobby faz com a 3001.
@@ -49,6 +51,9 @@ const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
 const DEFAULT_GAME_SERVER_HEARTBEAT_TTL_MS = 15000;
+// Alinhado com o nome do serviço no docker-compose.yml; em prod nativa o
+// workflow define GAME_SERVER_ADVERTISE_HOST=127.0.0.1.
+const DEFAULT_GAME_SERVER_ADVERTISE_HOST = 'game-server';
 
 export const GAME_SERVERS_PREFIX = 'game-servers:disponiveis:';
 
@@ -312,6 +317,12 @@ export function getConfig(): Config {
   const rawGameServerId = process.env.GAME_SERVER_ID as string | undefined;
   const gameServerId = rawGameServerId && rawGameServerId.trim().length > 0 ? sanitizeServerId(rawGameServerId) : undefined;
 
+  const rawGameServerAdvertiseHost = process.env.GAME_SERVER_ADVERTISE_HOST as string | undefined;
+  const gameServerAdvertiseHost =
+    rawGameServerAdvertiseHost && rawGameServerAdvertiseHost.trim().length > 0
+      ? rawGameServerAdvertiseHost.trim()
+      : DEFAULT_GAME_SERVER_ADVERTISE_HOST;
+
   return {
     gameServerPort,
     lobbyServerPort,
@@ -330,5 +341,6 @@ export function getConfig(): Config {
     gameServerHeartbeatIntervalMs,
     gameServerHeartbeatTtlMs,
     gameServerId,
+    gameServerAdvertiseHost,
   };
 }

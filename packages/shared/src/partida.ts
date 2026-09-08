@@ -147,6 +147,16 @@ export interface ConfirmarPosicaoDoPeaoComando {
   readonly peaoId: PeaoId;
 }
 
+// Atravessar o Escuro (issue #264 / spec #272): o comando wire do canal de
+// Partida — o `jogadorId` viaja aqui (forma do ST-11); o contrato do Peão em
+// si (sem `jogadorId`) vive em ./peoes.ts (AtravessarOEscuroComando).
+export interface AtravessarOEscuroPartidaComando {
+  readonly type: 'ATRAVESSAR_O_ESCURO';
+  readonly jogadorId: string;
+  readonly peaoId: PeaoId;
+  readonly celula: Celula;
+}
+
 export interface EncerrarTurnoComando {
   readonly type: 'ENCERRAR_TURNO';
   readonly jogadorId: string;
@@ -164,6 +174,7 @@ export type PartidaComandoDoCliente =
   | MoverPeaoPartidaComando
   | PermanecerPartidaComando
   | ConfirmarPosicaoDoPeaoComando
+  | AtravessarOEscuroPartidaComando
   | EncerrarTurnoComando;
 
 // --- Eventos servidor → cliente (5 + 2 da issue #138) ---
@@ -384,10 +395,14 @@ export interface EstadoResultanteNoAtaque {
   readonly amedrontado: boolean;
 }
 
-// Ataque dos Monstros (issues #172/#173): broadcast nos gatilhos definitivos
-// da Partida (posicionamento do Peão do Primeiro Turno e Confirmação de
-// Posição com mudança de peça) quando ao menos um Monstro dispara — mesmo
-// que ninguém seja atingido. Shape 1:1 com o evento de domínio;
+// Ataque dos Monstros (issues #172/#173, centrado no atuante pela #237 —
+// fiação na Partida pela #236): broadcast nos gatilhos definitivos do
+// ATUANTE — o posicionamento do Peão no Primeiro Turno (entrada), a
+// Confirmação de Posição com mudança de peça (entrada/saída) e a Permanência
+// (permanecer dentro dispara) — quando ao menos um Monstro dispara, mesmo
+// que ninguém seja atingido (saída do alcance com zero restantes). Fora→fora
+// é silêncio: mover sem confirmar, encerrar o turno e posicionamentos de
+// peça nunca disparam. Shape 1:1 com o evento de domínio;
 // estadosAplicados (issue #173) carrega o estado RESULTANTE das penalidades
 // (Baixa Iluminação, sanidade, Amedrontado) por Jogador mudado — o eco do
 // feedback aos clientes, não os efeitos em si.

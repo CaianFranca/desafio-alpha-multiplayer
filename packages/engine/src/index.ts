@@ -44,7 +44,26 @@ export type {
   VinculoExpiradoEvento,
 } from './lobby.ts';
 
+// Bot Random Walk (turno puramente aleatório, sem heurística): consulta à
+// FSM, sorteio uniforme e loop transacional com failsafe.
 export type {
+  IdentidadeDoBot,
+  MotivoDoFimDoTurnoDoBot,
+  OpcoesDoTurnoDoBot,
+  ResultadoDoTurnoDoBot,
+} from './bot.ts';
+
+export {
+  MAX_ACOES_POR_TURNO_DO_BOT,
+  acoesValidasDaSubfase,
+  executarTurnoDoBot,
+  mapearBot,
+  sortearAcao,
+} from './bot.ts';
+
+export type {
+  AtravessarOEscuroDaPartidaComando,
+  AtravessouOEscuroEvento,
   CelulasIluminadasEvento,
   CodigoDeErroDaPartida,
   ComandoDePartida,
@@ -183,6 +202,7 @@ export {
   estadoInicialDoTabuleiro,
   gerarRecebidas,
   sortearDaCaixa,
+  tetoDoPortao,
   vagasDisponiveis,
   vizinhasConectadas,
   vizinhos,
