@@ -426,22 +426,7 @@ export class SalasHandlers {
 
     const membroId = randomUUID();
 
-    const associacaoExistente = await this.projecao.obterAssociacaoJogador(jogadorId);
-    if (associacaoExistente !== null && associacaoExistente !== salaId) {
-      const infoAssoc = this.estado.abertas.get(associacaoExistente);
-      if (infoAssoc?.sala.estado === 'encaminhada' && (await this.partidaDaSalaEstaOrfa(associacaoExistente))) {
-        await this.limparAssociacaoOrfaSeNecessario(jogadorId);
-      }
-    } else if (associacaoExistente === null) {
-      const pgAssoc = await this.repo.obterSalaAtivaDoJogador(jogadorId);
-      if (pgAssoc !== null && pgAssoc !== salaId) {
-        const infoPg = this.estado.abertas.get(pgAssoc);
-        if (infoPg?.sala.estado === 'encaminhada' && (await this.partidaDaSalaEstaOrfa(pgAssoc))) {
-          await this.projecao.limparAssociacaoJogador(jogadorId);
-          try { await this.repo.sairMembroAtomico(pgAssoc, jogadorId, 'saida', false); } catch {}
-        }
-      }
-    }
+    await this.limparOrfaDeOutraSalaSeNecessario(jogadorId, salaId);
 
     const resultado = this.estado.aplicar({
       tipo: 'entrar_na_sala',
@@ -1270,6 +1255,28 @@ export class SalasHandlers {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  // Limpeza de órfã restrita a OUTRA sala (usado no ENTRAR): nunca mexe na
+  // associação para a própria sala-alvo. Move-fiel do bloco antes inline em
+  // handleEntrarNaSala — sem mudança de semântica.
+  private async limparOrfaDeOutraSalaSeNecessario(jogadorId: string, salaIdAlvo: string): Promise<void> {
+    const associacaoExistente = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (associacaoExistente !== null && associacaoExistente !== salaIdAlvo) {
+      const infoAssoc = this.estado.abertas.get(associacaoExistente);
+      if (infoAssoc?.sala.estado === 'encaminhada' && (await this.partidaDaSalaEstaOrfa(associacaoExistente))) {
+        await this.limparAssociacaoOrfaSeNecessario(jogadorId);
+      }
+    } else if (associacaoExistente === null) {
+      const pgAssoc = await this.repo.obterSalaAtivaDoJogador(jogadorId);
+      if (pgAssoc !== null && pgAssoc !== salaIdAlvo) {
+        const infoPg = this.estado.abertas.get(pgAssoc);
+        if (infoPg?.sala.estado === 'encaminhada' && (await this.partidaDaSalaEstaOrfa(pgAssoc))) {
+          await this.projecao.limparAssociacaoJogador(jogadorId);
+          try { await this.repo.sairMembroAtomico(pgAssoc, jogadorId, 'saida', false); } catch {}
+        }
+      }
     }
   }
 
