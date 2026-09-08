@@ -82,7 +82,10 @@ export function ObjectivesSection() {
       <div className="max-w-4xl mx-auto">
         <h2 id="objectives-title" className="objectives-eyebrow">{objectives.title}</h2>
         <ul className="objectives-timeline list-none m-0 p-0 flex flex-col">
-          {objectives.items.map((item, index) => (
+          {objectives.items.map((item, index) => {
+            // Fallback defensivo: typo em `placeholders.ts` não quebra o runtime.
+            const node = OBJECTIVE_NODES[item.icon] ?? OBJECTIVE_NODES.geradores
+            return (
             <ObjectivesRevealItem key={item.title} index={index}>
               <div className={`objectives-item${index % 2 === 1 ? ' is-flipped' : ''}`}>
                 <div className="objectives-item-text-wrap">
@@ -90,18 +93,19 @@ export function ObjectivesSection() {
                   <p className="objectives-item-desc">{item.description}</p>
                 </div>
                 <div
-                  className={`objectives-item-node ${OBJECTIVE_NODES[item.icon].className}`}
+                  className={`objectives-item-node ${node.className}`}
                   role="img"
-                  aria-label={OBJECTIVE_NODES[item.icon].label}
+                  aria-label={node.label}
                 >
-                  {OBJECTIVE_NODES[item.icon].content}
+                  {node.content}
                 </div>
                 <div className="objectives-item-media">
                   <img src={item.image} alt={item.imageAlt} className="objectives-image" />
                 </div>
               </div>
             </ObjectivesRevealItem>
-          ))}
+            )
+          })}
         </ul>
       </div>
     </section>
