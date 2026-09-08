@@ -146,12 +146,6 @@ interface AmbienteCenaProps {
    * afetado, em todas as posições (célula/fileira/voo).
    */
   emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
-  /**
-   * Peões AFETADOS do dono (Baixa Iluminação ∨ Amedrontado — issue #298):
-   * desce ao `Tabuleiro`/`Celula` para a variante apagada dos avatares, com o
-   * mesmo destino do `emBaixaIluminacaoPorPeaoId` (sobreposição parcial).
-   */
-  afetadosPorPeaoId?: ReadonlySet<PeaoId>
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -189,7 +183,6 @@ export function AmbienteCena({
   encaixeTrigger = null,
   onFimEncaixe,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
-  afetadosPorPeaoId = new Set<PeaoId>(),
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
@@ -238,7 +231,6 @@ export function AmbienteCena({
               onVooAterrissou={onVooAterrissou}
               ocultarPecaId={pecaEmVooId}
               emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
-              afetadosPorPeaoId={afetadosPorPeaoId}
             />
             <TransicaoEncaixe
               posicionadas={estadoExibicao.posicionadas}

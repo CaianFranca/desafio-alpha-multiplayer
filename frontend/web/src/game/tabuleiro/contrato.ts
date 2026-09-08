@@ -477,8 +477,8 @@ export const OFFSET_CANTO_Z = 0.45
 
 /**
  * Cantos na ordem de chegada do Portão de Saída, cada qual um par
- * [dx, dz]: SE (canto inferior direito), SD (superior direito), ID (inferior
- * esquerdo), IE (superior esquerdo). O 1º ocupante assume o SE; o ciclo segue
+ * [dx, dz]: SE (superior esquerdo), SD (superior direito), ID (inferior
+ * direito), IE (inferior esquerdo). O 1º ocupante assume o SE; o ciclo segue
  * no sentido horário (SE→SD→ID→IE).
  */
 export const CANTOS_DO_PORTAO: readonly (readonly [number, number])[] = [

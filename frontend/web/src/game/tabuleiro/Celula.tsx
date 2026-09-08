@@ -39,13 +39,21 @@ interface CelulaProps {
   onClick?: (event: ThreeEvent<MouseEvent>) => void
   /**
    * Peões posicionados sobre a peça desta célula, já filtrados pelo voo ativo
-   * e ordenados pela fila de chegada no pai (`Tabuleiro`). A cena renderiza um
-   * visual por peão no arranjo de co-ocupação do `layoutDoPeaoNaCelula`; a
-   * regra de ocupação (Portão 4, resgate +1) vive no engine e no espelho de
-   * destinos (`destinosConectadosDoPeao`). Durante o voo ativo o peão voador
-   * é suprimido no pai, então a fila aqui é transiente por ~500ms.
+   * no pai (`Tabuleiro`). A cena renderiza um visual por peão no arranjo de
+   * co-ocupação do `layoutDoPeaoNaCelula`; a regra de ocupação (Portão 4,
+   * resgate +1) vive no engine e no espelho de destinos
+   * (`destinosConectadosDoPeao`). A ordem de chegada vem de `filaDeChegada`
+   * (autoritativa) — durante o voo ativo o peão voador segue na fila e
+   * "reserva" o próprio canto no destino, sem shift dos demais.
    */
   peoes?: PeaoDaExibicao[]
+  /**
+   * Fila de chegada autoritativa desta célula (issue #298): ordem de pouso
+   * vinda de `ordemDeChegadaPorChave`. Mantém o arranjo estável durante o voo
+   * ativo (o peão voador permanece na fila do destino). Sem a prop, a fila
+   * deriva da lista renderizada (`peoes`).
+   */
+  filaDeChegada?: readonly PeaoId[]
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
   destinoValido?: boolean
   /**
@@ -71,12 +79,11 @@ interface CelulaProps {
   /** Peão do Jogador Ativo da vez: destaque emissivo suave (#118). */
   peaoAtivoId?: PeaoId | null
   /**
-   * Peões AFETADOS do dono (issue #297/#298): peaoIds cujo avatar 3D troca
-   * para a variante apagado e o placeholder para o tom de afetado. Inclui o
-   * Amedrontado — `afetadosPorPeaoId` é a projeção (Baixa Iluminação ∨
-   * Amedrontado) vinda da percepção no pai.
+   * Peões em Baixa Iluminação do dono (issue #297): o avatar 3D troca para a
+   * variante apagado — apenas Baixa Iluminação, não Amedrontado (semântica
+   * original #297 preservada na co-ocupação).
    */
-  afetadosPorPeaoId?: ReadonlySet<PeaoId>
+  emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
 
@@ -186,6 +193,7 @@ export function Celula({
   pecaDestacada = false,
   onClick,
   peoes = [],
+  filaDeChegada,
   destinoValido = false,
   destinoResgate = false,
   alvoPendente = false,
@@ -193,7 +201,7 @@ export function Celula({
   iluminada = false,
   peaoSelecionadoId = null,
   peaoAtivoId = null,
-  afetadosPorPeaoId = new Set<PeaoId>(),
+  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   onSelecionarPeao,
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
@@ -209,7 +217,10 @@ export function Celula({
 
   // Fila de ocupantes na ordem de chegada (issue #298): o índice decide o
   // arranjo de co-ocupação (Portão: cantos por ordem; peça comum: centro+SE).
-  const filaDeOcupantes = peoes.map((p) => p.peaoId)
+  // A fila autoritativa (`filaDeChegada`) inclui o peão voador no destino —
+  // ele reserva o próprio canto sem shift dos demais; sem ela, deriva da
+  // lista renderizada (após a filtragem do voo).
+  const filaDeOcupantes = filaDeChegada ?? peoes.map((p) => p.peaoId)
 
   // Destaques do ciclo: alvo de pendência (#91) e vaga disponível para a
   // pendência corrente (#143) ganham o mesmo tom quente (ambas convidam o
@@ -266,7 +277,7 @@ export function Celula({
             position={[dx, PEAO_Y, dz]}
             selecionado={peao.peaoId === peaoSelecionadoId}
             ativo={peao.peaoId === peaoAtivoId}
-            emBaixaIluminacao={afetadosPorPeaoId.has(peao.peaoId)}
+            emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(peao.peaoId)}
             aoClicar={
               onSelecionarPeao
                 ? () => onSelecionarPeao(peao.peaoId)

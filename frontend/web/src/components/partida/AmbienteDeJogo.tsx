@@ -84,12 +84,6 @@ interface AmbienteDeJogoProps {
    * afetado, em todas as posições (célula/fileira/voo).
    */
   emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
-  /**
-   * Peões AFETADOS do dono (Baixa Iluminação ∨ Amedrontado — issue #298):
-   * desce ao `AmbienteCena`/`Tabuleiro`/`Celula` para a variante apagada dos
-   * avatares na co-ocupação.
-   */
-  afetadosPorPeaoId?: ReadonlySet<PeaoId>
 }
 
 export function AmbienteDeJogo({
@@ -109,7 +103,6 @@ export function AmbienteDeJogo({
   encaixeTrigger = null,
   onFimEncaixe,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
-  afetadosPorPeaoId = new Set<PeaoId>(),
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -300,7 +293,6 @@ export function AmbienteDeJogo({
           encaixeTrigger={encaixeTrigger}
           onFimEncaixe={onFimEncaixe}
           emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
-          afetadosPorPeaoId={afetadosPorPeaoId}
         />
       </Canvas>
       {estadoExibicao ? (

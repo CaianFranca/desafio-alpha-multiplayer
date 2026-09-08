@@ -99,12 +99,6 @@ interface TabuleiroProps {
    */
   ordemDeChegadaPorChave?: Readonly<Record<string, readonly PeaoId[]>>
   /**
-   * Peão AFETADO (Baixa Iluminação ∨ Amedrontado, issue #298/#297): avatar do
-   * Diretor em variante apagado só no peão afetado, também durante a
-   * co-ocupação. Mesma fonte do overlay de voo (`emBaixaIluminacaoPorPeaoId`).
-   */
-  afetadosPorPeaoId?: ReadonlySet<PeaoId>
-  /**
    * Peça em voo do Encaixe (issue #241): escondida aqui enquanto a
    * TransicaoEncaixe a anima na cena — ao fim do voo o overlay some e esta
    * peça assume pixel-igual. Null = sem voo.
@@ -133,7 +127,6 @@ export function Tabuleiro({
   ocultarPecaId = null,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   ordemDeChegadaPorChave = {},
-  afetadosPorPeaoId = new Set<PeaoId>(),
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
@@ -237,7 +230,8 @@ export function Tabuleiro({
               })
             }}
             peoes={peoesDaCelula}
-            afetadosPorPeaoId={afetadosPorPeaoId}
+            filaDeChegada={ordemDeChegadaPorChave[chave]}
+            emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
             destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
             destinoResgate={peca !== null && resgateSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}
