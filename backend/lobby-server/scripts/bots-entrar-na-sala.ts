@@ -1,5 +1,8 @@
 #!/usr/bin/env -S npx tsx
+import { randomBytes } from 'node:crypto';
 import WebSocket, { type ClientOptions } from 'ws';
+import type { EstadoDaPartidaSnapshot } from '@flicker/shared';
+import { JogadorBot } from '../src/bots/jogador-bot.ts';
 
 type Cookies = { access_token?: string; refresh_token?: string };
 
@@ -26,11 +29,12 @@ type SalaWire = {
 const SENHA_PADRAO = 'senha_dev_123';
 const BASE_PADRAO = 'http://localhost:8080';
 const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
-const BOTS_DETERMINISTICOS: readonly JogadorCredenciais[] = [
-  { email: 'bot-teste-1@exemplo.local', senha: SENHA_PADRAO, apelido: 'bot-teste-1' },
-  { email: 'bot-teste-2@exemplo.local', senha: SENHA_PADRAO, apelido: 'bot-teste-2' },
-  { email: 'bot-teste-3@exemplo.local', senha: SENHA_PADRAO, apelido: 'bot-teste-3' },
-];
+// Bots são sempre efêmeros: cada execução gera email/apelido/senha únicos
+// para nunca reutilizar um Jogador ainda associado a outra Sala (evita
+// JOGADOR_JA_ASSOCIADO após Ctrl+C). Contas antigas expiram sozinhas no
+// servidor (janela de reconexão 60s); limpar no banco quando desejado com:
+//   DELETE FROM usuarios WHERE email LIKE 'bot-%@exemplo.local';
+const MAX_TENTATIVAS_REGISTRO = 8;
 
 function log(prefix: string, ...args: unknown[]): void {
   console.log(`[${new Date().toISOString().slice(11, 19)}] ${prefix}`, ...args);
@@ -102,15 +106,15 @@ Uso: npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts <CODIGO> [opç�
 
 Opções:
   --quantidade N      Quantidade de bots (1..3, padrão 3) — N+1 total na sala
-  --emails a,b,c      Emails de contas já criadas (tenta login primeiro)
-  --senha SENHA       Senha das contas (padrão: ${SENHA_PADRAO})
+  --emails a,b,c      Emails de contas já criadas (tenta login primeiro; usa --senha)
+  --senha SENHA       Senha das contas de --emails (padrão: ${SENHA_PADRAO}; ignorada sem --emails)
   --base-url URL      Base do lobby (padrão: ${BASE_PADRAO} ou env LOBBY_PUBLIC_URL)
 
-Opção C (padrão sem --emails):
-  1) login com bot-teste-1..3@exemplo.local
-  2) se 401 → register
-  3) se 409 → login novamente
-  4) se falhar → conta efêmera bot-<timestamp>-<i>@exemplo.local (pode poluir contas; limpar manualmente)
+Padrão (sem --emails): gera --quantidade contas efêmeras por execução, com
+  email/apelido/senha aleatórios e únicos, e registra direto (sem login).
+  Em 409 (apelido/email em uso) gera novas credenciais e repete (até
+  ${MAX_TENTATIVAS_REGISTRO}x). Cada execução cria N linhas em usuarios;
+  para limpar: DELETE FROM usuarios WHERE email LIKE 'bot-%@exemplo.local';
 
 Exemplos:
   npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts ABCDEF
@@ -161,7 +165,11 @@ async function tentarLogin(baseUrl: string, email: string, senha: string): Promi
   return null;
 }
 
-async function tentarRegister(baseUrl: string, apelido: string, email: string, senha: string): Promise<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } } | { conflito: true } | null> {
+type ResultadoRegister =
+  | { ok: true; cookies: Cookies; jogador: { id: string; apelido: string; email: string } }
+  | { ok: false; motivo: 'conflito' | 'validacao' | 'http'; status: number; corpo: string };
+
+async function tentarRegister(baseUrl: string, apelido: string, email: string, senha: string): Promise<ResultadoRegister> {
   const res = await fetch(`${baseUrl}/api/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -169,50 +177,73 @@ async function tentarRegister(baseUrl: string, apelido: string, email: string, s
   });
   if (res.status === 201) {
     const jogador = (await res.json()) as { id: string; apelido: string; email: string };
-    return { cookies: extrairCookies(res), jogador };
+    return { ok: true, cookies: extrairCookies(res), jogador };
   }
-  if (res.status === 409) return { conflito: true };
-  return null;
+  const corpo = await res.text().catch(() => '');
+  if (res.status === 409) return { ok: false, motivo: 'conflito', status: res.status, corpo: corpo.slice(0, 300) };
+  if (res.status === 400) return { ok: false, motivo: 'validacao', status: res.status, corpo: corpo.slice(0, 300) };
+  return { ok: false, motivo: 'http', status: res.status, corpo: corpo.slice(0, 300) };
 }
 
-async function obterCredenciaisBot(
+function gerarCredenciaisEfemeras(): JogadorCredenciais {
+  // email: válido, minúsculo, único (timestamp base36 + 6 bytes hex).
+  // apelido: 3–20 chars, só [a-z0-9-], único.
+  // senha: 16 chars base64url (sempre >= 8, sem espaços).
+  const uniq = `${Date.now().toString(36)}${randomBytes(6).toString('hex')}`.toLowerCase();
+  const email = `bot-${uniq}@exemplo.local`;
+  const apelido = `b-${Date.now().toString(36).slice(-4)}-${randomBytes(3).toString('hex')}`.toLowerCase().slice(0, 20);
+  const senha = randomBytes(12).toString('base64url');
+  return { email, senha, apelido };
+}
+
+async function registrarBotEfemero(
+  baseUrl: string,
+  indice: number,
+): Promise<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } }> {
+  let ultimoErro = '';
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_REGISTRO; tentativa++) {
+    const cred = gerarCredenciaisEfemeras();
+    const res = await tentarRegister(baseUrl, cred.apelido, cred.email, cred.senha);
+    if (res.ok) {
+      if (!res.cookies.access_token) throw new Error(`bot-${indice}: register sem access_token`);
+      log(`bot-${indice}`, `register efêmero ok (${res.jogador.apelido}) tentativa=${tentativa}`);
+      return res;
+    }
+    ultimoErro = `${res.motivo} http=${res.status} ${res.corpo}`;
+    if (res.motivo === 'conflito') {
+      log(`bot-${indice}`, `conflito 409 na tentativa ${tentativa}, gerando novas credenciais...`);
+      await new Promise((r) => setTimeout(r, 100 * tentativa));
+      continue;
+    }
+    throw new Error(`bot-${indice}: falha no register (${ultimoErro})`);
+  }
+  throw new Error(`bot-${indice}: falha ao registrar após ${MAX_TENTATIVAS_REGISTRO} tentativas (último: ${ultimoErro})`);
+}
+
+async function obterCredenciaisContaExistente(
   baseUrl: string,
   cred: JogadorCredenciais,
   indice: number,
 ): Promise<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } }> {
-  const apelidoBase = cred.apelido;
-  const emailBase = cred.email;
-  const senha = cred.senha;
-
-  const login1 = await tentarLogin(baseUrl, emailBase, senha);
-  if (login1 && login1.cookies.access_token) {
-    log(`bot-${indice}`, `login ok (${login1.jogador.apelido})`);
-    return login1;
+  const login = await tentarLogin(baseUrl, cred.email, cred.senha);
+  if (login && login.cookies.access_token) {
+    log(`bot-${indice}`, `login ok (${login.jogador.apelido})`);
+    return login;
   }
-
-  const reg = await tentarRegister(baseUrl, apelidoBase, emailBase, senha);
-  if (reg && 'cookies' in reg && reg.cookies.access_token) {
+  const reg = await tentarRegister(baseUrl, cred.apelido, cred.email, cred.senha);
+  if (reg.ok) {
+    if (!reg.cookies.access_token) throw new Error(`bot-${indice}: register sem access_token`);
     log(`bot-${indice}`, `register ok (${reg.jogador.apelido})`);
     return reg;
   }
-  if (reg && 'conflito' in reg) {
-    const login2 = await tentarLogin(baseUrl, emailBase, senha);
+  if (!reg.ok && reg.motivo === 'conflito') {
+    const login2 = await tentarLogin(baseUrl, cred.email, cred.senha);
     if (login2 && login2.cookies.access_token) {
       log(`bot-${indice}`, `login após 409 ok (${login2.jogador.apelido})`);
       return login2;
     }
   }
-
-  const sufixo = `${Date.now()}-${indice}-${Math.random().toString(36).slice(2, 6)}`;
-  const emailRand = `bot-${sufixo}@exemplo.local`;
-  const apelidoRand = `bot-${sufixo}`.slice(0, 20);
-  log(`bot-${indice}`, `fallback efêmero ${emailRand} — pode poluir contas; limpar manualmente se falhar sempre`);
-  const regRand = await tentarRegister(baseUrl, apelidoRand, emailRand, senha);
-  if (regRand && 'cookies' in regRand && regRand.cookies.access_token) {
-    log(`bot-${indice}`, `register efêmero ok (${regRand.jogador.apelido})`);
-    return regRand;
-  }
-  throw new Error(`bot-${indice}: falha ao obter credenciais para ${emailBase} (login/register falharam)`);
+  throw new Error(`bot-${indice}: falha ao obter credenciais para ${cred.email} (${reg.ok ? 'sem token' : `${reg.motivo} http=${reg.status} ${reg.corpo}`})`);
 }
 
 function entrarNaPartida(
@@ -220,6 +251,7 @@ function entrarNaPartida(
   serverId: string,
   partidaId: string,
   accessToken: string,
+  jogadorId: string,
   apelido: string,
   indice: number,
   sockets: WebSocket[],
@@ -231,6 +263,18 @@ function entrarNaPartida(
   log(prefix, `entrando na partida → ${wsGameUrl}`);
   const ws = new WebSocket(wsGameUrl);
   sockets.push(ws);
+  // Driver do turno (Random Walk): o espelho é semeado pelo snapshot da
+  // admissão e avança pelos eventos do broadcast; o turno roda no
+  // TURNO_INICIADO do próprio bot.
+  const bot = new JogadorBot({
+    jogadorId,
+    enviar: (comando) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(comando));
+      }
+    },
+    log: (...args) => log(prefix, '[bot]', ...args),
+  });
 
   ws.on('open', () => {
     log(prefix, `WS de partida conectado (aguardando admissão)`);
@@ -255,17 +299,29 @@ function entrarNaPartida(
     }
     if (t === 'ESTADO_DA_PARTIDA') {
       log(prefix, `ESTADO_DA_PARTIDA recebido (snapshot)`);
+      bot.aoReceberSnapshot(
+        (msg as { snapshot: EstadoDaPartidaSnapshot }).snapshot,
+      );
       return;
     }
-    if (t === 'TURNO_INICIADO') {
-      log(prefix, `TURNO_INICIADO ${JSON.stringify(msg).slice(0, 200)}`);
+    if (t === 'ERRO_DO_TABULEIRO') {
+      const e = msg as { codigo?: string; motivo?: string; mensagem?: string };
+      log(prefix, `ERRO_DO_TABULEIRO ${e.codigo ?? ''} ${e.motivo ?? e.mensagem ?? ''}`.trim());
+      bot.aoReceberErro(e.codigo ?? 'DADOS_INVALIDOS');
       return;
     }
-    if (t === 'ADMISSAO_REJEITADA' || t === 'ERRO_DO_TABULEIRO') {
+    if (t === 'ADMISSAO_REJEITADA') {
       const e = msg as { codigo?: string; motivo?: string; mensagem?: string };
       log(prefix, `${t} ${e.codigo ?? ''} ${e.motivo ?? e.mensagem ?? ''}`.trim());
       return;
     }
+    if (t === 'TURNO_INICIADO') {
+      log(prefix, `TURNO_INICIADO ${JSON.stringify(msg).slice(0, 200)}`);
+      bot.aoReceberEvento(msg);
+      return;
+    }
+    // Demais eventos do canal da partida alimentam o espelho do bot.
+    bot.aoReceberEvento(msg);
     log(prefix, `partida evento ${t} ${JSON.stringify(msg).slice(0, 200)}`);
   });
 
@@ -304,6 +360,16 @@ function criarWs(
   let tentativasEntrar = 0;
   let partidaConectada = false;
   const MAX_TENTATIVAS_ENTRAR = 1;
+  // Contas efêmeras nunca deveriam cair aqui; se cair, é fatal (não adianta
+  // repetir: conta nova não tem associação prévia — o problema é a sala).
+  const ERROS_FATAIS_ENTRADA = new Set([
+    'JOGADOR_JA_ASSOCIADO',
+    'JOGADOR_EXPULSO',
+    'SALA_CHEIA',
+    'SALA_ENCERRADA',
+    'SALA_NAO_ENCONTRADA',
+    'SALA_ENCAMINHADA',
+  ]);
 
   function enviarEntrar(): void {
     if (ws.readyState !== WebSocket.OPEN) return;
@@ -327,10 +393,12 @@ function criarWs(
     if (t === 'ERRO_DA_SALA') {
       const e = msg as { codigo: string; mensagem: string };
       log(prefix, `ERRO_DA_SALA ${e.codigo}: ${e.mensagem}`);
-      if (tentativasEntrar <= MAX_TENTATIVAS_ENTRAR) {
+      if (!ERROS_FATAIS_ENTRADA.has(e.codigo) && tentativasEntrar <= MAX_TENTATIVAS_ENTRAR) {
         const delay = 500;
         log(prefix, `retry ENTRAR_NA_SALA em ${delay}ms (single-shot com retry dev)`);
         setTimeout(() => enviarEntrar(), delay);
+      } else if (ERROS_FATAIS_ENTRADA.has(e.codigo)) {
+        log(prefix, `erro fatal — sem retry (conta efêmera nova; verifique a sala/código)`);
       }
       return;
     }
@@ -371,7 +439,7 @@ function criarWs(
         log(prefix, `PARTIDA_DISPONIVEL partida=${d.partidaId} server=${d.serverId}`);
         if (!partidaConectada && accessToken) {
           partidaConectada = true;
-          entrarNaPartida(baseUrl, d.serverId, d.partidaId, accessToken, apelido, indice, sockets, prefix);
+          entrarNaPartida(baseUrl, d.serverId, d.partidaId, accessToken, jogadorId, apelido, indice, sockets, prefix);
         } else if (!accessToken) {
           log(prefix, `sem access_token — não é possível entrar na partida`);
         }
@@ -403,32 +471,41 @@ function criarWs(
 async function main(): Promise<void> {
   const { codigo, baseUrl, emails, senha, quantidade } = parseArgs();
   if (emails !== null && emails.length !== quantidade) {
-    console.error(`--quantidade ${quantidade} conflita com --emails (${emails.length} emails): informe exatamente ${quantidade} emails ou omita --emails para usar os bots determinísticos`);
+    console.error(`--quantidade ${quantidade} conflita com --emails (${emails.length} emails): informe exatamente ${quantidade} emails ou omita --emails para usar contas efêmeras`);
     process.exit(1);
   }
-  const credenciais: JogadorCredenciais[] = emails
-    ? emails.map((email, i) => ({ email, senha, apelido: email.split('@')[0]!.slice(0, 20) || `bot-${i}` }))
-    : BOTS_DETERMINISTICOS.map((b) => ({ ...b, senha }));
-
-  const lista = credenciais.slice(0, quantidade);
-  while (lista.length < quantidade) {
-    const i = lista.length;
-    lista.push({ email: `bot-teste-${i + 1}@exemplo.local`, senha, apelido: `bot-teste-${i + 1}` });
-  }
-
-  log('main', `código=${codigo} base=${baseUrl} bots=${lista.map((b) => b.email).join(', ')} (quantidade=${quantidade}, sala N=${quantidade + 1})`);
 
   const bots: Array<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } }> = [];
-  for (let i = 0; i < lista.length; i++) {
-    const cred = lista[i]!;
-    try {
-      const res = await obterCredenciaisBot(baseUrl, cred, i + 1);
-      if (!res.cookies.access_token) throw new Error('sem access_token');
-      bots.push(res);
-    } catch (e) {
-      log(`bot-${i + 1}`, `falha credenciais: ${(e as Error).message}`);
-      process.exit(1);
+  if (emails) {
+    const lista = emails.slice(0, quantidade).map((email, i) => ({
+      email,
+      senha,
+      apelido: email.split('@')[0]!.slice(0, 20) || `bot-${i}`,
+    }));
+    log('main', `código=${codigo} base=${baseUrl} modo=contas-existentes bots=${lista.map((b) => b.email).join(', ')} (quantidade=${quantidade}, sala N=${quantidade + 1})`);
+    for (let i = 0; i < lista.length; i++) {
+      const cred = lista[i]!;
+      try {
+        const res = await obterCredenciaisContaExistente(baseUrl, cred, i + 1);
+        if (!res.cookies.access_token) throw new Error('sem access_token');
+        bots.push(res);
+      } catch (e) {
+        log(`bot-${i + 1}`, `falha credenciais: ${(e as Error).message}`);
+        process.exit(1);
+      }
     }
+  } else {
+    log('main', `código=${codigo} base=${baseUrl} modo=efêmero (${quantidade} contas novas por execução, sala N=${quantidade + 1})`);
+    for (let i = 0; i < quantidade; i++) {
+      try {
+        const res = await registrarBotEfemero(baseUrl, i + 1);
+        bots.push(res);
+      } catch (e) {
+        log(`bot-${i + 1}`, `falha credenciais: ${(e as Error).message}`);
+        process.exit(1);
+      }
+    }
+    log('main', `bots=${bots.map((b) => b.jogador.email).join(', ')}`);
   }
 
   const sockets: WebSocket[] = [];
