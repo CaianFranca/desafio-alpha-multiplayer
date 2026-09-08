@@ -1,6 +1,6 @@
 import type { Redis } from 'ioredis';
 import { chaveDaPartida } from './chaves.ts';
-import { cancelarPartida, obterPartida } from './partidas.ts';
+import { cancelarPartidaNaoIniciada, obterPartida } from './partidas.ts';
 import type { AvisoDeRetorno } from '../retorno/cliente.ts';
 
 const NAO_INICIO_IMEDIATO_MS = 10_000;
@@ -136,7 +136,10 @@ export async function verificarNaoInicioSeNecessario(redis: Redis, partidaId: st
     return false;
   }
   const partidaIdTyped = partida.partidaId as string;
-  const cancelada = await cancelarPartida(redis, partidaIdTyped as never);
+  // DEL condicional por Lua (review #304 item 1): se a admissão completar
+  // entre a leitura acima e o cancelamento, a partida já está em
+  // `em_andamento` e o cancelamento retorna false — sem chutar sockets.
+  const cancelada = await cancelarPartidaNaoIniciada(redis, partidaIdTyped);
   if (!cancelada) {
     // DEL falhou sob carga: não chuta os sockets (evita clientes caídos com
     // chave fantasma até o TTL); reagenda para a próxima verificação.

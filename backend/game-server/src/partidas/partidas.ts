@@ -91,6 +91,39 @@ export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promi
   return removida;
 }
 
+// Review #304 (item 1): o não-início não pode usar o DEL incondicional — entre
+// a leitura do estado e o DEL, o Lua de admissão pode ter virado a partida para
+// `em_andamento` (com PERSIST). O script só remove se a partida ainda está em
+// `preparada`; retorna 0 quando a condição falha, e o chamador reagenda sem
+// chutar sockets.
+const SCRIPT_CANCELAR_NAO_INICIADA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, partida = pcall(cjson.decode, raw)
+if not ok or not partida or partida.estado ~= 'preparada' then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+redis.call('DEL', KEYS[2])
+return 1
+`.trim();
+
+export async function cancelarPartidaNaoIniciada(redis: Redis, partidaId: string): Promise<boolean> {
+  const removida =
+    (await redis.eval(
+      SCRIPT_CANCELAR_NAO_INICIADA,
+      2,
+      chaveDaPartida(partidaId),
+      chaveDoEstadoDaPartida(partidaId),
+    )) === 1;
+  if (removida) {
+    cancelarNaoInicio(partidaId);
+  }
+  return removida;
+}
+
 export interface ResultadoTransicaoDePresenca {
   readonly mudou: boolean;
   readonly completo: boolean;

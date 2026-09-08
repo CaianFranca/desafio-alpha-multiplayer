@@ -179,7 +179,7 @@ test('A3: criadaEm inválida (NaN) nunca agenda nem declara não-início', async
   }
 });
 
-test('A4: DEL falho não chuta sockets (só após cancelarPartida=true)', async () => {
+test('A4: cancelamento recusado (DEL condicional) não chuta sockets', async () => {
   const store = new Map<string, string>([
     [CHAVE_PARTIDA, partidaPreparadaJson({ criadaEm: new Date('2000-01-01T00:00:00.000Z').toISOString() })],
   ]);
@@ -187,7 +187,7 @@ test('A4: DEL falho não chuta sockets (só após cancelarPartida=true)', async 
     async get(chave: string): Promise<string | null> {
       return store.get(chave) ?? null;
     },
-    async del(): Promise<number> {
+    async eval(): Promise<number> {
       return 0;
     },
   } as unknown as Redis;
@@ -200,8 +200,8 @@ test('A4: DEL falho não chuta sockets (só após cancelarPartida=true)', async 
   try {
     configurarNaoInicio(undefined, 90);
     const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
-    assert.equal(naoIniciou, false, 'DEL falho não deve concluir o não-início');
-    assert.equal(encerramentos, 0, 'sockets devem permanecer intactos com cancelarPartida=false');
+    assert.equal(naoIniciou, false, 'cancelamento recusado não deve concluir o não-início');
+    assert.equal(encerramentos, 0, 'sockets devem permanecer intactos com cancelamento recusado');
     assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
   } finally {
     definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
@@ -209,8 +209,104 @@ test('A4: DEL falho não chuta sockets (só após cancelarPartida=true)', async 
   }
 });
 
-test('A5: fire sem redis global reagenda em vez de explodir', async () => {
-  const avisos: unknown[][] = [];
+// Review #304 item 1 (TOCTOU): a admissão completa entre a leitura (GET) e o
+// DEL — o valor lido dizia `preparada`, mas no momento do eval a partida já
+// está `em_andamento`. O cancelamento condicional recusa, e nada é chutado.
+test('TOCTOU: partida que virou em_andamento entre GET e DEL não é cancelada', async () => {
+  const antiga = new Date('2000-01-01T00:00:00.000Z').toISOString();
+  const preparada = partidaPreparadaJson({ criadaEm: antiga });
+  const store = new Map<string, string>([[CHAVE_PARTIDA, preparada]]);
+  let leituras = 0;
+  const redis = {
+    async get(chave: string): Promise<string | null> {
+      leituras += 1;
+      return store.get(chave) ?? null;
+    },
+    async eval(_script: string, _numKeys: number, ...chaves: string[]): Promise<number> {
+      // Espelha o SCRIPT_CANCELAR_NAO_INICIADA: a corrida trocou o estado
+      // entre o GET e o cancelamento.
+      const bruto = store.get(chaves[0]!) ?? null;
+      if (bruto === null) return 0;
+      const partida = JSON.parse(bruto) as { estado?: string };
+      if (partida.estado !== 'preparada') return 0;
+      store.delete(chaves[0]!);
+      store.delete(chaves[1]!);
+      return 1;
+    },
+    async del(chave: string): Promise<number> {
+      return store.delete(chave) ? 1 : 0;
+    },
+  } as unknown as Redis;
+  let encerramentos = 0;
+  definirBroadcasterParaNaoInicio({
+    encerrarPorNaoInicio() {
+      encerramentos += 1;
+    },
+  });
+  try {
+    configurarNaoInicio(undefined, 90);
+    // Simula a corrida: depois da primeira leitura (obterPartida), a admissão
+    // vira a partida para em_andamento (Lua com PERSIST).
+    const originalGet = (redis as unknown as { get(chave: string): Promise<string | null> }).get.bind(redis);
+    (redis as unknown as { get(chave: string): Promise<string | null> }).get = async (chave: string) => {
+      const bruto = await originalGet(chave);
+      if (leituras >= 1 && store.has(CHAVE_PARTIDA)) {
+        store.set(CHAVE_PARTIDA, JSON.stringify({ ...JSON.parse(bruto!), estado: 'em_andamento' }));
+      }
+      return bruto;
+    };
+    const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
+    assert.equal(naoIniciou, false, 'partida em_andamento no momento do DEL não deve ser cancelada');
+    assert.equal(encerramentos, 0, 'sockets devem permanecer intactos na corrida com admissão');
+    assert.ok(store.has(CHAVE_PARTIDA), 'partida em_andamento deve permanecer no Redis');
+    assert.equal(
+      (JSON.parse(store.get(CHAVE_PARTIDA)!) as { estado: string }).estado,
+      'em_andamento',
+      'o estado em_andamento não pode ser destruído pelo não-início',
+    );
+  } finally {
+    definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('TOCTOU: partida ainda preparada no eval é cancelada normalmente', async () => {
+  const store = new Map<string, string>([
+    [CHAVE_PARTIDA, partidaPreparadaJson({ criadaEm: new Date('2000-01-01T00:00:00.000Z').toISOString() })],
+  ]);
+  const redis = {
+    async get(chave: string): Promise<string | null> {
+      return store.get(chave) ?? null;
+    },
+    async eval(_script: string, _numKeys: number, ...chaves: string[]): Promise<number> {
+      const bruto = store.get(chaves[0]!) ?? null;
+      if (bruto === null) return 0;
+      const partida = JSON.parse(bruto) as { estado?: string };
+      if (partida.estado !== 'preparada') return 0;
+      store.delete(chaves[0]!);
+      store.delete(chaves[1]!);
+      return 1;
+    },
+  } as unknown as Redis;
+  let encerramentos = 0;
+  definirBroadcasterParaNaoInicio({
+    encerrarPorNaoInicio() {
+      encerramentos += 1;
+    },
+  });
+  try {
+    configurarNaoInicio(undefined, 90);
+    const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
+    assert.equal(naoIniciou, true, 'partida preparada expirada deve ser cancelada');
+    assert.equal(encerramentos, 1, 'sockets devem ser chutados no cancelamento válido');
+    assert.ok(!store.has(CHAVE_PARTIDA), 'chave da partida preparada deve ser removida');
+  } finally {
+    definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('A5: fire sem redis global reagenda em vez de explodir', async () => {  const avisos: unknown[][] = [];
   const originalWarn = console.warn;
   (console as unknown as { warn: unknown }).warn = (...args: unknown[]) => {
     avisos.push(args);
