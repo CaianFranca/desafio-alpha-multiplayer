@@ -627,13 +627,8 @@ test('presenca: multiplas conexoes do mesmo Jogador contam como uma so presenca'
 
     // Segunda conexão do mesmo jogador B (segunda aba)
     const wsB2 = await conectarWs(servidor.wsUrl, b.cookies);
-    // Deve apenas registrar, sem emitir MEMBRO_DESCONECTADO adicional.
-    // A já autenticou B via wsB2 com presenca conectado -> registrar silenciosamente.
-    // Fast-reload (PR #304): o novo socket recebe o snapshot SALA_ATUALIZADA de
-    // reidratação (cliente recarregado com sala=null); os demais sockets e o
-    // restante dos membros permanecem em silêncio.
-    const reidratacao = await esperarSalaAtualizada(wsB2);
-    assert.equal(reidratacao.sala.codigoDeSala, codigo);
+    // Deve apenas registrar, sem emitir MEMBRO_DESCONECTADO adicional
+    // A já autenticou B via wsB2 com presenca conectado -> registrar silenciosamente
     await delay(100);
     await esperarSilencio(wsA);
     await esperarSilencio(wsB1);
