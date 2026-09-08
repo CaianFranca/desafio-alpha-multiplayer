@@ -29,7 +29,7 @@ import {
   type Comando,
   type EstadoDoLobby,
   type Sala as SalaDominio,
-  sairDaSalaEncaminhadaAbandonada,
+  sairDaSalaEncaminhadaNaoIniciada,
 } from '@flicker/engine';
 import type {
   SalaComandoDoCliente,
@@ -318,7 +318,7 @@ export class SalasHandlers {
     socket: AuthenticatedWebSocket,
     jogadorId: string,
   ): Promise<void> {
-    // P0: se o jogador está preso a sala encaminhada órfã (partida preparada abandonada/expirada),
+    // P0: se o jogador está preso a sala encaminhada órfã (partida preparada não iniciada/expirada),
     // limpa a associação antes de tentar criar nova sala — evita JOGADOR_JA_ASSOCIADO fantasma.
     await this.limparAssociacaoOrfaSeNecessario(jogadorId);
 
@@ -527,7 +527,7 @@ export class SalasHandlers {
       ?? null;
 
     const resultado = usarBypassOrfa
-      ? sairDaSalaEncaminhadaAbandonada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId })
+      ? sairDaSalaEncaminhadaNaoIniciada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId })
       : this.estado.aplicar({
           tipo: 'sair_da_sala',
           salaId,
@@ -1290,7 +1290,7 @@ export class SalasHandlers {
     if (!orfa) return false;
     await this.projecao.limparAssociacaoJogador(jogadorId);
     try {
-      const res = sairDaSalaEncaminhadaAbandonada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
+      const res = sairDaSalaEncaminhadaNaoIniciada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
       if (res.sucesso) {
         this.estado.substituirEstado(res.estado);
         await this.atualizarProjecaoEstado(res.estado, salaId);
