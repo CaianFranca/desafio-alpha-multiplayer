@@ -83,6 +83,7 @@ import {
   type ApelidoPorJogadorId,
 } from './eventos.ts';
 import { SalasReconexao, JANELA_RECONEXAO_SEGUNDOS } from './reconexao.ts';
+import { idadeDoEmVoo, limparEmVoo, marcarEmVoo } from './encaminhamento-voo.ts';
 import { getConfig } from '@flicker/config';
 import type { AuthenticatedWebSocket } from '../ws/ws.ts';
 import { listarGameServersDisponiveis as listarGameServersShared } from '@flicker/shared/server';
@@ -192,6 +193,9 @@ export class SalasHandlers {
   private readonly cancelarPartidaInjetado?: (serverId: string, partidaId: string, motivo: string, serverUrl?: string) => Promise<void>;
   private readonly redis: Redis;
   private readonly timeoutMs: number;
+  // Teto do não-início (mesmo valor do game-server, review #304 item 3): a
+  // idade do marker do em-voo acima deste teto libera a órfã sem partidaId.
+  private readonly tetoNaoInicioMs: number = getConfig().partidaNaoInicioSegundos * 1000;
   private readonly encaminhamentosEmVoo: Set<string> = new Set();
   // O lobby da #36 é mononodo. Serializar as mutações evita que dois awaits
   // de persistência confirmem candidatos calculados sobre o mesmo estado.
@@ -1001,6 +1005,9 @@ export class SalasHandlers {
     this.difundir(evs, salaId);
 
     this.encaminhamentosEmVoo.add(salaId);
+    // Relógio do em-voo (ADR-0010, "Órfã sem partidaId"): o instante da oferta
+    // viaja no Redis; se a oferta se perder sem rastro, o teto libera.
+    await marcarEmVoo(this.redis, salaId);
 
     // Construir roster para encaminhamento — ordenar por ordemDeEntrada
     // (composição válida: 2 a 4 Membros ativos; teto garantido pelo engine)
@@ -1010,6 +1017,7 @@ export class SalasHandlers {
       .sort((a, b) => a.ordemDeEntrada - b.ordemDeEntrada);
     if (membrosAtivosOrdenados.length < 2 || membrosAtivosOrdenados.length > 4) {
       this.encaminhamentosEmVoo.delete(salaId);
+      void limparEmVoo(this.redis, salaId);
       this.enviarErro(socket, 'ENCAMINHAMENTO_INVALIDO', 'Composição inválida para encaminhamento — esperado de 2 a 4 Membros ativos.');
       return;
     }
@@ -1189,6 +1197,7 @@ export class SalasHandlers {
         }
       } finally {
         this.encaminhamentosEmVoo.delete(salaId);
+        void limparEmVoo(this.redis, salaId);
       }
     });
   }
@@ -1226,11 +1235,18 @@ export class SalasHandlers {
       }
       if (!partidaId) {
         // Fail-closed: sem partida nas duas primeiras fontes, consulta a
-        // terceira (encaminhamento persistido) antes de liberar. Se as 3
-        // concordarem em "sem partida", não libera — a sala segue o caminho
-        // existente de expiração/TTL em vez de bypass silencioso.
+        // terceira (encaminhamento persistido) antes de liberar. Sem partida
+        // nas 3, o relógio do em-voo decide (review #304, item 3; ADR-0010):
+        // marker com idade acima do teto libera a órfã sem rastro; marker
+        // novo mantém a presa (a admissão ainda pode completar); sem marker
+        // (órfã anterior ao deploy) segue até a expiração.
         const encaminhado = await this.repo.obterEncaminhamento(salaId).catch(() => null);
         if (encaminhado === null) {
+          const idade = await idadeDoEmVoo(this.redis, salaId);
+          if (idade !== null && idade > this.tetoNaoInicioMs) {
+            console.warn('[salas] sala sem partida nas 3 fontes liberada pelo relógio do em-voo', { salaId, idadeMs: idade });
+            return true;
+          }
           console.warn('[salas] sala sem partida nas 3 fontes; mantida até expiração', { salaId });
           return false;
         }

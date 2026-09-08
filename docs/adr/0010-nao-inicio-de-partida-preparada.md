@@ -31,6 +31,18 @@ teto é comportamento desejado.
 - **Simétrico ao retorno**: reusa callback ADR-0006 com retry/backoff cap 30s.
 - **Parcial protegido**: teto evita liberar Sala enquanto admissão ainda pode completar.
 
+## Órfã sem partidaId (relógio do em-voo — review #304, item 3)
+
+A Sala pode ficar encaminhada sem partidaId em qualquer fonte (oferta perdida
+sem rastro). O fail-closed original mantinha essa órfã presa até a expiração,
+contra o objetivo de liberar os Jogadores. Decisão: o lobby registra no Redis o
+instante da oferta (`lobby:encaminhamento-voo:<salaId>`, TTL de 24h) ao iniciar
+o em-voo e o limpa quando o encaminhamento termina. Em `partidaDaSalaEstaOrfa`,
+sem partida nas 3 fontes: marker com idade acima do teto (`PARTIDA_NAO_INICIO_
+SEGUNDOS`, o mesmo do não-início) **libera** a órfã; marker novo mantém a presa
+(a admissão ainda pode completar); sem marker — órfã anterior a este deploy —
+segue pelo caminho antigo até a expiração.
+
 ## Alternativas consideradas
 
 - **Poll lobby → game-server** — rejeitada: carga contínua para evento pontual.

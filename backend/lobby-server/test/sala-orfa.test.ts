@@ -19,6 +19,7 @@ function handlersCom(
     estadoSala: { encaminhamento?: { partidaId?: string } | null } | null;
     encaminhamento: { serverId: string; partidaId: string } | null;
     chaveExiste: boolean;
+    markerEmVooIso: string | null;
   }>,
 ): { handlers: SalasHandlers; chamadas: { obterEncaminhamento: number } } {
   const chamadas = { obterEncaminhamento: 0 };
@@ -29,7 +30,10 @@ function handlersCom(
     async ttl(): Promise<number> {
       return 100;
     },
-    async get(): Promise<null> {
+    async get(chave: string): Promise<string | null> {
+      if (chave.startsWith('lobby:encaminhamento-voo:')) {
+        return overrides.markerEmVooIso ?? null;
+      }
       return null;
     },
   };
@@ -86,6 +90,44 @@ test('A8: terceira fonte com partida + chave ausente mantém o bypass', async ()
   });
   const orfa = await orfaDe(handlers)('sala-1');
   assert.equal(orfa, true, 'partida confirmada sem chave continua órfã liberável');
+});
+
+// ===== Relógio do em-voo (review #304, item 3; ADR-0010) =====
+
+test('relógio: marker do em-voo acima do teto libera a sala sem partida nas 3 fontes', async () => {
+  const { handlers } = handlersCom({
+    salaBruta: { partidaId: null },
+    estadoSala: null,
+    encaminhamento: null,
+    chaveExiste: false,
+    markerEmVooIso: new Date(Date.now() - 120_000).toISOString(),
+  });
+  const orfa = await orfaDe(handlers)('sala-1');
+  assert.equal(orfa, true, 'órfã sem rastro com oferta velha (> teto) é liberável');
+});
+
+test('relógio: marker do em-voo dentro do teto mantém a sala presa', async () => {
+  const { handlers } = handlersCom({
+    salaBruta: { partidaId: null },
+    estadoSala: null,
+    encaminhamento: null,
+    chaveExiste: false,
+    markerEmVooIso: new Date().toISOString(),
+  });
+  const orfa = await orfaDe(handlers)('sala-1');
+  assert.equal(orfa, false, 'oferta nova (a admissão ainda pode completar) permanece presa');
+});
+
+test('relógio: sem marker (órfã anterior ao deploy), fail-closed mantém', async () => {
+  const { handlers } = handlersCom({
+    salaBruta: { partidaId: null },
+    estadoSala: null,
+    encaminhamento: null,
+    chaveExiste: false,
+    markerEmVooIso: null,
+  });
+  const orfa = await orfaDe(handlers)('sala-1');
+  assert.equal(orfa, false, 'sem rastro do em-voo, o caminho antigo (expiração) segue');
 });
 
 // ===== Caminhos felizes do bypass de órfã (review #304 item 5) =====
