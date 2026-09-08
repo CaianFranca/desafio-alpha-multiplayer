@@ -53,12 +53,12 @@ Jogo entre os 2 a 4 Jogadores de uma Sala, do Encaminhamento até a vitória ou 
 _Avoid_: jogo, sessão
 
 **Resultado**:
-Vitória, derrota ou abandono declarados no término ou cancelamento da Partida; em evento simultâneo das condições, a vitória tem prioridade.
+Vitória, derrota ou não-início declarados no término ou cancelamento da Partida; em evento simultâneo das condições, a vitória tem prioridade.
 _Avoid_: desfecho, fim de jogo
 
-**Abandono de Partida**:
-Cancelamento de Partida preparada sem completar a admissão dos quatro Jogadores; com todos desconectados libera em 10s, com admissão parcial libera no teto de 90s; encerra conexões com PARTIDA_ABANDONADA e avisa o lobby para reabrir a Sala.
-_Avoid_: desistência, timeout
+**Partida Não Iniciada**:
+Cancelamento de Partida preparada sem completar a admissão dos 2 a 4 Jogadores; com todos desconectados libera em 10s, com admissão parcial libera no teto de 90s; encerra conexões com PARTIDA_NAO_INICIADA e avisa o lobby para reabrir a Sala.
+_Avoid_: abandono, desistência, timeout
 
 **Partida Órfã**:
 Sala encaminhada cuja Partida preparada foi cancelada, expirou ou está com todos em reconexão; libera SAIR_DA_SALA e ENTRAR_NA_SALA em nova Sala.
