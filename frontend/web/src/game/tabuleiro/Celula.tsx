@@ -80,7 +80,7 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
  * Relevo das paredes do grid (issue #278): mesmo ponto de partida das peças
  * (`RELEVO_TOPO_NORMAL_SCALE` em `PecaPlaceholder`) — realça o normalMap sob
  * a luz rasante da cena sem amplificar ruído além do motivo. Piso afundado
- * usa relevo menor para leitura de vazio; borda usa o ponto cheio.
+ * usa relevo menor para leitura de vazio; borda usa relevo contido de pedra.
  */
 const RELEVO_PISO_NORMAL_SCALE: readonly [number, number] = [1.0, 1.0]
 const RELEVO_BORDA_NORMAL_SCALE: readonly [number, number] = [1.1, 1.1]
