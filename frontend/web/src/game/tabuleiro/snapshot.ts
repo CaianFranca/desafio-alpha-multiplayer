@@ -77,19 +77,19 @@ export function aplicarSnapshot(
   // autoridade — recarregar reconstrói a mesa sem seed local.
   // Roster N=2..4 (#284): espelha só as N iniciais do roster; com o servidor
   // ainda em 4 e N=2, projetar as 4 criava indicadores fantasmas do ausente.
-  // Fonte única da faixa 2..4: quantidadeValidaDeJogadores — só fatia quando
-  // o roster já é um N válido; fora da faixa (0, 1, 5+) mantém a lista cheia
-  // (fallback defensivo, mesma regra dos peões).
+  // Sem fallback para a lista cheia: fora da faixa, projeta exatamente o
+  // roster (0 → mesa vazia; 1 → 1; 5+ → o que o servidor mandou, no máximo).
+  // Inventar 4 peças sem roster seria reintroduzir fantasmas.
   const quantidadeSnapshot = snapshot.jogadores.length
   const iniciaisDoRosterBase: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
     pecaId: p.pecaId,
     tipo: 'inicial' as const,
     orientacao: p.orientacao,
   }))
-  const iniciaisDoSnapshot: readonly PecaDaMesa[] =
-    quantidadeSnapshot === quantidadeValidaDeJogadores(quantidadeSnapshot)
-      ? iniciaisDoRosterBase.slice(0, quantidadeSnapshot)
-      : iniciaisDoRosterBase
+  const iniciaisDoSnapshot: readonly PecaDaMesa[] = iniciaisDoRosterBase.slice(
+    0,
+    Math.max(0, Math.min(quantidadeSnapshot, iniciaisDoRosterBase.length)),
+  )
 
   // Reparo defensivo de reload (issue #258): a Inicial em foco
   // (`pecaSelecionadaId`) está nas `iniciais` por invariante do engine —
@@ -110,11 +110,11 @@ export function aplicarSnapshot(
   // (peaoId da ordem de entrada) — nunca os N primeiros do array. Com o
   // servidor ainda em 4 e N=2, o slice por posição exibia cores erradas e
   // quebrava "peão na cor da minha ordem de entrada" (#281 história 4).
-  // Fallback defensivo: sem peaoId correspondente (snapshot vazio/antigo),
-  // mantém a lista cheia em vez de esvaziar a mesa.
+  // Sem fallback para a lista cheia: roster vazio projeta mesa vazia.
+  // Manter os 4 peões sem roster seria reintroduzir fantasmas (#284).
   const peaoIdsDosJogadores = new Set(snapshot.jogadores.map((j) => j.peaoId))
-  const peoesFiltrados = snapshot.tabuleiro.peoes.filter((peao) => peaoIdsDosJogadores.has(peao.peaoId))
-  const peoes: readonly PeaoDaExibicao[] = (peoesFiltrados.length > 0 ? peoesFiltrados : snapshot.tabuleiro.peoes)
+  const peoes: readonly PeaoDaExibicao[] = snapshot.tabuleiro.peoes
+    .filter((peao) => peaoIdsDosJogadores.has(peao.peaoId))
     .map((peao) => {
       const celula = peao.pecaId !== null ? (mapPos.get(peao.pecaId) ?? null) : null
       return {
@@ -209,6 +209,7 @@ export function aplicarSnapshot(
     pecasRestantesNaCaixa: snapshot.tabuleiro.pecasRestantesNaCaixa ?? null,
     geradoresLigados: snapshot.geradoresLigados ?? [],
     cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido ?? false,
-    quantidadeDeJogadores: quantidadeSnapshot > 0 ? quantidadeSnapshot : null,
+    quantidadeDeJogadores:
+      quantidadeSnapshot > 0 ? quantidadeValidaDeJogadores(quantidadeSnapshot) : null,
   }
 }

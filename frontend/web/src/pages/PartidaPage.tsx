@@ -418,6 +418,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     [sanidadePorPeao],
   )
 
+  // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
+  // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
+  // (solo anuncia 1, nunca um N falso), teto usa o N válido (#284, #281).
+  // Definido antes do ciclo para alimentar o teto do Portão no espelho.
+  const quantidadeRealDeJogadores = useMemo(() => {
+    const doSnapshot = Object.keys(modelo.jogadorPorId).length
+    if (doSnapshot > 0) return doSnapshot
+    if (modelo.quantidadeDeJogadores != null) return modelo.quantidadeDeJogadores
+    return modelo.peoes.length
+  }, [modelo.jogadorPorId, modelo.quantidadeDeJogadores, modelo.peoes.length])
+  const quantidadeParaTeto = quantidadeValidaDeJogadores(quantidadeRealDeJogadores)
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
@@ -434,8 +445,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       donoDoCiclo: minhaVez,
       // Projeção dos afetados (exceção de resgate #171 no espelho de destinos).
       afetadosPorPeaoId,
+      // N do roster para o teto do Portão (#284): nunca peoes.length.
+      quantidadeDeJogadores: quantidadeParaTeto,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa
@@ -543,16 +556,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
   }, [requerModoPaisagem])
 
-  // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
-  // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
-  // (solo anuncia 1, nunca um N falso), teto usa o N válido (#284, #281).
-  const quantidadeRealDeJogadores = useMemo(() => {
-    const doSnapshot = Object.keys(modelo.jogadorPorId).length
-    if (doSnapshot > 0) return doSnapshot
-    if (modelo.quantidadeDeJogadores != null) return modelo.quantidadeDeJogadores
-    return modelo.peoes.length
-  }, [modelo.jogadorPorId, modelo.quantidadeDeJogadores, modelo.peoes.length])
-  const quantidadeParaTeto = quantidadeValidaDeJogadores(quantidadeRealDeJogadores)
   const textoJogadorAtivo = modelo.jogadorAtivoId ? (modelo.jogadorPorId[modelo.jogadorAtivoId]?.apelido ?? 'desconhecido') : 'nenhum'
   const ordemDeEntradaTexto = useMemo(() => {
     const ordem = Object.entries(modelo.jogadorPorId)
@@ -583,6 +586,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         estadoExibicao={estadoExibicao}
         estadoInteracao={estadoInteracao}
         estadoInteracaoPeoes={estadoInteracaoPeoes}
+        quantidadeDeJogadores={quantidadeParaTeto}
         onComando={onComando}
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}

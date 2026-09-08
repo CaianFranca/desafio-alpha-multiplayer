@@ -84,6 +84,12 @@ interface AmbienteDeJogoProps {
    * afetado, em todas as posições (célula/fileira/voo).
    */
   emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
+  /**
+   * N do roster para o teto do Portão (#284): o teto é o N real de
+   * jogadores (clamp 2..4 no pai), não peoes.length (modo misto pré-fiação).
+   * Ausente = cai no N do ciclo ou em peoes.length.
+   */
+  quantidadeDeJogadores?: number
 }
 
 export function AmbienteDeJogo({
@@ -103,6 +109,7 @@ export function AmbienteDeJogo({
   encaixeTrigger = null,
   onFimEncaixe,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
+  quantidadeDeJogadores,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -233,6 +240,7 @@ export function AmbienteDeJogo({
           estadoExibicao.peoes,
           peaoSelecionadoIdLocal,
           estadoInteracaoPeoes?.afetadosPorPeaoId,
+          quantidadeDeJogadores ?? estadoInteracaoPeoes?.quantidadeDeJogadores,
         )
       : []
   const destinosSet = new Set<string>(destinosDoPeao.map((d) => d.peca.pecaId))
