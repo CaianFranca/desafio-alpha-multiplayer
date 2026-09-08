@@ -339,30 +339,17 @@ test('turno normal: início só seleciona o Peão; depois move ou permanece', ()
   );
 });
 
-test('turno normal: após mover, confirmar substitui o permanecer', () => {
+test('turno normal: após mover, só confirmar (movimento único, sem segundo mover)', () => {
   let estado = partidaEmRodada2();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
   // O mover re-seleciona o Peão (semântica única, issue #334): sem
-  // re-seleção intermediária, a FSM já propõe mover/confirmar.
+  // re-seleção intermediária, a FSM já propõe a confirmação.
   assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   const acoes = acoesValidasDaSubfase(estado, 'ana');
-  assert.ok(
-    !acoes.some((acao) => acao.tipo === 'selecionar_peao'),
-    'com o peão re-selecionado, re-selecionar é redundante',
-  );
-  assert.ok(
-    acoes.some(
-      (acao) =>
-        acao.tipo === 'confirmar_posicao_do_peao' &&
-        acao.peaoId === 'peao-branco',
-    ),
-    'esperava a confirmação após a mudança de peça',
-  );
-  assert.ok(
-    acoes.every((acao) => acao.tipo !== 'permanecer'),
-    'permanecer fora da peça de início seria rejeitado',
-  );
+  assert.deepEqual(acoes, [
+    { tipo: 'confirmar_posicao_do_peao', peaoId: 'peao-branco' },
+  ]);
 });
 
 test('cadeia do turno normal: mover, confirmar, resolver e encerrar', () => {
@@ -484,22 +471,47 @@ test('identidade: 200 turnos normais sem FORA_DA_VEZ por culpa do bot', () => {
   }
 });
 
-test('failsafe: vagar sem confirmar termina em ≤10 ações com desistência', () => {
+test('movimento único: bot nunca encadeia 2 movers no mesmo turno', () => {
+  for (let semente = 1; semente <= 50; semente++) {
+    let estado = partidaEmRodada2(semente);
+    const ator = estado.jogadorAtivoId;
+    const turno = executarTurnoDoBot(estado, ator, {
+      // Sorteio que prefere mover sempre que possível: sem o fix, vagaria.
+      sortear: <T>(opcoes: readonly T[]): T => {
+        const mover = opcoes.find(
+          (acao) =>
+            (acao as unknown as ComandoDePartida).tipo === 'mover_peao',
+        );
+        const primeira = mover ?? opcoes[0];
+        if (primeira === undefined) {
+          throw new Error('sem ações');
+        }
+        return primeira;
+      },
+    });
+    const movers = turno.acoesExecutadas.filter(
+      (acao) => acao.tipo === 'mover_peao',
+    ).length;
+    assert.ok(
+      movers <= 1,
+      `semente ${semente}: bot moveu ${movers}x no mesmo turno`,
+    );
+    assert.notEqual(
+      turno.motivo,
+      'desistencia',
+      `semente ${semente}: bot desistiu (${turno.codigoDaDesistencia})`,
+    );
+  }
+});
+
+test('failsafe: sem ação dentro do teto, forçado sem confirmação desiste', () => {
   const estado = partidaEmRodada2();
-  const sempreAPrimeira = <T>(acoes: readonly T[]): T => {
-    const primeira = acoes[0];
-    if (primeira === undefined) {
-      throw new Error('sem ações');
-    }
-    return primeira;
-  };
   const resultado = executarTurnoDoBot(estado, 'ana', {
-    maxActionsPerTurn: 10,
-    sortear: sempreAPrimeira,
+    maxActionsPerTurn: 0,
   });
   assert.equal(resultado.motivo, 'desistencia');
   assert.equal(resultado.codigoDaDesistencia, 'ENCERRAMENTO_INVALIDO');
-  assert.ok(resultado.acoesExecutadas.length <= 11);
+  assert.deepEqual(resultado.acoesExecutadas, []);
 });
 
 test('failsafe: com a posição confirmada, o forçado encerra de imediato', () => {

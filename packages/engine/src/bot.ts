@@ -18,8 +18,9 @@
 //   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida;
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
-//   (d) turno normal sem Confirmação → selecionar o Peão, mover, permanecer
-//       ou confirmar a posição (quando houve mudança de peça);
+//   (d) turno normal sem Confirmação → selecionar o Peão e, sobre a Peça do
+//       início, mover (uma vez) ou permanecer; fora dela, só confirmar a
+//       posição — o bot nunca encadeia 2 movers no mesmo turno;
 //   (e) posição confirmada (e sem pendências) → encerrar o turno.
 //
 // A confirmação em (d) — confirmar_posicao_do_peao quando o Peão saiu da Peça
@@ -50,7 +51,10 @@ import {
 // Failsafe contra loop infinito: teto de ações sorteadas por turno. Ao
 // atingi-lo, o loop tenta UMA vez o encerrar_turno forçado e, se a engine o
 // rejeitar (ex.: PENDENCIA_NAO_RESOLVIDA), desiste do turno sem contorno.
-export const MAX_ACOES_POR_TURNO_DO_BOT = 10;
+// Teto em 20 para acomodar o pior caso de um turno de movimento único:
+// selecionar + mover + confirmar + até 4 recebidas × (escolher + encaixar)
+// + encerrar, com folga.
+export const MAX_ACOES_POR_TURNO_DO_BOT = 20;
 
 export interface IdentidadeDoBot {
   readonly jogadorId: string;
@@ -239,8 +243,10 @@ export function acoesValidasDaSubfase(
     return [{ tipo: 'encerrar_turno' }];
   }
 
-  // (d) Turno normal sem confirmação: selecionar, mover, permanecer ou
-  // confirmar — conforme a posição do Peão.
+  // (d) Turno normal sem confirmação: selecionar, mover UMA vez ou
+  // permanecer — conforme a posição do Peão. Fora da Peça do início o bot
+  // já andou: só confirma (nunca encadeia outro mover, que causava o
+  // vai-e-vem até o failsafe desistir e strandar a partida).
   const peao = tabuleiro.peoes.find(
     (item) => item.peaoId === jogador.peaoId,
   );
@@ -249,6 +255,13 @@ export function acoesValidasDaSubfase(
   }
   if (tabuleiro.peaoSelecionadoId !== jogador.peaoId) {
     return [{ tipo: 'selecionar_peao', peaoId: jogador.peaoId }];
+  }
+  const sobreAPecaDoInicio = peao.pecaId === estado.pecaDoInicioDoTurnoId;
+  if (!sobreAPecaDoInicio) {
+    // Fora da Peça de início, terminar na peça atual exige a Confirmação de
+    // Posição (a Permanência seria ENCERRAMENTO_INVALIDO e outro mover
+    // seria o segundo passo do turno — proibido para o bot).
+    return [{ tipo: 'confirmar_posicao_do_peao', peaoId: jogador.peaoId }];
   }
   const origem = tabuleiro.posicionadas.find(
     (peca) => peca.pecaId === peao.pecaId,
@@ -274,21 +287,14 @@ export function acoesValidasDaSubfase(
       celula: vizinha.celula,
     });
   }
-  const sobreAPecaDoInicio = peao.pecaId === estado.pecaDoInicioDoTurnoId;
-  if (sobreAPecaDoInicio) {
-    // A Permanência vale só sobre a Peça do início do turno — e nunca sob o
-    // período de graça do Resgate (a engine rejeitaria).
-    const emGraca = (estado.pecasEmPeriodoDeGraca ?? []).includes(
-      peao.pecaId,
-    );
-    if (!emGraca) {
-      acoes.push({ tipo: 'permanecer', peaoId: jogador.peaoId });
-    }
-    return acoes;
+  // A Permanência vale só sobre a Peça do início do turno — e nunca sob o
+  // período de graça do Resgate (a engine rejeitaria).
+  const emGraca = (estado.pecasEmPeriodoDeGraca ?? []).includes(
+    peao.pecaId,
+  );
+  if (!emGraca) {
+    acoes.push({ tipo: 'permanecer', peaoId: jogador.peaoId });
   }
-  // Fora da Peça de início, terminar na peça atual exige a Confirmação de
-  // Posição (a Permanência seria ENCERRAMENTO_INVALIDO).
-  acoes.push({ tipo: 'confirmar_posicao_do_peao', peaoId: jogador.peaoId });
   return acoes;
 }
 
