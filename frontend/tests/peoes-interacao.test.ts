@@ -823,10 +823,15 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toBeNull()
   })
 
-  it('clique em vaga disponível atribui a vaga à peça PUXADA da bandeja', () => {
+  it('clique em vaga disponível escolhe E encaixa a peça PUXADA da bandeja no MESMO clique (#261)', () => {
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
+    // Único clique: ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido de POSICIONAR_PECA
+    // (pecaId da pendência puxada; célula da vaga clicada).
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toEqual({
-      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
+      escolhaDeVagaEEncaixe: {
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 'reta-1', celula: VAGA_NORTE },
+      },
     })
   })
 
@@ -835,7 +840,10 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     // R2 — a regra antiga (primeira da lista) morreria aqui com r1.
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r2' })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toEqual({
-      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'norte' },
+      escolhaDeVagaEEncaixe: {
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'norte' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 't-1', celula: VAGA_NORTE },
+      },
     })
   })
 
@@ -851,7 +859,7 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toBeNull()
   })
 
-  it('após a primeira vaga, a segunda pendência puxada recebe a próxima escolha', () => {
+  it('após a primeira vaga, a segunda pendência puxada recebe a próxima escolha + encaixe', () => {
     const estado = estadoComPendencias({
       recebidasPendentes: [
         pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE),
@@ -860,8 +868,26 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
       recebidaPuxadaId: 'r2',
     })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
-      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
+      escolhaDeVagaEEncaixe: {
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 't-1', celula: VAGA_LESTE },
+      },
     })
+  })
+
+  it('despacho da vaga: ESCOLHER_VAGA via canal de peão e POSICIONAR_PECA via tabuleiro, em ordem (#261)', () => {
+    const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
+    // Um único clique despacha os 2 comandos em sequência — o array único
+    // torna a ORDEM explícita (primeiro a escolha, depois o encaixe).
+    const emitidos: unknown[] = []
+    despacharCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE, {
+      onComando: (comando) => emitidos.push(comando),
+      onComandoPeao: (comando) => emitidos.push(comando),
+    })
+    expect(emitidos).toEqual([
+      { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
+      { type: 'POSICIONAR_PECA', pecaId: 'reta-1', celula: VAGA_NORTE },
+    ])
   })
 
   it('célula-alvo com a peça em foco → POSICIONAR_PECA (encaixe)', () => {

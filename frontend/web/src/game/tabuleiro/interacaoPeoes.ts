@@ -36,7 +36,10 @@
  * então o clique numa célula vazia vizinha disponível atribui a vaga à peça
  * PUXADA — não há mais "primeira pendência sem vaga" automática. Sem peça
  * puxada, o clique de vaga é silencioso (padrão #91: alvos inválidos não
- * reagem). Puxar é restrito ao dono do ciclo (espectador: clique mudo).
+ * reagem). Puxar é restrito ao dono do ciclo (espectador: clique mudo). O
+ * clique de vaga já carrega o encaixe imediato (issue #261):
+ * ESCOLHER_VAGA seguido de POSICIONAR_PECA no MESMO clique — a peça encaixa
+ * com um único clique.
  *
  * Guard pós-confirmação (AC3 — review #165): com `posicaoConfirmadaNoTurno`,
  * os alvos que seriam válidos (permanecer/mover) retornam rejeição com motivo
@@ -558,12 +561,20 @@ export function mapearMovimentacao(
 
 /**
  * Resultado do clique em célula com o ciclo ativo: comando do ciclo (peão ou
- * tabuleiro — POSICIONAR_PECA da Recebida), rejeição local com feedback
- * (guard pós-confirmação, AC3), ou null (alvo inválido não reage; sem ciclo
- * ativo o chamador aplica o fallback ST-09).
+ * tabuleiro — POSICIONAR_PECA da Recebida), escolha de vaga com encaixe
+ * imediato no MESMO clique (issue #261: ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido
+ * de POSICIONAR_PECA — a cadeia serial do servidor processa a sequência em
+ * ordem), rejeição local com feedback (guard pós-confirmação, AC3), ou null
+ * (alvo inválido não reage; sem ciclo ativo o chamador aplica o fallback ST-09).
  */
 export type ResultadoDeCliqueEmCelula =
   | { readonly ciclo: PeaoComandoDoCliente | TabuleiroComandoDoCliente }
+  | {
+      readonly escolhaDeVagaEEncaixe: {
+        readonly escolhaDeVaga: PeaoComandoDoCliente
+        readonly encaixe: TabuleiroComandoDoCliente
+      }
+    }
   | { readonly rejeicao: RejeicaoDeInteracao }
   | null
 
@@ -616,9 +627,12 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *
  * Com pendências:
  *   - célula = vaga disponível E há pendência PUXADA sem vaga →
- *     ESCOLHER_VAGA para a recebida puxada (fluxo #143/revisão #199: a vaga
+ *     ESCOLHER_VAGA + encaixe imediato (POSICIONAR_PECA na célula da vaga)
+ *     para a recebida puxada — issue #261: UM clique na vaga seleciona E
+ *     encaixa (2 comandos em sequência na mesma conexão, processados em
+ *     ordem pela cadeia serial do servidor); fluxo #143/revisão #199: a vaga
  *     vai para a peça puxada da bandeja — sem puxada ativa, ou com a puxada
- *     já encaminhada, o clique de vaga é silencioso).
+ *     já encaminhada, o clique de vaga é silencioso.
  *   - célula = célula-alvo de pendência com pendência.pecaId ===
  *     pecaSelecionadaId → POSICIONAR_PECA (encaixe; coerência tripla:
  *     célula-alvo + vaga escolhida + peça em foco).
@@ -666,7 +680,21 @@ export function rotearCliqueDeCelula(
             alvo.recebidaId,
             vaga.borda,
           )
-          if (comando) return { ciclo: comando }
+          // issue #261: UM clique na vaga escolhe E já encaixa a peça —
+          // ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido de POSICIONAR_PECA; a
+          // cadeia serial do servidor processa a sequência em ordem.
+          if (comando) {
+            return {
+              escolhaDeVagaEEncaixe: {
+                escolhaDeVaga: comando,
+                encaixe: {
+                  type: 'POSICIONAR_PECA',
+                  pecaId: alvo.pecaId,
+                  celula: vaga.celula,
+                },
+              },
+            }
+          }
         }
         return null
       }
@@ -755,6 +783,13 @@ export function despacharCliqueDeCelula(
   if (resultado !== null) {
     if ('rejeicao' in resultado) {
       despacho.onRejeicao?.(resultado.rejeicao)
+      return
+    }
+    if ('escolhaDeVagaEEncaixe' in resultado) {
+      // issue #261: escolha e encaixe no MESMO clique — o encaixe segue a
+      // escolha na ordem (2 mensagens WS em sequência na mesma conexão).
+      despacho.onComandoPeao?.(resultado.escolhaDeVagaEEncaixe.escolhaDeVaga)
+      despacho.onComando?.(resultado.escolhaDeVagaEEncaixe.encaixe)
       return
     }
     if (ehComandoDePeao(resultado.ciclo)) {
