@@ -43,15 +43,19 @@ interface CelulaProps {
    * co-ocupação do `layoutDoPeaoNaCelula`; a regra de ocupação (Portão 4,
    * resgate +1) vive no engine e no espelho de destinos
    * (`destinosConectadosDoPeao`). A ordem de chegada vem de `filaDeChegada`
-   * (autoritativa) — durante o voo ativo o peão voador segue na fila e
-   * "reserva" o próprio canto no destino, sem shift dos demais.
+   * (autoritativa): ela espelha o modelo pós-evento
+   * (PEAO_POSICIONADO/PEAO_MOVIDO) — sem reserva otimista pré-evento. Durante
+   * o voo ativo o modelo já avançou, então o voador segue na fila do destino
+   * e os demais não sofrem shift.
    */
   peoes?: PeaoDaExibicao[]
   /**
    * Fila de chegada autoritativa desta célula (issue #298): ordem de pouso
-   * vinda de `ordemDeChegadaPorChave`. Mantém o arranjo estável durante o voo
-   * ativo (o peão voador permanece na fila do destino). Sem a prop, a fila
-   * deriva da lista renderizada (`peoes`).
+   * vinda de `ordemDeChegadaPorChave` (modelo pós-evento — sem reserva
+   * otimista: a fila só muda em PEAO_POSICIONADO/PEAO_MOVIDO/snapshot).
+   * Mantém o arranjo estável durante o voo ativo (o modelo já avançou, então
+   * o peão voador permanece na fila do destino). Sem a prop, a fila deriva
+   * da lista renderizada (`peoes`).
    */
   filaDeChegada?: readonly PeaoId[]
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
@@ -217,9 +221,11 @@ export function Celula({
 
   // Fila de ocupantes na ordem de chegada (issue #298): o índice decide o
   // arranjo de co-ocupação (Portão: cantos por ordem; peça comum: centro+SE).
-  // A fila autoritativa (`filaDeChegada`) inclui o peão voador no destino —
-  // ele reserva o próprio canto sem shift dos demais; sem ela, deriva da
-  // lista renderizada (após a filtragem do voo).
+  // A fila autoritativa (`filaDeChegada`) espelha o modelo pós-evento — sem
+  // reserva otimista, ela só muda em PEAO_POSICIONADO/PEAO_MOVIDO/snapshot;
+  // durante o voo ativo o modelo já avançou, então o voador segue na fila do
+  // destino sem shift dos demais. Sem ela, deriva da lista renderizada (após
+  // a filtragem do voo).
   const filaDeOcupantes = filaDeChegada ?? peoes.map((p) => p.peaoId)
 
   // Destaques do ciclo: alvo de pendência (#91) e vaga disponível para a
