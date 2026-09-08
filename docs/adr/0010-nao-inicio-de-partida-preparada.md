@@ -18,9 +18,10 @@ em andamento: aqui só existe Partida `preparada` que nunca admitiu o roster.
 Game-server detecta o não-início server-side: debounce 10s quando roster todo
 `em_reconexao`, teto 90s (`PARTIDA_NAO_INICIO_SEGUNDOS`) pela idade mesmo com
 admissão parcial. Ao declarar o não-início: fecha conexões com 4000
-`PARTIDA_NAO_INICIADA` via `encerrarPorNaoInicio`, cancela Partida no Redis e
-notifica lobby com `resultado: 'nao-inicio'`; lobby revalida e reabre
-`encaminhada → aberta` no mesmo caminho do ADR-0006. Timers rearmados após
+`PARTIDA_NAO_INICIADA` via `fecharSocketsDeNaoInicio`, cancela Partida no
+Redis via `cancelarPartidaSeNaoIniciada` e notifica lobby com
+`resultado: 'nao-inicio'`; lobby revalida e reabre `encaminhada → aberta` no
+mesmo caminho do ADR-0006. Timers rearmados após
 restart via SCAN `game-server:partida:*` com dispersão (jitter), leitura por
 pipeline e guarda de idade inválida. Parcial <90s mantém `SALA_ENCAMINHADA` —
 teto é comportamento desejado.
