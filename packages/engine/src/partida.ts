@@ -1302,6 +1302,16 @@ function confirmarPosicaoDoPeao(
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
     posicionadas: posicionadasPosAtaque,
+    // Issue #326: a Movimentação limpa a seleção (peoes.ts, moverPeao) e a
+    // Confirmação gera o Recebimento — sem seleção, escolher vaga/encaixar as
+    // Recebidas rejeitam PEAO_NAO_SELECIONADO, a re-seleção rejeita
+    // PENDENCIA_NAO_RESOLVIDA e o Encerramento exige zero pendências: softlock.
+    // Mesmo padrão do Primeiro Turno (posicionarPeaoDaPartida) e do
+    // atravessarOEscuro: o Peão confirmado segue selecionado para a sequência
+    // (escolher vaga → encaixar) até o Encerramento do Turno. Guard `??`: se a
+    // seleção já é deste Peão, preserva (idempotente). A Movimentação pós-
+    // Confirmação segue barrada (guard POSICAO_CONFIRMADA em moverPeaoDaPartida).
+    peaoSelecionadoId: estado.tabuleiro.peaoSelecionadoId ?? peao.peaoId,
   };
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a

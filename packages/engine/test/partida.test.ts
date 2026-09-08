@@ -705,6 +705,71 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
   assert.equal(encerramento.estado.tabuleiro.peaoSelecionadoId, null);
 });
 
+// Issue #326: a Confirmação preserva a seleção do Peão confirmado — a
+// re-seleção do mover (#263, partida.ts) atravessa a Confirmação e as
+// Recebidas ficam encaixáveis sem re-seleção intermediária.
+test('confirmação preserva a seleção do peão confirmado — Recebidas encaixáveis sem re-seleção (#326)', () => {
+  let estado = partidaEmRodada2();
+
+  // A re-seleção do mover (#263) já devolve a seleção: mover direto, sem
+  // selecionar_peao depois.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+
+  // Escolher a vaga e encaixar direto, sem selecionar_peao no meio.
+  estado = resolverRecebidas(confirmacao.estado, 'ana');
+  // aplicar lança em rejeição: o encerramento válido é a prova final.
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+  assert.equal(estado.posicaoConfirmada, false);
+});
+
+// Defesa do restore (#326): mesmo quando o estado chega à Confirmação SEM
+// seleção (base sem a re-seleção do mover, ou estado persistido antigo), a
+// Confirmação adota o Peão confirmado e a sequência continua encaixável.
+test('confirmação com seleção nula no estado restaura o peão confirmado (#326)', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  // Zera a seleção como um motor sem a re-seleção do mover deixaria.
+  const semSelecao: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: null },
+  };
+
+  const confirmacao = aplicarComandoDePartida(semSelecao, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+
+  estado = resolverRecebidas(confirmacao.estado, 'ana');
+  // aplicar lança em rejeição: o encerramento válido é a prova final.
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+  assert.equal(estado.posicaoConfirmada, false);
+});
+
+// Guarda de outra seleção com pendências: a proteção PENDENCIA_NAO_RESOLVIDA
+// (tabuleiro) e o guard de peão alheio (partida) seguem de pé pós-confirmação.
+test('com pendências pós-confirmação, peão alheio segue rejeitado (FORA_DA_VEZ)', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.ok(confirmacao.estado.tabuleiro.recebidas.length > 0);
+
+  assert.equal(
+    codigoDaRejeicao(confirmacao.estado, selecionarPeao('peao-vermelho'), 'ana'),
+    'FORA_DA_VEZ',
+  );
+});
+
 test('confirmar sem mudança de Peça e no Primeiro Turno são ENCERRAMENTO_INVALIDO', () => {
   let estado = partidaEmRodada2();
 
