@@ -19,6 +19,7 @@ import {
   type PeaoId,
   type TipoDaPeca,
 } from './contrato'
+import { quantidadeValidaDeJogadores } from './contrato'
 import type { EstadoDoTabuleiroNoCliente } from './reducao'
 import type { PendenciaNoCliente } from './interacaoPeoes'
 import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
@@ -78,6 +79,9 @@ export function aplicarSnapshot(
   // autoridade — recarregar reconstrói a mesa sem seed local.
   // Roster N=2..4 (#284): espelha só as N iniciais do roster; com o servidor
   // ainda em 4 e N=2, projetar as 4 criava indicadores fantasmas do ausente.
+  // Fonte única da faixa 2..4: quantidadeValidaDeJogadores — só fatia quando
+  // o roster já é um N válido; fora da faixa (0, 1, 5+) mantém a lista cheia
+  // (fallback defensivo, mesma regra dos peões).
   const quantidadeSnapshot = snapshot.jogadores.length
   const iniciaisDoRosterBase: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
     pecaId: p.pecaId,
@@ -85,7 +89,7 @@ export function aplicarSnapshot(
     orientacao: p.orientacao,
   }))
   const iniciaisDoSnapshot: readonly PecaDaMesa[] =
-    quantidadeSnapshot >= 2 && quantidadeSnapshot <= 4
+    quantidadeSnapshot === quantidadeValidaDeJogadores(quantidadeSnapshot)
       ? iniciaisDoRosterBase.slice(0, quantidadeSnapshot)
       : iniciaisDoRosterBase
 
