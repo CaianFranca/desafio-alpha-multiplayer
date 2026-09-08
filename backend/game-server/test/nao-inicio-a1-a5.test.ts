@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Redis } from 'ioredis';
 import {
-  agendarAbandono,
-  cancelarAbandono,
-  configurarAbandono,
-  definirBroadcasterParaAbandono,
-  definirRedisParaAbandono,
-  rearmarAbandonosAposRestart,
-  verificarEAbandonarSeNecessario,
-} from '../src/partidas/abandono.ts';
+  agendarNaoInicio,
+  cancelarNaoInicio,
+  configurarNaoInicio,
+  definirBroadcasterParaNaoInicio,
+  definirRedisParaNaoInicio,
+  rearmarNaoInicioAposRestart,
+  verificarNaoInicioSeNecessario,
+} from '../src/partidas/nao-inicio.ts';
 
 const PARTIDA_ID = '22222222-2222-4222-8222-222222222222';
 const CHAVE_PARTIDA = `game-server:partida:${PARTIDA_ID}`;
@@ -56,9 +56,9 @@ function redisFalso(
 test('A1: rearme usa COUNT 500 no SCAN (anti-thundering-herd)', async () => {
   const store = new Map<string, string>([[CHAVE_PARTIDA, partidaPreparadaJson()]]);
   const observacao = { scanArgs: [] as unknown[][] };
-  configurarAbandono(undefined, 90);
+  configurarNaoInicio(undefined, 90);
   try {
-    await rearmarAbandonosAposRestart(redisFalso(store, observacao));
+    await rearmarNaoInicioAposRestart(redisFalso(store, observacao));
     const counts = observacao.scanArgs.map((args) => {
       const i = args.indexOf('COUNT');
       return i >= 0 ? Number(args[i + 1]) : null;
@@ -69,7 +69,7 @@ test('A1: rearme usa COUNT 500 no SCAN (anti-thundering-herd)', async () => {
       `SCAN deveria usar COUNT 500, usou ${counts.join(',')}`,
     );
   } finally {
-    cancelarAbandono(PARTIDA_ID);
+    cancelarNaoInicio(PARTIDA_ID);
   }
 });
 
@@ -111,9 +111,9 @@ test('A2: rearme lê o lote via pipeline (GET + TTL em 1 RTT)', async () => {
       throw new Error('deveria usar pipeline, não TTL sequencial');
     },
   } as unknown as Redis;
-  configurarAbandono(undefined, 90);
+  configurarNaoInicio(undefined, 90);
   try {
-    await rearmarAbandonosAposRestart(redis);
+    await rearmarNaoInicioAposRestart(redis);
     assert.equal(pipelines, 1, 'deveria abrir 1 pipeline por lote');
     assert.equal(execs, 1, 'deveria executar o pipeline do lote');
     assert.deepEqual(
@@ -125,11 +125,11 @@ test('A2: rearme lê o lote via pipeline (GET + TTL em 1 RTT)', async () => {
       'pipeline deveria enfileirar GET + TTL da chave da partida',
     );
   } finally {
-    cancelarAbandono(PARTIDA_ID);
+    cancelarNaoInicio(PARTIDA_ID);
   }
 });
 
-test('A3: criadaEm inválida (NaN) nunca agenda nem abandona', async () => {
+test('A3: criadaEm inválida (NaN) nunca agenda nem declara não-início', async () => {
   const parcial = [1, 2, 3, 4].map((n) => ({
     id: `membro-${n}`,
     jogadorId: `jogador-${n}`,
@@ -147,8 +147,8 @@ test('A3: criadaEm inválida (NaN) nunca agenda nem abandona', async () => {
     },
   } as unknown as Redis;
   let encerramentos = 0;
-  definirBroadcasterParaAbandono({
-    encerrarPorAbandono() {
+  definirBroadcasterParaNaoInicio({
+    encerrarPorNaoInicio() {
       encerramentos += 1;
     },
   });
@@ -163,9 +163,9 @@ test('A3: criadaEm inválida (NaN) nunca agenda nem abandona', async () => {
     return (originalSetTimeout as (...a: unknown[]) => unknown)(cb, ms, ...rest);
   }) as typeof setTimeout;
   try {
-    configurarAbandono(undefined, 90);
-    const abandonou = await verificarEAbandonarSeNecessario(redis, PARTIDA_ID);
-    assert.equal(abandonou, false, 'criadaEm inválida não deve abandonar');
+    configurarNaoInicio(undefined, 90);
+    const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
+    assert.equal(naoIniciou, false, 'criadaEm inválida não deve declarar não-início');
     assert.equal(encerramentos, 0, 'não deve chutar sockets com idade NaN');
     assert.ok(
       delays.every((d) => typeof d === 'number' && Number.isFinite(d)),
@@ -174,8 +174,8 @@ test('A3: criadaEm inválida (NaN) nunca agenda nem abandona', async () => {
     assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
   } finally {
     (globalThis as unknown as { setTimeout: unknown }).setTimeout = originalSetTimeout;
-    definirBroadcasterParaAbandono({ encerrarPorAbandono() {} });
-    cancelarAbandono(PARTIDA_ID);
+    definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
+    cancelarNaoInicio(PARTIDA_ID);
   }
 });
 
@@ -192,20 +192,20 @@ test('A4: DEL falho não chuta sockets (só após cancelarPartida=true)', async 
     },
   } as unknown as Redis;
   let encerramentos = 0;
-  definirBroadcasterParaAbandono({
-    encerrarPorAbandono() {
+  definirBroadcasterParaNaoInicio({
+    encerrarPorNaoInicio() {
       encerramentos += 1;
     },
   });
   try {
-    configurarAbandono(undefined, 90);
-    const abandonou = await verificarEAbandonarSeNecessario(redis, PARTIDA_ID);
-    assert.equal(abandonou, false, 'DEL falho não deve concluir o abandono');
+    configurarNaoInicio(undefined, 90);
+    const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
+    assert.equal(naoIniciou, false, 'DEL falho não deve concluir o não-início');
     assert.equal(encerramentos, 0, 'sockets devem permanecer intactos com cancelarPartida=false');
     assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
   } finally {
-    definirBroadcasterParaAbandono({ encerrarPorAbandono() {} });
-    cancelarAbandono(PARTIDA_ID);
+    definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
+    cancelarNaoInicio(PARTIDA_ID);
   }
 });
 
@@ -216,9 +216,9 @@ test('A5: fire sem redis global reagenda em vez de explodir', async () => {
     avisos.push(args);
   };
   try {
-    definirRedisParaAbandono(undefined);
-    configurarAbandono(undefined, 90);
-    agendarAbandono(PARTIDA_ID, 5);
+    definirRedisParaNaoInicio(undefined);
+    configurarNaoInicio(undefined, 90);
+    agendarNaoInicio(PARTIDA_ID, 5);
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.ok(
       avisos.some((a) => String(a[0]).includes('sem redis')),
@@ -226,7 +226,7 @@ test('A5: fire sem redis global reagenda em vez de explodir', async () => {
     );
   } finally {
     (console as unknown as { warn: unknown }).warn = originalWarn;
-    cancelarAbandono(PARTIDA_ID);
+    cancelarNaoInicio(PARTIDA_ID);
   }
 });
 
@@ -237,11 +237,11 @@ test('A5: redis injetado no agendamento é usado (assinatura compatível)', asyn
     },
   } as unknown as Redis;
   try {
-    definirRedisParaAbandono(undefined);
-    configurarAbandono(undefined, 90);
-    agendarAbandono(PARTIDA_ID, 5, redis);
+    definirRedisParaNaoInicio(undefined);
+    configurarNaoInicio(undefined, 90);
+    agendarNaoInicio(PARTIDA_ID, 5, redis);
     await new Promise((resolve) => setTimeout(resolve, 50));
   } finally {
-    cancelarAbandono(PARTIDA_ID);
+    cancelarNaoInicio(PARTIDA_ID);
   }
 });

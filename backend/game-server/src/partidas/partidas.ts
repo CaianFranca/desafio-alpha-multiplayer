@@ -6,7 +6,7 @@ import {
   inicializarEstadoDaPartida,
   removerEstadoDaPartida,
 } from './estado.ts';
-import { agendarAbandono, cancelarAbandono } from './abandono.ts';
+import { agendarNaoInicio, cancelarNaoInicio } from './nao-inicio.ts';
 
 export type EstadoDaPartida = 'preparada' | 'em_andamento';
 
@@ -65,8 +65,8 @@ export async function criarPartidaPreparada(
     throw erro;
   }
 
-  const abandonoMs = (contexto.partidaAbandonoSegundos ?? 90) * 1000;
-  agendarAbandono(partida.partidaId, abandonoMs);
+  const naoInicioMs = (contexto.partidaNaoInicioSegundos ?? 90) * 1000;
+  agendarNaoInicio(partida.partidaId, naoInicioMs);
 
   return partida;
 }
@@ -84,7 +84,7 @@ export async function existePartida(redis: Redis, partidaId: PartidaId): Promise
 }
 
 export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promise<boolean> {
-  cancelarAbandono(partidaId);
+  cancelarNaoInicio(partidaId);
   const removida = (await redis.del(chaveDaPartida(partidaId))) === 1;
   // Remove também o estado da partida associado (issue #117).
   await removerEstadoDaPartida(redis, partidaId);
@@ -148,7 +148,7 @@ end
 if mudou or iniciou then
    local novo = cjson.encode(partida)
    if iniciou then
-     -- ST-14: partida em_andamento persiste sem TTL (sem expiração) + cancela abandono 90s
+     -- ST-14: partida em_andamento persiste sem TTL (sem expiração) + cancela não-início 90s
      redis.call('SET', KEYS[1], novo)
      redis.call('PERSIST', KEYS[1])
      if redis.call('EXISTS', KEYS[2]) == 1 then
@@ -224,7 +224,7 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
       return null;
     }
     if (parsed.iniciou) {
-      cancelarAbandono(partidaId);
+      cancelarNaoInicio(partidaId);
     }
     return parsed;
   } catch {

@@ -40,7 +40,7 @@ import type {
 } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
 import { marcarDesconexao, obterPartida, transicionarSeCompletoOuAtualizarPresenca } from '../partidas/partidas.ts';
-import { verificarAbandonoAposDesconexao } from '../partidas/abandono.ts';
+import { verificarNaoInicioAposDesconexao } from '../partidas/nao-inicio.ts';
 import { obterEstadoDaPartida } from '../partidas/estado.ts';
 import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
@@ -411,7 +411,7 @@ export function criarWebSocketServer(
               return;
             }
             void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId)
-              .then(() => verificarAbandonoAposDesconexao(contexto.redis, partidaId))
+              .then(() => verificarNaoInicioAposDesconexao(contexto.redis, partidaId))
               .catch((err) => console.error('[ws] falha ao marcar desconexão:', (err as Error).message));
           });
         })().catch((error) => {

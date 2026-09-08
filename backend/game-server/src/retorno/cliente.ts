@@ -15,7 +15,7 @@ export interface AvisoDeRetorno {
   readonly salaId: string;
   readonly partidaId: string;
   readonly serverId: string;
-  readonly resultado: 'vitoria' | 'derrota' | 'abandono';
+  readonly resultado: 'vitoria' | 'derrota' | 'nao-inicio';
   readonly jogadores: readonly string[];
 }
 

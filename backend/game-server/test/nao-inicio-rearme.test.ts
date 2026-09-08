@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Redis } from 'ioredis';
 import {
-  cancelarAbandono,
-  configurarAbandono,
-  rearmarAbandonosAposRestart,
-} from '../src/partidas/abandono.ts';
+  cancelarNaoInicio,
+  configurarNaoInicio,
+  rearmarNaoInicioAposRestart,
+} from '../src/partidas/nao-inicio.ts';
 
 const PARTIDA_ID = '11111111-1111-4111-8111-111111111111';
 const CHAVE_PARTIDA = `game-server:partida:${PARTIDA_ID}`;
@@ -53,9 +53,9 @@ test('rearme encontra partida com prefixo game-server:partida:* e ignora estado'
     [CHAVE_ESTADO, JSON.stringify({ tabuleiro: [] })],
   ]);
   const observacao = { matchUsados: [] as string[], gets: [] as string[] };
-  configurarAbandono(undefined, 90);
+  configurarNaoInicio(undefined, 90);
   try {
-    await rearmarAbandonosAposRestart(redisFalso(store, observacao));
+    await rearmarNaoIniciosAposRestart(redisFalso(store, observacao));
     assert.ok(
       observacao.matchUsados.includes('game-server:partida:*'),
       `SCAN deveria usar game-server:partida:*, usou ${observacao.matchUsados.join(',')}`,
@@ -63,6 +63,6 @@ test('rearme encontra partida com prefixo game-server:partida:* e ignora estado'
     assert.ok(observacao.gets.includes(CHAVE_PARTIDA), 'deveria ler a chave da partida');
     assert.ok(!observacao.gets.includes(CHAVE_ESTADO), 'deveria pular a chave de estado sem GET');
   } finally {
-    cancelarAbandono(PARTIDA_ID);
+    cancelarNaoInicio(PARTIDA_ID);
   }
 });

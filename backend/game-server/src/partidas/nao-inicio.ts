@@ -3,7 +3,7 @@ import { chaveDaPartida } from './chaves.ts';
 import { cancelarPartida, obterPartida } from './partidas.ts';
 import type { AvisoDeRetorno } from '../retorno/cliente.ts';
 
-const ABANDONO_IMEDIATO_MS = 10_000;
+const NAO_INICIO_IMEDIATO_MS = 10_000;
 // Anti-thundering-herd (A1): o rearme pós-restart reagenda N partidas de uma
 // vez; sem dispersão, as expirações simultâneas atingem a fila mononodo do
 // lobby em rajada (timeout 5s → 503 → retry amplifica).
@@ -55,36 +55,36 @@ async function lerLoteDoRearme(redis: Redis, chaves: string[]): Promise<LinhaDoL
 }
 const timers = new Map<string, NodeJS.Timeout>();
 let notificarRetorno: ((aviso: AvisoDeRetorno) => Promise<void>) | undefined;
-let abandonoSegundos = 90;
+let naoInicioSegundos = 90;
 
-export function configurarAbandono(
+export function configurarNaoInicio(
   notificador: ((aviso: AvisoDeRetorno) => Promise<void>) | undefined,
   segundos: number,
 ): void {
   notificarRetorno = notificador;
-  abandonoSegundos = segundos;
+  naoInicioSegundos = segundos;
 }
 
-export function agendarAbandono(partidaId: string, delayMs?: number, redis?: Redis): void {
-  cancelarAbandono(partidaId);
-  const ms = delayMs ?? abandonoSegundos * 1000;
+export function agendarNaoInicio(partidaId: string, delayMs?: number, redis?: Redis): void {
+  cancelarNaoInicio(partidaId);
+  const ms = delayMs ?? naoInicioSegundos * 1000;
   const timer = setTimeout(() => {
     timers.delete(partidaId);
     const client = redis ?? globalRedis;
     if (client === undefined) {
       // Sem wiring de Redis (ex.: inversão futura): reagenda em vez de
-      // explodir em promise void e perder o abandono em silêncio.
-      console.warn('[abandono] sem redis para verificar; reagendando', { partidaId });
-      agendarAbandono(partidaId, ms, redis);
+      // explodir em promise void e perder o não-início em silêncio.
+      console.warn('[nao-inicio] sem redis para verificar; reagendando', { partidaId });
+      agendarNaoInicio(partidaId, ms, redis);
       return;
     }
-    void verificarEAbandonarSeNecessario(client, partidaId);
+    void verificarNaoInicioSeNecessario(client, partidaId);
   }, ms);
   if (typeof timer.unref === 'function') timer.unref();
   timers.set(partidaId, timer);
 }
 
-export function cancelarAbandono(partidaId: string): void {
+export function cancelarNaoInicio(partidaId: string): void {
   const t = timers.get(partidaId);
   if (t !== undefined) {
     clearTimeout(t);
@@ -93,31 +93,31 @@ export function cancelarAbandono(partidaId: string): void {
 }
 
 let globalRedis: Redis | undefined;
-let globalBroadcaster: { encerrarPorAbandono(partidaId: string, code?: number, reason?: string): void } | undefined;
-export function definirRedisParaAbandono(redis: Redis | undefined): void {
+let globalBroadcaster: { encerrarPorNaoInicio(partidaId: string, code?: number, reason?: string): void } | undefined;
+export function definirRedisParaNaoInicio(redis: Redis | undefined): void {
   globalRedis = redis;
 }
-export function definirBroadcasterParaAbandono(broadcaster: { encerrarPorAbandono(partidaId: string, code?: number, reason?: string): void }): void {
+export function definirBroadcasterParaNaoInicio(broadcaster: { encerrarPorNaoInicio(partidaId: string, code?: number, reason?: string): void }): void {
   globalBroadcaster = broadcaster;
 }
 
 /** Exportado para testes de regressão (A3/A4): executa uma verificação imediata. */
-export async function verificarEAbandonarSeNecessario(redis: Redis, partidaId: string): Promise<boolean> {
+export async function verificarNaoInicioSeNecessario(redis: Redis, partidaId: string): Promise<boolean> {
   const partida = await obterPartida(redis, partidaId as never);
   if (partida === null) return false;
   if (partida.estado !== 'preparada') return false;
   const idadeMs = Date.now() - Date.parse(partida.criadaEm);
   if (!Number.isFinite(idadeMs)) {
-    console.warn('[abandono] criadaEm inválida; abandono ignorado', { partidaId });
+    console.warn('[nao-inicio] criadaEm inválida; não-início ignorado', { partidaId });
     return false;
   }
   const todosEmReconexao = partida.roster.every((m) => m.presenca === 'em_reconexao');
-  // Abandono preparada: se todos em_reconexao → abandono imediato (10s já agendado),
-  // senão se ainda não expirou 90s → reagenda restante, senão (idade >= 90s) abandona mesmo com 1-3 conectados parciais.
+  // Não-início em preparada: se todos em_reconexao → não-início imediato (10s já agendado),
+  // senão se ainda não expirou 90s → reagenda restante, senão (idade >= 90s) declara não-início mesmo com 1-3 conectados parciais.
   // Parcial <90s mantém SALA_ENCAMINHADA no lobby; teto é comportamento desejado (#222).
-  if (!todosEmReconexao && idadeMs < abandonoSegundos * 1000) {
-    const restante = abandonoSegundos * 1000 - idadeMs;
-    agendarAbandono(partidaId, restante);
+  if (!todosEmReconexao && idadeMs < naoInicioSegundos * 1000) {
+    const restante = naoInicioSegundos * 1000 - idadeMs;
+    agendarNaoInicio(partidaId, restante);
     return false;
   }
   const partidaIdTyped = partida.partidaId as string;
@@ -125,43 +125,43 @@ export async function verificarEAbandonarSeNecessario(redis: Redis, partidaId: s
   if (!cancelada) {
     // DEL falhou sob carga: não chuta os sockets (evita clientes caídos com
     // chave fantasma até o TTL); reagenda para a próxima verificação.
-    agendarAbandono(partidaIdTyped);
+    agendarNaoInicio(partidaIdTyped);
     return false;
   }
   try {
-    globalBroadcaster?.encerrarPorAbandono(partidaIdTyped, 4000, 'PARTIDA_ABANDONADA');
+    globalBroadcaster?.encerrarPorNaoInicio(partidaIdTyped, 4000, 'PARTIDA_NAO_INICIADA');
   } catch {}
-  cancelarAbandono(partidaIdTyped);
+  cancelarNaoInicio(partidaIdTyped);
   if (notificarRetorno !== undefined) {
     const aviso: AvisoDeRetorno = {
       salaId: partida.salaId,
       partidaId: partida.partidaId,
       serverId: partida.serverId,
-      resultado: 'abandono',
+      resultado: 'nao-inicio',
       jogadores: partida.roster.map((m) => m.jogadorId),
     };
     try {
       await notificarRetorno(aviso);
     } catch (err) {
-      console.error('[abandono] falha ao notificar retorno', { partidaId, erro: (err as Error).message });
+      console.error('[nao-inicio] falha ao notificar retorno', { partidaId, erro: (err as Error).message });
     }
   } else {
-    console.info('[abandono] partida abandonada sem notificador', { partidaId });
+    console.info('[nao-inicio] partida não iniciada sem notificador', { partidaId });
   }
-  console.info('[abandono] partida abandonada cancelada', { partidaId, salaId: partida.salaId });
+  console.info('[nao-inicio] partida não iniciada cancelada', { partidaId, salaId: partida.salaId });
   return true;
 }
 
-export async function verificarAbandonoAposDesconexao(redis: Redis, partidaId: string): Promise<void> {
+export async function verificarNaoInicioAposDesconexao(redis: Redis, partidaId: string): Promise<void> {
   const partida = await obterPartida(redis, partidaId as never);
   if (partida === null) return;
   if (partida.estado !== 'preparada') return;
   const todosEmReconexao = partida.roster.every((m) => m.presenca === 'em_reconexao');
   if (!todosEmReconexao) return;
-  agendarAbandono(partidaId, ABANDONO_IMEDIATO_MS);
+  agendarNaoInicio(partidaId, NAO_INICIO_IMEDIATO_MS);
 }
 
-export async function rearmarAbandonosAposRestart(redis: Redis): Promise<void> {
+export async function rearmarNaoInicioAposRestart(redis: Redis): Promise<void> {
   globalRedis = redis;
   let verificadas = 0;
   let reagendadas = 0;
@@ -180,30 +180,30 @@ export async function rearmarAbandonosAposRestart(redis: Redis): Promise<void> {
           if (partida.estado !== 'preparada') continue;
           const idadeMs = Date.now() - Date.parse(partida.criadaEm);
           if (!Number.isFinite(idadeMs)) {
-            console.warn('[abandono] criadaEm inválida no rearme; partida ignorada', { chave: linha.chave });
+            console.warn('[nao-inicio] criadaEm inválida no rearme; partida ignorada', { chave: linha.chave });
             continue;
           }
           const ttl = linha.ttl;
           if (ttl === -2) continue;
           const todosEmReconexao = (partida.roster as Array<{ presenca: string }> | undefined)?.every((m) => m.presenca === 'em_reconexao') ?? false;
           if (todosEmReconexao) {
-            agendarAbandono(partida.partidaId, ABANDONO_IMEDIATO_MS + jitterAte(JITTER_REARME_MS));
+            agendarNaoInicio(partida.partidaId, NAO_INICIO_IMEDIATO_MS + jitterAte(JITTER_REARME_MS));
             reagendadas += 1;
             continue;
           }
-          if (idadeMs >= abandonoSegundos * 1000) {
+          if (idadeMs >= naoInicioSegundos * 1000) {
             if ((partida.roster as unknown[] | undefined)?.length === 0) {
-              agendarAbandono(partida.partidaId, REARME_ROSTER_VAZIO_MS + jitterAte(JITTER_REARME_MS));
+              agendarNaoInicio(partida.partidaId, REARME_ROSTER_VAZIO_MS + jitterAte(JITTER_REARME_MS));
             } else {
-              agendarAbandono(partida.partidaId, REARME_TETO_MS + jitterAte(JITTER_REARME_MS));
+              agendarNaoInicio(partida.partidaId, REARME_TETO_MS + jitterAte(JITTER_REARME_MS));
             }
             reagendadas += 1;
           } else {
             // Ramo `restante`: já é naturalmente disperso (idade varia por
             // partida), então mantém o delay exato sem jitter para não
             // estourar o teto documentado de 90s.
-            const restante = abandonoSegundos * 1000 - idadeMs;
-            agendarAbandono(partida.partidaId, restante);
+            const restante = naoInicioSegundos * 1000 - idadeMs;
+            agendarNaoInicio(partida.partidaId, restante);
             reagendadas += 1;
           }
         } catch {}
@@ -211,8 +211,8 @@ export async function rearmarAbandonosAposRestart(redis: Redis): Promise<void> {
       // Yield por lote: não monopoliza o event loop no boot com N partidas.
       await new Promise<void>((resolve) => setImmediate(resolve));
     } while (cursor !== '0');
-    console.info('[abandono] rearme concluído', { verificadas, reagendadas });
+    console.info('[nao-inicio] rearme concluído', { verificadas, reagendadas });
   } catch (err) {
-    console.error('[abandono] falha ao rearmar abandonos', { erro: (err as Error).message });
+    console.error('[nao-inicio] falha ao rearmar não-início', { erro: (err as Error).message });
   }
 }

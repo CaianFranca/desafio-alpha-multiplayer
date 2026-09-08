@@ -8,7 +8,7 @@ import { PartidaBroadcaster } from './partidas/broadcast.ts';
 import { PartidaHandlers } from './partidas/handlers.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
 import { criarClienteDeRetorno } from './retorno/cliente.ts';
-import { configurarAbandono, definirBroadcasterParaAbandono, definirRedisParaAbandono, rearmarAbandonosAposRestart } from './partidas/abandono.ts';
+import { configurarNaoInicio, definirBroadcasterParaNaoInicio, definirRedisParaNaoInicio, rearmarNaoInicioAposRestart } from './partidas/nao-inicio.ts';
 import {
   iniciarHeartbeat,
   pararHeartbeat,
@@ -22,7 +22,7 @@ const {
   gameServerPort,
   partidaPreparadaTtlSegundos,
   partidaTerminadaTtlSegundos,
-  partidaAbandonoSegundos,
+  partidaNaoInicioSegundos,
   lobbyRetornoCallbackUrl,
   gameServerHeartbeatIntervalMs,
   gameServerHeartbeatTtlMs,
@@ -36,7 +36,7 @@ const contexto: ContextoDoGameServer = {
   serverId,
   jwtSecret,
   partidaPreparadaTtlSegundos,
-  partidaAbandonoSegundos,
+  partidaNaoInicioSegundos,
   partidaTerminadaTtlSegundos,
   lobbyRetornoCallbackUrl,
 };
@@ -55,9 +55,9 @@ const handlers = new PartidaHandlers({
   partidaTerminadaTtlSegundos,
   notificarRetorno,
 });
-configurarAbandono(notificarRetorno, partidaAbandonoSegundos);
-definirRedisParaAbandono(redisClient);
-definirBroadcasterParaAbandono(broadcaster);
+configurarNaoInicio(notificarRetorno, partidaNaoInicioSegundos);
+definirRedisParaNaoInicio(redisClient);
+definirBroadcasterParaNaoInicio(broadcaster);
 
 criarWebSocketServer(server, contexto, {
   partida: { broadcaster, handlers },
@@ -106,8 +106,8 @@ async function iniciarRegistro(): Promise<void> {
   const meta = criarMeta();
   heartbeatHandle = iniciarHeartbeat(redisClient, meta, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, criarMeta);
   console.log(`[game-server] heartbeat iniciado interval=${gameServerHeartbeatIntervalMs}ms`);
-  void rearmarAbandonosAposRestart(redisClient).catch((err: unknown) =>
-    console.warn('[game-server] falha ao rearmar abandonos:', (err as Error).message),
+  void rearmarNaoInicioAposRestart(redisClient).catch((err: unknown) =>
+    console.warn('[game-server] falha ao rearmar não-início:', (err as Error).message),
   );
 }
 
