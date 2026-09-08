@@ -186,7 +186,7 @@ export async function rearmarNaoInicioAposRestart(redis: Redis): Promise<void> {
       const [next, keys] = await redis.scan(cursor, 'MATCH', 'game-server:partida:*', 'COUNT', REARME_SCAN_COUNT);
       cursor = next;
       const lote = await lerLoteDoRearme(redis, keys);
-      verificadas += lote.length;
+      verificadas += keys.length;
       for (const linha of lote) {
         const raw = linha.raw;
         if (raw === null) continue;
