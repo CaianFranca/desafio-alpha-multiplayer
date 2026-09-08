@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { Group } from 'three'
-import { chaveCelula, todasAsCelulas } from './contrato'
+import {
+  chaveCelula,
+  todasAsCelulas,
+} from './contrato'
 import type {
   CorDoPeao,
   PeaoDaExibicao,
@@ -90,6 +93,18 @@ interface TabuleiroProps {
    */
   emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
   /**
+   * Fila de chegada dos peões por célula (issue #298): ordem de pouso — o eixo
+   * do arranjo de co-ocupação do `layoutDoPeaoNaCelula`. Vem do estado de
+   * exibição (modelo/snapshot); célula sem entrada fica em ordem de exibição.
+   */
+  ordemDeChegadaPorChave?: Readonly<Record<string, readonly PeaoId[]>>
+  /**
+   * Peão AFETADO (Baixa Iluminação ∨ Amedrontado, issue #298/#297): avatar do
+   * Diretor em variante apagado só no peão afetado, também durante a
+   * co-ocupação. Mesma fonte do overlay de voo (`emBaixaIluminacaoPorPeaoId`).
+   */
+  afetadosPorPeaoId?: ReadonlySet<PeaoId>
+  /**
    * Peça em voo do Encaixe (issue #241): escondida aqui enquanto a
    * TransicaoEncaixe a anima na cena — ao fim do voo o overlay some e esta
    * peça assume pixel-igual. Null = sem voo.
@@ -117,6 +132,8 @@ export function Tabuleiro({
   onVooAterrissou,
   ocultarPecaId = null,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
+  ordemDeChegadaPorChave = {},
+  afetadosPorPeaoId = new Set<PeaoId>(),
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
@@ -126,14 +143,17 @@ export function Tabuleiro({
     posicionadasPorChave.set(chaveCelula(p.celula), p)
   }
 
-  // Peões posicionados mapeados por célula da peça que os abriga. A cena
-  // renderiza um placeholder por célula (último peão vence) — limitação
-  // conhecida de EXIBIÇÃO: a autoridade da ocupação é o engine (Portão aceita
-  // até 4, #176; exceção de resgate #171), e o espelho DOM lista todos.
-  const peoesPorChave = new Map<string, PeaoDaExibicao>()
+  // Peões posicionados agrupados por célula da peça que os abriga. A cena
+  // renderiza um visual por peão (arranjo de co-ocupação via
+  // `layoutDoPeaoNaCelula`); a autoridade da ocupação é o engine (Portão até
+  // 4, #176; exceção de resgate #171), e o espelho DOM lista todos.
+  const peoesPorChave = new Map<string, PeaoDaExibicao[]>()
   for (const peao of peoes) {
     if (peao.celula !== null) {
-      peoesPorChave.set(chaveCelula(peao.celula), peao)
+      const chave = chaveCelula(peao.celula)
+      const lista = peoesPorChave.get(chave)
+      if (lista) lista.push(peao)
+      else peoesPorChave.set(chave, [peao])
     }
   }
 
@@ -170,14 +190,27 @@ export function Tabuleiro({
           peca !== null &&
           (estadoInteracao.pecaSelecionadaId === peca.pecaId ||
             estadoInteracao.pecaEmManipulacaoId === peca.pecaId)
-        const peao = peoesPorChave.get(chave) ?? null
-        // Voo ativo (#242): suprime o estático de mesmo peaoId confinado a
-        // origem/destino — só o overlay voa; os demais peões (ex.: Portão
-        // com 4) e as demais células seguem intactos.
-        const peaoSuprimido =
-          peao !== null &&
-          vooEfetivo !== null &&
-          deveSuprimirPeaoEstatico(vooEfetivo, peao.peaoId, chave)
+        const peoesDaCelula =
+          (peoesPorChave.get(chave) ?? [])
+            // Voo ativo (#242): suprime o estático de mesmo peaoId confinado a
+            // origem/destino — só o overlay voa; os demais (ex.: Portão com 4)
+            // seguem intactos.
+            .filter(
+              (p) =>
+                vooEfetivo === null ||
+                !deveSuprimirPeaoEstatico(vooEfetivo, p.peaoId, chave),
+            )
+            // Ordena pela fila de chegada (issue #298): o peão mais antigo vem
+            // primeiro — é o eixo do arranjo de co-ocupação. Ausentes da fila
+            // caem no fim (ordem do agrupamento), degradando a ordem de exibição.
+            .sort((a, b) => {
+              const fa = ordemDeChegadaPorChave[chave]?.indexOf(a.peaoId) ?? -1
+              const fb = ordemDeChegadaPorChave[chave]?.indexOf(b.peaoId) ?? -1
+              if (fa === -1 && fb === -1) return 0
+              if (fa === -1) return 1
+              if (fb === -1) return -1
+              return fa - fb
+            })
         // Destaques do ciclo: alvos de pendência com vaga escolhida (#91) e
         // vagas disponíveis para a escolha sequencial (#143) aquecem o plano.
         const alvoPendente = alvosPendentesSet.has(chave)
@@ -203,7 +236,8 @@ export function Tabuleiro({
                   : undefined,
               })
             }}
-            peao={peaoSuprimido ? null : peao}
+            peoes={peoesDaCelula}
+            afetadosPorPeaoId={afetadosPorPeaoId}
             destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
             destinoResgate={peca !== null && resgateSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}
@@ -211,9 +245,6 @@ export function Tabuleiro({
             iluminada={iluminada}
             peaoSelecionadoId={peaoSelecionadoId}
             peaoAtivoId={peaoAtivoId}
-            emBaixaIluminacao={
-              peao !== null && emBaixaIluminacaoPorPeaoId.has(peao.peaoId)
-            }
             onSelecionarPeao={onSelecionarPeao}
           />
         )

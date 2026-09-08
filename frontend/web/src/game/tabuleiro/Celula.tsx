@@ -9,6 +9,7 @@ import {
   COR_BORDA_CELULA,
   ESPESSURA_BORDA,
   LADO_DA_GRADE,
+  layoutDoPeaoNaCelula,
   PEAO_Y,
   PECA_Y,
   TAMANHO_CELULA,
@@ -37,12 +38,14 @@ interface CelulaProps {
   pecaDestacada?: boolean
   onClick?: (event: ThreeEvent<MouseEvent>) => void
   /**
-   * Peão posicionado sobre a peça desta célula. A cena exibe um visual por
-   * célula (avatar 3D no slot do Diretor, placeholder nos demais); a regra de
-   * ocupação (Portão 4, resgate +1) vive no engine e no espelho de destinos
-   * (`destinosConectadosDoPeao`).
+   * Peões posicionados sobre a peça desta célula, já filtrados pelo voo ativo
+   * e ordenados pela fila de chegada no pai (`Tabuleiro`). A cena renderiza um
+   * visual por peão no arranjo de co-ocupação do `layoutDoPeaoNaCelula`; a
+   * regra de ocupação (Portão 4, resgate +1) vive no engine e no espelho de
+   * destinos (`destinosConectadosDoPeao`). Durante o voo ativo o peão voador
+   * é suprimido no pai, então a fila aqui é transiente por ~500ms.
    */
-  peao?: PeaoDaExibicao | null
+  peoes?: PeaoDaExibicao[]
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
   destinoValido?: boolean
   /**
@@ -67,8 +70,13 @@ interface CelulaProps {
   peaoSelecionadoId?: PeaoId | null
   /** Peão do Jogador Ativo da vez: destaque emissivo suave (#118). */
   peaoAtivoId?: PeaoId | null
-  /** Peão em Baixa Iluminação do dono: avatar 3D na variante apagado (#297). */
-  emBaixaIluminacao?: boolean
+  /**
+   * Peões AFETADOS do dono (issue #297/#298): peaoIds cujo avatar 3D troca
+   * para a variante apagado e o placeholder para o tom de afetado. Inclui o
+   * Amedrontado — `afetadosPorPeaoId` é a projeção (Baixa Iluminação ∨
+   * Amedrontado) vinda da percepção no pai.
+   */
+  afetadosPorPeaoId?: ReadonlySet<PeaoId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
 
@@ -177,7 +185,7 @@ export function Celula({
   cursor = 'default',
   pecaDestacada = false,
   onClick,
-  peao,
+  peoes = [],
   destinoValido = false,
   destinoResgate = false,
   alvoPendente = false,
@@ -185,7 +193,7 @@ export function Celula({
   iluminada = false,
   peaoSelecionadoId = null,
   peaoAtivoId = null,
-  emBaixaIluminacao = false,
+  afetadosPorPeaoId = new Set<PeaoId>(),
   onSelecionarPeao,
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
@@ -198,6 +206,10 @@ export function Celula({
   // Célula ocupada: clique só pela peça (evita disparo duplo plano+peca e
   // mapeamento indevido de POSICIONAR_PECA em célula ocupada). Plano fica inerte.
   const planeOnClick = ocupada ? undefined : onClick
+
+  // Fila de ocupantes na ordem de chegada (issue #298): o índice decide o
+  // arranjo de co-ocupação (Portão: cantos por ordem; peça comum: centro+SE).
+  const filaDeOcupantes = peoes.map((p) => p.peaoId)
 
   // Destaques do ciclo: alvo de pendência (#91) e vaga disponível para a
   // pendência corrente (#143) ganham o mesmo tom quente (ambas convidam o
@@ -241,20 +253,28 @@ export function Celula({
           onClick={onClick}
         />
       ) : null}
-      {peao ? (
-        <PeaoVisual
-          cor={peao.cor}
-          position={[0, PEAO_Y, 0]}
-          selecionado={peao.peaoId === peaoSelecionadoId}
-          ativo={peao.peaoId === peaoAtivoId}
-          emBaixaIluminacao={emBaixaIluminacao}
-          aoClicar={
-            onSelecionarPeao
-              ? () => onSelecionarPeao(peao.peaoId)
-              : undefined
-          }
-        />
-      ) : null}
+      {peoes.map((peao) => {
+        const { dx, dz } = layoutDoPeaoNaCelula(
+          peca?.tipo ?? 'inicial',
+          filaDeOcupantes,
+          peao.peaoId,
+        )
+        return (
+          <PeaoVisual
+            key={peao.peaoId}
+            cor={peao.cor}
+            position={[dx, PEAO_Y, dz]}
+            selecionado={peao.peaoId === peaoSelecionadoId}
+            ativo={peao.peaoId === peaoAtivoId}
+            emBaixaIluminacao={afetadosPorPeaoId.has(peao.peaoId)}
+            aoClicar={
+              onSelecionarPeao
+                ? () => onSelecionarPeao(peao.peaoId)
+                : undefined
+            }
+          />
+        )
+      })}
     </group>
   )
 }

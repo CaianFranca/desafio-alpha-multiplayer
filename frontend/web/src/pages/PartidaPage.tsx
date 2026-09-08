@@ -562,6 +562,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         encaixeTrigger={encaixeTrigger}
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
+        afetadosPorPeaoId={afetadosPorPeaoId}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*

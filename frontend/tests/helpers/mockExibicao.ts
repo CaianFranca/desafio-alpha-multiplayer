@@ -1,5 +1,6 @@
 import {
   CORES_DOS_PEOES,
+  chaveCelula,
   criarIniciaisDaMesa,
 } from '../../web/src/game/tabuleiro/contrato'
 
@@ -23,5 +24,7 @@ export function criarEstadoExibicaoMock() {
     cor,
     celula: cor === 'branco' ? { linha: 3, coluna: 3 } : null,
   }))
-  return { iniciais, posicionadas, peoes, celulasIluminadas: [] as const }
+  // Fila de chegada (issue #298): o branco sobre (3,3) é o único posicionado.
+  const ordemDeChegadaPorChave = { [chaveCelula({ linha: 3, coluna: 3 })]: ['peao-1-branco'] }
+  return { iniciais, posicionadas, peoes, celulasIluminadas: [] as const, ordemDeChegadaPorChave }
 }
