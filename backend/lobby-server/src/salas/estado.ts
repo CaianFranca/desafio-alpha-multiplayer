@@ -22,7 +22,7 @@ import {
   type Membro as MembroDominio,
   type Sala as SalaDominio,
 } from '@flicker/engine';
-import type { SalasRepo, MembroPersistido } from './repositorio.ts';
+import type { SalasRepo, MembroPersistido, SalaAtiva } from './repositorio.ts';
 import { serializarSala, type SalasProjecao } from './projecao.ts';
 
 interface SalaStateInterna {
@@ -43,6 +43,15 @@ export interface SalasState {
   readonly apelidoPorJogadorId: Map<string, string>;
 
   carregar(repo: SalasRepo, projecao: SalasProjecao): Promise<void>;
+
+  /**
+   * Hidrata UMA Sala do PG no engine (review #304, item 2): o fallback do
+   * bypass de órfã não pode depender da memória — pós-restart ou perda de
+   * projeção, a Sala reconstruída entra no engine (com `consistente: true`,
+   * sem o `registrar_reinicio` do boot, para o bypass do não-início passar
+   * pelo `exigirSalaConsistente`). Idempotente: sala já presente retorna true.
+   */
+  hidratarSala(repo: SalasRepo, salaId: string): Promise<boolean>;
 
   /**
    * Aplica o comando no engine e devolve o resultado bruto. Side-effects
@@ -115,54 +124,10 @@ class SalasStateImpl implements SalasState {
     // confirmada, como determina o ADR-0002.
     let novoEstado: EstadoDoLobby = estadoDoLobbyVazio();
     for (const sala of salasAtivas) {
-      const todosMembros = membrosPorSala.get(sala.id) ?? [];
-      const membrosAtivos = todosMembros.filter((m) => !m.bloqueado);
-      const jogadoresBloqueados = todosMembros
-        .filter((m) => m.bloqueado)
-        .map((m) => m.jogadorId);
-      const membrosDominio: MembroDominio[] = membrosAtivos.map((m, idx) => ({
-        id: `${sala.id}-m${m.ordem}`, // membroId determinístico na reconstrução
-        jogadorId: m.jogadorId,
-        ordemDeEntrada: m.ordem,
-        estado: 'ativo' as const,
-        motivoEncerramento: null,
-        presenca: 'conectado' as const,
-        pronto: false,
-      }));
-      // O contador é monotônico e nunca reutiliza ordens (contrato do
-      // engine). Membros bloqueados permanecem no PG com a ordem original —
-      // devem entrar no cálculo para não regredir o contador pós-restart.
-      const proximaOrdemDeEntrada =
-        todosMembros.length > 0
-          ? Math.max(...todosMembros.map((m) => m.ordem)) + 1
-          : 1;
-      // O Anfitrião vem do write-model — pode ter sido sucedido antes do
-      // reinício. A menor ordem é apenas fallback defensivo quando
-      // `anfitriao_id` está ausente ou sem vínculo ativo.
-      let anfitriaoMembroId: string | null = null;
-      const anfitriaoPersistido =
-        sala.anfitriaoId !== null
-          ? membrosDominio.find((m) => m.jogadorId === sala.anfitriaoId)
-          : undefined;
-      if (anfitriaoPersistido !== undefined) {
-        anfitriaoMembroId = anfitriaoPersistido.id;
-      } else if (membrosDominio.length > 0) {
-        console.warn(
-          `[salas] anfitriao_id ausente ou sem vínculo ativo na Sala ${sala.id}; usando menor ordem`,
-        );
-        anfitriaoMembroId = membrosDominio[0]!.id;
-      }
-      const estadoSala = (sala.status ?? 'aberta') as SalaDominio['estado'];
-      const salaDominio: SalaDominio = {
-        id: sala.id,
-        codigo: sala.codigo,
-        estado: estadoSala === 'encaminhada' ? 'encaminhada' : 'aberta',
-        membros: membrosDominio,
-        proximaOrdemDeEntrada,
-        anfitriaoId: anfitriaoMembroId,
-        jogadoresBloqueados,
-        consistente: true,
-      };
+      const salaDominio = this.montarSalaDominio(
+        sala,
+        membrosPorSala.get(sala.id) ?? [],
+      );
       novoEstado = { salas: [...novoEstado.salas, salaDominio] };
       this._abertas.set(sala.id, { sala: salaDominio, codigo: sala.codigo });
     }
@@ -214,6 +179,74 @@ class SalasStateImpl implements SalasState {
 
   aplicar(comando: Comando): ReturnType<typeof aplicarComando> {
     return aplicarComando(this._estado, comando);
+  }
+
+  async hidratarSala(repo: SalasRepo, salaId: string): Promise<boolean> {
+    if (this._estado.salas.some((sala) => sala.id === salaId)) {
+      return true;
+    }
+    const bruta = await repo.obterSalaBruta(salaId);
+    if (bruta === null) {
+      return false;
+    }
+    if (bruta.status !== 'aberta' && bruta.status !== 'encaminhada') {
+      return false;
+    }
+    const membros = await repo.listarMembrosDaSala(salaId);
+    const salaDominio = this.montarSalaDominio(bruta, membros);
+    this._estado = { salas: [...this._estado.salas, salaDominio] };
+    this._abertas.set(salaId, { sala: salaDominio, codigo: salaDominio.codigo });
+    return true;
+  }
+
+  private montarSalaDominio(sala: SalaAtiva, todosMembros: MembroPersistido[]): SalaDominio {
+    const membrosAtivos = todosMembros.filter((m) => !m.bloqueado);
+    const jogadoresBloqueados = todosMembros
+      .filter((m) => m.bloqueado)
+      .map((m) => m.jogadorId);
+    const membrosDominio: MembroDominio[] = membrosAtivos.map((m, idx) => ({
+      id: `${sala.id}-m${m.ordem}`, // membroId determinístico na reconstrução
+      jogadorId: m.jogadorId,
+      ordemDeEntrada: m.ordem,
+      estado: 'ativo' as const,
+      motivoEncerramento: null,
+      presenca: 'conectado' as const,
+      pronto: false,
+    }));
+    // O contador é monotônico e nunca reutiliza ordens (contrato do
+    // engine). Membros bloqueados permanecem no PG com a ordem original —
+    // devem entrar no cálculo para não regredir o contador pós-restart.
+    const proximaOrdemDeEntrada =
+      todosMembros.length > 0
+        ? Math.max(...todosMembros.map((m) => m.ordem)) + 1
+        : 1;
+    // O Anfitrião vem do write-model — pode ter sido sucedido antes do
+    // reinício. A menor ordem é apenas fallback defensivo quando
+    // `anfitriao_id` está ausente ou sem vínculo ativo.
+    let anfitriaoMembroId: string | null = null;
+    const anfitriaoPersistido =
+      sala.anfitriaoId !== null
+        ? membrosDominio.find((m) => m.jogadorId === sala.anfitriaoId)
+        : undefined;
+    if (anfitriaoPersistido !== undefined) {
+      anfitriaoMembroId = anfitriaoPersistido.id;
+    } else if (membrosDominio.length > 0) {
+      console.warn(
+        `[salas] anfitriao_id ausente ou sem vínculo ativo na Sala ${sala.id}; usando menor ordem`,
+      );
+      anfitriaoMembroId = membrosDominio[0]!.id;
+    }
+    const estadoSala = (sala.status ?? 'aberta') as SalaDominio['estado'];
+    return {
+      id: sala.id,
+      codigo: sala.codigo,
+      estado: estadoSala === 'encaminhada' ? 'encaminhada' : 'aberta',
+      membros: membrosDominio,
+      proximaOrdemDeEntrada,
+      anfitriaoId: anfitriaoMembroId,
+      jogadoresBloqueados,
+      consistente: true,
+    };
   }
 
   substituirEstado(novo: EstadoDoLobby): void {

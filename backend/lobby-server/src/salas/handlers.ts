@@ -1224,6 +1224,23 @@ export class SalasHandlers {
     }
   }
 
+  // Garante a sala `encaminhada` no engine para o bypass (review #304, item
+  // 2): memória primeiro; pós-restart ou perda de projeção, o PG decide e a
+  // sala é hidratada sob demanda — o fallback de órfã não pode depender só
+  // de `abertas`.
+  private async garantirSalaEncaminhadaNoEngine(salaId: string): Promise<boolean> {
+    const info = this.estado.abertas.get(salaId);
+    if (info !== undefined) {
+      return info.sala.estado === 'encaminhada';
+    }
+    const bruta = await this.repo.obterSalaBruta(salaId).catch(() => null);
+    if (bruta === null || bruta.status !== 'encaminhada') {
+      return false;
+    }
+    await this.estado.hidratarSala(this.repo, salaId);
+    return true;
+  }
+
   // Órfã = chave ausente ou preparada com todos em_reconexao. Parcial libera só no teto 90s do game-server (#222).
   private async partidaDaSalaEstaOrfa(salaId: string): Promise<boolean> {
     try {
@@ -1287,13 +1304,16 @@ export class SalasHandlers {
     } else if (associacaoExistente === null) {
       const pgAssoc = await this.repo.obterSalaAtivaDoJogador(jogadorId);
       if (pgAssoc !== null && pgAssoc !== salaIdAlvo) {
-        const infoPg = this.estado.abertas.get(pgAssoc);
-        if (infoPg?.sala.estado === 'encaminhada' && (await this.partidaDaSalaEstaOrfa(pgAssoc))) {
-          // Bypass via engine (review #304 item 6): PG não é mexido direto — o
-          // estado resultante, a sucessão do Anfitrião e os eventos são do
-          // engine; a limpeza de associação segue em qualquer caso.
-          await this.aplicarBypassOrfa(pgAssoc, jogadorId);
-          await this.projecao.limparAssociacaoJogador(jogadorId);
+        // Fallback PG com hidratação (review #304, item 2): a memória pode
+        // não ter a sala (pós-restart/perda de projeção) — o PG decide.
+        if (await this.garantirSalaEncaminhadaNoEngine(pgAssoc)) {
+          if (await this.partidaDaSalaEstaOrfa(pgAssoc)) {
+            // Bypass via engine (review #304 item 6): PG não é mexido direto — o
+            // estado resultante, a sucessão do Anfitrião e os eventos são do
+            // engine; a limpeza de associação segue em qualquer caso.
+            await this.aplicarBypassOrfa(pgAssoc, jogadorId);
+            await this.projecao.limparAssociacaoJogador(jogadorId);
+          }
         }
       }
     }
@@ -1304,14 +1324,22 @@ export class SalasHandlers {
     if (salaId === null) {
       const pgSala = await this.repo.obterSalaAtivaDoJogador(jogadorId);
       if (pgSala === null) return false;
+      // Hidratação sob demanda (review #304, item 2): sem a sala na memória,
+      // o PG decide e hidrata para o bypass poder aplicar.
+      const infoPg = this.estado.abertas.get(pgSala);
+      if (infoPg === undefined) {
+        const bruta = await this.repo.obterSalaBruta(pgSala).catch(() => null);
+        if (bruta !== null && bruta.status === 'encaminhada') {
+          await this.estado.hidratarSala(this.repo, pgSala);
+        }
+      }
       const orfa = await this.partidaDaSalaEstaOrfa(pgSala);
       if (!orfa) return false;
       await this.aplicarBypassOrfa(pgSala, jogadorId);
       await this.projecao.limparAssociacaoJogador(jogadorId);
       return true;
     }
-    const info = this.estado.abertas.get(salaId);
-    if (info?.sala.estado !== 'encaminhada') return false;
+    if (!(await this.garantirSalaEncaminhadaNoEngine(salaId))) return false;
     const orfa = await this.partidaDaSalaEstaOrfa(salaId);
     if (!orfa) return false;
     // Ordem do review #304 item 6: o engine decide primeiro; a limpeza da

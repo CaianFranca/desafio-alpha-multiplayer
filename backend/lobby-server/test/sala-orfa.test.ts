@@ -149,22 +149,35 @@ function estadoEncaminhado(): EstadoDoLobby {
   return aplicar(estado, { tipo: 'aceitar_encaminhamento', salaId: 'sala-1' });
 }
 
-function handlersComOrfa(engine: EstadoDoLobby) {
+function handlersComOrfa(
+  engine: EstadoDoLobby,
+  opcoes: { semSalaNoEngine?: boolean } = {},
+) {
   const registro = {
     associacoesLimpas: [] as string[],
     saidasAtomics: [] as unknown[][],
     broadcasts: [] as unknown[],
     socketsRemovidos: 0,
   };
+  const salaDominio = engine.salas[0];
   const estadoFalso = {
-    estado: engine,
-    abertas: new Map([['sala-1', { sala: engine.salas[0], codigo: 'ABC123' }]]),
+    estado: opcoes.semSalaNoEngine ? estadoDoLobbyVazio() : engine,
+    abertas: opcoes.semSalaNoEngine
+      ? new Map()
+      : new Map([['sala-1', { sala: engine.salas[0], codigo: 'ABC123' }]]),
     apelidoPorJogadorId: new Map([['jogador-1', 'um'], ['jogador-2', 'dois']]),
     substituirEstado(novo: EstadoDoLobby) {
       estadoFalso.estado = novo;
       estadoFalso.abertas = new Map(
         [...novo.salas].map((sala) => [sala.id, { sala, codigo: 'ABC123' }]),
       );
+    },
+    hidratarSala(_repo: unknown, salaId: string): Promise<boolean> {
+      // Espelha a hidratação real: injeta a sala do PG no engine/memória.
+      const sala = salaDominio;
+      estadoFalso.estado = { salas: [...estadoFalso.estado.salas, sala] };
+      estadoFalso.abertas.set(salaId, { sala, codigo: 'ABC123' });
+      return Promise.resolve(true);
     },
   };
   const redisFalso = {
@@ -181,10 +194,20 @@ function handlersComOrfa(engine: EstadoDoLobby) {
   const deps = {
     repo: {
       async obterSalaBruta() {
-        return { partidaId: 'partida-1' };
+        return {
+          id: 'sala-1',
+          codigo: 'ABC123',
+          anfitriaoId: 'jogador-1',
+          status: 'encaminhada',
+          serverId: 'srv-1',
+          partidaId: 'partida-1',
+        };
       },
       async obterEncaminhamento() {
         return null;
+      },
+      async listarMembrosDaSala() {
+        return [];
       },
       async obterSalaAtivaDoJogador() {
         return 'sala-1';
@@ -273,6 +296,26 @@ test('bypass órfã: ramo PG (associação nula) passa pelo engine', async () =>
   assert.deepEqual(registro.saidasAtomics[0], ['sala-1', 'jogador-2', 'saida', false, undefined]);
   assert.deepEqual(registro.associacoesLimpas, ['jogador-2']);
   assert.ok(registro.broadcasts.some((e) => (e as { type?: string }).type === 'MEMBRO_SAIU'));
+});
+
+// Review #304, item 2: com a memória vazia (pós-restart sem hidratação dessa
+// sala), o fallback PG hidrata a sala no engine e o bypass destrava o
+// jogador — antes, o `abertas.get(...)` desistia e `JOGADOR_JA_ASSOCIADO`
+// persistia.
+test('bypass órfã: memória vazia hidrata do PG e libera (fallback PG do item 2)', async () => {
+  const { handlers, registro, overridesAssociacao } = handlersComOrfa(estadoEncaminhado(), {
+    semSalaNoEngine: true,
+  });
+  overridesAssociacao.valor = null;
+  await limparOrfaDeOutraSalaDe(handlers)('jogador-2', 'sala-alvo');
+
+  // O fallback hidratou e o bypass aplicou a saída via engine.
+  assert.equal(registro.saidasAtomics.length, 1);
+  assert.deepEqual(registro.saidasAtomics[0], ['sala-1', 'jogador-2', 'saida', false, undefined]);
+  assert.deepEqual(registro.associacoesLimpas, ['jogador-2']);
+  assert.ok(registro.broadcasts.some((e) => (e as { type?: string }).type === 'MEMBRO_SAIU'));
+  // A sala hidratada permanece no engine (estado consistente pós-bypass).
+  assert.equal(estadoSalas(handlers).some((s) => s.id === 'sala-1'), true);
 });
 
 function estadoSalas(handlers: SalasHandlers): EstadoDoLobby['salas'] {
