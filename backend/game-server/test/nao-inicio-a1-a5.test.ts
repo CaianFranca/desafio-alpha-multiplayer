@@ -245,3 +245,29 @@ test('A5: redis injetado no agendamento é usado (assinatura compatível)', asyn
     cancelarNaoInicio(PARTIDA_ID);
   }
 });
+
+test('N1: sem redis o reagendamento tem teto e depois erra alto', async () => {
+  const avisos: unknown[][] = [];
+  const erros: unknown[][] = [];
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  (console as unknown as { warn: unknown }).warn = (...args: unknown[]) => {
+    avisos.push(args);
+  };
+  (console as unknown as { error: unknown }).error = (...args: unknown[]) => {
+    erros.push(args);
+  };
+  try {
+    definirRedisParaNaoInicio(undefined);
+    configurarNaoInicio(undefined, 90);
+    agendarNaoInicio(PARTIDA_ID, 5);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(avisos.length, 5, `deveria avisar 5 vezes, avisou ${avisos.length}`);
+    assert.equal(erros.length, 1, `deveria errar 1 vez e parar, errou ${erros.length}`);
+    assert.ok(String(erros[0]?.[0]).includes('após reagendamentos'));
+  } finally {
+    (console as unknown as { warn: unknown }).warn = originalWarn;
+    (console as unknown as { error: unknown }).error = originalError;
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});

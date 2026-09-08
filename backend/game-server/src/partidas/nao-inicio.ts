@@ -54,6 +54,10 @@ async function lerLoteDoRearme(redis: Redis, chaves: string[]): Promise<LinhaDoL
   }));
 }
 const timers = new Map<string, NodeJS.Timeout>();
+// Teto de reagendamentos sem wiring (N1): sem Redis o fire reagenda em vez de
+// explodir, mas não para sempre — após o teto, erra alto e para.
+const MAX_REAGENDAMENTOS_SEM_REDIS = 5;
+const reagendamentosSemRedis = new Map<string, number>();
 let notificarRetorno: ((aviso: AvisoDeRetorno) => Promise<void>) | undefined;
 let naoInicioSegundos = 90;
 
@@ -73,11 +77,20 @@ export function agendarNaoInicio(partidaId: string, delayMs?: number, redis?: Re
     const client = redis ?? globalRedis;
     if (client === undefined) {
       // Sem wiring de Redis (ex.: inversão futura): reagenda em vez de
-      // explodir em promise void e perder o não-início em silêncio.
-      console.warn('[nao-inicio] sem redis para verificar; reagendando', { partidaId });
+      // explodir em promise void e perder o não-início em silêncio — até o
+      // teto, depois erra alto e para em vez de girar para sempre.
+      const tentativas = (reagendamentosSemRedis.get(partidaId) ?? 0) + 1;
+      if (tentativas > MAX_REAGENDAMENTOS_SEM_REDIS) {
+        reagendamentosSemRedis.delete(partidaId);
+        console.error('[nao-inicio] sem redis após reagendamentos; verificação encerrada', { partidaId });
+        return;
+      }
+      reagendamentosSemRedis.set(partidaId, tentativas);
+      console.warn('[nao-inicio] sem redis para verificar; reagendando', { partidaId, tentativa: tentativas });
       agendarNaoInicio(partidaId, ms, redis);
       return;
     }
+    reagendamentosSemRedis.delete(partidaId);
     void verificarNaoInicioSeNecessario(client, partidaId);
   }, ms);
   if (typeof timer.unref === 'function') timer.unref();
@@ -86,10 +99,12 @@ export function agendarNaoInicio(partidaId: string, delayMs?: number, redis?: Re
 
 export function cancelarNaoInicio(partidaId: string): void {
   const t = timers.get(partidaId);
-  if (t !== undefined) {
-    clearTimeout(t);
-    timers.delete(partidaId);
-  }
+  // Sem timer pendente (caso do reagendamento interno), preserva o contador
+  // de tentativas; cancelamento explícito zera tudo.
+  if (t === undefined) return;
+  clearTimeout(t);
+  timers.delete(partidaId);
+  reagendamentosSemRedis.delete(partidaId);
 }
 
 let globalRedis: Redis | undefined;
