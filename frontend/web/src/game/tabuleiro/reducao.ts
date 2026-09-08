@@ -534,10 +534,11 @@ export function reduzirEvento(
         estado.posicionadas.find((p) => p.pecaId === evento.pecaId)?.tipo ??
         estado.pecasDeRecebimento[evento.pecaId]
       const anteriorProtegido = estado.jogadorPorId[evento.jogadorId]
+      const protegidoResultante = (evento as { protegido?: boolean }).protegido ?? false
       const jogadorPorIdComProtecao = anteriorProtegido
         ? {
             ...estado.jogadorPorId,
-            [evento.jogadorId]: { ...anteriorProtegido, protegido: evento.protegido },
+            [evento.jogadorId]: { ...anteriorProtegido, protegido: protegidoResultante },
           }
         : estado.jogadorPorId
       return {
@@ -592,7 +593,12 @@ export function reduzirEvento(
       // foi consumida nesta resolução — zera `protegido` no modelo. Jogadores
       // já Amedrontados/protegidos não aparecem em `estadosAplicados`, então
       // o consumo precisa ser tratado à parte; snapshot reconcilia em seguida.
-      if (evento.estadosAplicados.length === 0 && evento.protegidos.length === 0) {
+      // Fallback defensivo para payloads antigos sem `protegidos` (rolling
+      // deploy / replay persistido anterior à #227) — mesmo padrão de
+      // `snapshot.ts:135`.
+      const estadosAplicados = (evento as unknown as { estadosAplicados?: typeof evento.estadosAplicados }).estadosAplicados ?? []
+      const protegidos = (evento as unknown as { protegidos?: typeof evento.protegidos }).protegidos ?? []
+      if (estadosAplicados.length === 0 && protegidos.length === 0) {
         return estado
       }
       // Atualiza apenas jogadores já conhecidos via snapshot; eventos antes do
@@ -600,7 +606,7 @@ export function reduzirEvento(
       // jogadorId como apelido).
       let mudou = false
       const jogadorPorId = { ...estado.jogadorPorId }
-      for (const aplicado of evento.estadosAplicados) {
+      for (const aplicado of estadosAplicados) {
         const anterior = jogadorPorId[aplicado.jogadorId]
         if (!anterior) continue
         mudou = true
@@ -611,7 +617,7 @@ export function reduzirEvento(
           amedrontado: aplicado.amedrontado,
         }
       }
-      for (const jogadorId of evento.protegidos) {
+      for (const jogadorId of protegidos) {
         const anterior = jogadorPorId[jogadorId]
         if (!anterior) continue
         if (!anterior.protegido) continue
