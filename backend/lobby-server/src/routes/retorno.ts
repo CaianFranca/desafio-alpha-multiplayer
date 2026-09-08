@@ -28,7 +28,7 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
       jogadores.length > 0 &&
       jogadores.every((j) => typeof j === 'string' && (j as string).trim().length > 0);
 
-    const resultadoValido = resultado === 'vitoria' || resultado === 'derrota' || resultado === 'abandono';
+    const resultadoValido = resultado === 'vitoria' || resultado === 'derrota' || resultado === 'nao-inicio';
 
     if (
       salaId.length === 0 ||

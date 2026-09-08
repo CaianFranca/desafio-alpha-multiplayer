@@ -14,7 +14,7 @@ export interface Config {
   sessionRefreshTtlSeconds: number;
   partidaPreparadaTtlSegundos: number;
   partidaTerminadaTtlSegundos: number;
-  partidaAbandonoSegundos: number;
+  partidaNaoInicioSegundos: number;
   lobbyRetornoCallbackUrl: string;
   postgres: {
     host: string;
@@ -46,7 +46,7 @@ const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
-const DEFAULT_PARTIDA_ABANDONO_SEGUNDOS = 90;
+const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -126,14 +126,14 @@ function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
   return parseTtlSegundos(raw, DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS, 'PARTIDA_TERMINADA_TTL_SEGUNDOS');
 }
 
-function parsePartidaAbandonoSegundos(raw: string | undefined): number {
-  const fallback = DEFAULT_PARTIDA_ABANDONO_SEGUNDOS;
+function parsePartidaNaoInicioSegundos(raw: string | undefined): number {
+  const fallback = DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS;
   const parsed = Number(raw ?? fallback);
   if (Number.isInteger(parsed) && parsed >= 10 && parsed <= 600) {
     return parsed;
   }
   if (raw !== undefined) {
-    console.warn(`[config] PARTIDA_ABANDONO_SEGUNDOS inválido "${raw}" — usando fallback ${fallback} (10..600)`);
+    console.warn(`[config] PARTIDA_NAO_INICIO_SEGUNDOS inválido "${raw}" — usando fallback ${fallback} (10..600)`);
   }
   return fallback;
 }
@@ -259,8 +259,8 @@ export function getConfig(): Config {
   const partidaTerminadaTtlSegundos = parsePartidaTerminadaTtlSegundos(
     process.env.PARTIDA_TERMINADA_TTL_SEGUNDOS as string | undefined,
   );
-  const partidaAbandonoSegundos = parsePartidaAbandonoSegundos(
-    process.env.PARTIDA_ABANDONO_SEGUNDOS as string | undefined,
+  const partidaNaoInicioSegundos = parsePartidaNaoInicioSegundos(
+    process.env.PARTIDA_NAO_INICIO_SEGUNDOS as string | undefined,
   );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
@@ -334,7 +334,7 @@ export function getConfig(): Config {
     sessionRefreshTtlSeconds,
     partidaPreparadaTtlSegundos,
     partidaTerminadaTtlSegundos,
-    partidaAbandonoSegundos,
+    partidaNaoInicioSegundos,
     lobbyRetornoCallbackUrl,
     postgres,
     redis,
