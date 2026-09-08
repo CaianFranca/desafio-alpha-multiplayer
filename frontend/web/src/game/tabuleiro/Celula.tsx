@@ -1,3 +1,6 @@
+import { Suspense, useMemo } from 'react'
+import { useLoader, type ThreeEvent } from '@react-three/fiber'
+import * as THREE from 'three'
 import {
   BORDA_OFFSET,
   BORDA_Y,
@@ -11,7 +14,6 @@ import {
   PECA_Y,
   TAMANHO_CELULA,
 } from './contrato'
-import type { ThreeEvent } from '@react-three/fiber'
 import type {
   Celula as CelulaTipo,
   PeaoDaExibicao,
@@ -21,6 +23,7 @@ import type {
 import { PeaoVisual } from './PeaoVisual'
 import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
 import { handlersDeCursor } from './cursor'
+import { texturaDoTabuleiro } from './texturasDoTabuleiro'
 
 interface CelulaProps {
   celula: CelulaTipo
@@ -73,6 +76,123 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
   { pos: [-TAMANHO_CELULA / 2 + BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
 ]
 
+/**
+ * Relevo das paredes do grid (issue #278): mesmo ponto de partida das peças
+ * (`RELEVO_TOPO_NORMAL_SCALE` em `PecaPlaceholder`) — realça o normalMap sob
+ * a luz rasante da cena sem amplificar ruído além do motivo.
+ */
+const RELEVO_TABULEIRO_NORMAL_SCALE: readonly [number, number] = [1.6, 1.6]
+
+/** Texturas do grid com cor no map (sRGB) e dado linear no normal. */
+function useTexturasDoTabuleiro(): { mapa: THREE.Texture; normal: THREE.Texture } {
+  const { map, normalMap } = texturaDoTabuleiro()
+  const [mapCarregado, normalCarregado] = useLoader(THREE.TextureLoader, [
+    map,
+    normalMap,
+  ])
+  // Clona para não mutar o cache do useLoader (precedente das peças/Mesa).
+  return useMemo(() => {
+    const mapa = mapCarregado.clone()
+    mapa.colorSpace = THREE.SRGBColorSpace
+    mapa.needsUpdate = true
+    const normal = normalCarregado.clone()
+    normal.needsUpdate = true
+    return { mapa, normal }
+  }, [mapCarregado, normalCarregado])
+}
+
+interface SuperficiesProps {
+  corPlano: string
+  opacidadePlano: number
+  planeOnClick?: (event: ThreeEvent<MouseEvent>) => void
+  cursorHandlers: ReturnType<typeof handlersDeCursor>
+}
+
+/**
+ * Paredes do grid texturizadas (plano + 4 bordas, issue #278): o `color`
+ * multiplica o map, então os tons do ciclo (base/iluminada/ocupada/alvo-vaga)
+ * seguem vivos sobre a escuridão — mesma affordância, só com relevo.
+ */
+function SuperficiesTexturizadas({
+  corPlano,
+  opacidadePlano,
+  planeOnClick,
+  cursorHandlers,
+}: SuperficiesProps) {
+  const { mapa, normal } = useTexturasDoTabuleiro()
+  return (
+    <>
+      <mesh
+        position={[0, CELULA_Y_BASE, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        onClick={planeOnClick}
+        {...cursorHandlers}
+      >
+        <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
+        <meshStandardMaterial
+          color={corPlano}
+          map={mapa}
+          normalMap={normal}
+          normal-scale={RELEVO_TABULEIRO_NORMAL_SCALE}
+          transparent
+          opacity={opacidadePlano}
+          toneMapped={false}
+        />
+      </mesh>
+      <group position={[0, CELULA_Y_BORDA, 0]}>
+        {BORDAS_CONFIG.map((b, i) => (
+          <mesh key={i} position={b.pos}>
+            <boxGeometry args={b.args} />
+            <meshStandardMaterial
+              color={COR_BORDA_CELULA}
+              map={mapa}
+              normalMap={normal}
+              normal-scale={RELEVO_TABULEIRO_NORMAL_SCALE}
+              transparent
+              opacity={0.95}
+              toneMapped={false}
+            />
+          </mesh>
+        ))}
+      </group>
+    </>
+  )
+}
+
+/** Fallback de suspensão: cores chapadas atuais (sem textura). */
+function SuperficiesFallback({
+  corPlano,
+  opacidadePlano,
+  planeOnClick,
+  cursorHandlers,
+}: SuperficiesProps) {
+  return (
+    <>
+      <mesh
+        position={[0, CELULA_Y_BASE, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        onClick={planeOnClick}
+        {...cursorHandlers}
+      >
+        <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
+        <meshStandardMaterial
+          color={corPlano}
+          transparent
+          opacity={opacidadePlano}
+        />
+      </mesh>
+      <group position={[0, CELULA_Y_BORDA, 0]}>
+        {BORDAS_CONFIG.map((b, i) => (
+          <mesh key={i} position={b.pos}>
+            <boxGeometry args={b.args} />
+            <meshStandardMaterial color={COR_BORDA_CELULA} transparent opacity={0.95} />
+          </mesh>
+        ))}
+      </group>
+    </>
+  )
+}
+
 export function Celula({
   celula,
   peca,
@@ -114,30 +234,18 @@ export function Celula({
         ? '#3d3a30'
         : '#1b1915'
   const opacidadePlano = ocupada ? 0.82 : 0.7
+  const superficies: SuperficiesProps = {
+    corPlano,
+    opacidadePlano,
+    planeOnClick,
+    cursorHandlers,
+  }
 
   return (
     <group position={pos}>
-      <mesh
-        position={[0, CELULA_Y_BASE, 0]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        onClick={planeOnClick}
-        {...cursorHandlers}
-      >
-        <planeGeometry args={[CELULA_INSET, CELULA_INSET]} />
-        <meshStandardMaterial
-          color={corPlano}
-          transparent
-          opacity={opacidadePlano}
-        />
-      </mesh>
-      <group position={[0, CELULA_Y_BORDA, 0]}>
-        {BORDAS_CONFIG.map((b, i) => (
-          <mesh key={i} position={b.pos}>
-            <boxGeometry args={b.args} />
-            <meshStandardMaterial color={COR_BORDA_CELULA} transparent opacity={0.95} />
-          </mesh>
-        ))}
-      </group>
+      <Suspense fallback={<SuperficiesFallback {...superficies} />}>
+        <SuperficiesTexturizadas {...superficies} />
+      </Suspense>
       {peca ? (
         <PecaPlaceholder
           tipo={peca.tipo}
