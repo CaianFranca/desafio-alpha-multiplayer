@@ -1273,8 +1273,11 @@ export class SalasHandlers {
       if (pgAssoc !== null && pgAssoc !== salaIdAlvo) {
         const infoPg = this.estado.abertas.get(pgAssoc);
         if (infoPg?.sala.estado === 'encaminhada' && (await this.partidaDaSalaEstaOrfa(pgAssoc))) {
+          // Bypass via engine (review #304 item 6): PG não é mexido direto — o
+          // estado resultante, a sucessão do Anfitrião e os eventos são do
+          // engine; a limpeza de associação segue em qualquer caso.
+          await this.aplicarBypassOrfa(pgAssoc, jogadorId);
           await this.projecao.limparAssociacaoJogador(jogadorId);
-          try { await this.repo.sairMembroAtomico(pgAssoc, jogadorId, 'saida', false); } catch {}
         }
       }
     }
@@ -1287,33 +1290,61 @@ export class SalasHandlers {
       if (pgSala === null) return false;
       const orfa = await this.partidaDaSalaEstaOrfa(pgSala);
       if (!orfa) return false;
+      await this.aplicarBypassOrfa(pgSala, jogadorId);
       await this.projecao.limparAssociacaoJogador(jogadorId);
-      try { await this.repo.sairMembroAtomico(pgSala, jogadorId, 'saida', false); } catch {}
       return true;
     }
     const info = this.estado.abertas.get(salaId);
     if (info?.sala.estado !== 'encaminhada') return false;
     const orfa = await this.partidaDaSalaEstaOrfa(salaId);
     if (!orfa) return false;
+    // Ordem do review #304 item 6: o engine decide primeiro; a limpeza da
+    // associação acontece depois, para não deixar membro ativo na memória/PG
+    // com a projeção já apagada.
+    await this.aplicarBypassOrfa(salaId, jogadorId);
     await this.projecao.limparAssociacaoJogador(jogadorId);
-    try {
-      const res = sairDaSalaEncaminhadaNaoIniciada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
-      if (res.sucesso) {
-        this.estado.substituirEstado(res.estado);
-        await this.atualizarProjecaoEstado(res.estado, salaId);
-        const codigo = info.sala.codigo;
-        const salaEncerrada = res.eventos.some((e) => e.tipo === 'sala_encerrada');
-        if (salaEncerrada) {
-          await this.projecao.limparSala(salaId, codigo);
-          this.estado.abertas.delete(salaId);
-        }
-        const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase);
-        this.difundir(eventos, salaId);
-        this.broadcast.removerSocket({ data: { jogadorId } } as unknown as AuthenticatedWebSocket);
-        await this.repo.sairMembroAtomico(salaId, jogadorId, 'saida', salaEncerrada).catch(() => undefined);
-      }
-    } catch {}
     return true;
+  }
+
+  // Saída via bypass do engine (sala `encaminhada` com partida não iniciada):
+  // espelha a parte pós-sucesso do handleSairDaSala — PG (com sucessão do
+  // Anfitrião no mesmo commit), estado em memória, projeção e broadcast. Se o
+  // engine rejeitar (associação obsoleta sem membro ativo), nada é mutado — a
+  // limpeza da associação obsoleta fica a cargo do chamador.
+  private async aplicarBypassOrfa(salaId: string, jogadorId: string): Promise<void> {
+    const res = sairDaSalaEncaminhadaNaoIniciada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
+    if (!res.sucesso) {
+      console.warn('[salas] bypass de sala orfa rejeitado pelo engine', { salaId, jogadorId, codigo: res.erro.codigo });
+      return;
+    }
+    const salaEncerrada = res.eventos.some((e) => e.tipo === 'sala_encerrada');
+    let novoAnfitriaoJogadorId: string | undefined;
+    const sucessao = res.eventos.find(
+      (e) => e.tipo === 'anfitriao_sucedido',
+    );
+    if (sucessao?.tipo === 'anfitriao_sucedido') {
+      const salaNova = res.estado.salas.find((s) => s.id === salaId);
+      const membroNovo = salaNova?.membros.find(
+        (m) => m.id === sucessao.anfitriaoNovoId,
+      );
+      if (membroNovo !== undefined) {
+        novoAnfitriaoJogadorId = membroNovo.jogadorId;
+      }
+    }
+    await this.repo.sairMembroAtomico(salaId, jogadorId, 'saida', salaEncerrada, novoAnfitriaoJogadorId);
+    const codigoPre = this.estado.abertas.get(salaId)?.sala.codigo ?? null;
+    this.estado.substituirEstado(res.estado);
+    if (salaEncerrada) {
+      if (codigoPre !== null) {
+        await this.projecao.limparSala(salaId, codigoPre);
+      }
+      this.estado.abertas.delete(salaId);
+    } else {
+      await this.atualizarProjecaoEstado(res.estado, salaId);
+    }
+    const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+    this.difundir(eventos, salaId);
+    this.broadcast.removerSocket({ data: { jogadorId } } as unknown as AuthenticatedWebSocket);
   }
 
   private salaEstaEncaminhada(salaId: string): boolean {
