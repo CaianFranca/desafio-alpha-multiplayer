@@ -770,6 +770,25 @@ test('com pendências pós-confirmação, peão alheio segue rejeitado (FORA_DA_
   );
 });
 
+// Guarda da #332: a Confirmação com OUTRO Peão selecionado segue recusada —
+// o estado artesanal é o único caminho (no fluxo válido o Peão alheio nunca
+// é selecionável pelo ator), e o guard existe exatamente para estados
+// divergentes/derivados de bases antigas.
+test('confirmação com outro peão selecionado é recusada (PEAO_NAO_SELECIONADO)', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  const outroSelecionado: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: 'peao-vermelho' },
+  };
+
+  assert.equal(
+    codigoDaRejeicao(outroSelecionado, confirmarPosicao('peao-branco'), 'ana'),
+    'PEAO_NAO_SELECIONADO',
+  );
+});
+
 test('confirmar sem mudança de Peça e no Primeiro Turno são ENCERRAMENTO_INVALIDO', () => {
   let estado = partidaEmRodada2();
 
