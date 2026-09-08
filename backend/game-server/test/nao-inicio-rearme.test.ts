@@ -55,7 +55,7 @@ test('rearme encontra partida com prefixo game-server:partida:* e ignora estado'
   const observacao = { matchUsados: [] as string[], gets: [] as string[] };
   configurarNaoInicio(undefined, 90);
   try {
-    await rearmarNaoIniciosAposRestart(redisFalso(store, observacao));
+    await rearmarNaoInicioAposRestart(redisFalso(store, observacao));
     assert.ok(
       observacao.matchUsados.includes('game-server:partida:*'),
       `SCAN deveria usar game-server:partida:*, usou ${observacao.matchUsados.join(',')}`,
