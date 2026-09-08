@@ -83,10 +83,16 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
  * usa relevo menor para leitura de vazio; borda usa o ponto cheio.
  */
 const RELEVO_PISO_NORMAL_SCALE: readonly [number, number] = [1.0, 1.0]
-const RELEVO_BORDA_NORMAL_SCALE: readonly [number, number] = [1.6, 1.6]
+const RELEVO_BORDA_NORMAL_SCALE: readonly [number, number] = [1.1, 1.1]
+const TINT_PAREDE = '#b5b5b5'
 
 /** Texturas do grid com cor no map (sRGB) e dado linear no normal. */
-function useTexturasDoTabuleiro(): { mapa: THREE.Texture; normal: THREE.Texture } {
+function useTexturasDoTabuleiro(): {
+  mapa: THREE.Texture
+  normal: THREE.Texture
+  mapaParede: THREE.Texture
+  normalParede: THREE.Texture
+} {
   const { map, normalMap } = texturaDoTabuleiro()
   const [mapCarregado, normalCarregado] = useLoader(THREE.TextureLoader, [
     map,
@@ -106,7 +112,15 @@ function useTexturasDoTabuleiro(): { mapa: THREE.Texture; normal: THREE.Texture 
     normal.wrapT = THREE.RepeatWrapping
     normal.anisotropy = 4
     normal.needsUpdate = true
-    return { mapa, normal }
+    const mapaParede = mapa.clone()
+    mapaParede.center.set(0.5, 0.5)
+    mapaParede.rotation = Math.PI / 2
+    mapaParede.needsUpdate = true
+    const normalParede = normal.clone()
+    normalParede.center.set(0.5, 0.5)
+    normalParede.rotation = Math.PI / 2
+    normalParede.needsUpdate = true
+    return { mapa, normal, mapaParede, normalParede }
   }, [mapCarregado, normalCarregado])
 }
 
@@ -128,7 +142,7 @@ function SuperficiesTexturizadas({
   planeOnClick,
   cursorHandlers,
 }: SuperficiesProps) {
-  const { mapa, normal } = useTexturasDoTabuleiro()
+  const { mapa, normal, mapaParede, normalParede } = useTexturasDoTabuleiro()
   return (
     <>
       <mesh
@@ -155,11 +169,11 @@ function SuperficiesTexturizadas({
           <mesh key={i} position={b.pos}>
             <boxGeometry args={b.args} />
             <meshStandardMaterial
-              color={COR_BORDA_CELULA}
-              map={mapa}
-              normalMap={normal}
+              color={TINT_PAREDE}
+              map={mapaParede}
+              normalMap={normalParede}
               normal-scale={RELEVO_BORDA_NORMAL_SCALE}
-              roughness={0.7}
+              roughness={0.95}
               metalness={0}
               transparent
               opacity={0.95}
