@@ -144,16 +144,16 @@ if completo and partida.estado == 'preparada' and redis.call('EXISTS', KEYS[2]) 
   partida.estado = 'em_andamento'
   iniciou = true
 end
-  local estadoAtual = partida.estado
+local estadoAtual = partida.estado
 if mudou or iniciou then
-   local novo = cjson.encode(partida)
-   if iniciou then
-     -- ST-14: partida em_andamento persiste sem TTL (sem expiração) + cancela não-início 90s
-     redis.call('SET', KEYS[1], novo)
-     redis.call('PERSIST', KEYS[1])
-     if redis.call('EXISTS', KEYS[2]) == 1 then
-       redis.call('PERSIST', KEYS[2])
-     end
+  local novo = cjson.encode(partida)
+  if iniciou then
+    -- ST-14: partida em_andamento persiste sem TTL (sem expiração) + cancela não-início 90s
+    redis.call('SET', KEYS[1], novo)
+    redis.call('PERSIST', KEYS[1])
+    if redis.call('EXISTS', KEYS[2]) == 1 then
+      redis.call('PERSIST', KEYS[2])
+    end
   else
     salvarPreservandoTtl(KEYS[1], novo)
   end
