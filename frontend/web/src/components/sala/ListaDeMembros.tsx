@@ -15,8 +15,7 @@ function ordenarMembros(sala: Sala | null) {
 
 export function ListaDeMembros({ sala, jogadorIdLocal, ehAnfitriao, onExpulsar }: Props) {
   const membrosOrdenados = useMemo(() => ordenarMembros(sala), [sala])
-  const total = sala ? sala.membros.length : 0
-  const ocupados = membrosOrdenados.length
+  const quantidadeDeMembros = membrosOrdenados.length
 
   return (
     <div className="flex flex-col gap-4">
@@ -24,9 +23,9 @@ export function ListaDeMembros({ sala, jogadorIdLocal, ehAnfitriao, onExpulsar }
         <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Equipe</p>
         <span
           className="border border-[#c9a86a]/60 px-3 py-1 text-[10px] tracking-wider font-bold text-[#c9a86a] bg-[#c9a86a]/10"
-          aria-label={`${ocupados} de ${total} membros`}
+          aria-label={`${quantidadeDeMembros} de ${quantidadeDeMembros} membros`}
         >
-          MEMBRO {ocupados} DE {total}
+          MEMBRO {quantidadeDeMembros} DE {quantidadeDeMembros}
         </span>
       </div>
 
@@ -72,7 +71,7 @@ export function ListaDeMembros({ sala, jogadorIdLocal, ehAnfitriao, onExpulsar }
         })}
       </ul>
       <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {total > 0 ? `${total} ${total === 1 ? 'membro' : 'membros'} na sala` : 'Nenhum membro na sala'}
+        {quantidadeDeMembros > 0 ? `${quantidadeDeMembros} ${quantidadeDeMembros === 1 ? 'membro' : 'membros'} na sala` : 'Nenhum membro na sala'}
       </span>
     </div>
   )

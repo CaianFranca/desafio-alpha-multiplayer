@@ -76,11 +76,18 @@ export function aplicarSnapshot(
 
   // Peças Iniciais ainda não encaixadas (issue #143): a lista do motor é a
   // autoridade — recarregar reconstrói a mesa sem seed local.
-  const iniciaisDoSnapshot: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
+  // Roster N=2..4 (#284): espelha só as N iniciais do roster; com o servidor
+  // ainda em 4 e N=2, projetar as 4 criava indicadores fantasmas do ausente.
+  const quantidadeSnapshot = snapshot.jogadores.length
+  const iniciaisDoRosterBase: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
     pecaId: p.pecaId,
     tipo: 'inicial' as const,
     orientacao: p.orientacao,
   }))
+  const iniciaisDoSnapshot: readonly PecaDaMesa[] =
+    quantidadeSnapshot >= 2 && quantidadeSnapshot <= 4
+      ? iniciaisDoRosterBase.slice(0, quantidadeSnapshot)
+      : iniciaisDoRosterBase
 
   // Reparo defensivo de reload (issue #258): a Inicial em foco
   // (`pecaSelecionadaId`) está nas `iniciais` por invariante do engine —
@@ -103,7 +110,6 @@ export function aplicarSnapshot(
   // quebrava "peão na cor da minha ordem de entrada" (#281 história 4).
   // Fallback defensivo: sem peaoId correspondente (snapshot vazio/antigo),
   // mantém a lista cheia em vez de esvaziar a mesa.
-  const quantidadeSnapshot = snapshot.jogadores.length
   const peaoIdsDosJogadores = new Set(snapshot.jogadores.map((j) => j.peaoId))
   const peoesFiltrados = snapshot.tabuleiro.peoes.filter((peao) => peaoIdsDosJogadores.has(peao.peaoId))
   const peoes: readonly PeaoDaExibicao[] = (peoesFiltrados.length > 0 ? peoesFiltrados : snapshot.tabuleiro.peoes)

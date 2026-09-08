@@ -205,10 +205,10 @@ export interface EstadoDoTabuleiroNoCliente {
     */
   readonly geradoresLigados: readonly string[]
   /**
-     * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
-     * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
-     * engine). O snapshot substitui a baseline (reconexão reconcilia).
-     */
+   * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
+   * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
+   * engine). O snapshot substitui a baseline (reconexão reconcilia).
+   */
   readonly cartaoDeAcessoObtido: boolean
   /**
    * Fila de chegada dos peões por célula (issue #298): a ordem em que os peões
