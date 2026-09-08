@@ -1309,10 +1309,12 @@ export class SalasHandlers {
     } else if (associacaoExistente === null) {
       const pgAssoc = await this.repo.obterSalaAtivaDoJogador(jogadorId);
       if (pgAssoc !== null && pgAssoc !== salaIdAlvo) {
-        // Fallback PG com hidratação (review #304, item 2): a memória pode
-        // não ter a sala (pós-restart/perda de projeção) — o PG decide.
-        if (await this.garantirSalaEncaminhadaNoEngine(pgAssoc)) {
-          if (await this.partidaDaSalaEstaOrfa(pgAssoc)) {
+        // Fallback PG (review #304, item 2): a memória pode não ter a sala
+        // (pós-restart/perda de projeção) — o PG decide. Mesma ordem de
+        // `limparAssociacaoOrfaSeNecessario`: órfã confirmada antes da
+        // hidratação, para não fabricar presença de sala não-órfã.
+        if (await this.partidaDaSalaEstaOrfa(pgAssoc)) {
+          if (await this.garantirSalaEncaminhadaNoEngine(pgAssoc)) {
             // Bypass via engine (review #304 item 6): PG não é mexido direto — o
             // estado resultante, a sucessão do Anfitrião e os eventos são do
             // engine; a limpeza de associação segue em qualquer caso.
@@ -1324,29 +1326,26 @@ export class SalasHandlers {
     }
   }
 
+  // Ordem do bypass: a Partida Órfã é confirmada ANTES de qualquer hidratação
+  // — `partidaDaSalaEstaOrfa` lê PG/projeção/Redis sem depender do estado em
+  // memória, e hidratar uma sala não-órfã fabricaria presença (`conectado`/
+  // `consistente`) fora do bypass. Só a órfã confirmada é hidratada
+  // (`garantirSalaEncaminhadaNoEngine`) para o bypass aplicar; a associação é
+  // limpa por último (review #304, item 6).
   private async limparAssociacaoOrfaSeNecessario(jogadorId: string): Promise<boolean> {
     const salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
     if (salaId === null) {
       const pgSala = await this.repo.obterSalaAtivaDoJogador(jogadorId);
       if (pgSala === null) return false;
-      // Hidratação sob demanda (review #304, item 2): sem a sala na memória,
-      // o PG decide e hidrata para o bypass poder aplicar.
-      const infoPg = this.estado.abertas.get(pgSala);
-      if (infoPg === undefined) {
-        const bruta = await this.repo.obterSalaBruta(pgSala).catch(() => null);
-        if (bruta !== null && bruta.status === 'encaminhada') {
-          await this.estado.hidratarSala(this.repo, pgSala);
-        }
-      }
-      const orfa = await this.partidaDaSalaEstaOrfa(pgSala);
-      if (!orfa) return false;
+      if (!(await this.partidaDaSalaEstaOrfa(pgSala))) return false;
+      if (!(await this.garantirSalaEncaminhadaNoEngine(pgSala))) return false;
       await this.aplicarBypassOrfa(pgSala, jogadorId);
       await this.projecao.limparAssociacaoJogador(jogadorId);
       return true;
     }
-    if (!(await this.garantirSalaEncaminhadaNoEngine(salaId))) return false;
     const orfa = await this.partidaDaSalaEstaOrfa(salaId);
     if (!orfa) return false;
+    if (!(await this.garantirSalaEncaminhadaNoEngine(salaId))) return false;
     // Ordem do review #304 item 6: o engine decide primeiro; a limpeza da
     // associação acontece depois, para não deixar membro ativo na memória/PG
     // com a projeção já apagada.

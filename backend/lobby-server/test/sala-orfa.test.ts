@@ -151,13 +151,17 @@ function estadoEncaminhado(): EstadoDoLobby {
 
 function handlersComOrfa(
   engine: EstadoDoLobby,
-  opcoes: { semSalaNoEngine?: boolean } = {},
+  opcoes: {
+    semSalaNoEngine?: boolean;
+    partidaNoRedis?: { estado: string; roster: Array<{ presenca: string }> };
+  } = {},
 ) {
   const registro = {
     associacoesLimpas: [] as string[],
     saidasAtomics: [] as unknown[][],
     broadcasts: [] as unknown[],
     socketsRemovidos: 0,
+    hidratacoes: 0,
   };
   const salaDominio = engine.salas[0];
   const estadoFalso = {
@@ -174,6 +178,7 @@ function handlersComOrfa(
     },
     hidratarSala(_repo: unknown, salaId: string): Promise<boolean> {
       // Espelha a hidratação real: injeta a sala do PG no engine/memória.
+      registro.hidratacoes += 1;
       const sala = salaDominio;
       estadoFalso.estado = { salas: [...estadoFalso.estado.salas, sala] };
       estadoFalso.abertas.set(salaId, { sala, codigo: 'ABC123' });
@@ -181,13 +186,16 @@ function handlersComOrfa(
     },
   };
   const redisFalso = {
-    async exists(): Promise<number> {
-      return 0;
+    async exists(chave: string): Promise<number> {
+      return chave === 'game-server:partida:partida-1' && opcoes.partidaNoRedis !== undefined ? 1 : 0;
     },
     async ttl(): Promise<number> {
       return 100;
     },
-    async get(): Promise<null> {
+    async get(chave: string): Promise<string | null> {
+      if (chave === 'game-server:partida:partida-1' && opcoes.partidaNoRedis !== undefined) {
+        return JSON.stringify(opcoes.partidaNoRedis);
+      }
       return null;
     },
   };
@@ -316,6 +324,52 @@ test('bypass órfã: memória vazia hidrata do PG e libera (fallback PG do item 
   assert.ok(registro.broadcasts.some((e) => (e as { type?: string }).type === 'MEMBRO_SAIU'));
   // A sala hidratada permanece no engine (estado consistente pós-bypass).
   assert.equal(estadoSalas(handlers).some((s) => s.id === 'sala-1'), true);
+});
+
+// Review de hidratação: a Partida Órfã é confirmada ANTES da hidratação —
+// hidratar sala não-órfã fabricaria presença (`conectado`/`consistente`) fora
+// do bypass.
+test('bypass órfã: não-órfã não hidrata (partida parcial no Redis)', async () => {
+  const { handlers, registro, overridesAssociacao } = handlersComOrfa(estadoEncaminhado(), {
+    semSalaNoEngine: true,
+    partidaNoRedis: { estado: 'preparada', roster: [{ presenca: 'conectado' }] },
+  });
+  overridesAssociacao.valor = 'sala-1';
+  const limpo = await limparAssociacaoOrfaDe(handlers)('jogador-2');
+
+  assert.equal(limpo, false, 'roster com admissão parcial não libera o bypass');
+  assert.equal(registro.hidratacoes, 0, 'sala não-órfã não pode ser hidratada');
+  assert.equal(estadoSalas(handlers).some((s) => s.id === 'sala-1'), false, 'sala permanece fora do engine');
+  assert.equal(registro.saidasAtomics.length, 0);
+  assert.deepEqual(registro.associacoesLimpas, []);
+  assert.equal(registro.broadcasts.length, 0);
+});
+
+test('bypass órfã: ramo PG não hidrata sala não-órfã', async () => {
+  const { handlers, registro, overridesAssociacao } = handlersComOrfa(estadoEncaminhado(), {
+    semSalaNoEngine: true,
+    partidaNoRedis: { estado: 'preparada', roster: [{ presenca: 'conectado' }] },
+  });
+  overridesAssociacao.valor = null;
+  await limparOrfaDeOutraSalaDe(handlers)('jogador-2', 'sala-alvo');
+
+  assert.equal(registro.hidratacoes, 0, 'sala não-órfã no fallback PG não pode ser hidratada');
+  assert.equal(registro.saidasAtomics.length, 0);
+  assert.deepEqual(registro.associacoesLimpas, []);
+  assert.equal(registro.broadcasts.length, 0);
+});
+
+test('bypass órfã: órfã hidrata uma vez e libera (contagem do fallback PG)', async () => {
+  const { handlers, registro, overridesAssociacao } = handlersComOrfa(estadoEncaminhado(), {
+    semSalaNoEngine: true,
+  });
+  overridesAssociacao.valor = null;
+  await limparOrfaDeOutraSalaDe(handlers)('jogador-2', 'sala-alvo');
+
+  assert.equal(registro.hidratacoes, 1, 'a sala órfã confirmada hidrata exatamente uma vez');
+  assert.equal(registro.saidasAtomics.length, 1, 'bypass aplicado via engine');
+  assert.deepEqual(registro.associacoesLimpas, ['jogador-2']);
+  assert.ok(registro.broadcasts.some((e) => (e as { type?: string }).type === 'MEMBRO_SAIU'));
 });
 
 function estadoSalas(handlers: SalasHandlers): EstadoDoLobby['salas'] {
