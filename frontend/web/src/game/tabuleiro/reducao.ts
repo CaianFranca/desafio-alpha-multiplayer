@@ -627,11 +627,25 @@ export function reduzirEvento(
       // Peças removidas saem da cena; como a ocupação é derivada de
       // `posicionadas`, as células liberadas voltam a aceitar
       // posicionamento/recebimento sem código adicional.
+      // A fila de chegada (issue #298) acompanha: as chaves das células
+      // removidas são podadas para não vazar fila órfã para a próxima peça
+      // na mesma célula (limpeza #151: não acumular chaves órfãs).
+      const chavesRemovidas = new Set(
+        estado.posicionadas
+          .filter((p) => removidas.includes(p.pecaId))
+          .map((p) => chaveCelula(p.celula)),
+      )
+      const ordemDeChegadaPorChave = Object.fromEntries(
+        Object.entries(estado.ordemDeChegadaPorChave).filter(
+          ([chave]) => !chavesRemovidas.has(chave),
+        ),
+      )
       return {
         ...estado,
         posicionadas: estado.posicionadas.filter(
           (p) => !removidas.includes(p.pecaId),
         ),
+        ordemDeChegadaPorChave,
         // Seleção/Manipulação apontando para peça removida não pode sobreviver.
         pecaSelecionadaId:
           estado.pecaSelecionadaId !== null && removidas.includes(estado.pecaSelecionadaId)

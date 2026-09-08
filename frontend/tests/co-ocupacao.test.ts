@@ -177,4 +177,48 @@ describe('snapshot reconstrói a fila de chegada (issue #298)', () => {
     // Peão sobre a Mesa não entra em fila.
     expect(Object.keys(estado.ordemDeChegadaPorChave).sort()).toEqual(['3:3', '3:4'])
   })
+
+  it('LIMPEZA_APLICADA poda a fila da célula removida (sem chave órfã)', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'inicial-1',
+      orientacao: 0,
+      celula: { linha: 3, coluna: 3 },
+    } as never)
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+    } as never)
+    expect(estado.ordemDeChegadaPorChave['3:3']).toEqual(['peao-branco'])
+    estado = reduzirEvento(estado, {
+      type: 'LIMPEZA_APLICADA',
+      pecasRemovidas: ['inicial-1'],
+    } as never)
+    expect(estado.posicionadas).toEqual([])
+    expect(estado.ordemDeChegadaPorChave['3:3']).toBeUndefined()
+    expect(estado.ordemDeChegadaPorChave).toEqual({})
+  })
+
+  it('LIMPEZA_APLICADA preserva a fila das células não removidas', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+    } as never)
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-azul',
+      pecaId: 'portao-1',
+      celula: { linha: 3, coluna: 4 },
+    } as never)
+    estado = reduzirEvento(estado, {
+      type: 'LIMPEZA_APLICADA',
+      pecasRemovidas: ['outra-peca'],
+    } as never)
+    expect(estado.ordemDeChegadaPorChave['3:3']).toEqual(['peao-branco'])
+    expect(estado.ordemDeChegadaPorChave['3:4']).toEqual(['peao-azul'])
+  })
 })
