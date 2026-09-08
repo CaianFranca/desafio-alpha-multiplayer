@@ -668,8 +668,8 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
   })
 })
 
-describe('HUD da Partida — sem provisórios, sem Proteção, com rótulos (#226 [7])', () => {
-  it('chips antigos removidos; nenhum card de Proteção; vocabulário Baixa Iluminação', async () => {
+describe('HUD da Partida — sem provisórios, com rótulos (#226 [7], #225)', () => {
+  it('chips antigos removidos; vocabulário Baixa Iluminação e card de Proteção presente', async () => {
     await partidaComSnapshot(criarSnapshotBase())
 
     for (const testid of [
@@ -686,9 +686,10 @@ describe('HUD da Partida — sem provisórios, sem Proteção, com rótulos (#22
     ]) {
       expect(screen.queryByTestId(testid)).not.toBeInTheDocument()
     }
-    expect(screen.queryByText(/proteção/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/baixa visão/i)).not.toBeInTheDocument()
     expect(screen.getByText(/baixa iluminação/i)).toBeInTheDocument()
+    expect(screen.getByTestId('hud-card-protecao')).toBeInTheDocument()
+    expect(screen.getByText(/proteção/i)).toBeInTheDocument()
   })
 
   it('regiões e cards expõem rótulos acessíveis', async () => {
@@ -702,6 +703,170 @@ describe('HUD da Partida — sem provisórios, sem Proteção, com rótulos (#22
     expect(screen.getByTestId('hud-turno')).toHaveAttribute('aria-label', 'Turno')
     expect(screen.getByTestId('hud-conquistas')).toHaveAttribute('aria-label', 'Conquistas')
     expect(screen.getByTestId('hud-outros-jogadores')).toHaveAttribute('aria-label', 'Outros jogadores')
+  })
+})
+
+describe('HUD da Partida — Proteção no HUD (#225)', () => {
+  it('card local alterna apagado/aceso conforme flag protegido com paridade visual e acessível', async () => {
+    const ws = await partidaDisponivel()
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({
+          jogadores: [
+            { ...JOGADORES_BASE[0], protegido: false },
+            JOGADORES_BASE[1],
+            JOGADORES_BASE[2],
+            JOGADORES_BASE[3],
+          ],
+        }),
+      }),
+    )
+    await screen.findByTestId('hud-da-partida')
+
+    const card = screen.getByTestId('hud-card-protecao')
+    expect(card).toHaveAttribute('data-ativo', 'false')
+    expect(card).toHaveAttribute('aria-label', 'Proteção inativa')
+    expect(card).toHaveClass('w-24')
+    expect(card).toHaveClass('max-w-[6rem]')
+    expect(card).toHaveClass('border-zinc-700/60')
+    expect(card).toHaveClass('bg-zinc-950/70')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({
+          jogadores: [
+            { ...JOGADORES_BASE[0], protegido: true },
+            JOGADORES_BASE[1],
+            JOGADORES_BASE[2],
+            JOGADORES_BASE[3],
+          ],
+        }),
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'true'))
+    const cardAtivo = screen.getByTestId('hud-card-protecao')
+    expect(cardAtivo).toHaveAttribute('aria-label', 'Proteção ativa')
+    expect(cardAtivo).toHaveClass('w-24')
+    expect(cardAtivo).toHaveClass('max-w-[6rem]')
+    expect(cardAtivo).toHaveClass('border-cyan-400/70')
+    expect(cardAtivo).toHaveClass('bg-cyan-400/10')
+    expect(cardAtivo).toHaveClass('transition-all')
+  })
+
+  it('ícone de Proteção aparece nos avatares dos companheiros protegidos com rótulo acessível', async () => {
+    await partidaComSnapshot(
+      criarSnapshotBase({
+        jogadores: [
+          JOGADORES_BASE[0],
+          { ...JOGADORES_BASE[1], protegido: true },
+          { ...JOGADORES_BASE[2], protegido: false },
+          { ...JOGADORES_BASE[3], protegido: true },
+        ],
+      }),
+    )
+
+    const icones = screen.getAllByTestId('hud-estado-protecao')
+    expect(icones).toHaveLength(2)
+    expect(icones[0]).toHaveAttribute('title', 'Proteção')
+
+    const avatarAna = screen
+      .getAllByTestId('hud-avatar-adversario')
+      .find((el) => el.getAttribute('data-jogador-id') === 'jogador-2')!
+    expect(avatarAna).toHaveAttribute('data-protegido', 'true')
+    expect(avatarAna.getAttribute('aria-label')).toMatch(/protegido/i)
+    expect(screen.getByRole('img', { name: /Ana.*protegido/i })).toBeInTheDocument()
+
+    const avatarBeto = screen
+      .getAllByTestId('hud-avatar-adversario')
+      .find((el) => el.getAttribute('data-jogador-id') === 'jogador-3')!
+    expect(avatarBeto).not.toHaveAttribute('data-protegido')
+    expect(avatarBeto.getAttribute('aria-label')).not.toMatch(/protegido/i)
+
+    const avatarCara = screen
+      .getAllByTestId('hud-avatar-adversario')
+      .find((el) => el.getAttribute('data-jogador-id') === 'jogador-4')!
+    expect(avatarCara).toHaveAttribute('data-protegido', 'true')
+  })
+
+  it('degrada graciosamente quando snapshot antigo não traz protegido (sem quebrar, apagado)', async () => {
+    const ws = await partidaDisponivel()
+    const base = criarSnapshotBase()
+    const bruto = {
+      ...base,
+      jogadores: base.jogadores.map((j) => {
+        const { protegido: _, ...resto } = j as typeof j & { protegido?: boolean }
+        void _
+        return resto
+      }),
+    } as unknown as EstadoDaPartidaSnapshot
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: bruto }))
+    await screen.findByTestId('hud-da-partida')
+
+    expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'false')
+    expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('aria-label', 'Proteção inativa')
+    expect(screen.queryByTestId('hud-estado-protecao')).not.toBeInTheDocument()
+  })
+
+  it('delta POSICAO_CONFIRMADA atualiza Proteção ao vivo sem recarregar', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'false')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: MEU_JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        protegido: true,
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'true'))
+    expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('aria-label', 'Proteção ativa')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: MEU_JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-2',
+        protegido: false,
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'false'))
+  })
+
+  it('delta ATAQUE_RESOLVIDO consome Proteção dos protegidos listados', async () => {
+    const ws = await partidaComSnapshot(
+      criarSnapshotBase({
+        jogadores: [
+          { ...JOGADORES_BASE[0], protegido: true },
+          { ...JOGADORES_BASE[1], protegido: true },
+          JOGADORES_BASE[2],
+          JOGADORES_BASE[3],
+        ],
+      }),
+    )
+    expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'true')
+    expect(screen.getAllByTestId('hud-estado-protecao')).toHaveLength(1)
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco', 'peao-vermelho'] }],
+        peoesAtingidos: [],
+        protegidos: [MEU_JOGADOR_ID, 'jogador-2'],
+        estadosAplicados: [],
+      }),
+    )
+    await waitFor(() => expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'false'))
+    expect(screen.queryByTestId('hud-estado-protecao')).not.toBeInTheDocument()
+    const avatarAna = screen
+      .getAllByTestId('hud-avatar-adversario')
+      .find((el) => el.getAttribute('data-jogador-id') === 'jogador-2')!
+    expect(avatarAna).not.toHaveAttribute('data-protegido')
+    expect(avatarAna.getAttribute('aria-label')).not.toMatch(/protegido/i)
   })
 })
 
