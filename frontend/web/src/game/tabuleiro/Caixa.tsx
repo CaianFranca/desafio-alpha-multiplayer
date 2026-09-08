@@ -369,7 +369,9 @@ export function Caixa({
           <mesh
             position={[0, 0.025, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
-            onClick={() => {
+            onClick={(e) => {
+              // @ts-expect-error ThreeEvent stopPropagation tipado como MouseEvent em R3F 8
+              e.stopPropagation()
               despacharCliqueNaPecaDaBandeja(estadoPeoes, { onPuxar })
             }}
             {...handlersDeCursor(correntePuxavel ? 'pointer' : 'default')}
