@@ -571,6 +571,11 @@ export function destinosConectadosDoPeao(
   peoes: readonly PeaoDaExibicao[],
   peaoId: PeaoId,
   afetadosPorPeaoId: ReadonlySet<PeaoId> = new Set(),
+  // N do roster (2..4, #284): o teto do Portão é o N real de jogadores, não
+  // a quantidade de peões renderizados — no modo misto (servidor pré-fiação
+  // ainda em 4, partida N=2) peoes.length lê 4 e o teto fica errado.
+  // Ausente = deriva de peoes.length (compatibilidade com unidades puras).
+  quantidadeDeJogadores?: number,
 ): DestinoDoPeao[] {
   const peao = peoes.find((p) => p.peaoId === peaoId)
   if (!peao || peao.celula === null) return []
@@ -586,9 +591,11 @@ export function destinosConectadosDoPeao(
     const ocupantes = peoes.filter(
       (p) => p.peaoId !== peaoId && p.celula !== null && chaveCelula(p.celula) === chave,
     )
-    // (3) teto espelhado: Portão N, demais 1; +1 com afetado na peça.
+    // (3) teto espelhado: Portão N (roster), demais 1; +1 com afetado na peça.
     const tetoBase =
-      peca.tipo === 'portao_de_saida' ? tetoDeOcupacaoDoPortaoParaN(peoes.length) : 1
+      peca.tipo === 'portao_de_saida'
+        ? tetoDeOcupacaoDoPortaoParaN(quantidadeDeJogadores ?? peoes.length)
+        : 1
     const temAfetado = ocupantes.some((p) => afetadosPorPeaoId.has(p.peaoId))
     const teto = temAfetado ? tetoBase + 1 : tetoBase
     if (ocupantes.length >= teto) continue

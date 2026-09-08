@@ -50,8 +50,22 @@ describe('aplicarSnapshot com roster N=2..4 (#284)', () => {
     expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-1', 'inicial-2'])
   })
 
-  it('sem jogadores no snapshot mantém a lista cheia (fallback defensivo)', () => {
+  it('sem jogadores no snapshot projeta mesa vazia (sem fantasmas)', () => {
     const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([], [...PEOES_4]))
-    expect(estado.peoes).toHaveLength(4)
+    expect(estado.peoes).toHaveLength(0)
+    expect(estado.iniciais).toHaveLength(0)
+    expect(estado.quantidadeDeJogadores).toBeNull()
+  })
+
+  it('roster fora da faixa não inventa fantasmas: N cru é exibido, layout usa clamp', () => {
+    const snapshot = snapshotComJogadores(
+      [jogador('j1', 'Eu', 'branco', 1)],
+      [...PEOES_4],
+    )
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
+    // Só o peão real aparece (sem os 3 fantasmas); o N de layout/teto vai
+    // ao clamp 2..4 enquanto o anúncio deriva o N real do roster.
+    expect(estado.peoes.map((p) => p.peaoId)).toEqual(['peao-branco'])
+    expect(estado.quantidadeDeJogadores).toBe(2)
   })
 })
