@@ -551,70 +551,15 @@ export function entrarNaSala(
 
 export const admitirMembro = entrarNaSala;
 
-/**
- * Bypass de saída para sala `encaminhada` cuja partida não iniciou (#222).
- *
- * @internal Só chame após `partidaDaSalaEstaOrfa` confirmar a orfandade — a
- * função confia no chamador e não verifica o Redis. Uso fora desse guarda
- * libera sala indevidamente.
- */
-export function sairDaSalaEncaminhadaNaoIniciada(
+// Núcleo comum das duas saídas de Sala (review #304 item 4): os dois caminhos
+// compartilham validação, rejeições e efeito — divergem apenas no guarda do
+// estado `encaminhada`. `permitirEncaminhada: false` é o `sairDaSala` canônico
+// (recusa `SALA_ENCAMINHADA`); `true` é o bypass interno do não-início, que
+// exige a Sala `encaminhada` e confia na orfandade verificada pelo chamador.
+function executarSaidaDeSala(
   estado: EstadoDoLobby,
   comando: SairDaSalaComando,
-): Resultado {
-  const dadosInvalidos = validarTexto(
-    comando.salaId,
-    comando.jogadorId,
-    ...(comando.membroId === undefined ? [] : [comando.membroId]),
-  );
-  if (dadosInvalidos) return dadosInvalidos;
-  const salaOuErro = exigirSala(estado, comando.salaId);
-  if (!('sala' in salaOuErro)) return salaOuErro;
-  const { sala } = salaOuErro;
-  const salaInconsistente = exigirSalaConsistente(sala);
-  if (salaInconsistente) return salaInconsistente;
-  if (sala.estado !== 'encaminhada') {
-    return rejeitar('SALA_NAO_ENCAMINHADA', 'A Sala não está encaminhada.', { salaId: sala.id });
-  }
-  const membro = sala.membros.find(
-    (item) =>
-      item.estado === 'ativo' &&
-      item.jogadorId === comando.jogadorId &&
-      (comando.membroId === undefined || item.id === comando.membroId),
-  );
-  if (!membro) {
-    const membroDoJogador = sala.membros.find((item) => item.jogadorId === comando.jogadorId);
-    const membroAtivoComOutroId = membroDoJogador?.estado === 'ativo';
-    const codigo = membroAtivoComOutroId || !membroDoJogador ? 'MEMBRO_NAO_ENCONTRADO' : 'MEMBRO_NAO_ATIVO';
-    const mensagem = membroAtivoComOutroId || !membroDoJogador ? 'O Membro não pertence à Sala.' : 'O vínculo do Membro já está encerrado.';
-    return rejeitar(codigo, mensagem, {
-      salaId: sala.id,
-      jogadorId: comando.jogadorId,
-      ...(comando.membroId ? { membroId: comando.membroId } : {}),
-    });
-  }
-  const membroEncerrado: Membro = { ...membro, estado: 'encerrado', motivoEncerramento: 'saida' };
-  const membros = sala.membros.map((item) => (item.id === membro.id ? membroEncerrado : item));
-  const aindaHaMembrosAtivos = membros.some((item) => item.estado === 'ativo');
-  const anfitriaoSaiu = sala.anfitriaoId === membro.id;
-  const anfitriaoNovoId = aindaHaMembrosAtivos ? (anfitriaoSaiu ? sucederAnfitriao(membros, membro) : sala.anfitriaoId) : null;
-  const novaSala: Sala = {
-    ...sala,
-    membros,
-    estado: aindaHaMembrosAtivos ? sala.estado : 'encerrada',
-    anfitriaoId: anfitriaoNovoId,
-  };
-  const eventos: EventoDeDominio[] = [
-    { tipo: 'membro_saiu', salaId: sala.id, membroId: membro.id, jogadorId: membro.jogadorId, ordemDeEntrada: membro.ordemDeEntrada, motivo: 'saida' },
-  ];
-  if (anfitriaoSaiu && anfitriaoNovoId !== null) eventos.push({ tipo: 'anfitriao_sucedido', salaId: sala.id, anfitriaoAnteriorId: membro.id, anfitriaoNovoId });
-  if (!aindaHaMembrosAtivos) eventos.push({ tipo: 'sala_encerrada', salaId: sala.id, motivo: 'saida' });
-  return sucesso(substituirSala(estado, novaSala), eventos);
-}
-
-export function sairDaSala(
-  estado: EstadoDoLobby,
-  comando: SairDaSalaComando,
+  opcoes: { permitirEncaminhada: boolean },
 ): Resultado {
   const dadosInvalidos = validarTexto(
     comando.salaId,
@@ -636,9 +581,15 @@ export function sairDaSala(
     return salaInconsistente;
   }
 
-  const salaCongelada = exigirSalaNaoEncaminhada(sala);
-  if (salaCongelada) {
-    return salaCongelada;
+  if (opcoes.permitirEncaminhada) {
+    if (sala.estado !== 'encaminhada') {
+      return rejeitar('SALA_NAO_ENCAMINHADA', 'A Sala não está encaminhada.', { salaId: sala.id });
+    }
+  } else {
+    const salaCongelada = exigirSalaNaoEncaminhada(sala);
+    if (salaCongelada) {
+      return salaCongelada;
+    }
   }
 
   const membro = sala.membros.find(
@@ -712,6 +663,27 @@ export function sairDaSala(
   }
 
   return sucesso(substituirSala(estado, novaSala), eventos);
+}
+
+export function sairDaSala(
+  estado: EstadoDoLobby,
+  comando: SairDaSalaComando,
+): Resultado {
+  return executarSaidaDeSala(estado, comando, { permitirEncaminhada: false });
+}
+
+/**
+ * Bypass de saída para sala `encaminhada` cuja partida não iniciou (#222).
+ *
+ * @internal Só chame após `partidaDaSalaEstaOrfa` confirmar a orfandade — a
+ * função confia no chamador e não verifica o Redis. Uso fora desse guarda
+ * libera sala indevidamente.
+ */
+export function sairDaSalaEncaminhadaNaoIniciada(
+  estado: EstadoDoLobby,
+  comando: SairDaSalaComando,
+): Resultado {
+  return executarSaidaDeSala(estado, comando, { permitirEncaminhada: true });
 }
 
 export function expulsarMembro(
