@@ -9,13 +9,15 @@
  * Sem recalcular iluminação/limpeza: o motor é a autoridade.
  */
 
-import type {
-  Celula as CelulaContrato,
-  CorDoPeao,
-  PecaDaMesa,
-  PecaPosicionada,
-  PeaoDaExibicao,
-  TipoDaPeca,
+import {
+  chaveCelula,
+  type Celula as CelulaContrato,
+  type CorDoPeao,
+  type PecaDaMesa,
+  type PecaPosicionada,
+  type PeaoDaExibicao,
+  type PeaoId,
+  type TipoDaPeca,
 } from './contrato'
 import type { EstadoDoTabuleiroNoCliente } from './reducao'
 import type { PendenciaNoCliente } from './interacaoPeoes'
@@ -156,6 +158,18 @@ export function aplicarSnapshot(
     coluna: c.coluna,
   }))
 
+  // Fila de chegada por célula (issue #298): reconstruída na ordem da lista
+  // do motor (`snapshot.tabuleiro.peoes` mapeado acima — ordem canônica de
+  // inserção). O snapshot não preserva a sequência histórica de pousos, então
+  // recarregar aproxima a ordem pela lista do motor (limitação de reload
+  // documentada no estado); o índice só define o desempate visual.
+  const ordemDeChegadaPorChave: Record<string, PeaoId[]> = {}
+  for (const peao of peoes) {
+    if (peao.celula === null) continue
+    const chave = chaveCelula(peao.celula)
+    ;(ordemDeChegadaPorChave[chave] ??= []).push(peao.peaoId)
+  }
+
   return {
     iniciais,
     posicionadas,
@@ -189,5 +203,6 @@ export function aplicarSnapshot(
     pecasRestantesNaCaixa: snapshot.tabuleiro.pecasRestantesNaCaixa ?? null,
     geradoresLigados: snapshot.geradoresLigados ?? [],
     cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido ?? false,
+    ordemDeChegadaPorChave,
   }
 }
