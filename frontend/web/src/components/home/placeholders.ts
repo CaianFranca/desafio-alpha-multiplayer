@@ -45,6 +45,7 @@ export const history = {
   id: 'historia' as const,
   title: 'A História',
   paragraphs: [
+    'O Sanatório Flicker of Sanity já foi motivo de orgulho: uma instituição moderna, com uma ala nova em construção e um livro de ocorrências preenchido com capricho, dia após dia. A última página desse livro, porém, termina no meio de uma frase — "a sombra deste lugar devora" — e depois dela não há mais nenhum registro, nenhuma assinatura, nenhuma explicação. Só páginas em branco.',
     'Você acorda no chão frio de uma ala abandonada do Sanatório Flicker of Sanity, sem qualquer memória de como chegou ali ou do motivo de a antiga instituição estar mergulhada em escuridão. Ao seu lado, repousam apenas uma vela acesa e uma carta queimada com um aviso perturbador: a sombra deste lugar devora a própria realidade. Sem compreender as forças sobrenaturais que tomaram os corredores, cada passo revela o desconhecido apenas até onde o brilho do fogo alcança — sabendo que a chama não durará para sempre e que o menor descuido pode significar ser consumido pelas sombras.',
   ],
   imageAlt: 'Corredor sombrio do Sanatório Flicker of Sanity com luzes crepitantes',
@@ -97,6 +98,7 @@ export const objectives = {
         'Explore os corredores para encontrar e ligar os 3 Geradores. A energia reestabelecida é indispensável para alimentar o sistema do Portão de Saída.',
       imageAlt: 'Gerador elétrico em sala de utilidade do sanatório',
       image: '/assets/objetivo-1.jpg',
+      icon: 'geradores',
     },
     {
       title: 'Recuperar o Cartão de Acesso',
@@ -104,6 +106,7 @@ export const objectives = {
         'Infiltre-se na Sala do Diretor para obter o Cartão de Acesso, chave necessária para autorizar a abertura do portão principal.',
       imageAlt: 'Cartão de acesso brilhando sobre uma mesa de metal',
       image: '/assets/objetivo-2.jpg',
+      icon: 'cartao',
     },
     {
       title: 'Alcançar o Portão de Saída',
@@ -111,6 +114,7 @@ export const objectives = {
         'Com os Geradores ligados e o Cartão de Acesso em mãos, reúnam-se todos no portão principal para destravar a tranca e fugir do sanatório.',
       imageAlt: 'Portão de saída metálico com tranca eletrônica',
       image: '/assets/objetivo-3.jpg',
+      icon: 'portao',
     },
   ],
 } as const

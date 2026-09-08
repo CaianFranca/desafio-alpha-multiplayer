@@ -137,12 +137,37 @@ describe('homepage structure', () => {
     expect(screen.getByRole('heading', { name: /ameaças sobrenaturais/i })).toBeInTheDocument()
   })
 
-  it('renders objective items with numbered list', () => {
+  it('renders objective items as unordered HUD achievement nodes', () => {
     renderWithRouter()
 
     expect(screen.getByRole('heading', { name: /energizar o sanatório/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /recuperar o cartão de acesso/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /alcançar o portão de saída/i })).toBeInTheDocument()
+
+    // A timeline não sugere ordem entre as conquistas: lista não ordenada.
+    const timeline = document.querySelector('.objectives-timeline')
+    expect(timeline?.tagName).toBe('UL')
+
+    // Um círculo apagado por objetivo, acessível pelo nome da conquista.
+    expect(screen.getByRole('img', { name: 'Geradores' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Cartão de Acesso' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Portão de Saída' })).toBeInTheDocument()
+
+    // Nós numerados removidos.
+    expect(screen.queryByText('01')).toBeNull()
+    expect(screen.queryByText('02')).toBeNull()
+    expect(screen.queryByText('03')).toBeNull()
+  })
+
+  it('renders the history with the past paragraph before the current one', () => {
+    renderWithRouter()
+
+    const historySection = document.getElementById('historia')!
+    const paragraphs = historySection.querySelectorAll('p')
+    expect(paragraphs).toHaveLength(2)
+    expect(paragraphs[0].textContent).toMatch(/já foi motivo de orgulho/)
+    expect(paragraphs[0].textContent).toMatch(/a sombra deste lugar devora/)
+    expect(paragraphs[1].textContent).toMatch(/Você acorda no chão frio/)
   })
 
   it('renders footer with brand and copyright', () => {

@@ -41,12 +41,39 @@ function ObjectivesRevealItem({ index, children }: { index: number; children: Re
   )
 }
 
+type ObjectiveIcon = (typeof objectives.items)[number]['icon']
+
+// Nós-ícone da timeline: círculos de conquista do HUD sempre no estado
+// APAGADO (a home anuncia objetivos, não progresso). Glifos ⚡/▣ reaproveitados
+// do HudDaPartida; o Portão usa o asset door_open_icon.svg já existente.
+const OBJECTIVE_NODES: Record<ObjectiveIcon, { label: string; content: ReactNode }> = {
+  geradores: {
+    label: 'Geradores',
+    content: <span aria-hidden="true">⚡</span>,
+  },
+  cartao: {
+    label: 'Cartão de Acesso',
+    content: <span aria-hidden="true">▣</span>,
+  },
+  portao: {
+    label: 'Portão de Saída',
+    content: (
+      <img
+        src="/assets/door_open_icon.svg"
+        alt=""
+        aria-hidden="true"
+        className="objectives-item-node-icon"
+      />
+    ),
+  },
+}
+
 export function ObjectivesSection() {
   return (
     <section id={objectives.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-background" aria-labelledby="objectives-title">
       <div className="max-w-4xl mx-auto">
         <h2 id="objectives-title" className="objectives-eyebrow">{objectives.title}</h2>
-        <ol className="objectives-timeline list-none m-0 p-0 flex flex-col">
+        <ul className="objectives-timeline list-none m-0 p-0 flex flex-col">
           {objectives.items.map((item, index) => (
             <ObjectivesRevealItem key={item.title} index={index}>
               <div className={`objectives-item${index % 2 === 1 ? ' is-flipped' : ''}`}>
@@ -54,8 +81,12 @@ export function ObjectivesSection() {
                   <h3 className="objectives-item-title">{item.title}</h3>
                   <p className="objectives-item-desc">{item.description}</p>
                 </div>
-                <div className="objectives-item-node">
-                  <span>{String(index + 1).padStart(2, '0')}</span>
+                <div
+                  className="objectives-item-node border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40"
+                  role="img"
+                  aria-label={OBJECTIVE_NODES[item.icon].label}
+                >
+                  {OBJECTIVE_NODES[item.icon].content}
                 </div>
                 <div className="objectives-item-media">
                   <img src={item.image} alt={item.imageAlt} className="objectives-image" />
@@ -63,7 +94,7 @@ export function ObjectivesSection() {
               </div>
             </ObjectivesRevealItem>
           ))}
-        </ol>
+        </ul>
       </div>
     </section>
   )
