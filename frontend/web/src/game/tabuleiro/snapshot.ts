@@ -95,10 +95,16 @@ export function aplicarSnapshot(
     posicionadas.map((p) => [p.pecaId, p.celula] as const),
   )
 
-  // Roster variável N=2..4: filtra peões para N quando servidor ainda envia 4 (fallback)
+  // Roster variável N=2..4: mantém SÓ os peões dos jogadores do snapshot
+  // (peaoId da ordem de entrada) — nunca os N primeiros do array. Com o
+  // servidor ainda em 4 e N=2, o slice por posição exibia cores erradas e
+  // quebrava "peão na cor da minha ordem de entrada" (#281 história 4).
+  // Fallback defensivo: sem peaoId correspondente (snapshot vazio/antigo),
+  // mantém a lista cheia em vez de esvaziar a mesa.
   const quantidadeSnapshot = snapshot.jogadores.length
-  const peoes: readonly PeaoDaExibicao[] = snapshot.tabuleiro.peoes
-    .slice(0, quantidadeSnapshot > 0 ? quantidadeSnapshot : snapshot.tabuleiro.peoes.length)
+  const peaoIdsDosJogadores = new Set(snapshot.jogadores.map((j) => j.peaoId))
+  const peoesFiltrados = snapshot.tabuleiro.peoes.filter((peao) => peaoIdsDosJogadores.has(peao.peaoId))
+  const peoes: readonly PeaoDaExibicao[] = (peoesFiltrados.length > 0 ? peoesFiltrados : snapshot.tabuleiro.peoes)
     .map((peao) => {
       const celula = peao.pecaId !== null ? (mapPos.get(peao.pecaId) ?? null) : null
       return {
