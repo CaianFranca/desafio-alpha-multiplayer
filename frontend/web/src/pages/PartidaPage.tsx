@@ -47,6 +47,7 @@ import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabule
 import { mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
+import { quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
 import type {
@@ -538,12 +539,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
   }, [requerModoPaisagem])
 
-  // N dinâmico da partida: jogadores reais do snapshot (fallback peoes length)
+  // N dinâmico da partida: jogadores reais do snapshot (fallback peoes length).
+  // O fallback passa por quantidadeValidaDeJogadores (clamp 2..4): sem ele,
+  // solo (1) ou 5+ anunciavam "Partida com 1 jogadores" (#284, #281).
   const quantidadeDeJogadores = useMemo(() => {
     const doSnapshot = Object.keys(modelo.jogadorPorId).length
     if (doSnapshot >= 2 && doSnapshot <= 4) return doSnapshot
     if (modelo.peoes.length >= 2 && modelo.peoes.length <= 4) return modelo.peoes.length
-    return doSnapshot || modelo.peoes.length || 4
+    return quantidadeValidaDeJogadores(doSnapshot || modelo.peoes.length || 4)
   }, [modelo.jogadorPorId, modelo.peoes.length])
   const textoVez = modelo.jogadorAtivoId ? (modelo.jogadorPorId[modelo.jogadorAtivoId]?.apelido ?? 'desconhecido') : 'nenhum'
   const proxOrdem = useMemo(() => {
