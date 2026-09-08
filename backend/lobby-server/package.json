@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@flicker/config": "*",
+    "@flicker/engine": "*",
     "@flicker/shared": "*",
     "bcryptjs": "^2.4.3",
     "express": "^5.1.0",

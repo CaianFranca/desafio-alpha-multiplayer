@@ -1,6 +1,8 @@
 /**
- * HUD definitivo da Partida (issue #226, spec pai #224) — 6 regiões sobre o
- * Ambiente de Jogo, somente leitura do modelo existente, sem card de Proteção.
+ * HUD definitivo da Partida (issues #226 e #225, spec pai #224) — 6 regiões
+ * sobre o Ambiente de Jogo, somente leitura do modelo existente, com os 3
+ * cards de estado do jogador local (Baixa Iluminação, Amedrontado, Proteção)
+ * e ícones de estado junto aos avatares dos companheiros.
  *
  * Layout espelhado da referência `GamePage.jpg` (posição das 6 regiões, anel
  * amarelo nos avatares, cards escuros translúcidos, título serifado com
@@ -244,8 +246,9 @@ export function HudDaPartida({
                   data-ativo={ehAtivo ? 'true' : 'false'}
                   data-em-baixa={dados.emBaixaIluminacao ? 'true' : undefined}
                   data-amedrontado={dados.amedrontado ? 'true' : undefined}
+                  data-protegido={dados.protegido ? 'true' : undefined}
                   role="img"
-                aria-label={`${dados.apelido}, Sanidade ${dados.sanidade} de 3${dados.emBaixaIluminacao ? ', em Baixa Iluminação' : ''}${dados.amedrontado ? ', Amedrontado' : ''}`}
+                aria-label={`${dados.apelido}, Sanidade ${dados.sanidade} de 3${dados.emBaixaIluminacao ? ', em Baixa Iluminação' : ''}${dados.amedrontado ? ', Amedrontado' : ''}${dados.protegido ? ', protegido' : ''}`}
                 title={dados.apelido}
                   className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display text-base font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${
                     dados.amedrontado
@@ -271,6 +274,11 @@ export function HudDaPartida({
                 {dados.amedrontado ? (
                   <span data-testid="hud-estado-amedrontado" title="Amedrontado" className="rounded border border-red-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-sm leading-none text-red-400 shadow-[0_0_8px_rgba(248,113,113,0.35)]">
                     ⚠
+                  </span>
+                ) : null}
+                {dados.protegido ? (
+                  <span data-testid="hud-estado-protecao" title="Proteção" className="rounded border border-cyan-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-sm leading-none text-cyan-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
+                    🛡
                   </span>
                 ) : null}
               </div>
@@ -441,6 +449,25 @@ export function HudDaPartida({
               ⚠
             </span>
             Amedrontado
+          </div>
+          <div
+            data-testid="hud-card-protecao"
+            data-ativo={jogadorLocal.dados.protegido ? 'true' : 'false'}
+            role="status"
+            aria-label={jogadorLocal.dados.protegido ? 'Proteção ativa' : 'Proteção inativa'}
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+              jogadorLocal.dados.protegido
+                ? 'border-cyan-400/70 bg-cyan-400/10 text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.35)]'
+                : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`block text-sm ${jogadorLocal.dados.protegido ? 'text-cyan-300' : 'text-zinc-600'}`}
+            >
+              🛡
+            </span>
+            Proteção
           </div>
         </div>
       </div>
