@@ -27,14 +27,31 @@ const MOCK_SALA = {
   encerrarSala: () => {}, iniciarPartida: () => {}, expulso: false, descartarExpulsao: () => {},
 }
 
-async function anuncioComJogadores(jogadores: EstadoDaPartidaSnapshot['jogadores']) {
+function criarMembro(id: string, apelido: string, ordemDeEntrada: number) {
+  return {
+    id, jogadorId: `jogador-${id}`, apelido, ordemDeEntrada,
+    presenca: 'conectado' as const, prontidao: true,
+  }
+}
+
+function contextoComSala(apelidos: string[]) {
+  const membros = apelidos.map((apelido, i) => criarMembro(`m${i + 1}`, apelido, i))
+  const sala = {
+    id: 'sala-1', codigoDeSala: 'A3K9M2', estado: 'encaminhada' as const,
+    anfitriaoId: membros[0].id, membros,
+    convite: { codigoDeSala: 'A3K9M2', link: 'http://localhost/sala/A3K9M2' },
+  }
+  return { ...MOCK_SALA, sala }
+}
+
+async function admitirNaPartida(contexto: typeof MOCK_SALA) {
   const router = createMemoryRouter(
     [{ path: '/partida', element: <PartidaPage /> }],
     { initialEntries: ['/partida?serverId=s&partidaId=p'] },
   )
   render(
     <AuthProvider initialState={mockAuthenticatedState}>
-      <SalaWebSocketContext.Provider value={MOCK_SALA as unknown as UseSalaWebSocketReturn}>
+      <SalaWebSocketContext.Provider value={contexto as unknown as UseSalaWebSocketReturn}>
         <RouterProvider router={router} />
       </SalaWebSocketContext.Provider>
     </AuthProvider>,
@@ -48,6 +65,11 @@ async function anuncioComJogadores(jogadores: EstadoDaPartidaSnapshot['jogadores
     }),
   )
   await screen.findByTestId('tabuleiro')
+  return ws
+}
+
+async function anuncioComJogadores(jogadores: EstadoDaPartidaSnapshot['jogadores']) {
+  const ws = await admitirNaPartida(MOCK_SALA)
   act(() =>
     ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: snapshotComJogadores(jogadores) }),
   )
@@ -75,5 +97,12 @@ describe('anúncio da partida com N real (#284)', () => {
     expect(anuncio).toHaveTextContent('Jogador Ativo')
     expect(anuncio).toHaveTextContent('Portão de Saída')
     expect(anuncio).not.toHaveTextContent('vez de')
+  })
+
+  it('pré-snapshot a mesa já nasce com o N da Sala (N=2, sem fantasmas)', async () => {
+    await admitirNaPartida(contextoComSala(['Eu', 'Ana']))
+    // Seed com o N real da Sala: 2 peões antes de qualquer snapshot.
+    expect(screen.getAllByTestId('peao')).toHaveLength(2)
+    expect(screen.getByTestId('anuncio-partida')).toHaveTextContent('Partida com 2 jogadores')
   })
 })

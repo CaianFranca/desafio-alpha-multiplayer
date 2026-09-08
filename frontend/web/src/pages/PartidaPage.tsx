@@ -49,7 +49,7 @@ import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
-import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
+import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
@@ -105,7 +105,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
 
   // ── Modelo local do tabuleiro (deltas + snapshot) ──
-  const [modelo, despachar] = useReducer(reduzirModelo, undefined, criarEstadoInicialDoCliente)
+  // Seed com o N real da Sala (#284): sem ele, a mesa nascia sempre com 4
+  // peões/iniciais até o snapshot corrigir. Sem sala (link direto), fallback
+  // 4 por compatibilidade — o snapshot continua sendo a autoridade.
+  const quantidadeDeMembrosDaSala = useQuantidadeDeMembrosDaSalaOptional()
+  const [modelo, despachar] = useReducer(reduzirModelo, quantidadeDeMembrosDaSala ?? 4, criarEstadoInicialDoCliente)
   const despacharEvento = useCallback(
     (evento: Parameters<typeof reduzirEvento>[1]) => despachar({ type: 'EVENTO', evento }),
     [],
