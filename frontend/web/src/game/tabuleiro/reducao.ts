@@ -31,7 +31,9 @@
  *   - VAGA_DA_PECA_RECEBIDA_ESCOLHIDO fixa a vaga/célula-alvo e seleciona a
  *     Recebida (pecaSelecionadaId) até o encaixe.
  *   - PEAO_POSICIONADO re-seleciona o peão (Primeiro Turno, partida.ts:344);
- *     PEAO_MOVIDO/PEAO_PERMANECEU limpam a seleção (mover/permanecer).
+ *     PEAO_MOVIDO mantém selecionado o peão movido (mover_peaoDaPartida
+ *     re-seleciona para encerrar o turno sem seleção intermediária, #263);
+ *     PEAO_PERMANECEU limpa a seleção (permanecer).
  *   - PEAO_DESELECIONADO limpa a seleção vigente (desseleção autoritativa do
  *     servidor, issue #249 — idempotentes não reemitem, fora de sequência é
  *     no-op); o snapshot é a autoridade total da seleção no reload.
@@ -456,13 +458,13 @@ export function reduzirEvento(
       const peoes = estado.peoes.map((p) =>
         p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
       )
-      // mover_peao no engine limpa o peaoSelecionadoId — o cliente espelha
-      // para não manter seleção obsoleta. Dentro do turno, o movimento marca
-      // a fase e atribui o peão ao Jogador Ativo (issue #118).
+      // mover_peaoDaPartida re-seleciona o Peão para que o turno possa ser
+      // encerrado sem seleção intermediária. Dentro do turno, o movimento
+      // marca a fase e atribui o peão ao Jogador Ativo (issue #118).
       return {
         ...estado,
         peoes,
-        peaoSelecionadoId: null,
+        peaoSelecionadoId: evento.peaoId,
         movimentouNoTurno:
           estado.jogadorAtivoId !== null ? true : estado.movimentouNoTurno,
         peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
