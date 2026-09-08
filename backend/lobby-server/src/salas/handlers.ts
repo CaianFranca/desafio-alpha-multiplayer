@@ -112,6 +112,18 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
 /** Tamanho máximo de uma mensagem de chat (issue #34). Sem trim. */
 const TAMANHO_MAXIMO_MENSAGEM = 500;
 
+// Jogador do novo Anfitrião no estado resultante (lookups extraídos — review
+// interna #304): `estado.salas.find(...).membros.find(...)` sem chains.
+function jogadorNovoAnfitriao(
+  estado: EstadoDoLobby,
+  salaId: string,
+  anfitriaoNovoMembroId: string | null,
+): string | undefined {
+  if (anfitriaoNovoMembroId === null) return undefined;
+  const salaNova = estado.salas.find((s) => s.id === salaId);
+  return salaNova?.membros.find((m) => m.id === anfitriaoNovoMembroId)?.jogadorId;
+}
+
 /**
  * Conjunto fechado dos `type` aceitos em `SalaComandoDoCliente`. Usado por
  * `ws.ts` para decidir entre Salas e PING/PONG sem precisar repassar a
@@ -533,19 +545,12 @@ export class SalasHandlers {
     );
     // A sucessão do Anfitrião é gravada no mesmo commit da saída para que a
     // reconstrução do boot (ADR-0002) não restaure um Anfitrião já sucedido.
-    let novoAnfitriaoJogadorId: string | undefined;
     const sucessao = resultado.eventos.find(
       (e) => e.tipo === 'anfitriao_sucedido',
     );
-    if (sucessao?.tipo === 'anfitriao_sucedido') {
-      const salaNova = resultado.estado.salas.find((s) => s.id === salaId);
-      const membroNovo = salaNova?.membros.find(
-        (m) => m.id === sucessao.anfitriaoNovoId,
-      );
-      if (membroNovo !== undefined) {
-        novoAnfitriaoJogadorId = membroNovo.jogadorId;
-      }
-    }
+    const novoAnfitriaoJogadorId = sucessao?.tipo === 'anfitriao_sucedido'
+      ? jogadorNovoAnfitriao(resultado.estado, salaId, sucessao.anfitriaoNovoId)
+      : undefined;
     await this.repo.sairMembroAtomico(
       salaId,
       jogadorId,
@@ -1362,19 +1367,12 @@ export class SalasHandlers {
       return;
     }
     const salaEncerrada = res.eventos.some((e) => e.tipo === 'sala_encerrada');
-    let novoAnfitriaoJogadorId: string | undefined;
     const sucessao = res.eventos.find(
       (e) => e.tipo === 'anfitriao_sucedido',
     );
-    if (sucessao?.tipo === 'anfitriao_sucedido') {
-      const salaNova = res.estado.salas.find((s) => s.id === salaId);
-      const membroNovo = salaNova?.membros.find(
-        (m) => m.id === sucessao.anfitriaoNovoId,
-      );
-      if (membroNovo !== undefined) {
-        novoAnfitriaoJogadorId = membroNovo.jogadorId;
-      }
-    }
+    const novoAnfitriaoJogadorId = sucessao?.tipo === 'anfitriao_sucedido'
+      ? jogadorNovoAnfitriao(res.estado, salaId, sucessao.anfitriaoNovoId)
+      : undefined;
     await this.repo.sairMembroAtomico(salaId, jogadorId, 'saida', salaEncerrada, novoAnfitriaoJogadorId);
     const codigoPre = this.estado.abertas.get(salaId)?.sala.codigo ?? null;
     this.estado.substituirEstado(res.estado);

@@ -96,7 +96,7 @@ export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promi
 // `em_andamento` (com PERSIST). O script só remove se a partida ainda está em
 // `preparada`; retorna 0 quando a condição falha, e o chamador reagenda sem
 // chutar sockets.
-const SCRIPT_CANCELAR_NAO_INICIADA = `
+const SCRIPT_CANCELAR_SE_NAO_INICIADA = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then
   return 0
@@ -110,10 +110,10 @@ redis.call('DEL', KEYS[2])
 return 1
 `.trim();
 
-export async function cancelarPartidaNaoIniciada(redis: Redis, partidaId: string): Promise<boolean> {
+export async function cancelarPartidaSeNaoIniciada(redis: Redis, partidaId: string): Promise<boolean> {
   const removida =
     (await redis.eval(
-      SCRIPT_CANCELAR_NAO_INICIADA,
+      SCRIPT_CANCELAR_SE_NAO_INICIADA,
       2,
       chaveDaPartida(partidaId),
       chaveDoEstadoDaPartida(partidaId),

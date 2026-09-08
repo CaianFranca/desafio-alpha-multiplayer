@@ -10,6 +10,7 @@ import {
   rearmarNaoInicioAposRestart,
   verificarNaoInicioSeNecessario,
 } from '../src/partidas/nao-inicio.ts';
+import { redisFalsoDoRearme } from './helpers/redis-falso-do-rearme.ts';
 
 const PARTIDA_ID = '22222222-2222-4222-8222-222222222222';
 const CHAVE_PARTIDA = `game-server:partida:${PARTIDA_ID}`;
@@ -58,7 +59,7 @@ test('A1: rearme usa COUNT 500 no SCAN (anti-thundering-herd)', async () => {
   const observacao = { scanArgs: [] as unknown[][] };
   configurarNaoInicio(undefined, 90);
   try {
-    await rearmarNaoInicioAposRestart(redisFalso(store, observacao));
+    await rearmarNaoInicioAposRestart(redisFalsoDoRearme(store, observacao));
     const counts = observacao.scanArgs.map((args) => {
       const i = args.indexOf('COUNT');
       return i >= 0 ? Number(args[i + 1]) : null;
@@ -148,7 +149,7 @@ test('A3: criadaEm inválida (NaN) nunca agenda nem declara não-início', async
   } as unknown as Redis;
   let encerramentos = 0;
   definirBroadcasterParaNaoInicio({
-    encerrarPorNaoInicio() {
+    fecharSocketsDeNaoInicio() {
       encerramentos += 1;
     },
   });
@@ -174,7 +175,7 @@ test('A3: criadaEm inválida (NaN) nunca agenda nem declara não-início', async
     assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
   } finally {
     (globalThis as unknown as { setTimeout: unknown }).setTimeout = originalSetTimeout;
-    definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
+    definirBroadcasterParaNaoInicio({ fecharSocketsDeNaoInicio() {} });
     cancelarNaoInicio(PARTIDA_ID);
   }
 });
@@ -193,7 +194,7 @@ test('A4: cancelamento recusado (DEL condicional) não chuta sockets', async () 
   } as unknown as Redis;
   let encerramentos = 0;
   definirBroadcasterParaNaoInicio({
-    encerrarPorNaoInicio() {
+    fecharSocketsDeNaoInicio() {
       encerramentos += 1;
     },
   });
@@ -204,7 +205,7 @@ test('A4: cancelamento recusado (DEL condicional) não chuta sockets', async () 
     assert.equal(encerramentos, 0, 'sockets devem permanecer intactos com cancelamento recusado');
     assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
   } finally {
-    definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
+    definirBroadcasterParaNaoInicio({ fecharSocketsDeNaoInicio() {} });
     cancelarNaoInicio(PARTIDA_ID);
   }
 });
@@ -239,7 +240,7 @@ test('TOCTOU: partida que virou em_andamento entre GET e DEL não é cancelada',
   } as unknown as Redis;
   let encerramentos = 0;
   definirBroadcasterParaNaoInicio({
-    encerrarPorNaoInicio() {
+    fecharSocketsDeNaoInicio() {
       encerramentos += 1;
     },
   });
@@ -265,7 +266,7 @@ test('TOCTOU: partida que virou em_andamento entre GET e DEL não é cancelada',
       'o estado em_andamento não pode ser destruído pelo não-início',
     );
   } finally {
-    definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
+    definirBroadcasterParaNaoInicio({ fecharSocketsDeNaoInicio() {} });
     cancelarNaoInicio(PARTIDA_ID);
   }
 });
@@ -290,7 +291,7 @@ test('TOCTOU: partida ainda preparada no eval é cancelada normalmente', async (
   } as unknown as Redis;
   let encerramentos = 0;
   definirBroadcasterParaNaoInicio({
-    encerrarPorNaoInicio() {
+    fecharSocketsDeNaoInicio() {
       encerramentos += 1;
     },
   });
@@ -301,7 +302,7 @@ test('TOCTOU: partida ainda preparada no eval é cancelada normalmente', async (
     assert.equal(encerramentos, 1, 'sockets devem ser chutados no cancelamento válido');
     assert.ok(!store.has(CHAVE_PARTIDA), 'chave da partida preparada deve ser removida');
   } finally {
-    definirBroadcasterParaNaoInicio({ encerrarPorNaoInicio() {} });
+    definirBroadcasterParaNaoInicio({ fecharSocketsDeNaoInicio() {} });
     cancelarNaoInicio(PARTIDA_ID);
   }
 });

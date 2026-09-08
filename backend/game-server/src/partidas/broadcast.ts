@@ -76,7 +76,7 @@ export class PartidaBroadcaster {
   }
 
   /** Fecha todos os sockets de uma partida não iniciada para forçar reconnect → ADMISSAO_REJEITADA no upgrade. */
-  encerrarPorNaoInicio(partidaId: string, code = 4000, reason = 'PARTIDA_NAO_INICIADA'): void {
+  fecharSocketsDeNaoInicio(partidaId: string, code = 4000, reason = 'PARTIDA_NAO_INICIADA'): void {
     const sockets = this.partidaParaSockets.get(partidaId);
     if (sockets === undefined) return;
     for (const socket of [...sockets]) {

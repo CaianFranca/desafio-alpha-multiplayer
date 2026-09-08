@@ -1,12 +1,12 @@
 import type { Redis } from 'ioredis';
 import { chaveDaPartida } from './chaves.ts';
-import { cancelarPartidaNaoIniciada, obterPartida } from './partidas.ts';
+import { cancelarPartidaSeNaoIniciada, obterPartida } from './partidas.ts';
 import type { AvisoDeRetorno } from '../retorno/cliente.ts';
 
 const NAO_INICIO_IMEDIATO_MS = 10_000;
-// Anti-thundering-herd (A1): o rearme pós-restart reagenda N partidas de uma
-// vez; sem dispersão, as expirações simultâneas atingem a fila mononodo do
-// lobby em rajada (timeout 5s → 503 → retry amplifica).
+// Anti-thundering-herd (review interna #304): o rearme pós-restart reagenda N
+// partidas de uma vez; sem dispersão, as expirações simultâneas atingem a
+// fila mononodo do lobby em rajada (timeout 5s → 503 → retry amplifica).
 const JITTER_REARME_MS = 5_000;
 const REARME_SCAN_COUNT = 500;
 const REARME_ROSTER_VAZIO_MS = 1_000;
@@ -16,8 +16,22 @@ function jitterAte(maxMs: number): number {
   return Math.floor(Math.random() * (maxMs + 1));
 }
 
-// Pipeline mínimo usado no rearme (A2): GET + TTL por chave em 1 RTT.
-// Mantém o boot O(lotes) em vez de O(chaves) sob N partidas simultâneas.
+// Guarda única das três verificações: só a Partida ainda `preparada` pode
+// declarar o não-início (predicado extraído — review interna #304).
+function partidaAindaPreparada(partida: { estado?: string }): boolean {
+  return partida.estado === 'preparada';
+}
+
+// Guarda única do roster: TODOS os membros em reconexão (roster vazio conta
+// como sim — sem nenhum admitido, o não-início é imediato; review interna
+// #304).
+function rosterTodoEmReconexao(roster: ReadonlyArray<{ presenca?: string }> | undefined): boolean {
+  return roster?.every((m) => m.presenca === 'em_reconexao') ?? false;
+}
+
+// Pipeline mínimo usado no rearme (review interna #304): GET + TTL por chave
+// em 1 RTT. Mantém o boot O(lotes) em vez de O(chaves) sob N partidas
+// simultâneas.
 interface PipelineDeLeitura {
   get(chave: string): unknown;
   ttl(chave: string): unknown;
@@ -31,31 +45,32 @@ interface LinhaDoLote {
 }
 
 async function lerLoteDoRearme(redis: Redis, chaves: string[]): Promise<LinhaDoLote[]> {
-  const uteis = chaves.filter((chave) => !chave.startsWith('game-server:partida-estado:'));
-  const fábrica = (redis as unknown as { pipeline?: unknown }).pipeline;
-  if (typeof fábrica !== 'function') {
+  const chavesDePartida = chaves.filter((chave) => !chave.startsWith('game-server:partida-estado:'));
+  const fabricaDePipeline = (redis as unknown as { pipeline?: unknown }).pipeline;
+  if (typeof fabricaDePipeline !== 'function') {
     // Fallback sequencial (ex.: fakes de teste sem pipeline).
     const lote: LinhaDoLote[] = [];
-    for (const chave of uteis) {
+    for (const chave of chavesDePartida) {
       lote.push({ chave, raw: await redis.get(chave), ttl: await redis.ttl(chave) });
     }
     return lote;
   }
-  const pipeline = (fábrica as () => PipelineDeLeitura).call(redis);
-  for (const chave of uteis) {
+  const pipeline = (fabricaDePipeline as () => PipelineDeLeitura).call(redis);
+  for (const chave of chavesDePartida) {
     pipeline.get(chave);
     pipeline.ttl(chave);
   }
   const respostas = (await pipeline.exec()) ?? [];
-  return uteis.map((chave, i) => ({
+  return chavesDePartida.map((chave, i) => ({
     chave,
     raw: (respostas[i * 2]?.[1] as string | null) ?? null,
     ttl: Number(respostas[i * 2 + 1]?.[1] ?? -2),
   }));
 }
 const timers = new Map<string, NodeJS.Timeout>();
-// Teto de reagendamentos sem wiring (N1): sem Redis o fire reagenda em vez de
-// explodir, mas não para sempre — após o teto, erra alto e para.
+// Teto de reagendamentos sem wiring (review interna #304): sem Redis o fire
+// reagenda em vez de explodir, mas não para sempre — após o teto, erra alto
+// e para.
 const MAX_REAGENDAMENTOS_SEM_REDIS = 5;
 const reagendamentosSemRedis = new Map<string, number>();
 let notificarRetorno: ((aviso: AvisoDeRetorno) => Promise<void>) | undefined;
@@ -108,29 +123,28 @@ export function cancelarNaoInicio(partidaId: string): void {
 }
 
 let globalRedis: Redis | undefined;
-let globalBroadcaster: { encerrarPorNaoInicio(partidaId: string, code?: number, reason?: string): void } | undefined;
+let globalBroadcaster: { fecharSocketsDeNaoInicio(partidaId: string, code?: number, reason?: string): void } | undefined;
 export function definirRedisParaNaoInicio(redis: Redis | undefined): void {
   globalRedis = redis;
 }
-export function definirBroadcasterParaNaoInicio(broadcaster: { encerrarPorNaoInicio(partidaId: string, code?: number, reason?: string): void }): void {
+export function definirBroadcasterParaNaoInicio(broadcaster: { fecharSocketsDeNaoInicio(partidaId: string, code?: number, reason?: string): void }): void {
   globalBroadcaster = broadcaster;
 }
 
-/** Exportado para testes de regressão (A3/A4): executa uma verificação imediata. */
+/** Exportado para testes de regressão (review interna #304): verificação imediata. */
 export async function verificarNaoInicioSeNecessario(redis: Redis, partidaId: string): Promise<boolean> {
   const partida = await obterPartida(redis, partidaId as never);
   if (partida === null) return false;
-  if (partida.estado !== 'preparada') return false;
+  if (!partidaAindaPreparada(partida)) return false;
   const idadeMs = Date.now() - Date.parse(partida.criadaEm);
   if (!Number.isFinite(idadeMs)) {
     console.warn('[nao-inicio] criadaEm inválida; não-início ignorado', { partidaId });
     return false;
   }
-  const todosEmReconexao = partida.roster.every((m) => m.presenca === 'em_reconexao');
   // Não-início em preparada: se todos em_reconexao → não-início imediato (10s já agendado),
   // senão se ainda não expirou 90s → reagenda restante, senão (idade >= 90s) declara não-início mesmo com 1-3 conectados parciais.
   // Parcial <90s mantém SALA_ENCAMINHADA no lobby; teto é comportamento desejado (#222).
-  if (!todosEmReconexao && idadeMs < naoInicioSegundos * 1000) {
+  if (!rosterTodoEmReconexao(partida.roster) && idadeMs < naoInicioSegundos * 1000) {
     const restante = naoInicioSegundos * 1000 - idadeMs;
     agendarNaoInicio(partidaId, restante);
     return false;
@@ -139,7 +153,7 @@ export async function verificarNaoInicioSeNecessario(redis: Redis, partidaId: st
   // DEL condicional por Lua (review #304 item 1): se a admissão completar
   // entre a leitura acima e o cancelamento, a partida já está em
   // `em_andamento` e o cancelamento retorna false — sem chutar sockets.
-  const cancelada = await cancelarPartidaNaoIniciada(redis, partidaIdTyped);
+  const cancelada = await cancelarPartidaSeNaoIniciada(redis, partidaIdTyped);
   if (!cancelada) {
     // DEL falhou sob carga: não chuta os sockets (evita clientes caídos com
     // chave fantasma até o TTL); reagenda para a próxima verificação.
@@ -147,7 +161,7 @@ export async function verificarNaoInicioSeNecessario(redis: Redis, partidaId: st
     return false;
   }
   try {
-    globalBroadcaster?.encerrarPorNaoInicio(partidaIdTyped, 4000, 'PARTIDA_NAO_INICIADA');
+    globalBroadcaster?.fecharSocketsDeNaoInicio(partidaIdTyped, 4000, 'PARTIDA_NAO_INICIADA');
   } catch {}
   cancelarNaoInicio(partidaIdTyped);
   if (notificarRetorno !== undefined) {
@@ -173,9 +187,8 @@ export async function verificarNaoInicioSeNecessario(redis: Redis, partidaId: st
 export async function verificarNaoInicioAposDesconexao(redis: Redis, partidaId: string): Promise<void> {
   const partida = await obterPartida(redis, partidaId as never);
   if (partida === null) return;
-  if (partida.estado !== 'preparada') return;
-  const todosEmReconexao = partida.roster.every((m) => m.presenca === 'em_reconexao');
-  if (!todosEmReconexao) return;
+  if (!partidaAindaPreparada(partida)) return;
+  if (!rosterTodoEmReconexao(partida.roster)) return;
   agendarNaoInicio(partidaId, NAO_INICIO_IMEDIATO_MS);
 }
 
@@ -195,7 +208,7 @@ export async function rearmarNaoInicioAposRestart(redis: Redis): Promise<void> {
         if (raw === null) continue;
         try {
           const partida = JSON.parse(raw) as { partidaId: string; estado: string; criadaEm: string; roster?: unknown[] };
-          if (partida.estado !== 'preparada') continue;
+          if (!partidaAindaPreparada(partida)) continue;
           const idadeMs = Date.now() - Date.parse(partida.criadaEm);
           if (!Number.isFinite(idadeMs)) {
             console.warn('[nao-inicio] criadaEm inválida no rearme; partida ignorada', { chave: linha.chave });
@@ -203,8 +216,7 @@ export async function rearmarNaoInicioAposRestart(redis: Redis): Promise<void> {
           }
           const ttl = linha.ttl;
           if (ttl === -2) continue;
-          const todosEmReconexao = (partida.roster as Array<{ presenca: string }> | undefined)?.every((m) => m.presenca === 'em_reconexao') ?? false;
-          if (todosEmReconexao) {
+          if (rosterTodoEmReconexao(partida.roster as Array<{ presenca: string }> | undefined)) {
             agendarNaoInicio(partida.partidaId, NAO_INICIO_IMEDIATO_MS + jitterAte(JITTER_REARME_MS));
             reagendadas += 1;
             continue;
