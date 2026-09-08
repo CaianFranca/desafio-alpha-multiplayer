@@ -9,7 +9,8 @@ import {
 } from './contrato'
 
 export const LIMIAR_ARRASTO_PX = 6
-export const LIMIAR_POR_TIPO: Record<string, number> = {
+export type PointerType = 'mouse' | 'pen' | 'touch'
+export const LIMIAR_POR_TIPO: Record<PointerType, number> = {
   mouse: 6,
   pen: 8,
   touch: 10,
@@ -44,8 +45,8 @@ export type AlvoXZ = { x: number; z: number }
 /** Ponto 2D genérico (px ou mundo) para helpers de geometria de ponteiros. */
 export type Ponto2D = { x: number; y: number }
 
-export function atingiuLimiar(dx: number, dy: number, pointerType?: string): boolean {
-  const tipo = pointerType ?? 'mouse'
+export function atingiuLimiar(dx: number, dy: number, pointerType?: PointerType | string): boolean {
+  const tipo = (pointerType ?? 'mouse') as PointerType
   const limiar = LIMIAR_POR_TIPO[tipo] ?? LIMIAR_ARRASTO_PX
   return Math.hypot(dx, dy) >= limiar
 }

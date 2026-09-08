@@ -32,6 +32,7 @@ import {
   type AjusteDoModeloDaCaixa,
 } from './modelosDaCaixa'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
+import { handlersDeCursor } from './cursor'
 
 interface CaixaProps {
   iniciais: readonly PecaDaMesa[]
@@ -371,13 +372,8 @@ export function Caixa({
             onClick={() => {
               despacharCliqueNaPecaDaBandeja(estadoPeoes, { onPuxar })
             }}
-            onPointerOver={(e) => {
-              if (correntePuxavel) {
-                e.stopPropagation()
-                document.body.style.cursor = 'pointer'
-              }
-            }}
-            onPointerOut={() => {
+            {...handlersDeCursor(correntePuxavel ? 'pointer' : 'default')}
+            onPointerLeave={() => {
               document.body.style.cursor = 'auto'
             }}
           >

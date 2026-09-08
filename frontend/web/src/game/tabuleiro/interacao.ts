@@ -70,9 +70,9 @@ export function cursorParaPecaPosicionada(
   return pecaEmManipulacaoId === pecaId ? 'pointer' : 'default'
 }
 
-/** Delegação pura ao limiar da câmera (6px, ver cameraLimites.ts:11). */
-export function deveSuprimirCliquePorArrasto(dx: number, dy: number): boolean {
-  return atingiuLimiar(dx, dy)
+/** Delegação pura ao limiar da câmera (adaptativo por pointerType, ver cameraLimites.ts). */
+export function deveSuprimirCliquePorArrasto(dx: number, dy: number, pointerType?: string): boolean {
+  return atingiuLimiar(dx, dy, pointerType)
 }
 
 // ── Mapeamento clique → comando ──

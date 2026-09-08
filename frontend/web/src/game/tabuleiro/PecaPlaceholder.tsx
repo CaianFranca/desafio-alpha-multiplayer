@@ -186,11 +186,7 @@ function CorpoTexturizado({
 
   return (
     <>
-      <mesh
-        position={[0, Y_CORPO, 0]}
-        onClick={handleClick}
-        {...cursorHandlers}
-      >
+      <mesh position={[0, Y_CORPO, 0]} raycast={() => null}>
         <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
         <meshStandardMaterial attach="material-0" color={COR_LATERAL} />
         <meshStandardMaterial attach="material-1" color={COR_LATERAL} />
@@ -234,11 +230,7 @@ function CorpoFallback({
 
   return (
     <>
-      <mesh
-        position={[0, Y_CORPO, 0]}
-        onClick={handleClick}
-        {...cursorHandlers}
-      >
+      <mesh position={[0, Y_CORPO, 0]} raycast={() => null}>
         <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
         <meshStandardMaterial
           color={COR_POR_TIPO[tipo]}

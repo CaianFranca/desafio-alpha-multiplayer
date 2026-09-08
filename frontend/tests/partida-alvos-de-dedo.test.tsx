@@ -186,17 +186,19 @@ describe('partida-alvos-de-dedo — hitbox invisível ampliada', () => {
     expect(fonte).toContain('transparent')
     expect(fonte).toContain('opacity={0}')
     expect(fonte).toContain('depthWrite={false}')
-    // Mesmo onClick: hitbox compartilha handleClick
+    // Mesmo onClick: só hitbox tem handleClick (visível com raycast null para evitar double-fire)
     const handleClickCount = (fonte.match(/onClick=\{handleClick\}/g) ?? []).length
-    // 1 mesh visível + 1 hitbox em cada corpo => pelo menos 4 ocorrências (2 corpos ×2)
-    expect(handleClickCount).toBeGreaterThanOrEqual(4)
-    // Contorno mantém raycast null (não rouba clique)
+    // 1 hitbox por corpo (2 corpos) => 2 ocorrências; visível usa raycast null sem onClick
+    expect(handleClickCount).toBe(2)
+    // Visível e contorno com raycast null (não rouba clique, evita double-fire)
+    const raycastNullCount = (fonte.match(/raycast=\{\(\) => null\}/g) ?? []).length
+    expect(raycastNullCount).toBeGreaterThanOrEqual(3) // 2 visíveis + 1 contorno
     expect(fonte).toContain('raycast={() => null}')
     // TAMANHO_CELULA = 1.6 conforme contrato
     expect(TAMANHO_CELULA).toBe(1.6)
   })
 
-  it('Peão: hitbox cilindro r0.7 invisível com mesmo onClick (PeaoPlaceholder + PeaoAvatar)', () => {
+  it('Peão: hitbox cilindro r0.7 invisível (group cuida do cursor, hitbox só onClick)', () => {
     const fontePlaceholder = lerFonte('frontend/web/src/game/tabuleiro/PeaoPlaceholder.tsx')
     const fonteAvatar = lerFonte('frontend/web/src/game/tabuleiro/PeaoAvatar.tsx')
     for (const fonte of [fontePlaceholder, fonteAvatar]) {
@@ -205,10 +207,13 @@ describe('partida-alvos-de-dedo — hitbox invisível ampliada', () => {
       expect(fonte).toContain('opacity={0}')
       expect(fonte).toContain('depthWrite={false}')
     }
-    // PeaoPlaceholder hitbox com altura 1 e raio 0.7
+    // PeaoPlaceholder hitbox com altura 1 e raio 0.7, só onClick na hitbox
     expect(fontePlaceholder).toContain('cylinderGeometry args={[0.7, 0.7, 1, 20]}')
+    expect(fontePlaceholder).toContain('hitboxClick')
+    expect(fontePlaceholder).toContain('onPointerLeave')
     // PeaoAvatar hitbox com altura 1.16 (ALTURA_ALVO) e raio 0.7
     expect(fonteAvatar).toContain('cylinderGeometry args={[0.7, 0.7, 1.16')
+    expect(fonteAvatar).toContain('hitboxClick')
   })
 
   it('Caixa/Bandeja: hitbox plano 2.8×2.8 invisível delegando a despacharCliqueNaPecaDaBandeja', () => {
@@ -218,6 +223,7 @@ describe('partida-alvos-de-dedo — hitbox invisível ampliada', () => {
     expect(fonte).toContain('transparent')
     expect(fonte).toContain('opacity={0}')
     expect(fonte).toContain('depthWrite={false}')
+    expect(fonte).toContain('handlersDeCursor')
     // Plano horizontal na bandeja
     expect(fonte).toContain("rotation={[-Math.PI / 2, 0, 0]}")
   })

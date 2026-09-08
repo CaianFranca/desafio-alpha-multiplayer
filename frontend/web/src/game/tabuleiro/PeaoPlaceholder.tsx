@@ -92,7 +92,8 @@ export function PeaoPlaceholder({
   const emissiveIntensity = ativo ? EMISSIVO_ATIVO : 0
 
   // Só interage ao ponteiro quando há handler de seleção.
-  const handlers = aoClicar
+  // Group cuida do cursor; hitbox invisível cuida do clique (evita double-fire).
+  const groupHandlers = aoClicar
     ? {
         onPointerOver: (e: ThreeEvent<PointerEvent>) => {
           e.stopPropagation()
@@ -101,15 +102,20 @@ export function PeaoPlaceholder({
         onPointerOut: () => {
           document.body.style.cursor = 'auto'
         },
-        onClick: (e: ThreeEvent<MouseEvent>) => {
-          e.stopPropagation()
-          aoClicar()
+        onPointerLeave: () => {
+          document.body.style.cursor = 'auto'
         },
       }
     : {}
+  const hitboxClick = aoClicar
+    ? (e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation()
+        aoClicar()
+      }
+    : undefined
 
   return (
-    <group position={position} scale={[escala, escala, escala]} {...handlers}>
+    <group position={position} scale={[escala, escala, escala]} {...groupHandlers}>
       {/* Base cilíndrica */}
       <mesh position={[0, Y_BASE, 0]}>
         <cylinderGeometry args={[BASE_RAIO, BASE_RAIO, BASE_ALTURA, 20]} />
@@ -150,9 +156,9 @@ export function PeaoPlaceholder({
           emissiveIntensity={emissiveIntensity}
         />
       </mesh>
-      {/* Hitbox invisível ampliada para dedo (r0.7) — mesmo onClick via bubbling no group, depthWrite false */}
-      {aoClicar ? (
-        <mesh position={[0, 0.5, 0]} {...handlers}>
+      {/* Hitbox invisível ampliada para dedo (r0.7) — depthWrite false */}
+      {hitboxClick ? (
+        <mesh position={[0, 0.5, 0]} onClick={hitboxClick}>
           <cylinderGeometry args={[0.7, 0.7, 1, 20]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>

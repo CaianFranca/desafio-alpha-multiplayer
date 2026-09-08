@@ -167,7 +167,8 @@ export function PeaoAvatar({
 
   // Só interage ao ponteiro quando há handler de seleção (idêntico ao
   // PeaoPlaceholder): os meshes do modelo borbulham até o grupo pai.
-  const handlers = aoClicar
+  // Group cuida do cursor; hitbox cuida do clique (evita double-fire).
+  const groupHandlers = aoClicar
     ? {
         onPointerOver: (e: ThreeEvent<PointerEvent>) => {
           e.stopPropagation()
@@ -176,19 +177,24 @@ export function PeaoAvatar({
         onPointerOut: () => {
           document.body.style.cursor = 'auto'
         },
-        onClick: (e: ThreeEvent<MouseEvent>) => {
-          e.stopPropagation()
-          aoClicar()
+        onPointerLeave: () => {
+          document.body.style.cursor = 'auto'
         },
       }
     : {}
+  const hitboxClick = aoClicar
+    ? (e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation()
+        aoClicar()
+      }
+    : undefined
 
   return (
-    <group position={position} scale={[escala, escala, escala]} {...handlers}>
+    <group position={position} scale={[escala, escala, escala]} {...groupHandlers}>
       <primitive object={cena} />
       {anelDeSelecao !== null ? <primitive object={anelDeSelecao} /> : null}
-      {aoClicar ? (
-        <mesh position={[0, 0.58, 0]} {...handlers}>
+      {hitboxClick ? (
+        <mesh position={[0, 0.58, 0]} onClick={hitboxClick}>
           <cylinderGeometry args={[0.7, 0.7, 1.16, 24]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
