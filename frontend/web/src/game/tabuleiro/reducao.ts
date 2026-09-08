@@ -203,10 +203,10 @@ export interface EstadoDoTabuleiroNoCliente {
     */
   readonly geradoresLigados: readonly string[]
   /**
-     * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
-     * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
-     * engine). O snapshot substitui a baseline (reconexão reconcilia).
-     */
+   * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
+   * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
+   * engine). O snapshot substitui a baseline (reconexão reconcilia).
+   */
   readonly cartaoDeAcessoObtido: boolean
   /** Quantidade de jogadores N=2..4 derivada do roster (snapshot); null antes do snapshot. */
   readonly quantidadeDeJogadores: number | null

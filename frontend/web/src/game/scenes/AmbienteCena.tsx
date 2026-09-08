@@ -214,7 +214,6 @@ export function AmbienteCena({
               onVooAterrissou={onVooAterrissou}
               ocultarPecaId={pecaEmVooId}
               emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
-              quantidadeDePeoes={estadoExibicao.peoes.length}
             />
             <TransicaoEncaixe
               posicionadas={estadoExibicao.posicionadas}

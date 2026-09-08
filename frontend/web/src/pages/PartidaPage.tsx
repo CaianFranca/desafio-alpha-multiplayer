@@ -539,17 +539,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
   }, [requerModoPaisagem])
 
-  // N dinâmico da partida: jogadores reais do snapshot (fallback peoes length).
-  // O fallback passa por quantidadeValidaDeJogadores (clamp 2..4): sem ele,
-  // solo (1) ou 5+ anunciavam "Partida com 1 jogadores" (#284, #281).
-  const quantidadeDeJogadores = useMemo(() => {
+  // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
+  // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
+  // (solo anuncia 1, nunca um N falso), teto usa o N válido (#284, #281).
+  const quantidadeRealDeJogadores = useMemo(() => {
     const doSnapshot = Object.keys(modelo.jogadorPorId).length
-    if (doSnapshot >= 2 && doSnapshot <= 4) return doSnapshot
-    if (modelo.peoes.length >= 2 && modelo.peoes.length <= 4) return modelo.peoes.length
-    return quantidadeValidaDeJogadores(doSnapshot || modelo.peoes.length || 4)
-  }, [modelo.jogadorPorId, modelo.peoes.length])
-  const textoVez = modelo.jogadorAtivoId ? (modelo.jogadorPorId[modelo.jogadorAtivoId]?.apelido ?? 'desconhecido') : 'nenhum'
-  const proxOrdem = useMemo(() => {
+    if (doSnapshot > 0) return doSnapshot
+    if (modelo.quantidadeDeJogadores != null) return modelo.quantidadeDeJogadores
+    return modelo.peoes.length
+  }, [modelo.jogadorPorId, modelo.quantidadeDeJogadores, modelo.peoes.length])
+  const quantidadeParaTeto = quantidadeValidaDeJogadores(quantidadeRealDeJogadores)
+  const textoJogadorAtivo = modelo.jogadorAtivoId ? (modelo.jogadorPorId[modelo.jogadorAtivoId]?.apelido ?? 'desconhecido') : 'nenhum'
+  const ordemDeEntradaTexto = useMemo(() => {
     const ordem = Object.entries(modelo.jogadorPorId)
       .map(([id, d]) => ({ id, ordem: d.ordem }))
       .sort((a, b) => a.ordem - b.ordem)
@@ -569,7 +570,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         className="sr-only"
       >
         {estadoEmAndamento
-          ? `Partida com ${quantidadeDeJogadores} jogadores, rodada ${modelo.rodada ?? 1}, vez de ${textoVez}, ordem ${proxOrdem}, Portão teto ${quantidadeDeJogadores}`
+          ? `Partida com ${quantidadeRealDeJogadores} ${quantidadeRealDeJogadores === 1 ? 'jogador' : 'jogadores'}, rodada ${modelo.rodada ?? 1}, Jogador Ativo ${textoJogadorAtivo}, ordem de entrada ${ordemDeEntradaTexto}, Portão de Saída teto ${quantidadeParaTeto}`
           : ''}
       </div>
       <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>

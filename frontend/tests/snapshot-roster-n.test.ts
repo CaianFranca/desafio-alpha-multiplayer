@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { criarEstadoInicialDoCliente } from '../web/src/game/tabuleiro/reducao'
 import { aplicarSnapshot } from '../web/src/game/tabuleiro/snapshot'
-import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
+import { jogador, snapshotComJogadores } from './helpers/rosterN'
 
 // Roster variável N=2..4 no snapshot (issue #284, história 4 da #281):
 // o cliente exibe os peões dos jogadores (peaoId da ordem de entrada),
@@ -15,54 +15,43 @@ const PEOES_4 = [
   { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
 ] as const
 
-function jogador(id: string, apelido: string, cor: 'branco' | 'vermelho' | 'azul' | 'amarelo', ordem: number) {
-  return {
-    jogadorId: id, apelido, cor, ordem, peaoId: `peao-${cor}`,
-    primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false,
-    amedrontado: false, protegido: false,
-  }
-}
-
-function snapshotComJogadores(
-  jogadores: EstadoDaPartidaSnapshot['jogadores'],
-): EstadoDaPartidaSnapshot {
-  return {
-    tabuleiro: {
-      posicionadas: [],
-      iniciais: [],
-      peoes: [...PEOES_4],
-      recebidas: [],
-      pecaSelecionadaId: null,
-      pecaEmManipulacaoId: null,
-      peaoSelecionadoId: null,
-      pecasRestantesNaCaixa: 83,
-    },
-    jogadores,
-    jogadorAtivoId: jogadores[0]?.jogadorId ?? 'j1',
-    rodada: 1,
-    pecaDoInicioDoTurnoId: null,
-    posicaoConfirmada: false,
-    celulasIluminadas: [],
-    estado: 'em_andamento',
-    resultado: null,
-    geradoresLigados: [],
-    cartaoDeAcessoObtido: false,
-  } as unknown as EstadoDaPartidaSnapshot
-}
+const INICIAIS_4 = [
+  { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0 },
+  { pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 },
+  { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 0 },
+  { pecaId: 'inicial-4', tipo: 'inicial', orientacao: 0 },
+] as const
 
 describe('aplicarSnapshot com roster N=2..4 (#284)', () => {
   it('filtra os peões pelos peaoId dos jogadores, não por posição no array', () => {
     // Ordem de entrada: azul 1º, amarelo 2º — NÃO são os 2 primeiros canônicos.
-    const snapshot = snapshotComJogadores([
-      jogador('j1', 'Eu', 'azul', 1),
-      jogador('j2', 'Outro', 'amarelo', 2),
-    ])
+    // O tabuleiro ainda carrega os 4 (servidor pré-fiação #283).
+    const snapshot = snapshotComJogadores(
+      [
+        jogador('j1', 'Eu', 'azul', 1),
+        jogador('j2', 'Outro', 'amarelo', 2),
+      ],
+      [...PEOES_4],
+    )
     const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
     expect(estado.peoes.map((p) => p.peaoId)).toEqual(['peao-azul', 'peao-amarelo'])
   })
 
+  it('projeta só as N iniciais do roster, sem fantasmas do ausente', () => {
+    const snapshot = snapshotComJogadores(
+      [
+        jogador('j1', 'Eu', 'azul', 1),
+        jogador('j2', 'Outro', 'amarelo', 2),
+      ],
+      [...PEOES_4],
+    )
+    snapshot.tabuleiro.iniciais = [...INICIAIS_4] as unknown as typeof snapshot.tabuleiro.iniciais
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
+    expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-1', 'inicial-2'])
+  })
+
   it('sem jogadores no snapshot mantém a lista cheia (fallback defensivo)', () => {
-    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([]))
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([], [...PEOES_4]))
     expect(estado.peoes).toHaveLength(4)
   })
 })
