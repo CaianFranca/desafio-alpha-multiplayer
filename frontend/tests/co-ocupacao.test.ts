@@ -71,12 +71,21 @@ describe('arranjo visual de co-ocupação — seam puro (issue #298)', () => {
     expect(Number.isNaN(layout.dz)).toBe(false)
   })
 
-  it('Portão: índice além do teto (defensivo) clampa no último canto (IE), sem NaN', () => {
+  it('Portão: 5º ocupante (teto 4 + resgate #171) ocupa o centro, sem sobrepor o IE', () => {
     const fila = ['p1', 'p2', 'p3', 'p4', 'p5']
     const layout = layoutDoPeaoNaCelula('portao_de_saida', fila, 'p5')
-    expect([layout.dx, layout.dz]).toEqual(CANTOS_DO_PORTAO[3])
+    expect(layout).toEqual({ dx: 0, dz: 0 })
     expect(Number.isNaN(layout.dx)).toBe(false)
     expect(Number.isNaN(layout.dz)).toBe(false)
+  })
+
+  it('Portão com 5 ocupantes: 5 posições distintas (4 cantos + centro)', () => {
+    const fila = ['p1', 'p2', 'p3', 'p4', 'p5']
+    const posicoes = fila.map((peaoId) => {
+      const layout = layoutDoPeaoNaCelula('portao_de_saida', fila, peaoId)
+      return `${layout.dx},${layout.dz}`
+    })
+    expect(new Set(posicoes).size).toBe(5)
   })
 
   it('peça comum (resgate #171): 1º ocupante no centro; 2º no canto SE', () => {
