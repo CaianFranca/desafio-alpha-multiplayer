@@ -658,9 +658,24 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
       })
     })
 
-    // Fase sem movimento: Permanecer → PERMANECER com o peaoId próprio.
+    // Fase sem movimento: botão sem seleção prévia faz 1-clique
+    // (SELECIONAR_PEAO e, ao chegar o ack PEAO_SELECIONADO, PERMANECER).
+    // PEAO_PERMANECEU acima limpa a seleção (reducao.ts), então o botão parte
+    // sem seleção — antes do fix ele enviava PERMANECER direto e o servidor
+    // rejeitava com PEAO_NAO_SELECIONADO.
     const user = userEvent.setup()
     await user.click(screen.getByTestId('botao-permanecer'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'SELECIONAR_PEAO',
+        peaoId: 'peao-branco',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
     await waitFor(() => {
       const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
       expect(JSON.parse(ultimo)).toEqual({
@@ -713,6 +728,123 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
         jogadorId: MEU_JOGADOR_ID,
       })
     })
+  })
+
+  it('botão Permanecer com peão já selecionado (token+botão) envia PERMANECER direto', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_PERMANECEU',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+      })
+    })
+    // Seleção prévia via token (ack do servidor).
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('botao-permanecer'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'PERMANECER',
+        peaoId: 'peao-branco',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+    // Nenhum SELECIONAR_PEAO extra no caminho direto.
+    expect(
+      ws.sentMessages.map((m) => (JSON.parse(m) as { type: string }).type),
+    ).not.toContain('SELECIONAR_PEAO')
+  })
+
+  it('duplo-clique no botão antes do ack envia 1 só SELECIONAR e 1 PERMANECER após o ack', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_PERMANECEU',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+      })
+    })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('botao-permanecer'))
+    await user.click(screen.getByTestId('botao-permanecer'))
+    await waitFor(() => {
+      expect(
+        ws.sentMessages.filter(
+          (m) => (JSON.parse(m) as { type: string }).type === 'SELECIONAR_PEAO',
+        ),
+      ).toHaveLength(1)
+    })
+
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'PERMANECER',
+        peaoId: 'peao-branco',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+    expect(
+      ws.sentMessages.filter(
+        (m) => (JSON.parse(m) as { type: string }).type === 'PERMANECER',
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('ERRO após o SELECIONAR do 1-clique descarta o PERMANECER pendente', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_PERMANECEU',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+      })
+    })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('botao-permanecer'))
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect((JSON.parse(ultimo) as { type: string }).type).toBe('SELECIONAR_PEAO')
+    })
+
+    // Seleção rejeitada pelo servidor: o pendente é descartado.
+    act(() => {
+      ws.simulateMessage({
+        type: 'ERRO_DO_TABULEIRO',
+        codigo: 'PENDENCIA_NAO_RESOLVIDA',
+        mensagem: 'Há pendências.',
+      })
+    })
+    // Seleção tardia (de outro fluxo) não deve disparar PERMANECER fantasma:
+    // a vez segue minha, mas o pendente foi descartado no erro.
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+    })
+    await act(async () => {})
+    expect(
+      ws.sentMessages.map((m) => (JSON.parse(m) as { type: string }).type),
+    ).not.toContain('PERMANECER')
   })
 
   it('ERRO_DO_TABULEIRO FORA_DA_VEZ toca som de recusa com motivo e anuncia (issue #118)', async () => {
