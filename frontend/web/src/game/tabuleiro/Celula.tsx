@@ -79,9 +79,11 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
 /**
  * Relevo das paredes do grid (issue #278): mesmo ponto de partida das peças
  * (`RELEVO_TOPO_NORMAL_SCALE` em `PecaPlaceholder`) — realça o normalMap sob
- * a luz rasante da cena sem amplificar ruído além do motivo.
+ * a luz rasante da cena sem amplificar ruído além do motivo. Piso afundado
+ * usa relevo menor para leitura de vazio; borda usa o ponto cheio.
  */
-const RELEVO_TABULEIRO_NORMAL_SCALE: readonly [number, number] = [1.6, 1.6]
+const RELEVO_PISO_NORMAL_SCALE: readonly [number, number] = [1.0, 1.0]
+const RELEVO_BORDA_NORMAL_SCALE: readonly [number, number] = [1.6, 1.6]
 
 /** Texturas do grid com cor no map (sRGB) e dado linear no normal. */
 function useTexturasDoTabuleiro(): { mapa: THREE.Texture; normal: THREE.Texture } {
@@ -94,8 +96,15 @@ function useTexturasDoTabuleiro(): { mapa: THREE.Texture; normal: THREE.Texture 
   return useMemo(() => {
     const mapa = mapCarregado.clone()
     mapa.colorSpace = THREE.SRGBColorSpace
+    mapa.wrapS = THREE.RepeatWrapping
+    mapa.wrapT = THREE.RepeatWrapping
+    mapa.anisotropy = 4
     mapa.needsUpdate = true
     const normal = normalCarregado.clone()
+    normal.colorSpace = THREE.NoColorSpace
+    normal.wrapS = THREE.RepeatWrapping
+    normal.wrapT = THREE.RepeatWrapping
+    normal.anisotropy = 4
     normal.needsUpdate = true
     return { mapa, normal }
   }, [mapCarregado, normalCarregado])
@@ -133,7 +142,9 @@ function SuperficiesTexturizadas({
           color={corPlano}
           map={mapa}
           normalMap={normal}
-          normal-scale={RELEVO_TABULEIRO_NORMAL_SCALE}
+          normal-scale={RELEVO_PISO_NORMAL_SCALE}
+          roughness={0.95}
+          metalness={0}
           transparent
           opacity={opacidadePlano}
           toneMapped={false}
@@ -147,7 +158,9 @@ function SuperficiesTexturizadas({
               color={COR_BORDA_CELULA}
               map={mapa}
               normalMap={normal}
-              normal-scale={RELEVO_TABULEIRO_NORMAL_SCALE}
+              normal-scale={RELEVO_BORDA_NORMAL_SCALE}
+              roughness={0.7}
+              metalness={0}
               transparent
               opacity={0.95}
               toneMapped={false}
