@@ -44,7 +44,7 @@ function contextoComSala(apelidos: string[]) {
   return { ...MOCK_SALA, sala }
 }
 
-async function admitirNaPartida(contexto: typeof MOCK_SALA) {
+async function admitirNaPartida(contexto: typeof MOCK_SALA | ReturnType<typeof contextoComSala>) {
   const router = createMemoryRouter(
     [{ path: '/partida', element: <PartidaPage /> }],
     { initialEntries: ['/partida?serverId=s&partidaId=p'] },

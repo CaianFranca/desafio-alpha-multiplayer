@@ -45,8 +45,14 @@ describe('aplicarSnapshot com roster N=2..4 (#284)', () => {
       ],
       [...PEOES_4],
     )
-    snapshot.tabuleiro.iniciais = [...INICIAIS_4] as unknown as typeof snapshot.tabuleiro.iniciais
-    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshot)
+    const comIniciais = {
+      ...snapshot,
+      tabuleiro: {
+        ...snapshot.tabuleiro,
+        iniciais: [...INICIAIS_4] as unknown as typeof snapshot.tabuleiro.iniciais,
+      },
+    }
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), comIniciais)
     expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-1', 'inicial-2'])
   })
 
