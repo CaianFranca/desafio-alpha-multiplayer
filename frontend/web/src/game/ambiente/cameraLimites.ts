@@ -9,6 +9,11 @@ import {
 } from './contrato'
 
 export const LIMIAR_ARRASTO_PX = 6
+export const LIMIAR_POR_TIPO: Record<string, number> = {
+  mouse: 6,
+  pen: 8,
+  touch: 10,
+}
 export const FATOR_ZOOM_MAX = 2.8
 export const SENSIBILIDADE_WHEEL = 0.002
 
@@ -39,8 +44,10 @@ export type AlvoXZ = { x: number; z: number }
 /** Ponto 2D genérico (px ou mundo) para helpers de geometria de ponteiros. */
 export type Ponto2D = { x: number; y: number }
 
-export function atingiuLimiar(dx: number, dy: number): boolean {
-  return Math.hypot(dx, dy) >= LIMIAR_ARRASTO_PX
+export function atingiuLimiar(dx: number, dy: number, pointerType?: string): boolean {
+  const tipo = pointerType ?? 'mouse'
+  const limiar = LIMIAR_POR_TIPO[tipo] ?? LIMIAR_ARRASTO_PX
+  return Math.hypot(dx, dy) >= limiar
 }
 
 export function worldPerPixel(fovGraus: number, distancia: number, clientHeight: number): number {

@@ -187,6 +187,12 @@ export function PeaoAvatar({
     <group position={position} scale={[escala, escala, escala]} {...handlers}>
       <primitive object={cena} />
       {anelDeSelecao !== null ? <primitive object={anelDeSelecao} /> : null}
+      {aoClicar ? (
+        <mesh position={[0, 0.58, 0]} {...handlers}>
+          <cylinderGeometry args={[0.7, 0.7, 1.16, 24]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      ) : null}
     </group>
   )
 }

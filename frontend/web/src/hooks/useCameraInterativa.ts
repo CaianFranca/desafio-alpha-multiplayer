@@ -55,6 +55,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
   const pinchRef = useRef<EstadoPinch>(criarPinchInicial())
 
   const ponteirosRef = useRef<Map<number, Ponto2D>>(new Map())
+  const tipoPorPointerIdRef = useRef<Map<number, string>>(new Map())
 
   function getAspectVis(): number {
     return aspectoVisivel({ width, height }, bordaPx)
@@ -138,6 +139,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
 
     function onPointerDown(e: PointerEvent): void {
       ponteirosRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      tipoPorPointerIdRef.current.set(e.pointerId, (e as PointerEvent & { pointerType?: string }).pointerType ?? 'mouse')
 
       if (ponteirosRef.current.size === 2) {
         const d = distanciaPinch(ponteirosRef.current)
@@ -181,7 +183,8 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
       const totalDy = e.clientY - dragRef.current.inicioY
 
       if (!dragRef.current.engatado) {
-        if (!atingiuLimiar(totalDx, totalDy)) return
+        const tipo = tipoPorPointerIdRef.current.get(e.pointerId) ?? 'mouse'
+        if (!atingiuLimiar(totalDx, totalDy, tipo)) return
         dragRef.current.engatado = true
         suprimirCliqueAposArrastoRef.current = true
       }
@@ -202,6 +205,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
 
     function onPointerUp(e: PointerEvent): void {
       ponteirosRef.current.delete(e.pointerId)
+      tipoPorPointerIdRef.current.delete(e.pointerId)
 
       if (pinchRef.current.ativo && ponteirosRef.current.size < 2) {
         pinchRef.current = criarPinchInicial()
@@ -259,6 +263,7 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
 
     function onBlur(): void {
       ponteirosRef.current.clear()
+      tipoPorPointerIdRef.current.clear()
       dragRef.current = criarDragInicial()
       pinchRef.current = criarPinchInicial()
     }

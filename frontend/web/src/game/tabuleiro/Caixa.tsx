@@ -363,6 +363,28 @@ export function Caixa({
             }
           />
         ) : null}
+        {/* Hitbox invisível ampliada da bandeja (2.8×2.8) para dedo: irmão do PecaPlaceholder, mesmo despachador, depthWrite false */}
+        {onPuxar ? (
+          <mesh
+            position={[0, 0.025, 0]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            onClick={() => {
+              despacharCliqueNaPecaDaBandeja(estadoPeoes, { onPuxar })
+            }}
+            onPointerOver={(e) => {
+              if (correntePuxavel) {
+                e.stopPropagation()
+                document.body.style.cursor = 'pointer'
+              }
+            }}
+            onPointerOut={() => {
+              document.body.style.cursor = 'auto'
+            }}
+          >
+            <planeGeometry args={[2.8, 2.8]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          </mesh>
+        ) : null}
       </group>
 
       {/* Peças Iniciais na frente da bandeja, em grade 2×2, clicáveis (ST-09). */}

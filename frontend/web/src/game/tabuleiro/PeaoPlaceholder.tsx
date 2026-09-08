@@ -150,6 +150,13 @@ export function PeaoPlaceholder({
           emissiveIntensity={emissiveIntensity}
         />
       </mesh>
+      {/* Hitbox invisível ampliada para dedo (r0.7) — mesmo onClick via bubbling no group, depthWrite false */}
+      {aoClicar ? (
+        <mesh position={[0, 0.5, 0]} {...handlers}>
+          <cylinderGeometry args={[0.7, 0.7, 1, 20]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      ) : null}
       {selecionado ? (
         <>
           {/* Cascas de contorno: mesma geometria, BackSide, sem clique */}

@@ -208,6 +208,14 @@ function CorpoTexturizado({
         <meshStandardMaterial attach="material-4" color={COR_LATERAL} />
         <meshStandardMaterial attach="material-5" color={COR_LATERAL} />
       </mesh>
+      <mesh
+        position={[0, Y_CORPO, 0]}
+        onClick={handleClick}
+        {...cursorHandlers}
+      >
+        <boxGeometry args={[TAMANHO_CELULA, ESPESSURA_PECA, TAMANHO_CELULA]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
       <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
     </>
   )
@@ -237,6 +245,14 @@ function CorpoFallback({
           transparent
           opacity={0.88}
         />
+      </mesh>
+      <mesh
+        position={[0, Y_CORPO, 0]}
+        onClick={handleClick}
+        {...cursorHandlers}
+      >
+        <boxGeometry args={[TAMANHO_CELULA, ESPESSURA_PECA, TAMANHO_CELULA]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
     </>
