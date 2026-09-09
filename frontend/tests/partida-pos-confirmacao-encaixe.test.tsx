@@ -5,7 +5,10 @@ import { AuthProvider } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
+import { conectarSocketDaPartida } from './helpers/partida-ws'
 import { SalaWebSocketContext } from '../web/src/state/sala-web-socket-context'
+import { vagasDisponiveisDoPeao } from '../web/src/game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes } from '../web/src/game/tabuleiro/interacaoPeoes'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 import type { UseSalaWebSocketReturn } from '../web/src/hooks/useSalaWebSocket'
 
@@ -117,14 +120,38 @@ function celulaDoEspelho(linha: number, coluna: number): HTMLElement {
   return celula
 }
 
+/**
+ * Espelho do teste (D4/review #333): EstadoInteracaoPeoes derivado do
+ * snapshot dessincronizado — as vagas do clique são calculadas pela MESMA
+ * derivação do módulo de interação, sem hardcode de célula/borda.
+ */
+function estadoInteracaoDoSnapshot(snapshot: EstadoDaPartidaSnapshot): EstadoInteracaoPeoes {
+  const celulaPorPecaId = new Map(
+    snapshot.tabuleiro.posicionadas.map((peca) => [peca.pecaId, peca.celula]),
+  )
+  return {
+    peoes: snapshot.tabuleiro.peoes.map((peao) => ({
+      peaoId: peao.peaoId,
+      cor: peao.cor,
+      celula: peao.pecaId === null ? null : (celulaPorPecaId.get(peao.pecaId) ?? null),
+    })),
+    posicionadas: snapshot.tabuleiro.posicionadas,
+    recebidasPendentes: snapshot.tabuleiro.recebidas,
+    peaoSelecionadoId: null,
+    peaoDoTurnoId: 'peao-branco',
+    pecaSelecionadaId: null,
+    posicaoConfirmadaNoTurno: true,
+    movimentouNoTurno: true,
+  }
+}
+
 // Issue #326: com Recebidas pendentes e o espelho sem seleção (dessincronia
 // pós-confirmação — snapshot com peaoSelecionadoId null), o clique na vaga
 // EMITE ESCOLHER_VAGA_DA_PECA_RECEBIDA via o fallback do peão do turno.
 test('encaixe pós-confirmação com espelho sem seleção usa o peão do turno (#326)', async () => {
   const user = userEvent.setup()
   renderPartida()
-  await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
-  const ws = MockWebSocket.last()!
+  const ws = await conectarSocketDaPartida()
   act(() => {
     ws.simulateMessage({
       type: 'ADMISSAO_ACEITA',
@@ -146,15 +173,21 @@ test('encaixe pós-confirmação com espelho sem seleção usa o peão do turno 
     ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshot(null) })
   })
 
+  // A vaga clicada deriva do fallback (peão do turno) — mesma função que o
+  // roteador usa no clique; nada de célula/borda fixados no teste.
+  const vagas = vagasDisponiveisDoPeao(estadoInteracaoDoSnapshot(criarSnapshot(null)))
+  const vaga = vagas[0]
+  if (!vaga) throw new Error('fallback deveria derivar ao menos uma vaga')
+
   // Puxar a corrente da bandeja.
   const corrente = screen.getByTestId('caixa-peca-sorteada')
   expect(corrente.getAttribute('data-puxada')).toBe('false')
   await user.click(corrente)
   expect(screen.getByTestId('caixa-peca-sorteada').getAttribute('data-puxada')).toBe('true')
 
-  // Clique na vaga ao norte da peça sob o peão (1,3) — com o fallback, o
-  // comando vai ao wire em vez de clique mudo.
-  await user.click(celulaDoEspelho(1, 3))
+  // Clique na célula da vaga derivada — com o fallback, o comando vai ao wire
+  // em vez de clique mudo.
+  await user.click(celulaDoEspelho(vaga.celula.linha, vaga.celula.coluna))
   await waitFor(() => {
     const comandos = ws.sentMessages.map((m) => JSON.parse(m) as Record<string, unknown>)
     const escolha = comandos.find(
@@ -164,7 +197,7 @@ test('encaixe pós-confirmação com espelho sem seleção usa o peão do turno 
     expect(escolha).toMatchObject({
       type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
       recebidaId: 'recebida-reta-9',
-      borda: 'norte',
+      borda: vaga.borda,
     })
   })
 })
