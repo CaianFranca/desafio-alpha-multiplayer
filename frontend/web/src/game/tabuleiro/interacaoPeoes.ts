@@ -325,18 +325,37 @@ function celulaVizinhaNaBorda(celula: Celula, borda: BordaCardinal): Celula | nu
   return vizinha
 }
 
+// O default documentado (M1/review #333) emite UMA vez por sessão: o flag é
+// estado de módulo — o warn da PartidaPage cobre a fonte; este cobre os
+// consumidores (cena, espelho e testes).
+let avisoPeaoDoTurnoAusenteEmitido = false
+
 /**
  * Peão de referência da sequência pendente (#326): a seleção vigente; com
  * Recebidas pendentes e espelho dessincronizado (seleção nula pós-confirmação
  * em bases sem a re-seleção do mover), o Peão do Jogador Ativo cobre a
  * sequência — o engine mantém a seleção do Peão confirmado até o Encerramento.
  * Sem pendências, a referência é só a seleção (comportamento inalterado).
+ *
+ * Default documentado (M1/review #333): o campo é obrigatório no TS, mas em
+ * JS/casts pode chegar `undefined` — normaliza para `null` (`?? null`) e
+ * denuncia em DEV, uma vez por sessão. Sem Peão do turno, vagas/escolha
+ * ficam inertes em silêncio; o warn torna a invariante visível nos
+ * consumidores (cena, espelho e testes).
  */
 export function peaoDeReferenciaDaSequencia(
   estado: EstadoInteracaoPeoes,
 ): string | null {
   if (estado.peaoSelecionadoId !== null) return estado.peaoSelecionadoId
-  return haRecebidasPendentes(estado) ? (estado.peaoDoTurnoId ?? null) : null
+  if (!haRecebidasPendentes(estado)) return null
+  const peaoDoTurnoId = estado.peaoDoTurnoId ?? null
+  if (import.meta.env.DEV && peaoDoTurnoId === null && !avisoPeaoDoTurnoAusenteEmitido) {
+    avisoPeaoDoTurnoAusenteEmitido = true
+    console.warn(
+      '[interacaoPeoes] Recebidas pendentes sem Peão do Jogador Ativo — vagas/escolha ficam inertes (#326/M1)',
+    )
+  }
+  return peaoDoTurnoId
 }
 
 export function vagasDisponiveisDoPeao(

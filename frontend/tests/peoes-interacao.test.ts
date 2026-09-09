@@ -1586,6 +1586,30 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
     assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
     assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
   })
+
+  // M1/review #333: a única fonte real é a PartidaPage; qualquer factory/cena
+  // futura que esqueça o campo obrigatório em JS vira undefined → fallback
+  // null → vagas inertes silenciosas. A dupla asserção abaixo é o único jeito
+  // de "esquecer" um campo obrigatório — exatamente o cenário do M1: a
+  // normalização (?? null) não lança e a referência null mantém vagas e
+  // escolha inertes (o warn DEV warn-once é estado de módulo e o
+  // import.meta.env.DEV varia entre ambientes — o contrato testável é a
+  // normalização sem lançamento).
+  test('factory sem peaoDoTurnoId não lança — referência null e vagas inertes (M1 #326)', () => {
+    const estado = {
+      ...estadoBase({
+        posicionadas,
+        recebidasPendentes: pendencias,
+        peoes: [peao('peao-branco', INICIAL)],
+      }),
+    } as unknown as EstadoInteracaoPeoes
+    // A dupla asserção acima apaga o campo obrigatório (cenário do M1).
+    delete (estado as { peaoDoTurnoId?: string | null }).peaoDoTurnoId
+
+    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
+    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
+    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
+  })
 })
 
 describe('pós-confirmação suprime ST-09 e Mesa (review #333)', () => {
