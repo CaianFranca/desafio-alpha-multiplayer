@@ -99,7 +99,7 @@ export interface EstadoInteracaoPeoes {
   readonly recebidasPendentes: readonly PendenciaNoCliente[]
   readonly peaoSelecionadoId: string | null
   /**
-   * Peão do Jogador Ativo da vez (fonte: PartidaPage, do snapshot/turno).
+   * Peão do Jogador Ativo (fonte: PartidaPage, do snapshot/turno).
    * Fallback da sequência pendente (#326): se o espelho ficou sem seleção
    * (dessincronia pós-confirmação), as vagas/escolha usam o peão do turno —
    * o engine preserva a seleção do peão confirmado enquanto há pendências.
@@ -786,10 +786,16 @@ export function despacharCliqueDeCelula(
     return
   }
   // Sem resultado do roteador: fallback ST-09 só quando o ciclo está inativo
-  // (alvos inválidos com ciclo ativo não reagem — decisão aprovada #91;
-  // com seleção vigente o ciclo está ativo por definição binária — #249 — e
-  // só DESELECIONAR_PEAO + ack libera o fallback para a Inicial).
-  if (estadoPeoes !== null && cicloAtivo(estadoPeoes)) return
+  // e a posição não foi confirmada (alvos inválidos com ciclo ativo não
+  // reagem — decisão aprovada #91; com seleção vigente o ciclo está ativo por
+  // definição binária — #249 — e só DESELECIONAR_PEAO + ack libera o fallback
+  // para a Inicial). Pós-confirmação (B2/review #333) a célula fica muda: a
+  // Confirmação trava o Peão e nada mais é clicável no tabuleiro.
+  if (
+    estadoPeoes !== null &&
+    (cicloAtivo(estadoPeoes) || estadoPeoes.posicaoConfirmadaNoTurno)
+  )
+    return
   despacho.onComando?.(fallbackST09ParaCelula(estadoInteracao, celula))
 }
 
@@ -798,15 +804,21 @@ export function despacharCliqueDeCelula(
  * na mesa roteiam o fallback ST-09 (SELECIONAR_PECA — o engine aceita a
  * seleção de iniciais via `encontrarNasIniciais`); com Recebidas pendentes a
  * rota fica silenciosa (null), preservando o foco de encaixe da peça sorteada
- * (padrão de bloqueio local da #91). Clique fora das iniciais conhecidas da
- * mesa → null (o roteador puro valida a identidade da peça).
+ * (padrão de bloqueio local da #91). Pós-confirmação (B2/review #333) a Mesa
+ * fica muda: a Confirmação trava o Peão e a seleção de peças não existe mais
+ * no turno. Clique fora das iniciais conhecidas da mesa → null (o roteador
+ * puro valida a identidade da peça).
  */
 export function mapearCliqueNaPecaDaMesa(
   estadoPeoes: EstadoInteracaoPeoes | null,
   estadoInteracao: EstadoInteracaoTabuleiro,
   pecaId: string,
 ): TabuleiroComandoDoCliente | null {
-  if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) return null
+  if (
+    estadoPeoes !== null &&
+    (haRecebidasPendentes(estadoPeoes) || estadoPeoes.posicaoConfirmadaNoTurno)
+  )
+    return null
   if (!estadoInteracao.iniciais.some((p) => p.pecaId === pecaId)) return null
   return { type: 'SELECIONAR_PECA', pecaId }
 }

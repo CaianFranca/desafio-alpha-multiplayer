@@ -1585,3 +1585,57 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
     assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
   })
 })
+
+describe('pós-confirmação suprime ST-09 e Mesa (review #333)', () => {
+  /**
+   * Estado pós-confirmação (B2): a Confirmação travou o Peão — a posição está
+   * confirmada, sem seleção e sem pendências; nada mais é clicável.
+   */
+  function estadoPosConfirmacao(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPeoes {
+    return estadoBase({
+      posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      recebidasPendentes: [],
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      posicaoConfirmadaNoTurno: true,
+      ...opts,
+    })
+  }
+
+  /** Projeção ST-09 com as Iniciais ainda na mesa (formato dos testes de mesa). */
+  function tabuleiroDe(estado: EstadoInteracaoPeoes): EstadoInteracaoTabuleiro {
+    return {
+      iniciais: [{ pecaId: 'inicial-2' }],
+      posicionadas: estado.posicionadas,
+      pecaSelecionadaId: estado.pecaSelecionadaId,
+      pecaEmManipulacaoId: null,
+    }
+  }
+
+  it('pós-confirmação, clique em Inicial da mesa fica mudo (mesa suprimida)', () => {
+    const estado = estadoPosConfirmacao()
+    // 'inicial-2' está nas iniciais da projeção: sem o gate da confirmação o
+    // clique rotearia SELECIONAR_PECA (ver contraprova nos testes de mesa).
+    expect(mapearCliqueNaPecaDaMesa(estado, tabuleiroDe(estado), 'inicial-2')).toBeNull()
+  })
+
+  it('pós-confirmação, clique em célula vazia não emite fallback ST-09', () => {
+    const estado = estadoPosConfirmacao()
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estado, tabuleiroDe(estado), { linha: 5, coluna: 5 }, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandos).toEqual([])
+  })
+
+  it('pós-confirmação, clique em célula de peça posicionada não emite comando', () => {
+    const estado = estadoPosConfirmacao()
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estado, tabuleiroDe(estado), INICIAL, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandos).toEqual([])
+  })
+})
