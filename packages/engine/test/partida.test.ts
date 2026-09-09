@@ -753,6 +753,27 @@ test('confirmação com seleção nula no estado restaura o peão confirmado (#3
   assert.equal(estado.posicaoConfirmada, false);
 });
 
+// B1/review #333: estado persistido do pré-deploy — Confirmação já ocorreu
+// com seleção nula e Recebidas pendentes; os comandos de vaga/encaixe
+// resolvem sem re-seleção (pré-adoção do ator) e o turno encerra.
+test('estado persistido com seleção nula e Recebidas pendentes resolve sem re-seleção (#326)', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.ok(confirmacao.estado.tabuleiro.recebidas.length > 0);
+  // Esvazia a seleção como o estado persistido do pré-deploy chegaria.
+  const persistido: EstadoDaPartida = {
+    ...confirmacao.estado,
+    tabuleiro: { ...confirmacao.estado.tabuleiro, peaoSelecionadoId: null },
+  };
+  estado = resolverRecebidas(persistido, 'ana');
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+  assert.equal(estado.posicaoConfirmada, false);
+});
+
 // Guarda de outra seleção com pendências: a proteção PENDENCIA_NAO_RESOLVIDA
 // (tabuleiro) e o guard de peão alheio (partida) seguem de pé pós-confirmação.
 test('com pendências pós-confirmação, peão alheio segue rejeitado (FORA_DA_VEZ)', () => {
@@ -1803,13 +1824,17 @@ test('escolher vaga em Baixa com Seleção nula valida pela Peça do ator (Req 4
     'DADOS_INVALIDOS',
   );
 
-  // Vaga escura (leste (3,4)): a validação da Partida passa e a delegação ao
-  // Tabuleiro mantém o requisito de Peão em sequência (PEAO_NAO_SELECIONADO) —
-  // o fluxo da Travessia re-adota a Seleção do ator, então não trava o escuro.
-  assert.equal(
-    codigoDaRejeicao(semSelecao, escolherVaga('recebida-reta-1', 'leste'), 'ana'),
-    'PEAO_NAO_SELECIONADO',
+  // Vaga escura (leste (3,4)): a validação da Partida passa e a pré-adoção do
+  // ator (B1/review #333) alimenta a delegação com o Peão do ator — o comando
+  // flui sem re-seleção e a seleção nasce do próprio ator no resultado.
+  const escura = aplicarComandoDePartida(
+    semSelecao,
+    escolherVaga('recebida-reta-1', 'leste'),
+    'ana',
   );
+  assert.equal(escura.sucesso, true);
+  if (!escura.sucesso) return;
+  assert.equal(escura.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
 });
 
 test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem o confirmar (Req 3 #272)', () => {

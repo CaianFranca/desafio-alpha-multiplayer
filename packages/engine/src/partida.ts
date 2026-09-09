@@ -534,6 +534,15 @@ function posicionarPecaDaPartida(
   if (indisponivel) {
     return indisponivel;
   }
+  // Encaixe de Recebida com Seleção nula (B1/review #333): a pré-adoção do
+  // Peão do ator mantém a sequência (escolher vaga → encaixar) íntegra em
+  // estados persistidos do pré-deploy. Posições comuns não adotam nada.
+  const ehRecebida = estado.tabuleiro.recebidas.some(
+    (item) => item.pecaId === comando.pecaId,
+  );
+  if (ehRecebida) {
+    estado = adotarSelecaoDoAtor(estado, ator);
+  }
   return delegarAoTabuleiro(estado, comando);
 }
 
@@ -1021,6 +1030,7 @@ function escolherVagaDaPecaRecebidaDaPartida(
   comando: EscolherVagaDaPecaRecebidaComando,
   ator: JogadorDaPartida,
 ): ResultadoDaPartida {
+  estado = adotarSelecaoDoAtor(estado, ator);
   if (!(ator.emBaixaIluminacao ?? false)) {
     return delegarAoTabuleiro(estado, comando);
   }
@@ -1539,6 +1549,23 @@ function avancarVez(
     { tipo: 'turno_iniciado', jogadorId: alvo.jogadorId, rodada: rodadaAlvo },
   ];
   return sucessoDaPartida(novoEstado, eventosFinais);
+}
+
+// Pré-adoção da Seleção (mesmo padrão da Travessia do Escuro — AC-3 do #272):
+// com Recebidas pendentes e Seleção nula (estados persistidos do pré-deploy
+// da #326), a sequência (escolher vaga → encaixar) segue o Peão do ator — o
+// comando cura o softlock sem migração de dados e o Tabuleiro permanece puro
+// (guarda da seleção intacta em peoes.ts).
+function adotarSelecaoDoAtor(
+  estado: EstadoDaPartida,
+  ator: JogadorDaPartida,
+): EstadoDaPartida {
+  if (estado.tabuleiro.peaoSelecionadoId !== null) return estado;
+  if (estado.tabuleiro.recebidas.length === 0) return estado;
+  return {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: ator.peaoId },
+  };
 }
 
 function delegarAoTabuleiro(
