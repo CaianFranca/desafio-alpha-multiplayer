@@ -129,13 +129,11 @@ export function acoesValidasDaSubfase(
   const tabuleiro = estado.tabuleiro;
 
   // (b) Recebimento pendente tem precedência sobre qualquer sequência: cada
-  // peça sorteada exige a escolha da vaga e o encaixe, sem pular.
+  // peça sorteada exige a escolha da vaga e o encaixe, sem pular. O planejador
+  // emite as ações direto, mesmo sem Peão selecionado — o engine pré-adopta a
+  // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
+  // referencia o Peão do próprio jogador, não a Seleção.
   if (tabuleiro.recebidas.length > 0) {
-    // A escolha e o encaixe pertencem à sequência do Peão: sem ele
-    // selecionado, o único passo válido é selecioná-lo.
-    if (tabuleiro.peaoSelecionadoId === null) {
-      return [{ tipo: 'selecionar_peao', peaoId: jogador.peaoId }];
-    }
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
     for (const recebida of tabuleiro.recebidas) {

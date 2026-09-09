@@ -300,21 +300,33 @@ test('subfase (b): após escolher a vaga, resta escolher ou encaixar', () => {
   );
 });
 
-test('subfase (b): sem Peão selecionado, só selecionar o Peão', () => {
+test('subfase (b): sem Peão selecionado, planeja o Recebimento direto — pré-adoção do ator (#326)', () => {
   let estado = partidaEmRodada2();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, confirmarPosicao('peao-branco'), 'ana');
   assert.ok(estado.tabuleiro.recebidas.length > 0);
-  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   const semSelecao: EstadoDaPartida = {
     ...estado,
     tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: null },
   };
-  assert.deepEqual(acoesValidasDaSubfase(semSelecao, 'ana'), [
-    { tipo: 'selecionar_peao', peaoId: 'peao-branco' },
-  ]);
+  // Com a pré-adoção do engine (review #333), o planejador emite as ações do
+  // Recebimento direto — nenhuma re-seleção intermediária.
+  const acoes = acoesValidasDaSubfase(semSelecao, 'ana');
+  assert.ok(acoes.length > 0);
+  assert.ok(
+    acoes.every((acao) => acao.tipo === 'escolher_vaga_da_peca_recebida'),
+  );
+  const recebidas = new Set(
+    semSelecao.tabuleiro.recebidas.map((item) => item.recebidaId),
+  );
+  assert.ok(
+    acoes.every(
+      (acao) =>
+        acao.tipo === 'escolher_vaga_da_peca_recebida' &&
+        recebidas.has(acao.recebidaId),
+    ),
+  );
 });
 
 test('turno normal: início só seleciona o Peão; depois move ou permanece', () => {

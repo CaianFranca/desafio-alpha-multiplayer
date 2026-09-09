@@ -414,6 +414,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   )
 
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
+  // Fallback da sequência pendente (#326): se o espelho ficar sem seleção
+  // pós-confirmação, vagas/escolha/destaque usam o peão do Jogador Ativo.
+  const peaoDoTurnoId =
+    modelo.jogadorAtivoId !== null
+      ? (modelo.peaoPorJogador[modelo.jogadorAtivoId] ?? null)
+      : null
+  if (import.meta.env.DEV && modelo.recebidasPendentes.length > 0 && peaoDoTurnoId === null) {
+    console.warn('[PartidaPage] Recebidas pendentes sem Peão do Jogador Ativo — fallback da sequência inerte (#326)')
+  }
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
     if (!temAlvo || !estadoEmAndamento) return null
@@ -422,6 +431,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       posicionadas: modelo.posicionadas,
       recebidasPendentes: modelo.recebidasPendentes,
       peaoSelecionadoId: modelo.peaoSelecionadoId,
+      peaoDoTurnoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
       // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no
