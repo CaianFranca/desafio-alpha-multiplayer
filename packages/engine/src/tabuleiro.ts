@@ -291,6 +291,7 @@ export interface PendenciaDeRecebimento {
   readonly recebidaId: string;
   readonly pecaId: string;
   readonly tipoDaPeca: TipoDePecaDaCaixa;
+  readonly orientacao: Orientacao;
   readonly vaga: BordaCardinal | null;
   readonly celulaAlvo: Celula | null;
 }

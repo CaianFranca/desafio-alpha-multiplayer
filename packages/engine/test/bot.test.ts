@@ -5,7 +5,9 @@ import {
   aplicarComandoDePartida,
   estadoInicialDaPartida,
   executarTurnoDoBot,
+  expandirPosicionamentoDoBot,
   mapearBot,
+  orientacaoConectaComGeradora,
   sortearAcao,
   type ComandoDePartida,
   type EstadoDaPartida,
@@ -279,7 +281,7 @@ test('subfase (b): Recebimento pendente só emite escolher a vaga', () => {
   );
 });
 
-test('subfase (b): após escolher a vaga, resta escolher ou encaixar', () => {
+test('subfase (b): após escolher a vaga, o encaixe é serial (sem nova escolha)', () => {
   let estado = partidaIniciadaCom(JOGADORES);
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
@@ -289,13 +291,14 @@ test('subfase (b): após escolher a vaga, resta escolher ou encaixar', () => {
   assert.ok(primeira);
   estado = aplicar(estado, escolherVaga(primeira.recebidaId, 'norte'), 'ana');
   const acoes = acoesValidasDaSubfase(estado, 'ana');
-  const tipos = new Set(acoes.map((acao) => acao.tipo));
-  assert.ok(tipos.has('posicionar_peca'));
+  // Enquanto a primeira aguarda o encaixe, não se escolhe a vaga de outra:
+  // o giro da expansão encontra pecaSelecionadaId == pecaId.
+  assert.ok(acoes.length > 0);
   assert.ok(
     acoes.every(
       (acao) =>
-        acao.tipo === 'posicionar_peca' ||
-        acao.tipo === 'escolher_vaga_da_peca_recebida',
+        acao.tipo === 'posicionar_peca' &&
+        acao.pecaId === primeira.pecaId,
     ),
   );
 });
@@ -595,5 +598,252 @@ test('4 bots jogam até o resultado ou o limite de rodadas, sem exceção', () =
       `jogo travado na semente ${semente}: ${encerramentos} encerramentos`,
     );
     assert.ok(estado.rodada >= rodadaInicial);
+  }
+});
+
+test('orientacaoConectaComGeradora exige a borda oposta à vaga', () => {
+  // Reta base norte+sul; vaga norte = peça ao norte da geradora, que precisa
+  // do sul aberto.
+  assert.equal(orientacaoConectaComGeradora('reta', 0, 'norte'), true);
+  assert.equal(orientacaoConectaComGeradora('reta', 90, 'norte'), false);
+  assert.equal(orientacaoConectaComGeradora('reta', 180, 'norte'), true);
+  assert.equal(orientacaoConectaComGeradora('reta', 90, 'leste'), true);
+  assert.equal(orientacaoConectaComGeradora('reta', 0, 'leste'), false);
+  // Inicial base norte+leste; vaga norte precisa do sul.
+  assert.equal(orientacaoConectaComGeradora('inicial', 0, 'norte'), false);
+  assert.equal(orientacaoConectaComGeradora('inicial', 90, 'norte'), true);
+  // Cruz conecta em qualquer orientação e vaga.
+  for (const orientacao of [0, 90, 180, 270] as const) {
+    for (const vaga of ['norte', 'leste', 'sul', 'oeste'] as const) {
+      assert.equal(
+        orientacaoConectaComGeradora('cruz', orientacao, vaga),
+        true,
+      );
+    }
+  }
+});
+
+function primeiroTurnoAteRecebidas(
+  seed: number,
+): { estado: EstadoDaPartida; ator: string } {
+  let estado = partidaIniciadaCom(JOGADORES, seed);
+  const ator = estado.jogadorAtivoId;
+  const jogador = estado.jogadores.find((item) => item.jogadorId === ator);
+  if (!jogador) {
+    throw new Error('Partida sem Jogador Ativo');
+  }
+  estado = aplicar(estado, selecionarPeca(`inicial-${jogador.ordem}`), ator);
+  estado = aplicar(estado, posicionarPeca(`inicial-${jogador.ordem}`, 3, 3), ator);
+  estado = aplicar(estado, selecionarPeao(jogador.peaoId), ator);
+  estado = aplicar(
+    estado,
+    posicionarPeao(jogador.peaoId, 3, 3),
+    ator,
+  );
+  assert.ok(estado.tabuleiro.recebidas.length > 0);
+  return { estado, ator };
+}
+
+test('expandirPosicionamentoDoBot filtra pelos rótulos que conectam', () => {
+  // Força uma reta como primeira recebida para determinismo.
+  let achou = false;
+  for (let seed = 1; seed <= 500 && !achou; seed++) {
+    let { estado, ator } = primeiroTurnoAteRecebidas(seed);
+    const indice = estado.tabuleiro.recebidas.findIndex(
+      (item) => item.tipo === 'reta',
+    );
+    if (indice === -1) {
+      continue;
+    }
+    achou = true;
+    const recebida = estado.tabuleiro.recebidas[indice];
+    estado = aplicar(estado, escolherVaga(recebida.recebidaId, 'norte'), ator);
+    const escolhida = estado.tabuleiro.recebidas.find(
+      (item) => item.recebidaId === recebida.recebidaId,
+    );
+    assert.ok(escolhida && escolhida.celulaAlvo);
+    const comando = {
+      tipo: 'posicionar_peca',
+      pecaId: escolhida.pecaId,
+      celula: escolhida.celulaAlvo,
+    } as const;
+    // Reta em 0° com vaga norte: orientações válidas 0° e 180°; rótulos
+    // válidos manter, horario_2x e anti_horario_2x.
+    const primeira = <T>(acoes: readonly T[]): T => {
+      if (acoes.length === 0) {
+        throw new Error('sem ações');
+      }
+      return acoes[0] as T;
+    };
+    assert.deepEqual(expandirPosicionamentoDoBot(estado, comando, primeira), [
+      comando,
+    ]);
+    const ultima = <T>(acoes: readonly T[]): T => {
+      if (acoes.length === 0) {
+        throw new Error('sem ações');
+      }
+      return acoes[acoes.length - 1] as T;
+    };
+    assert.deepEqual(expandirPosicionamentoDoBot(estado, comando, ultima), [
+      { tipo: 'girar_peca', pecaId: escolhida.pecaId, sentido: 'anti_horario' },
+      { tipo: 'girar_peca', pecaId: escolhida.pecaId, sentido: 'anti_horario' },
+      comando,
+    ]);
+  }
+  assert.ok(achou, 'nenhuma seed sorteou reta como recebida');
+});
+
+test('expandirPosicionamentoDoBot passa intacta peça simétrica ou não selecionada', () => {
+  let achouSimetrica = false;
+  for (let seed = 1; seed <= 500 && !achouSimetrica; seed++) {
+    let { estado, ator } = primeiroTurnoAteRecebidas(seed);
+    const indice = estado.tabuleiro.recebidas.findIndex((item) =>
+      ['cruz', 'gerador', 'sala_do_diretor', 'sala_medica',
+        'portao_de_saida', 'vulto', 'espectro'].includes(item.tipo),
+    );
+    if (indice === -1) {
+      continue;
+    }
+    achouSimetrica = true;
+    const recebida = estado.tabuleiro.recebidas[indice];
+    estado = aplicar(estado, escolherVaga(recebida.recebidaId, 'norte'), ator);
+    const escolhida = estado.tabuleiro.recebidas.find(
+      (item) => item.recebidaId === recebida.recebidaId,
+    );
+    assert.ok(escolhida && escolhida.celulaAlvo);
+    const comando = {
+      tipo: 'posicionar_peca',
+      pecaId: escolhida.pecaId,
+      celula: escolhida.celulaAlvo,
+    } as const;
+    assert.deepEqual(expandirPosicionamentoDoBot(estado, comando), [comando]);
+  }
+  assert.ok(achouSimetrica, 'nenhuma seed sorteou peça simétrica');
+  // Peça não selecionada: giro seria PECA_NAO_SELECIONADA — passa intacta.
+  const { estado, ator } = primeiroTurnoAteRecebidas(42);
+  void ator;
+  const semSelecao: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, pecaSelecionadaId: null },
+  };
+  const recebida = semSelecao.tabuleiro.recebidas[0];
+  assert.ok(recebida);
+  const comando = {
+    tipo: 'posicionar_peca',
+    pecaId: recebida.pecaId,
+    celula: { linha: 2, coluna: 3 },
+  } as const;
+  assert.deepEqual(expandirPosicionamentoDoBot(semSelecao, comando), [comando]);
+});
+
+test('giro do bot: todo encaixe de Recebida conecta com a geradora', () => {
+  // Escopo: Primeiros Turnos (sem Baixa Iluminação — o bot nunca tratou a
+  // restrição de vaga escura do Recebimento em Baixa, limitação prévia fora
+  // deste fix; o teste de jogo completo tolera desistencia nesses casos).
+  for (let semente = 1; semente <= 40; semente++) {
+    let estado = partidaIniciadaCom(JOGADORES, semente);
+    for (let turno = 0; turno < 4; turno++) {
+      const ator = estado.jogadorAtivoId;
+      const resultado = executarTurnoDoBot(estado, ator);
+      assert.equal(
+        resultado.motivo,
+        'encerramento',
+        `semente ${semente}: bot desistiu (${resultado.codigoDaDesistencia})`,
+      );
+      let cursor = estado;
+      for (const acao of resultado.acoesExecutadas) {
+        if (acao.tipo === 'posicionar_peca') {
+          const recebida = cursor.tabuleiro.recebidas.find(
+            (item) => item.pecaId === acao.pecaId,
+          );
+          if (recebida && recebida.vaga !== null) {
+            assert.equal(
+              orientacaoConectaComGeradora(
+                recebida.tipo,
+                recebida.orientacao,
+                recebida.vaga,
+              ),
+              true,
+              `semente ${semente}: ${recebida.pecaId} encaixada sem conexão`,
+            );
+          }
+        }
+        cursor = aplicar(cursor, acao, ator);
+      }
+      estado = resultado.estado;
+    }
+  }
+});
+
+test('giro do bot: girar_peca precede o encaixe e a Inicial varia entre partidas', () => {
+  let turnosComGiro = 0;
+  const orientacoesDaInicial = new Set<number>();
+  for (let semente = 1; semente <= 60; semente++) {
+    const estado = partidaIniciadaCom(JOGADORES, semente);
+    const ator = estado.jogadorAtivoId;
+    const resultado = executarTurnoDoBot(estado, ator);
+    assert.equal(resultado.motivo, 'encerramento');
+    const acoes = resultado.acoesExecutadas;
+    if (acoes.some((acao) => acao.tipo === 'girar_peca')) {
+      turnosComGiro++;
+    }
+    for (let i = 0; i < acoes.length; i++) {
+      const acao = acoes[i];
+      if (acao?.tipo === 'girar_peca') {
+        const proxima = acoes[i + 1];
+        assert.ok(
+          proxima &&
+            ((proxima.tipo === 'girar_peca' &&
+              proxima.pecaId === acao.pecaId) ||
+              (proxima.tipo === 'posicionar_peca' &&
+                proxima.pecaId === acao.pecaId)),
+          'giro deve ser seguido do giro seguinte ou do encaixe da mesma peça',
+        );
+      }
+    }
+    const inicial = resultado.estado.tabuleiro.posicionadas.find(
+      (peca) => peca.pecaId === 'inicial-1',
+    );
+    assert.ok(inicial, 'Inicial deveria estar posicionada');
+    orientacoesDaInicial.add(inicial.orientacao);
+  }
+  assert.ok(turnosComGiro > 0, 'bot deveria girar em ao menos um turno');
+  assert.ok(
+    orientacoesDaInicial.size >= 2,
+    `Inicial deveria variar a orientação: ${[...orientacoesDaInicial]}`,
+  );
+});
+
+test('recebimento_gerado carrega a orientação de nascimento (contrato do espelho)', () => {
+  let estado = partidaIniciadaCom(JOGADORES, 11);
+  const ator = estado.jogadorAtivoId;
+  const jogador = estado.jogadores.find((item) => item.jogadorId === ator);
+  assert.ok(jogador);
+  estado = aplicar(estado, selecionarPeca(`inicial-${jogador.ordem}`), ator);
+  estado = aplicar(
+    estado,
+    posicionarPeca(`inicial-${jogador.ordem}`, 3, 3),
+    ator,
+  );
+  estado = aplicar(estado, selecionarPeao(jogador.peaoId), ator);
+  const resultado = aplicarComandoDePartida(
+    estado,
+    posicionarPeao(jogador.peaoId, 3, 3),
+    ator,
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) {
+    throw new Error('inacessível');
+  }
+  const evento = resultado.eventos.find(
+    (item) => item.tipo === 'recebimento_gerado',
+  );
+  assert.ok(evento, 'posicionar o peão gera recebimento_gerado');
+  assert.ok(evento.tipo === 'recebimento_gerado');
+  assert.ok(evento.recebidas.length > 0);
+  // Regressão: sem a orientação no evento o espelho do bot guardava
+  // `undefined` e a expansão nunca girava a Recebida (só a Inicial girava).
+  for (const recebida of evento.recebidas) {
+    assert.equal(recebida.orientacao, 0);
   }
 });

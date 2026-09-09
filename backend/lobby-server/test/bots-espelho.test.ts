@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acoesValidasDaSubfase } from '@flicker/engine';
+import { acoesValidasDaSubfase, expandirPosicionamentoDoBot } from '@flicker/engine';
 import {
   adaptarSnapshotParaEspelho,
   aplicarEventoNoEspelho,
@@ -150,6 +150,7 @@ test('fold do Primeiro Turno: seleção, encaixe, peão e recebimento', () => {
           recebidaId: 'recebida-reta-1',
           pecaId: 'reta-1',
           tipoDaPeca: 'reta',
+          orientacao: 0,
           vaga: null,
           celulaAlvo: null,
         },
@@ -174,6 +175,7 @@ test('fold da vaga: fixa borda, alvo e seleciona a sorteada', () => {
           recebidaId: 'recebida-reta-1',
           pecaId: 'reta-1',
           tipoDaPeca: 'reta',
+          orientacao: 0,
           vaga: null,
           celulaAlvo: null,
         },
@@ -190,6 +192,102 @@ test('fold da vaga: fixa borda, alvo e seleciona a sorteada', () => {
   assert.equal(recebida?.vaga, 'norte');
   assert.deepEqual(recebida?.celulaAlvo, { linha: 2, coluna: 3 });
   assert.equal(espelho.estado.tabuleiro.pecaSelecionadaId, 'reta-1');
+});
+
+test('fold do recebimento preserva a orientação (base do giro do bot)', () => {
+  let espelho = espelhoInicial(adaptarSnapshotParaEspelho(snapshotFresco()));
+  espelho = dobrar(espelho, [
+    {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [
+        {
+          recebidaId: 'recebida-reta-1',
+          pecaId: 'reta-1',
+          tipoDaPeca: 'reta',
+          orientacao: 90,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  ]);
+  // Regressão: sem a orientação no evento o espelho guardava `undefined` e a
+  // expansão do posicionamento nunca emitia girar_peca para Recebidas.
+  assert.equal(
+    espelho.estado.tabuleiro.recebidas[0]?.orientacao,
+    90,
+  );
+});
+
+test('fold tolera payload antigo sem orientação (nasce 0 na Caixa)', () => {
+  let espelho = espelhoInicial(adaptarSnapshotParaEspelho(snapshotFresco()));
+  espelho = dobrar(espelho, [
+    {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [
+        {
+          recebidaId: 'recebida-reta-1',
+          pecaId: 'reta-1',
+          tipoDaPeca: 'reta',
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  ]);
+  assert.equal(
+    espelho.estado.tabuleiro.recebidas[0]?.orientacao,
+    0,
+  );
+});
+
+test('espelho→engine: recebida com vaga expande em giro + encaixe', () => {
+  let espelho = espelhoInicial(adaptarSnapshotParaEspelho(snapshotFresco()));
+  espelho = dobrar(espelho, [
+    {
+      type: 'RECEBIMENTO_GERADO',
+      recebidas: [
+        {
+          recebidaId: 'recebida-reta-1',
+          pecaId: 'reta-1',
+          tipoDaPeca: 'reta',
+          orientacao: 0,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+    {
+      type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
+      recebidaId: 'recebida-reta-1',
+      borda: 'norte',
+      celulaAlvo: { linha: 2, coluna: 3 },
+    },
+  ]);
+  const comando = {
+    tipo: 'posicionar_peca',
+    pecaId: 'reta-1',
+    celula: { linha: 2, coluna: 3 },
+  } as const;
+  // Reta em 0° com vaga norte: rótulos válidos manter, horario_2x e
+  // anti_horario_2x — com orientação `undefined` no espelho a expansão
+  // retornava só o posicionar em qualquer sorteio (o bug).
+  const primeiro = <T>(acoes: readonly T[]): T => {
+    if (acoes.length === 0) throw new Error('sem ações');
+    return acoes[0] as T;
+  };
+  assert.deepEqual(expandirPosicionamentoDoBot(espelho.estado, comando, primeiro), [
+    comando,
+  ]);
+  const ultimo = <T>(acoes: readonly T[]): T => {
+    if (acoes.length === 0) throw new Error('sem ações');
+    return acoes[acoes.length - 1] as T;
+  };
+  assert.deepEqual(expandirPosicionamentoDoBot(espelho.estado, comando, ultimo), [
+    { tipo: 'girar_peca', pecaId: 'reta-1', sentido: 'anti_horario' },
+    { tipo: 'girar_peca', pecaId: 'reta-1', sentido: 'anti_horario' },
+    comando,
+  ]);
 });
 
 test('fold do turno normal: mover re-seleciona; turno avança e limpa', () => {
@@ -382,10 +480,22 @@ test('converterComandoParaWire usa sempre o jogadorId do bot', () => {
     type: 'ENCERRAR_TURNO',
     jogadorId: 'ana',
   });
+  assert.deepEqual(
+    converterComandoParaWire(
+      { tipo: 'girar_peca', pecaId: 'reta-1', sentido: 'horario' },
+      'ana',
+    ),
+    {
+      type: 'GIRAR_PECA',
+      jogadorId: 'ana',
+      pecaId: 'reta-1',
+      sentido: 'horario',
+    },
+  );
   assert.throws(
     () =>
       converterComandoParaWire(
-        { tipo: 'girar_peca', pecaId: 'x', sentido: 'horario' },
+        { tipo: 'finalizar_manipulacao' },
         'ana',
       ),
     /fora do plano do bot/,
@@ -394,18 +504,37 @@ test('converterComandoParaWire usa sempre o jogadorId do bot', () => {
 
 test('loop: turno completo do Primeiro Turno contra servidor de mentira', async () => {
   const enviados: { type: string; jogadorId: string }[] = [];
+  const orientacoes: Record<string, 0 | 90 | 180 | 270> = {};
   const bot = new JogadorBot({
     jogadorId: 'ana',
     enviar: (comando) => {
       enviados.push({ type: comando.type, jogadorId: comando.jogadorId });
       // Assíncrono como o WS real: a resposta nunca chega antes da espera.
-      setTimeout(() => responder(comando.type), 1);
+      setTimeout(() => responder(comando), 1);
     },
     log: () => undefined,
     intervaloDeQuiescenciaMs: 5,
     timeoutDeRespostaMs: 500,
   });
-  function responder(type: string): void {
+  function responder(
+    comando: import('@flicker/shared').PartidaComandoDoCliente,
+  ): void {
+    // O bot expande o posicionar em 0..2 giros (orientação sorteada): cada
+    // giro é confirmado como no wire real para o espelho acompanhar.
+    if (comando.type === 'GIRAR_PECA') {
+      const pecaId = comando.pecaId;
+      const anterior = orientacoes[pecaId] ?? 0;
+      const orientacao = ((anterior + 90) % 360) as 0 | 90 | 180 | 270;
+      orientacoes[pecaId] = orientacao;
+      bot.aoReceberEvento({
+        type: 'PECA_GIRADA',
+        pecaId,
+        orientacaoAnterior: anterior,
+        orientacao,
+        sentido: comando.sentido,
+      });
+      return;
+    }
     const lotes: Record<string, readonly unknown[]> = {
       SELECIONAR_PECA: [{ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' }],
       POSICIONAR_PECA: [
@@ -430,25 +559,36 @@ test('loop: turno completo do Primeiro Turno contra servidor de mentira', async 
         { type: 'TURNO_INICIADO', jogadorId: 'bruno', rodada: 1 },
       ],
     };
-    for (const evento of lotes[type] ?? []) {
+    for (const evento of lotes[comando.type] ?? []) {
       bot.aoReceberEvento(evento);
     }
   }
   bot.aoReceberSnapshot(snapshotFresco());
   bot.aoReceberEvento({ type: 'TURNO_INICIADO', jogadorId: 'ana', rodada: 1 });
   const limite = Date.now() + 3000;
-  while (enviados.length < 5 && Date.now() < limite) {
+  while (
+    !enviados.some((e) => e.type === 'ENCERRAR_TURNO') &&
+    Date.now() < limite
+  ) {
     await new Promise((r) => setTimeout(r, 10));
   }
+  // Ordem fixa, com 0..2 GIRAR_PECA entre selecionar e posicionar a peça.
+  assert.equal(enviados[0]?.type, 'SELECIONAR_PECA');
   assert.deepEqual(
-    enviados.map((e) => e.type),
-    [
-      'SELECIONAR_PECA',
-      'POSICIONAR_PECA',
-      'SELECIONAR_PEAO',
-      'POSICIONAR_PEAO',
-      'ENCERRAR_TURNO',
-    ],
+    enviados.slice(-3).map((e) => e.type),
+    ['SELECIONAR_PEAO', 'POSICIONAR_PEAO', 'ENCERRAR_TURNO'],
+  );
+  const meio = enviados.slice(1, -3);
+  assert.equal(
+    meio.filter((e) => e.type === 'POSICIONAR_PECA').length,
+    1,
+    'um único encaixe da Inicial',
+  );
+  assert.equal(meio[meio.length - 1]?.type, 'POSICIONAR_PECA');
+  const giros = meio.slice(0, -1);
+  assert.ok(
+    giros.length <= 2 && giros.every((e) => e.type === 'GIRAR_PECA'),
+    `giros inesperados: ${JSON.stringify(meio)}`,
   );
   assert.ok(enviados.every((e) => e.jogadorId === 'ana'));
 });
@@ -605,6 +745,7 @@ test('FSM do bot: pós-mover+confirmar com recebidas, propõe encaixe (não re-s
           recebidaId: 'recebida-reta-9',
           pecaId: 'reta-9',
           tipoDaPeca: 'reta',
+          orientacao: 0,
           vaga: null,
           celulaAlvo: null,
         },

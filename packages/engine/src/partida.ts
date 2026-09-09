@@ -1561,14 +1561,16 @@ function delegarAoTabuleiro(
 }
 
 // O evento de Recebimento carrega a projeção da pendência (issue #138):
-// recebidaId, a peça sorteada (pecaId + tipoDaPeca) e a vaga (com a
-// célula-alvo derivada dela), nulas até a escolha.
+// recebidaId, a peça sorteada (pecaId + tipoDaPeca + orientacao) e a vaga
+// (com a célula-alvo derivada dela), nulas até a escolha. A orientação é
+// obrigatória: o espelho do bot calcula o giro pré-encaixe a partir dela.
 function projetarRecebidas(recebidas: readonly PecaRecebida[]) {
   return recebidas.map(
-    ({ recebidaId, pecaId, tipo, vaga, celulaAlvo }) => ({
+    ({ recebidaId, pecaId, tipo, orientacao, vaga, celulaAlvo }) => ({
       recebidaId,
       pecaId,
       tipoDaPeca: tipo,
+      orientacao,
       vaga,
       celulaAlvo,
     }),

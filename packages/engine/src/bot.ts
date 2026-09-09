@@ -15,7 +15,10 @@
 //
 // Precedência das subfases em acoesValidasDaSubfase:
 //   (a) partida terminada ou vez de outro jogador → sem ações;
-//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida;
+//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida, em fluxo
+//       serial (enquanto uma Recebida aguarda o encaixe, não se escolhe a vaga
+//       de outra — o encaixe da pendente vem primeiro, preservando
+//       pecaSelecionadaId == pecaId para o giro);
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
 //   (d) turno normal sem Confirmação → selecionar o Peão e, sobre a Peça do
@@ -23,24 +26,40 @@
 //       posição — o bot nunca encadeia 2 movers no mesmo turno;
 //   (e) posição confirmada (e sem pendências) → encerrar o turno.
 //
+// Randomização da orientação: todo posicionar_peca sorteado passa por
+// expandirPosicionamentoDoBot, que sorteia um rótulo de giro (manter, 1x
+// horário, 1x anti-horário, 2x horário, 2x anti-horário) dentre os que geram
+// conexão com a peça geradora — e emite os girar_peca correspondentes antes
+// do encaixe. A Inicial (sem geradora) sorteia entre os 5 rótulos sem filtro.
+// Peças simétricas (cruz, especiais e monstros — 4 bordas abertas) dispensam
+// o giro: qualquer orientação conecta e o giro seria no-op visual.
+//
 // A confirmação em (d) — confirmar_posicao_do_peao quando o Peão saiu da Peça
 // do início do turno — é exigência estrutural da engine (o Encerramento do
 // Turno normal a requer e a Permanência só vale sobre a Peça de início); sem
 // ela o loop jamais alcançaria o encerrar_turno nos turnos normais.
 //
-// Fora do escopo deliberado: girar_peca/finalizar_manipulacao (janela
-// opcional de Manipulação — o bot encaixa na orientação sorteada),
-// atravessar_o_escuro (jogada opcional de Baixa Iluminação — o bot em Baixa
-// usa a movimentação normal) e desselecionar_peao (sem efeito útil no turno).
+// Fora do escopo deliberado: finalizar_manipulacao (janela de Manipulação
+// pós-encaixe — o bot não manipula após posicionar), atravessar_o_escuro
+// (jogada opcional de Baixa Iluminação — o bot em Baixa usa a movimentação
+// normal) e desselecionar_peao (sem efeito útil no turno). O girar_peca
+// pré-encaixe FAZ parte do plano, via expandirPosicionamentoDoBot.
 
 import {
+  bordasAbertas,
+  celulaVizinhaNaBorda,
   ehPecaDeMonstro,
+  ehPecaEspecial,
   tetoDoPortao,
   vagasDisponiveis,
   vizinhasConectadas,
+  type BordaCardinal,
   type Celula,
   type CorDoPeao,
+  type Orientacao,
   type PecaPosicionada,
+  type SentidoDeRotacao,
+  type TipoDaPeca,
 } from './tabuleiro.ts';
 import {
   aplicarComandoDePartida,
@@ -102,6 +121,174 @@ export function sortearAcao<T>(acoes: readonly T[]): T {
   return sorteada;
 }
 
+// --- Randomização da orientação do bot --------------------------------------
+//
+// O bot encaixa cada peça numa orientação sorteada entre 5 rótulos — manter,
+// 1x horário, 1x anti-horário, 2x horário, 2x anti-horário (os dois últimos
+// colapsam em 180°, dando peso duplo a essa orientação) — filtrados aos que
+// geram conexão com a peça geradora da vaga.
+
+const ORIENTACOES_CANDIDATAS: readonly Orientacao[] = [0, 90, 180, 270];
+
+const BORDA_OPOSTA_DO_BOT: Record<BordaCardinal, BordaCardinal> = {
+  norte: 'sul',
+  sul: 'norte',
+  leste: 'oeste',
+  oeste: 'leste',
+};
+
+export type RotuloDeGiroDoBot =
+  | 'manter'
+  | 'horario_1x'
+  | 'anti_horario_1x'
+  | 'horario_2x'
+  | 'anti_horario_2x';
+
+const ROTULOS_DE_GIRO_DO_BOT: readonly {
+  readonly rotulo: RotuloDeGiroDoBot;
+  readonly passosHorarios: 0 | 1 | 2 | 3;
+  readonly giros: readonly SentidoDeRotacao[];
+}[] = [
+  { rotulo: 'manter', passosHorarios: 0, giros: [] },
+  { rotulo: 'horario_1x', passosHorarios: 1, giros: ['horario'] },
+  { rotulo: 'anti_horario_1x', passosHorarios: 3, giros: ['anti_horario'] },
+  { rotulo: 'horario_2x', passosHorarios: 2, giros: ['horario', 'horario'] },
+  {
+    rotulo: 'anti_horario_2x',
+    passosHorarios: 2,
+    giros: ['anti_horario', 'anti_horario'],
+  },
+];
+
+// A nova peça conecta com a geradora quando tem aberta a borda voltada para
+// ela (a oposta da vaga — a geradora tem a vaga aberta por definição de
+// vagasDisponiveis).
+export function orientacaoConectaComGeradora(
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  vaga: BordaCardinal,
+): boolean {
+  return bordasAbertas({ tipo, orientacao }).includes(
+    BORDA_OPOSTA_DO_BOT[vaga],
+  );
+}
+
+// Peças de 4 bordas abertas em qualquer orientação: o giro é no-op visual e
+// toda orientação conecta — o bot poupa as ações de giro.
+function ehPecaSimetrica(tipo: TipoDaPeca): boolean {
+  return (
+    tipo === 'cruz' || ehPecaEspecial(tipo) || ehPecaDeMonstro(tipo)
+  );
+}
+
+// Conexões totais simuladas da peça numa célula (geradora + vizinhos
+// laterais já posicionados): fallback quando nenhuma das 4 orientações
+// conecta com a geradora — fica com as de maior contagem.
+export function contarConexoesTotaisDoBot(
+  posicionadas: readonly PecaPosicionada[],
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  celula: Celula,
+): number {
+  const porCelula = new Map(
+    posicionadas.map((peca) => [`${peca.celula.linha},${peca.celula.coluna}`, peca]),
+  );
+  let total = 0;
+  for (const borda of bordasAbertas({ tipo, orientacao })) {
+    const vizinha = celulaVizinhaNaBorda(celula, borda);
+    if (!vizinha) {
+      continue;
+    }
+    const pecaVizinha = porCelula.get(`${vizinha.linha},${vizinha.coluna}`);
+    if (
+      pecaVizinha &&
+      bordasAbertas(pecaVizinha).includes(BORDA_OPOSTA_DO_BOT[borda])
+    ) {
+      total++;
+    }
+  }
+  return total;
+}
+
+// Expande um posicionar_peca sorteado em [0..2 girar_peca, posicionar_peca],
+// com a orientação-alvo sorteada entre os rótulos que conectam com a geradora
+// (Inicial: entre os 5, sem filtro). Pura: não muta nada, só calcula.
+// Retorna [comando] intacto quando não há o que girar — peça simétrica, peça
+// fora da seleção (só a selecionada gira na engine) ou peça desconhecida.
+export function expandirPosicionamentoDoBot(
+  estado: EstadoDaPartida,
+  comando: {
+    readonly tipo: 'posicionar_peca';
+    readonly pecaId: string;
+    readonly celula: Celula;
+  },
+  sortear: <T>(acoes: readonly T[]) => T = sortearAcao,
+): ComandoDePartida[] {
+  const tabuleiro = estado.tabuleiro;
+  if (tabuleiro.pecaSelecionadaId !== comando.pecaId) {
+    return [comando];
+  }
+  const recebida = tabuleiro.recebidas.find(
+    (item) => item.pecaId === comando.pecaId,
+  );
+  const inicial = recebida
+    ? undefined
+    : tabuleiro.iniciais.find((peca) => peca.pecaId === comando.pecaId);
+  if (!recebida && !inicial) {
+    return [comando];
+  }
+  const tipo = recebida ? recebida.tipo : inicial!.tipo;
+  const atual = recebida ? recebida.orientacao : inicial!.orientacao;
+  if (ehPecaSimetrica(tipo)) {
+    return [comando];
+  }
+  let validas: Orientacao[];
+  if (recebida) {
+    if (recebida.vaga === null) {
+      return [comando];
+    }
+    validas = ORIENTACOES_CANDIDATAS.filter((orientacao) =>
+      orientacaoConectaComGeradora(tipo, orientacao, recebida.vaga!),
+    );
+    if (validas.length === 0) {
+      const alvo = recebida.celulaAlvo ?? comando.celula;
+      let melhor = -1;
+      let candidatas: Orientacao[] = [];
+      for (const orientacao of ORIENTACOES_CANDIDATAS) {
+        const total = contarConexoesTotaisDoBot(
+          tabuleiro.posicionadas,
+          tipo,
+          orientacao,
+          alvo,
+        );
+        if (total > melhor) {
+          melhor = total;
+          candidatas = [orientacao];
+        } else if (total === melhor) {
+          candidatas.push(orientacao);
+        }
+      }
+      validas = candidatas;
+    }
+  } else {
+    validas = [...ORIENTACOES_CANDIDATAS];
+  }
+  const rotulosValidos = ROTULOS_DE_GIRO_DO_BOT.filter((rotulo) =>
+    validas.includes(((atual + rotulo.passosHorarios * 90) % 360) as Orientacao),
+  );
+  if (rotulosValidos.length === 0) {
+    return [comando];
+  }
+  const escolhido = sortear(rotulosValidos);
+  return [
+    ...escolhido.giros.map(
+      (sentido) =>
+        ({ tipo: 'girar_peca', pecaId: comando.pecaId, sentido }) as const,
+    ),
+    comando,
+  ];
+}
+
 // Enumera EXATAMENTE as ações da subfase vigente do bot — nada da subfase
 // anterior ou seguinte, nada em nome de outro jogador. Cada comando emitido
 // carrega, quando houver campo de peão, exclusivamente o peaoId do bot.
@@ -142,8 +329,19 @@ export function acoesValidasDaSubfase(
     }
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
+    // Fluxo serial: enquanto uma Recebida aguarda o encaixe (vaga + alvo
+    // fixados), o bot resolve o encaixe antes de escolher outra vaga — assim
+    // o giro da expansão sempre encontra pecaSelecionadaId == pecaId.
+    // (Pendência travada da Travessia, com alvo mas sem vaga, nunca bloqueia
+    // as demais: ela própria ainda precisa da escolha.)
+    const haEncaixePendente = tabuleiro.recebidas.some(
+      (item) => item.vaga !== null && item.celulaAlvo !== null,
+    );
     for (const recebida of tabuleiro.recebidas) {
       if (recebida.vaga === null) {
+        if (recebida.celulaAlvo === null && haEncaixePendente) {
+          continue;
+        }
         if (pecaSobOPeao === undefined) {
           continue;
         }
@@ -369,30 +567,50 @@ export function executarTurnoDoBot(
       };
     }
     const comando = sortear(validas);
-    const resultado = aplicarComandoDePartida(estado, comando, jogadorId);
-    if (!resultado.sucesso) {
-      if (resultado.erro.codigo === 'FORA_DA_VEZ') {
-        return { estado, acoesExecutadas, motivo: 'fora_da_vez' };
+    // O posicionar sorteado vira a sequência de orientação + encaixe (0..2
+    // girar_peca com conexão garantida + o posicionar). Cada passo é aplicado
+    // e registrado como os demais — a macro é auto-curativa: se interrompida,
+    // a próxima expansão recalcula a partir da orientação corrente.
+    const sequencia =
+      comando.tipo === 'posicionar_peca'
+        ? expandirPosicionamentoDoBot(estado, comando, sortear)
+        : [comando];
+    let fimAntecipado: ResultadoDoTurnoDoBot | undefined;
+    for (const passo of sequencia) {
+      const resultado = aplicarComandoDePartida(estado, passo, jogadorId);
+      if (!resultado.sucesso) {
+        if (resultado.erro.codigo === 'FORA_DA_VEZ') {
+          fimAntecipado = { estado, acoesExecutadas, motivo: 'fora_da_vez' };
+          break;
+        }
+        // Defesa: a enumeração deveria ser exata — rejeição inesperada vira
+        // desistência em vez de girar em falso.
+        fimAntecipado = {
+          estado,
+          acoesExecutadas,
+          motivo: 'desistencia',
+          codigoDaDesistencia: resultado.erro.codigo,
+        };
+        break;
       }
-      // Defesa: a enumeração deveria ser exata — rejeição inesperada vira
-      // desistência em vez de girar em falso.
-      return {
-        estado,
-        acoesExecutadas,
-        motivo: 'desistencia',
-        codigoDaDesistencia: resultado.erro.codigo,
-      };
+      estado = resultado.estado;
+      acoesExecutadas.push(passo);
+      // Fim de turno próprio: o encerrar_turno e a permanência (que encerra o
+      // turno direto) emitem turno_encerrado no lote. O término da partida tem
+      // prioridade, como no funil do dispatch.
+      if (estado.resultado !== null) {
+        fimAntecipado = { estado, acoesExecutadas, motivo: 'resultado' };
+        break;
+      }
+      if (
+        resultado.eventos.some((evento) => evento.tipo === 'turno_encerrado')
+      ) {
+        fimAntecipado = { estado, acoesExecutadas, motivo: 'encerramento' };
+        break;
+      }
     }
-    estado = resultado.estado;
-    acoesExecutadas.push(comando);
-    // Fim de turno próprio: o encerrar_turno e a permanência (que encerra o
-    // turno direto) emitem turno_encerrado no lote. O término da partida tem
-    // prioridade, como no funil do dispatch.
-    if (estado.resultado !== null) {
-      return { estado, acoesExecutadas, motivo: 'resultado' };
-    }
-    if (resultado.eventos.some((evento) => evento.tipo === 'turno_encerrado')) {
-      return { estado, acoesExecutadas, motivo: 'encerramento' };
+    if (fimAntecipado) {
+      return fimAntecipado;
     }
   }
 }

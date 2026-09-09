@@ -313,6 +313,7 @@ test('sorteio unitário via serviço: RECEBIMENTO_GERADO com vaga null e PECA_SO
       for (const r of recebidas) {
         assert.equal(r.vaga, null, 'vaga deve nascer null');
         assert.equal(r.celulaAlvo, null, 'celulaAlvo deve nascer null');
+        assert.equal(r.orientacao, 0, 'orientação de nascimento viaja no evento (espelho do bot)');
         assert.ok(typeof r.recebidaId === 'string' && (r.recebidaId as string).startsWith('recebida-'));
         assert.ok(typeof r.pecaId === 'string');
       }

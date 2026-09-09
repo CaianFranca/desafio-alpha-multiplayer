@@ -32,6 +32,7 @@ import {
   acoesValidasDaSubfase,
   ehPecaDeMonstro,
   ehPecaEspecial,
+  expandirPosicionamentoDoBot,
   MAX_ACOES_POR_TURNO_DO_BOT,
   sortearAcao,
   type ComandoDePartida,
@@ -269,7 +270,11 @@ export function aplicarEventoNoEspelho(
           recebidaId: item.recebidaId,
           pecaId: item.pecaId,
           tipo: item.tipoDaPeca,
-          orientacao: item.orientacao,
+          // A orientação nasce 0 na Caixa e viaja no evento desde o fix do
+          // giro das Recebidas; o `?? 0` blinda contra payloads antigos sem o
+          // campo (sem ele a expansão calculava sobre `undefined` e nunca
+          // girava a Recebida).
+          orientacao: item.orientacao ?? 0,
           vaga: item.vaga,
           celulaAlvo: item.celulaAlvo ? { ...item.celulaAlvo } : null,
         })),
@@ -592,6 +597,13 @@ export function converterComandoParaWire(
         pecaId: comando.pecaId,
         celula: comando.celula,
       };
+    case 'girar_peca':
+      return {
+        type: 'GIRAR_PECA',
+        jogadorId,
+        pecaId: comando.pecaId,
+        sentido: comando.sentido,
+      };
     case 'selecionar_peao':
       return {
         type: 'SELECIONAR_PEAO',
@@ -634,7 +646,7 @@ export function converterComandoParaWire(
     case 'encerrar_turno':
       return { type: 'ENCERRAR_TURNO', jogadorId };
     default:
-      // O bot Random Walk nunca emite girar/finalizar/desselecionar/atravessar;
+      // O bot Random Walk nunca emite finalizar/desselecionar/atravessar;
       // falhar alto aqui impede vazar comando fora do plano.
       throw new Error(
         `Comando fora do plano do bot: ${(comando as ComandoDePartida).tipo}.`,
@@ -780,27 +792,42 @@ export class JogadorBot {
         ).filter((comando) => !rejeitados.has(JSON.stringify(comando)));
         if (validas.length === 0) break;
         const comando = sortearAcao(validas);
-        this.enviar(converterComandoParaWire(comando, this.jogadorId));
+        // O posicionar sorteado vira a sequência de orientação + encaixe (0..2
+        // GIRAR_PECA com conexão garantida + o POSICIONAR), como no loop puro
+        // do engine — o espelho já dobra PECA_GIRADA.
+        const sequencia =
+          comando.tipo === 'posicionar_peca'
+            ? expandirPosicionamentoDoBot(espelho.estado, comando)
+            : [comando];
         acoes++;
-        const desfecho = await this.aguardarMutacao();
-        if (desfecho.resultado === 'timeout') {
-          this.log(
-            `sem confirmação da mutação em ${this.timeoutMs}ms; desistindo do turno`,
-          );
-          return;
+        let reconsultar = false;
+        for (const passo of sequencia) {
+          this.enviar(converterComandoParaWire(passo, this.jogadorId));
+          const desfecho = await this.aguardarMutacao();
+          if (desfecho.resultado === 'timeout') {
+            this.log(
+              `sem confirmação da mutação em ${this.timeoutMs}ms; desistindo do turno`,
+            );
+            return;
+          }
+          if (desfecho.resultado === 'erro') {
+            if (desfecho.codigo === 'FORA_DA_VEZ') {
+              this.log('vez perdida (FORA_DA_VEZ); encerrando o loop');
+              return;
+            }
+            if (desfecho.codigo === 'PARTIDA_TERMINADA') {
+              this.log('partida terminada; encerrando o loop');
+              return;
+            }
+            // Rejeição sem mudança de estado: exclui o candidato e reconsulta.
+            this.log(`recusado (${desfecho.codigo}); tentando outra ação`);
+            rejeitados.add(JSON.stringify(comando));
+            reconsultar = true;
+            break;
+          }
         }
-        if (desfecho.resultado === 'erro') {
-          if (desfecho.codigo === 'FORA_DA_VEZ') {
-            this.log('vez perdida (FORA_DA_VEZ); encerrando o loop');
-            return;
-          }
-          if (desfecho.codigo === 'PARTIDA_TERMINADA') {
-            this.log('partida terminada; encerrando o loop');
-            return;
-          }
-          // Rejeição sem mudança de estado: exclui o candidato e reconsulta.
-          this.log(`recusado (${desfecho.codigo}); tentando outra ação`);
-          rejeitados.add(JSON.stringify(comando));
+        if (reconsultar) {
+          continue;
         }
       }
       // Failsafe: força o encerrar_turno; se a engine o rejeitar, loga e

@@ -40,7 +40,7 @@
 // com borda geradora fixa na criação) saiu do domínio na #138 e foi removido
 // daqui na limpeza da #140/#143.
 
-import type { Celula, PecaId, TipoDePecaDaCaixa } from './tabuleiro.ts';
+import type { Celula, Orientacao, PecaId, TipoDePecaDaCaixa } from './tabuleiro.ts';
 
 // --- Tipos base ---
 
@@ -53,10 +53,14 @@ export type BordaCardinal = 'norte' | 'leste' | 'sul' | 'oeste';
 // Pendência do Recebimento (issue #138): a Peça já vem sorteada da Caixa
 // (pecaId + tipo + orientação de composição) e a vaga (com a célula-alvo
 // derivada dela) só é fixada por ESCOLHER_VAGA_DA_PECA_RECEBIDA.
+// A orientação viaja no evento porque o espelho do bot (e a bandeja do
+// cliente) precisam dela antes do encaixe: sem ela o giro do bot calculava
+// sobre `undefined` e nunca girava a Recebida.
 export interface PendenciaDaPecaSorteada {
   readonly recebidaId: RecebidaId;
   readonly pecaId: PecaId;
   readonly tipoDaPeca: TipoDePecaDaCaixa;
+  readonly orientacao: Orientacao;
   readonly vaga: BordaCardinal | null;
   readonly celulaAlvo: Celula | null;
 }

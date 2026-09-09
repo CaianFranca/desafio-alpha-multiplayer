@@ -339,8 +339,8 @@ test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático 
     {
       tipo: 'recebimento_gerado',
       recebidas: [
-        { recebidaId: 'recebida-reta-1', pecaId: 'reta-1', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
-        { recebidaId: 'recebida-reta-2', pecaId: 'reta-2', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
+        { recebidaId: 'recebida-reta-1', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
+        { recebidaId: 'recebida-reta-2', pecaId: 'reta-2', tipoDaPeca: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
       ],
     },
     {
@@ -640,7 +640,7 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
     {
       tipo: 'recebimento_gerado',
       recebidas: [
-        { recebidaId: 'recebida-reta-7', pecaId: 'reta-7', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
+        { recebidaId: 'recebida-reta-7', pecaId: 'reta-7', tipoDaPeca: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
       ],
     },
     {
@@ -1368,6 +1368,7 @@ test('travessia do Escuro: atravessar, encaixar a Recebida travada, confirmar se
           recebidaId: 'recebida-reta-x',
           pecaId: 'reta-x',
           tipoDaPeca: 'reta',
+          orientacao: 0,
           vaga: null,
           celulaAlvo: { linha: 1, coluna: 3 },
         },

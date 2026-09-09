@@ -116,10 +116,11 @@ export class TabuleiroHandlers {
           eventos.push({
             tipo: 'recebimento_gerado',
             recebidas: sorteio.recebidas.map(
-              ({ recebidaId, pecaId, tipo, vaga, celulaAlvo }) => ({
+              ({ recebidaId, pecaId, tipo, orientacao, vaga, celulaAlvo }) => ({
                 recebidaId,
                 pecaId,
                 tipoDaPeca: tipo,
+                orientacao,
                 vaga,
                 celulaAlvo,
               }),

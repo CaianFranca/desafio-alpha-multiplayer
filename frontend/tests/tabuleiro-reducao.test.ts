@@ -27,7 +27,7 @@ function pendenciaSorteada(
   vaga: 'norte' | 'leste' | 'sul' | 'oeste' | null,
   celulaAlvo: { linha: number; coluna: number } | null,
 ) {
-  return { recebidaId, pecaId, tipoDaPeca, vaga, celulaAlvo }
+  return { recebidaId, pecaId, tipoDaPeca, orientacao: 0 as const, vaga, celulaAlvo }
 }
 
 describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', () => {
@@ -181,6 +181,7 @@ describe('redução do tabuleiro no cliente — deltas por evento (issue #85)', 
           recebidaId: 'r1',
           pecaId: 'gerador-1',
           tipoDaPeca: 'gerador',
+          orientacao: 0,
           vaga: 'norte',
           celulaAlvo: { linha: 2, coluna: 3 },
         },
