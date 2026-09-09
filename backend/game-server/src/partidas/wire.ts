@@ -171,6 +171,12 @@ export function mapearComandoDaPartida(
       };
     case 'ENCERRAR_TURNO':
       return { tipo: 'encerrar_turno' };
+    case 'ATIVAR_DEBUG':
+    case 'DESATIVAR_DEBUG':
+      // Inalcançável: `ehComandoDaPartida` recusa os comandos de controle de
+      // debug (issue #340) — eles são interceptados no `ws.ts` e nunca chegam
+      // ao mapeamento. O case existe só para a exaustividade da união wire.
+      throw new Error('Comando de controle de debug não atravessa o mapeamento de Partida.');
     default: {
       // Exaustividade: um novo `type` sem case falha a compilação; em runtime
       // a entrada já foi validada por `ehComandoDaPartida`.

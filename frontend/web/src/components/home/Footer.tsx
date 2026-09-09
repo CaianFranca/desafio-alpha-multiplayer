@@ -1,6 +1,11 @@
 import { footer } from './placeholders'
+import { useGatilhoDoModoDesenvolvedor } from '../../hooks/useGatilhoDoModoDesenvolvedor'
 
 export function Footer() {
+  // Gatilho escondido (issue #340, "Modo Desenvolvedor"): 5 cliques ≤3s no
+  // logo Ginga ativam o modo. O clique no Ginga não navega mais — o gesto
+  // substitui o link externo.
+  const { lidarComClique } = useGatilhoDoModoDesenvolvedor()
   return (
     <footer className="site-footer" role="contentinfo">
       <div className="site-footer__inner">
@@ -30,7 +35,13 @@ export function Footer() {
                   {img}
                 </a>
               ) : (
-                <span key={logo.alt}>{img}</span>
+                // Gatilho do Modo Desenvolvedor (issue #340): o logo Ginga
+                // (o único sem `href`) é o `<a>` do gesto escondido (5 cliques
+                // ≤3s). `preventDefault` sempre — a partir do gesto o link
+                // não navega.
+                <a key={logo.alt} href="#" onClick={lidarComClique} aria-label={logo.alt}>
+                  {img}
+                </a>
               )
             })}
           </div>

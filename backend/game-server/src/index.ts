@@ -3,6 +3,7 @@ import { getConfig } from '@flicker/config';
 import type { ServerId } from '@flicker/shared';
 import { createApp } from './app.ts';
 import { criarWebSocketServer } from './ws/ws.ts';
+import { DebugStreamDaPartida } from './ws/debug-stream.ts';
 import { redisClient } from './config/redis.ts';
 import { PartidaBroadcaster } from './partidas/broadcast.ts';
 import { PartidaHandlers } from './partidas/handlers.ts';
@@ -49,18 +50,20 @@ const notificarRetorno = criarClienteDeRetorno({
   jwtSecret,
 });
 const broadcaster = new PartidaBroadcaster();
+const streamDeDebug = new DebugStreamDaPartida();
 const handlers = new PartidaHandlers({
   redis: redisClient,
   broadcaster,
   partidaTerminadaTtlSegundos,
   notificarRetorno,
+  debug: streamDeDebug,
 });
 configurarNaoInicio(notificarRetorno, partidaNaoInicioSegundos);
 definirRedisParaNaoInicio(redisClient);
 definirBroadcasterParaNaoInicio(broadcaster);
 
 criarWebSocketServer(server, contexto, {
-  partida: { broadcaster, handlers },
+  partida: { broadcaster, handlers, debug: streamDeDebug },
 });
 
 let heartbeatHandle: HeartbeatHandle | undefined;

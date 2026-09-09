@@ -30,6 +30,7 @@ import {
 } from '../game/tabuleiro/vooDoPeao'
 import type { VooDoPeaoPendente } from '../game/tabuleiro/vooDoPeao'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
+import { definirFase } from '../utils/coletorDeDepuracao'
 import { useRequerModoPaisagem } from '../hooks/useModoPaisagemCelular'
 import { OverlayModoPaisagem } from '../components/partida/OverlayModoPaisagem'
 import { aplicarSnapshot } from '../game/tabuleiro/snapshot'
@@ -121,6 +122,25 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     modeloRef.current = modelo
   }, [modelo])
+  // ── Fases de turno no stream de depuração (issue #340) ──
+  // A PartidaPage consome o canal da partida: TURNO_INICIADO/TURNO_ENCERRADO
+  // e snapshots projetam `jogadorAtivoId`; a fase usa a posição do peão na
+  // ordem do roster (`jogadores[].ordem` do snapshot) — fallback ao índice de
+  // admissão quando o snapshot ainda não trouxe `ordem`. Entre turnos e ao
+  // sair da partida, a fase volta para `sala` (o ObservadorDeFases cuida das
+  // fases de login/registro/sala no nível do App).
+  useEffect(() => {
+    const ativo = modelo.jogadorAtivoId
+    if (ativo === null) return
+    const ordem = modelo.jogadorPorId[ativo]?.ordem
+    if (ordem !== undefined) {
+      definirFase(`turno-${ordem}`)
+      return
+    }
+    const indice = Object.keys(modelo.jogadorPorId).indexOf(ativo)
+    if (indice >= 0) definirFase(`turno-${indice + 1}`)
+  }, [modelo.jogadorAtivoId, modelo.jogadorPorId])
+  useEffect(() => () => definirFase('sala'), [])
   // ── Som de recusa + anúncio ao leitor de tela (issue #228) ──
   // Único dono dos disparos: reage aos mesmos eventos do canal que antes
   // geravam flash, somente leitura do modelo. Aprovações/seleções/sorteios/

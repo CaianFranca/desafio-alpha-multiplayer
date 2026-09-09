@@ -45,6 +45,7 @@ import { obterEstadoDaPartida } from '../partidas/estado.ts';
 import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
 import { adicionarConexao, removerConexao, type ConexaoDoJogador } from './conexao.ts';
+import { tipoDeComandoDeDebug } from './debug-stream.ts';
 import { PartidaBroadcaster } from '../partidas/broadcast.ts';
 import { PartidaHandlers } from '../partidas/handlers.ts';
 
@@ -55,6 +56,8 @@ const WS_PATH_RE = /^\/ws\/game\/([^/]+)$/;
 export interface PartidaWsDeps {
   readonly broadcaster: PartidaBroadcaster;
   readonly handlers: PartidaHandlers;
+  /** Stream de debug (issue #340). Opcional: sem o campo, comandos de controle são ignorados. */
+  readonly debug?: import('./debug-stream.ts').DebugStreamDaPartida;
 }
 
 export interface WebSocketServerDeps {
@@ -380,6 +383,15 @@ export function criarWebSocketServer(
               return;
             }
 
+            // Controle do stream de debug (issue #340): interceptado ANTES de
+            // `aplicarMensagem` — a guarda do contrato os recusaria como
+            // DADOS_INVALIDOS (o conjunto fechado de `wire.ts` não os conhece).
+            const tipoDeDebug = tipoDeComandoDeDebug(parsed);
+            if (tipoDeDebug !== null) {
+              depsPartida?.debug?.receberComando(ws, partidaId, tipoDeDebug);
+              return;
+            }
+
             if (depsPartida === undefined) {
               return;
             }
@@ -400,6 +412,9 @@ export function criarWebSocketServer(
               jogadorId: sessao.jogadorId,
               partidaId,
             });
+            // Stream de debug (issue #340): desconexão encerra o registro do
+            // cliente de debug.
+            depsPartida?.debug?.desconectar(ws);
             // Só marca `em_reconexao` quando a conexão fechada era a vigente do
             // Jogador: no fechamento por substituição (#155) a vigente já é a
             // nova conexão, e a presença permanece `conectado`.

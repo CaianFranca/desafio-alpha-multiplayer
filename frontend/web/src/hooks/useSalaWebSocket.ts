@@ -8,6 +8,12 @@ import type {
 } from '@flicker/shared'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
+import {
+  aoAtivarModo,
+  coletar,
+  estaModoAtivo,
+  resumirPayload,
+} from '../utils/coletorDeDepuracao'
 
 export interface AvisoDoLobby {
   id: string
@@ -298,6 +304,12 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       for (const comando of pendentes) {
         ws.send(JSON.stringify(comando))
       }
+      // Stream de debug do backend (issue #340): enviado no open quando o modo
+      // já está ativo (sobrevive a reload via sessionStorage) e a cada
+      // reconexão — o servidor é idempotente.
+      if (estaModoAtivo()) {
+        ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
+      }
     }
 
     ws.onclose = () => {
@@ -325,6 +337,17 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         return
       }
       if (typeof data !== 'object' || data === null || !('type' in data)) return
+
+      // Depuração (issue #340): linha espelhada do backend (DEBUG_LOG) vira
+      // fonte `backend`; o tráfego comum é capturado como `ws←` com payload
+      // truncado. DEBUG_LOG não é tráfego de aplicação — não vai como ws←.
+      const tipoDaMensagem = (data as { type?: unknown }).type
+      if (tipoDaMensagem === 'DEBUG_LOG') {
+        const evento = data as unknown as { nivel: 'info' | 'warn' | 'error'; contexto?: string; mensagem: string }
+        coletar('backend', evento.nivel, evento.mensagem, evento.contexto ?? 'lobby')
+        return
+      }
+      coletar('ws←', 'info', resumirPayload(data), 'sala')
 
       // Encaminhamento (issue #45): PARTIDA_PREPARANDO/DISPONIVEL/RECUSADA/FALHOU
       // Fonte única é `encaminhamento` → `AvisoEncaminhamento`/`EncaminhamentoOverlay`.
@@ -432,6 +455,18 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   }, [adicionarAviso, jogadorId, sincronizarEncaminhamentoDoSnapshot])
 
   useEffect(() => {
+    // Ativação em sessão corrente (issue #340): o modo pode ser ativado com o
+    // socket já aberto — envia o controle no instante da ativação (ou enfileira
+    // se o socket ainda conecta). Uma única assinatura por montagem: lê o
+    // socket vigente via ref, sem vazamento nas reconexões.
+    const desinscreverAtivacao = aoAtivarModo(() => {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
+      } else if (ws) {
+        comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'ATIVAR_DEBUG' }]
+      }
+    })
     if (!jogadorId) {
       // Sem jogador (ex.: logout ou sessão expirada): desconecta e reseta o
       // estado para não exibir uma sala/sessão fantasma — o App é compartilhado
@@ -464,10 +499,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       setConectado(false)
       setExpulso(false)
       expulsoRef.current = false
-      return
+      return desinscreverAtivacao
     }
     conectar()
     return () => {
+      desinscreverAtivacao()
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null
@@ -489,6 +525,9 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   }, [conectar, jogadorId])
 
   const enviar = useCallback((comando: SalaComandoDoCliente) => {
+    // Captura de saída no stream de depuração (issue #340): fonte `ws→`,
+    // contexto `sala`, payload truncado.
+    coletar('ws→', 'info', resumirPayload(comando), 'sala')
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(comando))
