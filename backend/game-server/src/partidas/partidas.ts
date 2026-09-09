@@ -6,7 +6,7 @@ import {
   inicializarEstadoDaPartida,
   removerEstadoDaPartida,
 } from './estado.ts';
-import { agendarNaoInicio, cancelarNaoInicio } from './nao-inicio.ts';
+import { agendarNaoInicio, cancelarNaoInicio, obterNaoInicioSegundos } from './nao-inicio.ts';
 
 export type EstadoDaPartida = 'preparada' | 'em_andamento';
 
@@ -65,7 +65,9 @@ export async function criarPartidaPreparada(
     throw erro;
   }
 
-  const naoInicioMs = (contexto.partidaNaoInicioSegundos ?? 90) * 1000;
+  // Teto único do não-início (review JF532, O2): o valor vive no módulo
+  // `nao-inicio` (fixado pelo wiring em index.ts) — não se lê do contexto.
+  const naoInicioMs = obterNaoInicioSegundos() * 1000;
   agendarNaoInicio(partida.partidaId, naoInicioMs);
 
   return partida;

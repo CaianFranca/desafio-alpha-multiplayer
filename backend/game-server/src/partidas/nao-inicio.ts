@@ -85,6 +85,13 @@ export function configurarNaoInicio(
   naoInicioSegundos = segundos;
 }
 
+// Leitura única do teto do não-início (review JF532, O2): o módulo nasce com
+// o default 90 (útil em testes sem wiring) e o wiring do index.ts o fixa via
+// `configurarNaoInicio` — ninguém mais lê o valor do contexto.
+export function obterNaoInicioSegundos(): number {
+  return naoInicioSegundos;
+}
+
 export function agendarNaoInicio(partidaId: string, delayMs?: number, redis?: Redis): void {
   cancelarNaoInicio(partidaId);
   const ms = delayMs ?? naoInicioSegundos * 1000;
