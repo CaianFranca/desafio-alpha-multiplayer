@@ -1,4 +1,5 @@
 import type { Redis } from 'ioredis';
+import { GAME_SERVERS_PARTIDA_ESTADO_PREFIXO, GAME_SERVERS_PARTIDA_PREFIXO } from '@flicker/config';
 import { chaveDaPartida } from './chaves.ts';
 import { cancelarPartidaSeNaoIniciada, obterPartida } from './partidas.ts';
 import type { AvisoDeRetorno } from '../retorno/cliente.ts';
@@ -45,7 +46,7 @@ interface LinhaDoLote {
 }
 
 async function lerLoteDoRearme(redis: Redis, chaves: string[]): Promise<LinhaDoLote[]> {
-  const chavesDePartida = chaves.filter((chave) => !chave.startsWith('game-server:partida-estado:'));
+  const chavesDePartida = chaves.filter((chave) => !chave.startsWith(GAME_SERVERS_PARTIDA_ESTADO_PREFIXO));
   const fabricaDePipeline = (redis as unknown as { pipeline?: unknown }).pipeline;
   if (typeof fabricaDePipeline !== 'function') {
     // Fallback sequencial (ex.: fakes de teste sem pipeline).
@@ -199,7 +200,7 @@ export async function rearmarNaoInicioAposRestart(redis: Redis): Promise<void> {
   try {
     let cursor = '0';
     do {
-      const [next, keys] = await redis.scan(cursor, 'MATCH', 'game-server:partida:*', 'COUNT', REARME_SCAN_COUNT);
+      const [next, keys] = await redis.scan(cursor, 'MATCH', `${GAME_SERVERS_PARTIDA_PREFIXO}*`, 'COUNT', REARME_SCAN_COUNT);
       cursor = next;
       const lote = await lerLoteDoRearme(redis, keys);
       verificadas += keys.length;

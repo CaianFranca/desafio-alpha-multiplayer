@@ -84,7 +84,7 @@ import {
 } from './eventos.ts';
 import { SalasReconexao, JANELA_RECONEXAO_SEGUNDOS } from './reconexao.ts';
 import { idadeDoEmVoo, limparEmVoo, marcarEmVoo } from './encaminhamento-voo.ts';
-import { getConfig } from '@flicker/config';
+import { GAME_SERVERS_PARTIDA_PREFIXO, getConfig } from '@flicker/config';
 import type { AuthenticatedWebSocket } from '../ws/ws.ts';
 import { listarGameServersDisponiveis as listarGameServersShared } from '@flicker/shared/server';
 import type { Redis } from 'ioredis';
@@ -1352,7 +1352,7 @@ export class SalasHandlers {
         }
         partidaId = encaminhado.partidaId;
       }
-      const chave = `game-server:partida:${partidaId}`;
+      const chave = `${GAME_SERVERS_PARTIDA_PREFIXO}${partidaId}`;
       const existe = await this.redis.exists(chave);
       if (existe === 1) {
         const ttl = await this.redis.ttl(chave);
@@ -1392,7 +1392,7 @@ export class SalasHandlers {
         return false;
       }
       if (decisao.partidaId !== null) {
-        const chave = `game-server:partida:${decisao.partidaId}`;
+        const chave = `${GAME_SERVERS_PARTIDA_PREFIXO}${decisao.partidaId}`;
         const existe = await this.redis.exists(chave);
         if (existe !== 1) {
           return true;

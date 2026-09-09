@@ -57,6 +57,12 @@ const DEFAULT_GAME_SERVER_ADVERTISE_HOST = 'game-server';
 
 export const GAME_SERVERS_PREFIX = 'game-servers:disponiveis:';
 
+// Prefixos das chaves de Partida do game-server (compartilhados com o lobby —
+// review JF532, O1): o lobby consulta `game-server:partida:<id>` ao decidir
+// Partida Órfã e o game-server registra/escaneia as mesmas chaves.
+export const GAME_SERVERS_PARTIDA_PREFIXO = 'game-server:partida:';
+export const GAME_SERVERS_PARTIDA_ESTADO_PREFIXO = 'game-server:partida-estado:';
+
 export function chaveGameServer(serverId: string): string {
   return `${GAME_SERVERS_PREFIX}${serverId}`;
 }
