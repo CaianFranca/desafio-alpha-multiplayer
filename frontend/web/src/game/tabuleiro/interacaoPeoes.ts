@@ -104,7 +104,7 @@ export interface EstadoInteracaoPeoes {
    * (dessincronia pós-confirmação), as vagas/escolha usam o peão do turno —
    * o engine preserva a seleção do peão confirmado enquanto há pendências.
    */
-  readonly peaoDoTurnoId?: PeaoId | null
+  readonly peaoDoTurnoId: PeaoId | null
   /** Peça em foco: após a escolha da vaga (#138), o pecaId da Recebida sorteada. */
   readonly pecaSelecionadaId: string | null
   /** A posição do Peão do Jogador Ativo já foi confirmada neste turno (POSICAO_CONFIRMADA). */
