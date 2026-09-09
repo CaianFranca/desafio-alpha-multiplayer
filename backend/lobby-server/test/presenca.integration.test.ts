@@ -13,6 +13,7 @@ import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts'
 registrarArquivoDeTeste();
 
 import type {
+  AceiteDoEncaminhamento,
   CodigoDeErroDaSala,
   ErroDaSalaEvento,
   MembroDaSala,
@@ -658,6 +659,66 @@ test('presenca: multiplas conexoes do mesmo Jogador contam como uma so presenca'
     wsB3.close();
     await Promise.all([wsA, wsB3].map((ws) => esperarClose(ws).catch(() => undefined)));
   }, { janelaReconexaoMs: 800 });
+});
+
+// 5b — Segunda aba em sala encaminhada recebe snapshot com encaminhamento (#335)
+test('presenca: segunda aba em sala encaminhada recebe snapshot com encaminhamento', async () => {
+  const ofertarEncaminhamento = async (): Promise<AceiteDoEncaminhamento> => ({
+    partidaId: 'p-segunda-aba',
+    serverId: 's-segunda-aba',
+  });
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const b = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+    const wsB1 = await conectarWs(servidor.wsUrl, b.cookies);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const criacao = await esperarSalaAtualizada(wsA);
+    const codigo = criacao.sala.codigoDeSala;
+
+    enviar(wsB1, { type: 'ENTRAR_NA_SALA', codigoDeSala: codigo });
+    await coletarEventos(wsB1, 2);
+    await coletarEventos(wsA, 2);
+
+    // Todos prontos; anfitrião inicia -> sala encaminhada (aceite via stub).
+    enviar(wsA, { type: 'ALTERNAR_PRONTIDAO' });
+    await coletarEventos(wsA, 2);
+    await coletarEventos(wsB1, 2);
+    enviar(wsB1, { type: 'ALTERNAR_PRONTIDAO' });
+    await coletarEventos(wsB1, 2);
+    await coletarEventos(wsA, 2);
+
+    enviar(wsA, { type: 'INICIAR_PARTIDA' });
+    const preparandoA = await coletarEventos(wsA, 2);
+    assert.equal(preparandoA[0]?.type, 'PARTIDA_PREPARANDO');
+    assert.equal(preparandoA[1]?.type, 'SALA_ATUALIZADA');
+    const preparandoB = await coletarEventos(wsB1, 2);
+    assert.equal(preparandoB[0]?.type, 'PARTIDA_PREPARANDO');
+    assert.equal(preparandoB[1]?.type, 'SALA_ATUALIZADA');
+    const disponivelA = await coletarEventos(wsA, 2);
+    assert.equal(disponivelA[0]?.type, 'PARTIDA_DISPONIVEL');
+    assert.equal(disponivelA[1]?.type, 'SALA_ATUALIZADA');
+    assert.equal((disponivelA[1] as SalaAtualizadaEvento).sala.estado, 'encaminhada');
+    const disponivelB = await coletarEventos(wsB1, 2);
+    assert.equal(disponivelB[0]?.type, 'PARTIDA_DISPONIVEL');
+    assert.equal(disponivelB[1]?.type, 'SALA_ATUALIZADA');
+
+    // Segunda aba de B com a sala já encaminhada: snapshot unicast com
+    // estado + encaminhamento; demais em silêncio, sem MEMBRO_ENTROU.
+    const wsB2 = await conectarWs(servidor.wsUrl, b.cookies);
+    const snapshot = await esperarSalaAtualizada(wsB2);
+    assert.equal(snapshot.sala.estado, 'encaminhada');
+    assert.deepEqual(snapshot.sala.encaminhamento, { serverId: 's-segunda-aba', partidaId: 'p-segunda-aba' });
+    await esperarSilencio(wsA);
+    await esperarSilencio(wsB1);
+    await esperarSilencio(wsB2);
+
+    wsA.close();
+    wsB1.close();
+    wsB2.close();
+    await Promise.all([wsA, wsB1, wsB2].map((ws) => esperarClose(ws).catch(() => undefined)));
+  }, { ofertarEncaminhamento });
 });
 
 // 6 — Após reinício sem rearmamento, mutações recebem SALA_INCONSISTENTE (wire)
