@@ -63,6 +63,7 @@ import {
   type EscolherVagaDaPecaRecebidaComando,
   type EstadoDoTabuleiro,
   type EventoDoTabuleiro,
+  type GirarPecaComando,
   type MoverPeaoComando,
   type PecaPosicionada,
   type PecaRecebida,
@@ -425,7 +426,10 @@ function rotearComandoDaPartida(
     case 'selecionar_peca':
       return selecionarPecaDaPartida(estado, comando, jogadorAtivo);
     case 'girar_peca':
+      return girarPecaDaPartida(estado, comando, jogadorAtivo);
     case 'finalizar_manipulacao':
+      // Sem pré-adoção: a finalização consulta a janela de Manipulação, não a
+      // Seleção (mesma razão do giro em si; fica fora do alcance do review).
       return delegarAoTabuleiro(estado, comando);
     case 'escolher_vaga_da_peca_recebida':
       return escolherVagaDaPecaRecebidaDaPartida(estado, comando, jogadorAtivo);
@@ -1573,6 +1577,25 @@ function adotarSelecaoDoAtor(
     ...estado,
     tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: ator.peaoId },
   };
+}
+
+// Giro de Recebida com Seleção nula (M2/review #333): a mesma pré-adoção do
+// ator de escolher vaga/encaixar — a sequência (escolher → girar → encaixar)
+// cura o stale em qualquer passo, sem depender da ordem. O giro em si não
+// consulta a Seleção (girarPeca roteia por peça selecionada/Manipulação); a
+// pré-adoção persiste a cura antecipada e mantém a sequência do Peão do ator.
+function girarPecaDaPartida(
+  estado: EstadoDaPartida,
+  comando: GirarPecaComando,
+  ator: JogadorDaPartida,
+): ResultadoDaPartida {
+  const ehRecebida = estado.tabuleiro.recebidas.some(
+    (item) => item.pecaId === comando.pecaId,
+  );
+  if (ehRecebida) {
+    estado = adotarSelecaoDoAtor(estado, ator);
+  }
+  return delegarAoTabuleiro(estado, comando);
 }
 
 function delegarAoTabuleiro(

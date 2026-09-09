@@ -774,6 +774,51 @@ test('estado persistido com seleção nula e Recebidas pendentes resolve sem re-
   assert.equal(estado.posicaoConfirmada, false);
 });
 
+// M2/review #333: o giro da Recebida cura o stale na mesma medida de escolher
+// vaga/encaixar — pré-adoção do ator com seleção nula persistida. A vaga é
+// escolhida antes (o giro da Recebida roteia pela peça selecionada, contrato
+// do Tabuleiro) e a seleção do Peão re-zerada para isolar a cura feita PELO
+// giro — o estado stale com Recebidas pendentes pode ocorrer em qualquer
+// passo da sequência (escolher → girar → encaixar).
+test('girar Recebida com seleção nula adota o Peão do ator (#326)', () => {
+  let estado = partidaEmRodada2();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  const persistido: EstadoDaPartida = {
+    ...confirmacao.estado,
+    tabuleiro: { ...confirmacao.estado.tabuleiro, peaoSelecionadoId: null },
+  };
+  const recebida = persistido.tabuleiro.recebidas[0]!;
+  // Escolhe a vaga da primeira Recebida (primeira borda canônica disponível).
+  let escolhido: EstadoDaPartida | undefined;
+  for (const borda of ['norte', 'leste', 'sul', 'oeste'] as const) {
+    const resultado = aplicarComandoDePartida(
+      persistido,
+      escolherVaga(recebida.recebidaId, borda),
+      'ana',
+    );
+    if (resultado.sucesso) {
+      escolhido = resultado.estado;
+      break;
+    }
+  }
+  if (!escolhido) {
+    throw new Error('esperava uma vaga disponível para a primeira Recebida');
+  }
+  // Re-zero do estado persistido: Recebida selecionada, seleção do Peão nula.
+  const stale: EstadoDaPartida = {
+    ...escolhido,
+    tabuleiro: { ...escolhido.tabuleiro, peaoSelecionadoId: null },
+  };
+  const giro = aplicarComandoDePartida(stale, girarPeca(recebida.pecaId), 'ana');
+  assert.equal(giro.sucesso, true);
+  if (!giro.sucesso) return;
+  assert.equal(giro.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+});
+
 // Guarda de outra seleção com pendências: a proteção PENDENCIA_NAO_RESOLVIDA
 // (tabuleiro) e o guard de peão alheio (partida) seguem de pé pós-confirmação.
 test('com pendências pós-confirmação, peão alheio segue rejeitado (FORA_DA_VEZ)', () => {
