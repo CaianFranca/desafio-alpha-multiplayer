@@ -43,7 +43,7 @@ export function ModoDesenvolvedorProvider({ children }: { children: ReactNode })
           type="button"
           onClick={alternarPainel}
           aria-pressed={painelVisivel}
-          className="fixed right-4 top-4 z-[60] rounded-md border border-slate-600 bg-slate-900/90 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800"
+          className="fixed right-4 top-4 z-[70] rounded-md border border-slate-600 bg-slate-900/90 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800"
         >
           {painelVisivel ? 'Fechar depuração' : 'Depuração'}
         </button>

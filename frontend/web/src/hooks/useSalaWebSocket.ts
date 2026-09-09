@@ -308,6 +308,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       // já está ativo (sobrevive a reload via sessionStorage) e a cada
       // reconexão — o servidor é idempotente.
       if (estaModoAtivo()) {
+        coletar('ws→', 'info', resumirPayload({ type: 'ATIVAR_DEBUG' }), 'sala')
         ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
       }
     }
@@ -462,6 +463,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     const desinscreverAtivacao = aoAtivarModo(() => {
       const ws = wsRef.current
       if (ws && ws.readyState === WebSocket.OPEN) {
+        coletar('ws→', 'info', resumirPayload({ type: 'ATIVAR_DEBUG' }), 'sala')
         ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
       } else if (ws) {
         comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'ATIVAR_DEBUG' }]

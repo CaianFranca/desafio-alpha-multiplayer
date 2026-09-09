@@ -123,4 +123,15 @@ describe('gatilho — 5 cliques em até 3s', () => {
     // Captura e stream continuam: o modo segue ativo.
     expect(coletor.estaModoAtivo()).toBe(true)
   })
+
+  it('botão flutuante fica ACIMA do overlay do painel (clicável com o painel aberto)', async () => {
+    const usuario = userEvent.setup()
+    montar()
+    for (let i = 0; i < 5; i++) fireEvent.click(logoGinga())
+
+    await usuario.click(screen.getByRole('button', { name: 'Depuração' }))
+    // Regressão do review: botão em z-70 > painel z-60 — mesmo z-index deixaria
+    // o botão atrás do overlay (posterior no DOM) e inclicável no navegador.
+    expect(screen.getByRole('button', { name: 'Fechar depuração' }).className).toContain('z-[70]')
+  })
 })

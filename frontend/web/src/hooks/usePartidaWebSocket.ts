@@ -161,6 +161,7 @@ export function usePartidaWebSocket({
       // Stream de debug do backend (issue #340): o escopo é a Partida da
       // conexão (o `partida-id` do upgrade); enviado a cada open/reconexão.
       if (estaModoAtivo()) {
+        coletar('ws→', 'info', resumirPayload({ type: 'ATIVAR_DEBUG' }), 'partida')
         ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
       }
     }
@@ -259,6 +260,7 @@ export function usePartidaWebSocket({
     const desinscreverAtivacao = aoAtivarModo(() => {
       const ws = wsRef.current
       if (ws && ws.readyState === WebSocket.OPEN) {
+        coletar('ws→', 'info', resumirPayload({ type: 'ATIVAR_DEBUG' }), 'partida')
         ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
       } else if (ws) {
         comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'ATIVAR_DEBUG' }]
