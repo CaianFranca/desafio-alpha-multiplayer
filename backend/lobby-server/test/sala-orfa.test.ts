@@ -271,7 +271,9 @@ function handlersComOrfa(
       enviar(_salaId: string, evento: unknown) {
         registro.broadcasts.push(evento);
       },
-      removerSocket() {
+      // Review JF532, O3: o bypass remove os sockets do jogador, não um
+      // socket específico.
+      removerSocketPorJogadorId() {
         registro.socketsRemovidos += 1;
       },
     },

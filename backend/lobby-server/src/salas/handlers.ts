@@ -1589,7 +1589,9 @@ export class SalasHandlers {
     }
     const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase);
     this.difundir(eventos, salaId);
-    this.broadcast.removerSocket({ data: { jogadorId } } as unknown as AuthenticatedWebSocket);
+    // Remoção por jogador (review JF532, O3): o bypass só tem o `jogadorId` —
+    // sem cast no-op de socket falso.
+    this.broadcast.removerSocketPorJogadorId(jogadorId);
     return true;
   }
 
