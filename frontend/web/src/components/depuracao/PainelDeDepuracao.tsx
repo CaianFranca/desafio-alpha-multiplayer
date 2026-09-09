@@ -1,8 +1,10 @@
 /**
- * Painel de depuração sobreposto (issue #340, "Modo Desenvolvedor").
+ * Painel de depuração em janela compacta (issue #340, "Modo Desenvolvedor").
  *
- * Overlay fixo acima dos overlays existentes (z-50 → z-[60]), fundo próprio
- * distinto do fundo das linhas. Filtro por nível (info/warn/error/todos),
+ * Janela fixa no canto superior direito (abaixo do botão flutuante de
+ * on/off, que fica em z-[70] — o painel fica em z-[60], acima dos overlays
+ * do app em z-50), fundo próprio distinto do fundo das linhas.
+ * Filtro por nível (info/warn/error/todos),
  * botão Limpar e botão Copiar com campo numérico "últimas N linhas"
  * (vazio/0 = copiar tudo); a cópia respeita o filtro ativo e sai em texto
  * simples, uma linha por log. Renderiza a partir do coletor singleton —
@@ -61,7 +63,10 @@ export function PainelDeDepuracao() {
   return (
     <div
       data-testid="painel-de-depuracao"
-      className="fixed inset-0 z-[60] overflow-auto bg-slate-950/95 p-4 font-mono text-xs"
+      // Janela compacta ancorada abaixo do botão flutuante (top-4 + altura do
+      // botão ≈ top-14): o botão nunca fica sob o painel. Coluna flex garante
+      // scroll interno apenas na lista (min-h-0 no <ol>).
+      className="fixed right-4 top-14 z-[60] flex max-h-[50vh] w-[360px] flex-col bg-slate-950/95 p-4 font-mono text-xs"
     >
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="font-semibold text-slate-300">Modo Desenvolvedor</span>
@@ -108,7 +113,12 @@ export function PainelDeDepuracao() {
           Copiar
         </button>
       </div>
-      <ol data-testid="linhas-do-painel" className="space-y-0.5">
+      <ol
+        data-testid="linhas-do-painel"
+        // min-h-0 permite o <ol> encolher dentro do max-h do painel; o
+        // overflow-y-auto fica só na lista, toolbar sempre visível.
+        className="min-h-0 space-y-0.5 overflow-y-auto"
+      >
         {filtradas.map((entrada) => (
           <li
             key={entrada.id}
