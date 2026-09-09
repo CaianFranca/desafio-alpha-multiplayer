@@ -53,7 +53,7 @@ function criarTexturaOK(): THREE.CanvasTexture | null {
   if (!ctx) return null
 
   const raio = 32
-  
+
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
   // Botão Verde (Original)
