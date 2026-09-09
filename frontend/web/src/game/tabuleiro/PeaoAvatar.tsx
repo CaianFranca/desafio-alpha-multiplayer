@@ -8,6 +8,7 @@ import {
   COR_CONTORNO_PEAO_SELECIONADO,
   propsDoMaterialDeContorno,
 } from './contorno'
+import { handlersDeCursor } from './cursor'
 
 interface PeaoAvatarProps {
   cor: CorDoPeao
@@ -167,19 +168,16 @@ export function PeaoAvatar({
 
   // Só interage ao ponteiro quando há handler de seleção (idêntico ao
   // PeaoPlaceholder): os meshes do modelo borbulham até o grupo pai.
-  // Group cuida do cursor; hitbox cuida do clique (evita double-fire).
+  // Group cuida do cursor via padrão global handlersDeCursor; hitbox cuida do clique (evita double-fire).
+  const baseCursor = handlersDeCursor(aoClicar ? 'pointer' : 'default')
   const groupHandlers = aoClicar
     ? {
         onPointerOver: (e: ThreeEvent<PointerEvent>) => {
           e.stopPropagation()
-          document.body.style.cursor = 'pointer'
+          baseCursor.onPointerOver(e)
         },
-        onPointerOut: () => {
-          document.body.style.cursor = 'auto'
-        },
-        onPointerLeave: () => {
-          document.body.style.cursor = 'auto'
-        },
+        onPointerOut: baseCursor.onPointerOut,
+        onPointerLeave: baseCursor.onPointerLeave,
       }
     : {}
   const hitboxClick = aoClicar

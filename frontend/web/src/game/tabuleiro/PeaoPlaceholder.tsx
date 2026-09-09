@@ -8,6 +8,7 @@ import {
   ESCALA_CONTORNO_PEAO,
   propsDoMaterialDeContorno,
 } from './contorno'
+import { handlersDeCursor } from './cursor'
 
 /**
  * Placeholder do Peão (issue #90 — ST-10).
@@ -92,19 +93,16 @@ export function PeaoPlaceholder({
   const emissiveIntensity = ativo ? EMISSIVO_ATIVO : 0
 
   // Só interage ao ponteiro quando há handler de seleção.
-  // Group cuida do cursor; hitbox invisível cuida do clique (evita double-fire).
+  // Group cuida do cursor (mesmo padrão global de PecaPlaceholder/Caixa); hitbox invisível cuida do clique (evita double-fire).
+  const baseCursor = handlersDeCursor(aoClicar ? 'pointer' : 'default')
   const groupHandlers = aoClicar
     ? {
         onPointerOver: (e: ThreeEvent<PointerEvent>) => {
           e.stopPropagation()
-          document.body.style.cursor = 'pointer'
+          baseCursor.onPointerOver(e)
         },
-        onPointerOut: () => {
-          document.body.style.cursor = 'auto'
-        },
-        onPointerLeave: () => {
-          document.body.style.cursor = 'auto'
-        },
+        onPointerOut: baseCursor.onPointerOut,
+        onPointerLeave: baseCursor.onPointerLeave,
       }
     : {}
   const hitboxClick = aoClicar
