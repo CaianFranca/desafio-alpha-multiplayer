@@ -44,6 +44,12 @@ SEGUNDOS`, o mesmo do não-início) **libera** a órfã; marker novo mantém a p
 (a admissão ainda pode completar); sem marker — órfã anterior a este deploy —
 segue pelo caminho antigo até a expiração.
 
+Invariante da hidratação: `hidratarSala` injeta a Sala com `consistente: true`
+e presença `conectado` de propósito — ela existe para o bypass de Partida Órfã
+(o `exigirSalaConsistente` do engine exige `true`) e não passa por
+`registrar_reinicio`; o fluxo de boot usa `carregar` + `registrar_reinicio`,
+nunca `hidratarSala`. Hidratar fora do bypass fabricaria presença.
+
 ## Alternativas consideradas
 
 - **Poll lobby → game-server** — rejeitada: carga contínua para evento pontual.

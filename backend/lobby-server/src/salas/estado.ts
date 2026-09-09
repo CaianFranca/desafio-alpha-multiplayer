@@ -193,6 +193,11 @@ class SalasStateImpl implements SalasState {
       return false;
     }
     const membros = await repo.listarMembrosDaSala(salaId);
+    // Invariante (ADR-0010): hidratar injeta a Sala com `consistente: true` e
+    // presença `conectado` DE PROPÓSITO — só o bypass de Partida Órfã chama
+    // este método, e o `exigirSalaConsistente` do engine exige `true`. O fluxo
+    // de boot usa `carregar` + `registrar_reinicio` e NUNCA `hidratarSala`:
+    // hidratar fora do bypass fabricaria presença.
     const salaDominio = this.montarSalaDominio(bruta, membros);
     this._estado = { salas: [...this._estado.salas, salaDominio] };
     this._abertas.set(salaId, { sala: salaDominio, codigo: salaDominio.codigo });
@@ -210,6 +215,9 @@ class SalasStateImpl implements SalasState {
       ordemDeEntrada: m.ordem,
       estado: 'ativo' as const,
       motivoEncerramento: null,
+      // `presenca: 'conectado'` e `consistente: true` são intencionais (ver a
+      // invariante em `hidratarSala`): existem para o bypass de Partida Órfã,
+      // não para o boot.
       presenca: 'conectado' as const,
       pronto: false,
     }));
@@ -245,6 +253,9 @@ class SalasStateImpl implements SalasState {
       proximaOrdemDeEntrada,
       anfitriaoId: anfitriaoMembroId,
       jogadoresBloqueados,
+      // Invariante (ADR-0010): `true` de propósito — só o bypass de Partida
+      // Órfã hidrata, e o `exigirSalaConsistente` do engine exige `true`. O
+      // boot segue por `carregar` + `registrar_reinicio`.
       consistente: true,
     };
   }
