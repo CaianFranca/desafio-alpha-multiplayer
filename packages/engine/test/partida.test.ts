@@ -625,12 +625,12 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
 
-  // Re-seleção reentra na sequência sem Recebimento; a Confirmação de
-  // Posição trava o Peão na Peça em que terminou e gera o Recebimento
+  // A re-seleção do mover (#263) já recolocou o Peão em sequência — sem
+  // re-seleção explícita antes de confirmar (R1/review #333). A Confirmação
+  // de Posição trava o Peão na Peça em que terminou e gera o Recebimento
   // (norte da reta-1 vazio; o sul aponta para a inicial-1 ocupada). A peça
   // sorteada é a 7ª da composição (reta-7: as seis primeiras — reta-1 a
   // reta-6 — já saíram nos quatro Primeiros Turnos).
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
   assert.equal(confirmacao.sucesso, true);
   if (!confirmacao.sucesso) return;
