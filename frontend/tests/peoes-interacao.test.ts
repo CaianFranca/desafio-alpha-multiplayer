@@ -1297,6 +1297,7 @@ describe('desseleção autoritativa do peão (issue #249)', () => {
       posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
       recebidasPendentes: [],
       peaoSelecionadoId: null,
+      peaoDoTurnoId: null,
       pecaSelecionadaId: null,
       posicaoConfirmadaNoTurno: false,
       movimentouNoTurno: false,

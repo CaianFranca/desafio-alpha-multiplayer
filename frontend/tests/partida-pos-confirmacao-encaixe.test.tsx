@@ -80,8 +80,11 @@ function criarSnapshot(peaoSelecionadoId: string | null): EstadoDaPartidaSnapsho
         { peaoId: 'peao-azul', cor: 'azul', pecaId: 'inicial-3' },
         { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: 'inicial-4' },
       ],
-      // Pendência corrente (sem vaga) do Recebimento da Confirmação.
-      recebidas: [{ recebidaId: 'recebida-reta-9', pecaId: 'reta-9', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null }],
+      // Pendência corrente (sem vaga) do Recebimento da Confirmação —
+      // forma do RecebidaNoSnapshot (tipo + orientação, @flicker/shared).
+      recebidas: [
+        { recebidaId: 'recebida-reta-9', pecaId: 'reta-9', tipo: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
+      ],
       pecaSelecionadaId: null,
       pecaEmManipulacaoId: null,
       peaoSelecionadoId,
@@ -136,7 +139,18 @@ function estadoInteracaoDoSnapshot(snapshot: EstadoDaPartidaSnapshot): EstadoInt
       celula: peao.pecaId === null ? null : (celulaPorPecaId.get(peao.pecaId) ?? null),
     })),
     posicionadas: snapshot.tabuleiro.posicionadas,
-    recebidasPendentes: snapshot.tabuleiro.recebidas,
+    // Mesma projeção do snapshot.ts: RecebidaNoSnapshot → PendenciaNoCliente
+    // (tipoDaPeca + orientação copiados), sem cast.
+    recebidasPendentes: snapshot.tabuleiro.recebidas.map((r) => ({
+      recebidaId: r.recebidaId,
+      pecaId: r.pecaId,
+      tipoDaPeca: r.tipo,
+      vaga: r.vaga,
+      celulaAlvo: r.celulaAlvo
+        ? { linha: r.celulaAlvo.linha, coluna: r.celulaAlvo.coluna }
+        : null,
+      orientacao: r.orientacao,
+    })),
     peaoSelecionadoId: null,
     peaoDoTurnoId: 'peao-branco',
     pecaSelecionadaId: null,
