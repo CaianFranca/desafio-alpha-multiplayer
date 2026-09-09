@@ -17,6 +17,10 @@ export const LIMIAR_POR_TIPO: Record<PointerType, number> = {
 }
 export const FATOR_ZOOM_MAX = 2.8
 export const SENSIBILIDADE_WHEEL = 0.002
+/** Breakpoint celular/tablet (Tailwind md = 768px) — abaixo disso é celular. */
+export const LIMITE_CELULAR_PX = 768
+/** Suavização do pinch no celular: 0.5 = metade da variação (mais controlável). */
+export const FATOR_SUAVIZACAO_PINCH_CELULAR = 0.5
 
 /** Margem da câmera interativa: >1 para deixar respiro entre borda da Mesa e frustum. */
 export const MARGEM_CAMERA_INTERATIVA = 1.05
@@ -238,6 +242,18 @@ export const criarPinchInicial = (): EstadoPinch => ({
 
 export function calcularFatorPinch(distanciaInicial: number, distAtual: number): number {
   return distanciaInicial / (distAtual || 1)
+}
+
+/**
+ * Suaviza o fator de pinch no celular (< 768px) para evitar zoom brusco.
+ * Em telas de celular aplica `1 + (fator-1)*0.5`; demais breakpoints retornam
+ * o fator cru. Puro e testável (largura injetada, sem ler window).
+ */
+export function suavizarFatorPinch(fator: number, larguraViewport: number): number {
+  if (larguraViewport < LIMITE_CELULAR_PX) {
+    return 1 + (fator - 1) * FATOR_SUAVIZACAO_PINCH_CELULAR
+  }
+  return fator
 }
 
 export function distanciaEntrePontos(a: Ponto2D, b: Ponto2D): number {

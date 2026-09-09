@@ -11,6 +11,7 @@ import {
   aspectoVisivel,
   resolverAltura,
   calcularFatorPinch,
+  suavizarFatorPinch,
   distanciaPinch,
   poseCamera,
   SENSIBILIDADE_WHEEL,
@@ -172,7 +173,11 @@ export function useCameraInterativa({ bordaPx = 0 }: UseCameraInterativaOptions 
       if (ponteirosRef.current.size === 2 && pinchRef.current.ativo) {
         const distAtual = distanciaPinch(ponteirosRef.current) || 1
         const fator = calcularFatorPinch(pinchRef.current.distanciaInicial, distAtual)
-        const novaDist = distanciaRef.current * fator
+        const fatorSuave =
+          typeof window !== 'undefined'
+            ? suavizarFatorPinch(fator, window.innerWidth)
+            : fator
+        const novaDist = distanciaRef.current * fatorSuave
         aplicarZoom(novaDist)
         return
       }
