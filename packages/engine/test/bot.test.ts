@@ -354,9 +354,8 @@ test('turno normal: início só seleciona o Peão; depois move ou permanece', ()
 test('turno normal: após mover, confirmar substitui o permanecer', () => {
   let estado = partidaEmRodada2();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  // Re-seleção do Peão (semântica única da Movimentação, #334): após o
-  // mover_peao bem-sucedido o Peão movido segue selecionado — sem re-seleção
-  // manual entre a Movimentação e a Confirmação de Posição.
+  // Re-seleção do Peão: semântica única da Movimentação — ver o fechamento do
+  // moverPeaoDaPartida em partida.ts (#334).
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
   assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
@@ -569,10 +568,10 @@ test('4 bots jogam até o resultado ou o limite de rodadas, sem exceção', () =
       }
       estado = turno.estado;
       if (turno.motivo === 'desistencia') {
-        // Desistência é desfecho legítimo do failsafe: o turno não avançou
-        // (o ator segue na vez) e a função é pura com sorteio aleatório —
-        // re-executar o turno do mesmo ator em vez de abortar a partida
-        // simulada (#334).
+        // Desistência é desdobramento legítimo do failsafe: o turno não
+        // avançou (o ator segue na vez) e a função é pura com sorteio
+        // aleatório — re-executar o turno do mesmo ator em vez de abortar a
+        // partida simulada (#334).
         desistencias++;
         continue;
       }

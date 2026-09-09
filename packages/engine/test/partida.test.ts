@@ -1669,9 +1669,9 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
   }
 
   // AC-3 do #272: com a Seleção nula a Travessia usa o Peão do ator como
-  // referência e NÃO trava — adota a Seleção na sequência. A Movimentação hoje
-  // re-seleciona o Peão movido (semântica única, #334), então a Seleção nula
-  // é construída sinteticamente para exercitar a guarda.
+  // referência e NÃO trava — adota a Seleção na sequência. A Movimentação
+  // re-seleciona o Peão movido (#334), então a Seleção nula é construída
+  // sinteticamente para exercitar a guarda.
   {
     let comMovimentacao = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
     comMovimentacao = aplicar(comMovimentacao, selecionarPeao('peao-branco'), 'ana');
@@ -1950,10 +1950,10 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
     codigoDaRejeicao(estado, encerrarTurno(), 'ana'),
     'ENCERRAMENTO_INVALIDO',
   );
-  // Permanência: com a Re-seleção da Movimentação (semântica única, #334) o
-  // Peão segue selecionado após o mover; após a mudança de Peça o permanecer
-  // responde ENCERRAMENTO_INVALIDO direto — nenhum caminho fecha o turno sem
-  // o confirmar.
+  // Permanência: o Peão segue selecionado após o mover (Re-seleção da
+  // Movimentação, #334); após a mudança de Peça o permanecer responde
+  // ENCERRAMENTO_INVALIDO direto — nenhum caminho fecha o turno sem o
+  // confirmar.
   assert.equal(
     codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
     'ENCERRAMENTO_INVALIDO',
