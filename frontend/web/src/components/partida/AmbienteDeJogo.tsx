@@ -190,6 +190,13 @@ export function AmbienteDeJogo({
           orientacao: corrente.orientacao ?? 0,
         }
       : null
+  // Gate experimental da janela de Manipulação 3D: durante a manípulação a
+  // bandeja fica oculta (a próxima corrente só volta após o OK). Vale para
+  // cena e espelho — fonte única dessa derivação de exibição.
+  const manipulacaoAtiva = estadoInteracao?.pecaEmManipulacaoId != null
+  const pecaCorrenteNaBandeja: PecaCorrente | null = manipulacaoAtiva
+    ? null
+    : pecaCorrente
   // O destaque de vaga segue o clique: só aparece com a corrente PUXADA
   // (alvo inválido sem pull não reage — padrão #91; espectador nunca puxa,
   // logo nunca vê vaga destacada). A vigência do pull vem do predicado puro
@@ -286,7 +293,7 @@ export function AmbienteDeJogo({
           onPuxarPecaDaBandeja={aoPuxarPecaDaBandeja}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
-          pecaCorrente={pecaCorrente}
+          pecaCorrente={pecaCorrenteNaBandeja}
           vooPendente={vooPendente}
           onVooAterrissou={onVooAterrissou}
           limpezaTrigger={limpezaTrigger}
@@ -301,7 +308,7 @@ export function AmbienteDeJogo({
           ocupadasSet={ocupadasSet}
           iluminadasSet={iluminadasSet}
           iniciais={estadoExibicao.iniciais}
-          pecaCorrente={pecaCorrente}
+          pecaCorrente={pecaCorrenteNaBandeja}
           posicionadas={estadoExibicao.posicionadas}
           peoes={estadoExibicao.peoes}
           peaoSelecionadoId={peaoSelecionadoIdLocal}

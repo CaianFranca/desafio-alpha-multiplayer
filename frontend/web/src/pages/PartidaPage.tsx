@@ -463,7 +463,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           ? 'confirmar'
           : 'permanecer'
 
-  // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
+  // ── Rotação: teclas R/E (a peça em manipulação gira pelo overlay 3D) ──
   const pecaAlvoDeGiro = estadoInteracao
     ? (estadoInteracao.pecaEmManipulacaoId ?? estadoInteracao.pecaSelecionadaId)
     : null
@@ -641,33 +641,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               Encerrar Turno
             </button>
           ) : null}
-        </div>
-      ) : null}
-      {estadoEmAndamento ? (
-        // Controles de giro acima das conquistas soltas do HUD (inf-centro,
-        // #226) para não sobrepor Geradores/Cartão.
-        <div
-          data-testid="controles-de-giro"
-          className="pointer-events-auto absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 gap-2"
-        >
-          <button
-            type="button"
-            data-testid="girar-anti-horario"
-            onClick={() => girar('anti_horario')}
-            disabled={pecaAlvoDeGiro === null}
-            className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
-          >
-            Girar ◀
-          </button>
-          <button
-            type="button"
-            data-testid="girar-horario"
-            onClick={() => girar('horario')}
-            disabled={pecaAlvoDeGiro === null}
-            className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
-          >
-            Girar ▶
-          </button>
         </div>
       ) : null}
       </div>

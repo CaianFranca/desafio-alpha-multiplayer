@@ -147,7 +147,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
     expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(3)
   })
 
-  it('rotação via botão DOM envia GIRAR_PECA para a peça em manipulação ao WS', async () => {
+  it('rotação por tecla R envia GIRAR_PECA para a peça em manipulação ao WS', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
     // Posiciona inicial-1 → abre janela de manipulação.
@@ -161,8 +161,10 @@ describe('partida conectada ao game-server (issue #85)', () => {
     )
     await screen.findByTestId('peca-posicionada')
 
+    // Os controles de giro são 3D (overlay) — o atalho R do teclado mantém o
+    // caminho de teste DOM para o wire (a cena WebGL é caixa-preta no jsdom).
     const user = userEvent.setup()
-    await user.click(screen.getByTestId('girar-horario'))
+    await user.keyboard('r')
 
     await waitFor(() => {
       const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
@@ -289,20 +291,24 @@ describe('partida conectada ao game-server (issue #85)', () => {
     expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
   })
 
-  it('controles de giro desabilitam sem seleção e após finalização', async () => {
+  it('overlay de giro 3D: presente apenas com peça em manipulação (pós-encaixe)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
-    // 1. Sem nada selecionado: botões desabilitados.
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
-    expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
+    // 1. Sem nada selecionado: sem overlay emitido (a cena 3D é caixa-preta
+    // no jsdom; o seam data-manipulacao espelha a mesma fonte).
+    const semJanela = () =>
+      screen.queryAllByTestId('peca-posicionada').some((el) => el.hasAttribute('data-manipulacao'))
+    expect(semJanela()).toBe(false)
 
-    // 2. Seleciona: habilita.
+    // 2. Seleciona (ainda não posiciona): o overlay só existe pós-encaixe —
+    //    a peça selecionada da mesa não recebe controles (rotação pré-encaixe
+    //    permanece só por teclas R/E).
     act(() => {
       ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' })
     })
-    expect(screen.getByTestId('girar-horario')).not.toBeDisabled()
+    expect(semJanela()).toBe(false)
 
-    // 3. Posiciona: abre manipulação (continua habilitado).
+    // 3. Posiciona: abre manípulação → data-manipulacao liga na peça.
     act(() => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
@@ -311,13 +317,19 @@ describe('partida conectada ao game-server (issue #85)', () => {
         orientacao: 0,
       })
     })
-    expect(screen.getByTestId('girar-horario')).not.toBeDisabled()
+    const comManipulacao = () =>
+      screen
+        .getAllByTestId('peca-posicionada')
+        .find((el) => el.getAttribute('data-peca-id') === 'inicial-1')
+        ?.getAttribute('data-manipulacao')
+    await waitFor(() => expect(comManipulacao()).toBe('true'))
 
-    // 4. Finaliza: desabilita (manipulação e seleção nulas).
+    // 4. Finaliza: manipulação e seleção nulas → overlay some.
     act(() => {
       ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
     })
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
+    // Atributo ausente → getAttribute devolve null (elemento permanece no DOM).
+    expect(comManipulacao()).toBeNull()
   })
 
   it('envia apenas comandos Partida com jogadorId (hook restrito)', async () => {
@@ -1317,6 +1329,8 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         snapshot: snapshotComObjetivos({ posicionadas: [GERADOR_1, SALA_MEDICA_1] }),
       }),
     )
+    // Sem janela de Manipulação: o overlay 3D não emite (data-manipulacao
+    // ausente no espelho) — os controles DOM de giro não existem mais.
     const pospecas = await screen.findAllByTestId('peca-posicionada')
     expect(pospecas).toHaveLength(2)
     expect(
@@ -1325,8 +1339,8 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
     expect(
       pospecas.find((el) => el.getAttribute('data-peca-id') === 'sala-medica-1')?.getAttribute('data-tipo'),
     ).toBe('sala_medica')
-    // Sem janela de Manipulação: os controles de giro nascem desabilitados.
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
+    expect(pospecas.some((el) => el.hasAttribute('data-manipulacao'))).toBe(false)
+    expect(screen.queryByTestId('controles-de-giro')).not.toBeInTheDocument()
 
     // Via delta: sorteio + encaixe direto de outra especial no mesmo lote.
     act(() => {
@@ -1344,9 +1358,11 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
       .find((el) => el.getAttribute('data-peca-id') === 'sala-medica-2')
     expect(delta?.getAttribute('data-tipo')).toBe('sala_medica')
     // O encaixe da especial não abriu janela de Manipulação (o modelo local
-    // reflete o engine): giro segue desabilitado.
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
-    expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
+    // reflete o engine): sem data-manipulacao nas peças e sem controles DOM.
+    expect(
+      screen.getAllByTestId('peca-posicionada').some((el) => el.hasAttribute('data-manipulacao')),
+    ).toBe(false)
+    expect(screen.queryByTestId('controles-de-giro')).not.toBeInTheDocument()
   })
 })
 

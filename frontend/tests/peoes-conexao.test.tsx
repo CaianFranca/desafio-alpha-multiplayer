@@ -175,6 +175,11 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         orientacao: 0,
       })
     })
+    // O encaixe da Inicial abre a janela de Manipulação; o OK que a fechou
+    // libera a bandeja para exibir a corrente seguinte (gate da Manipulação).
+    act(() => {
+      ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
+    })
     expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(3)
 
     // ── 1. Clique no peão → SELECIONAR_PEAO com jogadorId ──
@@ -279,10 +284,11 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(screen.getByTestId('caixa')).toBeInTheDocument()
     expect(pecaCorrenteDaBandeja()).toBeNull()
 
-    // ── 5. GIRAR_PECA pós-encaixe via botão (pecaEmManipulacaoId = reta-1) ──
-    const girarHorario = screen.getByTestId('girar-horario')
-    expect(girarHorario).not.toBeDisabled()
-    await user.click(girarHorario)
+    // ── 5. GIRAR_PECA pós-encaixe (janela de Manipulação aberta para reta-1) ──
+    // Rota pelo atalho de teclado R (os botões DOM de giro saíram; o overlay
+    // 3D é inacessível no jsdom — o seam data-manipulacao cobre a cena).
+    expect(pecaPosicionadaDoEspelho('reta-1').getAttribute('data-manipulacao')).toBe('true')
+    await user.keyboard('r')
     expect(ultimoComando(ws)).toEqual({
       type: 'GIRAR_PECA',
       pecaId: 'reta-1',
@@ -344,6 +350,11 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         ],
       })
     })
+    // Fecha a janela de Manipulação da Inicial (gate): só então a corrente r1
+    // aparece na bandeja.
+    act(() => {
+      ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
+    })
 
     // Só a PRIMEIRA pendência é visível (slot único): a segunda fica escondida.
     expect(screen.getAllByTestId('caixa-peca-sorteada')).toHaveLength(1)
@@ -391,6 +402,10 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         celula: { linha: 2, coluna: 3 },
         orientacao: 0,
       })
+    })
+    // Fecha a janela de reta-1 (gate): a corrente r2 volta à bandeja.
+    act(() => {
+      ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'reta-1' })
     })
     expect(screen.getAllByTestId('recebida-pendente')).toHaveLength(1)
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('cruz-1')
@@ -835,6 +850,11 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
         recebidas: [recebidaSorteada('r1', 'vulto-1', 'vulto')],
       })
     })
+    // Fecha a janela de Manipulação da Inicial (gate): a bandeja passa a
+    // exibir o Monstro corrente.
+    act(() => {
+      ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
+    })
 
     // Bandeja exibe o Monstro com o tipo do wire.
     const corrente = pecaCorrenteDaBandeja()
@@ -880,10 +900,10 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
     })
     // Monstro posicionado no espelho com o tipo correto…
     expect(pecaPosicionadaDoEspelho('vulto-1').getAttribute('data-tipo')).toBe('vulto')
-    // …e sem janela de Manipulação (espelha engine posicionarRecebida):
-    // os controles de giro nascem travados.
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
-    expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
+    // …e sem janela de Manipulação (espelha engine posicionarRecebida): o
+    // overlay 3D não emite (data-manipulacao ausente) e não há controles DOM.
+    expect(pecaPosicionadaDoEspelho('vulto-1').hasAttribute('data-manipulacao')).toBe(false)
+    expect(screen.queryByTestId('controles-de-giro')).not.toBeInTheDocument()
   })
 
   it('espectro na corrente da bandeja e no encaixe (cobertura do segundo tipo de Monstro)', async () => {
@@ -915,6 +935,10 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
         type: 'RECEBIMENTO_GERADO',
         recebidas: [recebidaSorteada('r1', 'espectro-1', 'espectro')],
       })
+    })
+    // Fecha a janela de Manipulação da Inicial (gate) para exibir a corrente.
+    act(() => {
+      ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
     })
 
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-tipo')).toBe('espectro')
