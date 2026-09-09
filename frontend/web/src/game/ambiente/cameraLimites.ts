@@ -9,8 +9,18 @@ import {
 } from './contrato'
 
 export const LIMIAR_ARRASTO_PX = 6
+export type PointerType = 'mouse' | 'pen' | 'touch'
+export const LIMIAR_POR_TIPO: Record<PointerType, number> = {
+  mouse: 6,
+  pen: 8,
+  touch: 10,
+}
 export const FATOR_ZOOM_MAX = 2.8
 export const SENSIBILIDADE_WHEEL = 0.002
+/** Breakpoint celular/tablet (Tailwind md = 768px) — abaixo disso é celular. */
+export const LIMITE_CELULAR_PX = 768
+/** Suavização do pinch no celular: 0.5 = metade da variação (mais controlável). */
+export const FATOR_SUAVIZACAO_PINCH_CELULAR = 0.5
 
 /** Margem da câmera interativa: >1 para deixar respiro entre borda da Mesa e frustum. */
 export const MARGEM_CAMERA_INTERATIVA = 1.05
@@ -39,8 +49,10 @@ export type AlvoXZ = { x: number; z: number }
 /** Ponto 2D genérico (px ou mundo) para helpers de geometria de ponteiros. */
 export type Ponto2D = { x: number; y: number }
 
-export function atingiuLimiar(dx: number, dy: number): boolean {
-  return Math.hypot(dx, dy) >= LIMIAR_ARRASTO_PX
+export function atingiuLimiar(dx: number, dy: number, pointerType?: PointerType | string): boolean {
+  const tipo = (pointerType ?? 'mouse') as PointerType
+  const limiar = LIMIAR_POR_TIPO[tipo] ?? LIMIAR_ARRASTO_PX
+  return Math.hypot(dx, dy) >= limiar
 }
 
 export function worldPerPixel(fovGraus: number, distancia: number, clientHeight: number): number {
@@ -230,6 +242,18 @@ export const criarPinchInicial = (): EstadoPinch => ({
 
 export function calcularFatorPinch(distanciaInicial: number, distAtual: number): number {
   return distanciaInicial / (distAtual || 1)
+}
+
+/**
+ * Suaviza o fator de pinch no celular (< 768px) para evitar zoom brusco.
+ * Em telas de celular aplica `1 + (fator-1)*0.5`; demais breakpoints retornam
+ * o fator cru. Puro e testável (largura injetada, sem ler window).
+ */
+export function suavizarFatorPinch(fator: number, larguraViewport: number): number {
+  if (larguraViewport < LIMITE_CELULAR_PX) {
+    return 1 + (fator - 1) * FATOR_SUAVIZACAO_PINCH_CELULAR
+  }
+  return fator
 }
 
 export function distanciaEntrePontos(a: Ponto2D, b: Ponto2D): number {

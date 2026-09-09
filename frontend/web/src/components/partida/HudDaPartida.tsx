@@ -324,7 +324,7 @@ export function HudDaPartida({
           type="button"
           data-testid="hud-sair"
           onClick={() => setConfirmandoSaida(true)}
-          className="pointer-events-auto rounded border border-amber-500/70 px-3 py-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-amber-400 hover:border-amber-400 hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-500"
+          className="pointer-events-auto min-h-[44px] min-w-[44px] rounded border border-amber-500/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-400 hover:border-amber-400 hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-500"
         >
           Sair
         </button>
@@ -343,7 +343,7 @@ export function HudDaPartida({
               type="button"
               data-testid="hud-sair-confirmar"
               onClick={onSair}
-              className="rounded bg-amber-500 px-4 py-1 text-xs font-semibold uppercase tracking-wider text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+              className="min-h-[44px] min-w-[44px] rounded bg-amber-500 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >
               Confirmar
             </button>
@@ -351,7 +351,7 @@ export function HudDaPartida({
               type="button"
               data-testid="hud-sair-cancelar"
               onClick={() => setConfirmandoSaida(false)}
-              className="rounded border border-zinc-600 px-4 py-1 text-xs uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+              className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-xs uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >
               Cancelar
             </button>
