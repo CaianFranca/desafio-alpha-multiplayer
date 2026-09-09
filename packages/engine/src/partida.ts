@@ -1312,10 +1312,17 @@ function confirmarPosicaoDoPeao(
   // B3/review #333: a adoção da seleção só existe quando a Confirmação gera
   // Recebimento — em Baixa Iluminação (sorteio [], ADR-0005) a seleção não
   // nasce sem sequência (invariante "a seleção vive durante a sequência").
-  // Guarda da #264 já rejeitou outro Peão; o lançamento é rede de proteção.
+  // Guarda da #264 já rejeitou outro Peão; a rejeição abaixo é a rede de
+  // proteção do dispatch.
   const selecaoVigente = estado.tabuleiro.peaoSelecionadoId;
   if (selecaoVigente !== null && selecaoVigente !== peao.peaoId) {
-    throw new Error('invariante: Confirmação chegou com outro Peão selecionado');
+    // Rede de proteção (B1/review #333): o guard da #264 acima já rejeitou
+    // outro Peão — esta rejeição defensiva preserva o contrato do dispatch
+    // (aplicarComandoDePartida nunca lança) mesmo sob estado artesanal.
+    return rejeitarDaPartida(
+      'PEAO_NAO_SELECIONADO',
+      'Invariante da Confirmação: outro Peão está selecionado.',
+    );
   }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
