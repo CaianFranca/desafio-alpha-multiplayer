@@ -551,9 +551,15 @@ export function entrarNaSala(
 
 export const admitirMembro = entrarNaSala;
 
-export function sairDaSala(
+// Núcleo comum das duas saídas de Sala (review #304 item 4): os dois caminhos
+// compartilham validação, rejeições e efeito — divergem apenas no guarda do
+// estado `encaminhada`. `permitirEncaminhada: false` é o `sairDaSala` canônico
+// (recusa `SALA_ENCAMINHADA`); `true` é o bypass interno do não-início, que
+// exige a Sala `encaminhada` e confia na orfandade verificada pelo chamador.
+function executarSaidaDeSala(
   estado: EstadoDoLobby,
   comando: SairDaSalaComando,
+  opcoes: { permitirEncaminhada: boolean },
 ): Resultado {
   const dadosInvalidos = validarTexto(
     comando.salaId,
@@ -575,9 +581,15 @@ export function sairDaSala(
     return salaInconsistente;
   }
 
-  const salaCongelada = exigirSalaNaoEncaminhada(sala);
-  if (salaCongelada) {
-    return salaCongelada;
+  if (opcoes.permitirEncaminhada) {
+    if (sala.estado !== 'encaminhada') {
+      return rejeitar('SALA_NAO_ENCAMINHADA', 'A Sala não está encaminhada.', { salaId: sala.id });
+    }
+  } else {
+    const salaCongelada = exigirSalaNaoEncaminhada(sala);
+    if (salaCongelada) {
+      return salaCongelada;
+    }
   }
 
   const membro = sala.membros.find(
@@ -651,6 +663,27 @@ export function sairDaSala(
   }
 
   return sucesso(substituirSala(estado, novaSala), eventos);
+}
+
+export function sairDaSala(
+  estado: EstadoDoLobby,
+  comando: SairDaSalaComando,
+): Resultado {
+  return executarSaidaDeSala(estado, comando, { permitirEncaminhada: false });
+}
+
+/**
+ * Bypass de saída para sala `encaminhada` cuja partida não iniciou (#222).
+ *
+ * @internal Só chame após `partidaDaSalaEstaOrfa` confirmar a orfandade — a
+ * função confia no chamador e não verifica o Redis. Uso fora desse guarda
+ * libera sala indevidamente.
+ */
+export function sairDaSalaEncaminhadaNaoIniciada(
+  estado: EstadoDoLobby,
+  comando: SairDaSalaComando,
+): Resultado {
+  return executarSaidaDeSala(estado, comando, { permitirEncaminhada: true });
 }
 
 export function expulsarMembro(

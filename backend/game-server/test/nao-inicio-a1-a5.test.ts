@@ -1,0 +1,370 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { Redis } from 'ioredis';
+import {
+  agendarNaoInicio,
+  cancelarNaoInicio,
+  configurarNaoInicio,
+  definirBroadcasterParaNaoInicio,
+  definirRedisParaNaoInicio,
+  rearmarNaoInicioAposRestart,
+  verificarNaoInicioSeNecessario,
+} from '../src/partidas/nao-inicio.ts';
+import { redisFalsoDoRearme } from './helpers/redis-falso-do-rearme.ts';
+
+const PARTIDA_ID = '22222222-2222-4222-8222-222222222222';
+const CHAVE_PARTIDA = `game-server:partida:${PARTIDA_ID}`;
+
+function partidaPreparadaJson(sobrescrita: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    partidaId: PARTIDA_ID,
+    salaId: 'sala-1',
+    serverId: 'srv-1',
+    estado: 'preparada',
+    criadaEm: new Date().toISOString(),
+    roster: [1, 2, 3, 4].map((n) => ({
+      id: `membro-${n}`,
+      jogadorId: `jogador-${n}`,
+      presenca: 'em_reconexao',
+    })),
+    ...sobrescrita,
+  });
+}
+
+function redisFalso(
+  store: Map<string, string>,
+  observacao: { scanArgs: unknown[][] },
+): Redis {
+  return {
+    async scan(cursor: string, ...args: unknown[]): Promise<[string, string[]]> {
+      observacao.scanArgs.push(args);
+      const idx = args.indexOf('MATCH');
+      const pattern = idx >= 0 ? String(args[idx + 1]) : '*';
+      const prefixo = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern;
+      const chaves = [...store.keys()].filter((k) => k.startsWith(prefixo));
+      void cursor;
+      return ['0', chaves];
+    },
+    async get(chave: string): Promise<string | null> {
+      return store.get(chave) ?? null;
+    },
+    async ttl(): Promise<number> {
+      return 100;
+    },
+  } as unknown as Redis;
+}
+
+test('A1: rearme usa COUNT 500 no SCAN (anti-thundering-herd)', async () => {
+  const store = new Map<string, string>([[CHAVE_PARTIDA, partidaPreparadaJson()]]);
+  const observacao = { scanArgs: [] as unknown[][] };
+  configurarNaoInicio(undefined, 90);
+  try {
+    await rearmarNaoInicioAposRestart(redisFalsoDoRearme(store, observacao));
+    const counts = observacao.scanArgs.map((args) => {
+      const i = args.indexOf('COUNT');
+      return i >= 0 ? Number(args[i + 1]) : null;
+    });
+    assert.ok(counts.length > 0, 'deveria escanear ao menos uma vez');
+    assert.ok(
+      counts.every((c) => c === 500),
+      `SCAN deveria usar COUNT 500, usou ${counts.join(',')}`,
+    );
+  } finally {
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('A2: rearme lê o lote via pipeline (GET + TTL em 1 RTT)', async () => {
+  const store = new Map<string, string>([[CHAVE_PARTIDA, partidaPreparadaJson()]]);
+  const comandos: Array<{ cmd: string; chave: string }> = [];
+  let pipelines = 0;
+  let execs = 0;
+  const redis = {
+    async scan(_cursor: string, ...args: unknown[]): Promise<[string, string[]]> {
+      const idx = args.indexOf('MATCH');
+      const pattern = idx >= 0 ? String(args[idx + 1]) : '*';
+      const prefixo = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern;
+      return ['0', [...store.keys()].filter((k) => k.startsWith(prefixo))];
+    },
+    pipeline() {
+      pipelines += 1;
+      return {
+        get(chave: string) {
+          comandos.push({ cmd: 'get', chave });
+        },
+        ttl(chave: string) {
+          comandos.push({ cmd: 'ttl', chave });
+        },
+        async exec(): Promise<Array<[Error | null, unknown]>> {
+          execs += 1;
+          const out: Array<[Error | null, unknown]> = [];
+          for (const c of comandos) {
+            out.push([null, c.cmd === 'get' ? (store.get(c.chave) ?? null) : 100]);
+          }
+          return out;
+        },
+      };
+    },
+    async get(): Promise<never> {
+      throw new Error('deveria usar pipeline, não GET sequencial');
+    },
+    async ttl(): Promise<never> {
+      throw new Error('deveria usar pipeline, não TTL sequencial');
+    },
+  } as unknown as Redis;
+  configurarNaoInicio(undefined, 90);
+  try {
+    await rearmarNaoInicioAposRestart(redis);
+    assert.equal(pipelines, 1, 'deveria abrir 1 pipeline por lote');
+    assert.equal(execs, 1, 'deveria executar o pipeline do lote');
+    assert.deepEqual(
+      comandos,
+      [
+        { cmd: 'get', chave: CHAVE_PARTIDA },
+        { cmd: 'ttl', chave: CHAVE_PARTIDA },
+      ],
+      'pipeline deveria enfileirar GET + TTL da chave da partida',
+    );
+  } finally {
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('A3: criadaEm inválida (NaN) nunca agenda nem declara não-início', async () => {
+  const parcial = [1, 2, 3, 4].map((n) => ({
+    id: `membro-${n}`,
+    jogadorId: `jogador-${n}`,
+    presenca: n === 1 ? 'conectado' : 'em_reconexao',
+  }));
+  const store = new Map<string, string>([
+    [CHAVE_PARTIDA, partidaPreparadaJson({ criadaEm: 'data-invalida', roster: parcial })],
+  ]);
+  const redis = {
+    async get(chave: string): Promise<string | null> {
+      return store.get(chave) ?? null;
+    },
+    async del(chave: string): Promise<number> {
+      return store.delete(chave) ? 1 : 0;
+    },
+  } as unknown as Redis;
+  let encerramentos = 0;
+  definirBroadcasterParaNaoInicio({
+    fecharSocketsDeNaoInicio() {
+      encerramentos += 1;
+    },
+  });
+  const delays: unknown[] = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  (globalThis as unknown as { setTimeout: unknown }).setTimeout = ((
+    cb: (...args: unknown[]) => void,
+    ms?: number,
+    ...rest: unknown[]
+  ) => {
+    delays.push(ms);
+    return (originalSetTimeout as (...a: unknown[]) => unknown)(cb, ms, ...rest);
+  }) as typeof setTimeout;
+  try {
+    configurarNaoInicio(undefined, 90);
+    const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
+    assert.equal(naoIniciou, false, 'criadaEm inválida não deve declarar não-início');
+    assert.equal(encerramentos, 0, 'não deve chutar sockets com idade NaN');
+    assert.ok(
+      delays.every((d) => typeof d === 'number' && Number.isFinite(d)),
+      `nenhum timer com delay NaN, agendados: ${JSON.stringify(delays)}`,
+    );
+    assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
+  } finally {
+    (globalThis as unknown as { setTimeout: unknown }).setTimeout = originalSetTimeout;
+    definirBroadcasterParaNaoInicio({ fecharSocketsDeNaoInicio() {} });
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('A4: cancelamento recusado (DEL condicional) não chuta sockets', async () => {
+  const store = new Map<string, string>([
+    [CHAVE_PARTIDA, partidaPreparadaJson({ criadaEm: new Date('2000-01-01T00:00:00.000Z').toISOString() })],
+  ]);
+  const redis = {
+    async get(chave: string): Promise<string | null> {
+      return store.get(chave) ?? null;
+    },
+    async eval(): Promise<number> {
+      return 0;
+    },
+  } as unknown as Redis;
+  let encerramentos = 0;
+  definirBroadcasterParaNaoInicio({
+    fecharSocketsDeNaoInicio() {
+      encerramentos += 1;
+    },
+  });
+  try {
+    configurarNaoInicio(undefined, 90);
+    const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
+    assert.equal(naoIniciou, false, 'cancelamento recusado não deve concluir o não-início');
+    assert.equal(encerramentos, 0, 'sockets devem permanecer intactos com cancelamento recusado');
+    assert.ok(store.has(CHAVE_PARTIDA), 'chave da partida deve permanecer intacta');
+  } finally {
+    definirBroadcasterParaNaoInicio({ fecharSocketsDeNaoInicio() {} });
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+// Review #304 item 1 (TOCTOU): a admissão completa entre a leitura (GET) e o
+// DEL — o valor lido dizia `preparada`, mas no momento do eval a partida já
+// está `em_andamento`. O cancelamento condicional recusa, e nada é chutado.
+test('TOCTOU: partida que virou em_andamento entre GET e DEL não é cancelada', async () => {
+  const antiga = new Date('2000-01-01T00:00:00.000Z').toISOString();
+  const preparada = partidaPreparadaJson({ criadaEm: antiga });
+  const store = new Map<string, string>([[CHAVE_PARTIDA, preparada]]);
+  let leituras = 0;
+  const redis = {
+    async get(chave: string): Promise<string | null> {
+      leituras += 1;
+      return store.get(chave) ?? null;
+    },
+    async eval(_script: string, _numKeys: number, ...chaves: string[]): Promise<number> {
+      // Espelha o SCRIPT_CANCELAR_NAO_INICIADA: a corrida trocou o estado
+      // entre o GET e o cancelamento.
+      const bruto = store.get(chaves[0]!) ?? null;
+      if (bruto === null) return 0;
+      const partida = JSON.parse(bruto) as { estado?: string };
+      if (partida.estado !== 'preparada') return 0;
+      store.delete(chaves[0]!);
+      store.delete(chaves[1]!);
+      return 1;
+    },
+    async del(chave: string): Promise<number> {
+      return store.delete(chave) ? 1 : 0;
+    },
+  } as unknown as Redis;
+  let encerramentos = 0;
+  definirBroadcasterParaNaoInicio({
+    fecharSocketsDeNaoInicio() {
+      encerramentos += 1;
+    },
+  });
+  try {
+    configurarNaoInicio(undefined, 90);
+    // Simula a corrida: depois da primeira leitura (obterPartida), a admissão
+    // vira a partida para em_andamento (Lua com PERSIST).
+    const originalGet = (redis as unknown as { get(chave: string): Promise<string | null> }).get.bind(redis);
+    (redis as unknown as { get(chave: string): Promise<string | null> }).get = async (chave: string) => {
+      const bruto = await originalGet(chave);
+      if (leituras >= 1 && store.has(CHAVE_PARTIDA)) {
+        store.set(CHAVE_PARTIDA, JSON.stringify({ ...JSON.parse(bruto!), estado: 'em_andamento' }));
+      }
+      return bruto;
+    };
+    const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
+    assert.equal(naoIniciou, false, 'partida em_andamento no momento do DEL não deve ser cancelada');
+    assert.equal(encerramentos, 0, 'sockets devem permanecer intactos na corrida com admissão');
+    assert.ok(store.has(CHAVE_PARTIDA), 'partida em_andamento deve permanecer no Redis');
+    assert.equal(
+      (JSON.parse(store.get(CHAVE_PARTIDA)!) as { estado: string }).estado,
+      'em_andamento',
+      'o estado em_andamento não pode ser destruído pelo não-início',
+    );
+  } finally {
+    definirBroadcasterParaNaoInicio({ fecharSocketsDeNaoInicio() {} });
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('TOCTOU: partida ainda preparada no eval é cancelada normalmente', async () => {
+  const store = new Map<string, string>([
+    [CHAVE_PARTIDA, partidaPreparadaJson({ criadaEm: new Date('2000-01-01T00:00:00.000Z').toISOString() })],
+  ]);
+  const redis = {
+    async get(chave: string): Promise<string | null> {
+      return store.get(chave) ?? null;
+    },
+    async eval(_script: string, _numKeys: number, ...chaves: string[]): Promise<number> {
+      const bruto = store.get(chaves[0]!) ?? null;
+      if (bruto === null) return 0;
+      const partida = JSON.parse(bruto) as { estado?: string };
+      if (partida.estado !== 'preparada') return 0;
+      store.delete(chaves[0]!);
+      store.delete(chaves[1]!);
+      return 1;
+    },
+  } as unknown as Redis;
+  let encerramentos = 0;
+  definirBroadcasterParaNaoInicio({
+    fecharSocketsDeNaoInicio() {
+      encerramentos += 1;
+    },
+  });
+  try {
+    configurarNaoInicio(undefined, 90);
+    const naoIniciou = await verificarNaoInicioSeNecessario(redis, PARTIDA_ID);
+    assert.equal(naoIniciou, true, 'partida preparada expirada deve ser cancelada');
+    assert.equal(encerramentos, 1, 'sockets devem ser chutados no cancelamento válido');
+    assert.ok(!store.has(CHAVE_PARTIDA), 'chave da partida preparada deve ser removida');
+  } finally {
+    definirBroadcasterParaNaoInicio({ fecharSocketsDeNaoInicio() {} });
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('A5: fire sem redis global reagenda em vez de explodir', async () => {  const avisos: unknown[][] = [];
+  const originalWarn = console.warn;
+  (console as unknown as { warn: unknown }).warn = (...args: unknown[]) => {
+    avisos.push(args);
+  };
+  try {
+    definirRedisParaNaoInicio(undefined);
+    configurarNaoInicio(undefined, 90);
+    agendarNaoInicio(PARTIDA_ID, 5);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(
+      avisos.some((a) => String(a[0]).includes('sem redis')),
+      `deveria avisar e reagendar, avisos: ${JSON.stringify(avisos)}`,
+    );
+  } finally {
+    (console as unknown as { warn: unknown }).warn = originalWarn;
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('A5: redis injetado no agendamento é usado (assinatura compatível)', async () => {
+  const redis = {
+    async get(): Promise<null> {
+      return null;
+    },
+  } as unknown as Redis;
+  try {
+    definirRedisParaNaoInicio(undefined);
+    configurarNaoInicio(undefined, 90);
+    agendarNaoInicio(PARTIDA_ID, 5, redis);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
+
+test('N1: sem redis o reagendamento tem teto e depois erra alto', async () => {
+  const avisos: unknown[][] = [];
+  const erros: unknown[][] = [];
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  (console as unknown as { warn: unknown }).warn = (...args: unknown[]) => {
+    avisos.push(args);
+  };
+  (console as unknown as { error: unknown }).error = (...args: unknown[]) => {
+    erros.push(args);
+  };
+  try {
+    definirRedisParaNaoInicio(undefined);
+    configurarNaoInicio(undefined, 90);
+    agendarNaoInicio(PARTIDA_ID, 5);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(avisos.length, 5, `deveria avisar 5 vezes, avisou ${avisos.length}`);
+    assert.equal(erros.length, 1, `deveria errar 1 vez e parar, errou ${erros.length}`);
+    assert.ok(String(erros[0]?.[0]).includes('após reagendamentos'));
+  } finally {
+    (console as unknown as { warn: unknown }).warn = originalWarn;
+    (console as unknown as { error: unknown }).error = originalError;
+    cancelarNaoInicio(PARTIDA_ID);
+  }
+});
