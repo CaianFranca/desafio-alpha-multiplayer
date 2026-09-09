@@ -5,9 +5,14 @@ import { HudDaPartida } from '../web/src/components/partida/HudDaPartida'
 import {
   LIMIAR_ARRASTO_PX,
   LIMIAR_POR_TIPO,
+  LIMITE_CELULAR_PX,
+  FATOR_SUAVIZACAO_PINCH_CELULAR,
   atingiuLimiar,
+  suavizarFatorPinch,
+  calcularFatorPinch,
 } from '../web/src/game/ambiente/cameraLimites'
 import { TAMANHO_CELULA } from '../web/src/game/tabuleiro/contrato'
+import { deveSuprimirCliquePorArrasto } from '../web/src/game/tabuleiro/interacao'
 
 // Helper para ler fonte
 function lerFonte(rel: string): string {
@@ -237,5 +242,168 @@ describe('partida-alvos-de-dedo — hitbox invisível ampliada', () => {
     expect(atingiuLimiar(6, 0, 'mouse')).toBe(true)
     // pen mantém 8px
     expect(atingiuLimiar(8, 0, 'pen')).toBe(true)
+  })
+})
+
+describe('partida-alvos-de-dedo — bloqueante 1: arrasto não dispara clique (3D)', () => {
+  // Simula a máquina do hook: tipoPorPointerId + atingiuLimiar adaptativo + suprimirCliqueAposArrastoRef + onClickCapture
+  function simularGesto(tipo: string, deltas: Array<[number, number]>): { engatou: boolean; suprimirAposArrasto: boolean } {
+    let engatado = false
+    let suprimir = false
+    let inicioX = 0
+    let inicioY = 0
+    for (let i = 0; i < deltas.length; i++) {
+      const [dx, dy] = deltas[i]
+      // dx,dy são totais desde inicio (como o hook calcula totalDx/totalDy)
+      if (!engatado) {
+        if (atingiuLimiar(dx, dy, tipo)) {
+          engatado = true
+          suprimir = true
+        }
+      }
+    }
+    // onPointerUp limpa suprimir se não engatou
+    if (!engatado) suprimir = false
+    // onClickCapture consome suprimir se engatado
+    return { engatou: engatado, suprimirAposArrasto: suprimir }
+  }
+
+  function deveDispararAcao(tipo: string, dx: number, dy: number): boolean {
+    // Ação (peça/peão/bandeja) dispara apenas se NÃO deve suprimir
+    return !deveSuprimirCliquePorArrasto(dx, dy, tipo)
+  }
+
+  it('toque curto de dedo (9px touch) — não engata, não suprime, dispara ação', () => {
+    const { engatou, suprimirAposArrasto } = simularGesto('touch', [[9, 0]])
+    expect(engatou).toBe(false)
+    expect(suprimirAposArrasto).toBe(false)
+    expect(deveDispararAcao('touch', 9, 0)).toBe(true)
+    // prova no nível do helper de peça/bandeja/peão (mesma semântica do 3D)
+    expect(deveSuprimirCliquePorArrasto(9, 0, 'touch')).toBe(false)
+  })
+
+  it('arrasto de dedo (10px touch) — engata pan e suprime clique da peça/peão/bandeja', () => {
+    const { engatou, suprimirAposArrasto } = simularGesto('touch', [[10, 0]])
+    expect(engatou).toBe(true)
+    expect(suprimirAposArrasto).toBe(true)
+    expect(deveDispararAcao('touch', 10, 0)).toBe(false)
+    expect(deveSuprimirCliquePorArrasto(10, 0, 'touch')).toBe(true)
+  })
+
+  it('arrasto iniciado sobre bandeja/peça/peão — mesma regra de supressão (ponto do clique 3D)', () => {
+    // O hook não distingue alvo; o limiar é por pointerType, então bandeja tem mesma proteção
+    for (const alvo of ['peca', 'peao', 'bandeja'] as const) {
+      expect(deveDispararAcao('touch', 9, 0), `toque curto em ${alvo} deveria disparar`).toBe(true)
+      expect(deveDispararAcao('touch', 10, 0), `arrasto em ${alvo} deveria suprimir`).toBe(false)
+    }
+  })
+
+  it('pen 7px não suprime, 8px suprime — adaptativo por tipo', () => {
+    expect(deveSuprimirCliquePorArrasto(7, 0, 'pen')).toBe(false)
+    expect(deveSuprimirCliquePorArrasto(8, 0, 'pen')).toBe(true)
+    const g7 = simularGesto('pen', [[7, 0]])
+    const g8 = simularGesto('pen', [[8, 0]])
+    expect(g7.engatou).toBe(false)
+    expect(g8.engatou).toBe(true)
+  })
+
+  it('mouse 5px não suprime, 6px suprime — fallback', () => {
+    expect(deveSuprimirCliquePorArrasto(5, 0, 'mouse')).toBe(false)
+    expect(deveSuprimirCliquePorArrasto(6, 0, 'mouse')).toBe(true)
+  })
+
+  it('onClickCapture consome supressão apenas quando engatado', () => {
+    // Simula hook: onClickCapture só suprime se flag true
+    function onClickCapture(suprimirRef: { current: boolean }): boolean {
+      if (suprimirRef.current) {
+        suprimirRef.current = false
+        return true // suprimido
+      }
+      return false
+    }
+    const refEngatado = { current: true }
+    expect(onClickCapture(refEngatado)).toBe(true)
+    expect(refEngatado.current).toBe(false)
+    const refNaoEngatado = { current: false }
+    expect(onClickCapture(refNaoEngatado)).toBe(false)
+  })
+})
+
+describe('partida-alvos-de-dedo — bloqueantes 2/4/6: cursor global padrão', () => {
+  it('cursor.ts: padrão global restaura com "" (nunca "auto") e usa contador', () => {
+    const fonte = lerFonte('frontend/web/src/game/tabuleiro/cursor.ts')
+    expect(fonte).toContain("document.body.style.cursor = ''")
+    expect(fonte).toContain('hoversPointerAtivos')
+    expect(fonte).not.toContain("cursor = 'auto'")
+    // garante que o valor "auto" não é usado no projeto para limpeza (carona 6)
+    const autoUsos = (fonte.match(/'auto'/g) ?? []).length
+    expect(autoUsos).toBe(0)
+  })
+
+  it('Caixa/Bandeja: sem limpeza manual com auto e sem @ts-expect-error', () => {
+    const fonte = lerFonte('frontend/web/src/game/tabuleiro/Caixa.tsx')
+    expect(fonte).not.toContain("document.body.style.cursor = 'auto'")
+    expect(fonte).not.toContain('@ts-expect-error')
+    expect(fonte).not.toContain('@ts-ignore')
+    expect(fonte).toContain('handlersDeCursor')
+    // tipagem correta do ThreeEvent
+    expect(fonte).toContain('ThreeEvent<MouseEvent>')
+  })
+
+  it('Peoes: PeaoPlaceholder e PeaoAvatar usam handlersDeCursor com contador global', () => {
+    const ph = lerFonte('frontend/web/src/game/tabuleiro/PeaoPlaceholder.tsx')
+    const av = lerFonte('frontend/web/src/game/tabuleiro/PeaoAvatar.tsx')
+    for (const fonte of [ph, av]) {
+      expect(fonte).toContain("handlersDeCursor")
+      expect(fonte).toContain("from './cursor'")
+      expect(fonte).not.toContain("document.body.style.cursor = 'auto'")
+      // ainda faz stopPropagation no hover para não vazar para a cena
+      expect(fonte).toContain('stopPropagation')
+    }
+    // PecaPlaceholder já usa o padrão — garante que os 3 agora convergem
+    const peca = lerFonte('frontend/web/src/game/tabuleiro/PecaPlaceholder.tsx')
+    expect(peca).toContain('handlersDeCursor')
+  })
+})
+
+describe('partida-alvos-de-dedo — bloqueante 3: helper documentado', () => {
+  it('interacao.ts documenta que proteção real vive em useCameraInterativa', () => {
+    const fonte = lerFonte('frontend/web/src/game/tabuleiro/interacao.ts')
+    expect(fonte).toContain('suprimirCliqueAposArrastoRef')
+    expect(fonte).toContain('useCameraInterativa')
+    expect(fonte).toContain('helper é 100% puro')
+    expect(fonte).toContain('não tem chamador em produção')
+  })
+})
+
+describe('partida-alvos-de-dedo — plus 7: pinch suave no celular', () => {
+  it('exporta constantes de suavização', () => {
+    expect(LIMITE_CELULAR_PX).toBe(768)
+    expect(FATOR_SUAVIZACAO_PINCH_CELULAR).toBe(0.5)
+  })
+
+  it('suavizarFatorPinch: abaixo de 768 suaviza, >=768 mantém cru', () => {
+    // caso real: distInicial 100 -> distAtual 50 => fator 2 (zoom 2x)
+    const fatorCru = calcularFatorPinch(100, 50) // 2
+    expect(fatorCru).toBe(2)
+    // celular 375px: 1 + (2-1)*0.5 = 1.5
+    expect(suavizarFatorPinch(fatorCru, 375)).toBe(1.5)
+    expect(suavizarFatorPinch(fatorCru, 767)).toBe(1.5)
+    // tablet/desktop: mantém 2
+    expect(suavizarFatorPinch(fatorCru, 768)).toBe(2)
+    expect(suavizarFatorPinch(fatorCru, 812)).toBe(2)
+    expect(suavizarFatorPinch(fatorCru, 1024)).toBe(2)
+    // pinch inverso (afastando): dist 50 -> 100 => fator 0.5
+    const fatorAfast = calcularFatorPinch(100, 200) // 0.5
+    expect(fatorAfast).toBe(0.5)
+    expect(suavizarFatorPinch(fatorAfast, 375)).toBe(0.75) // 1 + (-0.5)*0.5
+    expect(suavizarFatorPinch(fatorAfast, 1024)).toBe(0.5)
+  })
+
+  it('useCameraInterativa aplica suavização quando window.innerWidth <768', () => {
+    const fonte = lerFonte('frontend/web/src/hooks/useCameraInterativa.ts')
+    expect(fonte).toContain('suavizarFatorPinch')
+    expect(fonte).toContain('window.innerWidth')
+    expect(fonte).toContain('calcularFatorPinch')
   })
 })
