@@ -77,8 +77,8 @@ export function aplicarSnapshot(
 
   // Peças Iniciais ainda não encaixadas (issue #143): a lista do motor é a
   // autoridade — recarregar reconstrói a mesa sem seed local.
-  // Roster N=2..4 (#284): espelha só as N iniciais do roster; com o servidor
-  // ainda em 4 e N=2, projetar as 4 criava indicadores fantasmas do ausente.
+  // Roster N=2..4 (#284): espelha só as N iniciais do roster; com o
+  // snapshot em N=2, projetar as 4 criava indicadores fantasmas do ausente.
   // Sem fallback para a lista cheia: fora da faixa, projeta exatamente o
   // roster (0 → mesa vazia; 1 → 1; 5+ → o que o servidor mandou, no máximo).
   // Inventar 4 peças sem roster seria reintroduzir fantasmas.
@@ -109,9 +109,9 @@ export function aplicarSnapshot(
   )
 
   // Roster variável N=2..4: mantém SÓ os peões dos jogadores do snapshot
-  // (peaoId da ordem de entrada) — nunca os N primeiros do array. Com o
-  // servidor ainda em 4 e N=2, o slice por posição exibia cores erradas e
-  // quebrava "peão na cor da minha ordem de entrada" (#281 história 4).
+  // (peaoId da ordem de entrada) — nunca os N primeiros do array. O slice
+  // por posição exibia cores erradas e quebrava "peão na cor da minha ordem
+  // de entrada" (#281 história 4).
   // Sem fallback para a lista cheia: roster vazio projeta mesa vazia.
   // Manter os 4 peões sem roster seria reintroduzir fantasmas (#284).
   const peaoIdsDosJogadores = new Set(snapshot.jogadores.map((j) => j.peaoId))

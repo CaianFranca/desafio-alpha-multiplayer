@@ -74,6 +74,7 @@ function estadoBase(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPe
     pecaSelecionadaId: null,
     posicaoConfirmadaNoTurno: false,
     movimentouNoTurno: false,
+    quantidadeDeJogadores: 4,
     ...opts,
   }
 }
@@ -105,6 +106,7 @@ function estadoComMock(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteraca
     pecaSelecionadaId: null,
     posicaoConfirmadaNoTurno: false,
     movimentouNoTurno: false,
+    quantidadeDeJogadores: 4,
     ...opts,
   }
 }

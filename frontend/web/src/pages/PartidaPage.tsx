@@ -70,6 +70,7 @@ type ComandoDoCanal =
 type AcaoDoModelo =
   | { type: 'EVENTO'; evento: Parameters<typeof reduzirEvento>[1] }
   | { type: 'APLICAR_SNAPSHOT'; snapshot: EstadoDaPartidaSnapshot }
+  | { type: 'SYNC_QUANTIDADE'; quantidade: number }
 
 function reduzirModelo(
   estado: EstadoDoTabuleiroNoCliente,
@@ -77,6 +78,14 @@ function reduzirModelo(
 ): EstadoDoTabuleiroNoCliente {
   if (acao.type === 'APLICAR_SNAPSHOT') {
     return aplicarSnapshot(estado, acao.snapshot)
+  }
+  if (acao.type === 'SYNC_QUANTIDADE') {
+    // Sincroniza seed pré-snapshot (risco 3): se ainda sem snapshot de roster,
+    // recria o estado inicial com o N atualizado da Sala. Com jogadores já
+    // presentes (snapshot), a autoridade é do servidor — não sobrescreve.
+    if (Object.keys(estado.jogadorPorId).length > 0) return estado
+    if (estado.quantidadeDeJogadores === acao.quantidade) return estado
+    return criarEstadoInicialDoCliente(acao.quantidade)
   }
   return reduzirEvento(estado, acao.evento)
 }
@@ -108,8 +117,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Seed com o N real da Sala (#284): sem ele, a mesa nascia sempre com 4
   // peões/iniciais até o snapshot corrigir. Sem sala (link direto), fallback
   // 4 por compatibilidade — o snapshot continua sendo a autoridade.
+  // Risco 3: o N da Sala pode chegar pós-mount (WS assíncrono); o valor
+  // inicial do useReducer é capturado só no mount (stale). Lazy init +
+  // efeito de sync cobrem o caso sem recriar após snapshot.
   const quantidadeDeMembrosDaSala = useQuantidadeDeMembrosDaSalaOptional()
-  const [modelo, despachar] = useReducer(reduzirModelo, quantidadeDeMembrosDaSala ?? 4, criarEstadoInicialDoCliente)
+  const [modelo, despachar] = useReducer(
+    reduzirModelo,
+    undefined,
+    () => criarEstadoInicialDoCliente(quantidadeDeMembrosDaSala ?? 4),
+  )
+  useEffect(() => {
+    if (
+      quantidadeDeMembrosDaSala !== null &&
+      modelo.quantidadeDeJogadores !== quantidadeDeMembrosDaSala &&
+      Object.keys(modelo.jogadorPorId).length === 0
+    ) {
+      despachar({ type: 'SYNC_QUANTIDADE', quantidade: quantidadeDeMembrosDaSala })
+    }
+  }, [quantidadeDeMembrosDaSala, modelo.quantidadeDeJogadores, modelo.jogadorPorId])
   const despacharEvento = useCallback(
     (evento: Parameters<typeof reduzirEvento>[1]) => despachar({ type: 'EVENTO', evento }),
     [],
@@ -421,13 +446,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
   // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
   // (solo anuncia 1, nunca um N falso), teto usa o N válido (#284, #281).
+  // Risco 5: quantidade é obrigatória na cadeia — não deriva de peoes.length
+  // (modo misto). Antes do snapshot, a autoridade é o seed da Sala (já clampeado).
   // Definido antes do ciclo para alimentar o teto do Portão no espelho.
   const quantidadeRealDeJogadores = useMemo(() => {
     const doSnapshot = Object.keys(modelo.jogadorPorId).length
     if (doSnapshot > 0) return doSnapshot
     if (modelo.quantidadeDeJogadores != null) return modelo.quantidadeDeJogadores
-    return modelo.peoes.length
-  }, [modelo.jogadorPorId, modelo.quantidadeDeJogadores, modelo.peoes.length])
+    return quantidadeDeMembrosDaSala ?? 4
+  }, [modelo.jogadorPorId, modelo.quantidadeDeJogadores, quantidadeDeMembrosDaSala])
   const quantidadeParaTeto = quantidadeValidaDeJogadores(quantidadeRealDeJogadores)
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   // Fallback da sequência pendente (#326): se o espelho ficar sem seleção
@@ -462,7 +489,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       // N do roster para o teto do Portão (#284): nunca peoes.length.
       quantidadeDeJogadores: quantidadeParaTeto,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto, peaoDoTurnoId])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa

@@ -36,8 +36,13 @@ function snapshotComPeoes(): EstadoDaPartidaSnapshot {
       peaoSelecionadoId: null,
       pecasRestantesNaCaixa: 83,
     },
-    jogadores: [],
-    jogadorAtivoId: 'jogador-1',
+    jogadores: [
+      { jogadorId: 'j-vermelho', apelido: 'Vermelho', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'j-azul', apelido: 'Azul', cor: 'azul', ordem: 2, peaoId: 'peao-azul', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'j-branco', apelido: 'Branco', cor: 'branco', ordem: 3, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+      { jogadorId: 'j-amarelo', apelido: 'Amarelo', cor: 'amarelo', ordem: 4, peaoId: 'peao-amarelo', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+    ],
+    jogadorAtivoId: 'j-branco',
     rodada: 2,
     pecaDoInicioDoTurnoId: null,
     posicaoConfirmada: false,
@@ -46,7 +51,7 @@ function snapshotComPeoes(): EstadoDaPartidaSnapshot {
     resultado: null,
     geradoresLigados: [],
     cartaoDeAcessoObtido: false,
-  }
+  } as unknown as EstadoDaPartidaSnapshot
 }
 
 describe('arranjo visual de co-ocupação — seam puro (issue #298)', () => {

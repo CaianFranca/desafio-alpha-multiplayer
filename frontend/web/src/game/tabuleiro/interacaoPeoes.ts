@@ -143,9 +143,11 @@ export interface EstadoInteracaoPeoes {
    */
   readonly afetadosPorPeaoId?: ReadonlySet<PeaoId>
   /**
-   * N do roster para o teto do Portão (#284): o teto é o N real de
-   * jogadores, não peoes.length (modo misto pré-fiação). Ausente = o
-   * espelho deriva de peoes.length.
+   * N do roster para o teto do Portão (#284): obrigatório na cadeia
+   * PartidaPage→AmbienteDeJogo→interacaoPeoes — o teto é o N real de
+   * jogadores, nunca peoes.length (risco 5). Opcional para compatibilidade
+   * com testes legados que derivam de peoes.length; a cadeia produtiva
+   * sempre fornece o N clampeado.
    */
   readonly quantidadeDeJogadores?: number
 }

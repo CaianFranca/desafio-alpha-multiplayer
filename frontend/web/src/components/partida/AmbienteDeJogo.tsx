@@ -86,11 +86,10 @@ interface AmbienteDeJogoProps {
    */
   emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
   /**
-   * N do roster para o teto do Portão (#284): o teto é o N real de
-   * jogadores (clamp 2..4 no pai), não peoes.length (modo misto pré-fiação).
-   * Ausente = cai no N do ciclo ou em peoes.length.
+   * N do roster para o teto do Portão (#284): obrigatório — o teto é o N
+   * real de jogadores (clamp 2..4 no pai), nunca peoes.length (risco 5).
    */
-  quantidadeDeJogadores?: number
+  quantidadeDeJogadores: number
 }
 
 export function AmbienteDeJogo({
@@ -241,7 +240,7 @@ export function AmbienteDeJogo({
           estadoExibicao.peoes,
           peaoSelecionadoIdLocal,
           estadoInteracaoPeoes?.afetadosPorPeaoId,
-          quantidadeDeJogadores ?? estadoInteracaoPeoes?.quantidadeDeJogadores,
+          quantidadeDeJogadores,
         )
       : []
   const destinosSet = new Set<string>(destinosDoPeao.map((d) => d.peca.pecaId))

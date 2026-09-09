@@ -571,10 +571,10 @@ export function destinosConectadosDoPeao(
   peoes: readonly PeaoDaExibicao[],
   peaoId: PeaoId,
   afetadosPorPeaoId: ReadonlySet<PeaoId> = new Set(),
-  // N do roster (2..4, #284): o teto do Portão é o N real de jogadores, não
-  // a quantidade de peões renderizados — no modo misto (servidor pré-fiação
-  // ainda em 4, partida N=2) peoes.length lê 4 e o teto fica errado.
-  // Ausente = deriva de peoes.length (compatibilidade com unidades puras).
+  // N do roster (2..4, #284): obrigatório — o teto do Portão é o N real de
+  // jogadores, nunca peoes.length (risco 5). Ausente cai em 4 para unidades
+  // puras legadas; a cadeia PartidaPage→AmbienteDeJogo→interacaoPeoes sempre
+  // fornece o N clampeado.
   quantidadeDeJogadores?: number,
 ): DestinoDoPeao[] {
   const peao = peoes.find((p) => p.peaoId === peaoId)
@@ -592,9 +592,10 @@ export function destinosConectadosDoPeao(
       (p) => p.peaoId !== peaoId && p.celula !== null && chaveCelula(p.celula) === chave,
     )
     // (3) teto espelhado: Portão N (roster), demais 1; +1 com afetado na peça.
+    // Risco 5: não deriva de peoes.length (modo misto); fallback 4 para unidades puras.
     const tetoBase =
       peca.tipo === 'portao_de_saida'
-        ? tetoDeOcupacaoDoPortaoParaN(quantidadeDeJogadores ?? peoes.length)
+        ? tetoDeOcupacaoDoPortaoParaN(quantidadeDeJogadores ?? QUANTIDADE_PEOES)
         : 1
     const temAfetado = ocupantes.some((p) => afetadosPorPeaoId.has(p.peaoId))
     const teto = temAfetado ? tetoBase + 1 : tetoBase

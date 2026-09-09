@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import { quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import type { UseSalaWebSocketReturn } from '../hooks/useSalaWebSocket'
 
 export const SalaWebSocketContext = createContext<UseSalaWebSocketReturn | null>(null)
@@ -20,5 +21,8 @@ export function useSalaCodigoOptional(): string | null {
 export function useQuantidadeDeMembrosDaSalaOptional(): number | null {
   const ctx = useContext(SalaWebSocketContext)
   const quantidade = ctx?.sala?.membros.length
-  return typeof quantidade === 'number' && quantidade > 0 ? quantidade : null
+  if (typeof quantidade !== 'number' || quantidade <= 0) return null
+  // Clamp 2..4 para N=1/5+ (risco 4): solo transitório e quórum parcial não geram partida válida,
+  // mas o seed não deve criar mesa com N fora da faixa.
+  return quantidadeValidaDeJogadores(quantidade)
 }
