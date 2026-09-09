@@ -133,6 +133,10 @@ export function acoesValidasDaSubfase(
   // emite as ações direto, mesmo sem Peão selecionado — o engine pré-adopta a
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
   // referencia o Peão do próprio jogador, não a Seleção.
+  // TODO(#341): em Baixa Iluminação a FSM ainda enumera escolher_vaga para
+  // vagas em células iluminadas, que a engine rejeita (DADOS_INVALIDOS —
+  // "a vaga deve ser uma célula escura"). Correção pendente: filtrar por
+  // estado.celulasIluminadas neste ramo.
   if (tabuleiro.recebidas.length > 0) {
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];

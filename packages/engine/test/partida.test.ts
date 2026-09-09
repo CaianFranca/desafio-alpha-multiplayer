@@ -1668,13 +1668,19 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
     );
   }
 
-  // AC-3 do #272: com a Seleção nula (após mover, que a limpa) a Travessia usa
-  // o Peão do ator como referência e NÃO trava — adota a Seleção na sequência.
+  // AC-3 do #272: com a Seleção nula a Travessia usa o Peão do ator como
+  // referência e NÃO trava — adota a Seleção na sequência. A Movimentação
+  // re-seleciona o Peão movido (#334), então a Seleção nula é construída
+  // sinteticamente para exercitar a guarda.
   {
-    let semSelecao = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
-    semSelecao = aplicar(semSelecao, selecionarPeao('peao-branco'), 'ana');
-    semSelecao = aplicar(semSelecao, moverPeao('peao-branco', 2, 3), 'ana');
-    assert.equal(semSelecao.tabuleiro.peaoSelecionadoId, null);
+    let comMovimentacao = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+    comMovimentacao = aplicar(comMovimentacao, selecionarPeao('peao-branco'), 'ana');
+    comMovimentacao = aplicar(comMovimentacao, moverPeao('peao-branco', 2, 3), 'ana');
+    assert.equal(comMovimentacao.tabuleiro.peaoSelecionadoId, 'peao-branco');
+    const semSelecao: EstadoDaPartida = {
+      ...comMovimentacao,
+      tabuleiro: { ...comMovimentacao.tabuleiro, peaoSelecionadoId: null },
+    };
     const travessia = aplicarComandoDePartida(
       semSelecao,
       atravessarOEscuro('peao-branco', 1, 3),
@@ -1944,14 +1950,10 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
     codigoDaRejeicao(estado, encerrarTurno(), 'ana'),
     'ENCERRAMENTO_INVALIDO',
   );
-  // Permanência: sem o Peão selecionado é PEAO_NAO_SELECIONADO (guarda do
-  // Tabuleiro); mesmo selecionado, após a mudança de Peça é
-  // ENCERRAMENTO_INVALIDO — nenhum caminho fecha o turno sem o confirmar.
-  assert.equal(
-    codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
-    'PEAO_NAO_SELECIONADO',
-  );
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Permanência: o Peão segue selecionado após o mover (Re-seleção da
+  // Movimentação, #334); após a mudança de Peça o permanecer responde
+  // ENCERRAMENTO_INVALIDO direto — nenhum caminho fecha o turno sem o
+  // confirmar.
   assert.equal(
     codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
     'ENCERRAMENTO_INVALIDO',
