@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BORDA_OPOSTA,
   aplicarComandoDePartida,
+  bordasAbertas,
   calcularIluminacao,
   estadoInicialDaPartida,
   estadoInicialDoTabuleiro,
   type ComandoDePartida,
   type CodigoDeErroDaPartida,
   type EstadoDaPartida,
+  type Orientacao,
 } from '../src/index.ts';
 
 const selecionarPeca = (pecaId: string) =>
@@ -95,8 +98,9 @@ const jogadorAtivo = (estado: EstadoDaPartida) => {
 };
 
 // Resolve todas as pendências do Recebimento do Peão selecionado: escolhe a
-// vaga de cada peça sorteada (primeira borda canônica ainda disponível) e
-// encaixa a Recebida na célula-alvo derivada da vaga.
+// vaga de cada peça sorteada (primeira borda canônica ainda disponível), gira
+// a Recebida até a borda voltada à Peça sob o Peão abrir (encaixe conectado,
+// issue #311) e encaixa na célula-alvo derivada da vaga.
 function resolverRecebidas(
   estado: EstadoDaPartida,
   ator: string,
@@ -124,8 +128,31 @@ function resolverRecebidas(
     const escolhida = estado.tabuleiro.recebidas.find(
       (item) => item.recebidaId === pendente.recebidaId,
     );
-    if (!escolhida || escolhida.celulaAlvo === null) {
+    if (!escolhida || escolhida.celulaAlvo === null || escolhida.vaga === null) {
       throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+    }
+    // Gira (horário) até a borda voltada à Peça sob o Peão — o oposto da
+    // vaga — abrir; sem conexão o encaixe é rejeitado (issue #311). Peças
+    // Especiais e Monstros têm as 4 bordas abertas: giros = 0.
+    const alvo = BORDA_OPOSTA[escolhida.vaga];
+    let giros = 0;
+    while (
+      giros < 4 &&
+      !bordasAbertas({
+        tipo: escolhida.tipo,
+        orientacao: ((escolhida.orientacao + 90 * giros) %
+          360) as Orientacao,
+      }).includes(alvo)
+    ) {
+      giros++;
+    }
+    if (giros === 4) {
+      throw new Error(
+        `nenhuma rotação conecta a pendência ${pendente.recebidaId}`,
+      );
+    }
+    for (let giro = 0; giro < giros; giro++) {
+      estado = aplicar(estado, girarPeca(escolhida.pecaId), ator);
     }
     estado = aplicar(
       estado,

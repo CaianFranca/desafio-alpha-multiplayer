@@ -27,10 +27,11 @@
 // Turno normal a requer e a Permanência só vale sobre a Peça de início); sem
 // ela o loop jamais alcançaria o encerrar_turno nos turnos normais.
 //
-// Fora do escopo deliberado: girar_peca/finalizar_manipulacao (janela
-// opcional de Manipulação — o bot encaixa na orientação sorteada),
-// atravessar_o_escuro (jogada opcional de Baixa Iluminação — o bot em Baixa
-// usa a movimentação normal) e desselecionar_peao (sem efeito útil no turno).
+// Fora do escopo deliberado: finalizar_manipulacao (janela opcional de
+// Manipulação — o bot gira Recebidas exclusivamente para encaixar conectado e
+// não manipula a peça posicionada), atravessar_o_escuro (jogada opcional de
+// Baixa Iluminação — o bot em Baixa usa a movimentação normal) e
+// desselecionar_peao (sem efeito útil no turno).
 
 import {
   ehPecaDeMonstro,
@@ -41,6 +42,7 @@ import {
   type CorDoPeao,
   type PecaPosicionada,
 } from './tabuleiro.ts';
+import { conectaNaVaga } from './peoes.ts';
 import {
   aplicarComandoDePartida,
   type ComandoDePartida,
@@ -132,8 +134,45 @@ export function acoesValidasDaSubfase(
   // peça sorteada exige a escolha da vaga e o encaixe, sem pular. O planejador
   // emite as ações direto, mesmo sem Peão selecionado — o engine pré-adopta a
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
-  // referencia o Peão do próprio jogador, não a Seleção.
+  // referencia o Peão do próprio jogador, não a Seleção. O encaixe só vale
+  // conectado à Peça sob o Peão (issue #311): a Recebida selecionada com vaga
+  // tem prioridade absoluta — encaixa quando conectada, gira até conectar caso
+  // contrário — impedindo a intercalação de pendências (consistente com a
+  // guarda anti-softlock do domínio).
   if (tabuleiro.recebidas.length > 0) {
+    const recebidaSelecionada = tabuleiro.recebidas.find(
+      (recebida) => recebida.pecaId === tabuleiro.pecaSelecionadaId,
+    );
+    if (
+      recebidaSelecionada !== undefined &&
+      recebidaSelecionada.vaga !== null &&
+      recebidaSelecionada.celulaAlvo !== null
+    ) {
+      if (
+        conectaNaVaga(
+          recebidaSelecionada.tipo,
+          recebidaSelecionada.orientacao,
+          recebidaSelecionada.vaga,
+        )
+      ) {
+        return [
+          {
+            tipo: 'posicionar_peca',
+            pecaId: recebidaSelecionada.pecaId,
+            celula: recebidaSelecionada.celulaAlvo,
+          },
+        ];
+      }
+      // Gira até a borda voltada à Peça sob o Peão abrir (sentido fixo; o
+      // próximo desvio gira de novo até conectar).
+      return [
+        {
+          tipo: 'girar_peca',
+          pecaId: recebidaSelecionada.pecaId,
+          sentido: 'horario',
+        },
+      ];
+    }
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
     for (const recebida of tabuleiro.recebidas) {
@@ -171,11 +210,17 @@ export function acoesValidasDaSubfase(
         continue;
       }
       if (recebida.celulaAlvo !== null) {
-        acoes.push({
-          tipo: 'posicionar_peca',
-          pecaId: recebida.pecaId,
-          celula: recebida.celulaAlvo,
-        });
+        // Encaixe só conectado (issue #311): sem conexão, NÃO age — a
+        // selecionada com vaga já teve prioridade absoluta acima, então
+        // recebida não selecionada desconectada é inalcançável no fluxo do
+        // próprio bot.
+        if (conectaNaVaga(recebida.tipo, recebida.orientacao, recebida.vaga)) {
+          acoes.push({
+            tipo: 'posicionar_peca',
+            pecaId: recebida.pecaId,
+            celula: recebida.celulaAlvo,
+          });
+        }
       }
     }
     return acoes;

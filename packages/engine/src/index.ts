@@ -191,12 +191,14 @@ export {
 } from './monstros.ts';
 
 export {
+  BORDA_OPOSTA,
   COMPOSICAO_DA_CAIXA,
   LADO_DA_GRADE,
   aplicarComandoDeTabuleiro,
   aplicarLimpeza,
   bordasAbertas,
   calcularIluminacao,
+  conectaNaVaga,
   ehPecaDeMonstro,
   ehPecaEspecial,
   estadoInicialDoTabuleiro,

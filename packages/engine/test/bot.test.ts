@@ -1,18 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BORDA_OPOSTA,
   acoesValidasDaSubfase,
   aplicarComandoDePartida,
+  bordasAbertas,
   estadoInicialDaPartida,
   executarTurnoDoBot,
   mapearBot,
   sortearAcao,
   type ComandoDePartida,
   type EstadoDaPartida,
+  type Orientacao,
 } from '../src/index.ts';
 
 const selecionarPeca = (pecaId: string) =>
   ({ tipo: 'selecionar_peca', pecaId } as const);
+
+const girarPeca = (pecaId: string) =>
+  ({ tipo: 'girar_peca', pecaId, sentido: 'horario' } as const);
 
 const posicionarPeca = (pecaId: string, linha: number, coluna: number) =>
   ({ tipo: 'posicionar_peca', pecaId, celula: { linha, coluna } } as const);
@@ -68,6 +74,10 @@ function partidaIniciadaCom(
   return resultado.estado;
 }
 
+// Resolve todas as pendências do Recebimento: escolhe a vaga de cada peça
+// sorteada (primeira borda canônica ainda disponível), gira a Recebida até a
+// borda voltada à Peça sob o Peão abrir (encaixe conectado, issue #311) e
+// encaixa na célula-alvo derivada da vaga.
 function resolverRecebidas(
   estado: EstadoDaPartida,
   ator: string,
@@ -95,8 +105,31 @@ function resolverRecebidas(
     const escolhida = estado.tabuleiro.recebidas.find(
       (item) => item.recebidaId === pendente.recebidaId,
     );
-    if (!escolhida || escolhida.celulaAlvo === null) {
+    if (!escolhida || escolhida.celulaAlvo === null || escolhida.vaga === null) {
       throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+    }
+    // Gira (horário) até a borda voltada à Peça sob o Peão — o oposto da
+    // vaga — abrir; sem conexão o encaixe é rejeitado (issue #311). Peças
+    // Especiais e Monstros têm as 4 bordas abertas: giros = 0.
+    const alvo = BORDA_OPOSTA[escolhida.vaga];
+    let giros = 0;
+    while (
+      giros < 4 &&
+      !bordasAbertas({
+        tipo: escolhida.tipo,
+        orientacao: ((escolhida.orientacao + 90 * giros) %
+          360) as Orientacao,
+      }).includes(alvo)
+    ) {
+      giros++;
+    }
+    if (giros === 4) {
+      throw new Error(
+        `nenhuma rotação conecta a pendência ${pendente.recebidaId}`,
+      );
+    }
+    for (let giro = 0; giro < giros; giro++) {
+      estado = aplicar(estado, girarPeca(escolhida.pecaId), ator);
     }
     estado = aplicar(
       estado,

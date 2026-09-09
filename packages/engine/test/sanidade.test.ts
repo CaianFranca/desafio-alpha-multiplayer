@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BORDA_OPOSTA,
   aplicarComandoDePartida,
   avaliarTerminoDaPartida,
+  bordasAbertas,
   calcularIluminacao,
   estadoInicialDaPartida,
   type AtaqueResolvidoEvento,
@@ -53,6 +55,49 @@ function comPeaoSobre(s: EstadoDaPartida, peaoId: string, pecaId: string): Estad
 function comJogador(s: EstadoDaPartida, jogadorId: string, patch: Partial<{ sanidade: number; amedrontado: boolean; emBaixaIluminacao: boolean; protegido: boolean }>): EstadoDaPartida {
   return { ...s, jogadores: s.jogadores.map(j => j.jogadorId === jogadorId ? { ...j, ...patch } as any : j) };
 }
+// Gira até a borda voltada à Peça sob o Peão — o oposto da vaga — abrir;
+// sem conexão o encaixe é rejeitado (issue #311).
+function girarAteConectarEEncaixar(
+  s: EstadoDaPartida,
+  ator: string,
+  esc: {
+    pecaId: string;
+    tipo: TipoDaPeca;
+    orientacao: Orientacao;
+    vaga: BordaCardinal | null;
+    celulaAlvo: { linha: number; coluna: number } | null;
+  },
+): EstadoDaPartida {
+  if (esc.vaga === null || esc.celulaAlvo === null) {
+    throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+  }
+  const alvo = BORDA_OPOSTA[esc.vaga];
+  let giros = 0;
+  while (
+    giros < 4 &&
+    !bordasAbertas({
+      tipo: esc.tipo,
+      orientacao: ((esc.orientacao + 90 * giros) % 360) as Orientacao,
+    }).includes(alvo)
+  ) {
+    giros++;
+  }
+  if (giros === 4) {
+    throw new Error(`nenhuma rotação conecta a pendência ${esc.pecaId}`);
+  }
+  for (let giro = 0; giro < giros; giro++) {
+    s = aplicar(
+      s,
+      { tipo: 'girar_peca', pecaId: esc.pecaId, sentido: 'horario' },
+      ator,
+    );
+  }
+  return aplicar(
+    s,
+    posicionar(esc.pecaId, esc.celulaAlvo.linha, esc.celulaAlvo.coluna),
+    ator,
+  );
+}
 function resolverRecebidas(s: EstadoDaPartida, ator: string): EstadoDaPartida {
   while (s.tabuleiro.recebidas.length > 0) {
     const pend = s.tabuleiro.recebidas[0];
@@ -64,7 +109,7 @@ function resolverRecebidas(s: EstadoDaPartida, ator: string): EstadoDaPartida {
     if (!nxt) throw new Error(`sem vaga ${pend.recebidaId}`);
     s = nxt;
     const esc = s.tabuleiro.recebidas.find(x => x.recebidaId === pend.recebidaId)!;
-    s = aplicar(s, posicionar(esc.pecaId, esc.celulaAlvo!.linha, esc.celulaAlvo!.coluna), ator);
+    s = girarAteConectarEEncaixar(s, ator, esc);
   }
   return s;
 }
