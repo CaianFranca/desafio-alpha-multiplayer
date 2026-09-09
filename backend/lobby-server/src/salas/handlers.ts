@@ -1085,7 +1085,10 @@ export class SalasHandlers {
       .sort((a, b) => a.ordemDeEntrada - b.ordemDeEntrada);
     if (membrosAtivosOrdenados.length < 2 || membrosAtivosOrdenados.length > 4) {
       this.encaminhamentosEmVoo.delete(salaId);
-      void limparEmVoo(this.redis, salaId);
+      // Determinístico (review JF532, item 3): sem fire-and-forget — o marker
+      // não pode sobreviver ao fim do em-voo. `limparEmVoo` engole erro
+      // internamente.
+      await limparEmVoo(this.redis, salaId);
       this.enviarErro(socket, 'ENCAMINHAMENTO_INVALIDO', 'Composição inválida para encaminhamento — esperado de 2 a 4 Membros ativos.');
       return;
     }
@@ -1265,7 +1268,10 @@ export class SalasHandlers {
         }
       } finally {
         this.encaminhamentosEmVoo.delete(salaId);
-        void limparEmVoo(this.redis, salaId);
+        // Determinístico (review JF532, item 3): o marker do em-voo é limpo
+        // antes do fim da mutação — sem fire-and-forget. `limparEmVoo` engole
+        // erro internamente.
+        await limparEmVoo(this.redis, salaId);
       }
     });
   }
