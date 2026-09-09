@@ -15,7 +15,8 @@
 //
 // Precedência das subfases em acoesValidasDaSubfase:
 //   (a) partida terminada ou vez de outro jogador → sem ações;
-//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida;
+//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida (em
+//       Baixa Iluminação, apenas vagas em células escuras — #341);
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
 //   (d) turno normal sem Confirmação → selecionar o Peão, mover, permanecer
@@ -30,7 +31,8 @@
 // Fora do escopo deliberado: girar_peca/finalizar_manipulacao (janela
 // opcional de Manipulação — o bot encaixa na orientação sorteada),
 // atravessar_o_escuro (jogada opcional de Baixa Iluminação — o bot em Baixa
-// usa a movimentação normal) e desselecionar_peao (sem efeito útil no turno).
+// usa a movimentação normal; a pendência da Travessia, com célula travada,
+// segue enumerada em (b)) e desselecionar_peao (sem efeito útil no turno).
 
 import {
   ehPecaDeMonstro,
@@ -133,11 +135,23 @@ export function acoesValidasDaSubfase(
   // emite as ações direto, mesmo sem Peão selecionado — o engine pré-adopta a
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
   // referencia o Peão do próprio jogador, não a Seleção.
-  // TODO(#341): em Baixa Iluminação a FSM ainda enumera escolher_vaga para
-  // vagas em células iluminadas, que a engine rejeita (DADOS_INVALIDOS —
-  // "a vaga deve ser uma célula escura"). Correção pendente: filtrar por
-  // estado.celulasIluminadas neste ramo.
+  //
+  // Baixa Iluminação (#341): a engine rejeita vaga em célula iluminada
+  // (DADOS_INVALIDOS) e a camada Tabuleiro não conhece iluminação — o filtro
+  // vive aqui, na FSM, para a enumeração espelhar exatamente o que a engine
+  // aceita. Sem vaga escura, a pendência comum não é enumerável e o turno
+  // desdobra em desistência honesta pelo failsafe. A pendência da Travessia
+  // (celulaAlvo fixado) não passa pelo filtro: a engine valida só o match da
+  // célula travada, escura por construção.
   if (tabuleiro.recebidas.length > 0) {
+    const emBaixa = jogador.emBaixaIluminacao ?? false;
+    const iluminadas = emBaixa
+      ? new Set(
+          estado.celulasIluminadas.map(
+            (celula) => `${celula.linha},${celula.coluna}`,
+          ),
+        )
+      : null;
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
     for (const recebida of tabuleiro.recebidas) {
@@ -166,6 +180,14 @@ export function acoesValidasDaSubfase(
           continue;
         }
         for (const vaga of vagas) {
+          // Em Baixa, vaga iluminada é rejeição certa (DADOS_INVALIDOS):
+          // enumera apenas as vagas escuras restantes.
+          if (
+            iluminadas !== null &&
+            iluminadas.has(`${vaga.celula.linha},${vaga.celula.coluna}`)
+          ) {
+            continue;
+          }
           acoes.push({
             tipo: 'escolher_vaga_da_peca_recebida',
             recebidaId: recebida.recebidaId,
