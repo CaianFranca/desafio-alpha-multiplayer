@@ -559,6 +559,9 @@ test('4 bots jogam até o resultado ou o limite de rodadas, sem exceção', () =
     while (estado.resultado === null && tentativas < 400) {
       tentativas++;
       const ator = estado.jogadorAtivoId;
+      // Teto folgado do teste (50) acima do default do failsafe
+      // (MAX_ACOES_POR_TURNO_DO_BOT = 10): dá espaço ao wander aleatório
+      // sem mascarar o guardião do driver (#334).
       const turno = executarTurnoDoBot(estado, ator, {
         maxActionsPerTurn: 50,
       });
@@ -581,11 +584,13 @@ test('4 bots jogam até o resultado ou o limite de rodadas, sem exceção', () =
       estado.resultado !== null || tentativas === 400,
       'deveria terminar ou atingir o limite de tentativas',
     );
-    // Detector de travamento real: falha apenas quando NENHUM turno progrediu
-    // (todas as tentativas morreram em desistência sem avançar o estado).
-    // Desistências legítimas do failsafe podem ser frequentes — inclusive em
-    // tempestade (274 numa partida que terminou) — enquanto o estado segue
-    // avançando entre elas (#334).
+    // Detector de travamento real, temporário até a #341: falha apenas quando
+    // NENHUM turno progrediu (todas as tentativas morreram em desistência sem
+    // avançar o estado). Com a FSM ainda enumerando vaga iluminada em Baixa
+    // (DADOS_INVALIDOS → desistência, #341), desistências legítimas podem ser
+    // frequentes — tempestade de 274 desistências observada em seed 7, numa
+    // partida que terminou — enquanto o estado segue avançando entre elas
+    // (#334). Quando a #341 filtrar as vagas escuras, revisitar este detector.
     assert.ok(
       desistencias < tentativas,
       `jogo travado na semente ${semente}: ${desistencias}/${tentativas} turnos em desistência`,
