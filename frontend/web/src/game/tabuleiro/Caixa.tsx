@@ -1,5 +1,5 @@
 import { Suspense, useLayoutEffect, useMemo } from 'react'
-import { useLoader } from '@react-three/fiber'
+import { useLoader, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import {
@@ -369,15 +369,11 @@ export function Caixa({
           <mesh
             position={[0, 0.025, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
-            onClick={(e) => {
-              // @ts-expect-error ThreeEvent stopPropagation tipado como MouseEvent em R3F 8
+            onClick={(e: ThreeEvent<MouseEvent>) => {
               e.stopPropagation()
               despacharCliqueNaPecaDaBandeja(estadoPeoes, { onPuxar })
             }}
             {...handlersDeCursor(correntePuxavel ? 'pointer' : 'default')}
-            onPointerLeave={() => {
-              document.body.style.cursor = 'auto'
-            }}
           >
             <planeGeometry args={[2.8, 2.8]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
