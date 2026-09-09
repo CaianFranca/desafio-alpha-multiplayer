@@ -69,6 +69,25 @@ function orfaDe(handlers: SalasHandlers): (salaId: string) => Promise<boolean> {
     .partidaDaSalaEstaOrfa.bind(handlers);
 }
 
+// Formato da previsão (interface privada de handlers.ts): o teste usa
+// tipagem estrutural via cast.
+type PrevisaoLimpezaOrfa = {
+  salaId: string;
+  decisao: { orfa: boolean; partidaId: string | null };
+};
+
+function preverDe(handlers: SalasHandlers): (jogadorId: string, salaIdAlvo?: string) => Promise<PrevisaoLimpezaOrfa | null> {
+  return (handlers as unknown as {
+    preverLimpezaOrfa(jogadorId: string, salaIdAlvo?: string): Promise<PrevisaoLimpezaOrfa | null>;
+  }).preverLimpezaOrfa.bind(handlers);
+}
+
+function aplicarDe(handlers: SalasHandlers): (jogadorId: string, previsao: PrevisaoLimpezaOrfa) => Promise<boolean> {
+  return (handlers as unknown as {
+    aplicarLimpezaOrfa(jogadorId: string, previsao: PrevisaoLimpezaOrfa): Promise<boolean>;
+  }).aplicarLimpezaOrfa.bind(handlers);
+}
+
 test('A8: sem partida nas 3 fontes não libera (fail-closed)', async () => {
   const { handlers, chamadas } = handlersCom({
     salaBruta: { partidaId: null },
@@ -185,16 +204,26 @@ function handlersComOrfa(
       return Promise.resolve(true);
     },
   };
+  // Estado Redis mutável: os testes de revalidação mudam-no ENTRE a decisão
+  // (fora da fila) e a aplicação (dentro da fila).
+  const estadoRedis = {
+    existe: opcoes.partidaNoRedis !== undefined ? 1 : 0,
+    partidaJson: opcoes.partidaNoRedis !== undefined ? JSON.stringify(opcoes.partidaNoRedis) : null,
+    quebrarGet: false,
+  };
   const redisFalso = {
     async exists(chave: string): Promise<number> {
-      return chave === 'game-server:partida:partida-1' && opcoes.partidaNoRedis !== undefined ? 1 : 0;
+      return chave === 'game-server:partida:partida-1' ? estadoRedis.existe : 0;
     },
     async ttl(): Promise<number> {
       return 100;
     },
     async get(chave: string): Promise<string | null> {
-      if (chave === 'game-server:partida:partida-1' && opcoes.partidaNoRedis !== undefined) {
-        return JSON.stringify(opcoes.partidaNoRedis);
+      if (estadoRedis.quebrarGet) {
+        return Promise.reject(new Error('redis fora do ar'));
+      }
+      if (chave === 'game-server:partida:partida-1') {
+        return estadoRedis.partidaJson;
       }
       return null;
     },
@@ -255,22 +284,30 @@ function handlersComOrfa(
     redis: redisFalso,
   } as unknown as Deps;
   const overridesAssociacao = { valor: 'sala-1' as string | null };
-  return { handlers: new SalasHandlers(deps), registro, overridesAssociacao };
+  return { handlers: new SalasHandlers(deps), registro, overridesAssociacao, estadoRedis };
 }
 
-function limparAssociacaoOrfaDe(handlers: SalasHandlers): (jogadorId: string) => Promise<boolean> {
-  return (handlers as unknown as { limparAssociacaoOrfaSeNecessario(jogadorId: string): Promise<boolean> })
-    .limparAssociacaoOrfaSeNecessario.bind(handlers);
+// Review JF532 (item 1): a limpeza de órfã virou um par prever (fora da
+// fila) / aplicar (dentro da fila) — os helpers chamam as duas etapas.
+async function limparAssociacaoOrfaDe(handlers: SalasHandlers, jogadorId: string): Promise<boolean> {
+  const previsao = await preverDe(handlers)(jogadorId);
+  if (previsao === null) {
+    return false;
+  }
+  return aplicarDe(handlers)(jogadorId, previsao);
 }
 
-function limparOrfaDeOutraSalaDe(handlers: SalasHandlers): (jogadorId: string, salaIdAlvo: string) => Promise<void> {
-  return (handlers as unknown as { limparOrfaDeOutraSalaSeNecessario(jogadorId: string, salaIdAlvo: string): Promise<void> })
-    .limparOrfaDeOutraSalaSeNecessario.bind(handlers);
+async function limparOrfaDeOutraSalaDe(handlers: SalasHandlers, jogadorId: string, salaIdAlvo: string): Promise<boolean> {
+  const previsao = await preverDe(handlers)(jogadorId, salaIdAlvo);
+  if (previsao === null) {
+    return false;
+  }
+  return aplicarDe(handlers)(jogadorId, previsao);
 }
 
 test('bypass órfã: membro comum sai via engine, com projeção, broadcast e PG', async () => {
   const { handlers, registro } = handlersComOrfa(estadoEncaminhado());
-  const limpo = await limparAssociacaoOrfaDe(handlers)('jogador-2');
+  const limpo = await limparAssociacaoOrfaDe(handlers, 'jogador-2');
 
   assert.equal(limpo, true);
   // Sucesso do bypass no engine: saída gravada no PG sem sucessão.
@@ -287,7 +324,7 @@ test('bypass órfã: membro comum sai via engine, com projeção, broadcast e PG
 
 test('bypass órfã: anfitrião que sai grava a sucessão no mesmo commit', async () => {
   const { handlers, registro } = handlersComOrfa(estadoEncaminhado());
-  const limpo = await limparAssociacaoOrfaDe(handlers)('jogador-1');
+  const limpo = await limparAssociacaoOrfaDe(handlers, 'jogador-1');
 
   assert.equal(limpo, true);
   assert.equal(registro.saidasAtomics.length, 1);
@@ -297,7 +334,7 @@ test('bypass órfã: anfitrião que sai grava a sucessão no mesmo commit', asyn
 test('bypass órfã: ramo PG (associação nula) passa pelo engine', async () => {
   const { handlers, registro, overridesAssociacao } = handlersComOrfa(estadoEncaminhado());
   overridesAssociacao.valor = null;
-  await limparOrfaDeOutraSalaDe(handlers)('jogador-2', 'sala-alvo');
+  await limparOrfaDeOutraSalaDe(handlers, 'jogador-2', 'sala-alvo');
 
   // Saída via bypass do engine (não mais `sairMembroAtomico` cru), associação limpa.
   assert.equal(registro.saidasAtomics.length, 1);
@@ -315,7 +352,7 @@ test('bypass órfã: memória vazia hidrata do PG e libera (fallback PG do item 
     semSalaNoEngine: true,
   });
   overridesAssociacao.valor = null;
-  await limparOrfaDeOutraSalaDe(handlers)('jogador-2', 'sala-alvo');
+  await limparOrfaDeOutraSalaDe(handlers, 'jogador-2', 'sala-alvo');
 
   // O fallback hidratou e o bypass aplicou a saída via engine.
   assert.equal(registro.saidasAtomics.length, 1);
@@ -335,7 +372,7 @@ test('bypass órfã: não-órfã não hidrata (partida parcial no Redis)', async
     partidaNoRedis: { estado: 'preparada', roster: [{ presenca: 'conectado' }] },
   });
   overridesAssociacao.valor = 'sala-1';
-  const limpo = await limparAssociacaoOrfaDe(handlers)('jogador-2');
+  const limpo = await limparAssociacaoOrfaDe(handlers, 'jogador-2');
 
   assert.equal(limpo, false, 'roster com admissão parcial não libera o bypass');
   assert.equal(registro.hidratacoes, 0, 'sala não-órfã não pode ser hidratada');
@@ -351,7 +388,7 @@ test('bypass órfã: ramo PG não hidrata sala não-órfã', async () => {
     partidaNoRedis: { estado: 'preparada', roster: [{ presenca: 'conectado' }] },
   });
   overridesAssociacao.valor = null;
-  await limparOrfaDeOutraSalaDe(handlers)('jogador-2', 'sala-alvo');
+  await limparOrfaDeOutraSalaDe(handlers, 'jogador-2', 'sala-alvo');
 
   assert.equal(registro.hidratacoes, 0, 'sala não-órfã no fallback PG não pode ser hidratada');
   assert.equal(registro.saidasAtomics.length, 0);
@@ -364,10 +401,123 @@ test('bypass órfã: órfã hidrata uma vez e libera (contagem do fallback PG)',
     semSalaNoEngine: true,
   });
   overridesAssociacao.valor = null;
-  await limparOrfaDeOutraSalaDe(handlers)('jogador-2', 'sala-alvo');
+  await limparOrfaDeOutraSalaDe(handlers, 'jogador-2', 'sala-alvo');
 
   assert.equal(registro.hidratacoes, 1, 'a sala órfã confirmada hidrata exatamente uma vez');
   assert.equal(registro.saidasAtomics.length, 1, 'bypass aplicado via engine');
+  assert.deepEqual(registro.associacoesLimpas, ['jogador-2']);
+  assert.ok(registro.broadcasts.some((e) => (e as { type?: string }).type === 'MEMBRO_SAIU'));
+});
+
+// ===== Revalidação quente dentro da fila (review JF532, item 1) =====
+
+// Decisão fora da fila + revalidação dentro: partida que vira `em_andamento`
+// entre decisão e aplicação trava o bypass — zero mutações.
+test('revalidação: partida vira em_andamento entre decisão e aplicação — fail-closed', async () => {
+  const { handlers, registro, overridesAssociacao, estadoRedis } = handlersComOrfa(estadoEncaminhado(), {
+    partidaNoRedis: { estado: 'preparada', roster: [{ presenca: 'em_reconexao' }] },
+  });
+  overridesAssociacao.valor = 'sala-1';
+  const previsao = await preverDe(handlers)('jogador-2');
+  assert.ok(previsao !== null, 'órfã confirmada na decisão (fora da fila)');
+
+  // Entre a decisão e a aplicação, a admissão completa: partida em_andamento.
+  estadoRedis.existe = 1;
+  estadoRedis.partidaJson = JSON.stringify({ estado: 'em_andamento', roster: [{ presenca: 'conectado' }] });
+
+  const limpo = await aplicarDe(handlers)('jogador-2', previsao);
+  assert.equal(limpo, false, 'partida em andamento não libera o bypass');
+  assert.equal(registro.hidratacoes, 0, 'nenhuma hidratação');
+  assert.equal(registro.saidasAtomics.length, 0, 'nenhuma saída no PG');
+  assert.deepEqual(registro.associacoesLimpas, [], 'nenhuma associação limpa');
+  assert.equal(registro.broadcasts.length, 0, 'nenhum broadcast');
+});
+
+// Roster parcial (admissão parcial) entre decisão e aplicação: fail-closed.
+test('revalidação: roster parcial entre decisão e aplicação — fail-closed', async () => {
+  const { handlers, registro, overridesAssociacao, estadoRedis } = handlersComOrfa(estadoEncaminhado(), {
+    partidaNoRedis: { estado: 'preparada', roster: [{ presenca: 'em_reconexao' }] },
+  });
+  overridesAssociacao.valor = 'sala-1';
+  const previsao = await preverDe(handlers)('jogador-2');
+  assert.ok(previsao !== null);
+
+  // Um dos membros admitiu entre a decisão e a aplicação.
+  estadoRedis.partidaJson = JSON.stringify({
+    estado: 'preparada',
+    roster: [{ presenca: 'em_reconexao' }, { presenca: 'conectado' }],
+  });
+
+  const limpo = await aplicarDe(handlers)('jogador-2', previsao);
+  assert.equal(limpo, false, 'roster parcial não libera o bypass');
+  assert.equal(registro.saidasAtomics.length, 0);
+  assert.deepEqual(registro.associacoesLimpas, []);
+  assert.equal(registro.broadcasts.length, 0);
+});
+
+// Erro de I/O na revalidação: fail-closed, zero mutações.
+test('revalidação: erro de I/O no Redis trava o bypass', async () => {
+  const { handlers, registro, overridesAssociacao, estadoRedis } = handlersComOrfa(estadoEncaminhado(), {
+    partidaNoRedis: { estado: 'preparada', roster: [{ presenca: 'em_reconexao' }] },
+  });
+  overridesAssociacao.valor = 'sala-1';
+  const previsao = await preverDe(handlers)('jogador-2');
+  assert.ok(previsao !== null, 'decisão sai antes do erro de I/O');
+
+  // Entre a decisão e a aplicação, o Redis começa a rejeitar leituras.
+  estadoRedis.quebrarGet = true;
+
+  const limpo = await aplicarDe(handlers)('jogador-2', previsao);
+  assert.equal(limpo, false, 'erro de I/O na revalidação é fail-closed');
+  assert.equal(registro.hidratacoes, 0);
+  assert.equal(registro.saidasAtomics.length, 0);
+  assert.deepEqual(registro.associacoesLimpas, []);
+  assert.equal(registro.broadcasts.length, 0);
+});
+
+// Encaminhamento em voo para a sala: fail-closed.
+test('revalidação: encaminhamento em voo para a sala trava o bypass', async () => {
+  const { handlers, registro, overridesAssociacao } = handlersComOrfa(estadoEncaminhado());
+  overridesAssociacao.valor = 'sala-1';
+  const previsao = await preverDe(handlers)('jogador-2');
+  assert.ok(previsao !== null);
+
+  (handlers as unknown as { encaminhamentosEmVoo: Set<string> }).encaminhamentosEmVoo.add('sala-1');
+
+  const limpo = await aplicarDe(handlers)('jogador-2', previsao);
+  assert.equal(limpo, false, 'encaminhamento em voo é fail-closed');
+  assert.equal(registro.saidasAtomics.length, 0);
+  assert.deepEqual(registro.associacoesLimpas, []);
+  assert.equal(registro.broadcasts.length, 0);
+});
+
+// Jogador divergiu para outra Sala entre a decisão e a aplicação: aborta.
+test('revalidação: jogador reassociação para outra sala entre decisão e aplicação — aborta', async () => {
+  const { handlers, registro, overridesAssociacao } = handlersComOrfa(estadoEncaminhado());
+  overridesAssociacao.valor = 'sala-1';
+  const previsao = await preverDe(handlers)('jogador-2');
+  assert.ok(previsao !== null);
+
+  overridesAssociacao.valor = 'sala-alvo';
+
+  const limpo = await aplicarDe(handlers)('jogador-2', previsao);
+  assert.equal(limpo, false, 'associação divergente aborta a aplicação');
+  assert.equal(registro.saidasAtomics.length, 0);
+  assert.deepEqual(registro.broadcasts.length, 0);
+});
+
+// Fluxo completo (decisão fora + revalidação dentro): órfã confirmada libera
+// com hidratação exatamente 1× e bypass via engine.
+test('fluxo completo: órfã confirmada no par prever/aplicar hidrata exatamente 1×', async () => {
+  const { handlers, registro, overridesAssociacao } = handlersComOrfa(estadoEncaminhado(), {
+    semSalaNoEngine: true,
+  });
+  overridesAssociacao.valor = 'sala-1';
+  const limpo = await limparAssociacaoOrfaDe(handlers, 'jogador-2');
+
+  assert.equal(limpo, true);
+  assert.equal(registro.hidratacoes, 1, 'a sala órfã confirmada hidrata exatamente uma vez');
+  assert.equal(registro.saidasAtomics.length, 1);
   assert.deepEqual(registro.associacoesLimpas, ['jogador-2']);
   assert.ok(registro.broadcasts.some((e) => (e as { type?: string }).type === 'MEMBRO_SAIU'));
 });
