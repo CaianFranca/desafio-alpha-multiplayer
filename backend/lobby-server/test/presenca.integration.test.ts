@@ -625,11 +625,12 @@ test('presenca: multiplas conexoes do mesmo Jogador contam como uma so presenca'
     await coletarEventos(wsB1, 2);
     await coletarEventos(wsA, 2);
 
-    // Segunda conexão do mesmo jogador B (segunda aba)
+    // Segunda conexão do mesmo jogador B (segunda aba/F5): o novo socket
+    // recebe snapshot unicast SALA_ATUALIZADA (#335); demais em silêncio,
+    // sem MEMBRO_ENTROU e sem replay de chat.
     const wsB2 = await conectarWs(servidor.wsUrl, b.cookies);
-    // Deve apenas registrar, sem emitir MEMBRO_DESCONECTADO adicional
-    // A já autenticou B via wsB2 com presenca conectado -> registrar silenciosamente
-    await delay(100);
+    const snapshot = await esperarSalaAtualizada(wsB2);
+    assert.equal(snapshot.type, 'SALA_ATUALIZADA');
     await esperarSilencio(wsA);
     await esperarSilencio(wsB1);
     await esperarSilencio(wsB2);

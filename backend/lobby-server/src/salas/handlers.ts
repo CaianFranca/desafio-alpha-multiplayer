@@ -79,6 +79,7 @@ import { SalasBroadcaster } from './broadcast.ts';
 import { SalasState } from './estado.ts';
 import {
   mapearSala,
+  salaAtualizada,
   traduzirEventos,
   type ApelidoPorJogadorId,
 } from './eventos.ts';
@@ -1802,9 +1803,26 @@ export class SalasHandlers {
     }
     // Atualizar cache de apelido antes do broadcast.
     this.atualizarApelidoSeConhecido(jogadorId, socket.data.apelido);
-    // Se já está conectado, apenas registrar o novo socket (segunda aba).
+    // Segunda aba/F5: membro já `conectado` — registra o novo socket e
+    // reidrata com snapshot unicast da Sala atual (#335). Sem broadcast,
+    // sem MEMBRO_ENTROU e sem replay de chat.
     if (membro.presenca === 'conectado') {
       this.broadcast.registrarSocket(jogadorId, salaId, socket);
+      let encaminhamento: EncaminhamentoDaSala | undefined;
+      if (salaInfo.sala.estado === 'encaminhada') {
+        const proj = await this.projecao.obterEstadoSala(salaId).catch(() => null);
+        if (proj?.encaminhamento) {
+          encaminhamento = proj.encaminhamento;
+        } else {
+          const rep = await this.repo.obterEncaminhamento(salaId).catch(() => null);
+          if (rep) encaminhamento = rep;
+          else console.warn(`[salas] sala encaminhada ${salaId} sem encaminhamento na projeção/PG`);
+        }
+      }
+      this.broadcast.enviarParaSocket(
+        socket,
+        salaAtualizada(salaInfo.sala, this.estado.apelidoPorJogadorId, this.linkBase, encaminhamento),
+      );
       return;
     }
     // Está em reconexão — tentar reconectar via engine.
