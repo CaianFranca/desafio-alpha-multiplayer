@@ -65,12 +65,12 @@ describe('coletor — captura de console e erros', () => {
     rejeitada.catch(() => undefined)
   })
 
-  it('trunca a mensagem a ~500 chars', () => {
+  it('trunca a mensagem a ~2000 chars', () => {
     coletor.instalarColetorDeDepuracao()
-    console.log('x'.repeat(800))
+    console.log('x'.repeat(3000))
 
     const entrada = coletor.entradas()[0]
-    expect(entrada?.mensagem.length).toBe(501) // 500 + reticências
+    expect(entrada?.mensagem.length).toBe(2001) // 2000 + reticências
   })
 
   it('buffer anelado: acima de ~500 entradas descarta as mais antigas', () => {
@@ -81,6 +81,39 @@ describe('coletor — captura de console e erros', () => {
     expect(lista.length).toBe(500)
     expect(lista[0]?.mensagem).toBe('linha 5')
     expect(lista[lista.length - 1]?.mensagem).toBe('linha 504')
+  })
+})
+
+describe('coletor — formatação de objetos (formatarValor)', () => {
+  it('console.log com objeto registra JSON indentado, não [object Object]', () => {
+    coletor.instalarColetorDeDepuracao()
+
+    console.log('estado', { a: 1, b: { c: [2, 3] } })
+
+    const mensagem = coletor.entradas()[0]?.mensagem ?? ''
+    expect(mensagem).toContain('estado {')
+    expect(mensagem).toContain('"a": 1')
+    expect(mensagem).toContain('  "b": {')
+    expect(mensagem).toContain('    "c": [')
+    expect(mensagem).not.toContain('[object Object]')
+  })
+
+  it('objeto com ciclo referencial cai em String() sem lançar', () => {
+    coletor.instalarColetorDeDepuracao()
+    const ciclico: { self?: unknown } = {}
+    ciclico.self = ciclico
+
+    expect(() => console.log(ciclico)).not.toThrow()
+
+    // Fallback String(): o ciclo não serializa, mas a linha registra algo.
+    expect(coletor.entradas()[0]?.mensagem).toBe('[object Object]')
+  })
+
+  it('formatarValor: string como está, primitivo via String(), Error como "Nome: mensagem"', () => {
+    expect(coletor.formatarValor('texto')).toBe('texto')
+    expect(coletor.formatarValor(42)).toBe('42')
+    expect(coletor.formatarValor(null)).toBe('null')
+    expect(coletor.formatarValor(new TypeError('boom'))).toBe('TypeError: boom')
   })
 })
 

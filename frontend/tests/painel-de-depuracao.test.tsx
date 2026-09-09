@@ -1,7 +1,7 @@
 // Testes do PainelDeDepuração (issue #340): render, filtro por nível,
-// Limpar e Copiar últimas N linhas (respeitando o filtro), mais o fundo de
-// fase por linha da paleta. O painel lê do coletor singleton — cada teste
-// reimporta os módulos para começar com o buffer vazio.
+// Limpar e Copiar últimos N logs (entradas completas, respeitando o filtro),
+// mais o fundo de fase por linha da paleta. O painel lê do coletor
+// singleton — cada teste reimporta os módulos para começar com o buffer vazio.
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -81,7 +81,7 @@ describe('painel — Limpar', () => {
   })
 })
 
-describe('painel — Copiar últimas N linhas', () => {
+describe('painel — Copiar últimos N logs', () => {
   it('campo vazio copia tudo (respeitando o filtro)', async () => {
     semear()
     const copiado = clipboardFake()
@@ -100,7 +100,7 @@ describe('painel — Copiar últimas N linhas', () => {
     const copiado = clipboardFake()
     render(<PainelDeDepuracao />)
 
-    fireEvent.change(screen.getByLabelText('Últimas N linhas a copiar'), { target: { value: '3' } })
+    fireEvent.change(screen.getByLabelText('Últimos N logs a copiar'), { target: { value: '3' } })
     fireEvent.click(screen.getByRole('button', { name: 'Copiar' }))
     await waitFor(() => expect(copiado.length).toBe(1))
 
@@ -128,7 +128,7 @@ describe('painel — Copiar últimas N linhas', () => {
     const copiado = clipboardFake()
     render(<PainelDeDepuracao />)
 
-    fireEvent.change(screen.getByLabelText('Últimas N linhas a copiar'), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText('Últimos N logs a copiar'), { target: { value: '0' } })
     fireEvent.click(screen.getByRole('button', { name: 'Copiar' }))
     await waitFor(() => expect(copiado.length).toBe(1))
 

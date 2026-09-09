@@ -5,9 +5,11 @@
  * on/off, que fica em z-[70] — o painel fica em z-[60], acima dos overlays
  * do app em z-50), fundo próprio distinto do fundo das linhas.
  * Filtro por nível (info/warn/error/todos),
- * botão Limpar e botão Copiar com campo numérico "últimas N linhas"
- * (vazio/0 = copiar tudo); a cópia respeita o filtro ativo e sai em texto
- * simples, uma linha por log. Renderiza a partir do coletor singleton —
+ * botão Limpar e botão Copiar com campo numérico "últimos N logs" (N conta
+ * entradas completas do buffer — nunca um log cortado no meio; vazio/0 =
+ * copiar tudo); a cópia respeita o filtro ativo e sai em texto simples,
+ * um registro por log (mensagens multilinha preservadas). Renderiza a
+ * partir do coletor singleton —
  * o histórico existe desde o boot mesmo com o painel fechado.
  */
 
@@ -95,9 +97,9 @@ export function PainelDeDepuracao() {
           Limpar
         </button>
         <label className="flex items-center gap-1 text-slate-400">
-          Últimas N linhas
+          Últimos N logs
           <input
-            aria-label="Últimas N linhas a copiar"
+            aria-label="Últimos N logs a copiar"
             type="number"
             min={0}
             value={quantidadeCopiar}

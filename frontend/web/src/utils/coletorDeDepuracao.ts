@@ -14,7 +14,13 @@
  * não, por spec). Os hooks de WS assinam `aoAtivarModo` para enviar
  * `ATIVAR_DEBUG` nos sockets já abertos no instante da ativação.
  *
- * Truncagem: payloads a ~500 chars (o painel mostra linha única).
+ * Formatação: objetos capturados (console, payload WS) viram JSON indentado
+ * (2 espaços) via `formatarValor` — legível no painel e na cópia, sem o
+ * achatamento "[object Object]" dos valores serializáveis (só ciclos caem
+ * no fallback String()).
+ *
+ * Truncagem: linhas a ~2000 chars (payload de WS, console, JSON indentado);
+ * o painel mostra com wrap (`whitespace-pre-wrap`).
  */
 
 export type FonteDoDepurador = 'console' | 'erro' | 'boundary' | 'ws→' | 'ws←' | 'backend' | 'fase'
@@ -40,8 +46,9 @@ export interface EntradaDeDepuracao {
 /** Cap do buffer anelado (issue #340): ~500 entradas, descarta as mais antigas. */
 export const CAPACIDADE_DO_BUFFER = 500
 
-/** Truncagem de payload/linha (issue #340): ~500 chars. */
-export const TAMANHO_MAXIMO_DO_PAYLOAD = 500
+/** Truncagem de linha (issue #340): ~2000 chars — teto alto o bastante para
+ * manter JSON indentado legível sem inflar o buffer. */
+export const TAMANHO_MAXIMO_DA_LINHA = 2000
 
 /** Chave do sessionStorage que sobrevive a reload (o histórico não sobrevive). */
 const CHAVE_SESSAO_DO_MODO = 'flicker:modo-desenvolvedor'
@@ -102,19 +109,33 @@ export function aoAtivarModo(manipulador: () => void): () => void {
   }
 }
 
-/** Trunca o texto a ~500 chars (payload de WS, linhas longas de console). */
-export function truncarTexto(texto: string, limite: number = TAMANHO_MAXIMO_DO_PAYLOAD): string {
+/** Trunca o texto a ~2000 chars (payload de WS, linhas longas de console,
+ * JSON indentado) — o painel renderiza com wrap, não em linha única. */
+export function truncarTexto(texto: string, limite: number = TAMANHO_MAXIMO_DA_LINHA): string {
   return texto.length <= limite ? texto : `${texto.slice(0, limite)}…`
 }
 
-/** Serializa o payload de WS para uma linha do painel (truncada). */
-export function resumirPayload(payload: unknown): string {
-  if (typeof payload === 'string') return truncarTexto(payload)
+/**
+ * Formata um valor capturado como texto legível (issue #340): string passa
+ * como está; Error vira "Nome: mensagem"; demais valores (objetos, arrays,
+ * primitivos) via JSON.stringify(…, null, 2) — indentação e espaçamento.
+ * Ciclos e serialização impossível (incluindo `undefined` retornado pelo
+ * stringify) caem em String(): nunca explode e nunca vira "[object Object]"
+ * silenciosamente achatado.
+ */
+export function formatarValor(valor: unknown): string {
+  if (typeof valor === 'string') return valor
+  if (valor instanceof Error) return `${valor.name}: ${valor.message}`
   try {
-    return truncarTexto(JSON.stringify(payload) ?? String(payload))
+    return JSON.stringify(valor, null, 2) ?? String(valor)
   } catch {
-    return truncarTexto(String(payload))
+    return String(valor)
   }
+}
+
+/** Serializa o payload de WS para o painel (objetos em JSON indentado, truncada). */
+export function resumirPayload(payload: unknown): string {
+  return truncarTexto(typeof payload === 'string' ? payload : formatarValor(payload))
 }
 
 function registrar(
@@ -223,17 +244,19 @@ export function instalarColetorDeDepuracao(): void {
   instalado = true
   consoleOriginal = { log: console.log.bind(console), warn: console.warn.bind(console), error: console.error.bind(console) }
 
+  // Objetos passam por formatarValor: JSON indentado no painel/cópia em vez
+  // de "[object Object]" (o console original mantém o valor vivo, como antes).
   console.log = (...args: unknown[]) => {
     consoleOriginal?.log(...args)
-    registrar('console', 'info', args.map(String).join(' '))
+    registrar('console', 'info', args.map(formatarValor).join(' '))
   }
   console.warn = (...args: unknown[]) => {
     consoleOriginal?.warn(...args)
-    registrar('console', 'warn', args.map(String).join(' '))
+    registrar('console', 'warn', args.map(formatarValor).join(' '))
   }
   console.error = (...args: unknown[]) => {
     consoleOriginal?.error(...args)
-    registrar('console', 'error', args.map(String).join(' '))
+    registrar('console', 'error', args.map(formatarValor).join(' '))
   }
 
   window.addEventListener('error', (evento) => {

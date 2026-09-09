@@ -39,16 +39,18 @@ describe('captura WS in/out no canal da Sala', () => {
     expect(saida?.mensagem).toContain('CRIAR_SALA')
     const entradaWs = coletor.entradas().find((e) => e.fonte === 'ws←')
     expect(entradaWs?.mensagem).toContain('SALA_ATUALIZADA')
+    // Objetos chegam em JSON indentado (2 espaços), não em JSON compacto.
+    expect(entradaWs?.mensagem).toContain('\n  "sala": {')
   })
 
-  it('payload acima de ~500 chars é truncado', async () => {
+  it('payload acima de ~2000 chars é truncado', async () => {
     renderHook(() => useSalaWebSocket('jogador-1'))
     await waitFor(() => expect(MockWebSocket.last()?.readyState).toBe(1))
 
-    act(() => MockWebSocket.last()!.simulateMessage({ type: 'MENSAGEM_DE_CHAT', apelido: 'a', conteudo: 'y'.repeat(800), enviadoEm: 'x' }))
+    act(() => MockWebSocket.last()!.simulateMessage({ type: 'MENSAGEM_DE_CHAT', apelido: 'a', conteudo: 'y'.repeat(3000), enviadoEm: 'x' }))
 
     const entradaWs = coletor.entradas().find((e) => e.fonte === 'ws←')
-    expect(entradaWs?.mensagem.length).toBeLessThanOrEqual(501)
+    expect(entradaWs?.mensagem.length).toBeLessThanOrEqual(2001) // 2000 + reticências
   })
 
   it('DEBUG_LOG vira fonte backend, não ws←', async () => {
