@@ -1531,6 +1531,43 @@ test('travessia do Escuro: mover para célula iluminada e confirmar em Baixa nã
   assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
 });
 
+// B3/review #333: em Baixa Iluminação a Confirmação não sorteia (ADR-0005) —
+// sem Recebimento não nasce sequência, e a seleção não é adotada: o estado
+// segue com Seleção nula (invariante "a seleção vive durante a sequência").
+test('em Baixa, a Confirmação sem Recebimento não adota a seleção (#326)', () => {
+  // reta-2 girada para 90 em (3,4): oeste conectado à inicial-1 — movimento
+  // NORMAL para uma célula iluminada dentro da sequência do turno.
+  let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: estado.tabuleiro.posicionadas.map((peca) =>
+        peca.pecaId === 'reta-2' ? { ...peca, orientacao: 90 as const } : peca,
+      ),
+    },
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
+  // A re-seleção do mover (#263) recoloca o Peão; a injeção zera a seleção
+  // para espelhar como a Confirmação chegaria com Seleção nula.
+  const semSelecao: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: null },
+  };
+  const confirmacao = aplicarComandoDePartida(
+    semSelecao,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  // Confirmação em Baixa não gera Recebimento; a adoção do Peão confirmado
+  // não existe — a seleção permanece nula no resultado.
+  assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
+  assert.equal(confirmacao.estado.tabuleiro.peaoSelecionadoId, null);
+});
+
 test('travessia do Escuro: guardas na ordem canônica', () => {
   // Peão de outro Jogador e ator fora da vez: a vez precede a travessia.
   assert.equal(

@@ -1309,19 +1309,19 @@ function confirmarPosicaoDoPeao(
       iluminacao,
       eventos,
     );
+  // B3/review #333: a adoção da seleção só existe quando a Confirmação gera
+  // Recebimento — em Baixa Iluminação (sorteio [], ADR-0005) a seleção não
+  // nasce sem sequência (invariante "a seleção vive durante a sequência").
+  // Guarda da #264 já rejeitou outro Peão; o lançamento é rede de proteção.
+  const selecaoVigente = estado.tabuleiro.peaoSelecionadoId;
+  if (selecaoVigente !== null && selecaoVigente !== peao.peaoId) {
+    throw new Error('invariante: Confirmação chegou com outro Peão selecionado');
+  }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
     posicionadas: posicionadasPosAtaque,
-    // Issue #326: a Movimentação limpa a seleção (peoes.ts, moverPeao) e a
-    // Confirmação gera o Recebimento — sem seleção, escolher vaga/encaixar as
-    // Recebidas rejeitam PEAO_NAO_SELECIONADO, a re-seleção rejeita
-    // PENDENCIA_NAO_RESOLVIDA e o Encerramento exige zero pendências: softlock.
-    // Mesmo padrão do Primeiro Turno (posicionarPeaoDaPartida) e do
-    // atravessarOEscuro: o Peão confirmado segue selecionado para a sequência
-    // (escolher vaga → encaixar) até o Encerramento do Turno. Guard `??`: se a
-    // seleção já é deste Peão, preserva (idempotente). A Movimentação pós-
-    // Confirmação segue barrada (guard POSICAO_CONFIRMADA em moverPeaoDaPartida).
-    peaoSelecionadoId: estado.tabuleiro.peaoSelecionadoId ?? peao.peaoId,
+    peaoSelecionadoId:
+      sorteio.recebidas.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
   };
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a
