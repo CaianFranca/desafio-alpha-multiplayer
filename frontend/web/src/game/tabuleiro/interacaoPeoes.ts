@@ -27,16 +27,21 @@
  * `pendencia_nao_resolvida` (espelhando PENDENCIA_NAO_RESOLVIDA do servidor)
  * e clicar no próprio Peão, permanecer ou mover não reage (tudo precisa ser
  * posicionado antes de mover/permanecer). Clique no próprio Peão já
- * selecionado, sem pendências → PERMANECER. Alvos inválidos não reagem
- * (null); o arrasto permanece reservado à câmera via
- * `deveSuprimirCliquePorArrasto` (limiar 6px, ver cameraLimites.ts).
+ * selecionado → null (silencioso): PERMANECER é EXCLUSIVO do botão da fase —
+ * dois cliques no peão não encerram o turno por engano (revisão do
+ * mis-clique). Alvos inválidos não reagem (null); o arrasto permanece
+ * reservado à câmera via `deveSuprimirCliquePorArrasto` (limiar 6px, ver
+ * cameraLimites.ts).
  *
  * Atribuição de vaga (decisão da issue #143 ajustada na revisão da PR #199):
  * o jogador PUXA a peça corrente clicando na bandeja (estado local) e só
  * então o clique numa célula vazia vizinha disponível atribui a vaga à peça
  * PUXADA — não há mais "primeira pendência sem vaga" automática. Sem peça
  * puxada, o clique de vaga é silencioso (padrão #91: alvos inválidos não
- * reagem). Puxar é restrito ao dono do ciclo (espectador: clique mudo).
+ * reagem). Puxar é restrito ao dono do ciclo (espectador: clique mudo). O
+ * clique de vaga já carrega o encaixe imediato (issue #261):
+ * ESCOLHER_VAGA seguido de POSICIONAR_PECA no MESMO clique — a peça encaixa
+ * com um único clique.
  *
  * Guard pós-confirmação (AC3 — review #165): com `posicaoConfirmadaNoTurno`,
  * os alvos que seriam válidos (permanecer/mover) retornam rejeição com motivo
@@ -56,6 +61,7 @@ import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao
 import type { EstadoInteracaoTabuleiro } from './interacao'
 import {
   bordasAbertas,
+  bordaOposta,
   chaveCelula,
   destinosConectadosDoPeao,
   encontrarPecaNaCelula,
@@ -262,15 +268,13 @@ export function mapearDesselecaoDePeao(
 /**
  * Clique simples no Peão → SELECIONAR_PEAO (seleciona o Peão; o servidor
  * responde RECEBIMENTO_GERADO quando o contexto gera Recebimento). No
- * próprio Peão (já selecionado) → PERMANECER (AC 5) — ou null quando há
- * Recebidas pendentes (permanência exige tudo posicionado e re-seleção não
- * emite comando) ou quando o Peão já se moveu no turno
- * (`movimentouNoTurno` — revisão PR #309: após mover, PERMANECER é
- * ENCERRAMENTO_INVALIDO no engine; o clique fica silencioso). Com
- * pendências, clicar em OUTRO Peão não emite comando e retorna rejeição
- * local (espelha PENDENCIA_NAO_RESOLVIDA). Peão inexistente → null (não
- * reage). Gate "Inicial primeiro" (#249): sem a própria Inicial posicionada,
- * SELECIONAR_PEAO é silencioso (null).
+ * próprio Peão (já selecionado) → null (silencioso): PERMANECER é resgate
+ * EXCLUSIVO do botão da fase (revisão do mis-clique — dois cliques no peão
+ * encerravam o turno por engano); re-selecionar o próprio Peão também não
+ * emite comando. Com pendências, clicar em OUTRO Peão não emite comando e
+ * retorna rejeição local (espelha PENDENCIA_NAO_RESOLVIDA). Peão inexistente
+ * → null (não reage). Gate "Inicial primeiro" (#249): sem a própria Inicial
+ * posicionada, SELECIONAR_PEAO é silencioso (null).
  */
 export function mapearCliqueNoPeao(
   estado: EstadoInteracaoPeoes,
@@ -279,15 +283,9 @@ export function mapearCliqueNoPeao(
   const peao = estado.peoes.find((p) => p.peaoId === peaoId)
   if (!peao) return null
   if (peao.peaoId === estado.peaoSelecionadoId) {
-    // Próprio Peão: permanência (AC 5) exige Peão posicionado e tudo
-    // posicionado; sobre a Mesa, com Recebidas pendentes ou após mover no
-    // turno → null (silencioso). Posição já confirmada neste turno →
-    // rejeição âmbar (AC3, review #165).
-    if (peao.celula === null) return null
-    if (haRecebidasPendentes(estado)) return null
-    if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
-    if (estado.movimentouNoTurno) return null
-    return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
+    // Próprio Peão já selecionado: silencioso — permanência/encerrar só pelo
+    // botão da fase (sem mis-clique encerrando o turno).
+    return null
   }
   if (haRecebidasPendentes(estado)) {
     return {
@@ -392,6 +390,21 @@ export function vagasDisponiveisDoPeao(
     vagas.push({ borda, celula })
   }
   return vagas
+}
+
+/**
+ * Conexão do encaixe no cliente (espelha `conectaNaVaga` do engine,
+ * packages/engine/src/peoes.ts:106): a borda da Recebida voltada à Peça sob
+ * o Peão (o oposto da vaga) precisa estar aberta na orientação atual
+ * (composição da Caixa = 0; PECA_GIRADA atualiza `orientacao` da pendência).
+ * Peças de 4 bordas (cruz/especiais/monstros) sempre conectam.
+ */
+export function recebidaConectaNaVaga(
+  tipo: Pick<PecaPosicionada, 'tipo'>['tipo'],
+  orientacao: Orientacao,
+  vaga: BordaCardinal,
+): boolean {
+  return bordasAbertas({ tipo, orientacao }).includes(bordaOposta(vaga))
 }
 
 export function mapearEscolhaDeVagaDaRecebida(
@@ -548,31 +561,6 @@ export function mapearPosicionarRecebida(
 }
 
 /**
- * Clique no próprio Peão ou na Peça sob ele (ambos na célula do Peão
- * selecionado) → PERMANECER. Exige tudo posicionado (US 15: recebidas
- * pendentes antes de permanecer → não reage). Posição já confirmada neste
- * turno → rejeição âmbar (AC3). Após mover no turno (`movimentouNoTurno`) →
- * silencioso (null — revisão PR #309: PERMANECER pós-movimento é
- * ENCERRAMENTO_INVALIDO no engine; encerrar depois de mover é confirmar →
- * encerrar). Fora da célula do Peão, Peão não selecionado ou ainda sobre a
- * Mesa → null (não reage).
- */
-export function mapearPermanencia(
-  estado: EstadoInteracaoPeoes,
-  celula: Celula,
-): ResultadoDeInteracaoDePeao {
-  const peaoId = estado.peaoSelecionadoId
-  if (peaoId === null) return null
-  if (haRecebidasPendentes(estado)) return null
-  const peao = estado.peoes.find((p) => p.peaoId === peaoId)
-  if (!peao || peao.celula === null) return null
-  if (chaveCelula(peao.celula) !== chaveCelula(celula)) return null
-  if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
-  if (estado.movimentouNoTurno) return null
-  return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
-}
-
-/**
  * Clique em Peça vizinha conectada destacada do Peão selecionado →
  * MOVER_PEAO. Exige tudo posicionado (US 15: recebidas pendentes antes de
  * mover → não reage). Posição já confirmada neste turno → rejeição âmbar
@@ -610,12 +598,20 @@ export function mapearMovimentacao(
 
 /**
  * Resultado do clique em célula com o ciclo ativo: comando do ciclo (peão ou
- * tabuleiro — POSICIONAR_PECA da Recebida), rejeição local com feedback
- * (guard pós-confirmação, AC3), ou null (alvo inválido não reage; sem ciclo
- * ativo o chamador aplica o fallback ST-09).
+ * tabuleiro — POSICIONAR_PECA da Recebida), escolha de vaga com encaixe
+ * imediato no MESMO clique (issue #261: ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido
+ * de POSICIONAR_PECA — a cadeia serial do servidor processa a sequência em
+ * ordem), rejeição local com feedback (guard pós-confirmação, AC3), ou null
+ * (alvo inválido não reage; sem ciclo ativo o chamador aplica o fallback ST-09).
  */
 export type ResultadoDeCliqueEmCelula =
   | { readonly ciclo: PeaoComandoDoCliente | TabuleiroComandoDoCliente }
+  | {
+      readonly escolhaDeVagaEEncaixe: {
+        readonly escolhaDeVaga: PeaoComandoDoCliente
+        readonly encaixe: TabuleiroComandoDoCliente
+      }
+    }
   | { readonly rejeicao: RejeicaoDeInteracao }
   | null
 
@@ -668,9 +664,15 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *
  * Com pendências:
  *   - célula = vaga disponível E há pendência PUXADA sem vaga →
- *     ESCOLHER_VAGA para a recebida puxada (fluxo #143/revisão #199: a vaga
- *     vai para a peça puxada da bandeja — sem puxada ativa, ou com a puxada
- *     já encaminhada, o clique de vaga é silencioso).
+ *     ESCOLHER_VAGA + encaixe imediato (POSICIONAR_PECA na célula da vaga)
+ *     para a recebida puxada — issue #261: UM clique na vaga seleciona E
+  *     encaixa (2 comandos em sequência na mesma conexão, processados em
+  *     ordem pela cadeia serial do servidor); fluxo #143/revisão #199: a vaga
+  *     vai para a peça puxada da bandeja — sem puxada ativa, ou com a puxada
+  *     já encaminhada, o clique de vaga é silencioso. Gate de conexão
+  *     (review PR #338): sem a borda voltada à geradora aberta (ex.: reta@0
+  *     em vaga leste), emite SÓ a escolha — o encaixe imediato seria
+  *     recusado com MOVIMENTO_NAO_CONECTADO.
  *   - célula = célula-alvo de pendência com pendência.pecaId ===
  *     pecaSelecionadaId → POSICIONAR_PECA (encaixe; coerência tripla:
  *     célula-alvo + vaga escolhida + peça em foco).
@@ -678,13 +680,13 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *
  * Sem pendências, com peão selecionado (ciclo ativo — inclusive sobre a
  * Mesa, invariante binário #249):
- *   - célula do próprio peão → PERMANECER (ou rejeição âmbar se a posição já
- *     foi confirmada — AC3; silencioso se o peão já se moveu no turno —
- *     revisão PR #309).
  *   - destino conectado → MOVER_PEAO (ou rejeição âmbar pós-confirmação).
  *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO.
  *   - demais → null (com ciclo ativo o chamador NÃO aplica o fallback ST-09:
  *     a Inicial só posiciona após DESELECIONAR_PEAO + ack — "Inicial primeiro").
+ *   PERMANECER NÃO roteia por clique (nem na célula do próprio Peão, nem
+ *   clicando no próprio Peão): é exclusivo do botão da fase — revisão do
+ *   mis-clique (dois cliques no peão encerravam o turno por engano).
  *
  * Sem ciclo ativo → null (o chamador aplica o fallback ST-09).
  */
@@ -718,7 +720,36 @@ export function rotearCliqueDeCelula(
             alvo.recebidaId,
             vaga.borda,
           )
-          if (comando) return { ciclo: comando }
+          // issue #261: UM clique na vaga escolhe E já encaixa a peça —
+          // ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido de POSICIONAR_PECA; a
+          // cadeia serial do servidor processa a sequência em ordem.
+          // Gate de conexão (review PR #338): a reta@0 numa vaga leste, por
+          // exemplo, seria recusada com MOVIMENTO_NAO_CONECTADO (o engine
+          // exige a borda voltada à geradora aberta) — a escolha seria
+          // aceita mas o encaixe não, deixando a pendência com vaga sem
+          // peça posicionada ("não aparece e trava"). Sem conexão, emite
+          // SÓ a escolha: o jogador gira (R/E) e clica a célula-alvo.
+          if (comando) {
+            if (
+              recebidaConectaNaVaga(
+                alvo.tipoDaPeca,
+                alvo.orientacao ?? 0,
+                vaga.borda,
+              )
+            ) {
+              return {
+                escolhaDeVagaEEncaixe: {
+                  escolhaDeVaga: comando,
+                  encaixe: {
+                    type: 'POSICIONAR_PECA',
+                    pecaId: alvo.pecaId,
+                    celula: vaga.celula,
+                  },
+                },
+              }
+            }
+            return { ciclo: comando }
+          }
         }
         return null
       }
@@ -732,12 +763,11 @@ export function rotearCliqueDeCelula(
     return encaixe === null ? null : { ciclo: encaixe }
   }
   if (estadoPeoes.peaoSelecionadoId !== null) {
-    const permanencia = mapearPermanencia(estadoPeoes, celula)
-    if (permanencia) return resultadoDoMapeadorParaCelula(permanencia)
     const movimento = mapearMovimentacao(estadoPeoes, celula)
     if (movimento) return resultadoDoMapeadorParaCelula(movimento)
     // Peão ainda sobre a Mesa: primeiro posicionamento na Peça Inicial
-    // (mapearCliqueNaPecaInicial já exige peão sem célula).
+    // (mapearCliqueNaPecaInicial já exige peão sem célula). Permanência não
+    // roteia por clique (só pelo botão da fase).
     const posicionamento = mapearCliqueNaPecaInicial(estadoPeoes, celula)
     if (posicionamento) return { ciclo: posicionamento }
     return null
@@ -807,6 +837,13 @@ export function despacharCliqueDeCelula(
   if (resultado !== null) {
     if ('rejeicao' in resultado) {
       despacho.onRejeicao?.(resultado.rejeicao)
+      return
+    }
+    if ('escolhaDeVagaEEncaixe' in resultado) {
+      // issue #261: escolha e encaixe no MESMO clique — o encaixe segue a
+      // escolha na ordem (2 mensagens WS em sequência na mesma conexão).
+      despacho.onComandoPeao?.(resultado.escolhaDeVagaEEncaixe.escolhaDeVaga)
+      despacho.onComando?.(resultado.escolhaDeVagaEEncaixe.encaixe)
       return
     }
     if (ehComandoDePeao(resultado.ciclo)) {

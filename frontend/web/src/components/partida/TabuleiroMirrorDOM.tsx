@@ -234,6 +234,14 @@ export function TabuleiroMirrorDOM({
           data-selecionada={
             selecao ? (selecao.pecaId === p.pecaId ? 'true' : 'false') : undefined
           }
+          // Janela de Manipulação 3D (experimental): costura de teste do
+          // espelho — a cena WebGL é caixa-preta no jsdom; o estado vem da
+          // mesma fonte (estadoInteracao.pecaEmManipulacaoId).
+          data-manipulacao={
+            estadoInteracao && estadoInteracao.pecaEmManipulacaoId === p.pecaId
+              ? 'true'
+              : undefined
+          }
           onClick={(e) => {
             aoClicarCelula(p.celula, e)
           }}
