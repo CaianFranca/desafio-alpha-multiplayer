@@ -37,7 +37,7 @@ let appServ: ReturnType<typeof createApp> | null = null;
 let contador = 0;
 function sufixo(): string { contador += 1; return `${contador}`; }
 function apelidoUnico(p: string): string { return `${p}-${sufixo()}`; }
-function emailUnico(p: string): string { return `${p}-${sufixo()}@exemplo.local`; }
+function emailUnico(p: string): string { return `${p}-${sufixo()}@bot.teste`; }
 function extrairCookies(res: Response): Record<string,string> {
   const cookies: Record<string,string> = {};
   for (const raw of res.headers.getSetCookie()) {

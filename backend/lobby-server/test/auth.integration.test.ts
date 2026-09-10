@@ -83,7 +83,7 @@ function apelidoUnico(prefixo: string): string {
 }
 
 function emailUnico(prefixo: string): string {
-  return `${prefixo}-${sufixo()}@exemplo.local`;
+  return `${prefixo}-${sufixo()}@bot.teste`;
 }
 
 function extrairCookies(res: Response): Cookies {
