@@ -142,6 +142,14 @@ export interface EstadoInteracaoPeoes {
    * (peças ocupadas por não-afetados ficam bloqueadas — conservador).
    */
   readonly afetadosPorPeaoId?: ReadonlySet<PeaoId>
+  /**
+   * N do roster para o teto do Portão (#284): obrigatório na cadeia
+   * PartidaPage→AmbienteDeJogo→interacaoPeoes — o teto é o N real de
+   * jogadores, nunca peoes.length (risco 5). Opcional para compatibilidade
+   * com testes legados que derivam de peoes.length; a cadeia produtiva
+   * sempre fornece o N clampeado.
+   */
+  readonly quantidadeDeJogadores?: number
 }
 
 // ── Resultado de clique/ação do ciclo ──
@@ -585,6 +593,7 @@ export function mapearMovimentacao(
     estado.peoes,
     peaoId,
     estado.afetadosPorPeaoId,
+    estado.quantidadeDeJogadores,
   )
   const conectada = destinos.some(
     (d) => chaveCelula(d.peca.celula) === chaveCelula(celula),

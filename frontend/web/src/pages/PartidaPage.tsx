@@ -47,8 +47,9 @@ import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabule
 import { mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
+import { quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
-import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
+import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
@@ -69,6 +70,7 @@ type ComandoDoCanal =
 type AcaoDoModelo =
   | { type: 'EVENTO'; evento: Parameters<typeof reduzirEvento>[1] }
   | { type: 'APLICAR_SNAPSHOT'; snapshot: EstadoDaPartidaSnapshot }
+  | { type: 'SYNC_QUANTIDADE'; quantidade: number }
 
 function reduzirModelo(
   estado: EstadoDoTabuleiroNoCliente,
@@ -76,6 +78,14 @@ function reduzirModelo(
 ): EstadoDoTabuleiroNoCliente {
   if (acao.type === 'APLICAR_SNAPSHOT') {
     return aplicarSnapshot(estado, acao.snapshot)
+  }
+  if (acao.type === 'SYNC_QUANTIDADE') {
+    // Sincroniza seed pré-snapshot (risco 3): se ainda sem snapshot de roster,
+    // recria o estado inicial com o N atualizado da Sala. Com jogadores já
+    // presentes (snapshot), a autoridade é do servidor — não sobrescreve.
+    if (Object.keys(estado.jogadorPorId).length > 0) return estado
+    if (estado.quantidadeParaLayout === acao.quantidade) return estado
+    return criarEstadoInicialDoCliente(acao.quantidade)
   }
   return reduzirEvento(estado, acao.evento)
 }
@@ -104,7 +114,27 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
 
   // ── Modelo local do tabuleiro (deltas + snapshot) ──
-  const [modelo, despachar] = useReducer(reduzirModelo, undefined, criarEstadoInicialDoCliente)
+  // Seed com o N real da Sala (#284): sem ele, a mesa nascia sempre com 4
+  // peões/iniciais até o snapshot corrigir. Sem sala (link direto), fallback
+  // 4 por compatibilidade — o snapshot continua sendo a autoridade.
+  // Risco 3: o N da Sala pode chegar pós-mount (WS assíncrono); o valor
+  // inicial do useReducer é capturado só no mount (stale). Lazy init +
+  // efeito de sync cobrem o caso sem recriar após snapshot.
+  const quantidadeDeMembrosDaSala = useQuantidadeDeMembrosDaSalaOptional()
+  const [modelo, despachar] = useReducer(
+    reduzirModelo,
+    undefined,
+    () => criarEstadoInicialDoCliente(quantidadeDeMembrosDaSala ?? 4),
+  )
+  useEffect(() => {
+    if (
+      quantidadeDeMembrosDaSala !== null &&
+      modelo.quantidadeParaLayout !== quantidadeDeMembrosDaSala &&
+      Object.keys(modelo.jogadorPorId).length === 0
+    ) {
+      despachar({ type: 'SYNC_QUANTIDADE', quantidade: quantidadeDeMembrosDaSala })
+    }
+  }, [quantidadeDeMembrosDaSala, modelo.quantidadeParaLayout, modelo.jogadorPorId])
   const despacharEvento = useCallback(
     (evento: Parameters<typeof reduzirEvento>[1]) => despachar({ type: 'EVENTO', evento }),
     [],
@@ -413,6 +443,22 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     [sanidadePorPeao],
   )
 
+  // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
+  // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
+  // (solo anuncia 1, nunca um N falso), teto usa o N válido (#284, #281).
+  // Solo (N=1) é estado transitório, nunca partida válida (#281 "solo
+  // continua impossível"): o seed da Sala clampa para layout, o anúncio
+  // pós-snapshot mostra o N cru.
+  // Risco 5: quantidade é obrigatória na cadeia — não deriva de peoes.length
+  // (modo misto). Antes do snapshot, a autoridade é o seed da Sala (já clampeado).
+  // Definido antes do ciclo para alimentar o teto do Portão no espelho.
+  const quantidadeRealDeJogadores = useMemo(() => {
+    const doSnapshot = Object.keys(modelo.jogadorPorId).length
+    if (doSnapshot > 0) return doSnapshot
+    if (modelo.quantidadeParaLayout != null) return modelo.quantidadeParaLayout
+    return quantidadeDeMembrosDaSala ?? 4
+  }, [modelo.jogadorPorId, modelo.quantidadeParaLayout, quantidadeDeMembrosDaSala])
+  const quantidadeParaTeto = quantidadeValidaDeJogadores(quantidadeRealDeJogadores)
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   // Fallback da sequência pendente (#326): se o espelho ficar sem seleção
   // pós-confirmação, vagas/escolha/destaque usam o peão do Jogador Ativo.
@@ -443,8 +489,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       donoDoCiclo: minhaVez,
       // Projeção dos afetados (exceção de resgate #171 no espelho de destinos).
       afetadosPorPeaoId,
+      // N do roster para o teto do Portão (#284): nunca peoes.length.
+      quantidadeDeJogadores: quantidadeParaTeto,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto, peaoDoTurnoId])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa
@@ -552,14 +600,37 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
   }, [requerModoPaisagem])
 
+  const textoJogadorAtivo = modelo.jogadorAtivoId ? (modelo.jogadorPorId[modelo.jogadorAtivoId]?.apelido ?? 'desconhecido') : 'nenhum'
+  const ordemDeEntradaTexto = useMemo(() => {
+    const ordem = Object.entries(modelo.jogadorPorId)
+      .map(([id, d]) => ({ id, ordem: d.ordem }))
+      .sort((a, b) => a.ordem - b.ordem)
+    const idx = ordem.findIndex((o) => o.id === modelo.jogadorAtivoId)
+    if (idx === -1) return ordem.map((o) => modelo.jogadorPorId[o.id]?.apelido ?? o.id).join(', ')
+    return [...ordem.slice(idx), ...ordem.slice(0, idx)].map((o) => modelo.jogadorPorId[o.id]?.apelido ?? o.id).join(' → ')
+  }, [modelo.jogadorPorId, modelo.jogadorAtivoId])
+
   return (
     <div className="relative h-screen w-screen overflow-hidden">
+      {/* Anúncio de estado da partida para leitor de tela com N real */}
+      <div
+        data-testid="anuncio-partida"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {estadoEmAndamento
+          ? `Partida com ${quantidadeRealDeJogadores} ${quantidadeRealDeJogadores === 1 ? 'jogador' : 'jogadores'}, rodada ${modelo.rodada ?? 1}, Jogador Ativo ${textoJogadorAtivo}, ordem de entrada ${ordemDeEntradaTexto}, Portão de Saída teto ${quantidadeParaTeto}`
+          : ''}
+      </div>
       <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
       <AmbienteDeJogo
         bordaPx={bordaPx}
         estadoExibicao={estadoExibicao}
         estadoInteracao={estadoInteracao}
         estadoInteracaoPeoes={estadoInteracaoPeoes}
+        quantidadeDeJogadores={quantidadeParaTeto}
         onComando={onComando}
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}

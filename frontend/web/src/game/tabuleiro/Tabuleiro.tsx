@@ -104,6 +104,8 @@ interface TabuleiroProps {
    * peça assume pixel-igual. Null = sem voo.
    */
   ocultarPecaId?: PecaId | null
+  /** Quantidade de peões N=2..4 para posicionar fila da Mesa e voos mesa→peça. */
+  quantidadeDePeoes?: number
 }
 
 export function Tabuleiro({
@@ -125,8 +127,9 @@ export function Tabuleiro({
   vooPendente = null,
   onVooAterrissou,
   ocultarPecaId = null,
-  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
+   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   ordemDeChegadaPorChave = {},
+  quantidadeDePeoes = peoes.length || 4,
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
@@ -250,6 +253,7 @@ export function Tabuleiro({
           cor={corDoVoo}
           emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(vooEfetivo.peaoId)}
           onAterrissou={onVooAterrissou}
+          quantidadeDePeoes={quantidadeDePeoes}
         />
       ) : null}
     </group>
@@ -271,11 +275,13 @@ function PeaoVoador({
   cor,
   emBaixaIluminacao,
   onAterrissou,
+  quantidadeDePeoes = 4,
 }: {
   voo: VooDoPeaoPendente
   cor: CorDoPeao
   emBaixaIluminacao: boolean
   onAterrissou?: (nonce: number) => void
+  quantidadeDePeoes?: number
 }) {
   const grupo = useRef<Group | null>(null)
   const concluido = useRef(false)
@@ -287,9 +293,9 @@ function PeaoVoador({
   const origemMundo = useMemo(
     () =>
       'mesaIndice' in voo.origem
-        ? peaoMesaParaMundo(voo.origem.mesaIndice)
+        ? peaoMesaParaMundo(voo.origem.mesaIndice, quantidadeDePeoes)
         : mundoDoPeaoSobreACelula(voo.origem),
-    [voo],
+    [voo, quantidadeDePeoes],
   )
 
   // Reduce: chegada imediata + baque imediato, uma vez por nonce (efeito, sem temporizador).

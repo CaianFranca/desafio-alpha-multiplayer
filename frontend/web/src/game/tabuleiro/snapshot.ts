@@ -19,6 +19,7 @@ import {
   type PeaoId,
   type TipoDaPeca,
 } from './contrato'
+import { quantidadeValidaDeJogadores } from './contrato'
 import type { EstadoDoTabuleiroNoCliente } from './reducao'
 import type { PendenciaNoCliente } from './interacaoPeoes'
 import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
@@ -76,11 +77,21 @@ export function aplicarSnapshot(
 
   // Peças Iniciais ainda não encaixadas (issue #143): a lista do motor é a
   // autoridade — recarregar reconstrói a mesa sem seed local.
-  const iniciaisDoSnapshot: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
+  // Roster N=2..4 (#284): espelha só as N iniciais do roster; com o
+  // snapshot em N=2, projetar as 4 criava indicadores fantasmas do ausente.
+  // Sem fallback para a lista cheia: fora da faixa, projeta exatamente o
+  // roster (0 → mesa vazia; 1 → 1; 5+ → o que o servidor mandou, no máximo).
+  // Inventar 4 peças sem roster seria reintroduzir fantasmas.
+  const quantidadeSnapshot = snapshot.jogadores.length
+  const iniciaisDoRosterBase: readonly PecaDaMesa[] = snapshot.tabuleiro.iniciais.map((p) => ({
     pecaId: p.pecaId,
     tipo: 'inicial' as const,
     orientacao: p.orientacao,
   }))
+  const iniciaisDoSnapshot: readonly PecaDaMesa[] = iniciaisDoRosterBase.slice(
+    0,
+    Math.max(0, Math.min(quantidadeSnapshot, iniciaisDoRosterBase.length)),
+  )
 
   // Reparo defensivo de reload (issue #258): a Inicial em foco
   // (`pecaSelecionadaId`) está nas `iniciais` por invariante do engine —
@@ -97,14 +108,23 @@ export function aplicarSnapshot(
     posicionadas.map((p) => [p.pecaId, p.celula] as const),
   )
 
-  const peoes: readonly PeaoDaExibicao[] = snapshot.tabuleiro.peoes.map((peao) => {
-    const celula = peao.pecaId !== null ? (mapPos.get(peao.pecaId) ?? null) : null
-    return {
-      peaoId: peao.peaoId,
-      cor: peao.cor,
-      celula: celula ? { linha: celula.linha, coluna: celula.coluna } : null,
-    }
-  })
+  // Roster variável N=2..4: mantém SÓ os peões dos jogadores do snapshot
+  // (peaoId da ordem de entrada) — nunca os N primeiros do array. O slice
+  // por posição exibia cores erradas e quebrava "peão na cor da minha ordem
+  // de entrada" (#281 história 4).
+  // Sem fallback para a lista cheia: roster vazio projeta mesa vazia.
+  // Manter os 4 peões sem roster seria reintroduzir fantasmas (#284).
+  const peaoIdsDosJogadores = new Set(snapshot.jogadores.map((j) => j.peaoId))
+  const peoes: readonly PeaoDaExibicao[] = snapshot.tabuleiro.peoes
+    .filter((peao) => peaoIdsDosJogadores.has(peao.peaoId))
+    .map((peao) => {
+      const celula = peao.pecaId !== null ? (mapPos.get(peao.pecaId) ?? null) : null
+      return {
+        peaoId: peao.peaoId,
+        cor: peao.cor,
+        celula: celula ? { linha: celula.linha, coluna: celula.coluna } : null,
+      }
+    })
 
   // Toda Recebida do snapshot é da forma sorteada (#138): map direto para
   // PendenciaNoCliente, sem cast. `orientacao` da peça é copiado para que a
@@ -204,5 +224,7 @@ export function aplicarSnapshot(
     geradoresLigados: snapshot.geradoresLigados ?? [],
     cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido ?? false,
     ordemDeChegadaPorChave,
+    quantidadeParaLayout:
+      quantidadeSnapshot > 0 ? quantidadeValidaDeJogadores(quantidadeSnapshot) : null,
   }
 }

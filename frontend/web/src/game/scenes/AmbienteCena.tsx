@@ -232,6 +232,7 @@ export function AmbienteCena({
               ocultarPecaId={pecaEmVooId}
               emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
               ordemDeChegadaPorChave={estadoExibicao.ordemDeChegadaPorChave}
+              quantidadeDePeoes={estadoExibicao.peoes.length}
             />
             <TransicaoEncaixe
               posicionadas={estadoExibicao.posicionadas}
@@ -258,7 +259,7 @@ export function AmbienteCena({
                 <PeaoVisual
                   key={peao.peaoId}
                   cor={peao.cor}
-                  position={peaoMesaParaMundo(indiceGlobal)}
+                  position={peaoMesaParaMundo(indiceGlobal, estadoExibicao.peoes.length)}
                   selecionado={peao.peaoId === peaoSelecionadoId}
                   ativo={peao.peaoId === peaoAtivoId}
                   emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(peao.peaoId)}
