@@ -147,14 +147,20 @@ export function acoesValidasDaSubfase(
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
   // referencia o Peão do próprio jogador, não a Seleção.
   //
-  // Sequencialidade por encaixe — anti-softlock (#311, #260, #349; grade
-  // toroidal: ADR-0012): a escolha de vaga é sequencial POR encaixe — o
-  // guard canônico da engine (peoes.ts) rejeita a escolha de vaga de uma
-  // pendência enquanto outra Recebida tem vaga escolhida e ainda não
-  // encaixada (PENDENCIA_NAO_RESOLVIDA). A FSM espelha o guard: com Recebida
-  // fixada, enumera APENAS as ações sobre ela. Sem isso, turnos com 2+
-  // pendências — a regra na grade toroidal (#260) — sorteavam a rejeição
-  // certa.
+  // Sequencialidade por encaixe com anti-softlock (#311, #260, #349; grade
+  // toroidal: ADR-0012): a escolha de vaga é sequencial POR encaixe — o guard
+  // canônico da engine (peoes.ts) rejeita a escolha de vaga de uma pendência
+  // enquanto outra Recebida tem vaga escolhida e ainda não encaixada
+  // (PENDENCIA_NAO_RESOLVIDA). A FSM espelha o guard: com Recebida fixada,
+  // enumera APENAS as ações sobre ela — sem isso, turnos com 2+ pendências, a
+  // regra comum na grade toroidal, sorteavam a rejeição certa. E a engine só
+  // valida a conexão no encaixe (MOVIMENTO_NAO_CONECTADO): escolher vaga
+  // morta é aceito por design (a rotação pré-encaixe via girar_peca é o
+  // resgate do humano). A FSM pré-filtra as vagas com conectaNaVaga para o
+  // bot fixar vaga conectante quando ela existe; sem nenhuma vaga
+  // conectante, a escolha de vaga morta segue enumerada — o ramo da fixada
+  // recupera girando até a borda voltada à Peça geradora abrir, de modo que
+  // o turno nunca fica sem ação completável no meio do Recebimento.
   //
   // Baixa Iluminação (#341): a engine rejeita vaga em célula iluminada
   // (DADOS_INVALIDOS) e a camada Tabuleiro não conhece iluminação — o filtro
@@ -163,15 +169,6 @@ export function acoesValidasDaSubfase(
   // desdobra em desistência honesta pelo failsafe. A pendência da Travessia
   // (celulaAlvo fixado) não passa pelo filtro: a engine valida só o match da
   // célula travada, escura por construção.
-  //
-  // Vaga conectante (#349): a engine só valida a conexão no encaixe
-  // (MOVIMENTO_NAO_CONECTADO) — escolher vaga morta é aceito por design (a
-  // rotação pré-encaixe via girar_peca é o resgate do humano). A FSM
-  // pré-filtra as vagas com conectaNaVaga para o bot fixar vaga conectante
-  // quando ela existe; sem nenhuma vaga conectante, a escolha de vaga morta
-  // segue enumerada — o ramo da fixada recupera girando até a borda voltada
-  // à Peça geradora abrir, de modo que o turno nunca fica sem ação
-  // completável no meio do Recebimento.
   if (tabuleiro.recebidas.length > 0) {
     const fixada = tabuleiro.recebidas.find((item) => item.vaga !== null);
     if (fixada) {
@@ -182,7 +179,7 @@ export function acoesValidasDaSubfase(
         alvoFixado !== null &&
         conectaNaVaga(fixada.tipo, fixada.orientacao, vagaFixada)
       ) {
-        // Encaixe conectado (#311): a borda voltada à Peça geradora — o oposto
+        // Encaixe conectado: a borda voltada à Peça geradora — o oposto
         // da vaga — está aberta na orientação vigente, então a engine aceita.
         return [
           { tipo: 'posicionar_peca', pecaId: fixada.pecaId, celula: alvoFixado },
@@ -233,7 +230,7 @@ export function acoesValidasDaSubfase(
             !iluminadas.has(`${vaga.celula.linha},${vaga.celula.coluna}`),
         );
       }
-      // Pré-filtro de conexão (#349): vaga morta é rejeição certa no encaixe
+      // Pré-filtro de conexão: vaga morta é rejeição certa no encaixe
       // — enumere primeiro as conectantes; sem nenhuma, a vaga morta segue
       // enumerada, pois o giro da fixada a torna encaixável.
       const conectantes = candidatas.filter((vaga) =>
