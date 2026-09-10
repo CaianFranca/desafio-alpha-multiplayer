@@ -193,6 +193,12 @@ export interface EstadoExibicaoTabuleiro {
    * fonte única para a cena e para o espelho DOM.
    */
   readonly celulasIluminadas: readonly Celula[]
+  /**
+   * Fila de chegada dos peões por célula (chave `linha:coluna`; issue #298):
+   * ordem em que os peões pousaram na peça — o eixo do arranjo visual de
+   * co-ocupação do `layoutDoPeaoNaCelula`. O 1º da lista é o mais antigo.
+   */
+  readonly ordemDeChegadaPorChave: Readonly<Record<string, readonly PeaoId[]>>
 }
 
 /** 4 Peões, um por cor; ordem espelha `CORES_DOS_PEOES` do engine. */
@@ -469,6 +475,60 @@ export function ehPecaDeMonstro(tipo: TipoDaPeca): boolean {
  */
 export const TETO_DE_OCUPACAO_DO_PORTAO = 4
 
+// ── Arranjo visual de co-ocupação (issue #298) ───────────────────────────
+// Sem deslocamento (dx=dz=0) os peões sobre a mesma peça se sobrepõem no
+// centro; os offsets de canto afastam cada ocupante em um quadrante. Um
+// `TAMANHO_CELULA/2` colocaria o peão sobre a borda da peça vizinha — o valor
+// aqui é conservador, mantendo os avatares dentro da pegada da peça.
+
+/** Deslocamento x de um peão no canto (em unidades de mundo). */
+export const OFFSET_CANTO_X = 0.45
+
+/** Deslocamento z de um peão no canto (em unidades de mundo). */
+export const OFFSET_CANTO_Z = 0.45
+
+/**
+ * Cantos na ordem de chegada do Portão de Saída, cada qual um par
+ * [dx, dz]: SE (superior esquerdo), SD (superior direito), ID (inferior
+ * direito), IE (inferior esquerdo). O 1º ocupante assume o SE; o ciclo segue
+ * no sentido horário (SE→SD→ID→IE).
+ */
+export const CANTOS_DO_PORTAO: readonly (readonly [number, number])[] = [
+  [-OFFSET_CANTO_X, -OFFSET_CANTO_Z], // SE
+  [OFFSET_CANTO_X, -OFFSET_CANTO_Z], // SD
+  [OFFSET_CANTO_X, OFFSET_CANTO_Z], // ID
+  [-OFFSET_CANTO_X, OFFSET_CANTO_Z], // IE
+]
+
+/**
+ * Deslocamento [dx, dz] do peão sobre a peça na célula, dado o tipo da peça e
+ * a fila de ocupantes (ordem de chegada):
+ *   - Portão de Saída: o nº de chegada (índice na fila) mapeia pro canto
+ *     SE→SD→ID→IE por ordem de chegada; o 5º (índice 4 — teto 4 + resgate
+ *     #171, defensivo) ocupa o centro (dx=dz=0), sem sobrepor o IE; peão fora
+ *     da fila (−1) cai no centro. Com N=1 o peão também ocupa o SE (mesmo com
+ *     um único ocupante), preservando o centro da peça e a consistência do
+ *     ciclo.
+ *   - Demais peças (peça comum, ex.: janela de resgate): o 1º ocupante fica no
+ *     centro (dx=dz=0); apenas a partir do 2º (índice ≥ 1) desloca pro canto SE.
+ * Sem NaN (todas as saídas têm valores definidos).
+ */
+export function layoutDoPeaoNaCelula(
+  tipo: TipoDaPeca,
+  filaDeOcupantes: readonly PeaoId[],
+  peaoId: PeaoId,
+): { dx: number; dz: number } {
+  const indice = filaDeOcupantes.indexOf(peaoId)
+  if (tipo === 'portao_de_saida') {
+    if (indice < 0) return { dx: 0, dz: 0 }
+    if (indice >= CANTOS_DO_PORTAO.length) return { dx: 0, dz: 0 }
+    const canto = CANTOS_DO_PORTAO[indice]
+    return { dx: canto[0], dz: canto[1] }
+  }
+  if (indice >= 1) return { dx: CANTOS_DO_PORTAO[0][0], dz: CANTOS_DO_PORTAO[0][1] }
+  return { dx: 0, dz: 0 }
+}
+
 /** Teto dinâmico do Portão para N jogadores (fallback 4 quando N fora de 2..4). */
 export function tetoDeOcupacaoDoPortaoParaN(quantidadeDeJogadores: number): number {
   return quantidadeValidaDeJogadores(quantidadeDeJogadores)
@@ -511,10 +571,10 @@ export function destinosConectadosDoPeao(
   peoes: readonly PeaoDaExibicao[],
   peaoId: PeaoId,
   afetadosPorPeaoId: ReadonlySet<PeaoId> = new Set(),
-  // N do roster (2..4, #284): o teto do Portão é o N real de jogadores, não
-  // a quantidade de peões renderizados — no modo misto (servidor pré-fiação
-  // ainda em 4, partida N=2) peoes.length lê 4 e o teto fica errado.
-  // Ausente = deriva de peoes.length (compatibilidade com unidades puras).
+  // N do roster (2..4, #284): obrigatório — o teto do Portão é o N real de
+  // jogadores, nunca peoes.length (risco 5). Ausente cai em 4 para unidades
+  // puras legadas; a cadeia PartidaPage→AmbienteDeJogo→interacaoPeoes sempre
+  // fornece o N clampeado.
   quantidadeDeJogadores?: number,
 ): DestinoDoPeao[] {
   const peao = peoes.find((p) => p.peaoId === peaoId)
@@ -532,9 +592,10 @@ export function destinosConectadosDoPeao(
       (p) => p.peaoId !== peaoId && p.celula !== null && chaveCelula(p.celula) === chave,
     )
     // (3) teto espelhado: Portão N (roster), demais 1; +1 com afetado na peça.
+    // Risco 5: não deriva de peoes.length (modo misto); fallback 4 para unidades puras.
     const tetoBase =
       peca.tipo === 'portao_de_saida'
-        ? tetoDeOcupacaoDoPortaoParaN(quantidadeDeJogadores ?? peoes.length)
+        ? tetoDeOcupacaoDoPortaoParaN(quantidadeDeJogadores ?? QUANTIDADE_PEOES)
         : 1
     const temAfetado = ocupantes.some((p) => afetadosPorPeaoId.has(p.peaoId))
     const teto = temAfetado ? tetoBase + 1 : tetoBase

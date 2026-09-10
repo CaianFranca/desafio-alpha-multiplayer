@@ -70,6 +70,7 @@ type ComandoDoCanal =
 type AcaoDoModelo =
   | { type: 'EVENTO'; evento: Parameters<typeof reduzirEvento>[1] }
   | { type: 'APLICAR_SNAPSHOT'; snapshot: EstadoDaPartidaSnapshot }
+  | { type: 'SYNC_QUANTIDADE'; quantidade: number }
 
 function reduzirModelo(
   estado: EstadoDoTabuleiroNoCliente,
@@ -77,6 +78,14 @@ function reduzirModelo(
 ): EstadoDoTabuleiroNoCliente {
   if (acao.type === 'APLICAR_SNAPSHOT') {
     return aplicarSnapshot(estado, acao.snapshot)
+  }
+  if (acao.type === 'SYNC_QUANTIDADE') {
+    // Sincroniza seed pré-snapshot (risco 3): se ainda sem snapshot de roster,
+    // recria o estado inicial com o N atualizado da Sala. Com jogadores já
+    // presentes (snapshot), a autoridade é do servidor — não sobrescreve.
+    if (Object.keys(estado.jogadorPorId).length > 0) return estado
+    if (estado.quantidadeParaLayout === acao.quantidade) return estado
+    return criarEstadoInicialDoCliente(acao.quantidade)
   }
   return reduzirEvento(estado, acao.evento)
 }
@@ -108,8 +117,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Seed com o N real da Sala (#284): sem ele, a mesa nascia sempre com 4
   // peões/iniciais até o snapshot corrigir. Sem sala (link direto), fallback
   // 4 por compatibilidade — o snapshot continua sendo a autoridade.
+  // Risco 3: o N da Sala pode chegar pós-mount (WS assíncrono); o valor
+  // inicial do useReducer é capturado só no mount (stale). Lazy init +
+  // efeito de sync cobrem o caso sem recriar após snapshot.
   const quantidadeDeMembrosDaSala = useQuantidadeDeMembrosDaSalaOptional()
-  const [modelo, despachar] = useReducer(reduzirModelo, quantidadeDeMembrosDaSala ?? 4, criarEstadoInicialDoCliente)
+  const [modelo, despachar] = useReducer(
+    reduzirModelo,
+    undefined,
+    () => criarEstadoInicialDoCliente(quantidadeDeMembrosDaSala ?? 4),
+  )
+  useEffect(() => {
+    if (
+      quantidadeDeMembrosDaSala !== null &&
+      modelo.quantidadeParaLayout !== quantidadeDeMembrosDaSala &&
+      Object.keys(modelo.jogadorPorId).length === 0
+    ) {
+      despachar({ type: 'SYNC_QUANTIDADE', quantidade: quantidadeDeMembrosDaSala })
+    }
+  }, [quantidadeDeMembrosDaSala, modelo.quantidadeParaLayout, modelo.jogadorPorId])
   const despacharEvento = useCallback(
     (evento: Parameters<typeof reduzirEvento>[1]) => despachar({ type: 'EVENTO', evento }),
     [],
@@ -533,15 +558,29 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
   // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
   // (solo anuncia 1, nunca um N falso), teto usa o N válido (#284, #281).
+  // Solo (N=1) é estado transitório, nunca partida válida (#281 "solo
+  // continua impossível"): o seed da Sala clampa para layout, o anúncio
+  // pós-snapshot mostra o N cru.
+  // Risco 5: quantidade é obrigatória na cadeia — não deriva de peoes.length
+  // (modo misto). Antes do snapshot, a autoridade é o seed da Sala (já clampeado).
   // Definido antes do ciclo para alimentar o teto do Portão no espelho.
   const quantidadeRealDeJogadores = useMemo(() => {
     const doSnapshot = Object.keys(modelo.jogadorPorId).length
     if (doSnapshot > 0) return doSnapshot
-    if (modelo.quantidadeDeJogadores != null) return modelo.quantidadeDeJogadores
-    return modelo.peoes.length
-  }, [modelo.jogadorPorId, modelo.quantidadeDeJogadores, modelo.peoes.length])
+    if (modelo.quantidadeParaLayout != null) return modelo.quantidadeParaLayout
+    return quantidadeDeMembrosDaSala ?? 4
+  }, [modelo.jogadorPorId, modelo.quantidadeParaLayout, quantidadeDeMembrosDaSala])
   const quantidadeParaTeto = quantidadeValidaDeJogadores(quantidadeRealDeJogadores)
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
+  // Fallback da sequência pendente (#326): se o espelho ficar sem seleção
+  // pós-confirmação, vagas/escolha/destaque usam o peão do Jogador Ativo.
+  const peaoDoTurnoId =
+    modelo.jogadorAtivoId !== null
+      ? (modelo.peaoPorJogador[modelo.jogadorAtivoId] ?? null)
+      : null
+  if (import.meta.env.DEV && modelo.recebidasPendentes.length > 0 && peaoDoTurnoId === null) {
+    console.warn('[PartidaPage] Recebidas pendentes sem Peão do Jogador Ativo — fallback da sequência inerte (#326)')
+  }
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
     if (!temAlvo || !estadoEmAndamento) return null
@@ -550,12 +589,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       posicionadas: modelo.posicionadas,
       recebidasPendentes: modelo.recebidasPendentes,
       peaoSelecionadoId: modelo.peaoSelecionadoId,
-      // Fallback da sequência pendente (#326): se o espelho ficar sem seleção
-      // pós-confirmação, vagas/escolha/destaque usam o peão do Jogador Ativo.
-      peaoDoTurnoId:
-        modelo.jogadorAtivoId !== null
-          ? (modelo.peaoPorJogador[modelo.jogadorAtivoId] ?? null)
-          : null,
+      peaoDoTurnoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
       // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no
@@ -570,7 +604,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       // N do roster para o teto do Portão (#284): nunca peoes.length.
       quantidadeDeJogadores: quantidadeParaTeto,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto, peaoDoTurnoId])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa
@@ -786,7 +820,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               data-testid="botao-permanecer"
               onClick={permanecerNoTurno}
               disabled={peaoProprioId === null}
-              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Permanecer
             </button>
@@ -797,7 +831,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               data-testid="botao-confirmar-posicao"
               onClick={confirmarPosicaoNoTurno}
               disabled={peaoProprioId === null}
-              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Confirmar Posição
             </button>
@@ -807,7 +841,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-encerrar-turno"
               onClick={encerrarTurno}
-              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700"
             >
               Encerrar Turno
             </button>
@@ -826,7 +860,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             data-testid="girar-anti-horario"
             onClick={() => girar('anti_horario')}
             disabled={pecaAlvoDeGiro === null}
-            className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+            className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
           >
             Girar ◀
           </button>
@@ -835,7 +869,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             data-testid="girar-horario"
             onClick={() => girar('horario')}
             disabled={pecaAlvoDeGiro === null}
-            className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+            className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
           >
             Girar ▶
           </button>

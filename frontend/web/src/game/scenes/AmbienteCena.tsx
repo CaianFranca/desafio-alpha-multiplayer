@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useLoader } from '@react-three/fiber'
 import * as THREE from 'three'
-import mesaTopoUrl from '../assets/mesa_topo.png'
+import mesaTopoUrl from '../assets/mesa_topo.jpg'
 import {
   COR_FUNDO,
   COR_LATERAIS_MESA,
@@ -231,6 +231,8 @@ export function AmbienteCena({
               onVooAterrissou={onVooAterrissou}
               ocultarPecaId={pecaEmVooId}
               emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
+              ordemDeChegadaPorChave={estadoExibicao.ordemDeChegadaPorChave}
+              quantidadeDePeoes={estadoExibicao.peoes.length}
             />
             <TransicaoEncaixe
               posicionadas={estadoExibicao.posicionadas}

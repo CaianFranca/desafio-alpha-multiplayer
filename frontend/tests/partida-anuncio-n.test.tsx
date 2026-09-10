@@ -20,12 +20,12 @@ const MEU_JOGADOR_ID = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
 const MOCK_SALA = {
   sala: null, avisos: [], mensagensDeChat: [], jogadoresBloqueados: [],
   conectado: true, erro: null,
-  encaminhamento: { fase: 'ocioso', alvo: null, codigo: null, motivo: null, mensagem: null },
+  encaminhamento: { fase: 'ocioso' as const, alvo: null, codigo: null, motivo: null, mensagem: null },
   limparAvisoDeEncaminhamento: () => {}, enviar: () => {}, criarSala: () => {},
   entrarNaSala: () => {}, alternarProntidao: () => {}, sairDaSala: () => {},
   enviarMensagemDeChat: () => {}, expulsarMembro: () => {}, desbloquearJogador: () => {},
   encerrarSala: () => {}, iniciarPartida: () => {}, expulso: false, descartarExpulsao: () => {},
-}
+} as unknown as UseSalaWebSocketReturn
 
 function criarMembro(id: string, apelido: string, ordemDeEntrada: number) {
   return {
@@ -34,17 +34,17 @@ function criarMembro(id: string, apelido: string, ordemDeEntrada: number) {
   }
 }
 
-function contextoComSala(apelidos: string[]) {
+function contextoComSala(apelidos: string[]): UseSalaWebSocketReturn {
   const membros = apelidos.map((apelido, i) => criarMembro(`m${i + 1}`, apelido, i))
   const sala = {
     id: 'sala-1', codigoDeSala: 'A3K9M2', estado: 'encaminhada' as const,
     anfitriaoId: membros[0].id, membros,
     convite: { codigoDeSala: 'A3K9M2', link: 'http://localhost/sala/A3K9M2' },
   }
-  return { ...MOCK_SALA, sala }
+  return { ...MOCK_SALA, sala } as unknown as UseSalaWebSocketReturn
 }
 
-async function admitirNaPartida(contexto: typeof MOCK_SALA | ReturnType<typeof contextoComSala>) {
+async function admitirNaPartida(contexto: UseSalaWebSocketReturn) {
   const router = createMemoryRouter(
     [{ path: '/partida', element: <PartidaPage /> }],
     { initialEntries: ['/partida?serverId=s&partidaId=p'] },
@@ -69,7 +69,7 @@ async function admitirNaPartida(contexto: typeof MOCK_SALA | ReturnType<typeof c
 }
 
 async function anuncioComJogadores(jogadores: EstadoDaPartidaSnapshot['jogadores']) {
-  const ws = await admitirNaPartida(MOCK_SALA)
+  const ws = await admitirNaPartida(MOCK_SALA as unknown as UseSalaWebSocketReturn)
   act(() =>
     ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: snapshotComJogadores(jogadores) }),
   )

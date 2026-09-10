@@ -122,7 +122,7 @@ export async function aplicarRetencaoDeTermino(
   const aplicada = await redis.eval(
     SCRIPT_APLICAR_RETENCAO_DE_TERMINO,
     2,
-    `game-server:partida:${partidaId}`,
+    chaveDaPartida(partidaId),
     chaveDoEstadoDaPartida(partidaId),
     ttlSegundos,
   );

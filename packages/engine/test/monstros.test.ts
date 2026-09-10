@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BORDA_OPOSTA,
   COMPOSICAO_DA_CAIXA,
   aplicarComandoDePartida,
   aplicarComandoDeTabuleiro,
@@ -239,7 +240,9 @@ const jogadorAtivo = (estado: EstadoDaPartida) => {
 };
 
 // Resolve as pendências do Recebimento (mesmo padrão de partida.test.ts):
-// primeira borda canônica ainda disponível para a vaga, encaixe na célula-alvo.
+// primeira borda canônica ainda disponível para a vaga, giro até a borda
+// voltada à Peça sob o Peão abrir (encaixe conectado, issue #311 — Monstros
+// têm as 4 bordas abertas e nunca giram) e encaixe na célula-alvo.
 function resolverRecebidas(estado: EstadoDaPartida, ator: string): EstadoDaPartida {
   while (estado.tabuleiro.recebidas.length > 0) {
     const pendente = estado.tabuleiro.recebidas[0];
@@ -264,8 +267,30 @@ function resolverRecebidas(estado: EstadoDaPartida, ator: string): EstadoDaParti
     const escolhida = estado.tabuleiro.recebidas.find(
       (item) => item.recebidaId === pendente.recebidaId,
     );
-    if (!escolhida || escolhida.celulaAlvo === null) {
+    if (!escolhida || escolhida.celulaAlvo === null || escolhida.vaga === null) {
       throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+    }
+    // Gira (horário) até a borda voltada à Peça sob o Peão — o oposto da
+    // vaga — abrir; sem conexão o encaixe é rejeitado (issue #311).
+    const alvo = BORDA_OPOSTA[escolhida.vaga];
+    let giros = 0;
+    while (
+      giros < 4 &&
+      !bordasAbertas({
+        tipo: escolhida.tipo,
+        orientacao: ((escolhida.orientacao + 90 * giros) %
+          360) as Orientacao,
+      }).includes(alvo)
+    ) {
+      giros++;
+    }
+    if (giros === 4) {
+      throw new Error(
+        `nenhuma rotação conecta a pendência ${pendente.recebidaId}`,
+      );
+    }
+    for (let giro = 0; giro < giros; giro++) {
+      estado = aplicar(estado, girar(escolhida.pecaId), ator);
     }
     estado = aplicar(
       estado,

@@ -8,6 +8,7 @@ import {
   COR_CONTORNO_PEAO_SELECIONADO,
   propsDoMaterialDeContorno,
 } from './contorno'
+import { handlersDeCursor } from './cursor'
 
 interface PeaoAvatarProps {
   cor: CorDoPeao
@@ -167,26 +168,35 @@ export function PeaoAvatar({
 
   // Só interage ao ponteiro quando há handler de seleção (idêntico ao
   // PeaoPlaceholder): os meshes do modelo borbulham até o grupo pai.
-  const handlers = aoClicar
+  // Group cuida do cursor via padrão global handlersDeCursor; hitbox cuida do clique (evita double-fire).
+  const baseCursor = handlersDeCursor(aoClicar ? 'pointer' : 'default')
+  const groupHandlers = aoClicar
     ? {
         onPointerOver: (e: ThreeEvent<PointerEvent>) => {
           e.stopPropagation()
-          document.body.style.cursor = 'pointer'
+          baseCursor.onPointerOver(e)
         },
-        onPointerOut: () => {
-          document.body.style.cursor = 'auto'
-        },
-        onClick: (e: ThreeEvent<MouseEvent>) => {
-          e.stopPropagation()
-          aoClicar()
-        },
+        onPointerOut: baseCursor.onPointerOut,
+        onPointerLeave: baseCursor.onPointerLeave,
       }
     : {}
+  const hitboxClick = aoClicar
+    ? (e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation()
+        aoClicar()
+      }
+    : undefined
 
   return (
-    <group position={position} scale={[escala, escala, escala]} {...handlers}>
+    <group position={position} scale={[escala, escala, escala]} {...groupHandlers}>
       <primitive object={cena} />
       {anelDeSelecao !== null ? <primitive object={anelDeSelecao} /> : null}
+      {hitboxClick ? (
+        <mesh position={[0, 0.58, 0]} onClick={hitboxClick}>
+          <cylinderGeometry args={[0.7, 0.7, 1.16, 24]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      ) : null}
     </group>
   )
 }

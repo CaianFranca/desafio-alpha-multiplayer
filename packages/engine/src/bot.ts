@@ -18,7 +18,8 @@
 //   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida, em fluxo
 //       serial (enquanto uma Recebida aguarda o encaixe, não se escolhe a vaga
 //       de outra — o encaixe da pendente vem primeiro, preservando
-//       pecaSelecionadaId == pecaId para o giro);
+//       pecaSelecionadaId == pecaId para o giro; em Baixa Iluminação, apenas
+//       vagas em células escuras — #341);
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
 //   (d) turno normal sem Confirmação → selecionar o Peão e, sobre a Peça do
@@ -43,7 +44,8 @@
 // pós-encaixe — o bot não manipula após posicionar), atravessar_o_escuro
 // (jogada opcional de Baixa Iluminação — o bot em Baixa usa a movimentação
 // normal) e desselecionar_peao (sem efeito útil no turno). O girar_peca
-// pré-encaixe FAZ parte do plano, via expandirPosicionamentoDoBot.
+// pré-encaixe FAZ parte do plano, via expandirPosicionamentoDoBot. A
+// pendência da Travessia (Baixa, com célula travada) segue enumerada em (b).
 
 import {
   bordasAbertas,
@@ -320,13 +322,27 @@ export function acoesValidasDaSubfase(
   const tabuleiro = estado.tabuleiro;
 
   // (b) Recebimento pendente tem precedência sobre qualquer sequência: cada
-  // peça sorteada exige a escolha da vaga e o encaixe, sem pular.
+  // peça sorteada exige a escolha da vaga e o encaixe, sem pular. O planejador
+  // emite as ações direto, mesmo sem Peão selecionado — o engine pré-adopta a
+  // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
+  // referencia o Peão do próprio jogador, não a Seleção.
+  //
+  // Baixa Iluminação (#341): a engine rejeita vaga em célula iluminada
+  // (DADOS_INVALIDOS) e a camada Tabuleiro não conhece iluminação — o filtro
+  // vive aqui, na FSM, para a enumeração espelhar exatamente o que a engine
+  // aceita. Sem vaga escura, a pendência comum não é enumerável e o turno
+  // desdobra em desistência honesta pelo failsafe. A pendência da Travessia
+  // (celulaAlvo fixado) não passa pelo filtro: a engine valida só o match da
+  // célula travada, escura por construção.
   if (tabuleiro.recebidas.length > 0) {
-    // A escolha e o encaixe pertencem à sequência do Peão: sem ele
-    // selecionado, o único passo válido é selecioná-lo.
-    if (tabuleiro.peaoSelecionadoId === null) {
-      return [{ tipo: 'selecionar_peao', peaoId: jogador.peaoId }];
-    }
+    const emBaixa = jogador.emBaixaIluminacao ?? false;
+    const iluminadas = emBaixa
+      ? new Set(
+          estado.celulasIluminadas.map(
+            (celula) => `${celula.linha},${celula.coluna}`,
+          ),
+        )
+      : null;
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
     // Fluxo serial: enquanto uma Recebida aguarda o encaixe (vaga + alvo
@@ -366,6 +382,14 @@ export function acoesValidasDaSubfase(
           continue;
         }
         for (const vaga of vagas) {
+          // Em Baixa, vaga iluminada é rejeição certa (DADOS_INVALIDOS):
+          // enumera apenas as vagas escuras restantes.
+          if (
+            iluminadas !== null &&
+            iluminadas.has(`${vaga.celula.linha},${vaga.celula.coluna}`)
+          ) {
+            continue;
+          }
           acoes.push({
             tipo: 'escolher_vaga_da_peca_recebida',
             recebidaId: recebida.recebidaId,
@@ -375,6 +399,11 @@ export function acoesValidasDaSubfase(
         continue;
       }
       if (recebida.celulaAlvo !== null) {
+        // Encaixe sempre enumerado (issue #311 preservada via expansão): a
+        // conexão com a geradora é garantida pelo expandirPosicionamentoDoBot,
+        // que precede o posicionar sorteado com os girar_peca necessários. O
+        // portão conectaNaVaga aqui estrandaria o turno — a orientação de
+        // nascimento raramente conecta e só a expansão a corrige.
         acoes.push({
           tipo: 'posicionar_peca',
           pecaId: recebida.pecaId,

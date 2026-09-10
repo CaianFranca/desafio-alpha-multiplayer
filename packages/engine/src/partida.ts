@@ -63,6 +63,7 @@ import {
   type EscolherVagaDaPecaRecebidaComando,
   type EstadoDoTabuleiro,
   type EventoDoTabuleiro,
+  type GirarPecaComando,
   type MoverPeaoComando,
   type PecaPosicionada,
   type PecaRecebida,
@@ -425,7 +426,10 @@ function rotearComandoDaPartida(
     case 'selecionar_peca':
       return selecionarPecaDaPartida(estado, comando, jogadorAtivo);
     case 'girar_peca':
+      return girarPecaDaPartida(estado, comando, jogadorAtivo);
     case 'finalizar_manipulacao':
+      // Sem pré-adoção: a finalização consulta a janela de Manipulação, não a
+      // Seleção (mesma razão do giro em si; fica fora do alcance do review).
       return delegarAoTabuleiro(estado, comando);
     case 'escolher_vaga_da_peca_recebida':
       return escolherVagaDaPecaRecebidaDaPartida(estado, comando, jogadorAtivo);
@@ -533,6 +537,15 @@ function posicionarPecaDaPartida(
   const indisponivel = exigirPecaInicialDisponivel(estado, comando.pecaId, ator);
   if (indisponivel) {
     return indisponivel;
+  }
+  // Encaixe de Recebida com Seleção nula (B1/review #333): a pré-adoção do
+  // Peão do ator mantém a sequência (escolher vaga → encaixar) íntegra em
+  // estados persistidos do pré-deploy. Posições comuns não adotam nada.
+  const ehRecebida = estado.tabuleiro.recebidas.some(
+    (item) => item.pecaId === comando.pecaId,
+  );
+  if (ehRecebida) {
+    estado = adotarSelecaoDoAtor(estado, ator);
   }
   return delegarAoTabuleiro(estado, comando);
 }
@@ -824,6 +837,10 @@ function moverPeaoDaPartida(
     pecasEmPeriodoDeGraca = pecasEmPeriodoDeGraca.filter((id) => idsPosicionadas.has(id));
   }
 
+  // Re-seleção do Peão (#263/#324/#334): após o mover_peao bem-sucedido, o
+  // Peão movido permanece/re-é selecionado em TODOS os ramos (delegação e
+  // fallback de resgate) — o confirmar substitui o permanecer sem exigir
+  // re-seleção manual.
   const estadoNovo: EstadoDaPartida = {
     ...estado,
     tabuleiro: { ...tabuleiroNovo, peaoSelecionadoId: comando.peaoId },
@@ -1026,6 +1043,7 @@ function escolherVagaDaPecaRecebidaDaPartida(
   comando: EscolherVagaDaPecaRecebidaComando,
   ator: JogadorDaPartida,
 ): ResultadoDaPartida {
+  estado = adotarSelecaoDoAtor(estado, ator);
   if (!(ator.emBaixaIluminacao ?? false)) {
     return delegarAoTabuleiro(estado, comando);
   }
@@ -1304,19 +1322,26 @@ function confirmarPosicaoDoPeao(
       iluminacao,
       eventos,
     );
+  // B3/review #333: a adoção da seleção só existe quando a Confirmação gera
+  // Recebimento — em Baixa Iluminação (sorteio [], ADR-0005) a seleção não
+  // nasce sem sequência (invariante "a seleção vive durante a sequência").
+  // Guarda da #264 já rejeitou outro Peão; a rejeição abaixo é a rede de
+  // proteção do dispatch.
+  const selecaoVigente = estado.tabuleiro.peaoSelecionadoId;
+  if (selecaoVigente !== null && selecaoVigente !== peao.peaoId) {
+    // Rede de proteção (B1/review #333): o guard da #264 acima já rejeitou
+    // outro Peão — esta rejeição defensiva preserva o contrato do dispatch
+    // (aplicarComandoDePartida nunca lança) mesmo sob estado artesanal.
+    return rejeitarDaPartida(
+      'PEAO_NAO_SELECIONADO',
+      'Invariante da Confirmação: outro Peão está selecionado.',
+    );
+  }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
     posicionadas: posicionadasPosAtaque,
-    // Issue #326: a Movimentação limpa a seleção (peoes.ts, moverPeao) e a
-    // Confirmação gera o Recebimento — sem seleção, escolher vaga/encaixar as
-    // Recebidas rejeitam PEAO_NAO_SELECIONADO, a re-seleção rejeita
-    // PENDENCIA_NAO_RESOLVIDA e o Encerramento exige zero pendências: softlock.
-    // Mesmo padrão do Primeiro Turno (posicionarPeaoDaPartida) e do
-    // atravessarOEscuro: o Peão confirmado segue selecionado para a sequência
-    // (escolher vaga → encaixar) até o Encerramento do Turno. Guard `??`: se a
-    // seleção já é deste Peão, preserva (idempotente). A Movimentação pós-
-    // Confirmação segue barrada (guard POSICAO_CONFIRMADA em moverPeaoDaPartida).
-    peaoSelecionadoId: estado.tabuleiro.peaoSelecionadoId ?? peao.peaoId,
+    peaoSelecionadoId:
+      sorteio.recebidas.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
   };
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a
@@ -1544,6 +1569,42 @@ function avancarVez(
     { tipo: 'turno_iniciado', jogadorId: alvo.jogadorId, rodada: rodadaAlvo },
   ];
   return sucessoDaPartida(novoEstado, eventosFinais);
+}
+
+// Pré-adoção da Seleção (mesmo padrão da Travessia do Escuro — AC-3 do #272):
+// com Recebidas pendentes e Seleção nula (estados persistidos do pré-deploy
+// da #326), a sequência (escolher vaga → encaixar) segue o Peão do ator — o
+// comando cura o softlock sem migração de dados e o Tabuleiro permanece puro
+// (guarda da seleção intacta em peoes.ts).
+function adotarSelecaoDoAtor(
+  estado: EstadoDaPartida,
+  ator: JogadorDaPartida,
+): EstadoDaPartida {
+  if (estado.tabuleiro.peaoSelecionadoId !== null) return estado;
+  if (estado.tabuleiro.recebidas.length === 0) return estado;
+  return {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: ator.peaoId },
+  };
+}
+
+// Giro de Recebida com Seleção nula (M2/review #333): a mesma pré-adoção do
+// ator de escolher vaga/encaixar — a sequência (escolher → girar → encaixar)
+// cura o stale em qualquer passo, sem depender da ordem. O giro em si não
+// consulta a Seleção (girarPeca roteia por peça selecionada/Manipulação); a
+// pré-adoção persiste a cura antecipada e mantém a sequência do Peão do ator.
+function girarPecaDaPartida(
+  estado: EstadoDaPartida,
+  comando: GirarPecaComando,
+  ator: JogadorDaPartida,
+): ResultadoDaPartida {
+  const ehRecebida = estado.tabuleiro.recebidas.some(
+    (item) => item.pecaId === comando.pecaId,
+  );
+  if (ehRecebida) {
+    estado = adotarSelecaoDoAtor(estado, ator);
+  }
+  return delegarAoTabuleiro(estado, comando);
 }
 
 function delegarAoTabuleiro(

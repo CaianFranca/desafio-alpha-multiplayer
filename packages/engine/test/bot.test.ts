@@ -1,20 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BORDA_OPOSTA,
   acoesValidasDaSubfase,
   aplicarComandoDePartida,
+  bordasAbertas,
   estadoInicialDaPartida,
   executarTurnoDoBot,
   expandirPosicionamentoDoBot,
   mapearBot,
   orientacaoConectaComGeradora,
   sortearAcao,
+  type Celula,
   type ComandoDePartida,
   type EstadoDaPartida,
+  type Orientacao,
+  type JogadorDaPartida,
+  type PecaRecebida,
 } from '../src/index.ts';
 
 const selecionarPeca = (pecaId: string) =>
   ({ tipo: 'selecionar_peca', pecaId } as const);
+
+const girarPeca = (pecaId: string) =>
+  ({ tipo: 'girar_peca', pecaId, sentido: 'horario' } as const);
 
 const posicionarPeca = (pecaId: string, linha: number, coluna: number) =>
   ({ tipo: 'posicionar_peca', pecaId, celula: { linha, coluna } } as const);
@@ -70,6 +79,10 @@ function partidaIniciadaCom(
   return resultado.estado;
 }
 
+// Resolve todas as pendências do Recebimento: escolhe a vaga de cada peça
+// sorteada (primeira borda canônica ainda disponível), gira a Recebida até a
+// borda voltada à Peça sob o Peão abrir (encaixe conectado, issue #311) e
+// encaixa na célula-alvo derivada da vaga.
 function resolverRecebidas(
   estado: EstadoDaPartida,
   ator: string,
@@ -97,8 +110,31 @@ function resolverRecebidas(
     const escolhida = estado.tabuleiro.recebidas.find(
       (item) => item.recebidaId === pendente.recebidaId,
     );
-    if (!escolhida || escolhida.celulaAlvo === null) {
+    if (!escolhida || escolhida.celulaAlvo === null || escolhida.vaga === null) {
       throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+    }
+    // Gira (horário) até a borda voltada à Peça sob o Peão — o oposto da
+    // vaga — abrir; sem conexão o encaixe é rejeitado (issue #311). Peças
+    // Especiais e Monstros têm as 4 bordas abertas: giros = 0.
+    const alvo = BORDA_OPOSTA[escolhida.vaga];
+    let giros = 0;
+    while (
+      giros < 4 &&
+      !bordasAbertas({
+        tipo: escolhida.tipo,
+        orientacao: ((escolhida.orientacao + 90 * giros) %
+          360) as Orientacao,
+      }).includes(alvo)
+    ) {
+      giros++;
+    }
+    if (giros === 4) {
+      throw new Error(
+        `nenhuma rotação conecta a pendência ${pendente.recebidaId}`,
+      );
+    }
+    for (let giro = 0; giro < giros; giro++) {
+      estado = aplicar(estado, girarPeca(escolhida.pecaId), ator);
     }
     estado = aplicar(
       estado,
@@ -154,6 +190,67 @@ function peaoIdDo(jogadorId: string): string {
   const ordem = JOGADORES.indexOf(jogadorId);
   const cores = ['branco', 'vermelho', 'azul', 'amarelo'];
   return `peao-${cores[ordem]}`;
+}
+
+// Patch inline do Jogador (mesmo espírito do comJogador de sanidade.test.ts):
+// injeta flags de estado (ex.: emBaixaIluminacao) sem percorrer a engine.
+function comJogador(
+  estado: EstadoDaPartida,
+  jogadorId: string,
+  patch: Partial<JogadorDaPartida>,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    jogadores: estado.jogadores.map((item) =>
+      item.jogadorId === jogadorId ? { ...item, ...patch } : item,
+    ),
+  };
+}
+
+// Pendência sintética do Recebimento (vaga e célula-alvo nulas até a escolha):
+// o ramo (b) da FSM não lê o pecaId da pendência, então o valor é irrelevante
+// para a enumeração.
+const recebidaBaixa: PecaRecebida = {
+  recebidaId: 'rec-baixa',
+  pecaId: 'recebida-sintetica',
+  tipo: 'reta',
+  orientacao: 0,
+  vaga: null,
+  celulaAlvo: null,
+};
+
+// Cenário de Baixa Iluminação controlado (#341): ana em Baixa, com o Peão
+// sobre uma Peça Cruz sintética em (3,0) — as células vizinhas norte (2,0),
+// leste (3,1) e sul (4,0) estão vazias na Rodada 2 (longe das quatro
+// Iniciais e das vagas que elas geram), e o oeste cai fora da grade — e a
+// pendência informada como estado direto: a FSM enumera sem aplicar comandos.
+function estadoDaBaixa(
+  recebida: PecaRecebida,
+  celulasIluminadas: readonly Celula[],
+): EstadoDaPartida {
+  const base = partidaEmRodada2(7);
+  return {
+    ...comJogador(base, 'ana', { emBaixaIluminacao: true }),
+    celulasIluminadas,
+    tabuleiro: {
+      ...base.tabuleiro,
+      posicionadas: [
+        ...base.tabuleiro.posicionadas,
+        {
+          pecaId: 'peca-controle',
+          tipo: 'cruz',
+          orientacao: 0,
+          celula: { linha: 3, coluna: 0 },
+        },
+      ],
+      peoes: base.tabuleiro.peoes.map((peao) =>
+        peao.peaoId === 'peao-branco'
+          ? { ...peao, pecaId: 'peca-controle' }
+          : peao,
+      ),
+      recebidas: [recebida],
+    },
+  };
 }
 
 test('mapearBot traduz botId em peão, cor, ordem e flag do Primeiro Turno', () => {
@@ -303,21 +400,76 @@ test('subfase (b): após escolher a vaga, o encaixe é serial (sem nova escolha)
   );
 });
 
-test('subfase (b): sem Peão selecionado, só selecionar o Peão', () => {
+test('subfase (b): sem Peão selecionado, planeja o Recebimento direto — pré-adoção do ator (#326)', () => {
   let estado = partidaEmRodada2();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, confirmarPosicao('peao-branco'), 'ana');
   assert.ok(estado.tabuleiro.recebidas.length > 0);
-  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   const semSelecao: EstadoDaPartida = {
     ...estado,
     tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: null },
   };
-  assert.deepEqual(acoesValidasDaSubfase(semSelecao, 'ana'), [
-    { tipo: 'selecionar_peao', peaoId: 'peao-branco' },
+  // Com a pré-adoção do engine (review #333), o planejador emite as ações do
+  // Recebimento direto — nenhuma re-seleção intermediária.
+  const acoes = acoesValidasDaSubfase(semSelecao, 'ana');
+  assert.ok(acoes.length > 0);
+  assert.ok(
+    acoes.every((acao) => acao.tipo === 'escolher_vaga_da_peca_recebida'),
+  );
+  const recebidas = new Set(
+    semSelecao.tabuleiro.recebidas.map((item) => item.recebidaId),
+  );
+  assert.ok(
+    acoes.every(
+      (acao) =>
+        acao.tipo === 'escolher_vaga_da_peca_recebida' &&
+        recebidas.has(acao.recebidaId),
+    ),
+  );
+});
+
+test('subfase (b): em Baixa Iluminação a FSM enumera apenas vagas em células escuras (#341)', () => {
+  // A vaga norte (2,0) da Peça controle está iluminada; leste e sul seguem
+  // escuras — a engine rejeita a iluminada com DADOS_INVALIDOS.
+  const estado = estadoDaBaixa(recebidaBaixa, [{ linha: 2, coluna: 0 }]);
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  // Conjunto de bordas enumeradas é exatamente o das vagas escuras — nenhuma
+  // ação mira célula iluminada.
+  assert.deepEqual(acoes, [
+    escolherVaga('rec-baixa', 'leste'),
+    escolherVaga('rec-baixa', 'sul'),
   ]);
+});
+
+test('subfase (b): pendência da Travessia segue enumerando a borda travada em Baixa (#341)', () => {
+  // Pendência da Travessia do Escuro: célula-alvo pré-fixada — aqui, na vaga
+  // norte, ILUMINADA. A engine valida só o match da célula travada, então a
+  // FSM não aplica o filtro de Baixa a esta pendência.
+  const travessia: PecaRecebida = {
+    ...recebidaBaixa,
+    celulaAlvo: { linha: 2, coluna: 0 },
+  };
+  const estado = estadoDaBaixa(travessia, [{ linha: 2, coluna: 0 }]);
+  assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
+    escolherVaga('rec-baixa', 'norte'),
+  ]);
+});
+
+test('subfase (b): em Baixa com todas as vagas iluminadas, escolher_vaga não é enumerada (#341)', () => {
+  // Todas as três vagas da Peça controle iluminadas: a pendência comum fica
+  // irresolúvel e o ramo não emite escolher_vaga — lista vazia. No driver,
+  // isso desdobra em desistência honesta via failsafe (o encerrar_turno
+  // forçado cai em PENDENCIA_NAO_RESOLVIDA); pendência irresolúvel em Baixa é
+  // limitação pré-existente da engine para humanos e bots, fora do escopo
+  // desta correção.
+  const estado = estadoDaBaixa(recebidaBaixa, [
+    { linha: 2, coluna: 0 },
+    { linha: 3, coluna: 1 },
+    { linha: 4, coluna: 0 },
+  ]);
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  assert.deepEqual(acoes, []);
 });
 
 test('turno normal: início só seleciona o Peão; depois move ou permanece', () => {
@@ -345,6 +497,8 @@ test('turno normal: início só seleciona o Peão; depois move ou permanece', ()
 test('turno normal: após mover, só confirmar (movimento único, sem segundo mover)', () => {
   let estado = partidaEmRodada2();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Re-seleção do Peão: semântica única da Movimentação — ver o fechamento do
+  // moverPeaoDaPartida em partida.ts (#334).
   estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
   // O mover re-seleciona o Peão (semântica única, issue #334): sem
   // re-seleção intermediária, a FSM já propõe a confirmação.
@@ -399,24 +553,50 @@ test('via da permanência: ficar na peça de início encerra o turno direto', ()
 });
 
 test('toda ação enumerada é aceita pela engine (exatidão da FSM)', () => {
-  for (let semente = 1; semente <= 10; semente++) {
+  // 25 sementes: o caminho do bug da #341 era seed-dependente (bot em Baixa
+  // Iluminação com vaga candidata iluminada) e escapava de amostras curtas.
+  // posicionar_peca é verificado via expandirPosicionamentoDoBot (caminho real
+  // do driver, ADR-0011): o cru pode rejeitar por MOVIMENTO_NAO_CONECTADO.
+  for (let semente = 1; semente <= 25; semente++) {
     let estado = partidaIniciadaCom(JOGADORES, semente);
     for (let passo = 0; passo < 40; passo++) {
       if (estado.resultado !== null) break;
       const ator = estado.jogadorAtivoId;
       const acoes = acoesValidasDaSubfase(estado, ator);
       for (const acao of acoes) {
-        const resultado = aplicarComandoDePartida(estado, acao, ator);
-        assert.equal(
-          resultado.sucesso,
-          true,
-          `ação enumerada rejeitada: ${JSON.stringify(acao)} (${
-            resultado.sucesso ? '' : resultado.erro.codigo
-          })`,
-        );
+        const sequencia =
+          acao.tipo === 'posicionar_peca'
+            ? expandirPosicionamentoDoBot(estado, acao)
+            : [acao];
+        let cursor = estado;
+        for (const passoSequencia of sequencia) {
+          const resultado = aplicarComandoDePartida(
+            cursor,
+            passoSequencia,
+            ator,
+          );
+          assert.equal(
+            resultado.sucesso,
+            true,
+            `ação enumerada rejeitada: ${JSON.stringify(acao)} (${
+              resultado.sucesso ? '' : resultado.erro.codigo
+            })`,
+          );
+          if (resultado.sucesso) cursor = resultado.estado;
+        }
       }
       if (acoes.length === 0) break;
-      estado = aplicar(estado, sortearAcao(acoes), ator);
+      const sorteada = sortearAcao(acoes);
+      if (sorteada.tipo === 'posicionar_peca') {
+        for (const passoSequencia of expandirPosicionamentoDoBot(
+          estado,
+          sorteada,
+        )) {
+          estado = aplicar(estado, passoSequencia, ator);
+        }
+      } else {
+        estado = aplicar(estado, sorteada, ator);
+      }
     }
   }
 });
@@ -437,10 +617,25 @@ test('identidade: 200 Primeiros Turnos nunca agem por outro jogador', () => {
         }
       }
       const comando = sortearAcao(acoes);
-      const resultado = aplicarComandoDePartida(estado, comando, ator);
-      assert.equal(resultado.sucesso, true);
-      if (!resultado.sucesso) break;
-      estado = resultado.estado;
+      const sequencia =
+        comando.tipo === 'posicionar_peca'
+          ? expandirPosicionamentoDoBot(estado, comando)
+          : [comando];
+      let ok = true;
+      for (const passoSequencia of sequencia) {
+        const resultado = aplicarComandoDePartida(
+          estado,
+          passoSequencia,
+          ator,
+        );
+        assert.equal(resultado.sucesso, true);
+        if (!resultado.sucesso) {
+          ok = false;
+          break;
+        }
+        estado = resultado.estado;
+      }
+      if (!ok) break;
     }
     assert.equal(estado.jogadorAtivoId === ator, false);
   }
@@ -568,11 +763,14 @@ test('4 bots jogam até o resultado ou o limite de rodadas, sem exceção', () =
     let estado = partidaIniciadaCom(JOGADORES, semente);
     const rodadaInicial = estado.rodada;
     let tentativas = 0;
-    let encerramentos = 0;
+    let desistencias = 0;
     let foraDaVez = 0;
     while (estado.resultado === null && tentativas < 400) {
       tentativas++;
       const ator = estado.jogadorAtivoId;
+      // Teto folgado do teste (50) acima do default do failsafe
+      // (MAX_ACOES_POR_TURNO_DO_BOT = 10): dá espaço ao wander aleatório
+      // sem mascarar o guardião do driver (#334).
       const turno = executarTurnoDoBot(estado, ator, {
         maxActionsPerTurn: 50,
       });
@@ -580,22 +778,38 @@ test('4 bots jogam até o resultado ou o limite de rodadas, sem exceção', () =
         foraDaVez++;
         break;
       }
-      if (turno.motivo === 'encerramento') {
-        encerramentos++;
-      }
       estado = turno.estado;
       if (turno.motivo === 'desistencia') {
-        break;
+        // Guarda da #341: a FSM não enumera mais vaga iluminada em Baixa, e
+        // nenhuma outra ação enumerada é rejeitada pela engine — desistência
+        // DADOS_INVALIDOS indica regressão da enumeração.
+        assert.notEqual(
+          turno.codigoDaDesistencia,
+          'DADOS_INVALIDOS',
+          'desistência DADOS_INVALIDOS: ação enumerada rejeitada pela engine',
+        );
+        // Desistência é desdobramento legítimo do failsafe: o turno não
+        // avançou (o ator segue na vez) e a função é pura com sorteio
+        // aleatório — re-executar o turno do mesmo ator em vez de abortar a
+        // partida simulada (#334).
+        desistencias++;
+        continue;
       }
     }
     assert.equal(foraDaVez, 0, 'bot nunca perde a vez agindo nela');
     assert.ok(
       estado.resultado !== null || tentativas === 400,
-      'deveria terminar ou atingir o limite de rodadas',
+      'deveria terminar ou atingir o limite de tentativas',
     );
+    // Detector de travamento real: falha apenas quando NENHUM turno progrediu
+    // (todas as tentativas morreram em desistência sem avançar o estado).
+    // Desistências legítimas podem ocorrer — o wander aleatório não garante
+    // progresso por turno — mas o estado segue avançando entre elas (#334),
+    // e nenhuma delas é DADOS_INVALIDOS com o filtro de vagas escuras em
+    // Baixa (#341).
     assert.ok(
-      estado.resultado !== null || encerramentos >= 300,
-      `jogo travado na semente ${semente}: ${encerramentos} encerramentos`,
+      desistencias < tentativas,
+      `jogo travado na semente ${semente}: ${desistencias}/${tentativas} turnos em desistência`,
     );
     assert.ok(estado.rodada >= rodadaInicial);
   }

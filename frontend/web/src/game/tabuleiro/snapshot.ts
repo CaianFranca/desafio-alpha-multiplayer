@@ -9,13 +9,15 @@
  * Sem recalcular iluminação/limpeza: o motor é a autoridade.
  */
 
-import type {
-  Celula as CelulaContrato,
-  CorDoPeao,
-  PecaDaMesa,
-  PecaPosicionada,
-  PeaoDaExibicao,
-  TipoDaPeca,
+import {
+  chaveCelula,
+  type Celula as CelulaContrato,
+  type CorDoPeao,
+  type PecaDaMesa,
+  type PecaPosicionada,
+  type PeaoDaExibicao,
+  type PeaoId,
+  type TipoDaPeca,
 } from './contrato'
 import { quantidadeValidaDeJogadores } from './contrato'
 import type { EstadoDoTabuleiroNoCliente } from './reducao'
@@ -75,8 +77,8 @@ export function aplicarSnapshot(
 
   // Peças Iniciais ainda não encaixadas (issue #143): a lista do motor é a
   // autoridade — recarregar reconstrói a mesa sem seed local.
-  // Roster N=2..4 (#284): espelha só as N iniciais do roster; com o servidor
-  // ainda em 4 e N=2, projetar as 4 criava indicadores fantasmas do ausente.
+  // Roster N=2..4 (#284): espelha só as N iniciais do roster; com o
+  // snapshot em N=2, projetar as 4 criava indicadores fantasmas do ausente.
   // Sem fallback para a lista cheia: fora da faixa, projeta exatamente o
   // roster (0 → mesa vazia; 1 → 1; 5+ → o que o servidor mandou, no máximo).
   // Inventar 4 peças sem roster seria reintroduzir fantasmas.
@@ -107,9 +109,9 @@ export function aplicarSnapshot(
   )
 
   // Roster variável N=2..4: mantém SÓ os peões dos jogadores do snapshot
-  // (peaoId da ordem de entrada) — nunca os N primeiros do array. Com o
-  // servidor ainda em 4 e N=2, o slice por posição exibia cores erradas e
-  // quebrava "peão na cor da minha ordem de entrada" (#281 história 4).
+  // (peaoId da ordem de entrada) — nunca os N primeiros do array. O slice
+  // por posição exibia cores erradas e quebrava "peão na cor da minha ordem
+  // de entrada" (#281 história 4).
   // Sem fallback para a lista cheia: roster vazio projeta mesa vazia.
   // Manter os 4 peões sem roster seria reintroduzir fantasmas (#284).
   const peaoIdsDosJogadores = new Set(snapshot.jogadores.map((j) => j.peaoId))
@@ -176,6 +178,18 @@ export function aplicarSnapshot(
     coluna: c.coluna,
   }))
 
+  // Fila de chegada por célula (issue #298): reconstruída na ordem da lista
+  // do motor (`snapshot.tabuleiro.peoes` mapeado acima — ordem canônica de
+  // inserção). O snapshot não preserva a sequência histórica de pousos, então
+  // recarregar aproxima a ordem pela lista do motor (limitação de reload
+  // documentada no estado); o índice só define o desempate visual.
+  const ordemDeChegadaPorChave: Record<string, PeaoId[]> = {}
+  for (const peao of peoes) {
+    if (peao.celula === null) continue
+    const chave = chaveCelula(peao.celula)
+    ;(ordemDeChegadaPorChave[chave] ??= []).push(peao.peaoId)
+  }
+
   return {
     iniciais,
     posicionadas,
@@ -209,7 +223,8 @@ export function aplicarSnapshot(
     pecasRestantesNaCaixa: snapshot.tabuleiro.pecasRestantesNaCaixa ?? null,
     geradoresLigados: snapshot.geradoresLigados ?? [],
     cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido ?? false,
-    quantidadeDeJogadores:
+    ordemDeChegadaPorChave,
+    quantidadeParaLayout:
       quantidadeSnapshot > 0 ? quantidadeValidaDeJogadores(quantidadeSnapshot) : null,
   }
 }

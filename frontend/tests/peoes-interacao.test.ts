@@ -70,9 +70,11 @@ function estadoBase(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPe
     posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
     recebidasPendentes: [],
     peaoSelecionadoId: null,
+    peaoDoTurnoId: null,
     pecaSelecionadaId: null,
     posicaoConfirmadaNoTurno: false,
     movimentouNoTurno: false,
+    quantidadeDeJogadores: 4,
     ...opts,
   }
 }
@@ -100,9 +102,11 @@ function estadoComMock(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteraca
     posicionadas: mock.posicionadas,
     recebidasPendentes: [],
     peaoSelecionadoId: 'peao-1-branco',
+    peaoDoTurnoId: null,
     pecaSelecionadaId: null,
     posicaoConfirmadaNoTurno: false,
     movimentouNoTurno: false,
+    quantidadeDeJogadores: 4,
     ...opts,
   }
 }
@@ -1295,6 +1299,7 @@ describe('desseleção autoritativa do peão (issue #249)', () => {
       posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
       recebidasPendentes: [],
       peaoSelecionadoId: null,
+      peaoDoTurnoId: null,
       pecaSelecionadaId: null,
       posicaoConfirmadaNoTurno: false,
       movimentouNoTurno: false,
@@ -1583,5 +1588,83 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
     expect(peaoDeReferenciaDaSequencia(estado)).toBeNull()
     expect(vagasDisponiveisDoPeao(estado)).toEqual([])
     expect(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte')).toBeNull()
+  })
+
+  // M1/review #333: a única fonte real é a PartidaPage; qualquer factory/cena
+  // futura que esqueça o campo obrigatório em JS vira undefined → fallback
+  // null → vagas inertes silenciosas. A dupla asserção abaixo é o único jeito
+  // de "esquecer" um campo obrigatório — exatamente o cenário do M1: a
+  // normalização (?? null) não lança e a referência null mantém vagas e
+  // escolha inertes (o warn DEV warn-once é estado de módulo e o
+  // import.meta.env.DEV varia entre ambientes — o contrato testável é a
+  // normalização sem lançamento).
+  it('factory sem peaoDoTurnoId não lança — referência null e vagas inertes (M1 #326)', () => {
+    const estado = {
+      ...estadoBase({
+        posicionadas,
+        recebidasPendentes: pendencias,
+        peoes: [peao('peao-branco', INICIAL)],
+      }),
+    } as unknown as EstadoInteracaoPeoes
+    // A dupla asserção acima apaga o campo obrigatório (cenário do M1).
+    delete (estado as { peaoDoTurnoId?: string | null }).peaoDoTurnoId
+
+    expect(peaoDeReferenciaDaSequencia(estado)).toBeNull()
+    expect(vagasDisponiveisDoPeao(estado)).toEqual([])
+    expect(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte')).toBeNull()
+  })
+})
+
+describe('pós-confirmação suprime ST-09 e Mesa (review #333)', () => {
+  /**
+   * Estado pós-confirmação (B2): a Confirmação travou o Peão — a posição está
+   * confirmada, sem seleção e sem pendências; nada mais é clicável.
+   */
+  function estadoPosConfirmacao(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPeoes {
+    return estadoBase({
+      posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      recebidasPendentes: [],
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      posicaoConfirmadaNoTurno: true,
+      ...opts,
+    })
+  }
+
+  /** Projeção ST-09 com as Iniciais ainda na mesa (formato dos testes de mesa). */
+  function tabuleiroDe(estado: EstadoInteracaoPeoes): EstadoInteracaoTabuleiro {
+    return {
+      iniciais: [{ pecaId: 'inicial-2' }],
+      posicionadas: estado.posicionadas,
+      pecaSelecionadaId: estado.pecaSelecionadaId,
+      pecaEmManipulacaoId: null,
+    }
+  }
+
+  it('pós-confirmação, clique em Inicial da mesa fica mudo (mesa suprimida)', () => {
+    const estado = estadoPosConfirmacao()
+    // 'inicial-2' está nas iniciais da projeção: sem o gate da confirmação o
+    // clique rotearia SELECIONAR_PECA (ver contraprova nos testes de mesa).
+    expect(mapearCliqueNaPecaDaMesa(estado, tabuleiroDe(estado), 'inicial-2')).toBeNull()
+  })
+
+  it('pós-confirmação, clique em célula vazia não emite fallback ST-09', () => {
+    const estado = estadoPosConfirmacao()
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estado, tabuleiroDe(estado), { linha: 5, coluna: 5 }, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandos).toEqual([])
+  })
+
+  it('pós-confirmação, clique em célula de peça posicionada não emite comando', () => {
+    const estado = estadoPosConfirmacao()
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estado, tabuleiroDe(estado), INICIAL, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandos).toEqual([])
   })
 })

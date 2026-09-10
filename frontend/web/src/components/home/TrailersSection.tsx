@@ -51,7 +51,7 @@ function TrailerCover({ titulo, children }: { titulo: string; children?: ReactNo
 }
 
 function TrailerPlayer({ trailer }: { trailer: Trailer }) {
-  const { titulo, capa, src } = trailer
+  const { titulo, descricao, capa, src } = trailer
   const containerRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [inView, setInView] = useState(false)
@@ -218,6 +218,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
           {media}
           <h3 className="trailers-card-label">{titulo}</h3>
         </div>
+        <p className="mt-3 text-muted text-sm leading-relaxed">{descricao}</p>
       </div>
     )
   }
@@ -226,6 +227,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     <div ref={containerRef}>
       <h3 className="text-[clamp(1.125rem,2vw,1.375rem)] font-bold text-center mb-4">{titulo}</h3>
       {media}
+      <p className="mt-3 text-muted text-sm leading-relaxed text-center">{descricao}</p>
     </div>
   )
 }
@@ -282,7 +284,6 @@ export function TrailersSection() {
     <section id={trailers.id} className="py-[clamp(3rem,8vh,6rem)] px-8 bg-surface" aria-labelledby="trailers-title">
       <div className="max-w-7xl mx-auto">
         <h2 ref={titleRef} id="trailers-title" className={`trailers-eyebrow trailers-reveal ${titleState}`}>{trailers.title}</h2>
-        <p className="sr-only">{trailers.description}</p>
         <ul role="list" className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 list-none m-0 p-0">
           {trailers.items.map((item, index) => (
             <TrailerRevealItem key={item.titulo} index={index}>

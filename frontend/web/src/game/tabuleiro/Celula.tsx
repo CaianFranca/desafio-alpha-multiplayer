@@ -1,4 +1,6 @@
 import { Suspense, useEffect, useMemo } from 'react'
+import { useLoader, type ThreeEvent } from '@react-three/fiber'
+import * as THREE from 'three'
 import {
   BORDA_OFFSET,
   BORDA_Y,
@@ -9,13 +11,11 @@ import {
   COR_BORDA_CELULA,
   ESPESSURA_BORDA,
   LADO_DA_GRADE,
+  layoutDoPeaoNaCelula,
   PEAO_Y,
   PECA_Y,
   TAMANHO_CELULA,
 } from './contrato'
-import { useLoader } from '@react-three/fiber'
-import type { ThreeEvent } from '@react-three/fiber'
-import * as THREE from 'three'
 import { TEXTURA_OBSCURO_DA_GRADE } from './texturasDasPecas'
 import type {
   Celula as CelulaTipo,
@@ -27,6 +27,7 @@ import { PeaoVisual } from './PeaoVisual'
 import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { handlersDeCursor } from './cursor'
+import { texturaDoTabuleiro } from './texturasDoTabuleiro'
 
 interface CelulaProps {
   celula: CelulaTipo
@@ -37,12 +38,26 @@ interface CelulaProps {
   pecaDestacada?: boolean
   onClick?: (event: ThreeEvent<MouseEvent>) => void
   /**
-   * Peão posicionado sobre a peça desta célula. A cena exibe um visual por
-   * célula (avatar 3D no slot do Diretor, placeholder nos demais); a regra de
-   * ocupação (Portão 4, resgate +1) vive no engine e no espelho de destinos
-   * (`destinosConectadosDoPeao`).
+   * Peões posicionados sobre a peça desta célula, já filtrados pelo voo ativo
+   * no pai (`Tabuleiro`). A cena renderiza um visual por peão no arranjo de
+   * co-ocupação do `layoutDoPeaoNaCelula`; a regra de ocupação (Portão 4,
+   * resgate +1) vive no engine e no espelho de destinos
+   * (`destinosConectadosDoPeao`). A ordem de chegada vem de `filaDeChegada`
+   * (autoritativa): ela espelha o modelo pós-evento
+   * (PEAO_POSICIONADO/PEAO_MOVIDO) — sem reserva otimista pré-evento. Durante
+   * o voo ativo o modelo já avançou, então o voador segue na fila do destino
+   * e os demais não sofrem shift.
    */
-  peao?: PeaoDaExibicao | null
+  peoes?: PeaoDaExibicao[]
+  /**
+   * Fila de chegada autoritativa desta célula (issue #298): ordem de pouso
+   * vinda de `ordemDeChegadaPorChave` (modelo pós-evento — sem reserva
+   * otimista: a fila só muda em PEAO_POSICIONADO/PEAO_MOVIDO/snapshot).
+   * Mantém o arranjo estável durante o voo ativo (o modelo já avançou, então
+   * o peão voador permanece na fila do destino). Sem a prop, a fila deriva
+   * da lista renderizada (`peoes`).
+   */
+  filaDeChegada?: readonly PeaoId[]
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
   destinoValido?: boolean
   /**
@@ -67,8 +82,12 @@ interface CelulaProps {
   peaoSelecionadoId?: PeaoId | null
   /** Peão do Jogador Ativo da vez: destaque emissivo suave (#118). */
   peaoAtivoId?: PeaoId | null
-  /** Peão em Baixa Iluminação do dono: avatar 3D na variante apagado (#297). */
-  emBaixaIluminacao?: boolean
+  /**
+   * Peões em Baixa Iluminação do dono (issue #297): o avatar 3D troca para a
+   * variante apagado — apenas Baixa Iluminação, não Amedrontado (semântica
+   * original #297 preservada na co-ocupação).
+   */
+  emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
   onSelecionarPeao?: (peaoId: PeaoId) => void
 }
 
@@ -171,13 +190,122 @@ function PlanoDeFundoDaCelula(props: PlanoDeFundoProps) {
   )
 }
 
+/**
+ * Relevo das paredes do grid (issue #278): mesmo ponto de partida das peças
+ * (`RELEVO_TOPO_NORMAL_SCALE` em `PecaPlaceholder`) — realça o normalMap sob
+ * a luz rasante da cena sem amplificar ruído além do motivo. O motivo gira
+ * 90° para leitura horizontal de pedra/concreto nas bordas verticais.
+ */
+const RELEVO_PAREDE_NORMAL_SCALE: readonly [number, number] = [1.1, 1.1]
+const TINT_PAREDE = '#b5b5b5'
+
+/** Texturas das paredes do grid: cor no map (sRGB), dado linear no normal. */
+function useTexturasDaParede(): { mapa: THREE.Texture; normal: THREE.Texture } {
+  const { map, normalMap } = texturaDoTabuleiro()
+  const [mapCarregado, normalCarregado] = useLoader(THREE.TextureLoader, [
+    map,
+    normalMap,
+  ])
+  // Clona para não mutar o cache do useLoader (precedente das peças/Mesa).
+  const par = useMemo(() => {
+    const mapa = mapCarregado.clone()
+    mapa.colorSpace = THREE.SRGBColorSpace
+    mapa.wrapS = THREE.RepeatWrapping
+    mapa.wrapT = THREE.RepeatWrapping
+    mapa.anisotropy = 4
+    mapa.center.set(0.5, 0.5)
+    mapa.rotation = Math.PI / 2
+    mapa.needsUpdate = true
+    const normal = normalCarregado.clone()
+    normal.colorSpace = THREE.NoColorSpace
+    normal.wrapS = THREE.RepeatWrapping
+    normal.wrapT = THREE.RepeatWrapping
+    normal.anisotropy = 4
+    normal.center.set(0.5, 0.5)
+    normal.rotation = Math.PI / 2
+    normal.needsUpdate = true
+    return { mapa, normal }
+  }, [mapCarregado, normalCarregado])
+  // Descarta os clones no unmount/troca (49 células por mount) — o cache do
+  // `useLoader` segue intacto (mesmo padrão B1 do plano de fundo).
+  useEffect(
+    () => () => {
+      par.mapa.dispose()
+      par.normal.dispose()
+    },
+    [par],
+  )
+  return par
+}
+
+/**
+ * Paredes do grid texturizadas (issue #278): o `color` multiplica o map, com
+ * o piso em `obscuro` contínuo e as bordas em abismo — mesma affordância, só
+ * com relevo.
+ */
+function ParedesTexturizadas() {
+  const { mapa, normal } = useTexturasDaParede()
+  return (
+    <group position={[0, CELULA_Y_BORDA, 0]}>
+      {BORDAS_CONFIG.map((b, i) => (
+        <mesh key={i} position={b.pos}>
+          <boxGeometry args={b.args} />
+          <meshStandardMaterial
+            color={TINT_PAREDE}
+            map={mapa}
+            normalMap={normal}
+            normal-scale={RELEVO_PAREDE_NORMAL_SCALE}
+            roughness={0.95}
+            metalness={0}
+            transparent
+            opacity={0.95}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/** Fallback de suspensão/erro: bordas chapadas atuais (sem textura). */
+function ParedesChapadas() {
+  return (
+    <group position={[0, CELULA_Y_BORDA, 0]}>
+      {BORDAS_CONFIG.map((b, i) => (
+        <mesh key={i} position={b.pos}>
+          <boxGeometry args={b.args} />
+          <meshStandardMaterial color={COR_BORDA_CELULA} transparent opacity={0.95} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/**
+ * Paredes da célula com `Suspense` interno + limite de erro (mesmo padrão do
+ * `PlanoDeFundoDaCelula`): enquanto o par abismo carrega, as bordas chapadas
+ * — a grade nunca some, e uma falha (404) não derruba o Canvas (B4).
+ */
+function ParedesDaCelula() {
+  const chapeu = <ParedesChapadas />
+  const chave = texturaDoTabuleiro().map
+  return (
+    <LimiteDeErroDoModelo key={chave} resetKey={chave} fallback={chapeu}>
+      <Suspense fallback={chapeu}>
+        <ParedesTexturizadas />
+      </Suspense>
+    </LimiteDeErroDoModelo>
+  )
+}
+
 export function Celula({
   celula,
   peca,
   cursor = 'default',
   pecaDestacada = false,
   onClick,
-  peao,
+  peoes = [],
+  filaDeChegada,
   destinoValido = false,
   destinoResgate = false,
   alvoPendente = false,
@@ -185,7 +313,7 @@ export function Celula({
   iluminada = false,
   peaoSelecionadoId = null,
   peaoAtivoId = null,
-  emBaixaIluminacao = false,
+  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   onSelecionarPeao,
 }: CelulaProps) {
   const pos = celulaParaMundo(celula)
@@ -198,6 +326,15 @@ export function Celula({
   // Célula ocupada: clique só pela peça (evita disparo duplo plano+peca e
   // mapeamento indevido de POSICIONAR_PECA em célula ocupada). Plano fica inerte.
   const planeOnClick = ocupada ? undefined : onClick
+
+  // Fila de ocupantes na ordem de chegada (issue #298): o índice decide o
+  // arranjo de co-ocupação (Portão: cantos por ordem; peça comum: centro+SE).
+  // A fila autoritativa (`filaDeChegada`) espelha o modelo pós-evento — sem
+  // reserva otimista, ela só muda em PEAO_POSICIONADO/PEAO_MOVIDO/snapshot;
+  // durante o voo ativo o modelo já avançou, então o voador segue na fila do
+  // destino sem shift dos demais. Sem ela, deriva da lista renderizada (após
+  // a filtragem do voo).
+  const filaDeOcupantes = filaDeChegada ?? peoes.map((p) => p.peaoId)
 
   // Destaques do ciclo: alvo de pendência (#91) e vaga disponível para a
   // pendência corrente (#143) ganham o mesmo tom quente (ambas convidam o
@@ -222,14 +359,7 @@ export function Celula({
         onClick={planeOnClick}
         cursorHandlers={cursorHandlers}
       />
-      <group position={[0, CELULA_Y_BORDA, 0]}>
-        {BORDAS_CONFIG.map((b, i) => (
-          <mesh key={i} position={b.pos}>
-            <boxGeometry args={b.args} />
-            <meshStandardMaterial color={COR_BORDA_CELULA} transparent opacity={0.95} />
-          </mesh>
-        ))}
-      </group>
+      <ParedesDaCelula />
       {peca ? (
         <PecaPlaceholder
           tipo={peca.tipo}
@@ -241,20 +371,28 @@ export function Celula({
           onClick={onClick}
         />
       ) : null}
-      {peao ? (
-        <PeaoVisual
-          cor={peao.cor}
-          position={[0, PEAO_Y, 0]}
-          selecionado={peao.peaoId === peaoSelecionadoId}
-          ativo={peao.peaoId === peaoAtivoId}
-          emBaixaIluminacao={emBaixaIluminacao}
-          aoClicar={
-            onSelecionarPeao
-              ? () => onSelecionarPeao(peao.peaoId)
-              : undefined
-          }
-        />
-      ) : null}
+      {peoes.map((peao) => {
+        const { dx, dz } = layoutDoPeaoNaCelula(
+          peca?.tipo ?? 'inicial',
+          filaDeOcupantes,
+          peao.peaoId,
+        )
+        return (
+          <PeaoVisual
+            key={peao.peaoId}
+            cor={peao.cor}
+            position={[dx, PEAO_Y, dz]}
+            selecionado={peao.peaoId === peaoSelecionadoId}
+            ativo={peao.peaoId === peaoAtivoId}
+            emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(peao.peaoId)}
+            aoClicar={
+              onSelecionarPeao
+                ? () => onSelecionarPeao(peao.peaoId)
+                : undefined
+            }
+          />
+        )
+      })}
     </group>
   )
 }

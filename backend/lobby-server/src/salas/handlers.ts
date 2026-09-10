@@ -29,6 +29,7 @@ import {
   type Comando,
   type EstadoDoLobby,
   type Sala as SalaDominio,
+  sairDaSalaEncaminhadaNaoIniciada,
 } from '@flicker/engine';
 import type {
   SalaComandoDoCliente,
@@ -82,7 +83,8 @@ import {
   type ApelidoPorJogadorId,
 } from './eventos.ts';
 import { SalasReconexao, JANELA_RECONEXAO_SEGUNDOS } from './reconexao.ts';
-import { getConfig } from '@flicker/config';
+import { idadeDoEmVoo, limparEmVoo, marcarEmVoo } from './encaminhamento-voo.ts';
+import { GAME_SERVERS_PARTIDA_PREFIXO, getConfig } from '@flicker/config';
 import type { AuthenticatedWebSocket } from '../ws/ws.ts';
 import { listarGameServersDisponiveis as listarGameServersShared } from '@flicker/shared/server';
 import type { Redis } from 'ioredis';
@@ -109,6 +111,18 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
 
 /** Tamanho máximo de uma mensagem de chat (issue #34). Sem trim. */
 const TAMANHO_MAXIMO_MENSAGEM = 500;
+
+// Jogador do novo Anfitrião no estado resultante (lookups extraídos — review
+// interna #304): `estado.salas.find(...).membros.find(...)` sem chains.
+function jogadorNovoAnfitriao(
+  estado: EstadoDoLobby,
+  salaId: string,
+  anfitriaoNovoMembroId: string | null,
+): string | undefined {
+  if (anfitriaoNovoMembroId === null) return undefined;
+  const salaNova = estado.salas.find((s) => s.id === salaId);
+  return salaNova?.membros.find((m) => m.id === anfitriaoNovoMembroId)?.jogadorId;
+}
 
 /**
  * Conjunto fechado dos `type` aceitos em `SalaComandoDoCliente`. Usado por
@@ -156,6 +170,44 @@ function paraCodigoDeErroDaSala(
   return 'DADOS_INVALIDOS';
 }
 
+/**
+ * Decisão de Partida Órfã de uma Sala (review JF532, item 1): calculada
+ * FORA da fila mononodo (read-only) e revalidada dentro por `revalidarOrfa`.
+ * `partidaId === null` significa "sem partida nas 3 fontes" — a decisão
+ * veio do relógio do em-voo.
+ */
+interface DecisaoOrfa {
+  readonly orfa: boolean;
+  readonly partidaId: string | null;
+}
+
+/** Previsão de limpeza de órfã: a Sala candidata e a decisão congelada. */
+interface PrevisaoLimpezaOrfa {
+  readonly salaId: string;
+  readonly decisao: DecisaoOrfa;
+}
+
+/**
+ * Pré-cômputo do SAIR_DA_SALA fora da fila: a resolução de salaId (projeção →
+ * PG com write idempotente de projeção) e a decisão de órfã quando a Sala está
+ * encaminhada. `decisao === null` ⇒ o bypass está fora de questão.
+ */
+interface PreviaSaida {
+  readonly salaId: string;
+  readonly decisao: DecisaoOrfa | null;
+}
+
+/**
+ * Pré-cômputo do ENTRAR_NA_SALA fora da fila: resolução código→salaId
+ * (projeção → PG com write idempotente de projeção) e a previsão da limpeza
+ * de órfã de outra Sala. `salaId === null` ⇒ o handler responde como hoje
+ * (DADOS_INVALIDOS para código vazio, SALA_NAO_ENCONTRADA).
+ */
+interface PreviaEntrada {
+  readonly salaId: string | null;
+  readonly previsao: PrevisaoLimpezaOrfa | null;
+}
+
 export interface SalasHandlersDeps {
   readonly repo: SalasRepo;
   readonly projecao: SalasProjecao;
@@ -191,6 +243,9 @@ export class SalasHandlers {
   private readonly cancelarPartidaInjetado?: (serverId: string, partidaId: string, motivo: string, serverUrl?: string) => Promise<void>;
   private readonly redis: Redis;
   private readonly timeoutMs: number;
+  // Teto do não-início (mesmo valor do game-server, review #304 item 3): a
+  // idade do marker do em-voo acima deste teto libera a órfã sem partidaId.
+  private readonly tetoNaoInicioMs: number = getConfig().partidaNaoInicioSegundos * 1000;
   private readonly encaminhamentosEmVoo: Set<string> = new Set();
   // O lobby da #36 é mononodo. Serializar as mutações evita que dois awaits
   // de persistência confirmem candidatos calculados sobre o mesmo estado.
@@ -242,6 +297,22 @@ export class SalasHandlers {
 
     const jogadorId = socket.data.jogadorId;
     try {
+      // Pré-cômputo de Partida Órfã FORA da fila (review JF532, item 1): a
+      // decisão é read-only e custa o mesmo I/O de antes, mas não serializa a
+      // cadeiaDeMutacoes; dentro da fila só roda a revalidação quente
+      // (revalidarOrfa — in-memory + ≤2 RTTs Redis, fail-closed). Comandos
+      // sem pré-cômputo recebem `null` e seguem o fluxo atual.
+      let previaCriar: PrevisaoLimpezaOrfa | null = null;
+      let previaEntrar: PreviaEntrada | null = null;
+      let previaSair: PreviaSaida | null = null;
+      if (mensagem.type === 'CRIAR_SALA') {
+        previaCriar = await this.preverLimpezaOrfa(jogadorId);
+      } else if (mensagem.type === 'ENTRAR_NA_SALA') {
+        previaEntrar = await this.preverEntradaComOrfa(jogadorId, mensagem.codigoDeSala);
+      } else if (mensagem.type === 'SAIR_DA_SALA') {
+        previaSair = await this.preverSaidaComOrfa(jogadorId);
+      }
+
       await this.enfileirarMutacao(async () => {
         if (exigeRevalidacaoDeSessao(mensagem)) {
           const sessaoValida = await this.revalidarSessao(
@@ -256,13 +327,13 @@ export class SalasHandlers {
 
         switch (mensagem.type) {
           case 'CRIAR_SALA':
-            await this.handleCriarSala(socket, jogadorId);
+            await this.handleCriarSala(socket, jogadorId, previaCriar);
             return;
           case 'ENTRAR_NA_SALA':
-            await this.handleEntrarNaSala(socket, jogadorId, mensagem.codigoDeSala);
+            await this.handleEntrarNaSala(socket, jogadorId, mensagem.codigoDeSala, previaEntrar);
             return;
           case 'SAIR_DA_SALA':
-            await this.handleSairDaSala(socket, jogadorId);
+            await this.handleSairDaSala(socket, jogadorId, previaSair);
             return;
           case 'ENVIAR_MENSAGEM_DE_CHAT':
             await this.handleEnviarMensagemDeChat(socket, jogadorId, mensagem.conteudo);
@@ -316,7 +387,15 @@ export class SalasHandlers {
   private async handleCriarSala(
     socket: AuthenticatedWebSocket,
     jogadorId: string,
+    previsao: PrevisaoLimpezaOrfa | null,
   ): Promise<void> {
+    // P0: se o jogador está preso a sala encaminhada órfã (partida preparada não iniciada/expirada),
+    // limpa a associação antes de tentar criar nova sala — evita JOGADOR_JA_ASSOCIADO fantasma.
+    // A decisão veio de fora da fila; aqui roda só a aplicação revalidada.
+    if (previsao !== null) {
+      await this.aplicarLimpezaOrfa(jogadorId, previsao);
+    }
+
     const salaId = randomUUID();
     const membroId = randomUUID();
 
@@ -384,6 +463,7 @@ export class SalasHandlers {
     socket: AuthenticatedWebSocket,
     jogadorId: string,
     codigoDeSala: string,
+    previa: PreviaEntrada | null,
   ): Promise<void> {
     if (typeof codigoDeSala !== 'string' || codigoDeSala.length === 0) {
       this.enviarErro(
@@ -393,19 +473,7 @@ export class SalasHandlers {
       );
       return;
     }
-
-    let salaId = await this.projecao.obterSalaIdPorCodigo(codigoDeSala);
-    if (salaId === null) {
-      // A projeção é TTL e pode expirar para Salas abertas sem mutações.
-      // O write-model (ADR-0002) é a fonte da verdade: consulta o PG e,
-      // encontrado, cura a chave de código no Redis.
-      const recuperado = await this.repo.obterSalaAbertaPorCodigo(codigoDeSala);
-      if (recuperado !== null) {
-        salaId = recuperado;
-        await this.projecao.definirCodigo(codigoDeSala, recuperado);
-      }
-    }
-    if (salaId === null) {
+    if (previa === null || previa.salaId === null) {
       this.enviarErro(
         socket,
         'SALA_NAO_ENCONTRADA',
@@ -413,13 +481,22 @@ export class SalasHandlers {
       );
       return;
     }
+    const salaId = previa.salaId;
 
+    // Race com INICIAR_PARTIDA enfileirado: a resolução fora da fila pode ter
+    // visto a Sala aberta — re-cheque in-memory que ela continua não-encaminhada.
     if (this.salaEstaEncaminhada(salaId)) {
       this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e não aceita novos membros.');
       return;
     }
 
     const membroId = randomUUID();
+
+    // Limpeza de órfã de outra Sala: decisão veio de fora da fila; aqui roda
+    // só a aplicação revalidada.
+    if (previa.previsao !== null) {
+      await this.aplicarLimpezaOrfa(jogadorId, previa.previsao);
+    }
 
     const resultado = this.estado.aplicar({
       tipo: 'entrar_na_sala',
@@ -469,17 +546,10 @@ export class SalasHandlers {
   private async handleSairDaSala(
     socket: AuthenticatedWebSocket,
     jogadorId: string,
+    previa: PreviaSaida | null,
   ): Promise<void> {
-    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
-    if (salaId === null) {
-      // Fallback inclui 'encaminhada' para retornar SALA_ENCAMINHADA correto (A3)
-      const recuperado = await this.repo.obterSalaAtivaDoJogador(jogadorId);
-      if (recuperado !== null) {
-        salaId = recuperado;
-        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
-      }
-    }
-    if (salaId === null) {
+    if (previa === null) {
+      // Resolução fora da fila não encontrou Sala associada (projeção + PG).
       this.enviarErro(
         socket,
         'MEMBRO_NAO_ENCONTRADO',
@@ -487,13 +557,36 @@ export class SalasHandlers {
       );
       return;
     }
+    const salaId = previa.salaId;
 
     // Capturar codigo para limpar a projeção antes do engine (a referência
     // está no SalasState.abertas e também no Redis).
     const infoSala = this.estado.abertas.get(salaId);
     if (this.salaEstaEncaminhada(salaId)) {
-      this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e sua composição está congelada.');
-      return;
+      if (
+        previa.decisao !== null
+        && (await this.revalidarOrfa(salaId, previa.decisao))
+      ) {
+        // Bypass via engine (review #304 item 6), agora com a aplicação
+        // dentro da fila: órfã revalidada antes, saída pelo engine, associação
+        // limpa por último.
+        if (await this.aplicarBypassOrfa(salaId, jogadorId)) {
+          await this.projecao.limparAssociacaoJogador(jogadorId);
+          return;
+        }
+        // Engine rejeitou (associação obsoleta, sem membro ativo): mesma
+        // resposta de hoje — o resultado do bypass vira ERRO_DA_SALA.
+        const rejeitado = sairDaSalaEncaminhadaNaoIniciada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
+        if (!rejeitado.sucesso) {
+          this.enviarErro(socket, rejeitado.erro.codigo, rejeitado.erro.mensagem);
+          return;
+        }
+      } else {
+        // Decisão inexistente (não-órfã fora da fila) ou revalidação falsa:
+        // fail-closed, como o else do review #304.
+        this.enviarErro(socket, 'SALA_ENCAMINHADA', 'A Sala está encaminhada e sua composição está congelada.');
+        return;
+      }
     }
     const codigoSala = infoSala?.sala.codigo
       ?? (await this.projecao.obterEstadoSala(salaId))?.codigo
@@ -515,19 +608,12 @@ export class SalasHandlers {
     );
     // A sucessão do Anfitrião é gravada no mesmo commit da saída para que a
     // reconstrução do boot (ADR-0002) não restaure um Anfitrião já sucedido.
-    let novoAnfitriaoJogadorId: string | undefined;
     const sucessao = resultado.eventos.find(
       (e) => e.tipo === 'anfitriao_sucedido',
     );
-    if (sucessao?.tipo === 'anfitriao_sucedido') {
-      const salaNova = resultado.estado.salas.find((s) => s.id === salaId);
-      const membroNovo = salaNova?.membros.find(
-        (m) => m.id === sucessao.anfitriaoNovoId,
-      );
-      if (membroNovo !== undefined) {
-        novoAnfitriaoJogadorId = membroNovo.jogadorId;
-      }
-    }
+    const novoAnfitriaoJogadorId = sucessao?.tipo === 'anfitriao_sucedido'
+      ? jogadorNovoAnfitriao(resultado.estado, salaId, sucessao.anfitriaoNovoId)
+      : undefined;
     await this.repo.sairMembroAtomico(
       salaId,
       jogadorId,
@@ -987,6 +1073,9 @@ export class SalasHandlers {
     this.difundir(evs, salaId);
 
     this.encaminhamentosEmVoo.add(salaId);
+    // Relógio do em-voo (ADR-0010, "Órfã sem partidaId"): o instante da oferta
+    // viaja no Redis; se a oferta se perder sem rastro, o teto libera.
+    await marcarEmVoo(this.redis, salaId);
 
     // Construir roster para encaminhamento — ordenar por ordemDeEntrada
     // (composição válida: 2 a 4 Membros ativos; teto garantido pelo engine)
@@ -996,6 +1085,10 @@ export class SalasHandlers {
       .sort((a, b) => a.ordemDeEntrada - b.ordemDeEntrada);
     if (membrosAtivosOrdenados.length < 2 || membrosAtivosOrdenados.length > 4) {
       this.encaminhamentosEmVoo.delete(salaId);
+      // Determinístico (review JF532, item 3): sem fire-and-forget — o marker
+      // não pode sobreviver ao fim do em-voo. `limparEmVoo` engole erro
+      // internamente.
+      await limparEmVoo(this.redis, salaId);
       this.enviarErro(socket, 'ENCAMINHAMENTO_INVALIDO', 'Composição inválida para encaminhamento — esperado de 2 a 4 Membros ativos.');
       return;
     }
@@ -1175,6 +1268,10 @@ export class SalasHandlers {
         }
       } finally {
         this.encaminhamentosEmVoo.delete(salaId);
+        // Determinístico (review JF532, item 3): o marker do em-voo é limpo
+        // antes do fim da mutação — sem fire-and-forget. `limparEmVoo` engole
+        // erro internamente.
+        await limparEmVoo(this.redis, salaId);
       }
     });
   }
@@ -1199,6 +1296,303 @@ export class SalasHandlers {
     } catch (e) {
       console.error(`[salas] falha ao cancelar partida ${partidaId}`, e);
     }
+  }
+
+  // Garante a sala `encaminhada` no engine para o bypass (review #304, item
+  // 2): memória primeiro; pós-restart ou perda de projeção, o PG decide e a
+  // sala é hidratada sob demanda — o fallback de órfã não pode depender só
+  // de `abertas`.
+  private async garantirSalaEncaminhadaNoEngine(salaId: string): Promise<boolean> {
+    const info = this.estado.abertas.get(salaId);
+    if (info !== undefined) {
+      return info.sala.estado === 'encaminhada';
+    }
+    const bruta = await this.repo.obterSalaBruta(salaId).catch(() => null);
+    if (bruta === null || bruta.status !== 'encaminhada') {
+      return false;
+    }
+    await this.estado.hidratarSala(this.repo, salaId);
+    return true;
+  }
+
+  // Órfã = chave ausente ou preparada com todos em_reconexao. Parcial libera só no teto 90s do game-server (#222).
+  private async partidaDaSalaEstaOrfa(salaId: string): Promise<boolean> {
+    return (await this.resolverDecisaoOrfa(salaId)).orfa;
+  }
+
+  // Decisão completa de orfandade, FORA da fila (review JF532, item 1):
+  // extração fiel de `partidaDaSalaEstaOrfa`, sem mutação — PG
+  // (`obterSalaBruta`) → projeção → `obterEncaminhamento` → exists/ttl/get.
+  // Sem partida nas 3 fontes, o relógio do em-voo decide (review #304, item 3;
+  // ADR-0010). Fail-closed em erro de I/O: `{ orfa: false }`.
+  private async resolverDecisaoOrfa(salaId: string): Promise<DecisaoOrfa> {
+    try {
+      const bruta = await this.repo.obterSalaBruta(salaId);
+      let partidaId: string | null | undefined = bruta?.partidaId ?? null;
+      if (!partidaId) {
+        const proj = await this.projecao.obterEstadoSala(salaId);
+        partidaId = proj?.encaminhamento?.partidaId ?? null;
+      }
+      if (!partidaId) {
+        // Fail-closed: sem partida nas duas primeiras fontes, consulta a
+        // terceira (encaminhamento persistido) antes de liberar. Sem partida
+        // nas 3, o relógio do em-voo decide (review #304, item 3; ADR-0010):
+        // marker com idade acima do teto libera a órfã sem rastro; marker
+        // novo mantém a presa (a admissão ainda pode completar); sem marker
+        // (órfã anterior ao deploy) segue até a expiração.
+        const encaminhado = await this.repo.obterEncaminhamento(salaId).catch(() => null);
+        if (encaminhado === null) {
+          const idade = await idadeDoEmVoo(this.redis, salaId);
+          if (idade !== null && idade > this.tetoNaoInicioMs) {
+            console.warn('[salas] sala sem partida nas 3 fontes liberada pelo relógio do em-voo', { salaId, idadeMs: idade });
+            return { orfa: true, partidaId: null };
+          }
+          console.warn('[salas] sala sem partida nas 3 fontes; mantida até expiração', { salaId });
+          return { orfa: false, partidaId: null };
+        }
+        partidaId = encaminhado.partidaId;
+      }
+      const chave = `${GAME_SERVERS_PARTIDA_PREFIXO}${partidaId}`;
+      const existe = await this.redis.exists(chave);
+      if (existe === 1) {
+        const ttl = await this.redis.ttl(chave);
+        if (ttl === -1) return { orfa: false, partidaId };
+        try {
+          const raw = await this.redis.get(chave);
+          if (raw !== null) {
+            const partida = JSON.parse(raw) as { estado?: string; roster?: Array<{ presenca?: string }> };
+            if (partida.estado === 'preparada' && Array.isArray(partida.roster) && partida.roster.length > 0 && partida.roster.every((m) => m.presenca === 'em_reconexao')) {
+              return { orfa: true, partidaId };
+            }
+          }
+        } catch {}
+        return { orfa: false, partidaId };
+      }
+      return { orfa: true, partidaId };
+    } catch {
+      return { orfa: false, partidaId: null };
+    }
+  }
+
+  // Revalidação quente DENTRO da fila (review JF532, item 1): barata —
+  // in-memory + ≤2 RTTs Redis. Erro de I/O ⇒ false (fail-closed, como o
+  // catch da decisão). Sala presente na memória e não-encaminhada contradiz a
+  // decisão (reaberta pelo retorno, encerrada...); sala ausente da memória
+  // não contradiz — pós-restart o PG decide em `garantirSalaEncaminhadaNoEngine`.
+  // Com partidaId: `exists` + `get` (libera só se ausente, ou `preparada` com
+  // todo o roster em `em_reconexao`); sem partidaId: 1 `get` do marker do
+  // em-voo contra o teto.
+  private async revalidarOrfa(salaId: string, decisao: DecisaoOrfa): Promise<boolean> {
+    try {
+      const info = this.estado.abertas.get(salaId);
+      if (info !== undefined && info.sala.estado !== 'encaminhada') {
+        return false;
+      }
+      if (this.encaminhamentosEmVoo.has(salaId)) {
+        return false;
+      }
+      if (decisao.partidaId !== null) {
+        const chave = `${GAME_SERVERS_PARTIDA_PREFIXO}${decisao.partidaId}`;
+        const existe = await this.redis.exists(chave);
+        if (existe !== 1) {
+          return true;
+        }
+        const raw = await this.redis.get(chave);
+        if (raw === null) {
+          return true;
+        }
+        const partida = JSON.parse(raw) as { estado?: string; roster?: Array<{ presenca?: string }> };
+        return partida.estado === 'preparada'
+          && Array.isArray(partida.roster)
+          && partida.roster.length > 0
+          && partida.roster.every((m) => m.presenca === 'em_reconexao');
+      }
+      const idade = await idadeDoEmVoo(this.redis, salaId);
+      return idade !== null && idade > this.tetoNaoInicioMs;
+    } catch {
+      return false;
+    }
+  }
+
+  // Previsão da limpeza de órfã FORA da fila (review JF532, item 1): somente
+  // leitura — resolve a associação do jogador (projeção → fallback PG) e,
+  // quando a Sala candidata está encaminhada, congela a decisão de orfandade.
+  // `null` ⇒ nada a limpar. Ramo "associação em outra Sala" (ENTRAR, com
+  // `salaIdAlvo`) e ramo "associação própria" (CRIAR/SAIR, sem alvo);
+  // fast-path: associação nula ou Sala não-encaminhada custa 1-2 I/Os.
+  private async preverLimpezaOrfa(
+    jogadorId: string,
+    salaIdAlvo?: string,
+  ): Promise<PrevisaoLimpezaOrfa | null> {
+    const associacaoExistente = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaIdAlvo !== undefined) {
+      // ENTRAR: nunca mexe na associação para a própria Sala-alvo.
+      if (associacaoExistente !== null && associacaoExistente !== salaIdAlvo) {
+        // Ramo A (in-memory): associação aponta para outra Sala encaminhada.
+        if (!this.salaEstaEncaminhada(associacaoExistente)) {
+          return null;
+        }
+        const decisao = await this.resolverDecisaoOrfa(associacaoExistente);
+        return decisao.orfa ? { salaId: associacaoExistente, decisao } : null;
+      }
+      if (associacaoExistente !== null) {
+        return null;
+      }
+    }
+    if (associacaoExistente === null) {
+      // Ramo B: fallback PG (review #304, item 2) — a memória pode não ter a
+      // sala (pós-restart/perda de projeção), o PG decide. Mesma ordem do
+      // bypass antigo: órfã confirmada antes da hidratação, para não fabricar
+      // presença de sala não-órfã.
+      const pgSala = await this.repo.obterSalaAtivaDoJogador(jogadorId);
+      if (pgSala === null || (salaIdAlvo !== undefined && pgSala === salaIdAlvo)) {
+        return null;
+      }
+      if (!(await this.salaEstaEncaminhadaNoPg(pgSala))) {
+        return null;
+      }
+      const decisao = await this.resolverDecisaoOrfa(pgSala);
+      return decisao.orfa ? { salaId: pgSala, decisao } : null;
+    }
+    // Associação própria (CRIAR).
+    if (!(await this.salaEstaEncaminhadaNoPg(associacaoExistente))) {
+      return null;
+    }
+    const decisao = await this.resolverDecisaoOrfa(associacaoExistente);
+    return decisao.orfa ? { salaId: associacaoExistente, decisao } : null;
+  }
+
+  // Aplicação DENTRO da fila (review JF532, item 1): re-ler a associação
+  // (1 GET — aborta se o jogador divergiu para outra Sala entre a decisão e a
+  // mutação), revalidar a órfã (fail-closed), e só então
+  // `garantirSalaEncaminhadaNoEngine` → `aplicarBypassOrfa` → limpar
+  // associação — mesma ordem de hoje (órfã confirmada antes de hidratar;
+  // associação limpa por último, review #304, item 6).
+  private async aplicarLimpezaOrfa(
+    jogadorId: string,
+    previsao: PrevisaoLimpezaOrfa,
+  ): Promise<boolean> {
+    const atual = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (atual !== null && atual !== previsao.salaId) {
+      return false;
+    }
+    if (!(await this.revalidarOrfa(previsao.salaId, previsao.decisao))) {
+      return false;
+    }
+    if (!(await this.garantirSalaEncaminhadaNoEngine(previsao.salaId))) {
+      return false;
+    }
+    // O engine decide primeiro; a limpeza da associação acontece depois, para
+    // não deixar membro ativo na memória/PG com a projeção já apagada.
+    await this.aplicarBypassOrfa(previsao.salaId, jogadorId);
+    await this.projecao.limparAssociacaoJogador(jogadorId);
+    return true;
+  }
+
+  // Estado encaminhado fora da memória: in-memory primeiro; pós-restart, o PG
+  // bruto decide (mesma fonte de `garantirSalaEncaminhadaNoEngine`).
+  private async salaEstaEncaminhadaNoPg(salaId: string): Promise<boolean> {
+    const info = this.estado.abertas.get(salaId);
+    if (info !== undefined) {
+      return info.sala.estado === 'encaminhada';
+    }
+    const bruta = await this.repo.obterSalaBruta(salaId).catch(() => null);
+    return bruta?.status === 'encaminhada';
+  }
+
+  // SAIR fora da fila (review JF532, item 1): resolução de salaId (projeção →
+  // PG com write idempotente de projeção — precedentes:
+  // `tratarReconexaoSeNecessario`) + decisão de órfã quando a Sala está
+  // encaminhada. A revalidação e o bypass rodam dentro da fila, no handler.
+  private async preverSaidaComOrfa(jogadorId: string): Promise<PreviaSaida | null> {
+    let salaId = await this.projecao.obterAssociacaoJogador(jogadorId);
+    if (salaId === null) {
+      // Fallback inclui 'encaminhada' para retornar SALA_ENCAMINHADA correto (A3)
+      const recuperado = await this.repo.obterSalaAtivaDoJogador(jogadorId);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirAssociacaoJogador(jogadorId, recuperado);
+      }
+    }
+    if (salaId === null) {
+      return null;
+    }
+    if (!this.salaEstaEncaminhada(salaId)) {
+      return { salaId, decisao: null };
+    }
+    const decisao = await this.resolverDecisaoOrfa(salaId);
+    return { salaId, decisao: decisao.orfa ? decisao : null };
+  }
+
+  // ENTRAR fora da fila (review JF532, item 1): resolução código→salaId
+  // (projeção → PG com write idempotente de projeção — precedentes:
+  // `tratarReconexaoSeNecessario`) e previsão da limpeza de órfã de outra
+  // Sala. O handler re-checa in-memory que a sala-alvo continua
+  // não-encaminhada (race com INICIAR_PARTIDA enfileirado).
+  private async preverEntradaComOrfa(
+    jogadorId: string,
+    codigoDeSala: unknown,
+  ): Promise<PreviaEntrada> {
+    if (typeof codigoDeSala !== 'string' || codigoDeSala.length === 0) {
+      return { salaId: null, previsao: null };
+    }
+    let salaId = await this.projecao.obterSalaIdPorCodigo(codigoDeSala);
+    if (salaId === null) {
+      // A projeção é TTL e pode expirar para Salas abertas sem mutações.
+      // O write-model (ADR-0002) é a fonte da verdade: consulta o PG e,
+      // encontrado, cura a chave de código no Redis.
+      const recuperado = await this.repo.obterSalaAbertaPorCodigo(codigoDeSala);
+      if (recuperado !== null) {
+        salaId = recuperado;
+        await this.projecao.definirCodigo(codigoDeSala, recuperado);
+      }
+    }
+    if (salaId === null) {
+      return { salaId: null, previsao: null };
+    }
+    if (this.salaEstaEncaminhada(salaId)) {
+      // Fast-path: sala-alvo já encaminhada não aceita entrada (o handler
+      // responde SALA_ENCAMINHADA) e a limpeza de outra Sala é irrelevante.
+      return { salaId, previsao: null };
+    }
+    return { salaId, previsao: await this.preverLimpezaOrfa(jogadorId, salaId) };
+  }
+
+  // Saída via bypass do engine (sala `encaminhada` com partida não iniciada):
+  // espelha a parte pós-sucesso do handleSairDaSala — PG (com sucessão do
+  // Anfitrião no mesmo commit), estado em memória, projeção e broadcast. Se o
+  // engine rejeitar (associação obsoleta sem membro ativo), nada é mutado —
+  // devolve false e a limpeza da associação fica a cargo do chamador.
+  private async aplicarBypassOrfa(salaId: string, jogadorId: string): Promise<boolean> {
+    const res = sairDaSalaEncaminhadaNaoIniciada(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
+    if (!res.sucesso) {
+      console.warn('[salas] bypass de sala orfa rejeitado pelo engine', { salaId, jogadorId, codigo: res.erro.codigo });
+      return false;
+    }
+    const salaEncerrada = res.eventos.some((e) => e.tipo === 'sala_encerrada');
+    const sucessao = res.eventos.find(
+      (e) => e.tipo === 'anfitriao_sucedido',
+    );
+    const novoAnfitriaoJogadorId = sucessao?.tipo === 'anfitriao_sucedido'
+      ? jogadorNovoAnfitriao(res.estado, salaId, sucessao.anfitriaoNovoId)
+      : undefined;
+    await this.repo.sairMembroAtomico(salaId, jogadorId, 'saida', salaEncerrada, novoAnfitriaoJogadorId);
+    const codigoPre = this.estado.abertas.get(salaId)?.sala.codigo ?? null;
+    this.estado.substituirEstado(res.estado);
+    if (salaEncerrada) {
+      if (codigoPre !== null) {
+        await this.projecao.limparSala(salaId, codigoPre);
+      }
+      this.estado.abertas.delete(salaId);
+    } else {
+      await this.atualizarProjecaoEstado(res.estado, salaId);
+    }
+    const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+    this.difundir(eventos, salaId);
+    // Remoção por jogador (review JF532, O3): o bypass só tem o `jogadorId` —
+    // sem cast no-op de socket falso.
+    this.broadcast.removerSocketPorJogadorId(jogadorId);
+    return true;
   }
 
   private salaEstaEncaminhada(salaId: string): boolean {

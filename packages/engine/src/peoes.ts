@@ -72,7 +72,7 @@ const ROTACAO_HORARIA_DA_BORDA: Record<BordaCardinal, BordaCardinal> = {
   oeste: 'norte',
 };
 
-const BORDA_OPOSTA: Record<BordaCardinal, BordaCardinal> = {
+export const BORDA_OPOSTA: Record<BordaCardinal, BordaCardinal> = {
   norte: 'sul',
   sul: 'norte',
   leste: 'oeste',
@@ -97,6 +97,18 @@ export function bordasAbertas(
     bordas = bordas.map((borda) => ROTACAO_HORARIA_DA_BORDA[borda]);
   }
   return ORDEM_CANONICA_DAS_BORDAS.filter((borda) => bordas.includes(borda));
+}
+
+// Conexão do Encaixe (issue #311): uma Peça Recebida só encaixa conectada à
+// Peça sob o Peão — a borda da Recebida voltada àquela Peça (o oposto da vaga
+// escolhida) precisa estar aberta. Especiais e Monstros têm as 4 bordas
+// abertas, então sempre conectam (r = resposta true sem ramo especial).
+export function conectaNaVaga(
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  vaga: BordaCardinal,
+): boolean {
+  return bordasAbertas({ tipo, orientacao }).includes(BORDA_OPOSTA[vaga]);
 }
 
 // Monstros (ST-15 / issue #169): categoria própria de peça da Caixa — não
@@ -499,6 +511,22 @@ export function escolherVagaDaPecaRecebida(
     );
   }
 
+  // Anti-softlock (issue #311): a escolha de vaga é sequencial POR encaixe —
+  // com outra Recebida já com vaga escolhida e ainda não encaixada, escolher
+  // nova vaga trava a partida (a Recebida com vaga não pode mais ser
+  // re-selecionada nem ter a vaga redeslocada). Encaixe-a antes.
+  if (
+    estado.recebidas.some(
+      (item) =>
+        item.recebidaId !== recebida.recebidaId && item.vaga !== null,
+    )
+  ) {
+    return rejeitar(
+      'PENDENCIA_NAO_RESOLVIDA',
+      'Já há uma Peça Recebida com vaga escolhida ainda não encaixada; encaixe-a antes de escolher a vaga de outra.',
+    );
+  }
+
   // A vaga deriva da Peça sob o Peão selecionado: é dela que as bordas
   // abertas com célula vizinha vazia são calculadas.
   const peao = estado.peoes.find(
@@ -706,14 +734,15 @@ export function permanecer(
 }
 
 // Encaixe de Peça Recebida: a célula é fixa (a célula-alvo derivada da vaga
-// escolhida), com Orientação livre e SEM exigência de conexão com a Peça
-// geradora (ST-10). A Recebida sai da lista de pendências e a janela de
-// Manipulação da ST-09 abre como em qualquer Encaixe — girar a peça
-// posicionada vai pela janela, sem consultar a seleção. A seleção é limpa no
-// encaixe; a próxima escolha de vaga seleciona a próxima Recebida. Exceção
-// (ST-12 / issue #142 e ST-15 / issue #169): Peças Especiais e Monstros NÃO
-// abrem janela de Manipulação — pecaEmManipulacaoId permanece null no novo
-// estado.
+// escolhida) e o encaixe exige conexão com a Peça sob o Peão (issue #311): a
+// borda da Recebida voltada à Peça geradora precisa estar aberta — sem
+// conexão, o encaixe é rejeitado (MOVIMENTO_NAO_CONECTADO). A Recebida sai da
+// lista de pendências e a janela de Manipulação da ST-09 abre como em qualquer
+// Encaixe — girar a peça posicionada vai pela janela, sem consultar a seleção.
+// A seleção é limpa no encaixe; a próxima escolha de vaga seleciona a próxima
+// Recebida. Exceção (ST-12 / issue #142 e ST-15 / issue #169): Peças Especiais
+// e Monstros NÃO abrem janela de Manipulação — pecaEmManipulacaoId permanece
+// null no novo estado.
 export function posicionarRecebida(
   estado: EstadoDoTabuleiro,
   recebida: PecaRecebida,
@@ -743,6 +772,33 @@ export function posicionarRecebida(
     return rejeitar(
       'PECA_FORA_DO_ALVO',
       'A Peça Recebida só pode ser posicionada na célula-alvo da borda que a gerou.',
+    );
+  }
+
+  // A conexão deriva da Peça sob o Peão selecionado: é dela que a vaga foi
+  // gerada e é a ela que a Recebida precisa estar conectada (mesmo padrão de
+  // escolherVagaDaPecaRecebida). Peça ausente é defensiva — inalcançável com
+  // vaga válida, pois a vaga só existe a partir da Peça sob o Peão.
+  const peao = estado.peoes.find(
+    (item) => item.peaoId === estado.peaoSelecionadoId,
+  );
+  const pecaSobOPeao = peao?.pecaId
+    ? encontrarPosicionada(estado, peao.pecaId)
+    : undefined;
+  if (!pecaSobOPeao) {
+    return rejeitar(
+      'DADOS_INVALIDOS',
+      'O Peão selecionado não está sobre uma Peça; não há peça geradora da vaga.',
+    );
+  }
+
+  // Encaixe só conectado (issue #311): a borda da Recebida voltada à Peça sob
+  // o Peão (o oposto da vaga) precisa estar aberta. Especiais e Monstros têm
+  // as 4 bordas abertas e sempre conectam.
+  if (!conectaNaVaga(recebida.tipo, recebida.orientacao, recebida.vaga)) {
+    return rejeitar(
+      'MOVIMENTO_NAO_CONECTADO',
+      'A Peça Recebida só encaixa conectada à Peça sob o Peão: a borda voltada a ela precisa estar aberta.',
     );
   }
 
