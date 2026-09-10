@@ -77,9 +77,10 @@ function cookieHeader(cookies: Cookies): string {
 }
 
 import { pool } from '../config/pg.ts';
+import { redisClient } from '../config/redis.ts';
 import { criarSessao } from '../sessoes.ts';
 import { assinarAccess, assinarRefresh } from '../jwt.ts';
-import { getConfig, assinarBotToken } from '@flicker/config';
+import { getConfig, assinarBotToken, chaveGameServer } from '@flicker/config';
 
 // TTL de 2 horas para contas de bot no banco
 const BOT_DB_TTL_HOURS = 2;
@@ -222,23 +223,48 @@ async function executarBotEmBackground(args: {
             log(`PARTIDA_DISPONIVEL partida=${d.partidaId} server=${d.serverId}`);
             if (!partidaConectada) {
               partidaConectada = true;
-              // Fase 2: assina Bot Service Token temporário dedicado para a partida
-              const { jwtSecret } = getConfig();
-              const botToken = assinarBotToken(
-                { jogadorId: jogador.id, apelido: jogador.apelido, partidaId: d.partidaId },
-                jwtSecret,
-              );
-              const wsGame = conectarPartida({
-                wsBase: wsBase.replace('ws://localhost:', 'ws://127.0.0.1:').replace('ws://localhost/', 'ws://127.0.0.1/') || wsBase,
-                serverId: d.serverId,
-                partidaId: d.partidaId,
-                accessToken: botToken,
-                jogadorId: jogador.id,
-                apelido: jogador.apelido,
-                log,
-                onClose: resolve,
-              });
-              sockets.push(wsGame);
+              void (async () => {
+                // Fase 2: assina Bot Service Token temporário dedicado para a partida
+                const config = getConfig();
+                const botToken = assinarBotToken(
+                  { jogadorId: jogador.id, apelido: jogador.apelido, partidaId: d.partidaId },
+                  config.jwtSecret,
+                );
+
+                // Descobre a URL do game-server via Redis ou fallback no config
+                let gameServerWsBase: string | undefined;
+                try {
+                  const rawServer = await redisClient.get(chaveGameServer(d.serverId));
+                  if (rawServer) {
+                    const parsed = JSON.parse(rawServer) as { url?: string; host?: string; port?: number };
+                    if (parsed.url) {
+                      gameServerWsBase = parsed.url.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+                    } else if (parsed.host && parsed.port) {
+                      gameServerWsBase = `ws://${parsed.host}:${parsed.port}`;
+                    }
+                  }
+                } catch (err) {
+                  log(`erro ao consultar registro do game-server no redis: ${(err as Error).message}`);
+                }
+
+                if (!gameServerWsBase) {
+                  const host = config.gameServerAdvertiseHost || '127.0.0.1';
+                  const port = config.gameServerPort || 1234;
+                  gameServerWsBase = `ws://${host}:${port}`;
+                }
+
+                const wsGame = conectarPartida({
+                  wsBase: gameServerWsBase,
+                  serverId: d.serverId,
+                  partidaId: d.partidaId,
+                  accessToken: botToken,
+                  jogadorId: jogador.id,
+                  apelido: jogador.apelido,
+                  log,
+                  onClose: resolve,
+                });
+                sockets.push(wsGame);
+              })();
             }
           } else if (t === 'PARTIDA_RECUSADA' || t === 'PARTIDA_FALHOU') {
             log(`${t} ${JSON.stringify(msg).slice(0, 200)}`);

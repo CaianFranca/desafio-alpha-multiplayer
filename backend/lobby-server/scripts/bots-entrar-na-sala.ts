@@ -190,7 +190,7 @@ function gerarCredenciaisEfemeras(): JogadorCredenciais {
   // apelido: 3–20 chars, só [a-z0-9-], único.
   // senha: 16 chars base64url (sempre >= 8, sem espaços).
   const uniq = `${Date.now().toString(36)}${randomBytes(6).toString('hex')}`.toLowerCase();
-  const email = `bot-${uniq}@exemplo.local`;
+  const email = `bot-${uniq}@bot.teste`;
   const apelido = `b-${Date.now().toString(36).slice(-4)}-${randomBytes(3).toString('hex')}`.toLowerCase().slice(0, 20);
   const senha = randomBytes(12).toString('base64url');
   return { email, senha, apelido };
