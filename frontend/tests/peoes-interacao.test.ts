@@ -18,6 +18,7 @@ import {
   peaoSobreAMesa,
   podeSelecionarPeao,
   puxadaVigenteNaBandeja,
+  recebidaConectaNaVaga,
   rotearCliqueDeCelula,
   vagasDisponiveisDoPeao,
 } from '../web/src/game/tabuleiro/interacaoPeoes'
@@ -27,6 +28,7 @@ import { chaveDeComandoPendente, consumirAck } from '../web/src/game/tabuleiro/p
 import { motivoDeRecusaDoEvento } from '../web/src/components/partida/somDeRecusa'
 import type { EventoDoCanalDaPartida } from '../web/src/hooks/usePartidaWebSocket'
 import type { Celula, PecaPosicionada, PeaoDaExibicao } from '../web/src/game/tabuleiro/contrato'
+import { giroAlteraConexao } from '../web/src/game/tabuleiro/contrato'
 import { criarEstadoExibicaoMock } from './helpers/mockExibicao'
 import type { EstadoInteracaoTabuleiro } from '../web/src/game/tabuleiro/interacao'
 import type { BordaCardinal, ErroDoTabuleiroEvento } from '@flicker/shared'
@@ -780,14 +782,58 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     })
   })
 
+  it('reta em vaga não conectada emite SÓ a escolha — o encaixe imediato seria recusado (review PR #338)', () => {
+    // reta@0 (norte/sul) na vaga leste: o engine recusaria o POSICIONAR com
+    // MOVIMENTO_NAO_CONECTADO, mas aceitaria a escolha — o jogador gira
+    // (R/E) e clica a célula-alvo para encaixar (fluxo 2 cliques).
+    const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
+      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'leste' },
+    })
+  })
+
+  it('cruz conecta em qualquer vaga — clique único escolhe E encaixa (review PR #338)', () => {
+    const estado = estadoComPendencias({
+      recebidasPendentes: [
+        pendencia('r1', 'cruz-1', 'cruz', null, null),
+      ],
+      recebidaPuxadaId: 'r1',
+    })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
+      escolhaDeVagaEEncaixe: {
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'leste' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 'cruz-1', celula: VAGA_LESTE },
+      },
+    })
+  })
+
+  it('recebidaConectaNaVaga espelha o engine (reta/T/cruz)', () => {
+    expect(recebidaConectaNaVaga('reta', 0, 'norte')).toBe(true)
+    expect(recebidaConectaNaVaga('reta', 0, 'leste')).toBe(false)
+    expect(recebidaConectaNaVaga('reta', 90, 'leste')).toBe(true)
+    expect(recebidaConectaNaVaga('T', 0, 'leste')).toBe(true)
+    expect(recebidaConectaNaVaga('cruz', 0, 'leste')).toBe(true)
+    expect(recebidaConectaNaVaga('cruz', 90, 'norte')).toBe(true)
+  })
+
+  it('giroAlteraConexao: cruz é redundante, demais caminhos giram (review PR #338)', () => {
+    expect(giroAlteraConexao('cruz')).toBe(false)
+    expect(giroAlteraConexao('reta')).toBe(true)
+    expect(giroAlteraConexao('T')).toBe(true)
+    expect(giroAlteraConexao('inicial')).toBe(true)
+  })
+
   it('a vaga segue a puxada, não a ordem da lista (sem "primeira sem vaga" automática)', () => {
     // As duas pendências estão sem vaga; a puxada é r2. O roteador contempla
     // R2 — a regra antiga (primeira da lista) morreria aqui com r1.
+    // VAGA_LESTE: T@0 tem oeste aberto (oposto de leste) — conecta, então o
+    // clique único escolhe E encaixa (vaga norte não conectaria T@0, que não
+    // tem sul aberto — gate de conexão do review PR #338).
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r2' })
-    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toEqual({
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
       escolhaDeVagaEEncaixe: {
-        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'norte' },
-        encaixe: { type: 'POSICIONAR_PECA', pecaId: 't-1', celula: VAGA_NORTE },
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 't-1', celula: VAGA_LESTE },
       },
     })
   })

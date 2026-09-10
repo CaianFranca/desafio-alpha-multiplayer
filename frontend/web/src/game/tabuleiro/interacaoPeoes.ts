@@ -61,6 +61,7 @@ import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao
 import type { EstadoInteracaoTabuleiro } from './interacao'
 import {
   bordasAbertas,
+  bordaOposta,
   chaveCelula,
   destinosConectadosDoPeao,
   encontrarPecaNaCelula,
@@ -388,6 +389,21 @@ export function vagasDisponiveisDoPeao(
   return vagas
 }
 
+/**
+ * Conexão do encaixe no cliente (espelha `conectaNaVaga` do engine,
+ * packages/engine/src/peoes.ts:106): a borda da Recebida voltada à Peça sob
+ * o Peão (o oposto da vaga) precisa estar aberta na orientação atual
+ * (composição da Caixa = 0; PECA_GIRADA atualiza `orientacao` da pendência).
+ * Peças de 4 bordas (cruz/especiais/monstros) sempre conectam.
+ */
+export function recebidaConectaNaVaga(
+  tipo: Pick<PecaPosicionada, 'tipo'>['tipo'],
+  orientacao: Orientacao,
+  vaga: BordaCardinal,
+): boolean {
+  return bordasAbertas({ tipo, orientacao }).includes(bordaOposta(vaga))
+}
+
 export function mapearEscolhaDeVagaDaRecebida(
   estado: EstadoInteracaoPeoes,
   recebidaId: string,
@@ -647,10 +663,13 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *   - célula = vaga disponível E há pendência PUXADA sem vaga →
  *     ESCOLHER_VAGA + encaixe imediato (POSICIONAR_PECA na célula da vaga)
  *     para a recebida puxada — issue #261: UM clique na vaga seleciona E
- *     encaixa (2 comandos em sequência na mesma conexão, processados em
- *     ordem pela cadeia serial do servidor); fluxo #143/revisão #199: a vaga
- *     vai para a peça puxada da bandeja — sem puxada ativa, ou com a puxada
- *     já encaminhada, o clique de vaga é silencioso.
+  *     encaixa (2 comandos em sequência na mesma conexão, processados em
+  *     ordem pela cadeia serial do servidor); fluxo #143/revisão #199: a vaga
+  *     vai para a peça puxada da bandeja — sem puxada ativa, ou com a puxada
+  *     já encaminhada, o clique de vaga é silencioso. Gate de conexão
+  *     (review PR #338): sem a borda voltada à geradora aberta (ex.: reta@0
+  *     em vaga leste), emite SÓ a escolha — o encaixe imediato seria
+  *     recusado com MOVIMENTO_NAO_CONECTADO.
  *   - célula = célula-alvo de pendência com pendência.pecaId ===
  *     pecaSelecionadaId → POSICIONAR_PECA (encaixe; coerência tripla:
  *     célula-alvo + vaga escolhida + peça em foco).
@@ -701,17 +720,32 @@ export function rotearCliqueDeCelula(
           // issue #261: UM clique na vaga escolhe E já encaixa a peça —
           // ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido de POSICIONAR_PECA; a
           // cadeia serial do servidor processa a sequência em ordem.
+          // Gate de conexão (review PR #338): a reta@0 numa vaga leste, por
+          // exemplo, seria recusada com MOVIMENTO_NAO_CONECTADO (o engine
+          // exige a borda voltada à geradora aberta) — a escolha seria
+          // aceita mas o encaixe não, deixando a pendência com vaga sem
+          // peça posicionada ("não aparece e trava"). Sem conexão, emite
+          // SÓ a escolha: o jogador gira (R/E) e clica a célula-alvo.
           if (comando) {
-            return {
-              escolhaDeVagaEEncaixe: {
-                escolhaDeVaga: comando,
-                encaixe: {
-                  type: 'POSICIONAR_PECA',
-                  pecaId: alvo.pecaId,
-                  celula: vaga.celula,
+            if (
+              recebidaConectaNaVaga(
+                alvo.tipoDaPeca,
+                alvo.orientacao ?? 0,
+                vaga.borda,
+              )
+            ) {
+              return {
+                escolhaDeVagaEEncaixe: {
+                  escolhaDeVaga: comando,
+                  encaixe: {
+                    type: 'POSICIONAR_PECA',
+                    pecaId: alvo.pecaId,
+                    celula: vaga.celula,
+                  },
                 },
-              },
+              }
             }
+            return { ciclo: comando }
           }
         }
         return null

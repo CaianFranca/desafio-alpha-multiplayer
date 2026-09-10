@@ -385,6 +385,20 @@ const BORDA_OPOSTA: Record<BordaCardinal, BordaCardinal> = {
   oeste: 'leste',
 }
 
+/** Borda voltada à peça geradora (oposto da vaga escolhida — espelha `BORDA_OPOSTA` do engine). */
+export function bordaOposta(borda: BordaCardinal): BordaCardinal {
+  return BORDA_OPOSTA[borda]
+}
+
+/**
+ * O giro altera a conectividade deste tipo? A `cruz` (4 caminhos) tem as 4
+ * bordas abertas em qualquer orientação — girar é redundante (review PR
+ * #338). Os demais tipos de caminho mudam as bordas voltadas à geradora.
+ */
+export function giroAlteraConexao(tipo: TipoDaPeca): boolean {
+  return tipo !== 'cruz'
+}
+
 // Deslocamento idêntico ao engine: norte {linha:-1}, leste {coluna:+1},
 // sul {linha:+1}, oeste {coluna:-1}.
 const DESLOCAMENTO_DA_BORDA: Record<BordaCardinal, Celula> = {
