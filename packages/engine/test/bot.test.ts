@@ -395,16 +395,14 @@ test('subfase (b): após escolher a vaga, o encaixe é serial (sem nova escolha)
   assert.ok(primeira);
   estado = aplicar(estado, escolherVaga(primeira.recebidaId, 'norte'), 'ana');
   const acoes = acoesValidasDaSubfase(estado, 'ana');
-  // Enquanto a primeira aguarda o encaixe, não se escolhe a vaga de outra:
-  // o giro da expansão encontra pecaSelecionadaId == pecaId.
-  assert.ok(acoes.length > 0);
-  assert.ok(
-    acoes.every(
-      (acao) =>
-        acao.tipo === 'posicionar_peca' &&
-        acao.pecaId === primeira.pecaId,
-    ),
+  // Guard canônico espelhado (#311): com a fixada pendente, a engine rejeita
+  // escolher_vaga de outra pendência (PENDENCIA_NAO_RESOLVIDA) — a FSM
+  // enumera apenas o encaixe conectado dela ou, se a vaga não conecta na
+  // orientação sorteada, o giro que abre a borda voltada à geradora (#349).
+  const fixada = estado.tabuleiro.recebidas.find(
+    (item) => item.recebidaId === primeira.recebidaId,
   );
+  assert.ok(acoes.length > 0);
   assert.ok(fixada && fixada.vaga !== null && fixada.celulaAlvo !== null);
   if (conectaNaVaga(fixada.tipo, fixada.orientacao, fixada.vaga)) {
     assert.deepEqual(acoes, [

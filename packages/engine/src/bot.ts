@@ -63,6 +63,7 @@ import {
   type SentidoDeRotacao,
   type TipoDaPeca,
 } from './tabuleiro.ts';
+import { conectaNaVaga } from './peoes.ts';
 import {
   aplicarComandoDePartida,
   type ComandoDePartida,
@@ -454,24 +455,6 @@ export function acoesValidasDaSubfase(
           });
         }
         continue;
-      }
-      const vagas = vagasDisponiveis(
-        tabuleiro,
-        pecaSobOPeao,
-        tabuleiro.recebidas,
-      );
-      let vagasElegiveis: typeof vagas;
-      if (recebida.celulaAlvo !== null) {
-        // Encaixe sempre enumerado (issue #311 preservada via expansão): a
-        // conexão com a geradora é garantida pelo expandirPosicionamentoDoBot,
-        // que precede o posicionar sorteado com os girar_peca necessários. O
-        // portão conectaNaVaga aqui estrandaria o turno — a orientação de
-        // nascimento raramente conecta e só a expansão a corrige.
-        acoes.push({
-          tipo: 'posicionar_peca',
-          pecaId: recebida.pecaId,
-          celula: recebida.celulaAlvo,
-        });
       }
     }
     return acoes;
