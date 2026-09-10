@@ -25,14 +25,18 @@ const INICIAIS_4 = [
 /**
  * União do merge feat/random-walk × origin/main: o campo foi renomeado
  * `quantidadeDeJogadores` → `quantidadeParaLayout`. Lê ambos para cobrir
- * as duas pontas até a fonte convergir.
+ * as duas pontas até a fonte convergir. `??` não serve: `quantidadeParaLayout`
+ * é `number | null` (reducao.ts:223) e `null ?? x` cairia no campo antigo —
+ * presente só quando presente.
  */
 function quantidadeDeLayout(estado: unknown): unknown {
   const e = estado as unknown as {
     quantidadeParaLayout?: unknown
     quantidadeDeJogadores?: unknown
   }
-  return e.quantidadeParaLayout ?? e.quantidadeDeJogadores
+  return e.quantidadeParaLayout !== undefined
+    ? e.quantidadeParaLayout
+    : e.quantidadeDeJogadores
 }
 
 describe('aplicarSnapshot com roster N=2..4 (#284)', () => {
