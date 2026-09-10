@@ -5,12 +5,14 @@ export type ResultadoDaPartida = 'vitoria' | 'derrota'
 /**
  * Motivo da derrota — espelho local de `MotivoDeDerrotaWire` (shared,
  * packages/shared/src/partida.ts) e do `motivo` de `DesfechoDaPartida`
- * (engine, packages/engine/src/partida.ts:130-132): `'caixa_esgotada'`
+ * (engine, packages/engine/src/partida.ts:156-161): `'caixa_esgotada'`
  * (Caixa Esgotada sem objetivos alcançáveis) | `'equipe_amedrontada'`
- * (Sanidade 0 na equipe inteira). A vitória não tem motivo no domínio — o
- * campo é sempre `null`/ausente nela. Sync manual junto do par acima.
+ * (Sanidade 0 na equipe inteira) | `'desistencia'` (quórum mínimo — um
+ * Jogador restante após desistências, ADR-0013). A vitória não tem motivo no
+ * domínio — o campo é sempre `null`/ausente nela. Sync manual junto do par
+ * acima.
  */
-export type MotivoDeDerrota = 'caixa_esgotada' | 'equipe_amedrontada'
+export type MotivoDeDerrota = 'caixa_esgotada' | 'equipe_amedrontada' | 'desistencia'
 
 export type EventoDaTela =
   | { type: 'carregar' }
