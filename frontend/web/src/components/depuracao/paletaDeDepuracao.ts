@@ -30,6 +30,12 @@ export const CORES_DO_NIVEL: Record<NivelDoDepurador, string | null> = {
   error: null,
 }
 
+/** Cor da borda esquerda (3px) da entrada: identifica a fonte a um olhar,
+ * sem introduzir cores novas — reutiliza a paleta de texto das fontes. */
+export function bordaDaFonte(fonte: FonteDoDepurador): string {
+  return CORES_DA_FONTE[fonte]
+}
+
 /** Fundo histórico por fase (aplicado com transparência — ver FUNDO_DA_FASE). */
 export const FUNDO_DA_FASE: Record<FaseDoDepurador, string> = {
   login: '#2563eb',
