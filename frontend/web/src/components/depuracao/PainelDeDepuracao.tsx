@@ -1,9 +1,9 @@
 /**
  * Painel de depuração em janela compacta (issue #340, "Modo Desenvolvedor").
  *
- * Janela fixa no canto superior direito (abaixo do botão flutuante de
- * on/off, que fica em z-[70] — o painel fica em z-[60], acima dos overlays
- * do app em z-50), fundo próprio distinto do fundo das linhas.
+ * Janela ancorada na borda direita, centro vertical, logo abaixo dos botões
+ * de on/off (o wrapper em z-[70] garante o empilhamento acima dos overlays do
+ * app em z-50), fundo próprio distinto do fundo das linhas.
  * Filtro por nível (info/warn/error/todos),
  * botão Limpar e botão Copiar com campo numérico "últimos N logs" (N conta
  * entradas completas do buffer — nunca um log cortado no meio; vazio/0 =
@@ -110,10 +110,10 @@ export function PainelDeDepuracao() {
   return (
     <div
       data-testid="painel-de-depuracao"
-      // Janela compacta ancorada abaixo do botão flutuante (top-4 + altura do
-      // botão ≈ top-14): o botão nunca fica sob o painel. Coluna flex garante
-      // scroll interno apenas na lista (min-h-0 no <ol>).
-      className="fixed right-4 top-14 z-[60] flex max-h-[50vh] w-[360px] flex-col bg-slate-950/95 p-4 font-mono text-xs"
+      // Janela compacta ancorada sob os botões do wrapper (borda direita,
+      // centro vertical); `relative` ancora a pill de novas linhas. Coluna
+      // flex garante scroll interno apenas na lista (min-h-0 no <ol>).
+      className="relative flex max-h-[50vh] w-[360px] flex-col bg-slate-950/95 p-4 font-mono text-xs"
     >
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="font-semibold text-slate-300">Modo Desenvolvedor</span>

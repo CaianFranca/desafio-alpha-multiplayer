@@ -133,6 +133,11 @@ describe('gatilho — 5 cliques em até 3s', () => {
     // Regressão do review: botão em z-70 > painel z-60 — mesmo z-index deixaria
     // o botão atrás do overlay (posterior no DOM) e inclicável no navegador.
     expect(screen.getByRole('button', { name: 'Fechar depuração' }).className).toContain('z-[70]')
+    const controles = screen.getByTestId('controles-do-modo-desenvolvedor')
+    expect(controles.className).toContain('right-4')
+    expect(controles.className).toContain('top-1/2')
+    expect(controles.className).toContain('-translate-y-1/2')
+    expect(screen.getByTestId('painel-de-depuracao').className).not.toContain('top-14')
   })
 
   it('controle Desligar encerra o modo, limpa o storage e some com os controles', async () => {
