@@ -52,3 +52,4 @@ sempre conectam. Três consequências foram tomadas junto:
   modelo de seleção; o sequenciamento per-encaixe resolve por construção.
 - **Manter o bot sem girar** — rejeitado: o bot passaria a desistir de turnos
   com encaixe desconectado sorteado, quebrando os jogos automáticos.
+
