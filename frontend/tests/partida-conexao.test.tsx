@@ -670,24 +670,9 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
       })
     })
 
-    // Fase sem movimento: botão sem seleção prévia faz 1-clique
-    // (SELECIONAR_PEAO e, ao chegar o ack PEAO_SELECIONADO, PERMANECER).
-    // PEAO_PERMANECEU acima limpa a seleção (reducao.ts), então o botão parte
-    // sem seleção — antes do fix ele enviava PERMANECER direto e o servidor
-    // rejeitava com PEAO_NAO_SELECIONADO.
+    // Fase sem movimento: Permanecer → PERMANECER com o peaoId próprio.
     const user = userEvent.setup()
     await user.click(screen.getByTestId('botao-permanecer'))
-    await waitFor(() => {
-      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
-      expect(JSON.parse(ultimo)).toEqual({
-        type: 'SELECIONAR_PEAO',
-        peaoId: 'peao-branco',
-        jogadorId: MEU_JOGADOR_ID,
-      })
-    })
-    act(() => {
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-    })
     await waitFor(() => {
       const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
       expect(JSON.parse(ultimo)).toEqual({
