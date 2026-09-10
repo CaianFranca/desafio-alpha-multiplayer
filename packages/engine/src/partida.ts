@@ -747,7 +747,9 @@ function moverPeaoDaPartida(
         const peoes = estado.tabuleiro.peoes.map((item) =>
           item.peaoId === comando.peaoId ? { ...item, pecaId: destino.pecaId } : item,
         );
-        tabuleiroNovo = { ...estado.tabuleiro, peoes, peaoSelecionadoId: null };
+        // Sem limpeza de Seleção aqui: a Re-seleção do Peão é semântica única
+        // da Movimentação e vive no fechamento abaixo (#334).
+        tabuleiroNovo = { ...estado.tabuleiro, peoes };
         eventosTab = [
           {
             tipo: 'peao_movido',
@@ -832,6 +834,10 @@ function moverPeaoDaPartida(
     pecasEmPeriodoDeGraca = pecasEmPeriodoDeGraca.filter((id) => idsPosicionadas.has(id));
   }
 
+  // Re-seleção do Peão (#263/#324/#334): após o mover_peao bem-sucedido, o
+  // Peão movido permanece/re-é selecionado em TODOS os ramos (delegação e
+  // fallback de resgate) — o confirmar substitui o permanecer sem exigir
+  // re-seleção manual.
   const estadoNovo: EstadoDaPartida = {
     ...estado,
     tabuleiro: { ...tabuleiroNovo, peaoSelecionadoId: comando.peaoId },
