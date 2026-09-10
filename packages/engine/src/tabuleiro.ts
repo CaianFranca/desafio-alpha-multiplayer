@@ -470,22 +470,118 @@ function criarPrng(seed: number): () => number {
   };
 }
 
-// Embaralhamento único (Fisher-Yates) guiado pela seed: a mesma seed produz
-// exatamente a mesma ordem da Caixa.
+// Categorização de tipos para controle de distribuição
+function ehMonstro(tipo: TipoDePecaDaCaixa): boolean {
+  return tipo === 'vulto' || tipo === 'espectro';
+}
+
+function ehEspecial(tipo: TipoDePecaDaCaixa): boolean {
+  return (
+    tipo === 'gerador' ||
+    tipo === 'sala_do_diretor' ||
+    tipo === 'sala_medica' ||
+    tipo === 'portao_de_saida'
+  );
+}
+
+// Algoritmo clássico reutilizado internamente com o PRNG do sistema
+function fisherYates<T>(array: T[], prng: () => number): T[] {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(prng() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+// Valida as restrições de posicionamento na Caixa
+function pecaValidaNaPosicao(
+  fila: PecaDaCaixa[],
+  candidata: PecaDaCaixa,
+): boolean {
+  const indice = fila.length;
+  const tipo = candidata.tipo;
+
+  // 1. Nas 10 primeiras: proibido monstro, gerador ou chave (sala_do_diretor)
+  if (indice < 10) {
+    if (
+      ehMonstro(tipo) ||
+      tipo === 'gerador' ||
+      tipo === 'sala_do_diretor'
+    ) {
+      return false;
+    }
+  }
+
+  // 2. Distância mínima de 4 entre monstros do mesmo tipo
+  if (ehMonstro(tipo)) {
+    const inicioJanela = Math.max(0, indice - 4);
+    for (let i = inicioJanela; i < indice; i++) {
+      if (fila[i].tipo === tipo) return false;
+    }
+  }
+
+  // 3. Nunca mais de 2 especiais seguidos (vale mesmo para tipos
+  // diferentes: gerador, sala_medica, portao barra o 3o).
+  if (ehEspecial(tipo)) {
+    if (
+      indice >= 2 &&
+      ehEspecial(fila[indice - 1].tipo) &&
+      ehEspecial(fila[indice - 2].tipo)
+    ) {
+      return false;
+    }
+  }
+
+  // 4. Distância mínima de 2 cartas entre especiais do mesmo tipo
+  // (diferença >= 3 entre índices): gerador em 0 barra outro gerador
+  // em 1 e 2, libera em 3+. Tipos diferentes podem colar
+  // (gerador + sala_medica, vulto + espectro, vulto + gerador).
+  if (ehEspecial(tipo)) {
+    const inicioJanela = Math.max(0, indice - 3);
+    for (let i = inicioJanela; i < indice; i++) {
+      if (fila[i].tipo === tipo) return false;
+    }
+  }
+
+  return true;
+}
+
+// Embaralhamento estratificado da Caixa (issue #265):
+// - 10 primeiras: sem monstro, gerador ou sala_do_diretor (só caminho +
+//   sala_medica/portao_de_saida);
+// - depois: tipo igual nunca colado (monstro igual com 4 cartas entre,
+//   especial igual com 2 cartas entre); tipo diferente pode colar
+//   (vulto + espectro, gerador + sala_medica); máx 2 especiais seguidos;
+// - determinístico por seed via mulberry32 + Fisher-Yates, total
+//   preservado (83). Fallback pega a primeira restante quando nenhuma
+//   candidata passa nas regras para não travar no fim do baralho.
 function embaralharCaixa(
   caixa: readonly PecaDaCaixa[],
   seed: number,
 ): PecaDaCaixa[] {
   const prng = criarPrng(seed);
-  const embaralhada = [...caixa];
-  for (let indice = embaralhada.length - 1; indice > 0; indice--) {
-    const alvo = Math.floor(prng() * (indice + 1));
-    [embaralhada[indice], embaralhada[alvo]] = [
-      embaralhada[alvo],
-      embaralhada[indice],
-    ];
+  const restantes = fisherYates([...caixa], prng);
+  const resultado: PecaDaCaixa[] = [];
+
+  while (restantes.length > 0) {
+    let escolhidoIdx = -1;
+
+    for (let i = 0; i < restantes.length; i++) {
+      if (pecaValidaNaPosicao(resultado, restantes[i])) {
+        escolhidoIdx = i;
+        break;
+      }
+    }
+
+    // Fallback de segurança para não travar em caso de gargalo no final do baralho
+    if (escolhidoIdx === -1) {
+      escolhidoIdx = 0;
+    }
+
+    resultado.push(restantes.splice(escolhidoIdx, 1)[0]);
   }
-  return embaralhada;
+
+  return resultado;
 }
 
 export interface EntradaDoEstadoDoTabuleiro {
