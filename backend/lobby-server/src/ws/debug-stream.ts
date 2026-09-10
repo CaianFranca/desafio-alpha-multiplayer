@@ -55,6 +55,9 @@ export class DebugStreamDasSalas {
    * Interpreta `ATIVAR_DEBUG`/`DESATIVAR_DEBUG` de uma conexão autenticada.
    * Idempotente: reativar re-resolve o escopo e reenvia o ack (o cliente
    * reenvia o comando a cada reconexão do socket).
+   *
+   * Qualquer Jogador autenticado pode ativar (sem allowlist): risco aceito
+   * documentado no ADR-0011 — a entrega fica restrita ao escopo do Jogador.
    */
   async receberComando(socket: AuthenticatedWebSocket, tipo: TipoDeComandoDeDebug): Promise<void> {
     if (tipo === 'DESATIVAR_DEBUG') {
