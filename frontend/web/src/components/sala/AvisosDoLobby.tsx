@@ -13,7 +13,7 @@ export function AvisosDoLobby({ avisos }: Props) {
       aria-label="Avisos do Lobby"
     >
       {avisos.map((aviso) => (
-        <p key={aviso.id} role="status" className="text-xs text-white/70 bg-white/5 border border-white/10 px-3 py-2">
+        <p key={aviso.id} role="status" className="text-sm text-white/70 bg-white/5 border border-white/10 px-3 py-2">
           {aviso.mensagem}
         </p>
       ))}

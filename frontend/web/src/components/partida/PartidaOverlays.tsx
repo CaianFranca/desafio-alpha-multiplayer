@@ -56,7 +56,7 @@ export function PartidaOverlays({
       >
         <div className="flex flex-col items-center gap-4">
           <p className="text-white text-2xl font-bold">{vitoria ? 'Vitória!' : 'Derrota'}</p>
-          <p className="text-zinc-400 text-sm">
+          <p className="text-zinc-400 text-base">
             {vitoria ? 'A equipe escapou do sanatório' : detalhe}
           </p>
           <button
@@ -85,7 +85,7 @@ export function PartidaOverlays({
       <div data-testid="overlay-aguardando" role="status" className={baseClasses}>
         <div className="flex flex-col items-center gap-2">
           <p className="text-white text-lg">Aguardando partida</p>
-          <p className="text-zinc-400 text-sm">Partida preparada</p>
+          <p className="text-zinc-400 text-base">Partida preparada</p>
         </div>
       </div>
     )

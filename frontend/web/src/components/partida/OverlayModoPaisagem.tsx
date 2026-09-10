@@ -49,7 +49,7 @@ export function OverlayModoPaisagem() {
         <p className="font-display text-2xl font-bold tracking-wide text-white">
           Vire o aparelho para jogar
         </p>
-        <p className="max-w-xs text-sm leading-relaxed text-zinc-400">
+        <p className="max-w-xs text-base leading-relaxed text-zinc-400">
           Esta experiência foi pensada para o modo paisagem no celular.
         </p>
       </div>

@@ -50,11 +50,11 @@ export function EncaminhamentoOverlay({ encaminhamento, wsAlvo: wsAlvoProp, href
       <div className="max-w-lg w-full rounded-2xl bg-white p-8 text-center shadow-xl">
         {fase === 'preparando' && (
           <>
-            <p className="text-xs font-bold tracking-[.16em] uppercase text-accent">Encaminhamento</p>
+            <p className="text-sm font-bold tracking-[.16em] uppercase text-accent">Encaminhamento</p>
             <h2 id="encaminhamento-titulo" className="mt-2 text-2xl font-bold">
               Preparando partida...
             </h2>
-            <p className="mt-3 text-sm text-muted">A sala está sendo encaminhada para o servidor de jogo. Aguarde todos os membros.</p>
+            <p className="mt-3 text-base text-muted">A sala está sendo encaminhada para o servidor de jogo. Aguarde todos os membros.</p>
             <div role="status" aria-label="Preparando partida" className="mt-6 flex justify-center">
               <span className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-accent" />
             </div>
@@ -62,14 +62,14 @@ export function EncaminhamentoOverlay({ encaminhamento, wsAlvo: wsAlvoProp, href
         )}
         {fase === 'disponivel' && alvo !== null && wsAlvo !== null && href !== null && (
           <>
-            <p className="text-xs font-bold tracking-[.16em] uppercase text-emerald-600">Partida disponível</p>
+            <p className="text-sm font-bold tracking-[.16em] uppercase text-emerald-600">Partida disponível</p>
             <h2 id="encaminhamento-titulo" className="mt-2 text-2xl font-bold">
               Partida disponível!
             </h2>
-            <p className="mt-3 text-sm text-muted">Redirecionando para o servidor de jogo...</p>
+            <p className="mt-3 text-base text-muted">Redirecionando para o servidor de jogo...</p>
             <div className="mt-6 rounded-lg bg-gray-50 p-3 text-left">
-              <p className="text-xs font-semibold text-gray-600">Alvo do redirect</p>
-              <p data-testid="alvo-do-redirect" className="mt-1 break-all font-mono text-xs text-gray-800">
+              <p className="text-sm font-semibold text-gray-600">Alvo do redirect</p>
+              <p data-testid="alvo-do-redirect" className="mt-1 break-all font-mono text-sm text-gray-800">
                 {wsAlvo}
               </p>
             </div>
@@ -80,7 +80,7 @@ export function EncaminhamentoOverlay({ encaminhamento, wsAlvo: wsAlvoProp, href
             >
               Ir para a partida
             </a>
-            <p className="mt-3 text-xs text-muted">Você será redirecionado automaticamente em instantes.</p>
+            <p className="mt-3 text-sm text-muted">Você será redirecionado automaticamente em instantes.</p>
           </>
         )}
       </div>

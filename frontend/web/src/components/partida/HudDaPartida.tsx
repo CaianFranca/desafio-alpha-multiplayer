@@ -136,7 +136,7 @@ function CronometroDoHud({
       data-segundos={String(segundos)}
       role="timer"
       aria-label={`Tempo de partida: ${tempo}`}
-      className="text-sm tabular-nums text-zinc-100"
+      className="text-base tabular-nums text-zinc-100"
     >
       {tempo}
     </span>
@@ -324,7 +324,7 @@ export function HudDaPartida({
           type="button"
           data-testid="hud-sair"
           onClick={() => setConfirmandoSaida(true)}
-          className="pointer-events-auto min-h-[44px] min-w-[44px] rounded border border-amber-500/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-400 hover:border-amber-400 hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-500"
+          className="pointer-events-auto min-h-[44px] min-w-[44px] rounded border border-amber-500/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.14em] text-amber-400 hover:border-amber-400 hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-500"
         >
           Sair
         </button>
@@ -335,7 +335,7 @@ export function HudDaPartida({
           role="alertdialog"
           aria-modal="true"
           aria-label="Confirmar saída da partida"
-          className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
+          className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-base text-zinc-100 shadow-xl"
         >
           <p>Sair da partida e voltar à sala?</p>
           <div className="flex gap-2">
@@ -343,7 +343,7 @@ export function HudDaPartida({
               type="button"
               data-testid="hud-sair-confirmar"
               onClick={onSair}
-              className="min-h-[44px] min-w-[44px] rounded bg-amber-500 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+              className="min-h-[44px] min-w-[44px] rounded bg-amber-500 px-4 py-2 text-sm font-semibold uppercase tracking-wider text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >
               Confirmar
             </button>
@@ -351,7 +351,7 @@ export function HudDaPartida({
               type="button"
               data-testid="hud-sair-cancelar"
               onClick={() => setConfirmandoSaida(false)}
-              className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-xs uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+              className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-sm uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >
               Cancelar
             </button>
@@ -385,10 +385,10 @@ export function HudDaPartida({
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-100">
+            <span className="text-sm font-semibold uppercase tracking-[0.18em] text-zinc-100">
               {jogadorLocal.dados.apelido}
             </span>
-            <span className="text-xs uppercase tracking-[0.18em] text-amber-300">Sanidade</span>
+            <span className="text-sm uppercase tracking-[0.18em] text-amber-300">Sanidade</span>
             <div
               data-testid="hud-sanidade"
               data-sanidade={String(jogadorLocal.dados.sanidade)}
@@ -417,7 +417,7 @@ export function HudDaPartida({
             data-ativo={jogadorLocal.dados.emBaixaIluminacao ? 'true' : 'false'}
             role="status"
             aria-label={jogadorLocal.dados.emBaixaIluminacao ? 'Baixa Iluminação ativa' : 'Baixa Iluminação inativa'}
-            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-sm font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
               jogadorLocal.dados.emBaixaIluminacao
                 ? 'border-amber-400/70 bg-amber-400/10 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.35)]'
                 : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
@@ -436,7 +436,7 @@ export function HudDaPartida({
             data-ativo={jogadorLocal.dados.amedrontado ? 'true' : 'false'}
             role="status"
             aria-label={jogadorLocal.dados.amedrontado ? 'Amedrontado ativo' : 'Amedrontado inativo'}
-            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-sm font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
               jogadorLocal.dados.amedrontado
                 ? 'border-red-400/70 bg-red-400/10 text-red-200 shadow-[0_0_16px_rgba(248,113,113,0.35)]'
                 : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
@@ -455,7 +455,7 @@ export function HudDaPartida({
             data-ativo={jogadorLocal.dados.protegido ? 'true' : 'false'}
             role="status"
             aria-label={jogadorLocal.dados.protegido ? 'Proteção ativa' : 'Proteção inativa'}
-            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[10px] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-sm font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
               jogadorLocal.dados.protegido
                 ? 'border-cyan-400/70 bg-cyan-400/10 text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.35)]'
                 : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
@@ -502,7 +502,7 @@ export function HudDaPartida({
               )
             })}
           </div>
-          <span className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400">
+          <span className="font-display text-sm font-semibold uppercase tracking-[0.28em] text-zinc-400">
             Geradores
           </span>
         </div>
@@ -521,7 +521,7 @@ export function HudDaPartida({
           >
             <span aria-hidden="true" className={cartaoDeAcessoObtido ? 'drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]' : ''}>▣</span>
           </div>
-          <span className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400">
+          <span className="font-display text-sm font-semibold uppercase tracking-[0.28em] text-zinc-400">
             Cartão
           </span>
         </div>
@@ -537,7 +537,7 @@ export function HudDaPartida({
           aria-label="Turno"
           className="absolute bottom-6 right-6 flex origin-bottom-right scale-90 flex-col gap-2 bg-transparent px-1 py-1 lg:scale-100"
         >
-          <span className="text-right font-display text-xs font-semibold uppercase tracking-[0.28em] text-amber-200/90">
+          <span className="text-right font-display text-sm font-semibold uppercase tracking-[0.28em] text-amber-200/90">
             Turno
           </span>
           <div className="flex items-center gap-1.5">
@@ -558,7 +558,7 @@ export function HudDaPartida({
                     role="img"
                     aria-label={ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}
                     title={dados.apelido}
-                    className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border font-display text-xs transition-all duration-500 ${
+                    className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border font-display text-sm transition-all duration-500 ${
                       ehAtivo
                         ? 'border-amber-300/40 bg-zinc-800'
                         : 'border-zinc-800 bg-zinc-950 opacity-50 grayscale'

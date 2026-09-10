@@ -122,14 +122,14 @@ export function SalaPage() {
           {/* Coluna esquerda institucional */}
           <div className="flex flex-col justify-center gap-8 lg:pr-16 py-12 lg:py-20 lg:border-r lg:border-white/10 relative">
             <div className="flex flex-col gap-3">
-              <p className="text-[10px] tracking-[0.2em] uppercase text-[#c9a86a] flex items-center gap-3">
+              <p className="text-sm tracking-[0.2em] uppercase text-[#c9a86a] flex items-center gap-3">
                 <span className="w-8 h-px bg-[#c9a86a]" aria-hidden />
                 Protocolo de Isolamento
               </p>
               <h1 className="text-5xl font-light text-white tracking-tight">
                 {possuiSala ? `Sala ${sala.codigoDeSala}` : 'Criar Sala'}
               </h1>
-              <p className="text-white/60 text-sm leading-relaxed max-w-sm mt-2">
+              <p className="text-white/60 text-base leading-relaxed max-w-sm mt-2">
                 Reúna sua equipe de 2 a 4 Jogadores. O Sanatório Flicker of Sanity aguarda. A Sanidade é escassa, a cooperação é vital.
               </p>
             </div>
@@ -148,7 +148,7 @@ export function SalaPage() {
                   </button>
 
                   <div className="flex flex-col gap-2 pt-6 border-t border-white/10">
-                    <label htmlFor="codigo-entrada" className="text-[10px] tracking-[0.18em] uppercase text-white/60">
+                    <label htmlFor="codigo-entrada" className="text-sm tracking-[0.18em] uppercase text-white/60">
                       Entrar em Sala existente
                     </label>
                     <div className="flex gap-2">
@@ -158,7 +158,7 @@ export function SalaPage() {
                         onChange={(e) => setCodigoInput(e.target.value.toUpperCase())}
                         placeholder="Código de Sala"
                         maxLength={CODIGO_DE_SALA_TAMANHO}
-                        className="flex-1 bg-[#1e1e1e] border border-white/15 px-3 py-2 text-sm tracking-[0.2em] uppercase text-white placeholder:text-white/30 focus:outline-none focus:border-[#c9a86a]"
+                        className="flex-1 bg-[#1e1e1e] border border-white/15 px-3 py-2 text-sm tracking-[0.2em] uppercase text-white placeholder:text-white/60 focus:outline-none focus:border-[#c9a86a]"
                       />
                       <button
                         type="button"
@@ -167,13 +167,13 @@ export function SalaPage() {
                           if (codigo) entrarNaSala(codigo)
                         }}
                         disabled={conectando}
-                        className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-xs font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#c9a86a]"
+                        className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-sm font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#c9a86a]"
                       >
                         Entrar na Sala
                       </button>
                     </div>
                     {codigoParam && (
-                      <p className="text-xs text-white/50">Convite detectado: {codigoParam.toUpperCase()}</p>
+                      <p className="text-sm text-white/70">Convite detectado: {codigoParam.toUpperCase()}</p>
                     )}
                   </div>
                 </>
@@ -234,11 +234,11 @@ export function SalaPage() {
             <div className="flex items-end justify-between border-b border-white/15 pb-3">
               <h2 className="text-2xl font-light tracking-[0.2em] uppercase text-white">Ponto de Encontro</h2>
               {conectando ? (
-                <span className="flex items-center gap-2 text-[10px] tracking-widest uppercase text-yellow-400">
+                <span className="flex items-center gap-2 text-sm tracking-widest uppercase text-yellow-400">
                   <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" aria-hidden /> Conectando...
                 </span>
               ) : (
-                <span className="flex items-center gap-2 text-[10px] tracking-widest uppercase text-green-400">
+                <span className="flex items-center gap-2 text-sm tracking-widest uppercase text-green-400">
                   <span className="w-2 h-2 rounded-full bg-green-400" aria-hidden /> Conectado
                 </span>
               )}
@@ -262,14 +262,14 @@ export function SalaPage() {
                 {isDisponivel && alvoWs !== null && alvoHref !== null && (sala?.estado === 'encaminhada' || sala?.encaminhamento != null) && (
                   <div data-testid="snapshot-encaminhada" className="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
                     <h2 className="text-sm font-bold text-emerald-900">Sala encaminhada</h2>
-                    <p className="mt-2 text-xs text-emerald-800">Alvo do redirect:</p>
-                    <p data-testid="alvo-do-redirect-snapshot" className="mt-1 break-all font-mono text-xs text-emerald-900">
+                    <p className="mt-2 text-sm text-emerald-800">Alvo do redirect:</p>
+                    <p data-testid="alvo-do-redirect-snapshot" className="mt-1 break-all font-mono text-sm text-emerald-900">
                       {alvoWs}
                     </p>
                     <a
                       href={alvoHref}
                       data-testid="ir-para-partida-snapshot"
-                      className="mt-4 inline-flex rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700"
+                      className="mt-4 inline-flex rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
                     >
                       Ir para a partida
                     </a>
@@ -282,16 +282,16 @@ export function SalaPage() {
                 {/* Estado vazio mostra cards desabilitados e vagas */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 opacity-60">
                   <div className="border border-white/10 bg-[#1e1e1e] p-5">
-                    <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Código de Sala</p>
-                    <p className="text-sm text-white/30 mt-3">Crie uma sala para ver o código</p>
+                    <p className="text-sm tracking-[0.18em] uppercase text-white/60">Código de Sala</p>
+                    <p className="text-base text-white/70 mt-3">Crie uma sala para ver o código</p>
                   </div>
                   <div className="border border-white/10 bg-[#1e1e1e] p-5">
-                    <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Link Direto</p>
-                    <p className="text-sm text-white/30 mt-3">Link aparecerá aqui</p>
+                    <p className="text-sm tracking-[0.18em] uppercase text-white/60">Link Direto</p>
+                    <p className="text-base text-white/70 mt-3">Link aparecerá aqui</p>
                   </div>
                 </div>
                 <ListaDeMembros sala={null} />
-                <p className="text-xs text-white/40">Crie uma sala ou entre com um Código de Sala para começar.</p>
+                <p className="text-sm text-white/70">Crie uma sala ou entre com um Código de Sala para começar.</p>
                 {avisos.length > 0 && <AvisosDoLobby avisos={avisos} />}
               </>
             )}
