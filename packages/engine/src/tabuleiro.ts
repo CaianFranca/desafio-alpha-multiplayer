@@ -16,6 +16,8 @@ import {
   BORDA_OPOSTA,
   LADO_DA_GRADE,
   conectaNaVaga,
+  ehPecaDeMonstro,
+  ehPecaEspecial,
   exigirCelulaNoAlcance,
   escolherVagaDaPecaRecebida,
   desselecionarPeao,
@@ -473,22 +475,212 @@ function criarPrng(seed: number): () => number {
   };
 }
 
-// Embaralhamento único (Fisher-Yates) guiado pela seed: a mesma seed produz
-// exatamente a mesma ordem da Caixa.
+// Estratificação da Caixa (issue #265): constantes das regras numa fonte
+// única para comentário e código não divergirem.
+const PRIMEIRAS_PROTEGIDAS = 10;
+// Raios da forma "janela por tipo": quantas posições anteriores bloqueiam a
+// repetição do mesmo tipo (monstro igual com 4 cartas entre, especial igual
+// com 2 cartas entre).
+const JANELA_MONSTRO_MESMO_TIPO = 4;
+const JANELA_ESPECIAL_MESMO_TIPO = 2;
+const MAX_ESPECIAIS_SEGUIDOS = 2;
+// Ritmo espaçado (issue #265: "1 monstro/peça especial a cada 4-5 caminhos"):
+// após as 10 primeiras, nunca mais de 5 peças de caminho seguidas sem um
+// monstro ou especial no meio.
+const MAX_CAMINHOS_SEGUIDOS = 5;
+
+function ehPecaDeCaminho(tipo: TipoDePecaDaCaixa): boolean {
+  return !ehPecaEspecial(tipo) && !ehPecaDeMonstro(tipo);
+}
+
+// Regras 2 e 4 são a mesma forma "janela por tipo" (diferem em raio e
+// categoria): o tipo aparece na janela das últimas `raio` posições da fila?
+function tipoNaJanela(
+  fila: PecaDaCaixa[],
+  tipo: TipoDePecaDaCaixa,
+  raio: number,
+): boolean {
+  const inicio = Math.max(0, fila.length - raio);
+  for (let i = inicio; i < fila.length; i++) {
+    if (fila[i].tipo === tipo) return true;
+  }
+  return false;
+}
+
+// Algoritmo clássico reutilizado internamente com o PRNG do sistema
+function fisherYates<T>(array: T[], prng: () => number): T[] {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(prng() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+// Valida as restrições de posicionamento na Caixa
+function pecaValidaNaPosicao(
+  fila: PecaDaCaixa[],
+  candidata: PecaDaCaixa,
+): boolean {
+  const indice = fila.length;
+  const tipo = candidata.tipo;
+
+  // 1. Nas 10 primeiras (issue #265: "apenas peças de caminho + 1 peça de
+  // cartão (sala_do_diretor)"): proibido monstro, gerador, sala_medica e
+  // portao_de_saida; sala_do_diretor aparece no máximo 1 vez. A garantia de
+  // pelo menos 1 é forçada na última posição protegida (ver abaixo): se até
+  // o índice 9 nenhum cartão entrou, só o cartão é aceito.
+  if (indice < PRIMEIRAS_PROTEGIDAS) {
+    if (ehPecaDeMonstro(tipo)) return false;
+    if (
+      tipo === 'gerador' ||
+      tipo === 'sala_medica' ||
+      tipo === 'portao_de_saida'
+    ) {
+      return false;
+    }
+    if (tipo === 'sala_do_diretor') {
+      // No máximo 1 cartão nas 10 primeiras.
+      if (fila.some((peca) => peca.tipo === 'sala_do_diretor')) return false;
+    } else {
+      // Candidata é caminho: na última posição protegida, se o cartão ainda
+      // não entrou, só ele fecha as 10 primeiras.
+      if (
+        indice === PRIMEIRAS_PROTEGIDAS - 1 &&
+        !fila.some((peca) => peca.tipo === 'sala_do_diretor')
+      ) {
+        return false;
+      }
+    }
+  }
+
+  // 2. Distância mínima de 4 entre monstros do mesmo tipo
+  if (ehPecaDeMonstro(tipo)) {
+    if (tipoNaJanela(fila, tipo, JANELA_MONSTRO_MESMO_TIPO)) return false;
+  }
+
+  // 3. Nunca mais de 2 especiais seguidos (vale mesmo para tipos
+  // diferentes: gerador, sala_medica, portao barra o 3o).
+  if (ehPecaEspecial(tipo)) {
+    if (
+      indice >= MAX_ESPECIAIS_SEGUIDOS &&
+      ehPecaEspecial(fila[indice - 1].tipo) &&
+      ehPecaEspecial(fila[indice - 2].tipo)
+    ) {
+      return false;
+    }
+  }
+
+  // 4. Distância mínima de 2 cartas entre especiais do mesmo tipo
+  // (diferença >= 3 entre índices): gerador em 0 barra outro gerador
+  // em 1 e 2, libera em 3+. Tipos diferentes podem colar
+  // (gerador + sala_medica, vulto + espectro, vulto + gerador).
+  if (ehPecaEspecial(tipo)) {
+    if (tipoNaJanela(fila, tipo, JANELA_ESPECIAL_MESMO_TIPO)) return false;
+  }
+
+  // 5. Ritmo espaçado após as 10 primeiras: nunca mais de
+  // MAX_CAMINHOS_SEGUIDOS peças de caminho em sequência. Força um monstro
+  // ou especial quando a fila termina com 5 caminhos seguidos.
+  if (indice >= PRIMEIRAS_PROTEGIDAS && ehPecaDeCaminho(tipo)) {
+    let caminhosNoFim = 0;
+    for (let i = fila.length - 1; i >= 0; i--) {
+      if (!ehPecaDeCaminho(fila[i].tipo)) break;
+      caminhosNoFim++;
+      if (caminhosNoFim >= MAX_CAMINHOS_SEGUIDOS) return false;
+    }
+  }
+
+  return true;
+}
+
+// Embaralhamento estratificado da Caixa (issue #265):
+// - 10 primeiras: apenas caminho + exatamente 1 sala_do_diretor (sem
+//   monstro, gerador, sala_medica ou portao_de_saida);
+// - depois: tipo igual nunca colado (monstro igual com 4 cartas entre,
+//   especial igual com 2 cartas entre); tipo diferente pode colar
+//   (vulto + espectro, gerador + sala_medica); máx 2 especiais seguidos;
+//   ritmo espaçado (máx 5 caminhos seguidos);
+// - determinístico por seed via mulberry32 + Fisher-Yates, total
+//   preservado (83).
+//
+// Garantia: construção por busca em profundidade com ordem de alternativas
+// sorteada pelo PRNG — em vez do guloso "primeiro válido", que empurrava as
+// peças puladas para o fim da Caixa e violava as regras em ~1 a cada 7
+// partidas. Cada tentativa deriva uma sub-seed determinística da seed, então
+// a mesma seed produz sempre a mesma Caixa. Sem fallback silencioso: se as
+// regras forem insatisfatíveis para a composição dada, lança Error em vez de
+// devolver Caixa violada (o "nunca mais de 2 especiais seguidos" da issue é
+// invariante dura, não best-effort).
+const MAX_TENTATIVAS_ESTRATIFICACAO = 50;
+const LIMITE_PASSOS_ESTRATIFICACAO = 20000;
+
+function tentarEstratificar(
+  ordem: PecaDaCaixa[],
+  prng: () => number,
+): PecaDaCaixa[] | null {
+  const restantes = [...ordem];
+  const resultado: PecaDaCaixa[] = [];
+  // Pilha da busca: para cada posição, as alternativas válidas embaralhadas
+  // e quantas já foram tentadas. Ao retroceder, o prefixo da fila é o mesmo,
+  // então a próxima alternativa segue válida.
+  const pilha: { alternativas: PecaDaCaixa[]; usadas: number }[] = [];
+  let passos = 0;
+  while (resultado.length < ordem.length) {
+    if (++passos > LIMITE_PASSOS_ESTRATIFICACAO) return null;
+    const validas = restantes.filter((candidata) =>
+      pecaValidaNaPosicao(resultado, candidata),
+    );
+    if (validas.length === 0) {
+      const topo = pilha.pop();
+      if (topo === undefined) return null;
+      const devolvida = resultado.pop();
+      if (devolvida !== undefined) restantes.push(devolvida);
+      const proxima = topo.alternativas[topo.usadas + 1];
+      if (proxima === undefined) {
+        // Sem alternativa restante neste nível: segue retrocedendo.
+        continue;
+      }
+      const indice = restantes.findIndex((peca) => peca === proxima);
+      if (indice === -1 || !pecaValidaNaPosicao(resultado, proxima)) {
+        continue;
+      }
+      pilha.push({ alternativas: topo.alternativas, usadas: topo.usadas + 1 });
+      restantes.splice(indice, 1);
+      resultado.push(proxima);
+      continue;
+    }
+    const alternativas = fisherYates([...validas], prng);
+    const escolhida = alternativas[0];
+    pilha.push({ alternativas, usadas: 0 });
+    restantes.splice(
+      restantes.findIndex((peca) => peca === escolhida),
+      1,
+    );
+    resultado.push(escolhida);
+  }
+  return resultado;
+}
+
 function embaralharCaixa(
   caixa: readonly PecaDaCaixa[],
   seed: number,
 ): PecaDaCaixa[] {
-  const prng = criarPrng(seed);
-  const embaralhada = [...caixa];
-  for (let indice = embaralhada.length - 1; indice > 0; indice--) {
-    const alvo = Math.floor(prng() * (indice + 1));
-    [embaralhada[indice], embaralhada[alvo]] = [
-      embaralhada[alvo],
-      embaralhada[indice],
-    ];
+  for (let tentativa = 0; tentativa < MAX_TENTATIVAS_ESTRATIFICACAO; tentativa++) {
+    const prng = criarPrng(
+      (seed ^ Math.imul(tentativa + 1, 2654435761)) >>> 0,
+    );
+    const ordem = fisherYates([...caixa], prng);
+    const estratificada = tentarEstratificar(ordem, prng);
+    if (estratificada !== null) return estratificada;
   }
-  return embaralhada;
+
+  // Sem fallback violador: todas as Caixas devolvidas respeitam as regras.
+  // Com a composição real de 83 a busca sempre encontra solução dentro do
+  // limite (cobertura: 120 seeds na suíte + sondagem de 500); composição
+  // patológica externa lança em vez de degradar silenciosamente.
+  throw new Error(
+    `Embaralhamento estratificado insatisfatível para a seed ${seed}.`,
+  );
 }
 
 export interface EntradaDoEstadoDoTabuleiro {
