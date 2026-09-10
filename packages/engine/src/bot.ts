@@ -63,6 +63,7 @@ import {
   type SentidoDeRotacao,
   type TipoDaPeca,
 } from './tabuleiro.ts';
+import { conectaNaVaga } from './peoes.ts';
 import {
   aplicarComandoDePartida,
   type ComandoDePartida,
@@ -327,14 +328,68 @@ export function acoesValidasDaSubfase(
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
   // referencia o Peão do próprio jogador, não a Seleção.
   //
+  // Sequencialidade por encaixe com anti-softlock (#311, #260, #349; grade
+  // toroidal: ADR-0012): a escolha de vaga é sequencial POR encaixe — o guard
+  // canônico da engine (peoes.ts) rejeita a escolha de vaga de uma pendência
+  // enquanto outra Recebida tem vaga escolhida e ainda não encaixada
+  // (PENDENCIA_NAO_RESOLVIDA). A FSM espelha o guard: com Recebida fixada,
+  // enumera APENAS as ações sobre ela — sem isso, turnos com 2+ pendências, a
+  // regra comum na grade toroidal, sorteavam a rejeição certa.
+  //
+  // Exatidão literal (review #350): a engine aceita escolher vaga morta — a
+  // conexão só é validada no encaixe (MOVIMENTO_NAO_CONECTADO, peoes.ts) — e
+  // o ramo da fixada recupera a vaga morta girando até a borda voltada à Peça
+  // geradora abrir. A enumeração lista TODAS as vagas elegíveis da pendência,
+  // conectantes ou mortas: filtrar um subconjunto de ações aceitas violaria a
+  // exatidão (diferente do filtro de Baixa abaixo, que remove rejeições
+  // certas). O tradeoff é aceito: o bot pode fixar vaga morta tendo
+  // conectante disponível — custa ≤ 1 giro (reta: 2 de 4 orientações
+  // conectam; T: 3 de 4; cruz/especial/monstro: sempre — não existe peça
+  // "curva", TipoDePecaDeCaminho em tabuleiro.ts), dentro do teto do
+  // failsafe.
+  //
   // Baixa Iluminação (#341): a engine rejeita vaga em célula iluminada
   // (DADOS_INVALIDOS) e a camada Tabuleiro não conhece iluminação — o filtro
   // vive aqui, na FSM, para a enumeração espelhar exatamente o que a engine
   // aceita. Sem vaga escura, a pendência comum não é enumerável e o turno
-  // desdobra em desistência honesta pelo failsafe. A pendência da Travessia
-  // (celulaAlvo fixado) não passa pelo filtro: a engine valida só o match da
-  // célula travada, escura por construção.
+  // desdobra em desistência honesta pelo failsafe (limitação pré-existente da
+  // engine para humanos e bots, documentada no teste da #341).
   if (tabuleiro.recebidas.length > 0) {
+    const fixada = tabuleiro.recebidas.find((item) => item.vaga !== null);
+    if (fixada) {
+      const vagaFixada = fixada.vaga;
+      const alvoFixado = fixada.celulaAlvo;
+      if (
+        vagaFixada !== null &&
+        alvoFixado !== null &&
+        conectaNaVaga(fixada.tipo, fixada.orientacao, vagaFixada)
+      ) {
+        // Encaixe conectado: a borda voltada à Peça geradora — o oposto
+        // da vaga — está aberta na orientação vigente, então a engine aceita.
+        return [
+          { tipo: 'posicionar_peca', pecaId: fixada.pecaId, celula: alvoFixado },
+        ];
+      }
+      // Vaga morta (ou alvo nulo defensivo): recuperação por girar_peca sobre
+      // a Recebida fixada. O girar da engine exige a peça selecionada
+      // (PECA_NAO_SELECIONADA, tabuleiro.ts): guard defensivo — a divergência
+      // é inalcançável por comandos válidos (a escolha da vaga fixa o
+      // pecaSelecionadaId na Recebida — seleção da camada engine, peoes.ts,
+      // não termo de domínio — e a desseleção é rejeitada com Recebidas
+      // pendentes), mas divergindo o ramo não enumera nada ([] honesto,
+      // inalcançável — o failsafe desiste sem girar em falso). Teste
+      // artesanal em bot.test.ts prova a divergência.
+      if (tabuleiro.pecaSelecionadaId !== fixada.pecaId) {
+        return [];
+      }
+      // girarRecebida aceita o giro livremente, sem validar conexão. Cada
+      // sentido é uma ação; em ≤ 1 giro a borda abre (reta: 2 de 4
+      // orientações conectam; T: 3 de 4; cruz/especial/monstro: sempre).
+      return [
+        { tipo: 'girar_peca', pecaId: fixada.pecaId, sentido: 'horario' },
+        { tipo: 'girar_peca', pecaId: fixada.pecaId, sentido: 'anti_horario' },
+      ];
+    }
     const emBaixa = jogador.emBaixaIluminacao ?? false;
     const iluminadas = emBaixa
       ? new Set(
@@ -400,18 +455,6 @@ export function acoesValidasDaSubfase(
           });
         }
         continue;
-      }
-      if (recebida.celulaAlvo !== null) {
-        // Encaixe sempre enumerado (issue #311 preservada via expansão): a
-        // conexão com a geradora é garantida pelo expandirPosicionamentoDoBot,
-        // que precede o posicionar sorteado com os girar_peca necessários. O
-        // portão conectaNaVaga aqui estrandaria o turno — a orientação de
-        // nascimento raramente conecta e só a expansão a corrige.
-        acoes.push({
-          tipo: 'posicionar_peca',
-          pecaId: recebida.pecaId,
-          celula: recebida.celulaAlvo,
-        });
       }
     }
     return acoes;

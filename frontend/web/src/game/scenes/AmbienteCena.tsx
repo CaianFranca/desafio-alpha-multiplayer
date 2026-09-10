@@ -11,6 +11,7 @@ import {
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
+import { ManipulacaoOverlay } from './ManipulacaoOverlay'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
 import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
@@ -274,6 +275,14 @@ export function AmbienteCena({
           </>
         ) : null}
       </group>
+      {/* Janela de Manipulação 3D (experimental): irmão do grupo de
+          desseleção — os cliques nos controles não desselecionam e o pan da
+          câmera fica travado por conta dos controles (stopPropagation). */}
+      <ManipulacaoOverlay
+        estadoExibicao={estadoExibicao}
+        estadoInteracao={estadoInteracao ?? null}
+        onComando={onComando ?? noop}
+      />
     </>
   )
 }

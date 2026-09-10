@@ -73,7 +73,7 @@ function servirMediaNoDev(): Plugin {
 
 export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss(), servirMediaNoDev()],
-  // Os assets estáticos vivem em web/public (ex.: /assets/imagem_fundo_hero.png
+  // Os assets estáticos vivem em web/public (ex.: /assets/imagem_fundo_hero.webp
   // usado como fundo da Hero/CTA final); o default <root>/public não existe.
   publicDir: 'web/public',
   // Resolve o pacote de DTOs compartilhado pelo nome canônico,

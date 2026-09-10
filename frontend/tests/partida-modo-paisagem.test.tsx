@@ -248,8 +248,11 @@ describe('useRequerModoPaisagem via PartidaPage', () => {
     expect(conteudo).toHaveAttribute('inert')
     expect(document.activeElement).toBe(overlay)
 
-    // Controles de giro vivem dentro do conteúdo inert; turno quando presente.
-    expect(conteudo).toContainElement(screen.getByTestId('girar-horario'))
+    // Os controles de giro são 3D (sobre a peça, no canvas — nenhum controle
+    // DOM de giro existe); tabuleiro/caixa permanecem contidos no inert; e o
+    // botão de turno, quando presente, também.
+    expect(screen.queryByTestId('controles-de-giro')).not.toBeInTheDocument()
+    expect(conteudo).toContainElement(screen.getByTestId('tabuleiro'))
     const encerrar = screen.queryByTestId('botao-encerrar-turno')
     if (encerrar) expect(conteudo).toContainElement(encerrar)
 
@@ -272,8 +275,8 @@ describe('useRequerModoPaisagem via PartidaPage', () => {
     renderPartida('disponivel')
     expect(screen.queryByTestId('overlay-modo-paisagem')).not.toBeInTheDocument()
 
-    // Botões de giro nascem desabilitados (sem peça alvo) e não recebem
-    // foco; usa um controle externo focável para provar a devolução.
+    // Os controles de giro são 3D (fora do DOM, sem foco possível); usa um
+    // controle externo focável para provar a devolução do foco.
     const externo = document.createElement('button')
     externo.textContent = 'voltar'
     document.body.appendChild(externo)

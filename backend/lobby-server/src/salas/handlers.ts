@@ -79,6 +79,7 @@ import { SalasBroadcaster } from './broadcast.ts';
 import { SalasState } from './estado.ts';
 import {
   mapearSala,
+  salaAtualizada,
   traduzirEventos,
   type ApelidoPorJogadorId,
 } from './eventos.ts';
@@ -1807,6 +1808,25 @@ export class SalasHandlers {
   }
 
   /**
+   * Resolve o encaminhamento de uma Sala encaminhada: projeção quente →
+   * fallback PG. Emite `warn` estruturado quando ausente nas duas fontes.
+   */
+  private async resolverEncaminhamentoDaSala(
+    salaId: string,
+  ): Promise<EncaminhamentoDaSala | undefined> {
+    const proj = await this.projecao.obterEstadoSala(salaId).catch(() => null);
+    if (proj?.encaminhamento) {
+      return proj.encaminhamento;
+    }
+    const rep = await this.repo.obterEncaminhamento(salaId).catch(() => null);
+    if (rep) {
+      return rep;
+    }
+    console.warn('[salas] sala encaminhada sem encaminhamento na projeção/PG', { salaId });
+    return undefined;
+  }
+
+  /**
    * Tenta a reconexão automática quando um novo WS autentica. Chamado por
    * `ws.ts` após preencher `socket.data`. Verifica se o Jogador tem vínculo
    * ativo em `em_reconexao` (via projeção + estado + PG fallback) e, em caso
@@ -1843,20 +1863,38 @@ export class SalasHandlers {
     }
     // Atualizar cache de apelido antes do broadcast.
     this.atualizarApelidoSeConhecido(jogadorId, socket.data.apelido);
-    // Se já está conectado, apenas registrar o novo socket (segunda aba).
-    if (membro.presenca === 'conectado') {
-      this.broadcast.registrarSocket(jogadorId, salaId, socket);
-      return;
-    }
-    // Está em reconexão — tentar reconectar via engine.
+    // Segunda aba/F5 e reconexão serializados na fila de mutações (#335,
+    // B1 da PR #345): o snapshot unicast é montado do estado confirmado
+    // dentro da mesma mutação, sem inversão contra broadcasts concorrentes.
     await this.enfileirarMutacao(async () => {
-      // Revalidar dentro da cadeia (evitar condição de corrida com expiração).
+      // Revalidar dentro da cadeia (evitar condição de corrida com expiração
+      // ou mutações concorrentes como Retorno à Sala).
       const salaAtual = this.estado.abertas.get(salaId!);
       const membroAtual = salaAtual?.sala.membros.find(
         (m) => m.jogadorId === jogadorId && m.estado === 'ativo',
       );
-      if (membroAtual === undefined || membroAtual.presenca !== 'em_reconexao') {
-        // Já reconectado/expirado entre o check e a mutação — apenas registrar.
+      if (salaAtual === undefined || membroAtual === undefined) {
+        // Sala sumiu ou vínculo encerrado entre o check e a mutação — apenas registrar.
+        this.broadcast.registrarSocket(jogadorId, salaId!, socket);
+        return;
+      }
+      // Segunda aba/F5: membro já `conectado` — registra o novo socket e
+      // reidrata com snapshot unicast do estado confirmado. Sem broadcast,
+      // sem MEMBRO_ENTROU e sem replay de chat.
+      if (membroAtual.presenca === 'conectado') {
+        this.broadcast.registrarSocket(jogadorId, salaId!, socket);
+        const encaminhamento =
+          salaAtual.sala.estado === 'encaminhada'
+            ? await this.resolverEncaminhamentoDaSala(salaId!)
+            : undefined;
+        this.broadcast.enviarParaSocket(
+          socket,
+          salaAtualizada(salaAtual.sala, this.estado.apelidoPorJogadorId, this.linkBase, encaminhamento),
+        );
+        return;
+      }
+      if (membroAtual.presenca !== 'em_reconexao') {
+        // Já reconectado entre o check e a mutação — apenas registrar.
         this.broadcast.registrarSocket(jogadorId, salaId!, socket);
         return;
       }
@@ -1888,14 +1926,8 @@ export class SalasHandlers {
       let encMap: Map<string, EncaminhamentoDaSala> | undefined;
       const salaApos = resultado.estado.salas.find((s) => s.id === salaId!);
       if (salaApos?.estado === 'encaminhada') {
-        const proj = await this.projecao.obterEstadoSala(salaId!).catch(() => null);
-        if (proj?.encaminhamento) {
-          encMap = new Map([[salaId!, proj.encaminhamento]]);
-        } else {
-          const rep = await this.repo.obterEncaminhamento(salaId!).catch(() => null);
-          if (rep) encMap = new Map([[salaId!, rep]]);
-          else console.warn(`[salas] sala encaminhada ${salaId} sem encaminhamento na projeção/PG`);
-        }
+        const enc = await this.resolverEncaminhamentoDaSala(salaId!);
+        if (enc !== undefined) encMap = new Map([[salaId!, enc]]);
       }
       const eventos = traduzirEventos(
         resultado.eventos,

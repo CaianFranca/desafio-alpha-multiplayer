@@ -13,12 +13,12 @@ import {
   mapearEscolhaDeVagaDaRecebida,
   mapearGirarRecebida,
   mapearMovimentacao,
-  mapearPermanencia,
   mapearPosicionarRecebida,
   peaoDeReferenciaDaSequencia,
   peaoSobreAMesa,
   podeSelecionarPeao,
   puxadaVigenteNaBandeja,
+  recebidaConectaNaVaga,
   rotearCliqueDeCelula,
   vagasDisponiveisDoPeao,
 } from '../web/src/game/tabuleiro/interacaoPeoes'
@@ -28,6 +28,7 @@ import { chaveDeComandoPendente, consumirAck } from '../web/src/game/tabuleiro/p
 import { motivoDeRecusaDoEvento } from '../web/src/components/partida/somDeRecusa'
 import type { EventoDoCanalDaPartida } from '../web/src/hooks/usePartidaWebSocket'
 import type { Celula, PecaPosicionada, PeaoDaExibicao } from '../web/src/game/tabuleiro/contrato'
+import { giroAlteraConexao } from '../web/src/game/tabuleiro/contrato'
 import { criarEstadoExibicaoMock } from './helpers/mockExibicao'
 import type { EstadoInteracaoTabuleiro } from '../web/src/game/tabuleiro/interacao'
 import type { BordaCardinal, ErroDoTabuleiroEvento } from '@flicker/shared'
@@ -165,15 +166,12 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(mapearCliqueNoPeao(comSintetico, 'peao-sintetico')).toBeNull()
   })
 
-  it('clique no próprio peão já selecionado emite PERMANECER (AC 5)', () => {
+  it('clique no próprio peão já selecionado é silencioso (PERMANECER só pelo botão)', () => {
     const estado = estadoBase({
       peaoSelecionadoId: 'peao-branco',
       peoes: [peao('peao-branco', INICIAL), peao('peao-vermelho', null)],
     })
-    expect(mapearCliqueNoPeao(estado, 'peao-branco')).toEqual({
-      tipo: 'comando',
-      comando: { type: 'PERMANECER', peaoId: 'peao-branco' },
-    })
+    expect(mapearCliqueNoPeao(estado, 'peao-branco')).toBeNull()
   })
 
   it('peão inexistente não reage (null)', () => {
@@ -415,57 +413,11 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(mapearPosicionarRecebida(estado, { linha: 2, coluna: 3 })).toBeNull()
   })
 
-  // ── AC 5: permanência no próprio peão/peça sob ele; movimentação na vizinha conectada ──
+  // ── AC 5: permanência só via botão; movimentação na vizinha conectada ──
 
-  it('clique no próprio peão emite PERMANECER', () => {
+  it('clique no próprio peão não emite PERMANECER (permanência só pelo botão)', () => {
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
-    expect(mapearPermanencia(estado, INICIAL)).toEqual({
-      tipo: 'comando',
-      comando: { type: 'PERMANECER', peaoId: 'peao-1-branco' },
-    })
-  })
-
-  it('clique no próprio peão após mover no turno é silencioso (PERMANECER inválido — revisão PR #309)', () => {
-    // PEAO_MOVIDO mantém a seleção (#263); PERMANECER pós-movimento o engine
-    // rejeita com ENCERRAMENTO_INVALIDO — o clique no próprio Peão fica mudo.
-    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
-      movimentouNoTurno: true,
-    })
     expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toBeNull()
-    expect(mapearPermanencia(estado, INICIAL)).toBeNull()
-  })
-
-  it('permanência pós-movimento: o Peão já movido (célula nova) também fica silencioso', () => {
-    // Peão movido para a reta-1: clique na célula da nova Peça → sem PERMANECER.
-    const estado: EstadoInteracaoPeoes = {
-      ...estadoBase(),
-      posicionadas: [
-        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
-        pecaPosicionada('reta-1', 'reta', 90, 3, 4),
-      ],
-      peoes: [
-        peao('peao-1-branco', { linha: 3, coluna: 4 }),
-        peao('peao-2-vermelho', null),
-      ],
-      peaoSelecionadoId: 'peao-1-branco',
-      movimentouNoTurno: true,
-    }
-    expect(mapearPermanencia(estado, { linha: 3, coluna: 4 })).toBeNull()
-    expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toBeNull()
-  })
-
-  it('clique na Peça sob o peão emite PERMANECER (mesma célula do peão)', () => {
-    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
-    // Clique no mesh da Peça: mesma célula (3,3) da Peça sob o peão.
-    expect(mapearPermanencia(estado, { linha: 3, coluna: 3 })).toEqual({
-      tipo: 'comando',
-      comando: { type: 'PERMANECER', peaoId: 'peao-1-branco' },
-    })
-  })
-
-  it('clique fora da célula do peão não emite permanência (null)', () => {
-    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
-    expect(mapearPermanencia(estado, { linha: 3, coluna: 4 })).toBeNull()
   })
 
   it('peão selecionado ainda sobre a Mesa não emite permanência (null)', () => {
@@ -474,13 +426,12 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(mapearCliqueNoPeao(estado, 'peao-branco')).toBeNull()
   })
 
-  it('com Recebidas pendentes, permanência não emite comando (tudo posicionado antes)', () => {
+  it('com Recebidas pendentes, clique no próprio peão não emite comando (tudo posicionado antes)', () => {
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
       recebidasPendentes: [
         pendencia('r1', 'reta-1', 'reta', null, null),
       ],
     })
-    expect(mapearPermanencia(estado, INICIAL)).toBeNull()
     expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toBeNull()
   })
 
@@ -597,7 +548,6 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
     const semSelecao: EstadoInteracaoPeoes = { ...estado, peaoSelecionadoId: null }
     expect(mapearMovimentacao(semSelecao, { linha: 3, coluna: 3 })).toBeNull()
-    expect(mapearPermanencia(semSelecao, { linha: 3, coluna: 3 })).toBeNull()
   })
 
   // ── Guard AC3: alvos válidos são rejeitados com feedback pós-confirmação ──
@@ -614,25 +564,17 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(mapearMovimentacao(estado, { linha: 3, coluna: 4 })).toEqual(REJEITACAO_CONFIRMADA)
   })
 
-  it('permanência pós-confirmação → rejeição âmbar (AC3, review #165)', () => {
+  it('clique no próprio peão pós-confirmação é silencioso (sem PERMANECER por clique)', () => {
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
       posicaoConfirmadaNoTurno: true,
     })
-    expect(mapearPermanencia(estado, INICIAL)).toEqual(REJEITACAO_CONFIRMADA)
-  })
-
-  it('clique no próprio peão pós-confirmação → rejeição âmbar, não PERMANECER (AC3)', () => {
-    const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
-      posicaoConfirmadaNoTurno: true,
-    })
-    expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toEqual(REJEITACAO_CONFIRMADA)
+    expect(mapearCliqueNoPeao(estado, 'peao-1-branco')).toBeNull()
   })
 
   it('pós-confirmação, alvos inválidos seguem silenciosos (null, sem recusa indevida)', () => {
     const estado = estadoComMock({ posicaoConfirmadaNoTurno: true })
     // cruz(3,5) não é destino conectado → null mesmo com a flag ligada.
     expect(mapearMovimentacao(estado, { linha: 3, coluna: 5 })).toBeNull()
-    expect(mapearPermanencia(estado, { linha: 0, coluna: 0 })).toBeNull()
   })
 
   // ── AC 6: pendências bloqueiam outro peão com rejeição local ──
@@ -841,19 +783,71 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toBeNull()
   })
 
-  it('clique em vaga disponível atribui a vaga à peça PUXADA da bandeja', () => {
+  it('clique em vaga disponível escolhe E encaixa a peça PUXADA da bandeja no MESMO clique (#261)', () => {
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
+    // Único clique: ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido de POSICIONAR_PECA
+    // (pecaId da pendência puxada; célula da vaga clicada).
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toEqual({
-      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
+      escolhaDeVagaEEncaixe: {
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 'reta-1', celula: VAGA_NORTE },
+      },
     })
+  })
+
+  it('reta em vaga não conectada emite SÓ a escolha — o encaixe imediato seria recusado (review PR #338)', () => {
+    // reta@0 (norte/sul) na vaga leste: o engine recusaria o POSICIONAR com
+    // MOVIMENTO_NAO_CONECTADO, mas aceitaria a escolha — o jogador gira
+    // (R/E) e clica a célula-alvo para encaixar (fluxo 2 cliques).
+    const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
+      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'leste' },
+    })
+  })
+
+  it('cruz conecta em qualquer vaga — clique único escolhe E encaixa (review PR #338)', () => {
+    const estado = estadoComPendencias({
+      recebidasPendentes: [
+        pendencia('r1', 'cruz-1', 'cruz', null, null),
+      ],
+      recebidaPuxadaId: 'r1',
+    })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
+      escolhaDeVagaEEncaixe: {
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'leste' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 'cruz-1', celula: VAGA_LESTE },
+      },
+    })
+  })
+
+  it('recebidaConectaNaVaga espelha o engine (reta/T/cruz)', () => {
+    expect(recebidaConectaNaVaga('reta', 0, 'norte')).toBe(true)
+    expect(recebidaConectaNaVaga('reta', 0, 'leste')).toBe(false)
+    expect(recebidaConectaNaVaga('reta', 90, 'leste')).toBe(true)
+    expect(recebidaConectaNaVaga('T', 0, 'leste')).toBe(true)
+    expect(recebidaConectaNaVaga('cruz', 0, 'leste')).toBe(true)
+    expect(recebidaConectaNaVaga('cruz', 90, 'norte')).toBe(true)
+  })
+
+  it('giroAlteraConexao: cruz é redundante, demais caminhos giram (review PR #338)', () => {
+    expect(giroAlteraConexao('cruz')).toBe(false)
+    expect(giroAlteraConexao('reta')).toBe(true)
+    expect(giroAlteraConexao('T')).toBe(true)
+    expect(giroAlteraConexao('inicial')).toBe(true)
   })
 
   it('a vaga segue a puxada, não a ordem da lista (sem "primeira sem vaga" automática)', () => {
     // As duas pendências estão sem vaga; a puxada é r2. O roteador contempla
     // R2 — a regra antiga (primeira da lista) morreria aqui com r1.
+    // VAGA_LESTE: T@0 tem oeste aberto (oposto de leste) — conecta, então o
+    // clique único escolhe E encaixa (vaga norte não conectaria T@0, que não
+    // tem sul aberto — gate de conexão do review PR #338).
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r2' })
-    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toEqual({
-      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'norte' },
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
+      escolhaDeVagaEEncaixe: {
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 't-1', celula: VAGA_LESTE },
+      },
     })
   })
 
@@ -869,7 +863,7 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toBeNull()
   })
 
-  it('após a primeira vaga, a segunda pendência puxada recebe a próxima escolha', () => {
+  it('após a primeira vaga, a segunda pendência puxada recebe a próxima escolha + encaixe', () => {
     const estado = estadoComPendencias({
       recebidasPendentes: [
         pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE),
@@ -878,8 +872,26 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
       recebidaPuxadaId: 'r2',
     })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
-      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
+      escolhaDeVagaEEncaixe: {
+        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
+        encaixe: { type: 'POSICIONAR_PECA', pecaId: 't-1', celula: VAGA_LESTE },
+      },
     })
+  })
+
+  it('despacho da vaga: ESCOLHER_VAGA via canal de peão e POSICIONAR_PECA via tabuleiro, em ordem (#261)', () => {
+    const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
+    // Um único clique despacha os 2 comandos em sequência — o array único
+    // torna a ORDEM explícita (primeiro a escolha, depois o encaixe).
+    const emitidos: unknown[] = []
+    despacharCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE, {
+      onComando: (comando) => emitidos.push(comando),
+      onComandoPeao: (comando) => emitidos.push(comando),
+    })
+    expect(emitidos).toEqual([
+      { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
+      { type: 'POSICIONAR_PECA', pecaId: 'reta-1', celula: VAGA_NORTE },
+    ])
   })
 
   it('célula-alvo com a peça em foco → POSICIONAR_PECA (encaixe)', () => {
@@ -911,21 +923,17 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), { linha: 0, coluna: 0 })).toBeNull()
   })
 
-  // ── Sem pendências, com peão selecionado: permanecer / mover / posicionar ──
+  // ── Sem pendências, com peão selecionado: mover / posicionar (permanência só pelo botão) ──
 
-  it('célula do próprio peão → PERMANECER', () => {
+  it('célula do próprio peão fica muda (PERMANECER só pelo botão da fase)', () => {
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)])
     expect(cicloAtivo(estado)).toBe(true)
-    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), INICIAL)).toEqual({
-      ciclo: { type: 'PERMANECER', peaoId: 'peao-1-branco' },
-    })
+    expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), INICIAL)).toBeNull()
   })
 
-  it('célula do próprio peão após mover → silencioso (rota não emite PERMANECER inválido)', () => {
-    // Revisão PR #309: com a seleção mantida pós-movimento (#263), o clique no
-    // próprio peão não roteia PERMANECER (o engine rejeitaria com
-    // ENCERRAMENTO_INVALIDO) — o roteador fica mudo; encerrar é confirmar →
-    // encerrar.
+  it('clique no próprio peão após mover continua silencioso (rota não emite PERMANECER inválido)', () => {
+    // Revisão PR #309 + permanência só pelo botão: com a seleção mantida
+    // pós-movimento (#263), o clique no próprio peão não roteia nada.
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
       movimentouNoTurno: true,
     })
