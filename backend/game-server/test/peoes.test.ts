@@ -497,11 +497,28 @@ test('rejeição: mover para peça não conectada responde ERRO_DO_TABULEIRO MOV
     const ws = sockets[0]!;
 
     try {
+      // A reta-2 (3,4) encaixou conectada (orientação 90, leste-oeste, issue
+      // #311). Monta o estado desconectado diretamente (orientação 0,
+      // norte-sul: borda oeste fechada) — fora da janela de Manipulação a
+      // peça posicionada não gira mais (MANIPULACAO_ENCERRADA).
+      const estadoAtual = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.ok(estadoAtual !== null);
+      await salvarEstadoDaPartida(redis, aceite.partidaId, {
+        ...estadoAtual!,
+        tabuleiro: {
+          ...estadoAtual!.tabuleiro,
+          posicionadas: estadoAtual!.tabuleiro.posicionadas.map((peca) =>
+            peca.celula.linha === 3 && peca.celula.coluna === 4
+              ? { ...peca, orientacao: 0 }
+              : peca,
+          ),
+        },
+      });
+
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       await esperarEvento(ws, 'PEAO_SELECIONADO');
 
-      // A reta-2 (3,4) é norte-sul: não tem borda oeste para a leste da
-      // Peça Inicial em (3,3) — não é vizinha conectada; mover rejeita.
+      // Mover para (3,4) agora deve ser rejeitado por falta de conexão.
       enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 3, coluna: 4 } });
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');
