@@ -94,4 +94,36 @@ describe('controle de debug on/off no canal da Sala', () => {
 
     expect(MockWebSocket.last()!.sentMessages.map((m) => JSON.parse(m).type)).toContain('ATIVAR_DEBUG')
   })
+
+  it('desativação em sessão corrente: DESATIVAR_DEBUG sai no instante do Desligar', async () => {
+    coletor.ativarModoDoDesenvolvedor()
+    renderHook(() => useSalaWebSocket('jogador-1'))
+    await waitFor(() => expect(MockWebSocket.last()?.readyState).toBe(1))
+    expect(MockWebSocket.last()!.sentMessages.map((m) => JSON.parse(m).type)).toContain('ATIVAR_DEBUG')
+
+    act(() => coletor.desativarModoDoDesenvolvedor())
+
+    const enviados = MockWebSocket.last()!.sentMessages.map((m) => JSON.parse(m).type)
+    expect(enviados).toContain('DESATIVAR_DEBUG')
+    // Captura de saída (ws→) registra o DESATIVAR_DEBUG no painel.
+    expect(
+      coletor.entradas().some((e) => e.fonte === 'ws→' && e.mensagem.includes('DESATIVAR_DEBUG')),
+    ).toBe(true)
+  })
+
+  it('desativação com socket ainda conectando: DESATIVAR_DEBUG é enfileirado e sai no open', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    coletor.ativarModoDoDesenvolvedor()
+    renderHook(() => useSalaWebSocket('jogador-1'))
+    expect(MockWebSocket.last()?.readyState).toBe(0)
+
+    act(() => coletor.desativarModoDoDesenvolvedor())
+
+    act(() => MockWebSocket.last()!.simulateOpen())
+
+    const enviados = MockWebSocket.last()!.sentMessages.map((m) => JSON.parse(m).type)
+    expect(enviados).toContain('DESATIVAR_DEBUG')
+    // O modo já está desligado no open: não reenvia ATIVAR_DEBUG.
+    expect(enviados).not.toContain('ATIVAR_DEBUG')
+  })
 })

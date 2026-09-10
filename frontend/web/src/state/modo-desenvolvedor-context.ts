@@ -4,6 +4,7 @@ interface ModoDesenvolvedorContextoValor {
   ativo: boolean
   painelVisivel: boolean
   ativarModo: () => void
+  desativarModo: () => void
   alternarPainel: () => void
 }
 

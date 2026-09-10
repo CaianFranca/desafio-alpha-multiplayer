@@ -10,6 +10,7 @@ import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
 import {
   aoAtivarModo,
+  aoDesativarModo,
   coletar,
   estaModoAtivo,
   resumirPayload,
@@ -469,6 +470,17 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'ATIVAR_DEBUG' }]
       }
     })
+    // Desativação em sessão corrente (issue #340): espelha o ATIVAR_DEBUG no
+    // instante do Desligar (ou enfileira se o socket ainda conecta).
+    const desinscreverDesativacao = aoDesativarModo(() => {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        coletar('ws→', 'info', resumirPayload({ type: 'DESATIVAR_DEBUG' }), 'sala')
+        ws.send(JSON.stringify({ type: 'DESATIVAR_DEBUG' }))
+      } else if (ws) {
+        comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'DESATIVAR_DEBUG' }]
+      }
+    })
     if (!jogadorId) {
       // Sem jogador (ex.: logout ou sessão expirada): desconecta e reseta o
       // estado para não exibir uma sala/sessão fantasma — o App é compartilhado
@@ -501,11 +513,15 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       setConectado(false)
       setExpulso(false)
       expulsoRef.current = false
-      return desinscreverAtivacao
+      return () => {
+        desinscreverAtivacao()
+        desinscreverDesativacao()
+      }
     }
     conectar()
     return () => {
       desinscreverAtivacao()
+      desinscreverDesativacao()
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null

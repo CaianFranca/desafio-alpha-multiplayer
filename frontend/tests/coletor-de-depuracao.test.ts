@@ -183,6 +183,34 @@ describe('coletor — modo desenvolvedor', () => {
     expect(chamadas).toEqual([1])
   })
 
+  it('desativarModo limpa o sessionStorage e é idempotente', () => {
+    coletor.ativarModoDoDesenvolvedor()
+    expect(coletor.estaModoAtivo()).toBe(true)
+
+    coletor.desativarModoDoDesenvolvedor()
+    expect(coletor.estaModoAtivo()).toBe(false)
+    expect(window.sessionStorage.getItem('flicker:modo-desenvolvedor')).toBeNull()
+
+    // Idempotente: repetir não renotifica (a notificação é coberta abaixo).
+    expect(() => coletor.desativarModoDoDesenvolvedor()).not.toThrow()
+    expect(coletor.estaModoAtivo()).toBe(false)
+  })
+
+  it('aoDesativarModo notifica uma vez e para após unsubscribe', () => {
+    const chamadas: number[] = []
+    const desinscrever = coletor.aoDesativarModo(() => chamadas.push(1))
+
+    coletor.ativarModoDoDesenvolvedor()
+    coletor.desativarModoDoDesenvolvedor()
+    coletor.desativarModoDoDesenvolvedor()
+    expect(chamadas).toEqual([1])
+
+    desinscrever()
+    coletor.ativarModoDoDesenvolvedor()
+    coletor.desativarModoDoDesenvolvedor()
+    expect(chamadas).toEqual([1])
+  })
+
   it('modo lido do sessionStorage sobrevive a reimport (reload)', async () => {
     coletor.ativarModoDoDesenvolvedor()
 

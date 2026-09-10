@@ -134,4 +134,18 @@ describe('gatilho — 5 cliques em até 3s', () => {
     // o botão atrás do overlay (posterior no DOM) e inclicável no navegador.
     expect(screen.getByRole('button', { name: 'Fechar depuração' }).className).toContain('z-[70]')
   })
+
+  it('controle Desligar encerra o modo, limpa o storage e some com os controles', async () => {
+    const usuario = userEvent.setup()
+    montar()
+    for (let i = 0; i < 5; i++) fireEvent.click(logoGinga())
+    expect(coletor.estaModoAtivo()).toBe(true)
+
+    await usuario.click(screen.getByRole('button', { name: 'Desligar' }))
+
+    expect(coletor.estaModoAtivo()).toBe(false)
+    expect(window.sessionStorage.getItem('flicker:modo-desenvolvedor')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Desligar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Depuração' })).not.toBeInTheDocument()
+  })
 })

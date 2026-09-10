@@ -36,6 +36,7 @@ import type {
 import { buildGameWsUrl } from '../api/encaminhamento'
 import {
   aoAtivarModo,
+  aoDesativarModo,
   coletar,
   estaModoAtivo,
   resumirPayload,
@@ -266,9 +267,21 @@ export function usePartidaWebSocket({
         comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'ATIVAR_DEBUG' }]
       }
     })
+    // Desativação em sessão corrente (issue #340): espelha o ATIVAR_DEBUG no
+    // instante do Desligar (ou enfileira se o socket ainda conecta).
+    const desinscreverDesativacao = aoDesativarModo(() => {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        coletar('ws→', 'info', resumirPayload({ type: 'DESATIVAR_DEBUG' }), 'partida')
+        ws.send(JSON.stringify({ type: 'DESATIVAR_DEBUG' }))
+      } else if (ws) {
+        comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'DESATIVAR_DEBUG' }]
+      }
+    })
     conectar()
     return () => {
       desinscreverAtivacao()
+      desinscreverDesativacao()
       montadoRef.current = false
       encerrarConexao()
     }

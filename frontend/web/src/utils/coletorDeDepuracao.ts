@@ -10,9 +10,10 @@
  * históricos: cada linha guarda o fundo do instante em que foi registrada.
  *
  * Estado do Modo Desenvolvedor também vive aqui (`ativarModo`/`estaModoAtivo`,
- * persistido em `sessionStorage` — o modo sobrevive a reload, o histórico
- * não, por spec). Os hooks de WS assinam `aoAtivarModo` para enviar
- * `ATIVAR_DEBUG` nos sockets já abertos no instante da ativação.
+ * `desativarModo` — persistido em `sessionStorage`, o modo sobrevive a reload,
+ * o histórico não, por spec). Os hooks de WS assinam `aoAtivarModo`/
+ * `aoDesativarModo` para enviar `ATIVAR_DEBUG`/`DESATIVAR_DEBUG` nos sockets
+ * já abertos no instante da transição.
  *
  * Formatação: objetos capturados (console, payload WS) viram JSON indentado
  * (2 espaços) via `formatarValor` — legível no painel e na cópia, sem o
@@ -56,6 +57,7 @@ const CHAVE_SESSAO_DO_MODO = 'flicker:modo-desenvolvedor'
 const buffer: EntradaDeDepuracao[] = []
 const assinantes = new Set<(entrada: EntradaDeDepuracao) => void>()
 const manipuladoresDeAtivacao = new Set<() => void>()
+const manipuladoresDeDesativacao = new Set<() => void>()
 
 let proximoId = 1
 let faseAtual: FaseDoDepurador | null = null
@@ -106,6 +108,32 @@ export function aoAtivarModo(manipulador: () => void): () => void {
   manipuladoresDeAtivacao.add(manipulador)
   return () => {
     manipuladoresDeAtivacao.delete(manipulador)
+  }
+}
+
+/** Desativa o Modo Desenvolvedor. Idempotente: desativação repetida não renotifica. */
+export function desativarModoDoDesenvolvedor(): void {
+  if (!modoAtivo) return
+  modoAtivo = false
+  try {
+    window.sessionStorage.removeItem(CHAVE_SESSAO_DO_MODO)
+  } catch {
+    // Storage indisponível (privacidade/iframe): o modo vive só nesta página.
+  }
+  for (const manipulador of [...manipuladoresDeDesativacao]) {
+    try {
+      manipulador()
+    } catch {
+      // Assinante com falha não bloqueia os demais.
+    }
+  }
+}
+
+/** Assina o instante da desativação (hooks de WS enviam DESATIVAR_DEBUG aqui). Devolve o unsubscribe. */
+export function aoDesativarModo(manipulador: () => void): () => void {
+  manipuladoresDeDesativacao.add(manipulador)
+  return () => {
+    manipuladoresDeDesativacao.delete(manipulador)
   }
 }
 
