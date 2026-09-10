@@ -215,12 +215,15 @@ function concluirPrimeiroTurno(
   return aplicar(estado, encerrarTurno(), ator);
 }
 
+// Peões em (3,3), (0,0), (6,6) e (1,0): diogo foge de (6,0) porque a vaga
+// norte de bruno envolve para lá na grade toroidal (issue #260) — ver o
+// mesmo fixture em monstros.test.ts.
 function partidaEmRodada2(): EstadoDaPartida {
   let estado = partidaIniciada();
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
   estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
-  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 0 });
+  estado = concluirPrimeiroTurno(estado, { linha: 1, coluna: 0 });
   return estado;
 }
 
@@ -675,18 +678,24 @@ test('fluxo completo via partida com caixa manipulada: 4 especiais sorteadas e p
   const encaixe2 = aplicarComandoDePartida(estado, posicionarPeao('peao-vermelho', 0, 0), 'bruno');
   assert.equal(encaixe2.sucesso, true);
   if (!encaixe2.sucesso) return;
-  // Em (0,0) a Inicial norte cai fora: apenas leste vira vaga -> 1 peça sorteada (sala-medica-1).
-  // Mas para garantir 2, posicionamos Inicial com giro: norte+leste já está em (0,0) só leste.
-  // Ajusta expectativa: 1 recebida (sala-medica-1) devido à borda da grade.
-  assert.equal(encaixe2.estado.tabuleiro.recebidas[0].pecaId, 'sala-medica-1');
+  // Em (0,0) a Inicial norte envolve para (6,0) na grade toroidal (issue
+  // #260): norte e leste viram vaga -> 2 peças sorteadas (sala-medica-1 e
+  // portao-de-saida-1).
+  assert.deepEqual(
+    encaixe2.estado.tabuleiro.recebidas.map((r) => r.pecaId),
+    ['sala-medica-1', 'portao-de-saida-1'],
+  );
   estado = encaixe2.estado;
   estado = aplicar(estado, escolherVaga('recebida-sala-medica-1', 'leste'), 'bruno');
   estado = aplicar(estado, posicionar('sala-medica-1', 0, 1), 'bruno');
   assert.equal(estado.tabuleiro.pecaEmManipulacaoId, null);
+  estado = aplicar(estado, escolherVaga('recebida-portao-de-saida-1', 'norte'), 'bruno');
+  estado = aplicar(estado, posicionar('portao-de-saida-1', 6, 0), 'bruno');
+  assert.equal(estado.tabuleiro.pecaEmManipulacaoId, null);
   estado = aplicar(estado, encerrarTurno(), 'bruno');
   assert.equal(estado.jogadorAtivoId, 'carla');
 
-  // A composição da Caixa foi consumida exatamente nas 3 especiais; a 4ª (portao) segue na Caixa.
-  assert.ok(estado.tabuleiro.caixa.some((p) => p.pecaId === 'portao-de-saida-1'));
+  // A composição da Caixa foi consumida exatamente nas 4 especiais.
+  assert.ok(!estado.tabuleiro.caixa.some((p) => p.pecaId === 'portao-de-saida-1'));
   assert.ok(!estado.tabuleiro.caixa.some((p) => p.pecaId === 'gerador-1'));
 });

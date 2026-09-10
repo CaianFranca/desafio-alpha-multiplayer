@@ -14,16 +14,17 @@
 
 import {
   BORDA_OPOSTA,
+  LADO_DA_GRADE,
   conectaNaVaga,
   exigirCelulaNoAlcance,
   escolherVagaDaPecaRecebida,
   desselecionarPeao,
-  estaDentroDaGrade,
   encontrarPosicionada,
   encontrarPosicionadaPorCelula,
   encontrarRecebidaPorPeca,
   girarRecebida,
   moverPeao,
+  normalizarCelula,
   permanecer,
   posicionarPeao,
   posicionarRecebida,
@@ -44,6 +45,8 @@ export {
   ehPecaEspecial,
   estaDentroDaGrade,
   gerarRecebidas,
+  normalizarCelula,
+  normalizarCoordenada,
   tetoDoPortao,
   validarTexto,
   vagasDisponiveis,
@@ -571,19 +574,19 @@ export function sortearDaCaixa(estado: EstadoDoTabuleiro): ResultadoDoTabuleiro 
   );
 }
 
-// Vizinhança ortogonal (ADR-0004): apenas células que compartilham uma borda;
-// diagonais não são vizinhas. As quatro direções são avaliadas em ordem fixa
-// (norte, leste, sul, oeste) e as que caem fora da grade são descartadas.
+// Vizinhança ortogonal toroidal (ADR-0004, continuidade da issue #260):
+// apenas células que compartilham uma borda; diagonais não são vizinhas. As
+// quatro direções são avaliadas em ordem fixa (norte, leste, sul, oeste) e
+// sempre existem — na borda, a vizinha é o lado oposto (wrap % 7).
 export function vizinhos(celula: Celula): Celula[] {
+  const centro = normalizarCelula(celula);
   const candidatas: Celula[] = [
-    { linha: celula.linha - 1, coluna: celula.coluna },
-    { linha: celula.linha, coluna: celula.coluna + 1 },
-    { linha: celula.linha + 1, coluna: celula.coluna },
-    { linha: celula.linha, coluna: celula.coluna - 1 },
+    { linha: centro.linha - 1, coluna: centro.coluna },
+    { linha: centro.linha, coluna: centro.coluna + 1 },
+    { linha: centro.linha + 1, coluna: centro.coluna },
+    { linha: centro.linha, coluna: centro.coluna - 1 },
   ];
-  return candidatas.filter((vizinha) =>
-    estaDentroDaGrade(vizinha.linha) && estaDentroDaGrade(vizinha.coluna),
-  );
+  return candidatas.map((vizinha) => normalizarCelula(vizinha));
 }
 
 // Iluminação (ST-13 / ADR-0005, refinada pela ST-15 / issue #170): união
@@ -819,10 +822,16 @@ function posicionarPeca(
     return celulaInvalida;
   }
 
+  // Grade toroidal (issue #260): a célula do comando normaliza antes de
+  // qualquer comparação ou lookup — coordenadas fora de 0–6 alcançam o lado
+  // oposto, inclusive a célula-alvo fixa da Recebida.
+  const celula = normalizarCelula(comando.celula);
+  const comandoNormalizado: PosicionarPecaComando = { ...comando, celula };
+
   // Peças Recebidas têm fluxo próprio: célula-alvo fixa da borda geradora.
   const recebida = encontrarRecebidaPorPeca(estado, comando.pecaId);
   if (recebida) {
-    return posicionarRecebida(estado, recebida, comando);
+    return posicionarRecebida(estado, recebida, comandoNormalizado);
   }
 
   // ST-12: a Caixa é opaca — apenas as Peças Iniciais (fora dela) e as
@@ -851,7 +860,7 @@ function posicionarPeca(
     );
   }
 
-  if (encontrarPosicionadaPorCelula(estado, comando.celula)) {
+  if (encontrarPosicionadaPorCelula(estado, celula)) {
     return rejeitar(
       'CELULA_JA_OCUPADA',
       'A Célula já está ocupada por outra Peça.',
@@ -862,7 +871,7 @@ function posicionarPeca(
     pecaId: pecaNasIniciais.pecaId,
     tipo: pecaNasIniciais.tipo,
     orientacao: pecaNasIniciais.orientacao,
-    celula: comando.celula,
+    celula,
   };
   const novoEstado: EstadoDoTabuleiro = {
     ...estado,
@@ -998,15 +1007,16 @@ function girarPosicionada(
   ]);
 }
 
-// Borda da geradora voltada à peça vizinha (distância Manhattan 1): a direção
-// em que a peça está a partir da geradora. Retorna undefined quando não são
-// vizinhas — sem vizinhança não há relação geradora a proteger.
+// Borda da geradora voltada à peça vizinha (distância Manhattan 1, com wrap
+// toroidal da issue #260): a direção em que a peça está a partir da
+// geradora. Retorna undefined quando não são vizinhas — sem vizinhança não
+// há relação geradora a proteger.
 function bordaDaGeradoraVoltadaAPeca(
   geradora: PecaPosicionada,
   peca: PecaPosicionada,
 ): BordaCardinal | undefined {
-  const deltaLinha = peca.celula.linha - geradora.celula.linha;
-  const deltaColuna = peca.celula.coluna - geradora.celula.coluna;
+  const deltaLinha = deltaToroidal(geradora.celula.linha, peca.celula.linha);
+  const deltaColuna = deltaToroidal(geradora.celula.coluna, peca.celula.coluna);
   if (Math.abs(deltaLinha) + Math.abs(deltaColuna) !== 1) {
     return undefined;
   }
@@ -1020,6 +1030,14 @@ function bordaDaGeradoraVoltadaAPeca(
     return 'sul';
   }
   return 'oeste';
+}
+
+// Delta toroidal entre duas coordenadas (issue #260): o passo mais curto no
+// anel módulo 7 — 6 ≡ -1, então peças nas bordas opostas são vizinhas.
+function deltaToroidal(de: number, para: number): number {
+  const bruto =
+    (((para - de) % LADO_DA_GRADE) + LADO_DA_GRADE) % LADO_DA_GRADE;
+  return bruto === LADO_DA_GRADE - 1 ? -1 : bruto;
 }
 
 function encontrarNasIniciais(

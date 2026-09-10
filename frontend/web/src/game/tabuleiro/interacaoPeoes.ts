@@ -59,7 +59,7 @@ import {
   chaveCelula,
   destinosConectadosDoPeao,
   encontrarPecaNaCelula,
-  estaDentroDaGrade,
+  normalizarCelula,
 } from './contrato'
 import type {
   Celula,
@@ -326,11 +326,14 @@ const DESLOCAMENTO_DA_BORDA: Record<BordaCardinal, Celula> = {
   oeste: { linha: 0, coluna: -1 },
 }
 
-function celulaVizinhaNaBorda(celula: Celula, borda: BordaCardinal): Celula | null {
+// Vizinhança toroidal (issue #260): espelho do engine — na borda, a vizinha
+// é o lado oposto; nunca null.
+function celulaVizinhaNaBorda(celula: Celula, borda: BordaCardinal): Celula {
   const d = DESLOCAMENTO_DA_BORDA[borda]
-  const vizinha = { linha: celula.linha + d.linha, coluna: celula.coluna + d.coluna }
-  if (!estaDentroDaGrade(vizinha)) return null
-  return vizinha
+  return normalizarCelula({
+    linha: celula.linha + d.linha,
+    coluna: celula.coluna + d.coluna,
+  })
 }
 
 // O default documentado (M1/review #333) emite UMA vez por sessão: o flag é
@@ -385,7 +388,7 @@ export function vagasDisponiveisDoPeao(
   for (const borda of bordas) {
     if (jaEscolhidas.has(borda)) continue
     const celula = celulaVizinhaNaBorda(origem.celula, borda)
-    if (!celula || encontrarPecaNaCelula(estado.posicionadas, celula)) continue
+    if (encontrarPecaNaCelula(estado.posicionadas, celula)) continue
     vagas.push({ borda, celula })
   }
   return vagas
