@@ -86,6 +86,7 @@ import { SalasReconexao, JANELA_RECONEXAO_SEGUNDOS } from './reconexao.ts';
 import { idadeDoEmVoo, limparEmVoo, marcarEmVoo } from './encaminhamento-voo.ts';
 import { GAME_SERVERS_PARTIDA_PREFIXO, getConfig } from '@flicker/config';
 import type { AuthenticatedWebSocket } from '../ws/ws.ts';
+import type { DebugStreamDasSalas, NivelDeDebug } from '../ws/debug-stream.ts';
 import { listarGameServersDisponiveis as listarGameServersShared } from '@flicker/shared/server';
 import type { Redis } from 'ioredis';
 import { redisClient as defaultRedis } from '../config/redis.ts';
@@ -227,6 +228,8 @@ export interface SalasHandlersDeps {
   readonly cancelarPartida?: (serverId: string, partidaId: string, motivo: string, serverUrl?: string) => Promise<void>;
   readonly redis?: Redis;
   readonly timeoutMs?: number;
+  /** Stream de debug (issue #340). Opcional: sem o campo, nenhuma linha é espelhada. */
+  readonly debug?: DebugStreamDasSalas;
 }
 
 export class SalasHandlers {
@@ -243,6 +246,7 @@ export class SalasHandlers {
   private readonly cancelarPartidaInjetado?: (serverId: string, partidaId: string, motivo: string, serverUrl?: string) => Promise<void>;
   private readonly redis: Redis;
   private readonly timeoutMs: number;
+  private readonly debug?: DebugStreamDasSalas;
   // Teto do não-início (mesmo valor do game-server, review #304 item 3): a
   // idade do marker do em-voo acima deste teto libera a órfã sem partidaId.
   private readonly tetoNaoInicioMs: number = getConfig().partidaNaoInicioSegundos * 1000;
@@ -266,6 +270,7 @@ export class SalasHandlers {
     this.cancelarPartidaInjetado = deps.cancelarPartida;
     this.redis = deps.redis ?? defaultRedis;
     this.timeoutMs = deps.timeoutMs ?? 5000;
+    this.debug = deps.debug;
   }
 
   get handlersLinkBase(): string {
@@ -382,6 +387,14 @@ export class SalasHandlers {
       mensagem,
     };
     this.broadcast.enviarParaSocket(socket, erro);
+    // Espelho de erro no stream de debug (issue #340): direcionado ao
+    // originador — erro é pessoal, não de Sala.
+    this.debug?.emitirParaSocket(socket, 'error', `ERRO_DA_SALA ${paraCodigoDeErroDaSala(codigo)}: ${mensagem}`);
+  }
+
+  /** Espelha uma linha de log escopada à Sala (issue #340). Fire-and-forget nas emissões. */
+  private espelhar(salaId: string, nivel: NivelDeDebug, mensagem: string, contexto: string = 'lobby'): void {
+    this.debug?.emitir(salaId, nivel, mensagem, contexto);
   }
 
   private async handleCriarSala(
@@ -453,6 +466,9 @@ export class SalasHandlers {
         this.linkBase,
       );
       this.difundir(eventos, salaId);
+
+      // Espelho de criação no stream de debug (issue #340).
+      this.espelhar(salaId, 'info', `sala criada por ${this.apelidoDe(jogadorId)}`);
       return;
     }
 
@@ -531,6 +547,9 @@ export class SalasHandlers {
       this.linkBase,
     );
     this.difundir(eventos, salaId);
+
+    // Espelho de entrada no stream de debug (issue #340).
+    this.espelhar(salaId, 'info', `${this.apelidoDe(jogadorId)} entrou na sala`);
 
     // Replay do histórico de chat (issue #34): só na entrada nova
     // (`membro_admitido`). Quem já estava na sala (reenvio idempotente)
@@ -654,6 +673,9 @@ export class SalasHandlers {
     // também receba o `MEMBRO_SAIU`. A função abaixo trata idem-potência
     // para múltiplas conexões.
     this.broadcast.removerSocket(socket);
+
+    // Espelho de saída no stream de debug (issue #340).
+    this.espelhar(salaId, 'info', `${this.apelidoDe(jogadorId)} saiu da sala`);
   }
 
   private async handleExpulsarMembro(
@@ -758,6 +780,11 @@ export class SalasHandlers {
       this.linkBase,
     );
     this.difundir(eventos, salaId);
+
+    // Espelho de expulsão no stream de debug (issue #340).
+    if (eventoExpulsao?.tipo === 'membro_expulsado') {
+      this.espelhar(salaId, 'info', `${this.apelidoDe(eventoExpulsao.jogadorId)} foi expulso por ${this.apelidoDe(jogadorId)}`);
+    }
   }
 
   private async handleDesbloquearJogador(
@@ -993,6 +1020,9 @@ export class SalasHandlers {
     );
     this.difundir(eventos, salaId);
 
+    // Espelho de encerramento no stream de debug (issue #340) — saída coletiva.
+    this.espelhar(salaId, 'info', `sala encerrada por ${this.apelidoDe(jogadorId)}`);
+
     // Limpeza da projeção quente: estado + codigo + cada jogador→sala.
     await this.projecao.limparSala(salaId, codigoSala);
     for (const jid of jogadoresDaSala) {
@@ -1071,6 +1101,9 @@ export class SalasHandlers {
     // Broadcast via tradutor (PARTIDA_PREPARANDO + SALA_ATUALIZADA)
     const evs = traduzirEventos(resultado.eventos, resultado.estado, this.estado.apelidoPorJogadorId, this.linkBase);
     this.difundir(evs, salaId);
+
+    // Espelho do encaminhamento no stream de debug (issue #340).
+    this.espelhar(salaId, 'info', `encaminhamento iniciado por ${this.apelidoDe(jogadorId)}`, 'encaminhamento');
 
     this.encaminhamentosEmVoo.add(salaId);
     // Relógio do em-voo (ADR-0010, "Órfã sem partidaId"): o instante da oferta
@@ -1197,6 +1230,8 @@ export class SalasHandlers {
     await this.enfileirarMutacao(async () => {
       try {
         if (aceite) {
+          // Espelho do aceite no stream de debug (issue #340).
+          this.espelhar(salaId, 'info', `encaminhamento aceito — partida ${aceite.partidaId} no server ${aceite.serverId}`, 'encaminhamento');
           const resAceite = this.estado.aplicar({ tipo: 'aceitar_encaminhamento', salaId } satisfies Comando);
           if (resAceite.sucesso) {
             try {
@@ -1249,6 +1284,8 @@ export class SalasHandlers {
             );
           }
         } else if (erroKind === 'recusa') {
+          // Espelho da recusa no stream de debug (issue #340).
+          this.espelhar(salaId, 'warn', `encaminhamento recusado: ${erroMotivo}`, 'encaminhamento');
           const resRecusa = this.estado.aplicar({ tipo: 'recusar_encaminhamento', salaId } satisfies Comando);
           if (resRecusa.sucesso) {
             this.estado.substituirEstado(resRecusa.estado);
@@ -1257,6 +1294,8 @@ export class SalasHandlers {
           const recusada: PartidaRecusadaEvento = { type: 'PARTIDA_RECUSADA', codigo: erroCodigo, motivo: erroMotivo || 'encaminhamento recusado' };
           this.broadcast.enviar(salaId, recusada);
         } else {
+          // Espelho da falha no stream de debug (issue #340).
+          this.espelhar(salaId, 'error', `encaminhamento falhou: ${erroMotivo}`, 'encaminhamento');
           const resFalha = this.estado.aplicar({ tipo: 'registrar_falha_do_encaminhamento', salaId } satisfies Comando);
           if (resFalha.sucesso) {
             this.estado.substituirEstado(resFalha.estado);
@@ -1762,6 +1801,8 @@ export class SalasHandlers {
         this.linkBase,
       );
       this.difundir(eventos, salaId);
+      // Espelho de desconexão no stream de debug (issue #340) — saída temporária.
+      this.espelhar(salaId, 'info', `${this.apelidoDe(jogadorId)} desconectado (em_reconexao)`);
     });
   }
 
@@ -2007,6 +2048,11 @@ export class SalasHandlers {
     if (typeof apelido === 'string' && apelido.length > 0) {
       this.estado.apelidoPorJogadorId.set(jogadorId, apelido);
     }
+  }
+
+  /** Apelido para as linhas de debug; fallback ao jogadorId truncado. */
+  private apelidoDe(jogadorId: string): string {
+    return this.estado.apelidoPorJogadorId.get(jogadorId) ?? jogadorId.slice(0, 8);
   }
 
   private async atualizarProjecaoEstado(

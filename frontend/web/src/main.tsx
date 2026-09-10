@@ -2,7 +2,12 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router-dom'
 import { router } from './app/router'
 import { AuthProvider } from './state/AuthProvider'
+import { instalarColetorDeDepuracao } from './utils/coletorDeDepuracao'
 import './styles/global.css'
+
+// Coletor de depuração (issue #340, "Modo Desenvolvedor"): instalado antes de
+// qualquer render para que console/erros/WS desde o boot caiam no buffer.
+instalarColetorDeDepuracao()
 
 /**
  * Sem StrictMode: o duplo montagem/desmonte do StrictMode quebra o Canvas do

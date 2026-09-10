@@ -4,6 +4,8 @@ import { Header } from '../components/ui/Header'
 import { ErrorBoundary } from '../components/home/ErrorBoundary'
 import { LoadingPage } from '../components/home/ErrorPage'
 import { SalaWebSocketProvider } from '../state/SalaWebSocketProvider'
+import { ModoDesenvolvedorProvider } from '../state/ModoDesenvolvedorProvider'
+import { ObservadorDeFases } from '../state/ObservadorDeFases'
 
 export function App() {
   const location = useLocation()
@@ -14,9 +16,30 @@ export function App() {
 
   if (emPartida) {
     return (
+      <ModoDesenvolvedorProvider>
+        <ObservadorDeFases />
+        <SalaWebSocketProvider>
+          <div className="h-screen w-screen overflow-hidden bg-[radial-gradient(circle_at_top,#26334a,var(--color-background)_55%)]">
+            <main id="main-content" className="flex h-full w-full min-h-0 flex-col p-0">
+              <ErrorBoundary>
+                <Suspense fallback={<LoadingPage />}>
+                  <Outlet />
+                </Suspense>
+              </ErrorBoundary>
+            </main>
+          </div>
+        </SalaWebSocketProvider>
+      </ModoDesenvolvedorProvider>
+    )
+  }
+
+  return (
+    <ModoDesenvolvedorProvider>
+      <ObservadorDeFases />
       <SalaWebSocketProvider>
-        <div className="h-screen w-screen overflow-hidden bg-[radial-gradient(circle_at_top,#26334a,var(--color-background)_55%)]">
-          <main id="main-content" className="flex h-full w-full min-h-0 flex-col p-0">
+        <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#26334a,var(--color-background)_55%)]">
+          <Header />
+          <main id="main-content" className="flex flex-1 min-h-0 flex-col p-0">
             <ErrorBoundary>
               <Suspense fallback={<LoadingPage />}>
                 <Outlet />
@@ -25,21 +48,6 @@ export function App() {
           </main>
         </div>
       </SalaWebSocketProvider>
-    )
-  }
-
-  return (
-    <SalaWebSocketProvider>
-      <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top,#26334a,var(--color-background)_55%)]">
-        <Header />
-        <main id="main-content" className="flex flex-1 min-h-0 flex-col p-0">
-          <ErrorBoundary>
-            <Suspense fallback={<LoadingPage />}>
-              <Outlet />
-            </Suspense>
-          </ErrorBoundary>
-        </main>
-      </div>
-    </SalaWebSocketProvider>
+    </ModoDesenvolvedorProvider>
   )
 }
