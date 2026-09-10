@@ -203,7 +203,9 @@ export type PartidaComandoDoCliente =
   | AtivarDebugDaPartidaComando
   | DesativarDebugDaPartidaComando;
 
-// --- Eventos servidor → cliente (5 + 2 da issue #138) ---
+// --- Eventos servidor → cliente (13: Turno/posição/iluminação/limpeza,
+// sorteio+vaga da #138, iniciada+estado, término da #179, ataque #172/#173,
+// resgate #171, desistência #288) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';

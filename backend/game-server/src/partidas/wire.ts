@@ -1,7 +1,7 @@
 // Guarda wire e mapeamento wire→domínio do canal de Partida (issue #117).
 //
 // O canal de Partida substitui o seam isolado de tabuleiro/Peões (issues #80
-// e #88): os comandos agora viajam com o `jogadorId` da mensagem
+// e #88): os 14 comandos agora viajam com o `jogadorId` da mensagem
 // (contrato do ST-11). O ator do dispatch, porém, é a sessão autenticada do
 // socket (#155): o `jogadorId` do wire é vestigial no dispatch — segue
 // obrigatório só pela guarda de forma, e comandos com `jogadorId` alheio são
@@ -196,7 +196,9 @@ export function mapearComandoDaPartida(
 // Conjunto fechado dos códigos do domínio que pertencem ao contrato wire do
 // canal de Partida (issue #117): os códigos de Tabuleiro/Peões das issues #80
 // e #88, o da Caixa da ST-12 (#144) e os 5 códigos de Turno do ST-11. O
-// PARTIDA_TERMINADA entra pela issue #179 (recusa pós-término). Qualquer
+// PARTIDA_TERMINADA entra pela issue #179 (recusa pós-término) e o
+// JOGADOR_NAO_NA_PARTIDA pela issue #288 (recusa de não-membro/desistente).
+// Qualquer
 // código fora deste conjunto é normalizado para DADOS_INVALIDOS para nunca
 // vazar um código fora do contrato.
 const CODIGOS_DA_PARTIDA_WIRE: ReadonlySet<string> = new Set([

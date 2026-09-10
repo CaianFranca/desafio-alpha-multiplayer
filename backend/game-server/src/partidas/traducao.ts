@@ -170,8 +170,12 @@ export function traduzirEventos(
         });
         break;
       // Desistência (issue #288): shape 1:1 com o domínio — abre o lote do
-      // comando e serve de aviso aos restantes (nova ordem via TURNO_INICIADO
-      // e tabuleiro via CELULAS_ILUMINADAS/LIMPEZA_APLICADA do mesmo lote).
+      // comando e é o anúncio de presença da saída definitiva: a partida
+      // nunca fez broadcast de `em_reconexao` (a queda é silenciosa — só
+      // marca presença via `marcarDesconexao`, sem mensagem aos restantes),
+      // então este evento é a novidade que avisa os restantes antes da nova
+      // ordem (TURNO_INICIADO) e do tabuleiro (CELULAS_ILUMINADAS/
+      // LIMPEZA_APLICADA) do mesmo lote. Sem evento wire novo de roster.
       case 'desistencia_registrada':
         saida.push({
           type: 'DESISTENCIA_REGISTRADA',

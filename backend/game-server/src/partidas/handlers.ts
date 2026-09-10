@@ -1,6 +1,6 @@
 // Handlers WS do canal de Partida (issue #117).
 //
-// Roteia os comandos wire de Partida (`@flicker/shared`) para o domínio
+// Roteia os 14 comandos wire de Partida (`@flicker/shared`) para o domínio
 // (`@flicker/engine`) via `aplicarComandoDePartida`, persiste o novo estado
 // (tabuleiro + Turnos) no Redis e faz broadcast dos eventos traduzidos —
 // incluindo a desistência (issue #288), cujo efeito atômico do engine
@@ -307,6 +307,21 @@ export class PartidaHandlers {
     return proxima;
   }
 
+  /**
+   * Monta o aviso de Retorno com N (membros da sala), não N−1 (engine).
+   *
+   * O `jogadores` do aviso preserva o vínculo de sala: é o roster da partida
+   * preparada (pré-desistência), porque o lobby revalida
+   * `jogadores == membros ativos` e responde `409 SALA_NAO_ENCAMINHADA` a
+   * qualquer subconjunto (lobby-server/src/routes/retorno.ts:131-141) —
+   * código definitivo, sem retentativa (retorno/cliente.ts:36-42, ADR-0006).
+   * Enviar N−1 deixaria a sala presa em `encaminhada` e quebraria o critério
+   * "volta à Sala" da spec #288, que manda reutilizar o callback de Retorno
+   * existente com "os mesmos Membros" (CONTEXT.md). O N−1 vive no
+   * `estado.jogadores` do engine (participação na partida), não no aviso.
+   * A eventual remoção do desistente do roster da sala é follow-up fora deste
+   * ticket (exigiria o lobby aceitar subconjunto N−1 + remoção de membro).
+   */
   private montarAviso(partida: PartidaPreparada, resultado: 'vitoria' | 'derrota'): AvisoDeRetorno {
     return {
       salaId: partida.salaId,

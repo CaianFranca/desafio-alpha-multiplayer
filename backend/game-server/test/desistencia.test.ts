@@ -46,6 +46,8 @@ import { traduzirEventos } from '../src/partidas/traducao.ts';
 
 class RedisEmMemoria {
   private readonly dados = new Map<string, string>();
+  /** Contador de `eval` (só a retenção do término usa `eval` no canal). */
+  chamadasEval = 0;
 
   async get(chave: string): Promise<string | null> {
     return this.dados.get(chave) ?? null;
@@ -64,6 +66,7 @@ class RedisEmMemoria {
   async eval(_script: string, _nChaves: number, ...args: unknown[]): Promise<number> {
     // Retenção do término: as duas chaves existem no stub em todos os cenários
     // de derrota por desistência — aplica como o Lua (retorna 1).
+    this.chamadasEval += 1;
     const ttl = args[args.length - 1];
     const chaves = args.slice(0, -1) as string[];
     assert.ok(typeof ttl === 'number' && ttl > 0, 'retenção exige TTL positivo');
@@ -413,6 +416,11 @@ test('2→1 declara derrota por desistência e dispara o Retorno uma única vez'
 
   const estado = await lerEstado(montada);
   assert.equal(estado.jogadores.length, 1);
+  assert.deepEqual(
+    estado.jogadores.map((j) => j.jogadorId),
+    ['jogador-1'],
+    'participação na partida é N−1 (engine remove o desistente)',
+  );
   assert.deepEqual(estado.resultado, { tipo: 'derrota', motivo: 'desistencia' });
 
   // A derrota por desistência é o último evento do lote, após o aviso.
@@ -424,6 +432,10 @@ test('2→1 declara derrota por desistência e dispara o Retorno uma única vez'
     motivo: 'desistencia',
   });
 
+  // N × N−1 lado a lado: o aviso carrega N (vínculo de sala preservado — o
+  // lobby revalida `jogadores == membros ativos` e rejeita subconjunto com
+  // 409 definitivo; ver `montarAviso`), enquanto o estado carrega N−1. A
+  // remoção do desistente do roster da sala é follow-up fora deste ticket.
   assert.equal(avisos.length, 1);
   assert.deepEqual(avisos[0], {
     salaId: 'sala-1',
@@ -581,11 +593,44 @@ test('ator é a sessão: jogadorId alheio no wire não desiste por outro', async
   });
 });
 
+// ─── Presença: desistência anuncia a saída, queda silencia ───
+
+test('presença: desistência anuncia a saída; queda não faz broadcast nenhum', async () => {
+  // Desistência = anúncio de presença da saída definitiva: todos os
+  // restantes recebem DESISTENCIA_REGISTRADA abrindo o lote, com snapshot
+  // consistente em N−1.
+  const comDesistencia = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
+  await comDesistencia.handlers.aplicarMensagem(
+    comDesistencia.sockets.get('jogador-3')!.comoWebSocket(),
+    comDesistencia.partidaId,
+    'jogador-3',
+    desistir('jogador-3'),
+  );
+  for (const jogadorId of ['jogador-1', 'jogador-2']) {
+    const tipos = tiposRecebidos(comDesistencia.sockets.get(jogadorId)!);
+    assert.ok(tipos.length > 0, `${jogadorId} recebe o lote`);
+    assert.equal(tipos[0], 'DESISTENCIA_REGISTRADA', `${jogadorId} é avisado primeiro da saída`);
+  }
+  assert.deepEqual(
+    (await lerEstado(comDesistencia)).jogadores.map((j) => j.jogadorId),
+    ['jogador-1', 'jogador-2'],
+  );
+
+  // Queda = silêncio total no broadcast: nenhum comando, nenhuma mensagem
+  // aos restantes. A presença do caído só muda via `marcarDesconexao` (camada
+  // `ws.ts`, fora do `PartidaHandlers`) — sem evento wire novo de roster.
+  const comQueda = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
+  for (const [jogadorId, socket] of comQueda.sockets) {
+    assert.equal(socket.mensagens.length, 0, `queda não avisa ${jogadorId}`);
+  }
+  assert.equal((await lerEstado(comQueda)).jogadores.length, 3);
+});
+
 // ─── Queda sem desistência continua voltável ───
 
-test('queda sem desistência volta com snapshot N e turno atual', async () => {
+test('queda sem desistência volta com snapshot N e turno atual, sem expiração', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
-  const { partidaId, handlers, sockets } = montada;
+  const { partidaId, handlers, sockets, avisos, redis } = montada;
 
   // Queda = fechar a conexão sem desistir: nenhum comando, nenhum aviso.
   const caido = sockets.get('jogador-2')!;
@@ -600,6 +645,14 @@ test('queda sem desistência volta com snapshot N e turno atual', async () => {
   assert.equal(snapshot.rodada, 1);
   assert.equal(snapshot.estado, 'em_andamento');
 
+  // Sem expiração (observável): estado em_andamento repersistido sem TTL,
+  // sem resultado, sem término, sem aviso e sem retenção — `anunciarTurnoAtual`
+  // inalterado.
+  assert.equal(await redis.ttl(chaveDoEstadoDaPartida(partidaId)), -1);
+  assert.equal(estado.resultado, null);
+  assert.equal(avisos.length, 0);
+  assert.equal(redis.chamadasEval, 0, 'nenhum eval de retenção após queda');
+
   const retorno = criarSocketFalso();
   await handlers.anunciarTurnoAtual(partidaId, retorno.comoWebSocket());
   assert.deepEqual(retorno.mensagens[0], {
@@ -607,5 +660,9 @@ test('queda sem desistência volta com snapshot N e turno atual', async () => {
     jogadorId: 'jogador-1',
     rodada: 1,
   });
+  assert.ok(
+    retorno.mensagens.every((m) => m.type !== 'PARTIDA_TERMINADA'),
+    'queda não termina a partida',
+  );
   assert.ok(caido !== undefined);
 });
