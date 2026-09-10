@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useLoader } from '@react-three/fiber'
 import * as THREE from 'three'
-import mesaTopoUrl from '../assets/mesa_topo.png'
+import mesaTopoUrl from '../assets/mesa_topo.jpg'
 import {
   COR_FUNDO,
   COR_LATERAIS_MESA,

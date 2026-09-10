@@ -1,4 +1,6 @@
 import { Suspense, useEffect, useMemo } from 'react'
+import { useLoader, type ThreeEvent } from '@react-three/fiber'
+import * as THREE from 'three'
 import {
   BORDA_OFFSET,
   BORDA_Y,
@@ -14,9 +16,6 @@ import {
   PECA_Y,
   TAMANHO_CELULA,
 } from './contrato'
-import { useLoader } from '@react-three/fiber'
-import type { ThreeEvent } from '@react-three/fiber'
-import * as THREE from 'three'
 import { TEXTURA_OBSCURO_DA_GRADE } from './texturasDasPecas'
 import type {
   Celula as CelulaTipo,
@@ -28,6 +27,7 @@ import { PeaoVisual } from './PeaoVisual'
 import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { handlersDeCursor } from './cursor'
+import { texturaDoTabuleiro } from './texturasDoTabuleiro'
 
 interface CelulaProps {
   celula: CelulaTipo
@@ -190,6 +190,114 @@ function PlanoDeFundoDaCelula(props: PlanoDeFundoProps) {
   )
 }
 
+/**
+ * Relevo das paredes do grid (issue #278): mesmo ponto de partida das peças
+ * (`RELEVO_TOPO_NORMAL_SCALE` em `PecaPlaceholder`) — realça o normalMap sob
+ * a luz rasante da cena sem amplificar ruído além do motivo. O motivo gira
+ * 90° para leitura horizontal de pedra/concreto nas bordas verticais.
+ */
+const RELEVO_PAREDE_NORMAL_SCALE: readonly [number, number] = [1.1, 1.1]
+const TINT_PAREDE = '#b5b5b5'
+
+/** Texturas das paredes do grid: cor no map (sRGB), dado linear no normal. */
+function useTexturasDaParede(): { mapa: THREE.Texture; normal: THREE.Texture } {
+  const { map, normalMap } = texturaDoTabuleiro()
+  const [mapCarregado, normalCarregado] = useLoader(THREE.TextureLoader, [
+    map,
+    normalMap,
+  ])
+  // Clona para não mutar o cache do useLoader (precedente das peças/Mesa).
+  const par = useMemo(() => {
+    const mapa = mapCarregado.clone()
+    mapa.colorSpace = THREE.SRGBColorSpace
+    mapa.wrapS = THREE.RepeatWrapping
+    mapa.wrapT = THREE.RepeatWrapping
+    mapa.anisotropy = 4
+    mapa.center.set(0.5, 0.5)
+    mapa.rotation = Math.PI / 2
+    mapa.needsUpdate = true
+    const normal = normalCarregado.clone()
+    normal.colorSpace = THREE.NoColorSpace
+    normal.wrapS = THREE.RepeatWrapping
+    normal.wrapT = THREE.RepeatWrapping
+    normal.anisotropy = 4
+    normal.center.set(0.5, 0.5)
+    normal.rotation = Math.PI / 2
+    normal.needsUpdate = true
+    return { mapa, normal }
+  }, [mapCarregado, normalCarregado])
+  // Descarta os clones no unmount/troca (49 células por mount) — o cache do
+  // `useLoader` segue intacto (mesmo padrão B1 do plano de fundo).
+  useEffect(
+    () => () => {
+      par.mapa.dispose()
+      par.normal.dispose()
+    },
+    [par],
+  )
+  return par
+}
+
+/**
+ * Paredes do grid texturizadas (issue #278): o `color` multiplica o map, com
+ * o piso em `obscuro` contínuo e as bordas em abismo — mesma affordância, só
+ * com relevo.
+ */
+function ParedesTexturizadas() {
+  const { mapa, normal } = useTexturasDaParede()
+  return (
+    <group position={[0, CELULA_Y_BORDA, 0]}>
+      {BORDAS_CONFIG.map((b, i) => (
+        <mesh key={i} position={b.pos}>
+          <boxGeometry args={b.args} />
+          <meshStandardMaterial
+            color={TINT_PAREDE}
+            map={mapa}
+            normalMap={normal}
+            normal-scale={RELEVO_PAREDE_NORMAL_SCALE}
+            roughness={0.95}
+            metalness={0}
+            transparent
+            opacity={0.95}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/** Fallback de suspensão/erro: bordas chapadas atuais (sem textura). */
+function ParedesChapadas() {
+  return (
+    <group position={[0, CELULA_Y_BORDA, 0]}>
+      {BORDAS_CONFIG.map((b, i) => (
+        <mesh key={i} position={b.pos}>
+          <boxGeometry args={b.args} />
+          <meshStandardMaterial color={COR_BORDA_CELULA} transparent opacity={0.95} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/**
+ * Paredes da célula com `Suspense` interno + limite de erro (mesmo padrão do
+ * `PlanoDeFundoDaCelula`): enquanto o par abismo carrega, as bordas chapadas
+ * — a grade nunca some, e uma falha (404) não derruba o Canvas (B4).
+ */
+function ParedesDaCelula() {
+  const chapeu = <ParedesChapadas />
+  const chave = texturaDoTabuleiro().map
+  return (
+    <LimiteDeErroDoModelo key={chave} resetKey={chave} fallback={chapeu}>
+      <Suspense fallback={chapeu}>
+        <ParedesTexturizadas />
+      </Suspense>
+    </LimiteDeErroDoModelo>
+  )
+}
+
 export function Celula({
   celula,
   peca,
@@ -251,14 +359,7 @@ export function Celula({
         onClick={planeOnClick}
         cursorHandlers={cursorHandlers}
       />
-      <group position={[0, CELULA_Y_BORDA, 0]}>
-        {BORDAS_CONFIG.map((b, i) => (
-          <mesh key={i} position={b.pos}>
-            <boxGeometry args={b.args} />
-            <meshStandardMaterial color={COR_BORDA_CELULA} transparent opacity={0.95} />
-          </mesh>
-        ))}
-      </group>
+      <ParedesDaCelula />
       {peca ? (
         <PecaPlaceholder
           tipo={peca.tipo}
