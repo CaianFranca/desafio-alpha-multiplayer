@@ -732,6 +732,17 @@ test('regressão do travamento da semente 7: a rodada dos 4 bots progrediu sem d
   let foraDaVez = 0;
   let desistenciasSeguidas = 0;
   let atorEmBaixa = false;
+  // Teto de travamento (medido, 300 execuções): sem progresso, o failsafe
+  // desiste no máximo 2 vezes seguidas (o re-sorteio do turno recupera) —
+  // sequência maior só ocorre com o ator em Baixa Iluminação, o livelock
+  // documentado em :478. Fora dela, travamento é regressão.
+  const falharSeTravado = () => {
+    if (desistenciasSeguidas > 10 && !atorEmBaixa) {
+      assert.fail(
+        `travamento fora da Baixa: ${desistenciasSeguidas} desistências seguidas sem progresso`,
+      );
+    }
+  };
   while (estado.resultado === null && tentativas < 400) {
     tentativas++;
     const ator = estado.jogadorAtivoId;
@@ -754,23 +765,11 @@ test('regressão do travamento da semente 7: a rodada dos 4 bots progrediu sem d
       atorEmBaixa = jogador?.emBaixaIluminacao ?? false;
       continue;
     }
-    // Teto de travamento (medido, 300 execuções): sem progresso, o failsafe
-    // desiste no máximo 2 vezes seguidas (o re-sorteio do turno recupera) —
-    // sequência maior só ocorre com o ator em Baixa Iluminação, o livelock
-    // documentado em :478. Fora dela, travamento é regressão.
-    if (desistenciasSeguidas > 10 && !atorEmBaixa) {
-      assert.fail(
-        `travamento fora da Baixa: ${desistenciasSeguidas} desistências seguidas sem progresso`,
-      );
-    }
+    falharSeTravado();
     desistenciasSeguidas = 0;
     estado = turno.estado;
   }
-  if (desistenciasSeguidas > 10 && !atorEmBaixa) {
-    assert.fail(
-      `travamento fora da Baixa: ${desistenciasSeguidas} desistências seguidas sem progresso`,
-    );
-  }
+  falharSeTravado();
   assert.equal(foraDaVez, 0, 'bot nunca perde a vez agindo nela');
 });
 
