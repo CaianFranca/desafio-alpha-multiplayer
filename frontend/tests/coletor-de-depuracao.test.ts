@@ -115,6 +115,52 @@ describe('coletor — formatação de objetos (formatarValor)', () => {
     expect(coletor.formatarValor(null)).toBe('null')
     expect(coletor.formatarValor(new TypeError('boom'))).toBe('TypeError: boom')
   })
+
+  it('coletar aceita thunk e só resolve/memoiza na leitura da mensagem', () => {
+    let avaliacoes = 0
+    coletor.coletar('console', 'info', () => {
+      avaliacoes += 1
+      return 'sob demanda'
+    })
+
+    expect(avaliacoes).toBe(0)
+    expect(coletor.entradas()[0]?.mensagem).toBe('sob demanda')
+    expect(avaliacoes).toBe(1)
+
+    // Memoização: leituras seguintes não reavaliam o thunk.
+    expect(coletor.entradas()[0]?.mensagem).toBe('sob demanda')
+    expect(avaliacoes).toBe(1)
+  })
+
+  it('a serialização do payload só ocorre na leitura da mensagem (lazy)', () => {
+    const stringify = vi.spyOn(JSON, 'stringify')
+
+    coletor.coletar('ws←', 'info', () =>
+      coletor.resumirPayload({ type: 'ESTADO', grande: 'x'.repeat(10) }),
+    )
+
+    // Nada foi formatado no registro; só a leitura dispara JSON.stringify.
+    expect(stringify).not.toHaveBeenCalled()
+    const mensagem = coletor.entradas()[0]?.mensagem ?? ''
+    expect(stringify).toHaveBeenCalled()
+    expect(mensagem).toContain('"type": "ESTADO"')
+
+    stringify.mockRestore()
+  })
+
+  it('objeto do console só é serializado quando a mensagem é lida (mutação refletida)', () => {
+    coletor.instalarColetorDeDepuracao()
+    const estado: { valor: number } = { valor: 1 }
+
+    console.log(estado)
+    // A mutação posterior aparece na leitura: prova que a serialização foi
+    // adiada até aqui, não feita no registro.
+    estado.valor = 2
+
+    const mensagem = coletor.entradas()[0]?.mensagem ?? ''
+    expect(mensagem).toContain('"valor": 2')
+    expect(mensagem).not.toContain('[object Object]')
+  })
 })
 
 describe('coletor — marcadores de fase (fundos históricos)', () => {

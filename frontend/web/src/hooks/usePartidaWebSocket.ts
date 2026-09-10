@@ -162,7 +162,7 @@ export function usePartidaWebSocket({
       // Stream de debug do backend (issue #340): o escopo é a Partida da
       // conexão (o `partida-id` do upgrade); enviado a cada open/reconexão.
       if (estaModoAtivo()) {
-        coletar('ws→', 'info', resumirPayload({ type: 'ATIVAR_DEBUG' }), 'partida')
+        coletar('ws→', 'info', () => resumirPayload({ type: 'ATIVAR_DEBUG' }), 'partida')
         ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
       }
     }
@@ -185,7 +185,7 @@ export function usePartidaWebSocket({
         coletar('backend', evento.nivel, evento.mensagem, evento.contexto ?? 'partida')
         return
       }
-      coletar('ws←', 'info', resumirPayload(data), 'partida')
+      coletar('ws←', 'info', () => resumirPayload(data), 'partida')
 
       switch ((data as { type: string }).type) {
         case 'ADMISSAO_ACEITA':
@@ -261,7 +261,7 @@ export function usePartidaWebSocket({
     const desinscreverAtivacao = aoAtivarModo(() => {
       const ws = wsRef.current
       if (ws && ws.readyState === WebSocket.OPEN) {
-        coletar('ws→', 'info', resumirPayload({ type: 'ATIVAR_DEBUG' }), 'partida')
+        coletar('ws→', 'info', () => resumirPayload({ type: 'ATIVAR_DEBUG' }), 'partida')
         ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
       } else if (ws) {
         comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'ATIVAR_DEBUG' }]
@@ -272,7 +272,7 @@ export function usePartidaWebSocket({
     const desinscreverDesativacao = aoDesativarModo(() => {
       const ws = wsRef.current
       if (ws && ws.readyState === WebSocket.OPEN) {
-        coletar('ws→', 'info', resumirPayload({ type: 'DESATIVAR_DEBUG' }), 'partida')
+        coletar('ws→', 'info', () => resumirPayload({ type: 'DESATIVAR_DEBUG' }), 'partida')
         ws.send(JSON.stringify({ type: 'DESATIVAR_DEBUG' }))
       } else if (ws) {
         comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'DESATIVAR_DEBUG' }]
@@ -295,7 +295,7 @@ export function usePartidaWebSocket({
   const enviar = useCallback((comando: PartidaComandoDoCliente) => {
     // Captura de saída no stream de depuração (issue #340): fonte `ws→`,
     // contexto `partida`, payload truncado.
-    coletar('ws→', 'info', resumirPayload(comando), 'partida')
+    coletar('ws→', 'info', () => resumirPayload(comando), 'partida')
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(comando))

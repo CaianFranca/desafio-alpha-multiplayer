@@ -309,7 +309,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       // já está ativo (sobrevive a reload via sessionStorage) e a cada
       // reconexão — o servidor é idempotente.
       if (estaModoAtivo()) {
-        coletar('ws→', 'info', resumirPayload({ type: 'ATIVAR_DEBUG' }), 'sala')
+        coletar('ws→', 'info', () => resumirPayload({ type: 'ATIVAR_DEBUG' }), 'sala')
         ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
       }
     }
@@ -349,7 +349,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
         coletar('backend', evento.nivel, evento.mensagem, evento.contexto ?? 'lobby')
         return
       }
-      coletar('ws←', 'info', resumirPayload(data), 'sala')
+      coletar('ws←', 'info', () => resumirPayload(data), 'sala')
 
       // Encaminhamento (issue #45): PARTIDA_PREPARANDO/DISPONIVEL/RECUSADA/FALHOU
       // Fonte única é `encaminhamento` → `AvisoEncaminhamento`/`EncaminhamentoOverlay`.
@@ -464,7 +464,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     const desinscreverAtivacao = aoAtivarModo(() => {
       const ws = wsRef.current
       if (ws && ws.readyState === WebSocket.OPEN) {
-        coletar('ws→', 'info', resumirPayload({ type: 'ATIVAR_DEBUG' }), 'sala')
+        coletar('ws→', 'info', () => resumirPayload({ type: 'ATIVAR_DEBUG' }), 'sala')
         ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
       } else if (ws) {
         comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'ATIVAR_DEBUG' }]
@@ -475,7 +475,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     const desinscreverDesativacao = aoDesativarModo(() => {
       const ws = wsRef.current
       if (ws && ws.readyState === WebSocket.OPEN) {
-        coletar('ws→', 'info', resumirPayload({ type: 'DESATIVAR_DEBUG' }), 'sala')
+        coletar('ws→', 'info', () => resumirPayload({ type: 'DESATIVAR_DEBUG' }), 'sala')
         ws.send(JSON.stringify({ type: 'DESATIVAR_DEBUG' }))
       } else if (ws) {
         comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'DESATIVAR_DEBUG' }]
@@ -545,7 +545,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const enviar = useCallback((comando: SalaComandoDoCliente) => {
     // Captura de saída no stream de depuração (issue #340): fonte `ws→`,
     // contexto `sala`, payload truncado.
-    coletar('ws→', 'info', resumirPayload(comando), 'sala')
+    coletar('ws→', 'info', () => resumirPayload(comando), 'sala')
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(comando))

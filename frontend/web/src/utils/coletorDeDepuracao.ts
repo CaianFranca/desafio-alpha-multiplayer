@@ -166,20 +166,38 @@ export function resumirPayload(payload: unknown): string {
   return truncarTexto(typeof payload === 'string' ? payload : formatarValor(payload))
 }
 
+/**
+ * Mensagem de uma entrada: string pronta ou thunk avaliado sob demanda.
+ * Diferir a serialização (`formatarValor`/`resumirPayload`) remove o custo por
+ * mensagem de console/WS enquanto o modo está desligado e o painel fechado.
+ * Objetos/args capturados ficam vivos: a formatação enxerga mutações feitas
+ * até a primeira leitura de `.mensagem` (aceitável para ferramenta de dev, é o
+ * preço de adiar a serialização).
+ */
+type MensagemDeDepuracao = string | (() => string)
+
 function registrar(
   fonte: FonteDoDepurador,
   nivel: NivelDoDepurador,
-  mensagem: string,
+  mensagem: MensagemDeDepuracao,
   contexto: string | null = null,
 ): EntradaDeDepuracao {
+  // Memoiza a primeira leitura: o getter resolve o thunk e trunca uma única
+  // vez; a interface `EntradaDeDepuracao.mensagem` permanece `string`.
+  let memoizada: string | undefined
   const entrada: EntradaDeDepuracao = {
     id: proximoId++,
     registradoEm: Date.now(),
     fonte,
     nivel,
     contexto,
-    mensagem: truncarTexto(mensagem),
     fase: faseAtual,
+    get mensagem(): string {
+      if (memoizada === undefined) {
+        memoizada = truncarTexto(typeof mensagem === 'string' ? mensagem : mensagem())
+      }
+      return memoizada
+    },
   }
   buffer.push(entrada)
   // Anel: acima do cap, descarta as mais antigas.
@@ -199,12 +217,14 @@ function registrar(
 /**
  * Ponto de entrada das fontes instrumentadas (boundaries, hooks de WS,
  * linhas espelhadas do backend). `console` e erros globais são capturados
- * pelo instalador; o resto chama esta função.
+ * pelo instalador; o resto chama esta função. Aceita `string` ou thunk —
+ * prefira thunk nos caminhos de alta frequência (WS/console) para não
+ * serializar com o modo desligado.
  */
 export function coletar(
   fonte: FonteDoDepurador,
   nivel: NivelDoDepurador,
-  mensagem: string,
+  mensagem: MensagemDeDepuracao,
   contexto?: string,
 ): void {
   registrar(fonte, nivel, mensagem, contexto ?? null)
@@ -274,17 +294,22 @@ export function instalarColetorDeDepuracao(): void {
 
   // Objetos passam por formatarValor: JSON indentado no painel/cópia em vez
   // de "[object Object]" (o console original mantém o valor vivo, como antes).
+  // A formatação é diferida via thunk (com cópia dos args): nada é
+  // serializado enquanto ninguém lê a mensagem da entrada.
   console.log = (...args: unknown[]) => {
     consoleOriginal?.log(...args)
-    registrar('console', 'info', args.map(formatarValor).join(' '))
+    const argumentos = [...args]
+    registrar('console', 'info', () => argumentos.map(formatarValor).join(' '))
   }
   console.warn = (...args: unknown[]) => {
     consoleOriginal?.warn(...args)
-    registrar('console', 'warn', args.map(formatarValor).join(' '))
+    const argumentos = [...args]
+    registrar('console', 'warn', () => argumentos.map(formatarValor).join(' '))
   }
   console.error = (...args: unknown[]) => {
     consoleOriginal?.error(...args)
-    registrar('console', 'error', args.map(formatarValor).join(' '))
+    const argumentos = [...args]
+    registrar('console', 'error', () => argumentos.map(formatarValor).join(' '))
   }
 
   window.addEventListener('error', (evento) => {
