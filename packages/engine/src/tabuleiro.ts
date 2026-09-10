@@ -560,34 +560,99 @@ function pecaValidaNaPosicao(
 //   especial igual com 2 cartas entre); tipo diferente pode colar
 //   (vulto + espectro, gerador + sala_medica); máx 2 especiais seguidos;
 // - determinístico por seed via mulberry32 + Fisher-Yates, total
-//   preservado (83). Fallback pega a primeira restante quando nenhuma
-//   candidata passa nas regras para não travar no fim do baralho.
+//   preservado (83).
+//
+// Garantia (B1): construção por busca em profundidade com ordem de
+// alternativas sorteada pelo PRNG — em vez do guloso "primeiro válido", que
+// empurrava as peças puladas para o fim da Caixa e caía no fallback
+// violando as regras em ~1 a cada 7 partidas. Cada tentativa deriva uma
+// sub-seed determinística da seed, então a mesma seed produz sempre a mesma
+// Caixa. Se todas as tentativas esgotarem o limite de passos (Caixa
+// patológica onde as regras são insatisfatíveis), o fallback best-effort
+// abaixo entrega a Caixa completa **violando as janelas** — comportamento
+// degradado documentado e coberto por teste, nunca travamento.
+const MAX_TENTATIVAS_ESTRATIFICACAO = 50;
+const LIMITE_PASSOS_ESTRATIFICACAO = 20000;
+
+function tentarEstratificar(
+  ordem: PecaDaCaixa[],
+  prng: () => number,
+): PecaDaCaixa[] | null {
+  const restantes = [...ordem];
+  const resultado: PecaDaCaixa[] = [];
+  // Pilha da busca: para cada posição, as alternativas válidas embaralhadas
+  // e quantas já foram tentadas. Ao retroceder, o prefixo da fila é o mesmo,
+  // então a próxima alternativa segue válida.
+  const pilha: { alternativas: PecaDaCaixa[]; usadas: number }[] = [];
+  let passos = 0;
+  while (resultado.length < ordem.length) {
+    if (++passos > LIMITE_PASSOS_ESTRATIFICACAO) return null;
+    const validas = restantes.filter((candidata) =>
+      pecaValidaNaPosicao(resultado, candidata),
+    );
+    if (validas.length === 0) {
+      const topo = pilha.pop();
+      if (topo === undefined) return null;
+      const devolvida = resultado.pop();
+      if (devolvida !== undefined) restantes.push(devolvida);
+      const proxima = topo.alternativas[topo.usadas + 1];
+      if (proxima === undefined) {
+        // Sem alternativa restante neste nível: segue retrocedendo.
+        continue;
+      }
+      const indice = restantes.findIndex((peca) => peca === proxima);
+      if (indice === -1 || !pecaValidaNaPosicao(resultado, proxima)) {
+        continue;
+      }
+      pilha.push({ alternativas: topo.alternativas, usadas: topo.usadas + 1 });
+      restantes.splice(indice, 1);
+      resultado.push(proxima);
+      continue;
+    }
+    const alternativas = fisherYates([...validas], prng);
+    const escolhida = alternativas[0];
+    pilha.push({ alternativas, usadas: 0 });
+    restantes.splice(
+      restantes.findIndex((peca) => peca === escolhida),
+      1,
+    );
+    resultado.push(escolhida);
+  }
+  return resultado;
+}
+
 function embaralharCaixa(
   caixa: readonly PecaDaCaixa[],
   seed: number,
 ): PecaDaCaixa[] {
+  for (let tentativa = 0; tentativa < MAX_TENTATIVAS_ESTRATIFICACAO; tentativa++) {
+    const prng = criarPrng(
+      (seed ^ Math.imul(tentativa + 1, 2654435761)) >>> 0,
+    );
+    const ordem = fisherYates([...caixa], prng);
+    const estratificada = tentarEstratificar(ordem, prng);
+    if (estratificada !== null) return estratificada;
+  }
+
+  // Fallback best-effort: só dispara quando as regras são insatisfatíveis
+  // para a composição dada (nunca com a composição real de 83). Preserva o
+  // total e o determinismo, mas PODE VIOLAR as janelas — ver teste.
   const prng = criarPrng(seed);
   const restantes = fisherYates([...caixa], prng);
   const resultado: PecaDaCaixa[] = [];
-
   while (restantes.length > 0) {
-    let escolhidoIdx = -1;
-
+    let indiceEscolhido = -1;
     for (let i = 0; i < restantes.length; i++) {
       if (pecaValidaNaPosicao(resultado, restantes[i])) {
-        escolhidoIdx = i;
+        indiceEscolhido = i;
         break;
       }
     }
-
-    // Fallback de segurança para não travar em caso de gargalo no final do baralho
-    if (escolhidoIdx === -1) {
-      escolhidoIdx = 0;
+    if (indiceEscolhido === -1) {
+      indiceEscolhido = 0;
     }
-
-    resultado.push(restantes.splice(escolhidoIdx, 1)[0]);
+    resultado.push(restantes.splice(indiceEscolhido, 1)[0]);
   }
-
   return resultado;
 }
 
