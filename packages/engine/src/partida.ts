@@ -5,7 +5,9 @@
 // Posição. O dispatch aplicarComandoDePartida segue o padrão dos dispatches
 // existentes (aplicarComando do lobby e aplicarComandoDeTabuleiro): valida o
 // ator, roteia o comando e produz eventos de domínio ou rejeições com códigos
-// fechados. A dependência em runtime é única — partida.ts → monstros.ts →
+// fechados. Exceção única: desistir_da_partida (issue #289) tem rota própria
+// fora do FORA_DA_VEZ — qualquer Jogador do roster, no próprio turno ou fora
+// dele. A dependência em runtime é única — partida.ts → monstros.ts →
 // tabuleiro.ts → peoes.ts — e o Recebimento do Peão já posicionado
 // (posicionar_peao do Primeiro Turno e confirmar_posicao_do_peao) é gerado
 // aqui, via gerarRecebidas. Nenhum contrato wire, Redis ou Express vive aqui:
@@ -157,11 +159,21 @@ export type DesfechoDaPartida =
   | { readonly tipo: 'vitoria' }
   | {
       readonly tipo: 'derrota';
-      readonly motivo: 'caixa_esgotada' | 'equipe_amedrontada';
+      // Desistência (issue #289): o quórum mínimo — um Jogador restante após
+      // desistências — encerra em derrota e precede a vitória.
+      readonly motivo: 'caixa_esgotada' | 'equipe_amedrontada' | 'desistencia';
     };
 
 export interface EncerrarTurnoComando {
   readonly tipo: 'encerrar_turno';
+}
+
+// Desistência (issue #289): comando de domínio do ato irreversível de sair da
+// Partida em andamento. Só o próprio Jogador desiste (ator === desistente),
+// no próprio turno ou fora dele — fora do FORA_DA_VEZ, com rota própria no
+// dispatch.
+export interface DesistirDaPartidaComando {
+  readonly tipo: 'desistir_da_partida';
 }
 
 // Travessia do Escuro (issue #264 / spec #272): comando de domínio da jogada
@@ -181,7 +193,8 @@ export type ComandoDePartida =
   | ComandoDeTabuleiro
   | ConfirmarPosicaoDoPeaoComando
   | AtravessarOEscuroDaPartidaComando
-  | EncerrarTurnoComando;
+  | EncerrarTurnoComando
+  | DesistirDaPartidaComando;
 
 export interface TurnoIniciadoEvento {
   readonly tipo: 'turno_iniciado';
@@ -222,6 +235,16 @@ export interface ResgateRealizadoEvento {
   readonly resgatadorPeaoId: string;
 }
 
+// Desistência (issue #289): eco do domínio — o Jogador saiu da Partida em
+// andamento; o peão indicado foi removido (a célula fica livre) e a vez saiu
+// da ordem. Abre o lote do comando, antes de celulas_iluminadas,
+// limpeza_aplicada e da Passagem de Vez (quando o desistente era o Ativo).
+export interface DesistenciaRegistradaEvento {
+  readonly tipo: 'desistencia_registrada';
+  readonly jogadorId: string;
+  readonly peaoId: string;
+}
+
 // Término (issue #176): emitido no máximo uma vez, sempre como ÚLTIMO evento
 // do lote da Ação que consumou o desfecho.
 export interface PartidaTerminadaEvento {
@@ -249,6 +272,7 @@ export type EventoDaPartida =
   | AtaqueResolvidoEvento
   | ResgateRealizadoEvento
   | AtravessouOEscuroEvento
+  | DesistenciaRegistradaEvento
   | PartidaTerminadaEvento;
 
 export type CodigoDeErroDaPartida =
@@ -258,6 +282,7 @@ export type CodigoDeErroDaPartida =
   | 'POSICAO_CONFIRMADA'
   | 'ENCERRAMENTO_INVALIDO'
   | 'MOVIMENTO_INDISPONIVEL'
+  | 'JOGADOR_NAO_NA_PARTIDA'
   | 'PARTIDA_TERMINADA';
 
 export interface ErroDeDominioDaPartida {
@@ -383,6 +408,12 @@ export function aplicarComandoDePartida(
   const jogadorAtivo = estado.jogadores.find(
     (jogador) => jogador.jogadorId === estado.jogadorAtivoId,
   );
+  // Desistência (issue #289): rota própria fora do FORA_DA_VEZ — qualquer
+  // Jogador do roster desiste no próprio turno ou fora dele; só o próprio
+  // (ator === desistente) é aceito, validado dentro de desistirDaPartida.
+  if (comando.tipo === 'desistir_da_partida') {
+    return funilarAvaliacaoDoTermino(desistirDaPartida(estado, ator));
+  }
   // Ator desconhecido ou fora da vez: apenas o Jogador Ativo comanda.
   if (!jogadorAtivo || ator !== estado.jogadorAtivoId) {
     return rejeitarDaPartida(
@@ -461,6 +492,10 @@ function rotearComandoDaPartida(
       return confirmarPosicaoDoPeao(estado, comando, jogadorAtivo);
     case 'encerrar_turno':
       return encerrarTurnoDaPartida(estado, jogadorAtivo);
+    case 'desistir_da_partida':
+      // Inalcançável via aplicarComandoDePartida (rota própria acima, fora do
+      // FORA_DA_VEZ) — rede de proteção da exaustividade: delega com o Ativo.
+      return desistirDaPartida(estado, jogadorAtivo.jogadorId);
     default: {
       // Exaustividade: um novo ComandoDePartida sem case próprio falha a
       // compilação aqui; em runtime, entrada externa pode bypassar tipos.
@@ -1446,6 +1481,216 @@ function encerrarTurnoDaPartida(
   );
 }
 
+// Desistência (issue #289): ato irreversível do próprio Jogador em Partida em
+// andamento — remove o peão (libera a célula), exclui a vez do roster,
+// recalcula a Iluminação com os restantes e aplica a Limpeza no ato
+// (recalcularIluminacaoEAplicarLimpeza com o roster pós-remoção; conquistas
+// não revogadas). Sem Ataque (sem gatilho de decisão) e sem Resgate.
+// Se o desistente era o Jogador Ativo, a Passagem de Vez é imediata,
+// ancorada no índice removido (o seguinte na ordem assume, com salto de
+// amedrontados e incremento de rodada no wrap, na semântica de avancarVez);
+// se não era, vez/rodada/pendências do Ativo vigente são preservadas.
+// O término (vitória em N−1, derrota no quórum de 1) sai pelo funil do
+// dispatch, via avaliarTerminoDaPartida.
+function desistirDaPartida(
+  estado: EstadoDaPartida,
+  ator: string,
+): ResultadoDaPartida {
+  const desistente = estado.jogadores.find(
+    (jogador) => jogador.jogadorId === ator,
+  );
+  if (!desistente) {
+    return rejeitarDaPartida(
+      'JOGADOR_NAO_NA_PARTIDA',
+      'Apenas um Jogador da Partida pode desistir dela.',
+    );
+  }
+  const eraAtivo = ator === estado.jogadorAtivoId;
+
+  const jogadores = estado.jogadores.filter(
+    (jogador) => jogador.jogadorId !== ator,
+  );
+  const peoes = estado.tabuleiro.peoes.filter(
+    (peao) => peao.peaoId !== desistente.peaoId,
+  );
+
+  // Seleção/manipulação/recebidas: pertencem à sequência do Ativo. Com o
+  // turno abortado (desistente Ativo), caem — a Passagem abaixo também as
+  // limpa; fora do turno, são do Ativo vigente e ficam intactas. A Seleção
+  // do peão órfã do desistente cai em ambos os ramos (defensivo: o guard
+  // exigirPeaoDoAtor impede esse estado pela via normal).
+  const tabuleiroBase: EstadoDoTabuleiro = eraAtivo
+    ? {
+        ...estado.tabuleiro,
+        peoes,
+        pecaSelecionadaId: null,
+        pecaEmManipulacaoId: null,
+        peaoSelecionadoId: null,
+        recebidas: [],
+      }
+    : {
+        ...estado.tabuleiro,
+        peoes,
+        peaoSelecionadoId:
+          estado.tabuleiro.peaoSelecionadoId === desistente.peaoId
+            ? null
+            : estado.tabuleiro.peaoSelecionadoId,
+      };
+
+  const estadoParaIluminacao: EstadoDaPartida = { ...estado, jogadores };
+  const eventos: EventoDaPartida[] = [
+    {
+      tipo: 'desistencia_registrada',
+      jogadorId: ator,
+      peaoId: desistente.peaoId,
+    },
+  ];
+  const iluminacao = recalcularIluminacaoEAplicarLimpeza(
+    estadoParaIluminacao,
+    tabuleiroBase,
+    eventos,
+  );
+  const tabuleiroPosLimpeza: EstadoDoTabuleiro = {
+    ...tabuleiroBase,
+    posicionadas: iluminacao.posicionadas,
+  };
+
+  // Poda do snapshot do Alcance: entradas de Monstros removidos pela Limpeza
+  // caem; nas demais, o peão do desistente é filtrado.
+  const posicionadasIds = new Set(
+    tabuleiroPosLimpeza.posicionadas.map((peca) => peca.pecaId),
+  );
+  const peoesNoAlcance: Record<string, readonly string[]> = {};
+  for (const [pecaId, peaoIds] of Object.entries(estado.peoesNoAlcance)) {
+    if (!posicionadasIds.has(pecaId)) {
+      continue;
+    }
+    peoesNoAlcance[pecaId] = peaoIds.filter(
+      (peaoId) => peaoId !== desistente.peaoId,
+    );
+  }
+
+  // Poda stale da graça (mesmo padrão do mover): peças removidas pela
+  // Limpeza não retêm ID órfão; a lista em si é preservada.
+  const pecasEmPeriodoDeGraca = (estado.pecasEmPeriodoDeGraca ?? []).filter(
+    (pecaId) => posicionadasIds.has(pecaId),
+  );
+
+  if (!eraAtivo) {
+    return sucessoDaPartida(
+      {
+        ...estado,
+        tabuleiro: tabuleiroPosLimpeza,
+        jogadores,
+        celulasIluminadas: iluminacao.celulasIluminadas,
+        peoesNoAlcance,
+        pecasEmPeriodoDeGraca,
+      },
+      eventos,
+    );
+  }
+
+  // Passagem imediata ancorada no índice removido: o seguinte na ordem de
+  // entrada assume. O índice inicial é o do removido módulo o tamanho
+  // pós-remoção (os posteriores deslocam uma posição); a rodada incrementa
+  // quando o removido era o último (o seguinte abre nova rodada).
+  const ordenadosPre = [...estado.jogadores].sort(
+    (primeiro, segundo) => primeiro.ordem - segundo.ordem,
+  );
+  const ordenados = [...jogadores].sort(
+    (primeiro, segundo) => primeiro.ordem - segundo.ordem,
+  );
+  const indiceRemovido = ordenadosPre.findIndex(
+    (jogador) => jogador.jogadorId === ator,
+  );
+  let indiceProximo = indiceRemovido % ordenados.length;
+  let rodadaAlvo =
+    indiceRemovido === ordenadosPre.length - 1
+      ? estado.rodada + 1
+      : estado.rodada;
+
+  // Salto silencioso de amedrontados (semântica de avancarVez): sem emitir
+  // turno para eles; cada wrap à origem incrementa a rodada.
+  let alvo: (typeof ordenados)[number] | null = null;
+  let tentativas = 0;
+  while (tentativas < ordenados.length) {
+    const candidato = ordenados[indiceProximo];
+    const jogadorObj = jogadores.find(
+      (item) => item.jogadorId === candidato.jogadorId,
+    );
+    const ehAmedrontado =
+      jogadorObj !== undefined &&
+      (jogadorObj.amedrontado ?? jogadorObj.sanidade === 0) === true;
+    if (!ehAmedrontado) {
+      alvo = candidato;
+      break;
+    }
+    indiceProximo = (indiceProximo + 1) % ordenados.length;
+    rodadaAlvo = indiceProximo === 0 ? rodadaAlvo + 1 : rodadaAlvo;
+    tentativas++;
+  }
+
+  const turnoEncerrado: EventoDaPartida = {
+    tipo: 'turno_encerrado',
+    jogadorId: ator,
+  };
+  // Fechamento da Manipulação em aberto (efeito da Passagem, sem duplicar).
+  const pecaEmManipulacaoId = estado.tabuleiro.pecaEmManipulacaoId;
+  const fechamentoDaManipulacao: readonly EventoDaPartida[] =
+    pecaEmManipulacaoId !== null
+      ? [{ tipo: 'manipulacao_finalizada', pecaId: pecaEmManipulacaoId }]
+      : [];
+
+  // Todos amedrontados: sem novo turno (espelha avancarVez) — o funil do
+  // dispatch decide a derrota.
+  if (alvo === null) {
+    const peaoDoPrimeiro = tabuleiroPosLimpeza.peoes.find(
+      (item) => item.peaoId === ordenados[0].peaoId,
+    );
+    return sucessoDaPartida(
+      {
+        ...estado,
+        tabuleiro: tabuleiroPosLimpeza,
+        jogadores,
+        jogadorAtivoId: ordenados[0].jogadorId,
+        rodada: estado.rodada,
+        pecaDoInicioDoTurnoId: peaoDoPrimeiro?.pecaId ?? null,
+        posicaoConfirmada: false,
+        atravessouNoTurno: false,
+        celulasIluminadas: iluminacao.celulasIluminadas,
+        peoesNoAlcance,
+        pecasEmPeriodoDeGraca,
+      },
+      [...eventos, turnoEncerrado, ...fechamentoDaManipulacao],
+    );
+  }
+
+  const peaoDoAlvo = tabuleiroPosLimpeza.peoes.find(
+    (item) => item.peaoId === alvo.peaoId,
+  );
+  return sucessoDaPartida(
+    {
+      ...estado,
+      tabuleiro: tabuleiroPosLimpeza,
+      jogadores,
+      jogadorAtivoId: alvo.jogadorId,
+      rodada: rodadaAlvo,
+      pecaDoInicioDoTurnoId: peaoDoAlvo?.pecaId ?? null,
+      posicaoConfirmada: false,
+      atravessouNoTurno: false,
+      celulasIluminadas: iluminacao.celulasIluminadas,
+      peoesNoAlcance,
+      pecasEmPeriodoDeGraca,
+    },
+    [
+      ...eventos,
+      turnoEncerrado,
+      ...fechamentoDaManipulacao,
+      { tipo: 'turno_iniciado', jogadorId: alvo.jogadorId, rodada: rodadaAlvo },
+    ],
+  );
+}
+
 // Avanço circular pela ordem de entrada: o próximo Jogador assume a vez e, ao
 // voltar ao primeiro, a rodada incrementa. A Peça do início do novo turno é a
 // Peça atual do Peão do próximo Jogador; a Confirmação é zerada e o Tabuleiro
@@ -1666,11 +1911,16 @@ export function avaliarTerminoDaPartida(
   };
 }
 
-// Ordem de avaliação (issue #176): a vitória é avaliada ANTES da derrota —
-// quando vitória e derrota são verdadeiras no mesmo evento, prevalece a
-// vitória. Entre os motivos de derrota simultâneos, equipe_amedrontada
-// precede caixa_esgotada (desempate do mesmo evento).
+// Ordem de avaliação (issue #176, quórum pela #289): o quórum mínimo (um
+// Jogador restante após desistências) precede a vitória — N=2→1 termina em
+// derrota mesmo com os objetivos completos; depois, a vitória é avaliada
+// ANTES das demais derrotas — quando vitória e derrota são verdadeiras no
+// mesmo evento, prevalece a vitória. Entre os motivos de derrota simultâneos,
+// equipe_amedrontada precede caixa_esgotada (desempate do mesmo evento).
 function desfechoDaPartida(estado: EstadoDaPartida): DesfechoDaPartida | null {
+  if (estado.jogadores.length <= 1) {
+    return { tipo: 'derrota', motivo: 'desistencia' };
+  }
   if (equipeVenceu(estado)) {
     return { tipo: 'vitoria' };
   }

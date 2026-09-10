@@ -73,6 +73,8 @@ export type {
   ComandoDePartida,
   ConfirmarPosicaoDoPeaoComando,
   DesfechoDaPartida,
+  DesistenciaRegistradaEvento,
+  DesistirDaPartidaComando,
   EncerrarTurnoComando,
   ErroDeDominioDaPartida,
   EstadoDaPartida,
