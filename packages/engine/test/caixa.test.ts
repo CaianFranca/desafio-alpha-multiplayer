@@ -3,10 +3,13 @@ import test from 'node:test';
 import {
   COMPOSICAO_DA_CAIXA,
   aplicarComandoDeTabuleiro,
+  ehPecaDeMonstro,
+  ehPecaEspecial,
   estadoInicialDaPartida,
   estadoInicialDoTabuleiro,
   sortearDaCaixa,
   type EstadoDoTabuleiro,
+  type TipoDePecaDaCaixa,
 } from '../src/index.ts';
 
 function estadoInicial(): EstadoDoTabuleiro {
@@ -246,4 +249,118 @@ test('a caixa esgotada rejeita o sorteio com CAIXA_ESGOTADA e preserva o estado'
   });
   // O estado segue intacto (caixa vazia, nada reposto).
   assert.deepEqual(estado.caixa, []);
+});
+
+// Estratificação da Caixa (issue #265, PR #347): invariantes sobre N seeds —
+// sem estes testes o fallback best-effort violava as regras em ~1 a cada 7
+// partidas sem o CI perceber (B1). Uma sondagem local em 500 seeds deu zero
+// violações; a suíte fixa 120 para manter o tempo sob controle.
+const SEEDS_DA_ESTRATIFICACAO = Array.from({ length: 120 }, (_, i) => i + 1);
+
+function tiposComSeed(seed: number): TipoDePecaDaCaixa[] {
+  return estadoInicialDoTabuleiro({ seed }).caixa.map((peca) => peca.tipo);
+}
+
+test('as 10 primeiras nunca trazem monstro, gerador ou sala_do_diretor', () => {
+  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
+    const dezPrimeiras = tiposComSeed(seed).slice(0, 10);
+    for (const tipo of dezPrimeiras) {
+      assert.ok(
+        !ehPecaDeMonstro(tipo),
+        `seed ${seed}: monstro nas 10 primeiras (${tipo})`,
+      );
+      assert.notEqual(tipo, 'gerador', `seed ${seed}: gerador nas 10 primeiras`);
+      assert.notEqual(
+        tipo,
+        'sala_do_diretor',
+        `seed ${seed}: sala_do_diretor nas 10 primeiras`,
+      );
+    }
+  }
+});
+
+test('monstros do mesmo tipo mantêm 4 cartas entre si', () => {
+  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
+    const tipos = tiposComSeed(seed);
+    const ultimaPosicao = new Map<string, number>();
+    for (let i = 0; i < tipos.length; i++) {
+      const tipo = tipos[i];
+      if (!ehPecaDeMonstro(tipo)) continue;
+      const anterior = ultimaPosicao.get(tipo);
+      assert.ok(
+        anterior === undefined || i - anterior >= 5,
+        `seed ${seed}: ${tipo} em ${anterior} e ${i} (4 cartas entre exigidas)`,
+      );
+      ultimaPosicao.set(tipo, i);
+    }
+  }
+});
+
+test('a caixa nunca emenda 3 peças especiais seguidas', () => {
+  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
+    const tipos = tiposComSeed(seed);
+    for (let i = 2; i < tipos.length; i++) {
+      const trio = [tipos[i - 2], tipos[i - 1], tipos[i]].every((tipo) =>
+        ehPecaEspecial(tipo),
+      );
+      assert.ok(!trio, `seed ${seed}: 3 especiais seguidos em ${i - 2}..${i}`);
+    }
+  }
+});
+
+test('especiais do mesmo tipo mantêm 2 cartas entre si (diferença >= 3)', () => {
+  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
+    const tipos = tiposComSeed(seed);
+    const ultimaPosicao = new Map<string, number>();
+    for (let i = 0; i < tipos.length; i++) {
+      const tipo = tipos[i];
+      if (!ehPecaEspecial(tipo)) continue;
+      const anterior = ultimaPosicao.get(tipo);
+      assert.ok(
+        anterior === undefined || i - anterior >= 3,
+        `seed ${seed}: ${tipo} em ${anterior} e ${i} (2 cartas entre exigidas)`,
+      );
+      ultimaPosicao.set(tipo, i);
+    }
+  }
+});
+
+test('a janela de especiais aceita a distância exata de 3 (sem off-by-one)', () => {
+  // Regressão do B3: com a janela `indice - 3` nenhuma seed repetia o mesmo
+  // especial a distância 3; com a janela `indice - 2` isso é rotina
+  // (130/200 seeds na sondagem). Se este teste falhar, a regra voltou a ser
+  // mais restritiva que a issue.
+  let comDistanciaExata3 = 0;
+  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
+    const tipos = tiposComSeed(seed);
+    const ultimaPosicao = new Map<string, number>();
+    for (let i = 0; i < tipos.length; i++) {
+      const tipo = tipos[i];
+      if (!ehPecaEspecial(tipo)) continue;
+      if (ultimaPosicao.get(tipo) === i - 3) {
+        comDistanciaExata3++;
+        break;
+      }
+      ultimaPosicao.set(tipo, i);
+    }
+  }
+  assert.ok(
+    comDistanciaExata3 > 0,
+    'nenhuma seed repetiu o mesmo especial a distância 3: janela restritiva demais?',
+  );
+});
+
+test('a seed 28 estratifica sem colar geradores (caso do review)', () => {
+  // O review mediu `gerador` em 80 e 82 na seed 28 (distância 2, violação);
+  // após a garantia, a mesma seed precisa sair limpa e determinística.
+  const tipos = tiposComSeed(28);
+  assert.equal(tipos.length, 83);
+  assert.deepEqual(tipos, tiposComSeed(28));
+  const posicoes = tipos
+    .map((tipo, i) => (tipo === 'gerador' ? i : -1))
+    .filter((i) => i >= 0);
+  assert.equal(posicoes.length, 6);
+  for (let k = 1; k < posicoes.length; k++) {
+    assert.ok(posicoes[k] - posicoes[k - 1] >= 3);
+  }
 });
