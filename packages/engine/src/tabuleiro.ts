@@ -481,6 +481,14 @@ const PRIMEIRAS_PROTEGIDAS = 10;
 const JANELA_MONSTRO_MESMO_TIPO = 4;
 const JANELA_ESPECIAL_MESMO_TIPO = 2;
 const MAX_ESPECIAIS_SEGUIDOS = 2;
+// Ritmo espaçado (issue #265: "1 monstro/peça especial a cada 4-5 caminhos"):
+// após as 10 primeiras, nunca mais de 5 peças de caminho seguidas sem um
+// monstro ou especial no meio.
+const MAX_CAMINHOS_SEGUIDOS = 5;
+
+function ehPecaDeCaminho(tipo: TipoDePecaDaCaixa): boolean {
+  return !ehPecaEspecial(tipo) && !ehPecaDeMonstro(tipo);
+}
 
 // Regras 2 e 4 são a mesma forma "janela por tipo" (diferem em raio e
 // categoria): o tipo aparece na janela das últimas `raio` posições da fila?
@@ -513,15 +521,32 @@ function pecaValidaNaPosicao(
   const indice = fila.length;
   const tipo = candidata.tipo;
 
-  // 1. Nas 10 primeiras: proibido monstro, gerador ou cartão
-  // (sala_do_diretor)
+  // 1. Nas 10 primeiras (issue #265: "apenas peças de caminho + 1 peça de
+  // cartão (sala_do_diretor)"): proibido monstro, gerador, sala_medica e
+  // portao_de_saida; sala_do_diretor aparece no máximo 1 vez. A garantia de
+  // pelo menos 1 é forçada na última posição protegida (ver abaixo): se até
+  // o índice 9 nenhum cartão entrou, só o cartão é aceito.
   if (indice < PRIMEIRAS_PROTEGIDAS) {
+    if (ehPecaDeMonstro(tipo)) return false;
     if (
-      ehPecaDeMonstro(tipo) ||
       tipo === 'gerador' ||
-      tipo === 'sala_do_diretor'
+      tipo === 'sala_medica' ||
+      tipo === 'portao_de_saida'
     ) {
       return false;
+    }
+    if (tipo === 'sala_do_diretor') {
+      // No máximo 1 cartão nas 10 primeiras.
+      if (fila.some((peca) => peca.tipo === 'sala_do_diretor')) return false;
+    } else {
+      // Candidata é caminho: na última posição protegida, se o cartão ainda
+      // não entrou, só ele fecha as 10 primeiras.
+      if (
+        indice === PRIMEIRAS_PROTEGIDAS - 1 &&
+        !fila.some((peca) => peca.tipo === 'sala_do_diretor')
+      ) {
+        return false;
+      }
     }
   }
 
@@ -550,27 +575,39 @@ function pecaValidaNaPosicao(
     if (tipoNaJanela(fila, tipo, JANELA_ESPECIAL_MESMO_TIPO)) return false;
   }
 
+  // 5. Ritmo espaçado após as 10 primeiras: nunca mais de
+  // MAX_CAMINHOS_SEGUIDOS peças de caminho em sequência. Força um monstro
+  // ou especial quando a fila termina com 5 caminhos seguidos.
+  if (indice >= PRIMEIRAS_PROTEGIDAS && ehPecaDeCaminho(tipo)) {
+    let caminhosNoFim = 0;
+    for (let i = fila.length - 1; i >= 0; i--) {
+      if (!ehPecaDeCaminho(fila[i].tipo)) break;
+      caminhosNoFim++;
+      if (caminhosNoFim >= MAX_CAMINHOS_SEGUIDOS) return false;
+    }
+  }
+
   return true;
 }
 
 // Embaralhamento estratificado da Caixa (issue #265):
-// - 10 primeiras: sem monstro, gerador ou sala_do_diretor (só caminho +
-//   sala_medica/portao_de_saida);
+// - 10 primeiras: apenas caminho + exatamente 1 sala_do_diretor (sem
+//   monstro, gerador, sala_medica ou portao_de_saida);
 // - depois: tipo igual nunca colado (monstro igual com 4 cartas entre,
 //   especial igual com 2 cartas entre); tipo diferente pode colar
 //   (vulto + espectro, gerador + sala_medica); máx 2 especiais seguidos;
+//   ritmo espaçado (máx 5 caminhos seguidos);
 // - determinístico por seed via mulberry32 + Fisher-Yates, total
 //   preservado (83).
 //
-// Garantia (B1): construção por busca em profundidade com ordem de
-// alternativas sorteada pelo PRNG — em vez do guloso "primeiro válido", que
-// empurrava as peças puladas para o fim da Caixa e caía no fallback
-// violando as regras em ~1 a cada 7 partidas. Cada tentativa deriva uma
-// sub-seed determinística da seed, então a mesma seed produz sempre a mesma
-// Caixa. Se todas as tentativas esgotarem o limite de passos (Caixa
-// patológica onde as regras são insatisfatíveis), o fallback best-effort
-// abaixo entrega a Caixa completa **violando as janelas** — comportamento
-// degradado documentado e coberto por teste, nunca travamento.
+// Garantia: construção por busca em profundidade com ordem de alternativas
+// sorteada pelo PRNG — em vez do guloso "primeiro válido", que empurrava as
+// peças puladas para o fim da Caixa e violava as regras em ~1 a cada 7
+// partidas. Cada tentativa deriva uma sub-seed determinística da seed, então
+// a mesma seed produz sempre a mesma Caixa. Sem fallback silencioso: se as
+// regras forem insatisfatíveis para a composição dada, lança Error em vez de
+// devolver Caixa violada (o "nunca mais de 2 especiais seguidos" da issue é
+// invariante dura, não best-effort).
 const MAX_TENTATIVAS_ESTRATIFICACAO = 50;
 const LIMITE_PASSOS_ESTRATIFICACAO = 20000;
 
@@ -634,26 +671,13 @@ function embaralharCaixa(
     if (estratificada !== null) return estratificada;
   }
 
-  // Fallback best-effort: só dispara quando as regras são insatisfatíveis
-  // para a composição dada (nunca com a composição real de 83). Preserva o
-  // total e o determinismo, mas PODE VIOLAR as janelas — ver teste.
-  const prng = criarPrng(seed);
-  const restantes = fisherYates([...caixa], prng);
-  const resultado: PecaDaCaixa[] = [];
-  while (restantes.length > 0) {
-    let indiceEscolhido = -1;
-    for (let i = 0; i < restantes.length; i++) {
-      if (pecaValidaNaPosicao(resultado, restantes[i])) {
-        indiceEscolhido = i;
-        break;
-      }
-    }
-    if (indiceEscolhido === -1) {
-      indiceEscolhido = 0;
-    }
-    resultado.push(restantes.splice(indiceEscolhido, 1)[0]);
-  }
-  return resultado;
+  // Sem fallback violador: todas as Caixas devolvidas respeitam as regras.
+  // Com a composição real de 83 a busca sempre encontra solução dentro do
+  // limite (cobertura: 120 seeds na suíte + sondagem de 500); composição
+  // patológica externa lança em vez de degradar silenciosamente.
+  throw new Error(
+    `Embaralhamento estratificado insatisfatível para a seed ${seed}.`,
+  );
 }
 
 export interface EntradaDoEstadoDoTabuleiro {

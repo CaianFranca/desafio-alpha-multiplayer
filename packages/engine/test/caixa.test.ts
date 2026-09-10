@@ -261,9 +261,16 @@ function tiposComSeed(seed: number): TipoDePecaDaCaixa[] {
   return estadoInicialDoTabuleiro({ seed }).caixa.map((peca) => peca.tipo);
 }
 
-test('as 10 primeiras nunca trazem monstro, gerador ou sala_do_diretor', () => {
+test('as 10 primeiras trazem só caminho + exatamente 1 sala_do_diretor', () => {
+  // Issue #265: "apenas peças de caminho + 1 peça de cartão (sala_do_diretor)".
   for (const seed of SEEDS_DA_ESTRATIFICACAO) {
     const dezPrimeiras = tiposComSeed(seed).slice(0, 10);
+    const cartoes = dezPrimeiras.filter((tipo) => tipo === 'sala_do_diretor');
+    assert.equal(
+      cartoes.length,
+      1,
+      `seed ${seed}: esperado 1 sala_do_diretor nas 10 primeiras, achou ${cartoes.length} (${dezPrimeiras.join(',')})`,
+    );
     for (const tipo of dezPrimeiras) {
       assert.ok(
         !ehPecaDeMonstro(tipo),
@@ -272,9 +279,39 @@ test('as 10 primeiras nunca trazem monstro, gerador ou sala_do_diretor', () => {
       assert.notEqual(tipo, 'gerador', `seed ${seed}: gerador nas 10 primeiras`);
       assert.notEqual(
         tipo,
-        'sala_do_diretor',
-        `seed ${seed}: sala_do_diretor nas 10 primeiras`,
+        'sala_medica',
+        `seed ${seed}: sala_medica nas 10 primeiras`,
       );
+      assert.notEqual(
+        tipo,
+        'portao_de_saida',
+        `seed ${seed}: portao_de_saida nas 10 primeiras`,
+      );
+      assert.ok(
+        tipo === 'sala_do_diretor' ||
+          (!ehPecaEspecial(tipo) && !ehPecaDeMonstro(tipo)),
+        `seed ${seed}: tipo inesperado nas 10 primeiras (${tipo})`,
+      );
+    }
+  }
+});
+
+test('após as 10 primeiras, nunca mais de 5 caminhos seguidos (ritmo espaçado)', () => {
+  // Issue #265: "1 monstro/peça especial a cada 4-5 caminhos".
+  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
+    const tipos = tiposComSeed(seed);
+    let caminhosSeguidos = 0;
+    for (let i = 10; i < tipos.length; i++) {
+      const tipo = tipos[i];
+      if (!ehPecaEspecial(tipo) && !ehPecaDeMonstro(tipo)) {
+        caminhosSeguidos++;
+        assert.ok(
+          caminhosSeguidos <= 5,
+          `seed ${seed}: ${caminhosSeguidos} caminhos seguidos até ${i}`,
+        );
+      } else {
+        caminhosSeguidos = 0;
+      }
     }
   }
 });
