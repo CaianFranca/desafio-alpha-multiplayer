@@ -59,6 +59,19 @@ export function criarContextoDasSalas(
     return sessao?.jogadorId === jogadorId;
   });
 
+  // Stream de debug (issue #340): mesmo fallback de resolução dos handlers
+  // (projeção → PG), injetado como função para o ws.ts e os handlers usarem
+  // a mesma fonte de salaId. Instanciado ANTES dos handlers para ser
+  // injetado no construtor — sem isso o `handler.espelhar()` vira no-op no
+  // lobby real (o `ws.ts` passava o debug só para o `receberComando`).
+  const debug = new DebugStreamDasSalas({
+    resolverSalaId: async (jogadorId) => {
+      const salaId = await projecao.obterAssociacaoJogador(jogadorId);
+      if (salaId !== null) return salaId;
+      return repo.obterSalaAtivaDoJogador(jogadorId);
+    },
+  });
+
   const handlers = new SalasHandlers({
     repo,
     projecao,
@@ -73,17 +86,7 @@ export function criarContextoDasSalas(
     cancelarPartida: opcoes.cancelarPartida,
     redis: opcoes.redis,
     timeoutMs: opcoes.timeoutMs,
-  });
-
-  // Stream de debug (issue #340): mesmo fallback de resolução dos handlers
-  // (projeção → PG), injetado como função para o ws.ts e os handlers usarem
-  // a mesma fonte de salaId.
-  const debug = new DebugStreamDasSalas({
-    resolverSalaId: async (jogadorId) => {
-      const salaId = await projecao.obterAssociacaoJogador(jogadorId);
-      if (salaId !== null) return salaId;
-      return repo.obterSalaAtivaDoJogador(jogadorId);
-    },
+    debug,
   });
 
   return { estado, projecao, broadcast, handlers, repo, reconexao, debug };
