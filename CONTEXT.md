@@ -53,8 +53,16 @@ Jogo entre os 2 a 4 Jogadores de uma Sala, do Encaminhamento até a vitória ou 
 _Avoid_: jogo, sessão
 
 **Resultado**:
-Vitória ou derrota declarada no término da Partida; em evento simultâneo das condições, a vitória tem prioridade.
+Vitória, derrota ou não-início declarados no término ou cancelamento da Partida; em evento simultâneo das condições, a vitória tem prioridade.
 _Avoid_: desfecho, fim de jogo
+
+**Partida Não Iniciada**:
+Cancelamento de Partida preparada sem completar a admissão dos 2 a 4 Jogadores; com todos desconectados libera em 10s, com admissão parcial libera no teto de 90s; encerra conexões com PARTIDA_NAO_INICIADA e avisa o lobby para reabrir a Sala.
+_Avoid_: abandono, desistência, timeout
+
+**Partida Órfã**:
+Sala encaminhada cuja Partida preparada foi cancelada, expirou ou está com todos em reconexão; libera SAIR_DA_SALA e ENTRAR_NA_SALA em nova Sala.
+_Avoid_: sala fantasma, sala presa
 
 **Retorno à Sala**:
 Volta dos Jogadores à Sala de origem após o término da Partida; a Sala reabre com os mesmos Membros, mantendo a ordem de entrada e o Anfitrião, com a Prontidão redefinida.
@@ -225,7 +233,7 @@ Relação entre duas peças vizinhas cujas bordas abertas estão voltadas uma pa
 _Avoid_: ligação, elo
 
 **Recebimento**:
-Peças sorteadas da Caixa que o Jogador recebe, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; o Jogador escolhe a vaga de cada peça sorteada; quando a Caixa não tem peças suficientes, recebe as restantes; ocorre no início da sequência do peão.
+Peças sorteadas da Caixa que o Jogador recebe, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; o Jogador escolhe a vaga de cada peça sorteada e a encaixa conectada à peça sob o peão, uma por uma; quando a Caixa não tem peças suficientes, recebe as restantes; ocorre no início da sequência do peão.
 _Avoid_: ganho
 
 **Movimentação**:

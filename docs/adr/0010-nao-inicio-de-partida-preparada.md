@@ -1,0 +1,56 @@
+# ADR-0010: Não-Início de Partida Preparada
+
+Status: Aceito
+Data: 2026-09-06
+
+## Contexto
+
+Partida `preparada` sem completar a admissão (nenhum dos 2 a 4 admitidos completa o
+início, todos desconectam) nunca terminava nem avisava o lobby: `SAIR_DA_SALA`
+rejeitado com `SALA_ENCAMINHADA`, `ENTRAR_NA_SALA` com `JOGADOR_JA_ASSOCIADO`,
+prendendo Jogadores à Sala encaminhada até expirar (~1h TTL). Ver #222, PR #304.
+
+O termo "não-início" reserva "abandono" para a desistência futura em partida já
+em andamento: aqui só existe Partida `preparada` que nunca admitiu o roster.
+
+## Decisão
+
+Game-server detecta o não-início server-side: debounce 10s quando roster todo
+`em_reconexao`, teto 90s (`PARTIDA_NAO_INICIO_SEGUNDOS`) pela idade mesmo com
+admissão parcial. Ao declarar o não-início: fecha conexões com 4000
+`PARTIDA_NAO_INICIADA` via `fecharSocketsDeNaoInicio`, cancela Partida no
+Redis via `cancelarPartidaSeNaoIniciada` e notifica lobby com
+`resultado: 'nao-inicio'`; lobby revalida e reabre `encaminhada → aberta` no
+mesmo caminho do ADR-0006. Timers rearmados após
+restart via SCAN `game-server:partida:*` com dispersão (jitter), leitura por
+pipeline e guarda de idade inválida. Parcial <90s mantém `SALA_ENCAMINHADA` —
+teto é comportamento desejado.
+
+## Porquê
+
+- **Server-side único**: lobby não sabe quando perguntar; cliente-driven espalha transição entre os clientes.
+- **Simétrico ao retorno**: reusa callback ADR-0006 com retry/backoff cap 30s.
+- **Parcial protegido**: teto evita liberar Sala enquanto admissão ainda pode completar.
+
+## Órfã sem partidaId (relógio do em-voo — review #304, item 3)
+
+A Sala pode ficar encaminhada sem partidaId em qualquer fonte (oferta perdida
+sem rastro). O fail-closed original mantinha essa órfã presa até a expiração,
+contra o objetivo de liberar os Jogadores. Decisão: o lobby registra no Redis o
+instante da oferta (`lobby:encaminhamento-voo:<salaId>`, TTL de 24h) ao iniciar
+o em-voo e o limpa quando o encaminhamento termina. Em `partidaDaSalaEstaOrfa`,
+sem partida nas 3 fontes: marker com idade acima do teto (`PARTIDA_NAO_INICIO_
+SEGUNDOS`, o mesmo do não-início) **libera** a órfã; marker novo mantém a presa
+(a admissão ainda pode completar); sem marker — órfã anterior a este deploy —
+segue pelo caminho antigo até a expiração.
+
+Invariante da hidratação: `hidratarSala` injeta a Sala com `consistente: true`
+e presença `conectado` de propósito — ela existe para o bypass de Partida Órfã
+(o `exigirSalaConsistente` do engine exige `true`) e não passa por
+`registrar_reinicio`; o fluxo de boot usa `carregar` + `registrar_reinicio`,
+nunca `hidratarSala`. Hidratar fora do bypass fabricaria presença.
+
+## Alternativas consideradas
+
+- **Poll lobby → game-server** — rejeitada: carga contínua para evento pontual.
+- **Bypass parcial imediato no lobby** — rejeitada: divergiria do game-server antes do teto.

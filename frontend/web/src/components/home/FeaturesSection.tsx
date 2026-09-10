@@ -35,12 +35,12 @@ function useReveal<T extends HTMLElement>() {
   return { ref, revealState: revealed ? 'is-visible' : 'is-hidden' }
 }
 
-const featureIcons: Record<string, string> = {
+const featureIcons: Record<(typeof features.items)[number]['title'], string> = {
   'Cooperação': '/assets/group_icon.svg',
-  'Exploração': '/assets/explore_icon.svg',
-  'Minigames': '/assets/psychologt_icon.svg',
-  'Monstros': '/assets/visibility_icon.svg',
-  'Sanidade': '/assets/sound_detection_glass_break_icon.svg',
+  'O tabuleiro vivo': '/assets/explore_icon.svg',
+  'Iluminação & visibilidade': '/assets/visibility_icon.svg',
+  'Salas estratégicas': '/assets/psychologt_icon.svg',
+  'Ameaças sobrenaturais': '/assets/sound_detection_glass_break_icon.svg',
 }
 
 function FeaturesRevealItem({ index, children }: { index: number; children: ReactNode }) {
@@ -67,7 +67,7 @@ export function FeaturesSection() {
         <ul className="features-grid grid grid-cols-1 md:grid-cols-6 gap-8 list-none m-0 p-0" role="list">
           {features.items.map((item, index) => (
             <FeaturesRevealItem key={item.title} index={index}>
-              <FeatureCard title={item.title} description={item.description} iconSrc={featureIcons[item.title]} />
+              <FeatureCard title={item.title} description={item.description} iconSrc={featureIcons[item.title] ?? '/assets/explore_icon.svg'} />
             </FeaturesRevealItem>
           ))}
         </ul>

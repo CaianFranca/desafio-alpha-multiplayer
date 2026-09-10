@@ -21,6 +21,7 @@ import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 import {
   mapearCliqueNoPeao,
   mapearDesselecaoDePeao,
+  peaoDeReferenciaDaSequencia,
   puxadaVigenteNaBandeja,
   vagasDisponiveisDoPeao,
 } from '../../game/tabuleiro/interacaoPeoes'
@@ -84,6 +85,11 @@ interface AmbienteDeJogoProps {
    * afetado, em todas as posições (célula/fileira/voo).
    */
   emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
+  /**
+   * N do roster para o teto do Portão (#284): obrigatório — o teto é o N
+   * real de jogadores (clamp 2..4 no pai), nunca peoes.length (risco 5).
+   */
+  quantidadeDeJogadores: number
 }
 
 export function AmbienteDeJogo({
@@ -103,6 +109,7 @@ export function AmbienteDeJogo({
   encaixeTrigger = null,
   onFimEncaixe,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
+  quantidadeDeJogadores,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -203,7 +210,7 @@ export function AmbienteDeJogo({
   // compartilhado com cena e espelho.
   const vagasSet = new Set<string>(
     estadoPeoesComPuxada !== null &&
-      estadoPeoesComPuxada.peaoSelecionadoId !== null &&
+      peaoDeReferenciaDaSequencia(estadoPeoesComPuxada) !== null &&
       puxadaVigenteNaBandeja(estadoPeoesComPuxada)
       ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
       : [],
@@ -240,6 +247,7 @@ export function AmbienteDeJogo({
           estadoExibicao.peoes,
           peaoSelecionadoIdLocal,
           estadoInteracaoPeoes?.afetadosPorPeaoId,
+          quantidadeDeJogadores,
         )
       : []
   const destinosSet = new Set<string>(destinosDoPeao.map((d) => d.peca.pecaId))

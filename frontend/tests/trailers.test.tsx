@@ -65,15 +65,15 @@ afterEach(() => {
 })
 
 describe('seção de trailers', () => {
-  it('renderiza âncora, título, descrição e títulos de cada trailer sem vídeo', () => {
+  it('renderiza âncora, título e títulos com descrições de cada trailer sem vídeo', () => {
     const section = renderHome()
 
     expect(section).toHaveAttribute('id', trailers.id)
     expect(screen.getByRole('heading', { name: trailers.title })).toBeInTheDocument()
     expect(section).toHaveAttribute('aria-labelledby', 'trailers-title')
-    expect(within(section).getByText(trailers.description)).toBeInTheDocument()
     for (const item of trailers.items) {
       expect(within(section).getByRole('heading', { name: item.titulo })).toBeInTheDocument()
+      expect(within(section).getByText(item.descricao)).toBeInTheDocument()
     }
     expect(section.querySelector('video')).toBeNull()
   })

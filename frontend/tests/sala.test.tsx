@@ -209,7 +209,7 @@ describe('lobby - página do lobby', () => {
     expect(screen.getByText(/anfitrião/i)).toBeInTheDocument()
   })
 
-  it('vagas disponíveis são visíveis quando sala não tem 4 membros', async () => {
+  it('vagas fantasmas não são exibidas: sala com 1 membro mostra 1 de 4 sem aguardando', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/salas/criar'], mockAuthenticatedState)
 
@@ -225,8 +225,30 @@ describe('lobby - página do lobby', () => {
     await screen.findByText('LucasGomes')
 
     expect(screen.getByText(/membro 1 de 4/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/aguardando conexão/i).length).toBe(3)
-    expect(screen.getAllByText(/sinal inexistente/i).length).toBe(3)
+    expect(screen.queryByText(/aguardando conexão/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/sinal inexistente/i)).not.toBeInTheDocument()
+    const lista = screen.getByLabelText(/lista de membros/i)
+    expect(within(lista).getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByLabelText(/1 de 4 membros/i)).toBeInTheDocument()
+  })
+
+  it('sala com 2 membros exibe 2 de 4 sem vagas fantasmas', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const sala = criarSala({
+      codigoDeSala: 'X1Y2Z3',
+      membros: [
+        criarMembro({ apelido: 'Ana', ordemDeEntrada: 0 }),
+        criarMembro({ apelido: 'Beto', ordemDeEntrada: 1 }),
+      ],
+    })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala })
+    await screen.findByText('Ana')
+    expect(screen.getByText(/membro 2 de 4/i)).toBeInTheDocument()
+    expect(screen.queryByText(/aguardando conexão/i)).not.toBeInTheDocument()
+    const lista = screen.getByLabelText(/lista de membros/i)
+    expect(within(lista).getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.getByLabelText(/2 de 4 membros/i)).toBeInTheDocument()
   })
 
   it('pronto alterna e reflete o estado dos demais Membros', async () => {

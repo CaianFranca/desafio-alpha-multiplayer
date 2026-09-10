@@ -6,6 +6,7 @@ import {
   inicializarEstadoDaPartida,
   removerEstadoDaPartida,
 } from './estado.ts';
+import { agendarNaoInicio, cancelarNaoInicio, obterNaoInicioSegundos } from './nao-inicio.ts';
 
 export type EstadoDaPartida = 'preparada' | 'em_andamento';
 
@@ -64,6 +65,11 @@ export async function criarPartidaPreparada(
     throw erro;
   }
 
+  // Teto único do não-início (review JF532, O2): o valor vive no módulo
+  // `nao-inicio` (fixado pelo wiring em index.ts) — não se lê do contexto.
+  const naoInicioMs = obterNaoInicioSegundos() * 1000;
+  agendarNaoInicio(partida.partidaId, naoInicioMs);
+
   return partida;
 }
 
@@ -80,9 +86,43 @@ export async function existePartida(redis: Redis, partidaId: PartidaId): Promise
 }
 
 export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promise<boolean> {
+  cancelarNaoInicio(partidaId);
   const removida = (await redis.del(chaveDaPartida(partidaId))) === 1;
   // Remove também o estado da partida associado (issue #117).
   await removerEstadoDaPartida(redis, partidaId);
+  return removida;
+}
+
+// Review #304 (item 1): o não-início não pode usar o DEL incondicional — entre
+// a leitura do estado e o DEL, o Lua de admissão pode ter virado a partida para
+// `em_andamento` (com PERSIST). O script só remove se a partida ainda está em
+// `preparada`; retorna 0 quando a condição falha, e o chamador reagenda sem
+// chutar sockets.
+const SCRIPT_CANCELAR_SE_NAO_INICIADA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, partida = pcall(cjson.decode, raw)
+if not ok or not partida or partida.estado ~= 'preparada' then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+redis.call('DEL', KEYS[2])
+return 1
+`.trim();
+
+export async function cancelarPartidaSeNaoIniciada(redis: Redis, partidaId: string): Promise<boolean> {
+  const removida =
+    (await redis.eval(
+      SCRIPT_CANCELAR_SE_NAO_INICIADA,
+      2,
+      chaveDaPartida(partidaId),
+      chaveDoEstadoDaPartida(partidaId),
+    )) === 1;
+  if (removida) {
+    cancelarNaoInicio(partidaId);
+  }
   return removida;
 }
 
@@ -143,7 +183,7 @@ local estadoAtual = partida.estado
 if mudou or iniciou then
   local novo = cjson.encode(partida)
   if iniciou then
-    -- ST-14: partida em_andamento persiste sem TTL (sem expiração)
+    -- ST-14: partida em_andamento persiste sem TTL (sem expiração) + cancela não-início 90s
     redis.call('SET', KEYS[1], novo)
     redis.call('PERSIST', KEYS[1])
     if redis.call('EXISTS', KEYS[2]) == 1 then
@@ -216,8 +256,10 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
   try {
     const parsed = JSON.parse(json) as ResultadoTransicaoDePresenca;
     if (parsed.estado !== 'preparada' && parsed.estado !== 'em_andamento') {
-      // Estado vazio indica partida inexistente ou payload corrompido — não mascarar como 'preparada'
       return null;
+    }
+    if (parsed.iniciou) {
+      cancelarNaoInicio(partidaId);
     }
     return parsed;
   } catch {

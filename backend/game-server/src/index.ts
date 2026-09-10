@@ -8,6 +8,7 @@ import { PartidaBroadcaster } from './partidas/broadcast.ts';
 import { PartidaHandlers } from './partidas/handlers.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
 import { criarClienteDeRetorno } from './retorno/cliente.ts';
+import { configurarNaoInicio, definirBroadcasterParaNaoInicio, definirRedisParaNaoInicio, rearmarNaoInicioAposRestart } from './partidas/nao-inicio.ts';
 import {
   iniciarHeartbeat,
   pararHeartbeat,
@@ -21,6 +22,7 @@ const {
   gameServerPort,
   partidaPreparadaTtlSegundos,
   partidaTerminadaTtlSegundos,
+  partidaNaoInicioSegundos,
   lobbyRetornoCallbackUrl,
   gameServerHeartbeatIntervalMs,
   gameServerHeartbeatTtlMs,
@@ -34,6 +36,7 @@ const contexto: ContextoDoGameServer = {
   serverId,
   jwtSecret,
   partidaPreparadaTtlSegundos,
+  partidaNaoInicioSegundos,
   partidaTerminadaTtlSegundos,
   lobbyRetornoCallbackUrl,
 };
@@ -41,16 +44,20 @@ const app = createApp(contexto);
 
 const server = http.createServer(app);
 
+const notificarRetorno = criarClienteDeRetorno({
+  lobbyRetornoCallbackUrl,
+  jwtSecret,
+});
 const broadcaster = new PartidaBroadcaster();
 const handlers = new PartidaHandlers({
   redis: redisClient,
   broadcaster,
   partidaTerminadaTtlSegundos,
-  notificarRetorno: criarClienteDeRetorno({
-    lobbyRetornoCallbackUrl,
-    jwtSecret,
-  }),
+  notificarRetorno,
 });
+configurarNaoInicio(notificarRetorno, partidaNaoInicioSegundos);
+definirRedisParaNaoInicio(redisClient);
+definirBroadcasterParaNaoInicio(broadcaster);
 
 criarWebSocketServer(server, contexto, {
   partida: { broadcaster, handlers },
@@ -99,6 +106,9 @@ async function iniciarRegistro(): Promise<void> {
   const meta = criarMeta();
   heartbeatHandle = iniciarHeartbeat(redisClient, meta, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, criarMeta);
   console.log(`[game-server] heartbeat iniciado interval=${gameServerHeartbeatIntervalMs}ms`);
+  void rearmarNaoInicioAposRestart(redisClient).catch((err: unknown) =>
+    console.warn('[game-server] falha ao rearmar não-início:', (err as Error).message),
+  );
 }
 
 server.listen(gameServerPort, () => {

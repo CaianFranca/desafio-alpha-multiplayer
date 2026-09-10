@@ -14,6 +14,7 @@ import {
   mapearGirarRecebida,
   mapearMovimentacao,
   mapearPosicionarRecebida,
+  peaoDeReferenciaDaSequencia,
   peaoSobreAMesa,
   podeSelecionarPeao,
   puxadaVigenteNaBandeja,
@@ -68,9 +69,11 @@ function estadoBase(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPe
     posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
     recebidasPendentes: [],
     peaoSelecionadoId: null,
+    peaoDoTurnoId: null,
     pecaSelecionadaId: null,
     posicaoConfirmadaNoTurno: false,
     movimentouNoTurno: false,
+    quantidadeDeJogadores: 4,
     ...opts,
   }
 }
@@ -98,9 +101,11 @@ function estadoComMock(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteraca
     posicionadas: mock.posicionadas,
     recebidasPendentes: [],
     peaoSelecionadoId: 'peao-1-branco',
+    peaoDoTurnoId: null,
     pecaSelecionadaId: null,
     posicaoConfirmadaNoTurno: false,
     movimentouNoTurno: false,
+    quantidadeDeJogadores: 4,
     ...opts,
   }
 }
@@ -1256,6 +1261,7 @@ describe('desseleção autoritativa do peão (issue #249)', () => {
       posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
       recebidasPendentes: [],
       peaoSelecionadoId: null,
+      peaoDoTurnoId: null,
       pecaSelecionadaId: null,
       posicaoConfirmadaNoTurno: false,
       movimentouNoTurno: false,
@@ -1481,5 +1487,146 @@ describe('integração dos 8 passos da issue #249 (ordem Inicial-primeiro)', () 
       tipo: 'comando',
       comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' },
     })
+  })
+})
+
+describe('fallback do peão do turno com pendências (issue #326)', () => {
+  const posicionadas = [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)]
+  const pendencias = [pendencia('recebida-reta-1', 'reta-1', 'reta', null, null)]
+
+  test('com seleção nula e pendências, vagas e escolha usam o peão do turno', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    const vagas = vagasDisponiveisDoPeao(estado)
+    assert.ok(vagas.length > 0, 'fallback deveria derivar vagas do peão do turno')
+
+    const comando = mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', vagas[0]!.borda)
+    assert.equal(comando?.type, 'ESCOLHER_VAGA_DA_PECA_RECEBIDA')
+    assert.equal((comando as { recebidaId?: string }).recebidaId, 'recebida-reta-1')
+  })
+
+  test('sem pendências, o fallback não atua (comportamento inalterado)', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: [],
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
+    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
+    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
+  })
+
+  test('seleção vigente tem precedência sobre o peão do turno', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: 'peao-branco',
+      peaoDoTurnoId: 'peao-vermelho',
+      peoes: [peao('peao-branco', INICIAL), peao('peao-vermelho', null)],
+    })
+
+    assert.equal(peaoDeReferenciaDaSequencia(estado), 'peao-branco')
+    assert.ok(vagasDisponiveisDoPeao(estado).length > 0)
+  })
+
+  test('sem fallback disponível (peão do turno nulo), segue silencioso', () => {
+    const estado = estadoBase({
+      posicionadas,
+      recebidasPendentes: pendencias,
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: null,
+      peoes: [peao('peao-branco', INICIAL)],
+    })
+
+    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
+    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
+    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
+  })
+
+  // M1/review #333: a única fonte real é a PartidaPage; qualquer factory/cena
+  // futura que esqueça o campo obrigatório em JS vira undefined → fallback
+  // null → vagas inertes silenciosas. A dupla asserção abaixo é o único jeito
+  // de "esquecer" um campo obrigatório — exatamente o cenário do M1: a
+  // normalização (?? null) não lança e a referência null mantém vagas e
+  // escolha inertes (o warn DEV warn-once é estado de módulo e o
+  // import.meta.env.DEV varia entre ambientes — o contrato testável é a
+  // normalização sem lançamento).
+  test('factory sem peaoDoTurnoId não lança — referência null e vagas inertes (M1 #326)', () => {
+    const estado = {
+      ...estadoBase({
+        posicionadas,
+        recebidasPendentes: pendencias,
+        peoes: [peao('peao-branco', INICIAL)],
+      }),
+    } as unknown as EstadoInteracaoPeoes
+    // A dupla asserção acima apaga o campo obrigatório (cenário do M1).
+    delete (estado as { peaoDoTurnoId?: string | null }).peaoDoTurnoId
+
+    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
+    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
+    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
+  })
+})
+
+describe('pós-confirmação suprime ST-09 e Mesa (review #333)', () => {
+  /**
+   * Estado pós-confirmação (B2): a Confirmação travou o Peão — a posição está
+   * confirmada, sem seleção e sem pendências; nada mais é clicável.
+   */
+  function estadoPosConfirmacao(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPeoes {
+    return estadoBase({
+      posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      recebidasPendentes: [],
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-branco',
+      posicaoConfirmadaNoTurno: true,
+      ...opts,
+    })
+  }
+
+  /** Projeção ST-09 com as Iniciais ainda na mesa (formato dos testes de mesa). */
+  function tabuleiroDe(estado: EstadoInteracaoPeoes): EstadoInteracaoTabuleiro {
+    return {
+      iniciais: [{ pecaId: 'inicial-2' }],
+      posicionadas: estado.posicionadas,
+      pecaSelecionadaId: estado.pecaSelecionadaId,
+      pecaEmManipulacaoId: null,
+    }
+  }
+
+  it('pós-confirmação, clique em Inicial da mesa fica mudo (mesa suprimida)', () => {
+    const estado = estadoPosConfirmacao()
+    // 'inicial-2' está nas iniciais da projeção: sem o gate da confirmação o
+    // clique rotearia SELECIONAR_PECA (ver contraprova nos testes de mesa).
+    expect(mapearCliqueNaPecaDaMesa(estado, tabuleiroDe(estado), 'inicial-2')).toBeNull()
+  })
+
+  it('pós-confirmação, clique em célula vazia não emite fallback ST-09', () => {
+    const estado = estadoPosConfirmacao()
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estado, tabuleiroDe(estado), { linha: 5, coluna: 5 }, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandos).toEqual([])
+  })
+
+  it('pós-confirmação, clique em célula de peça posicionada não emite comando', () => {
+    const estado = estadoPosConfirmacao()
+    const comandos: unknown[] = []
+    despacharCliqueDeCelula(estado, tabuleiroDe(estado), INICIAL, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: () => {},
+    })
+    expect(comandos).toEqual([])
   })
 })

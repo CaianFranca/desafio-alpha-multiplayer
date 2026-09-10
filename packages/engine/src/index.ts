@@ -173,6 +173,9 @@ export {
   registrarFalhaDoEncaminhamento,
   registrarReinicioDaSala,
   sairDaSala,
+  // @internal (#222): bypass de sala encaminhada não iniciada — só após
+  // `partidaDaSalaEstaOrfa` confirmar a orfandade. Ver JSDoc em lobby.ts.
+  sairDaSalaEncaminhadaNaoIniciada,
 } from './lobby.ts';
 
 export {
@@ -188,12 +191,14 @@ export {
 } from './monstros.ts';
 
 export {
+  BORDA_OPOSTA,
   COMPOSICAO_DA_CAIXA,
   LADO_DA_GRADE,
   aplicarComandoDeTabuleiro,
   aplicarLimpeza,
   bordasAbertas,
   calcularIluminacao,
+  conectaNaVaga,
   ehPecaDeMonstro,
   ehPecaEspecial,
   estadoInicialDoTabuleiro,

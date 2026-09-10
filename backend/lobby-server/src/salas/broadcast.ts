@@ -169,4 +169,38 @@ export class SalasBroadcaster {
       }
     }
   }
+
+  /**
+   * Remove TODOS os sockets de um jogador (usado no bypass de Partida Órfã —
+   * review JF532, O3: o chamador só tem o `jogadorId`, não um socket
+   * específico). Espelha `removerPorSala`: limpa os três mapas por socket e
+   * remove `jogadorParaSala` quando o jogador fica sem conexões. Devolve a
+   * contagem removida; idempotente.
+   */
+  removerSocketPorJogadorId(jogadorId: string): number {
+    const sockets: WebSocket[] = [];
+    for (const [socket, j] of this.socketParaJogador.entries()) {
+      if (j === jogadorId) {
+        sockets.push(socket);
+      }
+    }
+    for (const socket of sockets) {
+      const salaId = this.socketParaSala.get(socket);
+      if (salaId !== undefined) {
+        const socketsDaSala = this.salaParaSockets.get(salaId);
+        if (socketsDaSala !== undefined) {
+          socketsDaSala.delete(socket);
+          if (socketsDaSala.size === 0) {
+            this.salaParaSockets.delete(salaId);
+          }
+        }
+      }
+      this.socketParaSala.delete(socket);
+      this.socketParaJogador.delete(socket);
+    }
+    if (sockets.length > 0 && this.contarConexoesDoJogador(jogadorId) === 0) {
+      this.jogadorParaSala.delete(jogadorId);
+    }
+    return sockets.length;
+  }
 }

@@ -4,24 +4,21 @@
    sem equivalente 1:1, fica no CSS). */
 
 @layer components {
-  /* Hero: fundo com sangria de 14% (parallax só via `transform` JS/rAF)
-     + overlay em gradiente para contraste AA. */
+  /* Hero: fundo com sangria de 14% (parallax só via `transform` JS/rAF).
+     Sem overlay — legibilidade via sombra de texto em `#hero`. */
   .hero-media {
     position: absolute;
     inset: -14% 0;
     background: var(--background-image-hero) center 35% / cover no-repeat, var(--color-background);
     will-change: transform;
   }
-  .hero-media::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      to bottom,
-      rgba(5, 5, 7, 0.8),
-      rgba(5, 5, 7, 0.62) 42%,
-      rgba(5, 5, 7, 0.86)
-    );
+  /* Texto da Hero legível sem véu: sombra sobre a imagem. */
+  #hero h1,
+  #hero p {
+    text-shadow:
+      0 1px 3px rgba(0, 0, 0, 0.9),
+      0 2px 12px rgba(0, 0, 0, 0.85),
+      0 0 1px rgba(0, 0, 0, 0.9);
   }
 
   /* Reveal escalonado da Hero (só `opacity` + `transform`, reveal único;
@@ -333,13 +330,16 @@
     width: 2.75rem;
     height: 2.75rem;
     flex-shrink: 0;
-    border: 2px solid rgba(245, 241, 232, 0.35);
+    border: 2px dashed #3f3f46;
     border-radius: 9999px;
-    background: var(--color-background);
-    color: var(--color-muted);
-    font-family: var(--font-display);
-    font-size: 0.75rem;
-    letter-spacing: 0.08em;
+    background: rgba(24, 24, 27, 0.6);
+    color: #52525b;
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+  .objectives-item-node-icon {
+    width: 1.25rem;
+    height: 1.25rem;
   }
   .objectives-item-media {
     position: relative;

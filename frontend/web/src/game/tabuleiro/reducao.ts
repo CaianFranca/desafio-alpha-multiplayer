@@ -62,10 +62,11 @@
  */
 
 import {
-  CORES_DOS_PEOES,
   abreJanelaDeManipulacao,
   chaveCelula,
+  coresParaN,
   criarIniciaisDaMesa,
+  quantidadeValidaDeJogadores,
   type CorDoPeao,
   type EstadoExibicaoTabuleiro,
   type Orientacao,
@@ -204,24 +205,37 @@ export interface EstadoDoTabuleiroNoCliente {
     */
   readonly geradoresLigados: readonly string[]
   /**
-    * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
-    * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
-    * engine). O snapshot substitui a baseline (reconexão reconcilia).
-    */
+   * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
+   * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
+   * engine). O snapshot substitui a baseline (reconexão reconcilia).
+   */
   readonly cartaoDeAcessoObtido: boolean
+  /**
+   * Fila de chegada dos peões por célula (issue #298): a ordem em que os peões
+   * pousam na peça que os abriga é o que define o arranjo visual de
+   * co-ocupação (Portão: cantos SE→SD→ID→IE; peça comum: 1º no centro).
+   * Chave = `chaveCelula`; o 1º da lista é o mais antigo na célula. É
+   * reconstruída pelo snapshot na ordem do motor; o índice é usado só para
+   * desempate visual em recarregamentos.
+   */
+  readonly ordemDeChegadaPorChave: Readonly<Record<string, readonly PeaoId[]>>
+  /** N de layout/teto 2..4 derivado do roster (snapshot, clamp); null antes do snapshot. Não é o N real do anúncio. */
+  readonly quantidadeParaLayout: number | null
 }
 
-/** Estado inicial determinístico do cliente (deltas a partir do zero). */
-export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
+/** Estado inicial determinístico do cliente (deltas a partir do zero). Suporta N=2..4; fallback 4. */
+export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): EstadoDoTabuleiroNoCliente {
+  const n = quantidadeValidaDeJogadores(quantidadeDeJogadores)
+  const cores = coresParaN(n)
   return {
-    iniciais: criarIniciaisDaMesa(),
+    iniciais: criarIniciaisDaMesa(n),
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
     // Seed dos peões (issue #91): ids determinísticos por cor, espelhando o
-    // engine (`peaoId: peao-${cor}`, `pecaId: null` na origem); os 4 nascem
+    // engine (`peaoId: peao-${cor}`, `pecaId: null` na origem); N peões nascem
     // sobre a Mesa (celula: null) e o servidor confirma cada movimento.
-    peoes: CORES_DOS_PEOES.map((cor) => ({
+    peoes: cores.map((cor) => ({
       peaoId: `peao-${cor}`,
       cor,
       celula: null,
@@ -243,6 +257,9 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     pecasRestantesNaCaixa: null,
     geradoresLigados: [],
     cartaoDeAcessoObtido: false,
+    // Sem fila de chegada até o primeiro posicionamento/movimento (issue #298).
+    ordemDeChegadaPorChave: {},
+    quantidadeParaLayout: n,
   }
 }
 
@@ -284,6 +301,45 @@ function aprenderPeaoDoAtivo(
 ): Readonly<Record<string, string>> {
   if (estado.jogadorAtivoId === null) return estado.peaoPorJogador
   return { ...estado.peaoPorJogador, [estado.jogadorAtivoId]: peaoId }
+}
+
+/**
+ * Rastreia a fila de chegada dos peões por célula (issue #298): cada
+ * posicionamento/movimento de peão remove o peão do tracker da célula de
+ * origem (derivada de `estado.peoes` — o estado ANTERIOR ao evento) e o anexa
+ * ao fim da fila da célula de destino. Fila/chave vazias são podadas
+ * (limpeza #151: não acumular chaves órfãs). `novaCelula` null (defensivo —
+ * o wire de PEAO_POSICIONADO/MOVIDO nunca traz; cobre reposição sobre a Mesa
+ * por paridade com o snapshot) só remove, sem anexar.
+ */
+export function atualizarOrdemDeChegada(
+  estado: EstadoDoTabuleiroNoCliente,
+  peaoId: PeaoId,
+  novaCelula: Celula | null,
+): Readonly<Record<string, readonly PeaoId[]>> {
+  const anterior = estado.peoes.find((p) => p.peaoId === peaoId)
+  const anteriorChave =
+    anterior !== undefined && anterior.celula !== null
+      ? chaveCelula(anterior.celula)
+      : null
+  const proximaChave = novaCelula !== null ? chaveCelula(novaCelula) : null
+  const mapa: Record<string, PeaoId[]> = {}
+  // Reutiliza as filas existentes (referências são imutáveis; só os arrays novos abaixo).
+  for (const [chave, fila] of Object.entries(estado.ordemDeChegadaPorChave)) {
+    mapa[chave] = [...fila]
+  }
+  // Remove da origem (podando fila vazia).
+  if (anteriorChave !== null && mapa[anteriorChave]) {
+    mapa[anteriorChave] = mapa[anteriorChave].filter((id) => id !== peaoId)
+    if (mapa[anteriorChave].length === 0) delete mapa[anteriorChave]
+  }
+  // Anexa ao destino (no-op quando sem destino: remove sem anexar).
+  if (proximaChave !== null) {
+    const filaDestino = mapa[proximaChave] ?? []
+    if (!filaDestino.includes(peaoId)) filaDestino.push(peaoId)
+    mapa[proximaChave] = filaDestino
+  }
+  return mapa
 }
 
 /**
@@ -452,6 +508,11 @@ export function reduzirEvento(
         peoes,
         peaoSelecionadoId: evento.peaoId,
         peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
+        ordemDeChegadaPorChave: atualizarOrdemDeChegada(
+          estado,
+          evento.peaoId,
+          evento.celula,
+        ),
       }
     }
     case 'PEAO_MOVIDO': {
@@ -468,6 +529,11 @@ export function reduzirEvento(
         movimentouNoTurno:
           estado.jogadorAtivoId !== null ? true : estado.movimentouNoTurno,
         peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
+        ordemDeChegadaPorChave: atualizarOrdemDeChegada(
+          estado,
+          evento.peaoId,
+          evento.celula,
+        ),
       }
     }
     case 'PEAO_PERMANECEU':
@@ -567,11 +633,25 @@ export function reduzirEvento(
       // Peças removidas saem da cena; como a ocupação é derivada de
       // `posicionadas`, as células liberadas voltam a aceitar
       // posicionamento/recebimento sem código adicional.
+      // A fila de chegada (issue #298) acompanha: as chaves das células
+      // removidas são podadas para não vazar fila órfã para a próxima peça
+      // na mesma célula (limpeza #151: não acumular chaves órfãs).
+      const chavesRemovidas = new Set(
+        estado.posicionadas
+          .filter((p) => removidas.includes(p.pecaId))
+          .map((p) => chaveCelula(p.celula)),
+      )
+      const ordemDeChegadaPorChave = Object.fromEntries(
+        Object.entries(estado.ordemDeChegadaPorChave).filter(
+          ([chave]) => !chavesRemovidas.has(chave),
+        ),
+      )
       return {
         ...estado,
         posicionadas: estado.posicionadas.filter(
           (p) => !removidas.includes(p.pecaId),
         ),
+        ordemDeChegadaPorChave,
         // Seleção/Manipulação apontando para peça removida não pode sobreviver.
         pecaSelecionadaId:
           estado.pecaSelecionadaId !== null && removidas.includes(estado.pecaSelecionadaId)
@@ -686,5 +766,6 @@ export function estadoDeExibicaoDoModelo(
     posicionadas: estado.posicionadas,
     peoes: estado.peoes,
     celulasIluminadas: estado.celulasIluminadas,
+    ordemDeChegadaPorChave: estado.ordemDeChegadaPorChave,
   }
 }

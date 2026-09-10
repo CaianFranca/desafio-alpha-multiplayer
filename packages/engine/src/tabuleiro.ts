@@ -13,6 +13,8 @@
 // domínio puro e imutável.
 
 import {
+  BORDA_OPOSTA,
+  conectaNaVaga,
   exigirCelulaNoAlcance,
   escolherVagaDaPecaRecebida,
   desselecionarPeao,
@@ -33,9 +35,11 @@ import {
 } from './peoes.ts';
 
 export {
+  BORDA_OPOSTA,
   LADO_DA_GRADE,
   bordasAbertas,
   celulaVizinhaNaBorda,
+  conectaNaVaga,
   ehPecaDeMonstro,
   ehPecaEspecial,
   estaDentroDaGrade,
@@ -949,6 +953,34 @@ function girarPosicionada(
   }
 
   const orientacaoNova = rotacionar(peca.orientacao, comando.sentido);
+
+  // Encaixe conectado (issue #311): a rotação da janela de Manipulação não
+  // pode fechar a borda da peça voltada à Peça sob o Peão selecionado — a
+  // relação geradora do encaixe precisa permanecer conectada. A regra vale só
+  // enquanto o Peão está sobre a geradora (células vizinhas); quando o Peão
+  // sai dela nos turnos seguintes, não há relação a proteger e a rotação é
+  // livre de novo — o Peão já não referencia a peça.
+  const peao = estado.peoes.find(
+    (item) => item.peaoId === estado.peaoSelecionadoId,
+  );
+  const geradora = peao?.pecaId
+    ? encontrarPosicionada(estado, peao.pecaId)
+    : undefined;
+  const bordaDaGeradora = geradora
+    ? bordaDaGeradoraVoltadaAPeca(geradora, peca)
+    : undefined;
+  if (
+    geradora !== undefined &&
+    geradora.pecaId !== peca.pecaId &&
+    bordaDaGeradora !== undefined &&
+    !conectaNaVaga(peca.tipo, orientacaoNova, bordaDaGeradora)
+  ) {
+    return rejeitar(
+      'MOVIMENTO_NAO_CONECTADO',
+      'A rotação fecharia a borda voltada à Peça sob o Peão selecionado; o encaixe deve permanecer conectado a ela.',
+    );
+  }
+
   const novoEstado: EstadoDoTabuleiro = {
     ...estado,
     posicionadas: estado.posicionadas.map((item) =>
@@ -964,6 +996,30 @@ function girarPosicionada(
       sentido: comando.sentido,
     },
   ]);
+}
+
+// Borda da geradora voltada à peça vizinha (distância Manhattan 1): a direção
+// em que a peça está a partir da geradora. Retorna undefined quando não são
+// vizinhas — sem vizinhança não há relação geradora a proteger.
+function bordaDaGeradoraVoltadaAPeca(
+  geradora: PecaPosicionada,
+  peca: PecaPosicionada,
+): BordaCardinal | undefined {
+  const deltaLinha = peca.celula.linha - geradora.celula.linha;
+  const deltaColuna = peca.celula.coluna - geradora.celula.coluna;
+  if (Math.abs(deltaLinha) + Math.abs(deltaColuna) !== 1) {
+    return undefined;
+  }
+  if (deltaLinha === -1) {
+    return 'norte';
+  }
+  if (deltaColuna === 1) {
+    return 'leste';
+  }
+  if (deltaLinha === 1) {
+    return 'sul';
+  }
+  return 'oeste';
 }
 
 function encontrarNasIniciais(
