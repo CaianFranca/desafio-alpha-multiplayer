@@ -179,6 +179,8 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
     erros.push({ campo: 'email', mensagem: 'Informe o email.' });
   } else if (!validarFormatoEmail(emailBruto)) {
     erros.push({ campo: 'email', mensagem: 'Informe um email válido.' });
+  } else if (normalizarEmail(emailBruto).endsWith('@exemplo.local')) {
+    erros.push({ campo: 'email', mensagem: 'Domínio reservado para contas internas.' });
   }
 
   if (typeof body.senha !== 'string') {

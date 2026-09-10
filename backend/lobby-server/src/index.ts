@@ -7,6 +7,7 @@ import { redisClient } from './config/redis.ts';
 import { verificarAccess } from './jwt.ts';
 import { obterSessao } from './sessoes.ts';
 import { criarContextoDasSalas } from './salas/index.ts';
+import { iniciarServicoDeLimpezaDeBots } from './bots/limpeza.ts';
 
 const contextoSalas = criarContextoDasSalas();
 
@@ -33,6 +34,9 @@ async function inicializarDependencias(): Promise<void> {
   await contextoSalas.estado.carregar(contextoSalas.repo, contextoSalas.projecao);
   await contextoSalas.handlers.rearmarAposRestart();
   console.log('[lobby-server] salas carregadas do PG');
+
+  iniciarServicoDeLimpezaDeBots();
+  console.log('[lobby-server] servico de limpeza de bots ativo');
 }
 
 async function iniciar(): Promise<void> {

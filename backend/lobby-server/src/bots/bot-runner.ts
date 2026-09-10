@@ -76,31 +76,45 @@ function cookieHeader(cookies: Cookies): string {
   return partes.join('; ');
 }
 
+import { pool } from '../config/pg.ts';
+import { criarSessao } from '../sessoes.ts';
+import { assinarAccess, assinarRefresh } from '../jwt.ts';
+
+// TTL de 2 horas para contas de bot no banco
+const BOT_DB_TTL_HOURS = 2;
+
 async function registrarBotEfemero(
-  baseUrl: string,
+  _baseUrl: string,
   log: (...args: unknown[]) => void,
 ): Promise<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } }> {
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_REGISTRO; tentativa++) {
     const cred = gerarCredenciaisEfemeras();
-    const res = await fetch(`${baseUrl}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ apelido: cred.apelido, email: cred.email, senha: cred.senha }),
-    });
-    if (res.status === 201) {
-      const jogador = (await res.json()) as { id: string; apelido: string; email: string };
-      const cookies = extrairCookies(res.headers);
-      if (!cookies.access_token) throw new Error('bot-runner: register sem access_token');
-      log(`bot registrado: ${jogador.apelido} (tentativa ${tentativa})`);
-      return { cookies, jogador };
+    try {
+      // Inserção direta no PostgreSQL com bot=true e expira_em calculado
+      const expiraEm = new Date(Date.now() + BOT_DB_TTL_HOURS * 60 * 60 * 1000);
+      const res = await pool.query<{ id: string; apelido: string; email: string }>(
+        `INSERT INTO usuarios (apelido, email, senha, bot, expira_em)
+         VALUES ($1, $2, $3, true, $4)
+         RETURNING id, apelido, email`,
+        [cred.apelido, cred.email, 'bot_nopassword', expiraEm],
+      );
+
+      const jogador = res.rows[0];
+      const { sessaoId } = await criarSessao(jogador.id);
+      const access_token = assinarAccess(jogador, sessaoId);
+      const refresh_token = assinarRefresh(jogador, sessaoId);
+
+      log(`bot registrado diretamente no banco: ${jogador.apelido} (expiraEm: ${expiraEm.toISOString()})`);
+      return { cookies: { access_token, refresh_token }, jogador };
+    } catch (err: unknown) {
+      const pgError = err as { code?: string };
+      if (pgError.code === '23505') {
+        log(`bot-runner: colisão de chave na tentativa ${tentativa}, gerando novas credenciais...`);
+        await new Promise((r) => setTimeout(r, 50 * tentativa));
+        continue;
+      }
+      throw err;
     }
-    if (res.status === 409) {
-      log(`bot-runner: conflito 409 na tentativa ${tentativa}, gerando novas credenciais...`);
-      await new Promise((r) => setTimeout(r, 100 * tentativa));
-      continue;
-    }
-    const corpo = await res.text().catch(() => '');
-    throw new Error(`bot-runner: falha no register http=${res.status} ${corpo.slice(0, 200)}`);
   }
   throw new Error(`bot-runner: falha ao registrar após ${MAX_TENTATIVAS_REGISTRO} tentativas`);
 }

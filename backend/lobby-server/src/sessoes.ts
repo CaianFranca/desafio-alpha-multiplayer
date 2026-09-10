@@ -50,7 +50,7 @@ if antigaId then
   redis.call('DEL', 'sessao:' .. antigaId)
 end
 redis.call('SET', KEYS[2], ARGV[2], 'EX', tonumber(ARGV[1]))
-redis.call('SET', KEYS[1], ARGV[3])
+redis.call('SET', KEYS[1], ARGV[3], 'EX', tonumber(ARGV[1]))
 return ARGV[3]
 `.trim();
 
@@ -82,7 +82,7 @@ if mapping ~= ARGV[5] then
 end
 redis.call('DEL', KEYS[1])
 redis.call('SET', KEYS[3], ARGV[2], 'EX', tonumber(ARGV[1]))
-redis.call('SET', KEYS[2], ARGV[3])
+redis.call('SET', KEYS[2], ARGV[3], 'EX', tonumber(ARGV[1]))
 return ARGV[3]
 `.trim();
 
