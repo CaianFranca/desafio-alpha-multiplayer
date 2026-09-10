@@ -379,7 +379,7 @@
   }
   .objectives-item-desc {
     margin: 0;
-    font-size: clamp(0.8125rem, 1vw, 0.875rem);
+    font-size: clamp(0.875rem, 1vw, 1rem);
     line-height: 1.65;
     color: var(--color-muted);
   }
