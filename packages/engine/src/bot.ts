@@ -154,9 +154,20 @@ export function acoesValidasDaSubfase(
         )
       : null;
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
+    // Anti-softlock (issue #311): com outra Recebida já com vaga escolhida e
+    // ainda não encaixada, a engine rejeita nova escolha de vaga com
+    // PENDENCIA_NAO_RESOLVIDA — a FSM não enumera escolher_vaga nesse caso,
+    // só o encaixe da escolhida. Sem isso, turnos com 2+ pendências (a regra
+    // na grade toroidal, issue #260) sorteavam a rejeição certa.
+    const algumaVagaEscolhida = tabuleiro.recebidas.some(
+      (item) => item.vaga !== null,
+    );
     const acoes: ComandoDePartida[] = [];
     for (const recebida of tabuleiro.recebidas) {
       if (recebida.vaga === null) {
+        if (algumaVagaEscolhida) {
+          continue;
+        }
         if (pecaSobOPeao === undefined) {
           continue;
         }

@@ -172,18 +172,25 @@ test('vizinhança considera apenas células que compartilham uma borda', () => {
   assert.ok(!vizinhas.some((celula) => celula.linha === 4 && celula.coluna === 4));
 });
 
-test('células nas bordas da grade não expõem vizinhas fora do range', () => {
+test('vizinhança toroidal: bordas envolvem para o lado oposto (issue #260)', () => {
   assert.equal(LADO_DA_GRADE, 7);
 
+  // Ordem canônica (norte, leste, sul, oeste); na borda, a vizinha é o lado
+  // oposto — sempre 4 vizinhas, nunca fora do range.
   assert.deepEqual(vizinhos({ linha: 0, coluna: 0 }), [
+    { linha: 6, coluna: 0 },
     { linha: 0, coluna: 1 },
     { linha: 1, coluna: 0 },
+    { linha: 0, coluna: 6 },
   ]);
   assert.deepEqual(vizinhos({ linha: 6, coluna: 6 }), [
     { linha: 5, coluna: 6 },
+    { linha: 6, coluna: 0 },
+    { linha: 0, coluna: 6 },
     { linha: 6, coluna: 5 },
   ]);
   assert.deepEqual(vizinhos({ linha: 0, coluna: 3 }), [
+    { linha: 6, coluna: 3 },
     { linha: 0, coluna: 4 },
     { linha: 1, coluna: 3 },
     { linha: 0, coluna: 2 },
@@ -450,12 +457,22 @@ test('peça da caixa não é posicionável nem selecionável; posicionamento só
   );
 });
 
-test('células fora da grade ou malformadas são rejeitadas', () => {
+test('coordenadas fora de 0–6 normalizam pelo wrap; malformadas rejeitam (issue #260)', () => {
   const estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
 
-  assert.equal(codigoDaRejeicao(estado, posicionar('inicial-1', -1, 3)), 'CELULA_NAO_ENCONTRADA');
-  assert.equal(codigoDaRejeicao(estado, posicionar('inicial-1', 3, 7)), 'CELULA_NAO_ENCONTRADA');
-  assert.equal(codigoDaRejeicao(estado, posicionar('inicial-1', 7, 0)), 'CELULA_NAO_ENCONTRADA');
+  // Não existe "fora": (-1,3) envolve para (6,3) e o posicionamento funciona.
+  const envolvido = aplicar(estado, posicionar('inicial-1', -1, 3));
+  assert.deepEqual(
+    envolvido.posicionadas.find((peca) => peca.pecaId === 'inicial-1')?.celula,
+    { linha: 6, coluna: 3 },
+  );
+
+  // (3,7) envolve para (3,0); malformadas seguem DADOS_INVALIDOS.
+  const envolvidoLeste = aplicar(estado, posicionar('inicial-1', 3, 7));
+  assert.deepEqual(
+    envolvidoLeste.posicionadas.find((peca) => peca.pecaId === 'inicial-1')?.celula,
+    { linha: 3, coluna: 0 },
+  );
   assert.equal(codigoDaRejeicao(estado, posicionar('inicial-1', 1.5, 3)), 'DADOS_INVALIDOS');
 });
 

@@ -374,9 +374,10 @@ export function validarDimensoes(): string | null {
 // ── Conexões e seleção de peões (issue #90 — espelho visual do engine) ──
 //
 // Espelha `vizinhasConectadas` de packages/engine/src/peoes.ts: para cada
-// borda aberta da origem, a célula vizinha na direção; a vizinha está
-// conectada quando tem a borda oposta aberta. O frontend NÃO importa o
-// engine: esta é a projeção de exibição da mesma regra.
+// borda aberta da origem, a célula vizinha na direção — com continuidade
+// toroidal (issue #260), sem "fora da grade"; a vizinha está conectada
+// quando tem a borda oposta aberta. O frontend NÃO importa o engine: esta é
+// a projeção de exibição da mesma regra.
 
 const BORDA_OPOSTA: Record<BordaCardinal, BordaCardinal> = {
   norte: 'sul',
@@ -413,6 +414,16 @@ export function encontrarPecaNaCelula(
   return posicionadas.find((p) => chaveCelula(p.celula) === chave) ?? null
 }
 
+/**
+ * Normalização toroidal (issue #260): espelho de `normalizarCelula` do
+ * engine — toda coordenada cai numa célula válida da grade 7x7.
+ */
+export function normalizarCelula(celula: Celula): Celula {
+  const normalizar = (valor: number) =>
+    ((valor % LADO_DA_GRADE) + LADO_DA_GRADE) % LADO_DA_GRADE
+  return { linha: normalizar(celula.linha), coluna: normalizar(celula.coluna) }
+}
+
 /** Vizinhas conectadas à peça de origem (ordem canônica norte→leste→sul→oeste). */
 export function vizinhasConectadas(
   posicionadas: readonly PecaPosicionada[],
@@ -421,11 +432,12 @@ export function vizinhasConectadas(
   const conectadas: PecaPosicionada[] = []
   for (const borda of bordasAbertas(origem)) {
     const delta = DESLOCAMENTO_DA_BORDA[borda]
-    const celulaVizinha: Celula = {
+    // Toroidal (issue #260): na borda, a vizinha é o lado oposto — nunca
+    // descartada por estaDentroDaGrade.
+    const celulaVizinha: Celula = normalizarCelula({
       linha: origem.celula.linha + delta.linha,
       coluna: origem.celula.coluna + delta.coluna,
-    }
-    if (!estaDentroDaGrade(celulaVizinha)) continue
+    })
     const vizinha = encontrarPecaNaCelula(posicionadas, celulaVizinha)
     if (!vizinha || !bordasAbertas(vizinha).includes(BORDA_OPOSTA[borda])) {
       continue

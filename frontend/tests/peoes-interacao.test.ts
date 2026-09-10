@@ -253,6 +253,19 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     ])
   })
 
+  it('vagas na borda envolvem para o lado oposto (grade toroidal, issue #260)', () => {
+    // inicial(0,6)@0 abre norte/leste → (6,6) e (0,0), ambas vazias.
+    const estado = estadoBase({
+      posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 0, 6)],
+      peoes: [peao('peao-branco', { linha: 0, coluna: 6 }), peao('peao-vermelho', null)],
+      peaoSelecionadoId: 'peao-branco',
+    })
+    expect(vagasDisponiveisDoPeao(estado)).toEqual([
+      { borda: 'norte', celula: { linha: 6, coluna: 6 } },
+      { borda: 'leste', celula: { linha: 0, coluna: 0 } },
+    ])
+  })
+
   it('escolher a vaga de uma pendência sem vaga emite ESCOLHER_VAGA_DA_PECA_RECEBIDA', () => {
     const estado = comPeaoSelecionado([pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)], {
       recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', null, null)],
