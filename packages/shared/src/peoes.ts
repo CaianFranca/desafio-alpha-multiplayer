@@ -181,6 +181,8 @@ export interface PeaoPermaneceuEvento {
 // alcançou a célula escura conectada. O evento carrega apenas o Peão e a
 // célula de destino — a peça sorteada do Recebimento gerado pela travessia
 // chega pelos eventos RECEBIMENTO_GERADO/PECA_SORTEADA do mesmo lote.
+// @deprecated ADR-0013: fluxo canônico em Baixa é puxar no início do turno
+// (avancarVez). Mantido como legado funcional até remoção em issue futura.
 export interface AtravessouOEscuroEvento {
   readonly type: 'ATRAVESSOU_O_ESCURO';
   readonly peaoId: PeaoId;
