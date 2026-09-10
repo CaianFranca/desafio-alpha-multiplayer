@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import type { Sala } from '@flicker/shared'
 import type { JogadorBloqueado } from '../../hooks/useSalaWebSocket'
+import { adicionarBot, BotIndisponivelError, BotErroError } from '../../api/bots'
 
 interface Props {
   sala: Sala
@@ -20,6 +22,9 @@ export function ControlesDoAnfitriao({
 }: Props) {
   if (!ehAnfitriao) return null
 
+  const [adicionandoBot, setAdicionandoBot] = useState(false)
+  const [erroBot, setErroBot] = useState<string | null>(null)
+
   // O servidor revalida: 2 a 4 Membros (o Anfitrião incluso), todos conectados e prontos.
   const podeIniciar =
     sala.membros.length >= 2 &&
@@ -27,15 +32,38 @@ export function ControlesDoAnfitriao({
     sala.membros.every((m) => m.presenca === 'conectado' && m.prontidao)
   const motivoIniciar = podeIniciar ? undefined : 'Requer 2 a 4 Membros conectados e prontos'
 
+  const temVaga = sala.membros.length < 4
+  const podeAdicionarBot = temVaga && !adicionandoBot
+
   const confirmarEncerramento = () => {
     if (window.confirm('Encerrar a Sala para todos os Membros?')) aoEncerrarSala()
+  }
+
+  const handleAdicionarBot = async () => {
+    setErroBot(null)
+    setAdicionandoBot(true)
+    try {
+      const bot = await adicionarBot()
+      // Aviso simples — o bot aparecerá na lista de membros via evento WS
+      console.log(`[sala] bot adicionado: ${bot.apelido}`)
+    } catch (err) {
+      if (err instanceof BotIndisponivelError) {
+        setErroBot('Bots não disponíveis neste ambiente.')
+      } else if (err instanceof BotErroError) {
+        setErroBot(err.message)
+      } else {
+        setErroBot('Falha ao adicionar bot.')
+      }
+    } finally {
+      setAdicionandoBot(false)
+    }
   }
 
   return (
     <div className="flex flex-col gap-4 max-w-sm w-full">
       <div className="flex flex-col gap-3">
         <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Controles do Anfitrião</p>
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <button
             type="button"
             onClick={confirmarEncerramento}
@@ -52,7 +80,27 @@ export function ControlesDoAnfitriao({
           >
             Iniciar Partida
           </button>
+          <button
+            type="button"
+            onClick={() => void handleAdicionarBot()}
+            disabled={!podeAdicionarBot}
+            title={
+              !temVaga
+                ? 'Sala cheia (máximo 4 membros)'
+                : adicionandoBot
+                  ? 'Adicionando bot...'
+                  : 'Adicionar um jogador-bot à sala'
+            }
+            className="border border-white/30 text-white/60 px-4 py-2 text-xs font-bold tracking-wider uppercase hover:border-white/60 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-white/30 disabled:hover:text-white/60"
+          >
+            {adicionandoBot ? 'Adicionando…' : '+ Bot'}
+          </button>
         </div>
+        {erroBot && (
+          <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-1">
+            {erroBot}
+          </p>
+        )}
       </div>
 
       {jogadoresBloqueados.length > 0 && (
