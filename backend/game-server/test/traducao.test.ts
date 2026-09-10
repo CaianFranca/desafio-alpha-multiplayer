@@ -125,15 +125,16 @@ test('traduzirEventos mapeia partida_terminada com vitoria para PARTIDA_TERMINAD
 });
 
 test('traduzirEventos mapeia partida_terminada com derrota projetando o motivo no wire (#145-exp)', () => {
-  // O motivo da derrota (caixa_esgotada/equipe_amedrontada — sync
-  // DesfechoDaPartida, engine/src/partida.ts:128-133) viaja no evento para a
-  // tela distinguir o fim (issue #145-exp).
+  // O motivo da derrota (caixa_esgotada/equipe_amedrontada/desistencia — sync
+  // DesfechoDaPartida, engine/src/partida.ts:156-161) viaja no evento para a
+  // tela distinguir o fim (issue #145-exp; 'desistencia' pela ADR-0013/#289).
   const eventos = [
     { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'caixa_esgotada' } },
     { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'equipe_amedrontada' } },
+    { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'desistencia' } },
   ] as const satisfies readonly EventoDaPartida[];
   const saida = traduzirEventos(eventos);
-  assert.equal(saida.length, 2);
+  assert.equal(saida.length, 3);
   assert.deepEqual(saida[0], {
     type: 'PARTIDA_TERMINADA',
     resultado: 'derrota',
@@ -143,6 +144,32 @@ test('traduzirEventos mapeia partida_terminada com derrota projetando o motivo n
     type: 'PARTIDA_TERMINADA',
     resultado: 'derrota',
     motivo: 'equipe_amedrontada',
+  });
+  assert.deepEqual(saida[2], {
+    type: 'PARTIDA_TERMINADA',
+    resultado: 'derrota',
+    motivo: 'desistencia',
+  });
+});
+
+test('traduzirEventos mapeia desistencia_registrada para DESISTENCIA_REGISTRADA (issue #289, ADR-0013)', () => {
+  // Shape 1:1 com o domínio — abre o lote do comando; o término por quórum
+  // mínimo chega como PARTIDA_TERMINADA no fim do lote (motivo desistencia).
+  const eventos = [
+    { tipo: 'desistencia_registrada', jogadorId: 'jogador-2', peaoId: 'peao-vermelho' },
+    { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'desistencia' } },
+  ] as const satisfies readonly EventoDaPartida[];
+  const saida = traduzirEventos(eventos);
+  assert.equal(saida.length, 2);
+  assert.deepEqual(saida[0], {
+    type: 'DESISTENCIA_REGISTRADA',
+    jogadorId: 'jogador-2',
+    peaoId: 'peao-vermelho',
+  });
+  assert.deepEqual(saida[1], {
+    type: 'PARTIDA_TERMINADA',
+    resultado: 'derrota',
+    motivo: 'desistencia',
   });
 });
 
