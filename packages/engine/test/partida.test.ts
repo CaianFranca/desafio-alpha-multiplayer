@@ -194,13 +194,15 @@ function concluirPrimeiroTurno(
 }
 
 // Partida com os quatro Primeiros Turnos concluídos: a vez voltou ao primeiro
-// Jogador, agora em turno normal (rodada 2).
+// Jogador, agora em turno normal (rodada 2). Peões em (3,3), (0,0), (6,6) e
+// (1,0): diogo foge de (6,0) porque a vaga norte de bruno envolve para lá na
+// grade toroidal (issue #260) — mesmo fixture de monstros.test.ts.
 function partidaEmRodada2(): EstadoDaPartida {
   let estado = partidaIniciada();
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
   estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
-  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 0 });
+  estado = concluirPrimeiroTurno(estado, { linha: 1, coluna: 0 });
   return estado;
 }
 
@@ -672,23 +674,27 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
     },
     {
       tipo: 'celulas_iluminadas',
+      // Iluminação toroidal (issue #260): cantos envolvem para o lado oposto
+      // — (0,0) ilumina (6,0) e (0,6); (6,6) ilumina (6,0) e (0,6).
       celulas: [
         // peao-vermelho em (0,0)
         { linha: 0, coluna: 0 },
         { linha: 0, coluna: 1 },
+        { linha: 0, coluna: 6 },
+        // peao-amarelo em (1,0)
         { linha: 1, coluna: 0 },
-        // peao-branco em (2,3)
+        { linha: 1, coluna: 1 },
         { linha: 1, coluna: 3 },
+        { linha: 1, coluna: 6 },
+        // peao-branco em (2,3)
+        { linha: 2, coluna: 0 },
         { linha: 2, coluna: 2 },
         { linha: 2, coluna: 3 },
         { linha: 2, coluna: 4 },
         { linha: 3, coluna: 3 },
-        // peao-amarelo em (6,0)
-        { linha: 5, coluna: 0 },
         // peao-azul em (6,6)
         { linha: 5, coluna: 6 },
         { linha: 6, coluna: 0 },
-        { linha: 6, coluna: 1 },
         { linha: 6, coluna: 5 },
         { linha: 6, coluna: 6 },
       ],
@@ -962,7 +968,9 @@ test('avanço circular: os quatro encerram o Primeiro Turno e a vez volta ao pri
   assert.equal(estado.jogadorAtivoId, 'diogo');
   assert.equal(estado.rodada, 1);
 
-  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 0 });
+  // (1,0) em vez de (6,0): a vaga norte de bruno envolve para (6,0) — grade
+  // toroidal (issue #260).
+  estado = concluirPrimeiroTurno(estado, { linha: 1, coluna: 0 });
   assert.equal(estado.jogadorAtivoId, 'ana');
   assert.equal(estado.rodada, 2);
   assert.ok(estado.jogadores.every((jogador) => !jogador.primeiroTurnoPendente));
@@ -1042,7 +1050,7 @@ test('após qualquer rejeição o estado da Partida fica inalterado, com um úni
   }
 });
 
-test('iluminação: inicial vazia, 1 peão centro ilumina 5, borda 3, diagonais nunca', () => {
+test('iluminação: inicial vazia, 1 peão centro ilumina 5, canto ilumina 5 com wrap, diagonais nunca (issue #260)', () => {
   let estado = partidaIniciada();
   assert.deepEqual(estado.celulasIluminadas, []);
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
@@ -1060,21 +1068,25 @@ test('iluminação: inicial vazia, 1 peão centro ilumina 5, borda 3, diagonais 
   assert.ok(!estado.celulasIluminadas.some((c) => c.linha === 2 && c.coluna === 2));
   assert.ok(!estado.celulasIluminadas.some((c) => c.linha === 2 && c.coluna === 4));
 
-  // Encerrar e posicionar em borda (0,0) → 3 células
+  // Encerrar e posicionar no canto (0,0) → 5 células com o wrap toroidal
+  // (issue #260): (0,0),(0,1),(1,0) mais (6,0) e (0,6) do lado oposto.
   estado = resolverRecebidas(estado, 'ana');
   estado = aplicar(estado, encerrarTurno(), 'ana');
   estado = aplicar(estado, selecionarPeca('inicial-2'), 'bruno');
   estado = aplicar(estado, posicionarPeca('inicial-2', 0, 0), 'bruno');
   estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
   estado = aplicar(estado, posicionarPeao('peao-vermelho', 0, 0), 'bruno');
-  assert.equal(estado.celulasIluminadas.length, 8);
-  // Células da borda: (0,0),(0,1),(1,0) — sem diagonais fora da grade
+  assert.equal(estado.celulasIluminadas.length, 10);
+  // Células do canto: (0,0),(0,1),(1,0) — sem diagonais fora da grade
   const borda = estado.celulasIluminadas.filter((c) => c.linha <= 1 && c.coluna <= 1);
   assert.deepEqual(borda.sort((a, b) => a.linha - b.linha || a.coluna - b.coluna), [
     { linha: 0, coluna: 0 },
     { linha: 0, coluna: 1 },
     { linha: 1, coluna: 0 },
   ]);
+  // O wrap alcança o lado oposto.
+  assert.ok(estado.celulasIluminadas.some((c) => c.linha === 6 && c.coluna === 0));
+  assert.ok(estado.celulasIluminadas.some((c) => c.linha === 0 && c.coluna === 6));
 });
 
 test('iluminação: união desduplicada e independente de conexões/orientação, vazias inclusas', () => {
@@ -1518,19 +1530,23 @@ test('travessia do Escuro: atravessar, encaixar a Recebida travada, confirmar se
     },
     {
       tipo: 'celulas_iluminadas',
+      // Iluminação toroidal (issue #260): cantos envolvem para o lado oposto;
+      // peao-amarelo em (1,0) (fixture de rodada 2) e peao-branco em Baixa.
       celulas: [
         // peao-vermelho em (0,0)
         { linha: 0, coluna: 0 },
         { linha: 0, coluna: 1 },
+        { linha: 0, coluna: 6 },
+        // peao-amarelo em (1,0)
         { linha: 1, coluna: 0 },
+        { linha: 1, coluna: 1 },
         // peao-branco em (1,3) — Baixa Iluminação: apenas a própria célula
         { linha: 1, coluna: 3 },
-        // peao-amarelo em (6,0)
-        { linha: 5, coluna: 0 },
+        { linha: 1, coluna: 6 },
+        { linha: 2, coluna: 0 },
         // peao-azul em (6,6)
         { linha: 5, coluna: 6 },
         { linha: 6, coluna: 0 },
-        { linha: 6, coluna: 1 },
         { linha: 6, coluna: 5 },
         { linha: 6, coluna: 6 },
       ],

@@ -177,12 +177,15 @@ function concluirPrimeiroTurno(
   return aplicar(estado, encerrarTurno(), ator);
 }
 
+// Peões em (3,3), (0,0), (6,6) e (1,0): diogo foge de (6,0) porque a vaga
+// norte de bruno envolve para lá na grade toroidal (issue #260) — mesmo
+// fixture de monstros.test.ts.
 function partidaEmRodada2(seed?: number): EstadoDaPartida {
   let estado = partidaIniciadaCom(JOGADORES, seed);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
   estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
-  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 0 });
+  estado = concluirPrimeiroTurno(estado, { linha: 1, coluna: 0 });
   return estado;
 }
 
@@ -222,8 +225,8 @@ const recebidaBaixa: PecaRecebida = {
 
 // Cenário de Baixa Iluminação controlado (#341): ana em Baixa, com o Peão
 // sobre uma Peça Cruz sintética em (3,0) — as células vizinhas norte (2,0),
-// leste (3,1) e sul (4,0) estão vazias na Rodada 2 (longe das quatro
-// Iniciais e das vagas que elas geram), e o oeste cai fora da grade — e a
+// leste (3,1), sul (4,0) e o oeste toroidal (3,6) (issue #260) estão vazias
+// na Rodada 2 (longe das quatro Iniciais e das vagas que elas geram) — e a
 // pendência informada como estado direto: a FSM enumera sem aplicar comandos.
 function estadoDaBaixa(
   recebida: PecaRecebida,
@@ -443,8 +446,9 @@ test('subfase (b): sem Peão selecionado, planeja o Recebimento direto — pré-
 });
 
 test('subfase (b): em Baixa Iluminação a FSM enumera apenas vagas em células escuras (#341)', () => {
-  // A vaga norte (2,0) da Peça controle está iluminada; leste e sul seguem
-  // escuras — a engine rejeita a iluminada com DADOS_INVALIDOS.
+  // A vaga norte (2,0) da Peça controle está iluminada; leste, sul e o oeste
+  // toroidal (3,6) (issue #260) seguem escuros — a engine rejeita a iluminada
+  // com DADOS_INVALIDOS.
   const estado = estadoDaBaixa(recebidaBaixa, [{ linha: 2, coluna: 0 }]);
   const acoes = acoesValidasDaSubfase(estado, 'ana');
   // Conjunto de bordas enumeradas é exatamente o das vagas escuras — nenhuma
@@ -452,6 +456,7 @@ test('subfase (b): em Baixa Iluminação a FSM enumera apenas vagas em células 
   assert.deepEqual(acoes, [
     escolherVaga('rec-baixa', 'leste'),
     escolherVaga('rec-baixa', 'sul'),
+    escolherVaga('rec-baixa', 'oeste'),
   ]);
 });
 
@@ -470,25 +475,28 @@ test('subfase (b): pendência da Travessia segue enumerando a borda travada em B
 });
 
 test('subfase (b): em Baixa com todas as vagas iluminadas, escolher_vaga não é enumerada (#341)', () => {
-  // Todas as três vagas da Peça controle iluminadas: a pendência comum fica
-  // irresolúvel e o ramo não emite escolher_vaga — lista vazia. No driver,
-  // isso desdobra em desistência honesta via failsafe (o encerrar_turno
-  // forçado cai em PENDENCIA_NAO_RESOLVIDA); pendência irresolúvel em Baixa é
-  // limitação pré-existente da engine para humanos e bots, fora do escopo
-  // desta correção.
+  // Todas as QUATRO vagas da Peça controle iluminadas — incluindo o oeste
+  // toroidal (3,6) (issue #260): a pendência comum fica irresolúvel e o ramo
+  // não emite escolher_vaga — lista vazia. No driver, isso desdobra em
+  // desistência honesta via failsafe (o encerrar_turno forçado cai em
+  // PENDENCIA_NAO_RESOLVIDA); pendência irresolúvel em Baixa é limitação
+  // pré-existente da engine para humanos e bots, fora do escopo desta
+  // correção.
   const estado = estadoDaBaixa(recebidaBaixa, [
     { linha: 2, coluna: 0 },
     { linha: 3, coluna: 1 },
     { linha: 4, coluna: 0 },
+    { linha: 3, coluna: 6 },
   ]);
   const acoes = acoesValidasDaSubfase(estado, 'ana');
   assert.deepEqual(acoes, []);
 });
 
 // Pendência não fixada do Recebimento (#349): Reta na orientação 90° — bordas
-// abertas leste+oeste. Sobre a Peça controle (vagas norte/leste/sul), apenas a
-// vaga leste conecta (o oposto da vaga, oeste, está aberto); norte e sul são
-// vagas mortas para esta orientação.
+// abertas leste+oeste. Sobre a Peça controle (vagas norte (2,0), leste (3,1),
+// sul (4,0) e oeste toroidal (3,6) — issue #260), leste e oeste conectam (o
+// oposto da vaga — oeste e leste, respectivamente — está aberto); norte e sul
+// são vagas mortas para esta orientação.
 const recebidaMorta: PecaRecebida = {
   recebidaId: 'rec-morta',
   pecaId: 'recebida-morta',
@@ -509,10 +517,11 @@ const recebidaMortaFixada: PecaRecebida = {
 
 // Cenário controlado do Recebimento para a #349: ana na Rodada 2, sem Baixa,
 // com o Peão sobre a Peça controle Cruz sintética em (3,0) — as células
-// vizinhas norte (2,0), leste (3,1) e sul (4,0) estão vazias (o mesmo cenário
-// da #341). As Recebidas são informadas como estado direto; quando há
-// Recebida com vaga fixada, o helper seta a Seleção para ela — o mesmo efeito
-// do escolher_vaga na engine (peoes.ts).
+// vizinhas norte (2,0), leste (3,1), sul (4,0) e oeste toroidal (3,6)
+// (issue #260) estão vazias (o mesmo cenário da #341). As Recebidas são
+// informadas como estado direto; quando há Recebida com vaga fixada, o helper
+// seta a Seleção para ela — o mesmo efeito do escolher_vaga na engine
+// (peoes.ts).
 function estadoDoRecebimento(
   recebidas: readonly PecaRecebida[],
 ): EstadoDaPartida {
@@ -568,12 +577,14 @@ test('subfase (b): com Recebida fixada conectada, a enumeração é exatamente o
 });
 
 test('subfase (b): Reta não-conectante enumera escolher_vaga só nas vagas conectantes (#349)', () => {
-  // Vagas da Peça controle: norte (2,0), leste (3,1) e sul (4,0) — na
-  // orientação 90° da Reta (abertas leste+oeste), apenas a leste conecta;
-  // norte e sul são vagas mortas e ficam FORA da enumeração.
+  // Vagas da Peça controle: norte (2,0), leste (3,1), sul (4,0) e oeste
+  // toroidal (3,6) (issue #260) — na orientação 90° da Reta (abertas
+  // leste+oeste), leste e oeste conectam; norte e sul são vagas mortas e
+  // ficam FORA da enumeração.
   const estado = estadoDoRecebimento([recebidaMorta]);
   assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
     escolherVaga('rec-morta', 'leste'),
+    escolherVaga('rec-morta', 'oeste'),
   ]);
 });
 

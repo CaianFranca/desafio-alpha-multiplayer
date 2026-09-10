@@ -97,6 +97,18 @@ export interface IniciarPartidaComando {
   type: 'INICIAR_PARTIDA';
 }
 
+// Controle do stream de debug (issue #340, "Modo Desenvolvedor"): interceptados
+// na camada `ws.ts` do lobby-server, ANTES dos handlers — os handlers os
+// recusariam como DADOS_INVALIDOS (o switch não conhece estas variantes). Sem
+// payload: o escopo é a Sala do jogador, resolvida pelo servidor no ato.
+export interface AtivarDebugComando {
+  type: 'ATIVAR_DEBUG';
+}
+
+export interface DesativarDebugComando {
+  type: 'DESATIVAR_DEBUG';
+}
+
 export type SalaComandoDoCliente =
   | CriarSalaComando
   | EntrarNaSalaComando
@@ -106,7 +118,9 @@ export type SalaComandoDoCliente =
   | ExpulsarMembroComando
   | DesbloquearJogadorComando
   | EncerrarSalaComando
-  | IniciarPartidaComando;
+  | IniciarPartidaComando
+  | AtivarDebugComando
+  | DesativarDebugComando;
 
 // --- Eventos servidor → cliente (9) ---
 

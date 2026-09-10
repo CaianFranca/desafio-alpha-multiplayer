@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react'
+import { coletar } from '../../utils/coletorDeDepuracao'
 
 interface LimiteDeErroDoModeloProps {
   fallback: ReactNode
@@ -43,6 +44,11 @@ export class LimiteDeErroDoModelo extends Component<
       return { falhou: false, chaveVista: props.resetKey }
     }
     return null
+  }
+
+  // Captura do boundary de modelo 3D no stream de depuração (issue #340).
+  componentDidCatch(error: Error): void {
+    coletar('boundary', 'error', error.message, 'LimiteDeErroDoModelo')
   }
 
   render() {

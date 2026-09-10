@@ -7,6 +7,7 @@ import {
   destinosConectadosDoPeao,
   encontrarPecaNaCelula,
   estaDentroDaGrade,
+  normalizarCelula,
   peaoMesaParaMundo,
   selecionarPeaoNaExibicao,
   vizinhasConectadas,
@@ -76,12 +77,25 @@ describe('peões no contrato de exibição (issue #90)', () => {
     expect(vizinhasConectadas(pos, pos[0])).toEqual([])
   })
 
-  it('borda aberta que aponta para fora da grade não conecta nem explode', () => {
-    // reta(0,3)@0 abre norte → linha -1, fora da grade 7x7
+  it('borda aberta na borda da grade envolve sem explodir (issue #260)', () => {
+    // reta(0,3)@0 abre norte → envolve para (6,3), vazia; sul→(1,3) conecta
     const pos = [peca('reta', 'reta', 0, 0, 3), peca('outra', 'cruz', 0, 1, 3)]
     const conectadas = vizinhasConectadas(pos, pos[0])
-    // norte fora da grade é ignorado; sul→(1,3) cruz tem norte aberto → conecta
     expect(conectadas.map((p) => p.pecaId)).toEqual(['outra'])
+  })
+
+  it('conexão toroidal: norte de (0,3) alcança peça com sul aberto em (6,3) (issue #260)', () => {
+    const pos = [
+      peca('inicial', 'inicial', 0, 0, 3),
+      peca('reta', 'reta', 0, 6, 3),
+    ]
+    expect(vizinhasConectadas(pos, pos[0]).map((p) => p.pecaId)).toEqual(['reta'])
+    expect(vizinhasConectadas(pos, pos[1]).map((p) => p.pecaId)).toEqual(['inicial'])
+  })
+
+  it('normalizarCelula envolve coordenadas para a grade 7x7 (issue #260)', () => {
+    expect(normalizarCelula({ linha: -1, coluna: 7 })).toEqual({ linha: 6, coluna: 0 })
+    expect(normalizarCelula({ linha: 3, coluna: 3 })).toEqual({ linha: 3, coluna: 3 })
   })
 
   it('conexão vale nos dois sentidos (reta@90 ↔ cruz)', () => {

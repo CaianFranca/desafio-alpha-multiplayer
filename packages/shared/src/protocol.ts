@@ -45,6 +45,21 @@ export interface AdmissaoRejeitadaEvento {
 
 export type AdmissaoEventoDoServidor = AdmissaoAceitaEvento | AdmissaoRejeitadaEvento;
 
+// --- Debug (issue #340, "Modo Desenvolvedor") ---
+
+/**
+ * Linha espelhada do backend para o PainelDeDepuracao do cliente. Enviada
+ * UNICAST apenas às conexões que ativaram o stream (`ATIVAR_DEBUG`), nunca
+ * broadcast. `nivel` espelha os níveis do painel; `contexto` identifica a
+ * origem escopada (ex.: 'lobby', 'partida'); `mensagem` é a linha pronta.
+ */
+export interface DebugLogEvento {
+  type: 'DEBUG_LOG';
+  nivel: 'info' | 'warn' | 'error';
+  contexto: string;
+  mensagem: string;
+}
+
 // --- Union types ---
 // ST-11 compat temporária: mantém Tabuleiro/Peao sem jogadorId até migrar game-server/frontend (#117).
 // Partida(11 com jogadorId) é o contrato alvo; remover Tabuleiro/Peao após migração.
@@ -63,4 +78,4 @@ export type SalaServerMessage =
 
 export type ClientMessage = PingMessage | SalaClientMessage;
 
-export type ServerMessage = PongMessage | SalaServerMessage | AdmissaoEventoDoServidor;
+export type ServerMessage = PongMessage | SalaServerMessage | AdmissaoEventoDoServidor | DebugLogEvento;

@@ -7,6 +7,7 @@ import { parseCookies } from '../middleware/cookie.ts';
 import { verificarAccess } from '../jwt.ts';
 import { obterSessao } from '../sessoes.ts';
 import { ehSalaComando } from '../salas/handlers.ts';
+import { tipoDeComandoDeDebug } from './debug-stream.ts';
 import type { SalasContexto } from '../salas/index.ts';
 
 export interface WsAuthData {
@@ -98,6 +99,9 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
 
     socket.on('close', () => {
       console.log('[ws] disconnect');
+      // Stream de debug (issue #340): desconexão encerra o registro do
+      // cliente de debug antes do fechamento das Salas.
+      contextoSalas?.debug?.desconectar(authSocket);
       if (autenticado && contextoSalas !== undefined) {
         contextoSalas.handlers.handleFechamento(authSocket);
       }
@@ -165,6 +169,15 @@ async function handleMessage(
   try {
     parsed = JSON.parse(data.toString());
   } catch {
+    return;
+  }
+
+  // Controle do stream de debug (issue #340): interceptado ANTES do despacho —
+  // os handlers recusariam como DADOS_INVALIDOS (o switch não conhece as
+  // variantes ATIVAR_DEBUG/DESATIVAR_DEBUG).
+  const tipoDeDebug = tipoDeComandoDeDebug(parsed);
+  if (tipoDeDebug !== null) {
+    void contextoSalas?.debug?.receberComando(socket, tipoDeDebug);
     return;
   }
 

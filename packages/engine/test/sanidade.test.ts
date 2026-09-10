@@ -124,12 +124,15 @@ function concluirPrimeiro(s: EstadoDaPartida, cel: { linha: number; coluna: numb
   s = resolverRecebidas(s, ator);
   return aplicar(s, encerrar(), ator);
 }
+// Peões em (3,3), (0,0), (6,6) e (1,0): diogo foge de (6,0) porque a vaga
+// norte de bruno envolve para lá na grade toroidal (issue #260) — mesmo
+// fixture de monstros.test.ts.
 function rodada2(): EstadoDaPartida {
   let s = iniciado();
   s = concluirPrimeiro(s, { linha: 3, coluna: 3 });
   s = concluirPrimeiro(s, { linha: 0, coluna: 0 });
   s = concluirPrimeiro(s, { linha: 6, coluna: 6 });
-  s = concluirPrimeiro(s, { linha: 6, coluna: 0 });
+  s = concluirPrimeiro(s, { linha: 1, coluna: 0 });
   return s;
 }
 // Força ana a ser ativa, evitando ciclo pelos outros (injeção direta permitida nos testes de domínio)

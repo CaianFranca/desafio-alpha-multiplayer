@@ -162,6 +162,18 @@ export interface EncerrarTurnoComando {
   readonly jogadorId: string;
 }
 
+// Controle do stream de debug (issue #340, "Modo Desenvolvedor"): interceptados
+// na camada `ws.ts` do game-server, ANTES de `aplicarMensagem` — a guarda do
+// contrato (`ehComandoDaPartida`) os recusaria como DADOS_INVALIDOS. Sem
+// payload: o escopo é a Partida da conexão (o `partida-id` do upgrade).
+export interface AtivarDebugDaPartidaComando {
+  readonly type: 'ATIVAR_DEBUG';
+}
+
+export interface DesativarDebugDaPartidaComando {
+  readonly type: 'DESATIVAR_DEBUG';
+}
+
 export type PartidaComandoDoCliente =
   | SelecionarPecaPartidaComando
   | GirarPecaPartidaComando
@@ -175,7 +187,9 @@ export type PartidaComandoDoCliente =
   | PermanecerPartidaComando
   | ConfirmarPosicaoDoPeaoComando
   | AtravessarOEscuroPartidaComando
-  | EncerrarTurnoComando;
+  | EncerrarTurnoComando
+  | AtivarDebugDaPartidaComando
+  | DesativarDebugDaPartidaComando;
 
 // --- Eventos servidor → cliente (5 + 2 da issue #138) ---
 

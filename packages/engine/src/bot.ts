@@ -147,11 +147,14 @@ export function acoesValidasDaSubfase(
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
   // referencia o Peão do próprio jogador, não a Seleção.
   //
-  // Sequencialidade por encaixe (#311/#349): a escolha de vaga é sequencial
-  // POR encaixe — o guard canônico da engine (peoes.ts) rejeita a escolha de
-  // vaga de uma pendência enquanto outra Recebida tem vaga escolhida e ainda
-  // não encaixada (PENDENCIA_NAO_RESOLVIDA). A FSM espelha o guard: com
-  // Recebida fixada, enumera APENAS as ações sobre ela.
+  // Sequencialidade por encaixe — anti-softlock (#311, #260, #349; grade
+  // toroidal: ADR-0012): a escolha de vaga é sequencial POR encaixe — o
+  // guard canônico da engine (peoes.ts) rejeita a escolha de vaga de uma
+  // pendência enquanto outra Recebida tem vaga escolhida e ainda não
+  // encaixada (PENDENCIA_NAO_RESOLVIDA). A FSM espelha o guard: com Recebida
+  // fixada, enumera APENAS as ações sobre ela. Sem isso, turnos com 2+
+  // pendências — a regra na grade toroidal (#260) — sorteavam a rejeição
+  // certa.
   //
   // Baixa Iluminação (#341): a engine rejeita vaga em célula iluminada
   // (DADOS_INVALIDOS) e a camada Tabuleiro não conhece iluminação — o filtro
