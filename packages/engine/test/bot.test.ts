@@ -612,6 +612,24 @@ test('subfase (b): sem nenhuma vaga conectante, as escuras mortas seguem enumera
   ]);
 });
 
+test('subfase (b): em Baixa com RETA e todas as vagas iluminadas, escolher_vaga não é enumerada (review #350)', () => {
+  // Par do teste da Cruz (:478) com a Reta — a troca do fixture
+  // recebidaBaixa reta→cruz esvaziara o caso "todas as vagas iluminadas".
+  // As QUATRO vagas da Peça controle iluminadas — norte (2,0), leste (3,1),
+  // sul (4,0) e o oeste toroidal (3,6) (issue #260) — deixam a pendência
+  // comum irresolúvel: nenhuma vaga escura restante, o ramo não emite
+  // escolher_vaga — lista vazia (desistência honesta pelo failsafe no
+  // driver). Com o pré-filtro de conexão removido, o Tipo não muda o filtro
+  // de escuras — o caso fica coberto explicitamente mesmo assim.
+  const estado = estadoDaBaixa(recebidaMorta, [
+    { linha: 2, coluna: 0 },
+    { linha: 3, coluna: 1 },
+    { linha: 4, coluna: 0 },
+    { linha: 3, coluna: 6 },
+  ]);
+  assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), []);
+});
+
 test('subfase (b): Recebida fixada em vaga morta enumera girar_peca nos dois sentidos, e o giro abre o encaixe (#349)', () => {
   // O helper já seta o pecaSelecionadaId na fixada — o mesmo efeito da
   // escolha de vaga na engine (peoes.ts) — satisfazendo o guard defensivo
@@ -667,12 +685,53 @@ test('executarTurnoDoBot: a Recebida morta é recuperada por giro e o turno ence
 test('regressão do travamento da semente 7: a rodada dos 4 bots progrediu sem desistir em todos os turnos (#349)', () => {
   // O travamento pré-correção: o bot fixava vaga morta, o ramo da fixada
   // deixava de agir e 400/400 turnos morriam em desistência (fail do teste
-  // acima, padrão :694). Com a FSM exata, nenhum turno trava.
+  // acima, padrão :694) — nem a rodada 1 avançava. Duas janelas assertadas:
+  //
+  // Janela da regressão (rodada 1), terminação ESTRITA — medida em 300
+  // execuções: 4 turnos por partida, 1200/1200 encerrados em 'encerramento',
+  // zero desistências, nenhum término de partida na rodada 1. O assert de
+  // motivo é o próprio endurecimento: o travamento pré-correção encerrava o
+  // turno do bot em 'desistencia' em vez de 'encerramento' (:662/:694).
   let estado = partidaIniciadaCom(JOGADORES, 7);
   const rodadaInicial = estado.rodada;
+  while (
+    estado.resultado === null &&
+    estado.jogadores.some((jogador) => jogador.primeiroTurnoPendente)
+  ) {
+    const ator = estado.jogadorAtivoId;
+    const turno = executarTurnoDoBot(estado, ator);
+    assert.equal(
+      turno.motivo,
+      'encerramento',
+      'turno do Primeiro Turno não encerrou — desistência é a regressão da #349',
+    );
+    estado = turno.estado;
+  }
+  assert.equal(estado.resultado, null, 'a rodada 1 não termina a partida');
+  assert.ok(
+    estado.jogadores.every((jogador) => !jogador.primeiroTurnoPendente),
+    'os 4 Primeiros Turnos encerraram',
+  );
+  assert.equal(
+    estado.rodada,
+    rodadaInicial + 1,
+    'a rodada avançou sem nenhum turno em desistência',
+  );
+
+  // Continuação (rodada 2+): a partida pode estender-se além do teto — o
+  // wander aleatório não tem objetivo e a terminação da PARTIDA não é
+  // propriedade da FSM (medido: 26/50 execuções sem término em 4000 turnos,
+  // com zero desistências). O que a correção garante é o avanço dos turnos:
+  // (i) nenhuma desistência é rejeição de ação enumerada (DADOS_INVALIDOS) e
+  // (ii) desistências não travam o jogo — sequências seguidas sem progresso
+  // têm teto medido de 2 (300 execuções; teto de 10 = margem 5×), e a única
+  // exceção observada é o livelock da Baixa toda iluminada (limitação
+  // pré-existente da engine, teste :478 — desistências seguidas ≥ 292 SEMPRE
+  // com o ator em Baixa Iluminação).
   let tentativas = 0;
-  let desistencias = 0;
   let foraDaVez = 0;
+  let desistenciasSeguidas = 0;
+  let atorEmBaixa = false;
   while (estado.resultado === null && tentativas < 400) {
     tentativas++;
     const ator = estado.jogadorAtivoId;
@@ -681,27 +740,38 @@ test('regressão do travamento da semente 7: a rodada dos 4 bots progrediu sem d
       foraDaVez++;
       break;
     }
-    estado = turno.estado;
     if (turno.motivo === 'desistencia') {
+      // Guarda da #341/#349: a FSM não enumera ação rejeitada pela engine.
       assert.notEqual(
         turno.codigoDaDesistencia,
         'DADOS_INVALIDOS',
         'desistência DADOS_INVALIDOS: ação enumerada rejeitada pela engine',
       );
-      desistencias++;
+      desistenciasSeguidas++;
+      const jogador = estado.jogadores.find(
+        (item) => item.jogadorId === ator,
+      );
+      atorEmBaixa = jogador?.emBaixaIluminacao ?? false;
       continue;
     }
+    // Teto de travamento (medido, 300 execuções): sem progresso, o failsafe
+    // desiste no máximo 2 vezes seguidas (o re-sorteio do turno recupera) —
+    // sequência maior só ocorre com o ator em Baixa Iluminação, o livelock
+    // documentado em :478. Fora dela, travamento é regressão.
+    if (desistenciasSeguidas > 10 && !atorEmBaixa) {
+      assert.fail(
+        `travamento fora da Baixa: ${desistenciasSeguidas} desistências seguidas sem progresso`,
+      );
+    }
+    desistenciasSeguidas = 0;
+    estado = turno.estado;
+  }
+  if (desistenciasSeguidas > 10 && !atorEmBaixa) {
+    assert.fail(
+      `travamento fora da Baixa: ${desistenciasSeguidas} desistências seguidas sem progresso`,
+    );
   }
   assert.equal(foraDaVez, 0, 'bot nunca perde a vez agindo nela');
-  assert.ok(
-    estado.resultado !== null || tentativas === 400,
-    'deveria terminar ou atingir o limite de tentativas',
-  );
-  assert.ok(
-    desistencias < tentativas,
-    `jogo travado na semente 7: ${desistencias}/${tentativas} turnos em desistência`,
-  );
-  assert.ok(estado.rodada >= rodadaInicial);
 });
 
 test('prova dinâmica da Travessia: ações de bot jamais criam pendência travada (review #350)', () => {
@@ -713,6 +783,20 @@ test('prova dinâmica da Travessia: ações de bot jamais criam pendência trava
   // jogos de bots, nenhum estado alcançado contém pendência travada (vaga
   // nula com célula-alvo fixada) e nenhuma ação enumerada é
   // atravessar_o_escuro.
+  //
+  // A mesma varredura prova, por invariante de estados alcançados, os ramos
+  // `[]` do review 2 #350 que não têm teste artesanal próprio:
+  // (i) com Recebimento pendente, o Peão do ator está sobre uma Peça
+  //     posicionada — o 4º ramo (pecaSobOPeao === undefined) não ocorre: o
+  //     Recebimento só nasce com o Peão sobre Peça (Confirmação/Primeiro
+  //     Turno), mover/permanecer são rejeitados com recebidas pendentes
+  //     (peoes.ts) e o encerrar com pendências também — as recebidas nunca
+  //     sobrevivem ao fim do turno;
+  // (ii) com Recebida fixada, o pecaSelecionadaId é o dela — o 1º ramo (guard
+  //     defensivo com seleção divergente) não ocorre: a escolha da vaga fixa
+  //     a seleção na Recebida (peoes.ts) e a desseleção é rejeitada com
+  //     recebidas pendentes; a divergência só existe em estado artesanal
+  //     (teste :655).
   for (let semente = 1; semente <= 25; semente++) {
     let estado = partidaIniciadaCom(JOGADORES, semente);
     let tentativas = 0;
@@ -727,6 +811,33 @@ test('prova dinâmica da Travessia: ações de bot jamais criam pendência trava
       );
       for (const acao of acoesValidasDaSubfase(estado, ator)) {
         assert.notEqual(acao.tipo, 'atravessar_o_escuro');
+      }
+      const jogador = estado.jogadores.find(
+        (item) => item.jogadorId === ator,
+      );
+      const fixada = estado.tabuleiro.recebidas.find(
+        (item) => item.vaga !== null,
+      );
+      if (estado.tabuleiro.recebidas.length > 0) {
+        assert.ok(
+          jogador !== undefined &&
+            estado.tabuleiro.peoes.some(
+              (peao) =>
+                peao.peaoId === jogador.peaoId &&
+                peao.pecaId !== null &&
+                estado.tabuleiro.posicionadas.some(
+                  (peca) => peca.pecaId === peao.pecaId,
+                ),
+            ),
+          `Peão do ator fora de Peça posicionada com Recebimento pendente (semente ${semente})`,
+        );
+      }
+      if (fixada) {
+        assert.equal(
+          estado.tabuleiro.pecaSelecionadaId,
+          fixada.pecaId,
+          `pecaSelecionadaId diverge da Recebida fixada (semente ${semente})`,
+        );
       }
       const turno = executarTurnoDoBot(estado, ator);
       if (turno.motivo === 'fora_da_vez') break;
