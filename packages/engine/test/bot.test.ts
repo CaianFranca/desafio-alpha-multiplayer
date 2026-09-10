@@ -213,7 +213,8 @@ function comJogador(
 // Pendência sintética do Recebimento (vaga e célula-alvo nulas até a escolha).
 // Tipo Cruz: as 4 bordas abertas conectam em qualquer vaga (conectaNaVaga
 // sempre true), de modo que os testes da #341 exercem apenas o filtro de
-// Baixa — o pré-filtro de conexão da #349 fica coberto pelos testes próprios.
+// Baixa — a exatidão literal das vagas (review #350) fica coberta pelos
+// testes próprios da Reta.
 const recebidaBaixa: PecaRecebida = {
   recebidaId: 'rec-baixa',
   pecaId: 'recebida-sintetica',
@@ -520,8 +521,8 @@ const recebidaMortaFixada: PecaRecebida = {
 // vizinhas norte (2,0), leste (3,1), sul (4,0) e oeste toroidal (3,6)
 // (issue #260) estão vazias (o mesmo cenário da #341). As Recebidas são
 // informadas como estado direto; quando há Recebida com vaga fixada, o helper
-// seta a Seleção para ela — o mesmo efeito do escolher_vaga na engine
-// (peoes.ts).
+// seta o pecaSelecionadaId para ela — o mesmo efeito do escolher_vaga na
+// engine (peoes.ts), requisito do guard defensivo do giro (review #350).
 function estadoDoRecebimento(
   recebidas: readonly PecaRecebida[],
 ): EstadoDaPartida {
@@ -576,19 +577,45 @@ test('subfase (b): com Recebida fixada conectada, a enumeração é exatamente o
   aplicar(estado, acoes[0] as ComandoDePartida, 'ana');
 });
 
-test('subfase (b): Reta não-conectante enumera escolher_vaga só nas vagas conectantes (#349)', () => {
+test('subfase (b): exatidão literal — vaga conectante e vaga morta são AMBAS enumeradas (review #350)', () => {
   // Vagas da Peça controle: norte (2,0), leste (3,1), sul (4,0) e oeste
   // toroidal (3,6) (issue #260) — na orientação 90° da Reta (abertas
-  // leste+oeste), leste e oeste conectam; norte e sul são vagas mortas e
-  // ficam FORA da enumeração.
+  // leste+oeste), leste e oeste conectam; norte e sul são vagas mortas. A
+  // engine aceita escolher vaga morta (a conexão só valida no encaixe,
+  // MOVIMENTO_NAO_CONECTADO em peoes.ts), então TODAS as vagas escuras são
+  // enumeradas — filtrar conectantes seria enumerar subconjunto (viola a
+  // exatidão); o giro da fixada é o resgate da vaga morta (#349).
   const estado = estadoDoRecebimento([recebidaMorta]);
-  assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  assert.deepEqual(acoes, [
+    escolherVaga('rec-morta', 'norte'),
     escolherVaga('rec-morta', 'leste'),
+    escolherVaga('rec-morta', 'sul'),
     escolherVaga('rec-morta', 'oeste'),
+  ]);
+  // E a vaga morta enumerada é de fato aceita pela engine (exatidão literal).
+  aplicar(estado, acoes[0] as ComandoDePartida, 'ana');
+});
+
+test('subfase (b): sem nenhuma vaga conectante, as escuras mortas seguem enumeradas (review #350)', () => {
+  // A mesma Reta em Baixa com as DUAS conectantes (leste (3,1) e oeste
+  // toroidal (3,6)) iluminadas: restam só as vagas mortas norte e sul — e
+  // ambas são enumeradas. Este era o "fallback" do pré-filtro removido:
+  // agora é o comportamento incondicional da enumeração.
+  const estado = estadoDaBaixa(recebidaMorta, [
+    { linha: 3, coluna: 1 },
+    { linha: 3, coluna: 6 },
+  ]);
+  assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
+    escolherVaga('rec-morta', 'norte'),
+    escolherVaga('rec-morta', 'sul'),
   ]);
 });
 
 test('subfase (b): Recebida fixada em vaga morta enumera girar_peca nos dois sentidos, e o giro abre o encaixe (#349)', () => {
+  // O helper já seta o pecaSelecionadaId na fixada — o mesmo efeito da
+  // escolha de vaga na engine (peoes.ts) — satisfazendo o guard defensivo
+  // do giro (review #350).
   const estado = estadoDoRecebimento([recebidaMortaFixada]);
   const acoes = acoesValidasDaSubfase(estado, 'ana');
   assert.deepEqual(acoes, [
@@ -605,6 +632,21 @@ test('subfase (b): Recebida fixada em vaga morta enumera girar_peca nos dois sen
       celula: { linha: 2, coluna: 0 },
     },
   ]);
+});
+
+test('subfase (b): fixada em vaga morta com seleção divergente não enumera giro (guard defensivo, review #350)', () => {
+  // Estado artesanal: o pecaSelecionadaId diverge da Recebida fixada —
+  // inalcançável por comandos válidos (a escolha da vaga fixa o
+  // pecaSelecionadaId e a desseleção é rejeitada com Recebidas pendentes,
+  // peoes.ts), mas o girar da engine rejeitaria com PECA_NAO_SELECIONADA
+  // (tabuleiro.ts). A FSM não enumera rejeição certa: [] honesto — no
+  // driver, desistência pelo failsafe, sem girar em falso.
+  const base = estadoDoRecebimento([recebidaMortaFixada]);
+  const divergente: EstadoDaPartida = {
+    ...base,
+    tabuleiro: { ...base.tabuleiro, pecaSelecionadaId: null },
+  };
+  assert.deepEqual(acoesValidasDaSubfase(divergente, 'ana'), []);
 });
 
 test('executarTurnoDoBot: a Recebida morta é recuperada por giro e o turno encerra (#349)', () => {
@@ -660,6 +702,38 @@ test('regressão do travamento da semente 7: a rodada dos 4 bots progrediu sem d
     `jogo travado na semente 7: ${desistencias}/${tentativas} turnos em desistência`,
   );
   assert.ok(estado.rodada >= rodadaInicial);
+});
+
+test('prova dinâmica da Travessia: ações de bot jamais criam pendência travada (review #350)', () => {
+  // Par dinâmico da prova do ramo travada em bot.ts: a pendência com
+  // celulaAlvo fixado nasce EXCLUSIVAMENTE em atravessarOEscuroDaPartida
+  // (partida.ts) — gerarRecebidas nasce com celulaAlvo nulo (peoes.ts) e o
+  // escolher de vaga fixa vaga e célula-alvo JUNTAS (peoes.ts) — e esta FSM
+  // nunca emite atravessar_o_escuro. Aqui, a prova dinâmica: percorrendo
+  // jogos de bots, nenhum estado alcançado contém pendência travada (vaga
+  // nula com célula-alvo fixada) e nenhuma ação enumerada é
+  // atravessar_o_escuro.
+  for (let semente = 1; semente <= 25; semente++) {
+    let estado = partidaIniciadaCom(JOGADORES, semente);
+    let tentativas = 0;
+    while (estado.resultado === null && tentativas < 400) {
+      tentativas++;
+      const ator = estado.jogadorAtivoId;
+      assert.ok(
+        !estado.tabuleiro.recebidas.some(
+          (recebida) => recebida.vaga === null && recebida.celulaAlvo !== null,
+        ),
+        `pendência travada alcançada por ações de bot (semente ${semente})`,
+      );
+      for (const acao of acoesValidasDaSubfase(estado, ator)) {
+        assert.notEqual(acao.tipo, 'atravessar_o_escuro');
+      }
+      const turno = executarTurnoDoBot(estado, ator);
+      if (turno.motivo === 'fora_da_vez') break;
+      if (turno.motivo === 'desistencia') continue;
+      estado = turno.estado;
+    }
+  }
 });
 
 test('turno normal: início só seleciona o Peão; depois move ou permanece', () => {
