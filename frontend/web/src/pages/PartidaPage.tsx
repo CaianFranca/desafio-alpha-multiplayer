@@ -47,7 +47,7 @@ import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabule
 import { mapearFinalizarManipulacao, mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
-import { quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
+import { giroAlteraConexao, quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
 import type {
@@ -532,9 +532,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const girar = useCallback(
     (sentido: 'horario' | 'anti_horario') => {
       if (pecaAlvoDeGiro === null) return
+      // Peça de 4 caminhos (cruz): giro redundante, sem setas no overlay e
+      // sem R/E (review PR #338). O tipo vem da posicionada em manipulação
+      // ou da pendência em foco (pré-encaixe).
+      const emManipulacao = estadoInteracao?.pecaEmManipulacaoId ?? null
+      const tipoAlvo =
+        emManipulacao !== null && pecaAlvoDeGiro === emManipulacao
+          ? (estadoExibicao?.posicionadas.find((p) => p.pecaId === pecaAlvoDeGiro)?.tipo ?? null)
+          : (modelo.recebidasPendentes.find((r) => r.pecaId === pecaAlvoDeGiro)?.tipoDaPeca ?? null)
+      if (tipoAlvo !== null && !giroAlteraConexao(tipoAlvo)) return
       enviarComJogador(mapearGiro(pecaAlvoDeGiro, sentido))
     },
-    [enviarComJogador, pecaAlvoDeGiro],
+    [enviarComJogador, pecaAlvoDeGiro, estadoInteracao, estadoExibicao, modelo.recebidasPendentes],
   )
 
   // ── Acessibilidade do overlay 3D (review #338): o botão "OK" é exclusivo

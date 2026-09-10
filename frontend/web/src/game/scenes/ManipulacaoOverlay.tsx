@@ -22,7 +22,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 import type { EstadoExibicaoTabuleiro } from '../tabuleiro/contrato'
-import { celulaParaMundo } from '../tabuleiro/contrato'
+import { celulaParaMundo, giroAlteraConexao } from '../tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
 import {
   mapearFinalizarManipulacao,
@@ -167,10 +167,16 @@ export function ManipulacaoOverlay({
   const pos = celulaParaMundo(peca.celula)
   const comandar = (comando: TabuleiroComandoDoCliente) => onComando?.(comando)
   const cursor = handlersDeCursor('pointer')
+  // Peça de 4 caminhos (cruz): as 4 bordas abrem em qualquer orientação —
+  // girar é redundante, então as setas não montam (review PR #338). O OK
+  // permanece: a janela de Manipulação continua exigindo finalização.
+  const exibirGiro = giroAlteraConexao(peca.tipo)
 
   return (
     <group position={[pos[0], pos[1] + ALTURA_OVERLAY, pos[2]]}>
       {/* Seta da Direita (Leste) */}
+      {exibirGiro ? (
+      <>
       <mesh
         position={[RAIO_BOTOES, 0, -0.05]}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -217,6 +223,8 @@ export function ManipulacaoOverlay({
           toneMapped={false}
         />
       </mesh>
+      </>
+      ) : null}
 
       {/* OK: Botão plano visto de cima, posicionado ao sul da peça. */}
       <mesh
