@@ -19,6 +19,9 @@ interface PartidaOverlaysProps {
 
 const baseClasses = 'absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/80'
 
+// O overlay de resultado fica ACIMA do HUD (z-40 > hud z-30) para a leitura
+// do desfecho; os demais overlays seguem abaixo da moldura/HUD (issue #226).
+
 // Textos sóbrios por motivo de derrota, no estilo do overlay; os nomes do
 // domínio são os do engine (DesfechoDaPartida.motivo). Payload sem motivo
 // (binário anterior) cai no texto genérico — defensivos, sem inventar causa.
@@ -49,7 +52,7 @@ export function PartidaOverlays({
         data-resultado={resultado ?? ''}
         data-motivo={!vitoria && motivo ? motivo : ''}
         role="status"
-        className={baseClasses}
+        className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/80"
       >
         <div className="flex flex-col items-center gap-4">
           <p className="text-white text-2xl font-bold">{vitoria ? 'Vitória!' : 'Derrota'}</p>

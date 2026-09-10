@@ -131,18 +131,43 @@ describe('homepage structure', () => {
     renderWithRouter()
 
     expect(screen.getByRole('heading', { name: /cooperação/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /exploração/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /minigames/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /monstros/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /sanidade/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /o tabuleiro vivo/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /iluminação & visibilidade/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /salas estratégicas/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /ameaças sobrenaturais/i })).toBeInTheDocument()
   })
 
-  it('renders objective items with numbered list', () => {
+  it('renders objective items as unordered HUD achievement nodes', () => {
     renderWithRouter()
 
-    expect(screen.getByRole('heading', { name: /restaurar a energia/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /obter o acesso/i })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /sobreviver à fuga/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /energizar o sanatório/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /recuperar o cartão de acesso/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /alcançar o portão de saída/i })).toBeInTheDocument()
+
+    // A timeline não sugere ordem entre as conquistas: lista não ordenada.
+    const timeline = document.querySelector('.objectives-timeline')
+    expect(timeline?.tagName).toBe('UL')
+
+    // Um círculo apagado por objetivo, acessível pelo nome da conquista.
+    expect(screen.getByRole('img', { name: 'Geradores' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Cartão de Acesso' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Portão de Saída' })).toBeInTheDocument()
+
+    // Nós numerados removidos.
+    expect(screen.queryByText('01')).toBeNull()
+    expect(screen.queryByText('02')).toBeNull()
+    expect(screen.queryByText('03')).toBeNull()
+  })
+
+  it('renders the history with the past paragraph before the current one', () => {
+    renderWithRouter()
+
+    const historySection = document.getElementById('historia')!
+    const paragraphs = historySection.querySelectorAll('p')
+    expect(paragraphs).toHaveLength(2)
+    expect(paragraphs[0].textContent).toMatch(/já foi motivo de orgulho/)
+    expect(paragraphs[0].textContent).toMatch(/a sombra deste lugar devora/)
+    expect(paragraphs[1].textContent).toMatch(/Você acorda no chão frio/)
   })
 
   it('renders footer with brand and copyright', () => {
@@ -216,7 +241,7 @@ describe('authentication states', () => {
 
     const header = screen.getByRole('banner')
     expect(within(header).queryByText(apelidoMock)).not.toBeInTheDocument()
-    expect(within(header).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
+    expect(within(header).queryByRole('link', { name: /criar \/ entrar na sala/i })).not.toBeInTheDocument()
 
     const heroSection = document.getElementById('hero')!
     expect(within(heroSection).getByRole('link', { name: /criar conta/i })).toBeInTheDocument()
@@ -228,10 +253,10 @@ describe('authentication states', () => {
 
     const header = screen.getByRole('banner')
     expect(within(header).getByText(apelidoMock)).toBeInTheDocument()
-    expect(within(header).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(header).getByRole('link', { name: /criar \/ entrar na sala/i })).toHaveAttribute('href', '/salas/criar')
 
     const heroSection = document.getElementById('hero')!
-    expect(within(heroSection).getByRole('link', { name: /criar\/entrar sala/i })).toBeInTheDocument()
+    expect(within(heroSection).getByRole('link', { name: /criar \/ entrar na sala/i })).toBeInTheDocument()
     expect(within(heroSection).queryByRole('link', { name: /criar conta/i })).not.toBeInTheDocument()
   })
 
@@ -250,7 +275,7 @@ describe('authentication states', () => {
     // Só o apelido trunca com reticências; navegação e controles permanecem.
     expect(within(header).getByText(apelidoLongo)).toHaveClass('truncate')
     expect(within(header).getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
-    expect(within(header).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(header).getByRole('link', { name: /criar \/ entrar na sala/i })).toHaveAttribute('href', '/salas/criar')
     expect(within(header).getByRole('button', { name: /^sair$/i })).toBeInTheDocument()
   })
 
@@ -259,12 +284,12 @@ describe('authentication states', () => {
 
     const finalCtaRegion = screen.getByRole('region', { name: /pronto para enfrentar o sanatório/i })
     expect(within(finalCtaRegion).getByRole('link', { name: /criar conta/i })).toBeInTheDocument()
-    expect(within(finalCtaRegion).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
+    expect(within(finalCtaRegion).queryByRole('link', { name: /criar \/ entrar na sala/i })).not.toBeInTheDocument()
     unmount()
 
     renderWithRouter(['/'], autenticado)
     const authenticatedFinalCta = screen.getByRole('region', { name: /pronto para enfrentar o sanatório/i })
-    expect(within(authenticatedFinalCta).getByRole('link', { name: /criar\/entrar sala/i })).toBeInTheDocument()
+    expect(within(authenticatedFinalCta).getByRole('link', { name: /criar \/ entrar na sala/i })).toBeInTheDocument()
     expect(within(authenticatedFinalCta).queryByRole('link', { name: /criar conta/i })).not.toBeInTheDocument()
   })
 
@@ -301,7 +326,7 @@ describe('authentication states', () => {
     expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
     const headerHome = screen.getByRole('banner')
     expect(within(headerHome).getByText(apelidoMock)).toBeInTheDocument()
-    expect(within(headerHome).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(headerHome).getByRole('link', { name: /criar \/ entrar na sala/i })).toHaveAttribute('href', '/salas/criar')
     expect(within(headerHome).queryByRole('button', { name: /voltar para o início/i })).not.toBeInTheDocument()
     // Nenhum SAIR_DA_SALA foi enviado ao voltar (apenas navegação).
     const enviouSair = ws?.sentMessages.some((m) => {
@@ -320,11 +345,11 @@ describe('authentication states', () => {
     expect(within(screen.getByRole('banner')).queryByText(apelidoMock)).not.toBeInTheDocument()
   })
 
-  it('authenticated header Criar/Entrar Sala action navigates to the create room page', async () => {
+  it('authenticated header Criar / Entrar na Sala action navigates to the create room page', async () => {
     const user = userEvent.setup()
     renderWithRouter(['/'], autenticado)
 
-    await user.click(within(screen.getByRole('banner')).getByRole('link', { name: /criar\/entrar sala/i }))
+    await user.click(within(screen.getByRole('banner')).getByRole('link', { name: /criar \/ entrar na sala/i }))
 
     expect(screen.getByRole('heading', { name: /criar sala/i })).toBeInTheDocument()
   })
@@ -384,14 +409,14 @@ describe('header variations (issue #211)', () => {
     expect(within(header).queryByRole('button', { name: /^sair$/i })).not.toBeInTheDocument()
   })
 
-  it('variação 2 — Jogador na Home sem sala: âncoras + Apelido + Criar/Entrar Sala + Sair com ícone', () => {
+  it('variação 2 — Jogador na Home sem sala: âncoras + Apelido + Criar / Entrar na Sala + Sair com ícone', () => {
     MockWebSocket.clean()
     renderWithRouter(['/'], autenticado)
 
     const header = screen.getByRole('banner')
     expect(within(header).getByRole('navigation', { name: /navegação principal/i })).toBeInTheDocument()
     expect(within(header).getByText(apelidoMock)).toBeInTheDocument()
-    expect(within(header).getByRole('link', { name: /criar\/entrar sala/i })).toHaveAttribute('href', '/salas/criar')
+    expect(within(header).getByRole('link', { name: /criar \/ entrar na sala/i })).toHaveAttribute('href', '/salas/criar')
     expect(within(header).queryByRole('button', { name: /voltar para o início/i })).not.toBeInTheDocument()
     iconePortaDoSair(header)
   })
@@ -406,7 +431,7 @@ describe('header variations (issue #211)', () => {
     expect(within(header).getByText(apelidoMock)).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: /voltar para o início/i })).toBeInTheDocument()
     iconePortaDoSair(header)
-    expect(within(header).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
+    expect(within(header).queryByRole('link', { name: /criar \/ entrar na sala/i })).not.toBeInTheDocument()
     expect(within(header).queryByRole('link', { name: /retornar para sala/i })).not.toBeInTheDocument()
 
     const ws = MockWebSocket.last()
@@ -462,7 +487,7 @@ describe('header variations (issue #211)', () => {
     const header = screen.getByRole('banner')
     expect(within(header).queryByRole('navigation', { name: /navegação principal/i })).not.toBeInTheDocument()
     expect(within(header).getByRole('button', { name: /voltar para o início/i })).toBeInTheDocument()
-    expect(within(header).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
+    expect(within(header).queryByRole('link', { name: /criar \/ entrar na sala/i })).not.toBeInTheDocument()
     expect(within(header).queryByRole('link', { name: /retornar para sala/i })).not.toBeInTheDocument()
 
     // Após entrar na sala, o header continua com Voltar (não vira Retornar).
@@ -473,7 +498,7 @@ describe('header variations (issue #211)', () => {
     const headerEmSala = screen.getByRole('banner')
     expect(within(headerEmSala).getByRole('button', { name: /voltar para o início/i })).toBeInTheDocument()
     expect(within(headerEmSala).queryByRole('link', { name: /retornar para sala/i })).not.toBeInTheDocument()
-    expect(within(headerEmSala).queryByRole('link', { name: /criar\/entrar sala/i })).not.toBeInTheDocument()
+    expect(within(headerEmSala).queryByRole('link', { name: /criar \/ entrar na sala/i })).not.toBeInTheDocument()
   })
 })
 

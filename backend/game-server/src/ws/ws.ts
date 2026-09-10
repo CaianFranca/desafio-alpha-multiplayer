@@ -40,6 +40,7 @@ import type {
 } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
 import { marcarDesconexao, obterPartida, transicionarSeCompletoOuAtualizarPresenca } from '../partidas/partidas.ts';
+import { verificarNaoInicioAposDesconexao } from '../partidas/nao-inicio.ts';
 import { obterEstadoDaPartida } from '../partidas/estado.ts';
 import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
@@ -287,9 +288,9 @@ export function criarWebSocketServer(
           } satisfies ServerMessage));
 
           // Admissão concluída após upgrade: transição atômica dentro do
-          // callback garante que a partida só inicie com 4 sockets vivos
-          // (ST-14). Ordem: ADMISSAO_ACEITA (já enviada) → PARTIDA_INICIADA
-          // broadcast (se 4ª admissão) → ESTADO_DA_PARTIDA unicast →
+          // callback garante que a partida só inicie com N sockets vivos
+          // (ST-14, N=2..4). Ordem: ADMISSAO_ACEITA (já enviada) → PARTIDA_INICIADA
+          // broadcast (se N-ésima admissão) → ESTADO_DA_PARTIDA unicast →
           // anunciarTurnoAtual (TURNO_INICIADO). Snapshot e turno são unicast
           // ao socket admitido; PARTIDA_INICIADA é broadcast a todos da partida
           // e garantido mesmo se o snapshot falhar.
@@ -409,9 +410,9 @@ export function criarWebSocketServer(
             if (!eraVigente) {
               return;
             }
-            void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
-              console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
-            );
+            void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId)
+              .then(() => verificarNaoInicioAposDesconexao(contexto.redis, partidaId))
+              .catch((err) => console.error('[ws] falha ao marcar desconexão:', (err as Error).message));
           });
         })().catch((error) => {
           console.error('[ws] falha na transição pós-upgrade:', (error as Error).message);

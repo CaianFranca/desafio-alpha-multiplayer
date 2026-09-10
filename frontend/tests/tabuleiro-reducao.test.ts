@@ -17,6 +17,7 @@ import type {
   PecaPosicionadaNoSnapshot,
   TabuleiroEventoDoServidor,
 } from '@flicker/shared'
+import { jogador } from './helpers/rosterN'
 
 // Pendência sorteada (#138) compartilhada nos cenários do ciclo.
 function pendenciaSorteada(
@@ -458,7 +459,7 @@ describe('redução do ciclo do peão — espelho do engine (issue #91, forma #1
     expect(estado.peaoSelecionadoId).toBe('peao-branco')
   })
 
-  it('PEAO_MOVIDO atualiza a posição e limpa a seleção (sem seleção remanescente)', () => {
+  it('PEAO_MOVIDO atualiza a posição e mantém a seleção do peão movido', () => {
     let estado = criarEstadoInicialDoCliente()
     estado = reduzirEvento(estado, { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
     estado = reduzirEvento(estado, {
@@ -470,7 +471,7 @@ describe('redução do ciclo do peão — espelho do engine (issue #91, forma #1
     })
     const peao = estado.peoes.find((p) => p.peaoId === 'peao-branco')
     expect(peao?.celula).toEqual({ linha: 2, coluna: 3 })
-    expect(estado.peaoSelecionadoId).toBeNull()
+    expect(estado.peaoSelecionadoId).toBe('peao-branco')
   })
 
   it('PEAO_PERMANECEU limpa a seleção sem alterar a posição', () => {
@@ -854,6 +855,12 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
 
   it('aplicarSnapshot reconstrói as iniciais da mesa a partir do snapshot (issue #143)', () => {
     const snapshot = snapshotBase({
+      // Roster N=2 (#284): a foto pressupõe partida de 2 — sem roster o
+      // snapshot projetaria mesa vazia (sem fantasmas).
+      jogadores: [
+        jogador('j1', 'A', 'branco', 1),
+        jogador('j2', 'B', 'vermelho', 2),
+      ],
       tabuleiro: {
         posicionadas: [
           { pecaId: 'inicial-1', tipo: 'inicial', orientacao: 0, celula: { linha: 3, coluna: 3 } },
@@ -1374,6 +1381,12 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
         ],
         pecaSelecionadaId: null,
         peaoSelecionadoId: null,
+      }, {
+        // Roster N=2 (#284): a foto pressupõe partida de 2.
+        jogadores: [
+          jogador('j1', 'A', 'branco', 1),
+          jogador('j2', 'B', 'vermelho', 2),
+        ],
       }),
     )
     expect(estado.iniciais).toEqual([
@@ -1392,6 +1405,12 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
         iniciais: [{ pecaId: 'inicial-2', tipo: 'inicial', orientacao: 0 }],
         pecaSelecionadaId: null,
         peaoSelecionadoId: null,
+      }, {
+        // Roster N=2 (#284): a foto pressupõe partida de 2.
+        jogadores: [
+          jogador('j1', 'A', 'branco', 1),
+          jogador('j2', 'B', 'vermelho', 2),
+        ],
       }),
     )
     expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-2'])
@@ -1458,8 +1477,10 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
       posicionadas: estado.posicionadas,
       recebidasPendentes: estado.recebidasPendentes,
       peaoSelecionadoId: estado.peaoSelecionadoId,
+      peaoDoTurnoId: null,
       pecaSelecionadaId: estado.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: estado.posicaoConfirmadaNoTurno,
+      movimentouNoTurno: estado.movimentouNoTurno,
     }
     const estadoTabuleiro = {
       iniciais: estado.iniciais,
@@ -1491,8 +1512,10 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
       posicionadas: destravado.posicionadas,
       recebidasPendentes: destravado.recebidasPendentes,
       peaoSelecionadoId: destravado.peaoSelecionadoId,
+      peaoDoTurnoId: null,
       pecaSelecionadaId: destravado.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: destravado.posicaoConfirmadaNoTurno,
+      movimentouNoTurno: destravado.movimentouNoTurno,
     })).toBe(false)
     expect(
       mapearCliqueNaPecaDaMesa(
@@ -1501,8 +1524,10 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
           posicionadas: destravado.posicionadas,
           recebidasPendentes: destravado.recebidasPendentes,
           peaoSelecionadoId: destravado.peaoSelecionadoId,
+          peaoDoTurnoId: null,
           pecaSelecionadaId: destravado.pecaSelecionadaId,
           posicaoConfirmadaNoTurno: destravado.posicaoConfirmadaNoTurno,
+          movimentouNoTurno: destravado.movimentouNoTurno,
         },
         {
           iniciais: destravado.iniciais,

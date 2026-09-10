@@ -223,6 +223,17 @@ function enviar(ws: WebSocket, mensagem: unknown): void {
   ws.send(JSON.stringify(mensagem));
 }
 
+// Giros horários necessários para a Recebida encaixar conectada (issue #311):
+// a borda voltada à Peça sob o Peão (o oposto da vaga) precisa estar aberta.
+// Em orientação 0, reta nas vagas leste/oeste e T na vaga norte fecham essa
+// borda (1 giro horário abre); os demais casos e Especiais/Monstros (4
+// bordas) conectam direto (r=0).
+function girosParaConectar(tipoDaPeca: string, borda: string): number {
+  if (tipoDaPeca === 'reta' && (borda === 'leste' || borda === 'oeste')) return 1;
+  if (tipoDaPeca === 'T' && borda === 'norte') return 1;
+  return 0;
+}
+
 /**
  * Aguarda o TURNO_INICIADO de um Jogador/rodada específicos, descartando os
  * demais frames do tipo — em especial o TURNO_INICIADO que a admissão anuncia
@@ -303,6 +314,15 @@ async function resolverRecebidasComCelulaAlvo(
     assert.equal(escolhido.borda, borda);
     const celulaAlvo = escolhido.celulaAlvo as { linha: number; coluna: number };
     assert.ok(celulaAlvo && typeof celulaAlvo.linha === 'number' && typeof celulaAlvo.coluna === 'number');
+
+    // Encaixe conectado (issue #311): gira a Recebida (horário) até a borda
+    // voltada à Peça sob o Peão abrir; r=0 não emite GIRAR_PECA.
+    const giros = girosParaConectar(r.tipoDaPeca as string, borda);
+    for (let giro = 0; giro < giros; giro++) {
+      enviar(ws, { type: 'GIRAR_PECA', jogadorId, pecaId, sentido: 'horario' });
+      await esperarEvento(ws, 'PECA_GIRADA');
+    }
+
     enviar(ws, { type: 'POSICIONAR_PECA', jogadorId, pecaId, celula: celulaAlvo });
     await esperarEvento(ws, 'PECA_POSICIONADA');
     resolvidas.push({ pecaId, celulaAlvo });

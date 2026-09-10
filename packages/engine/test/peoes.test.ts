@@ -377,13 +377,17 @@ test('vaga inválida, já escolhida ou reescolhida é rejeitada com DADOS_INVALI
     'DADOS_INVALIDOS',
   );
 
-  // Norte escolhido pela primeira pendência deixa de ser vaga: a segunda
-  // pendência não pode escolher a mesma borda (vaga já ocupada por outra
-  // pendência).
+  // Norte escolhido pela primeira pendência: com a vaga ainda em aberto, a
+  // guarda anti-softlock (issue #311) impede a escolha de vaga de QUALQUER
+  // outra pendência — PENDENCIA_NAO_RESOLVIDA, antes da avaliação da borda.
   const comNorte = aplicar(estado, escolherVaga('recebida-reta-1', 'norte'));
   assert.equal(
     codigoDaRejeicao(comNorte, escolherVaga('recebida-t-1', 'norte')),
-    'DADOS_INVALIDOS',
+    'PENDENCIA_NAO_RESOLVIDA',
+  );
+  assert.equal(
+    codigoDaRejeicao(comNorte, escolherVaga('recebida-t-1', 'leste')),
+    'PENDENCIA_NAO_RESOLVIDA',
   );
   // A própria pendência com vaga já escolhida não é reescolhível.
   assert.equal(
@@ -392,7 +396,7 @@ test('vaga inválida, já escolhida ou reescolhida é rejeitada com DADOS_INVALI
   );
 });
 
-test('recebida só posiciona na célula-alvo da vaga escolhida, com orientação livre e sem exigência de conexão', () => {
+test('encaixe de Recebida exige conexão com a Peça sob o Peão', () => {
   let estado = estadoComRecebidasPendentes();
 
   // Encaixe antes da escolha da vaga é rejeitado: a célula-alvo ainda não
@@ -402,9 +406,9 @@ test('recebida só posiciona na célula-alvo da vaga escolhida, com orientação
     'DADOS_INVALIDOS',
   );
 
-  // T escolhida para a vaga norte e mantida na orientação 0 (bordas
-  // norte+leste+oeste): a borda sul, voltada à Peça geradora, está fechada —
-  // sem conexão, e mesmo assim o encaixe na célula-alvo é aceito.
+  // T escolhida para a vaga norte (célula (2,3)) e mantida na orientação 0
+  // (bordas norte+leste+oeste): a borda sul, voltada à Peça sob o Peão em
+  // (3,3), está fechada — o encaixe desconectado é rejeitado (issue #311).
   estado = aplicar(estado, escolherVaga('recebida-t-1', 'norte'));
 
   const foraDoAlvo = aplicarComandoDeTabuleiro(estado, posicionar('t-1', 0, 0));
@@ -413,30 +417,56 @@ test('recebida só posiciona na célula-alvo da vaga escolhida, com orientação
     assert.equal(foraDoAlvo.erro.codigo, 'PECA_FORA_DO_ALVO');
   }
 
+  assert.equal(
+    codigoDaRejeicao(estado, posicionar('t-1', 2, 3)),
+    'MOVIMENTO_NAO_CONECTADO',
+  );
+
+  // Após girar a T para 90° (bordas leste+sul+norte), a borda sul abre e o
+  // encaixe conectado na célula-alvo é aceito.
+  estado = aplicar(estado, girar('t-1'));
   estado = aplicar(estado, posicionar('t-1', 2, 3));
   assert.equal(estado.recebidas.length, 1);
   assert.ok(estado.posicionadas.some(
     (peca) => peca.pecaId === 't-1' && peca.celula.linha === 2 && peca.celula.coluna === 3,
   ));
 
-  // Resolve a pendência restante com uma reta também sem conexão (reta 0° tem
-  // bordas norte+sul; voltada à geradora fica a oeste, fechada).
+  // Resolve a pendência restante com uma reta na vaga leste: reta 0° tem
+  // bordas norte+sul — a oeste, voltada à geradora, está fechada.
   estado = aplicar(estado, escolherVaga('recebida-reta-1', 'leste'));
+  assert.equal(
+    codigoDaRejeicao(estado, posicionar('reta-1', 3, 4)),
+    'MOVIMENTO_NAO_CONECTADO',
+  );
+  // Girada para 90° (bordas leste+oeste), a oeste abre e o encaixe conecta.
+  estado = aplicar(estado, girar('reta-1'));
   estado = aplicar(estado, posicionar('reta-1', 3, 4));
 
-  // Nenhuma das vizinhas é conectada: movimentação rejeitada.
-  assert.equal(
-    codigoDaRejeicao(estado, moverPeao('peao-branco', 2, 3)),
-    'MOVIMENTO_NAO_CONECTADO',
+  // As duas encaixadas estão conectadas à Inicial: a movimentação passa a ser
+  // aceita (era rejeitada com MOVIMENTO_NAO_CONECTADO quando as peças ficavam
+  // desconectadas).
+  const movimentoNorte = aplicarComandoDeTabuleiro(
+    estado,
+    moverPeao('peao-branco', 2, 3),
   );
-  assert.equal(
-    codigoDaRejeicao(estado, moverPeao('peao-branco', 3, 4)),
-    'MOVIMENTO_NAO_CONECTADO',
+  assert.equal(movimentoNorte.sucesso, true);
+  estado = aplicar(estado, selecionarPeao('peao-branco'));
+  const movimentoLeste = aplicarComandoDeTabuleiro(
+    estado,
+    moverPeao('peao-branco', 3, 4),
   );
+  assert.equal(movimentoLeste.sucesso, true);
 });
 
-test('girar recebida segue o padrão da seleção única', () => {
-  let parcial = estadoComRecebidasPendentes();
+test('girar recebida segue o padrão da seleção única, com encaixe só conectado', () => {
+  // Seleção única: girar recebida não selecionada é rejeitado.
+  const pendentes = estadoComRecebidasPendentes();
+  assert.equal(
+    codigoDaRejeicao(pendentes, girar('reta-1')),
+    'PECA_NAO_SELECIONADA',
+  );
+
+  let parcial = pendentes;
   parcial = aplicar(parcial, escolherVaga('recebida-reta-1', 'norte'));
 
   const giro = aplicarComandoDeTabuleiro(parcial, girar('reta-1'));
@@ -454,14 +484,34 @@ test('girar recebida segue o padrão da seleção única', () => {
   assert.equal(giro.estado.recebidas[0].orientacao, 90);
   let estado = giro.estado;
 
-  // Escolhida a vaga da outra recebida, a seleção muda: girar a anterior é
-  // rejeitado, mas o encaixe dela segue aceito (orientação é livre).
-  estado = aplicar(estado, escolherVaga('recebida-t-1', 'leste'));
-  assert.equal(codigoDaRejeicao(estado, girar('reta-1')), 'PECA_NAO_SELECIONADA');
+  // Reta 90° tem bordas leste+oeste: na vaga norte, a borda sul (voltada à
+  // Peça sob o Peão) está fechada — o encaixe desconectado é rejeitado
+  // (issue #311).
+  assert.equal(
+    codigoDaRejeicao(estado, posicionar('reta-1', 2, 3)),
+    'MOVIMENTO_NAO_CONECTADO',
+  );
+
+  // Giro anti-horário devolve a orientação 0 (bordas norte+sul): o sul abre
+  // e o encaixe conectado é aceito.
+  estado = aplicar(estado, girar('reta-1', 'anti_horario'));
   estado = aplicar(estado, posicionar('reta-1', 2, 3));
   assert.equal(estado.posicionadas.some(
-    (peca) => peca.pecaId === 'reta-1' && peca.orientacao === 90,
+    (peca) => peca.pecaId === 'reta-1' && peca.orientacao === 0,
   ), true);
+
+  // Anti-softlock (issue #311): com a reta-1 ainda com vaga em aberto,
+  // escolher a vaga de outra Recebida é rejeitado com PENDENCIA_NAO_RESOLVIDA
+  // — sem re-seleção possível, a pendência com vaga precisa ser encaixada
+  // antes de a sequência avançar.
+  const comVaga = aplicar(
+    estadoComRecebidasPendentes(),
+    escolherVaga('recebida-reta-1', 'norte'),
+  );
+  assert.equal(
+    codigoDaRejeicao(comVaga, escolherVaga('recebida-t-1', 'leste')),
+    'PENDENCIA_NAO_RESOLVIDA',
+  );
 });
 
 test('recebida nasce com orientação 0; a caixa é opaca e não é manipulável', () => {
@@ -477,31 +527,40 @@ test('recebida nasce com orientação 0; a caixa é opaca e não é manipulável
   assert.equal(estado.recebidas[0].orientacao, 0);
 });
 
-test('girar recebida posicionada vai pela janela de Manipulação, sem seleção', () => {
+test('girar peça posicionada vai pela janela de Manipulação, sem desconectar da geradora', () => {
   let estado = estadoComRecebidasPendentes();
-  estado = aplicar(estado, escolherVaga('recebida-reta-1', 'norte'));
-  estado = aplicar(estado, posicionar('reta-1', 2, 3));
+  // T na vaga norte: orientação 0 (norte+leste+oeste) não conecta — gira para
+  // 90° (leste+sul+norte), com o sul aberto voltado à Inicial, e encaixa.
+  estado = aplicar(estado, escolherVaga('recebida-t-1', 'norte'));
+  estado = aplicar(estado, girar('t-1'));
+  estado = aplicar(estado, posicionar('t-1', 2, 3));
 
-  // O encaixe limpa a seleção e abre a Manipulação em reta-1; girar continua
-  // funcionando pela janela, sem depender de pecaSelecionadaId.
+  // O encaixe limpa a seleção e abre a Manipulação em t-1; a guarda de
+  // conexão do giro protege a relação geradora enquanto o Peão está
+  // selecionado sobre ela (mesmo estado do fluxo via camada da Partida).
   assert.equal(estado.pecaSelecionadaId, null);
-  assert.equal(estado.pecaEmManipulacaoId, 'reta-1');
+  assert.equal(estado.pecaEmManipulacaoId, 't-1');
+  const comPeaoSelecionado: EstadoDoTabuleiro = {
+    ...estado,
+    peaoSelecionadoId: 'peao-branco',
+  };
 
-  const giro = aplicarComandoDeTabuleiro(estado, girar('reta-1'));
-  assert.equal(giro.sucesso, true);
-  if (!giro.sucesso) return;
-  assert.deepEqual(giro.eventos, [
-    {
-      tipo: 'peca_girada',
-      pecaId: 'reta-1',
-      orientacaoAnterior: 0,
-      orientacao: 90,
-      sentido: 'horario',
-    },
-  ]);
-  assert.equal(giro.estado.posicionadas.some(
-    (peca) => peca.pecaId === 'reta-1' && peca.orientacao === 90,
+  // A T em (2,3) 90° — e também em 180° (sul+oeste+leste) e 270°
+  // (oeste+norte+sul) — mantém o sul aberto voltado à Inicial (3,3) sob o
+  // Peão: rotações conectadas são aceitas.
+  estado = aplicar(comPeaoSelecionado, girar('t-1'));
+  const giro270 = aplicar(estado, girar('t-1'));
+  assert.equal(giro270.posicionadas.some(
+    (peca) => peca.pecaId === 't-1' && peca.orientacao === 270,
   ), true);
+
+  // De 270° de volta a 0° (norte+leste+oeste), o sul fecha: rotação
+  // desconectada da geradora é rejeitada (issue #311), mesmo dentro da
+  // janela de Manipulação, com o Peão ainda sobre a geradora.
+  assert.equal(
+    codigoDaRejeicao(giro270, girar('t-1')),
+    'MOVIMENTO_NAO_CONECTADO',
+  );
 });
 
 test('pendências bloqueiam mover, permanecer e selecionar outro peão', () => {

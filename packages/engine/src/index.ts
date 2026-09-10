@@ -44,6 +44,23 @@ export type {
   VinculoExpiradoEvento,
 } from './lobby.ts';
 
+// Bot Random Walk (turno puramente aleatório, sem heurística): consulta à
+// FSM, sorteio uniforme e loop transacional com failsafe.
+export type {
+  IdentidadeDoBot,
+  MotivoDoFimDoTurnoDoBot,
+  OpcoesDoTurnoDoBot,
+  ResultadoDoTurnoDoBot,
+} from './bot.ts';
+
+export {
+  MAX_ACOES_POR_TURNO_DO_BOT,
+  acoesValidasDaSubfase,
+  executarTurnoDoBot,
+  mapearBot,
+  sortearAcao,
+} from './bot.ts';
+
 export type {
   AtravessarOEscuroDaPartidaComando,
   AtravessouOEscuroEvento,
@@ -156,6 +173,9 @@ export {
   registrarFalhaDoEncaminhamento,
   registrarReinicioDaSala,
   sairDaSala,
+  // @internal (#222): bypass de sala encaminhada não iniciada — só após
+  // `partidaDaSalaEstaOrfa` confirmar a orfandade. Ver JSDoc em lobby.ts.
+  sairDaSalaEncaminhadaNaoIniciada,
 } from './lobby.ts';
 
 export {
@@ -171,12 +191,14 @@ export {
 } from './monstros.ts';
 
 export {
+  BORDA_OPOSTA,
   COMPOSICAO_DA_CAIXA,
   LADO_DA_GRADE,
   aplicarComandoDeTabuleiro,
   aplicarLimpeza,
   bordasAbertas,
   calcularIluminacao,
+  conectaNaVaga,
   ehPecaDeMonstro,
   ehPecaEspecial,
   estadoInicialDoTabuleiro,

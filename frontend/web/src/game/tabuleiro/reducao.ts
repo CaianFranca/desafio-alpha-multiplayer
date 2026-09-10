@@ -31,7 +31,9 @@
  *   - VAGA_DA_PECA_RECEBIDA_ESCOLHIDO fixa a vaga/célula-alvo e seleciona a
  *     Recebida (pecaSelecionadaId) até o encaixe.
  *   - PEAO_POSICIONADO re-seleciona o peão (Primeiro Turno, partida.ts:344);
- *     PEAO_MOVIDO/PEAO_PERMANECEU limpam a seleção (mover/permanecer).
+ *     PEAO_MOVIDO mantém selecionado o peão movido (mover_peaoDaPartida
+ *     re-seleciona para encerrar o turno sem seleção intermediária, #263);
+ *     PEAO_PERMANECEU limpa a seleção (permanecer).
  *   - PEAO_DESELECIONADO limpa a seleção vigente (desseleção autoritativa do
  *     servidor, issue #249 — idempotentes não reemitem, fora de sequência é
  *     no-op); o snapshot é a autoridade total da seleção no reload.
@@ -60,10 +62,11 @@
  */
 
 import {
-  CORES_DOS_PEOES,
   abreJanelaDeManipulacao,
   chaveCelula,
+  coresParaN,
   criarIniciaisDaMesa,
+  quantidadeValidaDeJogadores,
   type CorDoPeao,
   type EstadoExibicaoTabuleiro,
   type Orientacao,
@@ -95,9 +98,13 @@ export type PercepcaoDeJogador = {
   readonly sanidade: number
   readonly emBaixaIluminacao: boolean
   readonly amedrontado: boolean
-  // Baseline da Proteção da Sala Médica (issue #227): o cliente só projeta
-  // pelo snapshot (reconciliação); deltas ao vivo ficam para a UI (#225/#226).
   readonly protegido: boolean
+  /**
+   * Ordem de entrada na Sala (snapshot `jogadores[].ordem`, issue #226):
+   * base da fila circular do Turno no HUD. Preservada nos deltas por spread
+   * (`...anterior`); projeções sem snapshot ficam sem ordem até a baseline.
+   */
+  readonly ordem: number
 }
 
 export type SanidadePorPeao = Readonly<
@@ -198,24 +205,37 @@ export interface EstadoDoTabuleiroNoCliente {
     */
   readonly geradoresLigados: readonly string[]
   /**
-    * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
-    * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
-    * engine). O snapshot substitui a baseline (reconexão reconcilia).
-    */
+   * Cartão de Acesso obtido (issue #145): monotônico — POSICAO_CONFIRMADA de
+   * peça `sala_do_diretor` liga; nada local revoga (Limpeza não revoga no
+   * engine). O snapshot substitui a baseline (reconexão reconcilia).
+   */
   readonly cartaoDeAcessoObtido: boolean
+  /**
+   * Fila de chegada dos peões por célula (issue #298): a ordem em que os peões
+   * pousam na peça que os abriga é o que define o arranjo visual de
+   * co-ocupação (Portão: cantos SE→SD→ID→IE; peça comum: 1º no centro).
+   * Chave = `chaveCelula`; o 1º da lista é o mais antigo na célula. É
+   * reconstruída pelo snapshot na ordem do motor; o índice é usado só para
+   * desempate visual em recarregamentos.
+   */
+  readonly ordemDeChegadaPorChave: Readonly<Record<string, readonly PeaoId[]>>
+  /** N de layout/teto 2..4 derivado do roster (snapshot, clamp); null antes do snapshot. Não é o N real do anúncio. */
+  readonly quantidadeParaLayout: number | null
 }
 
-/** Estado inicial determinístico do cliente (deltas a partir do zero). */
-export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
+/** Estado inicial determinístico do cliente (deltas a partir do zero). Suporta N=2..4; fallback 4. */
+export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): EstadoDoTabuleiroNoCliente {
+  const n = quantidadeValidaDeJogadores(quantidadeDeJogadores)
+  const cores = coresParaN(n)
   return {
-    iniciais: criarIniciaisDaMesa(),
+    iniciais: criarIniciaisDaMesa(n),
     posicionadas: [],
     pecaSelecionadaId: null,
     pecaEmManipulacaoId: null,
     // Seed dos peões (issue #91): ids determinísticos por cor, espelhando o
-    // engine (`peaoId: peao-${cor}`, `pecaId: null` na origem); os 4 nascem
+    // engine (`peaoId: peao-${cor}`, `pecaId: null` na origem); N peões nascem
     // sobre a Mesa (celula: null) e o servidor confirma cada movimento.
-    peoes: CORES_DOS_PEOES.map((cor) => ({
+    peoes: cores.map((cor) => ({
       peaoId: `peao-${cor}`,
       cor,
       celula: null,
@@ -237,6 +257,9 @@ export function criarEstadoInicialDoCliente(): EstadoDoTabuleiroNoCliente {
     pecasRestantesNaCaixa: null,
     geradoresLigados: [],
     cartaoDeAcessoObtido: false,
+    // Sem fila de chegada até o primeiro posicionamento/movimento (issue #298).
+    ordemDeChegadaPorChave: {},
+    quantidadeParaLayout: n,
   }
 }
 
@@ -278,6 +301,45 @@ function aprenderPeaoDoAtivo(
 ): Readonly<Record<string, string>> {
   if (estado.jogadorAtivoId === null) return estado.peaoPorJogador
   return { ...estado.peaoPorJogador, [estado.jogadorAtivoId]: peaoId }
+}
+
+/**
+ * Rastreia a fila de chegada dos peões por célula (issue #298): cada
+ * posicionamento/movimento de peão remove o peão do tracker da célula de
+ * origem (derivada de `estado.peoes` — o estado ANTERIOR ao evento) e o anexa
+ * ao fim da fila da célula de destino. Fila/chave vazias são podadas
+ * (limpeza #151: não acumular chaves órfãs). `novaCelula` null (defensivo —
+ * o wire de PEAO_POSICIONADO/MOVIDO nunca traz; cobre reposição sobre a Mesa
+ * por paridade com o snapshot) só remove, sem anexar.
+ */
+export function atualizarOrdemDeChegada(
+  estado: EstadoDoTabuleiroNoCliente,
+  peaoId: PeaoId,
+  novaCelula: Celula | null,
+): Readonly<Record<string, readonly PeaoId[]>> {
+  const anterior = estado.peoes.find((p) => p.peaoId === peaoId)
+  const anteriorChave =
+    anterior !== undefined && anterior.celula !== null
+      ? chaveCelula(anterior.celula)
+      : null
+  const proximaChave = novaCelula !== null ? chaveCelula(novaCelula) : null
+  const mapa: Record<string, PeaoId[]> = {}
+  // Reutiliza as filas existentes (referências são imutáveis; só os arrays novos abaixo).
+  for (const [chave, fila] of Object.entries(estado.ordemDeChegadaPorChave)) {
+    mapa[chave] = [...fila]
+  }
+  // Remove da origem (podando fila vazia).
+  if (anteriorChave !== null && mapa[anteriorChave]) {
+    mapa[anteriorChave] = mapa[anteriorChave].filter((id) => id !== peaoId)
+    if (mapa[anteriorChave].length === 0) delete mapa[anteriorChave]
+  }
+  // Anexa ao destino (no-op quando sem destino: remove sem anexar).
+  if (proximaChave !== null) {
+    const filaDestino = mapa[proximaChave] ?? []
+    if (!filaDestino.includes(peaoId)) filaDestino.push(peaoId)
+    mapa[proximaChave] = filaDestino
+  }
+  return mapa
 }
 
 /**
@@ -446,22 +508,32 @@ export function reduzirEvento(
         peoes,
         peaoSelecionadoId: evento.peaoId,
         peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
+        ordemDeChegadaPorChave: atualizarOrdemDeChegada(
+          estado,
+          evento.peaoId,
+          evento.celula,
+        ),
       }
     }
     case 'PEAO_MOVIDO': {
       const peoes = estado.peoes.map((p) =>
         p.peaoId === evento.peaoId ? { ...p, celula: evento.celula } : p,
       )
-      // mover_peao no engine limpa o peaoSelecionadoId — o cliente espelha
-      // para não manter seleção obsoleta. Dentro do turno, o movimento marca
-      // a fase e atribui o peão ao Jogador Ativo (issue #118).
+      // mover_peaoDaPartida re-seleciona o Peão para que o turno possa ser
+      // encerrado sem seleção intermediária. Dentro do turno, o movimento
+      // marca a fase e atribui o peão ao Jogador Ativo (issue #118).
       return {
         ...estado,
         peoes,
-        peaoSelecionadoId: null,
+        peaoSelecionadoId: evento.peaoId,
         movimentouNoTurno:
           estado.jogadorAtivoId !== null ? true : estado.movimentouNoTurno,
         peaoPorJogador: aprenderPeaoDoAtivo(estado, evento.peaoId),
+        ordemDeChegadaPorChave: atualizarOrdemDeChegada(
+          estado,
+          evento.peaoId,
+          evento.celula,
+        ),
       }
     }
     case 'PEAO_PERMANECEU':
@@ -523,9 +595,20 @@ export function reduzirEvento(
       // mesmo lote, então o tipo é resolvido no estado anterior — a peça ainda
       // está em `posicionadas`; `pecasDeRecebimento` é o fallback se ela já
       // saiu do tabuleiro local em outro lote.
+      // Proteção da Sala Médica (issue #225): o wire traz o estado RESULTANTE
+      // do ator (`evento.protegido` já inclui concessão da Sala Médica e consumo
+      // do ataque do MESMO gatilho) — projeta sem derivar.
       const tipo =
         estado.posicionadas.find((p) => p.pecaId === evento.pecaId)?.tipo ??
         estado.pecasDeRecebimento[evento.pecaId]
+      const anteriorProtegido = estado.jogadorPorId[evento.jogadorId]
+      const protegidoResultante = (evento as { protegido?: boolean }).protegido ?? false
+      const jogadorPorIdComProtecao = anteriorProtegido
+        ? {
+            ...estado.jogadorPorId,
+            [evento.jogadorId]: { ...anteriorProtegido, protegido: protegidoResultante },
+          }
+        : estado.jogadorPorId
       return {
         ...estado,
         posicaoConfirmadaNoTurno: true,
@@ -535,6 +618,7 @@ export function reduzirEvento(
             : estado.geradoresLigados,
         cartaoDeAcessoObtido:
           estado.cartaoDeAcessoObtido || tipo === 'sala_do_diretor',
+        jogadorPorId: jogadorPorIdComProtecao,
       }
     }
 
@@ -549,11 +633,25 @@ export function reduzirEvento(
       // Peças removidas saem da cena; como a ocupação é derivada de
       // `posicionadas`, as células liberadas voltam a aceitar
       // posicionamento/recebimento sem código adicional.
+      // A fila de chegada (issue #298) acompanha: as chaves das células
+      // removidas são podadas para não vazar fila órfã para a próxima peça
+      // na mesma célula (limpeza #151: não acumular chaves órfãs).
+      const chavesRemovidas = new Set(
+        estado.posicionadas
+          .filter((p) => removidas.includes(p.pecaId))
+          .map((p) => chaveCelula(p.celula)),
+      )
+      const ordemDeChegadaPorChave = Object.fromEntries(
+        Object.entries(estado.ordemDeChegadaPorChave).filter(
+          ([chave]) => !chavesRemovidas.has(chave),
+        ),
+      )
       return {
         ...estado,
         posicionadas: estado.posicionadas.filter(
           (p) => !removidas.includes(p.pecaId),
         ),
+        ordemDeChegadaPorChave,
         // Seleção/Manipulação apontando para peça removida não pode sobreviver.
         pecaSelecionadaId:
           estado.pecaSelecionadaId !== null && removidas.includes(estado.pecaSelecionadaId)
@@ -566,14 +664,23 @@ export function reduzirEvento(
       }
     }
 
-    // ── Monstros e estados (ST-15, issue #174) ──
+    // ── Monstros e estados (ST-15, issue #174) — Proteção (issue #225) ──
     case 'ATAQUE_RESOLVIDO': {
       // estadosAplicados carrega o estado resultante por Jogador mudado
       // (Baixa Iluminação, sanidade, Amedrontado) — issue #173. O cliente
       // apenas projeta no dicionário, sem derivar (mesma semântica do
       // snapshot). Ataque sem alvos ⇒ array vazio — estado permanece, a
       // recusa (som) é tratada na camada PartidaPage.
-      if (evento.estadosAplicados.length === 0) {
+      // Proteção (issue #225): `protegidos` lista os Jogadores cuja Proteção
+      // foi consumida nesta resolução — zera `protegido` no modelo. Jogadores
+      // já Amedrontados/protegidos não aparecem em `estadosAplicados`, então
+      // o consumo precisa ser tratado à parte; snapshot reconcilia em seguida.
+      // Fallback defensivo para payloads antigos sem `protegidos` (rolling
+      // deploy / replay persistido anterior à #227) — mesmo padrão de
+      // `snapshot.ts:135`.
+      const estadosAplicados = (evento as unknown as { estadosAplicados?: typeof evento.estadosAplicados }).estadosAplicados ?? []
+      const protegidos = (evento as unknown as { protegidos?: typeof evento.protegidos }).protegidos ?? []
+      if (estadosAplicados.length === 0 && protegidos.length === 0) {
         return estado
       }
       // Atualiza apenas jogadores já conhecidos via snapshot; eventos antes do
@@ -581,7 +688,7 @@ export function reduzirEvento(
       // jogadorId como apelido).
       let mudou = false
       const jogadorPorId = { ...estado.jogadorPorId }
-      for (const aplicado of evento.estadosAplicados) {
+      for (const aplicado of estadosAplicados) {
         const anterior = jogadorPorId[aplicado.jogadorId]
         if (!anterior) continue
         mudou = true
@@ -591,6 +698,13 @@ export function reduzirEvento(
           emBaixaIluminacao: aplicado.emBaixaIluminacao,
           amedrontado: aplicado.amedrontado,
         }
+      }
+      for (const jogadorId of protegidos) {
+        const anterior = jogadorPorId[jogadorId]
+        if (!anterior) continue
+        if (!anterior.protegido) continue
+        mudou = true
+        jogadorPorId[jogadorId] = { ...anterior, protegido: false }
       }
       return mudou ? { ...estado, jogadorPorId } : estado
     }
@@ -652,5 +766,6 @@ export function estadoDeExibicaoDoModelo(
     posicionadas: estado.posicionadas,
     peoes: estado.peoes,
     celulasIluminadas: estado.celulasIluminadas,
+    ordemDeChegadaPorChave: estado.ordemDeChegadaPorChave,
   }
 }

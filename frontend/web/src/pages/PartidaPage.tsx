@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AmbienteDeJogo } from '../components/partida/AmbienteDeJogo'
+import { HudDaPartida } from '../components/partida/HudDaPartida'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
 import { usePartidaTela } from '../components/partida/usePartidaTela'
@@ -45,10 +46,10 @@ import {
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
-import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS } from '../game/tabuleiro/contrato'
 import type { PeaoId } from '../game/tabuleiro/contrato'
+import { quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
-import { useSalaCodigoOptional } from '../state/sala-web-socket-context'
+import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
@@ -69,6 +70,7 @@ type ComandoDoCanal =
 type AcaoDoModelo =
   | { type: 'EVENTO'; evento: Parameters<typeof reduzirEvento>[1] }
   | { type: 'APLICAR_SNAPSHOT'; snapshot: EstadoDaPartidaSnapshot }
+  | { type: 'SYNC_QUANTIDADE'; quantidade: number }
 
 function reduzirModelo(
   estado: EstadoDoTabuleiroNoCliente,
@@ -76,6 +78,14 @@ function reduzirModelo(
 ): EstadoDoTabuleiroNoCliente {
   if (acao.type === 'APLICAR_SNAPSHOT') {
     return aplicarSnapshot(estado, acao.snapshot)
+  }
+  if (acao.type === 'SYNC_QUANTIDADE') {
+    // Sincroniza seed pré-snapshot (risco 3): se ainda sem snapshot de roster,
+    // recria o estado inicial com o N atualizado da Sala. Com jogadores já
+    // presentes (snapshot), a autoridade é do servidor — não sobrescreve.
+    if (Object.keys(estado.jogadorPorId).length > 0) return estado
+    if (estado.quantidadeParaLayout === acao.quantidade) return estado
+    return criarEstadoInicialDoCliente(acao.quantidade)
   }
   return reduzirEvento(estado, acao.evento)
 }
@@ -104,7 +114,27 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
 
   // ── Modelo local do tabuleiro (deltas + snapshot) ──
-  const [modelo, despachar] = useReducer(reduzirModelo, undefined, criarEstadoInicialDoCliente)
+  // Seed com o N real da Sala (#284): sem ele, a mesa nascia sempre com 4
+  // peões/iniciais até o snapshot corrigir. Sem sala (link direto), fallback
+  // 4 por compatibilidade — o snapshot continua sendo a autoridade.
+  // Risco 3: o N da Sala pode chegar pós-mount (WS assíncrono); o valor
+  // inicial do useReducer é capturado só no mount (stale). Lazy init +
+  // efeito de sync cobrem o caso sem recriar após snapshot.
+  const quantidadeDeMembrosDaSala = useQuantidadeDeMembrosDaSalaOptional()
+  const [modelo, despachar] = useReducer(
+    reduzirModelo,
+    undefined,
+    () => criarEstadoInicialDoCliente(quantidadeDeMembrosDaSala ?? 4),
+  )
+  useEffect(() => {
+    if (
+      quantidadeDeMembrosDaSala !== null &&
+      modelo.quantidadeParaLayout !== quantidadeDeMembrosDaSala &&
+      Object.keys(modelo.jogadorPorId).length === 0
+    ) {
+      despachar({ type: 'SYNC_QUANTIDADE', quantidade: quantidadeDeMembrosDaSala })
+    }
+  }, [quantidadeDeMembrosDaSala, modelo.quantidadeParaLayout, modelo.jogadorPorId])
   const despacharEvento = useCallback(
     (evento: Parameters<typeof reduzirEvento>[1]) => despachar({ type: 'EVENTO', evento }),
     [],
@@ -413,7 +443,32 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     [sanidadePorPeao],
   )
 
+  // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
+  // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
+  // (solo anuncia 1, nunca um N falso), teto usa o N válido (#284, #281).
+  // Solo (N=1) é estado transitório, nunca partida válida (#281 "solo
+  // continua impossível"): o seed da Sala clampa para layout, o anúncio
+  // pós-snapshot mostra o N cru.
+  // Risco 5: quantidade é obrigatória na cadeia — não deriva de peoes.length
+  // (modo misto). Antes do snapshot, a autoridade é o seed da Sala (já clampeado).
+  // Definido antes do ciclo para alimentar o teto do Portão no espelho.
+  const quantidadeRealDeJogadores = useMemo(() => {
+    const doSnapshot = Object.keys(modelo.jogadorPorId).length
+    if (doSnapshot > 0) return doSnapshot
+    if (modelo.quantidadeParaLayout != null) return modelo.quantidadeParaLayout
+    return quantidadeDeMembrosDaSala ?? 4
+  }, [modelo.jogadorPorId, modelo.quantidadeParaLayout, quantidadeDeMembrosDaSala])
+  const quantidadeParaTeto = quantidadeValidaDeJogadores(quantidadeRealDeJogadores)
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
+  // Fallback da sequência pendente (#326): se o espelho ficar sem seleção
+  // pós-confirmação, vagas/escolha/destaque usam o peão do Jogador Ativo.
+  const peaoDoTurnoId =
+    modelo.jogadorAtivoId !== null
+      ? (modelo.peaoPorJogador[modelo.jogadorAtivoId] ?? null)
+      : null
+  if (import.meta.env.DEV && modelo.recebidasPendentes.length > 0 && peaoDoTurnoId === null) {
+    console.warn('[PartidaPage] Recebidas pendentes sem Peão do Jogador Ativo — fallback da sequência inerte (#326)')
+  }
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
     if (!temAlvo || !estadoEmAndamento) return null
@@ -422,15 +477,22 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       posicionadas: modelo.posicionadas,
       recebidasPendentes: modelo.recebidasPendentes,
       peaoSelecionadoId: modelo.peaoSelecionadoId,
+      peaoDoTurnoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
+      // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no
+      // turno o clique no próprio Peão fica silencioso — encerrar depois de
+      // mover é confirmar → encerrar, e Permanecer só vale antes de mover.
+      movimentouNoTurno: modelo.movimentouNoTurno,
       // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
       // bandeja continua pública (as pendências vêm do broadcast sem filtro).
       donoDoCiclo: minhaVez,
       // Projeção dos afetados (exceção de resgate #171 no espelho de destinos).
       afetadosPorPeaoId,
+      // N do roster para o teto do Portão (#284): nunca peoes.length.
+      quantidadeDeJogadores: quantidadeParaTeto,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto, peaoDoTurnoId])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa
@@ -458,10 +520,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         : modelo.movimentouNoTurno
           ? 'confirmar'
           : 'permanecer'
-
-  // ── Chip Jogador Ativo (apelido/cor do snapshot, #156) ──
-  const jogadorAtivoDados =
-    modelo.jogadorAtivoId !== null ? modelo.jogadorPorId[modelo.jogadorAtivoId] ?? null : null
 
   // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
   const pecaAlvoDeGiro = estadoInteracao
@@ -542,14 +600,37 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
   }, [requerModoPaisagem])
 
+  const textoJogadorAtivo = modelo.jogadorAtivoId ? (modelo.jogadorPorId[modelo.jogadorAtivoId]?.apelido ?? 'desconhecido') : 'nenhum'
+  const ordemDeEntradaTexto = useMemo(() => {
+    const ordem = Object.entries(modelo.jogadorPorId)
+      .map(([id, d]) => ({ id, ordem: d.ordem }))
+      .sort((a, b) => a.ordem - b.ordem)
+    const idx = ordem.findIndex((o) => o.id === modelo.jogadorAtivoId)
+    if (idx === -1) return ordem.map((o) => modelo.jogadorPorId[o.id]?.apelido ?? o.id).join(', ')
+    return [...ordem.slice(idx), ...ordem.slice(0, idx)].map((o) => modelo.jogadorPorId[o.id]?.apelido ?? o.id).join(' → ')
+  }, [modelo.jogadorPorId, modelo.jogadorAtivoId])
+
   return (
-    <div className="relative min-h-[calc(100vh-5rem)] w-full overflow-hidden">
+    <div className="relative h-screen w-screen overflow-hidden">
+      {/* Anúncio de estado da partida para leitor de tela com N real */}
+      <div
+        data-testid="anuncio-partida"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {estadoEmAndamento
+          ? `Partida com ${quantidadeRealDeJogadores} ${quantidadeRealDeJogadores === 1 ? 'jogador' : 'jogadores'}, rodada ${modelo.rodada ?? 1}, Jogador Ativo ${textoJogadorAtivo}, ordem de entrada ${ordemDeEntradaTexto}, Portão de Saída teto ${quantidadeParaTeto}`
+          : ''}
+      </div>
       <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
       <AmbienteDeJogo
         bordaPx={bordaPx}
         estadoExibicao={estadoExibicao}
         estadoInteracao={estadoInteracao}
         estadoInteracaoPeoes={estadoInteracaoPeoes}
+        quantidadeDeJogadores={quantidadeParaTeto}
         onComando={onComando}
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}
@@ -583,121 +664,31 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       >
         {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa.motivo) : ''}
       </div>
-      {(emResultado || estadoEmAndamento) && modelo.rodada !== null ? (
-        <div
-          data-testid="indicador-rodada"
-          className="pointer-events-none absolute right-4 top-4 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
-        >
-          Rodada {modelo.rodada}
-        </div>
-      ) : null}
-      {estadoEmAndamento && modelo.pecasRestantesNaCaixa !== null ? (
-        // Contagem da Caixa no HUD (issue #145): baseline do snapshot +
-        // decremento ao vivo em PECA_SORTEADA. Oculta enquanto null (antes do
-        // primeiro ESTADO_DA_PARTIDA nunca se mostra contagem inventada).
-        <div
-          data-testid="contagem-caixa"
-          className="pointer-events-none absolute right-4 top-12 z-30 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-200"
-        >
-          Caixa: {modelo.pecasRestantesNaCaixa}
-        </div>
-      ) : null}
-      {(estadoEmAndamento || emResultado) && jogadorAtivoDados ? (
-        <div
-          data-testid="chip-jogador-ativo"
-          data-cor={jogadorAtivoDados.cor}
-          data-sanidade={String(jogadorAtivoDados.sanidade)}
-          data-em-baixa={jogadorAtivoDados.emBaixaIluminacao ? 'true' : undefined}
-          data-amedrontado={jogadorAtivoDados.amedrontado ? 'true' : undefined}
-          className="pointer-events-none absolute left-4 top-4 z-30 flex items-center gap-2 rounded bg-zinc-900/80 px-3 py-1 text-sm text-zinc-100"
-          style={{ borderLeft: `4px solid ${HEX_COR_PEAO[jogadorAtivoDados.cor] ?? '#fff'}` }}
-        >
-          <span>{jogadorAtivoDados.apelido}</span>
-          <span data-testid="chip-sanidade" className="text-xs text-zinc-300">
-            {jogadorAtivoDados.sanidade}/3
-          </span>
-          {jogadorAtivoDados.emBaixaIluminacao ? (
-            <span data-testid="chip-baixa-iluminacao" className="text-xs text-amber-300" title="Baixa Iluminação">
-              ◐
-            </span>
-          ) : null}
-          {jogadorAtivoDados.amedrontado ? (
-            <span data-testid="chip-amedrontado" className="text-xs text-red-400" title="Amedrontado">
-              ⚠
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {/* Percepção mínima de todos os jogadores (issue #174): sem controles
-          completos — apenas 4 chips com sanidade/estados no Ambiente de Jogo.
-          O chip do Jogador Ativo acima é o destaque da vez; esta lista é a
-          visão “cada Jogador” exigida no critério, sem barras/painéis. */}
-      {(estadoEmAndamento || emResultado) && Object.keys(modelo.jogadorPorId).length > 0 ? (
-        <div
-          data-testid="indicadores-sanidade"
-          className="pointer-events-none absolute left-4 top-16 z-30 flex flex-col gap-1"
-        >
-          {Object.entries(modelo.jogadorPorId).map(([jid, dados]) => (
-            <div
-              key={jid}
-              data-testid="indicador-sanidade-jogador"
-              data-jogador-id={jid}
-              data-sanidade={String(dados.sanidade)}
-              data-em-baixa={dados.emBaixaIluminacao ? 'true' : undefined}
-              data-amedrontado={dados.amedrontado ? 'true' : undefined}
-              data-cor={dados.cor}
-              className="flex items-center gap-2 rounded bg-zinc-900/70 px-2 py-0.5 text-xs text-zinc-200"
-              style={{ borderLeft: `3px solid ${HEX_COR_PEAO[dados.cor] ?? '#fff'}` }}
-            >
-              <span>{dados.apelido}</span>
-              <span>{dados.sanidade}/3</span>
-              {dados.emBaixaIluminacao ? <span title="Baixa Iluminação">◐</span> : null}
-              {dados.amedrontado ? <span title="Amedrontado">⚠</span> : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {estadoEmAndamento ? (
-        // Chips de Objetivo Global na moldura (issue #145, spec pai ST-12):
-        // overlay IRMÃO sobre a moldura — o PartidaMoldura é decoração
-        // aria-hidden, os chips são informativos (aria-label) e nunca captam
-        // ponteiro. Fonte: modelo local (baseline do snapshot + derivação ao
-        // vivo pelos eventos existentes; sem novos eventos de conquista).
-        <div className="pointer-events-none absolute left-1/2 top-4 z-30 flex -translate-x-1/2 gap-2">
-          <div
-            data-testid="chip-geradores-ligados"
-            role="status"
-            data-geradores={modelo.geradoresLigados.length}
-            aria-label={`Geradores ligados: ${modelo.geradoresLigados.length} de ${ALVO_GERADORES_LIGADOS}`}
-            className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
-              modelo.geradoresLigados.length >= ALVO_GERADORES_LIGADOS
-                ? 'text-amber-300'
-                : 'text-zinc-200'
-            }`}
-          >
-            Geradores {modelo.geradoresLigados.length}/{ALVO_GERADORES_LIGADOS}
-          </div>
-          <div
-            data-testid="chip-cartao-de-acesso"
-            role="status"
-            data-obtido={modelo.cartaoDeAcessoObtido ? 'true' : 'false'}
-            aria-label={
-              modelo.cartaoDeAcessoObtido
-                ? 'Cartão de Acesso obtido'
-                : 'Cartão de Acesso ainda não obtido'
-            }
-            className={`rounded bg-zinc-900/80 px-3 py-1 text-sm ${
-              modelo.cartaoDeAcessoObtido ? 'text-emerald-300' : 'text-zinc-500'
-            }`}
-          >
-            Cartão de Acesso
-          </div>
-        </div>
+      {/*
+        HUD definitivo da Partida (issue #226, spec pai #224): irmão de
+        AmbienteDeJogo/PartidaMoldura no ponto mais alto, somente leitura do
+        modelo existente (reducao.ts/snapshot.ts). Substitui os indicadores
+        provisórios (rodada, caixa, jogador ativo em texto, lista de sanidade
+        em texto, chips de geradores/cartão em texto) — sem card de Proteção.
+      */}
+      {(estadoEmAndamento || emResultado) ? (
+        <HudDaPartida
+          jogadorPorId={modelo.jogadorPorId}
+          jogadorAtivoId={modelo.jogadorAtivoId}
+          jogadorLocalId={jogadorId}
+          geradoresLigados={modelo.geradoresLigados}
+          cartaoDeAcessoObtido={modelo.cartaoDeAcessoObtido}
+          emAndamento={estadoEmAndamento}
+          emResultado={emResultado}
+          partidaId={partidaId}
+          onSair={voltarASala}
+        />
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (
+        // Botões de turno acima do card de Turno do HUD (inf-dir, #226).
         <div
           data-testid="controles-de-turno"
-          className="pointer-events-auto absolute bottom-6 right-6 z-30 flex gap-2"
+          className="pointer-events-auto absolute bottom-32 right-6 z-30 flex gap-2"
         >
           {faseDoTurno === 'permanecer' ? (
             <button
@@ -705,7 +696,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               data-testid="botao-permanecer"
               onClick={permanecerNoTurno}
               disabled={peaoProprioId === null}
-              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Permanecer
             </button>
@@ -716,7 +707,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               data-testid="botao-confirmar-posicao"
               onClick={confirmarPosicaoNoTurno}
               disabled={peaoProprioId === null}
-              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Confirmar Posição
             </button>
@@ -726,7 +717,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-encerrar-turno"
               onClick={encerrarTurno}
-              className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700"
             >
               Encerrar Turno
             </button>
@@ -734,16 +725,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         </div>
       ) : null}
       {estadoEmAndamento ? (
+        // Controles de giro acima das conquistas soltas do HUD (inf-centro,
+        // #226) para não sobrepor Geradores/Cartão.
         <div
           data-testid="controles-de-giro"
-          className="pointer-events-auto absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 gap-2"
+          className="pointer-events-auto absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 gap-2"
         >
           <button
             type="button"
             data-testid="girar-anti-horario"
             onClick={() => girar('anti_horario')}
             disabled={pecaAlvoDeGiro === null}
-            className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+            className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
           >
             Girar ◀
           </button>
@@ -752,7 +745,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             data-testid="girar-horario"
             onClick={() => girar('horario')}
             disabled={pecaAlvoDeGiro === null}
-            className="rounded bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+            className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
           >
             Girar ▶
           </button>

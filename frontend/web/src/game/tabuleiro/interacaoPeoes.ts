@@ -42,6 +42,14 @@
  * os alvos que seriam válidos (permanecer/mover) retornam rejeição com motivo
  * `posicao_confirmada` — espelhando o FORA_DA_VEZ do servidor; alvos
  * inválidos seguem silenciosos (null).
+ *
+ * Gate do PERMANECER por `movimentouNoTurno` (revisão PR #309): como
+ * PEAO_MOVIDO mantém o Peão selecionado (#263), o clique no próprio Peão
+ * após mover rotearia para PERMANECER — que o engine rejeita com
+ * ENCERRAMENTO_INVALIDO (mover já consumiu a decisão do turno). Com
+ * `movimentouNoTurno` o clique no próprio Peão fica silencioso; o caminho
+ * canônico de encerrar após mover é confirmar → encerrar, e o botão
+ * Permanecer só vale ANTES de mover.
  */
 
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao'
@@ -90,10 +98,25 @@ export interface EstadoInteracaoPeoes {
   /** Recebidas aguardando escolha de vaga e encaixe (bloqueiam a seleção de outro Peão). */
   readonly recebidasPendentes: readonly PendenciaNoCliente[]
   readonly peaoSelecionadoId: string | null
+  /**
+   * Peão do Jogador Ativo (fonte: PartidaPage, do snapshot/turno).
+   * Fallback da sequência pendente (#326): se o espelho ficou sem seleção
+   * (dessincronia pós-confirmação), as vagas/escolha usam o peão do turno —
+   * o engine preserva a seleção do peão confirmado enquanto há pendências.
+   */
+  readonly peaoDoTurnoId: PeaoId | null
   /** Peça em foco: após a escolha da vaga (#138), o pecaId da Recebida sorteada. */
   readonly pecaSelecionadaId: string | null
   /** A posição do Peão do Jogador Ativo já foi confirmada neste turno (POSICAO_CONFIRMADA). */
   readonly posicaoConfirmadaNoTurno: boolean
+  /**
+   * O Peão do Jogador Ativo já se moveu neste turno (PEAO_MOVIDO marca a fase
+   * no espelho — issue #118). Com o movimento consumado, PERMANECER perde o
+   * sentido (o engine rejeita com ENCERRAMENTO_INVALIDO — revisão PR #309):
+   * o clique no próprio Peão após mover fica silencioso; encerrar depois de
+   * mover é confirmar → encerrar, e Permanecer só vale ANTES de mover.
+   */
+  readonly movimentouNoTurno: boolean
   /**
    * Recebida "puxada" da bandeja (fluxo aprovado na revisão #199 da issue
    * #143): estado visual LOCAL do jogador — fora do modelo autoritativo.
@@ -119,6 +142,14 @@ export interface EstadoInteracaoPeoes {
    * (peças ocupadas por não-afetados ficam bloqueadas — conservador).
    */
   readonly afetadosPorPeaoId?: ReadonlySet<PeaoId>
+  /**
+   * N do roster para o teto do Portão (#284): obrigatório na cadeia
+   * PartidaPage→AmbienteDeJogo→interacaoPeoes — o teto é o N real de
+   * jogadores, nunca peoes.length (risco 5). Opcional para compatibilidade
+   * com testes legados que derivam de peoes.length; a cadeia produtiva
+   * sempre fornece o N clampeado.
+   */
+  readonly quantidadeDeJogadores?: number
 }
 
 // ── Resultado de clique/ação do ciclo ──
@@ -233,10 +264,13 @@ export function mapearDesselecaoDePeao(
  * responde RECEBIMENTO_GERADO quando o contexto gera Recebimento). No
  * próprio Peão (já selecionado) → PERMANECER (AC 5) — ou null quando há
  * Recebidas pendentes (permanência exige tudo posicionado e re-seleção não
- * emite comando). Com pendências, clicar em OUTRO Peão não emite comando e
- * retorna rejeição local (espelha PENDENCIA_NAO_RESOLVIDA). Peão
- * inexistente → null (não reage). Gate "Inicial primeiro" (#249): sem a
- * própria Inicial posicionada, SELECIONAR_PEAO é silencioso (null).
+ * emite comando) ou quando o Peão já se moveu no turno
+ * (`movimentouNoTurno` — revisão PR #309: após mover, PERMANECER é
+ * ENCERRAMENTO_INVALIDO no engine; o clique fica silencioso). Com
+ * pendências, clicar em OUTRO Peão não emite comando e retorna rejeição
+ * local (espelha PENDENCIA_NAO_RESOLVIDA). Peão inexistente → null (não
+ * reage). Gate "Inicial primeiro" (#249): sem a própria Inicial posicionada,
+ * SELECIONAR_PEAO é silencioso (null).
  */
 export function mapearCliqueNoPeao(
   estado: EstadoInteracaoPeoes,
@@ -246,11 +280,13 @@ export function mapearCliqueNoPeao(
   if (!peao) return null
   if (peao.peaoId === estado.peaoSelecionadoId) {
     // Próprio Peão: permanência (AC 5) exige Peão posicionado e tudo
-    // posicionado; sobre a Mesa ou com Recebidas pendentes → null. Posição
-    // já confirmada neste turno → rejeição âmbar (AC3, review #165).
+    // posicionado; sobre a Mesa, com Recebidas pendentes ou após mover no
+    // turno → null (silencioso). Posição já confirmada neste turno →
+    // rejeição âmbar (AC3, review #165).
     if (peao.celula === null) return null
     if (haRecebidasPendentes(estado)) return null
     if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
+    if (estado.movimentouNoTurno) return null
     return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
   }
   if (haRecebidasPendentes(estado)) {
@@ -297,10 +333,43 @@ function celulaVizinhaNaBorda(celula: Celula, borda: BordaCardinal): Celula | nu
   return vizinha
 }
 
+// O default documentado (M1/review #333) emite UMA vez por sessão: o flag é
+// estado de módulo — o warn da PartidaPage cobre a fonte; este cobre os
+// consumidores (cena, espelho e testes).
+let avisoPeaoDoTurnoAusenteEmitido = false
+
+/**
+ * Peão de referência da sequência pendente (#326): a seleção vigente; com
+ * Recebidas pendentes e espelho dessincronizado (seleção nula pós-confirmação
+ * em bases sem a re-seleção do mover), o Peão do Jogador Ativo cobre a
+ * sequência — o engine mantém a seleção do Peão confirmado até o Encerramento.
+ * Sem pendências, a referência é só a seleção (comportamento inalterado).
+ *
+ * Default documentado (M1/review #333): o campo é obrigatório no TS, mas em
+ * JS/casts pode chegar `undefined` — normaliza para `null` (`?? null`) e
+ * denuncia em DEV, uma vez por sessão. Sem Peão do turno, vagas/escolha
+ * ficam inertes em silêncio; o warn torna a invariante visível nos
+ * consumidores (cena, espelho e testes).
+ */
+export function peaoDeReferenciaDaSequencia(
+  estado: EstadoInteracaoPeoes,
+): string | null {
+  if (estado.peaoSelecionadoId !== null) return estado.peaoSelecionadoId
+  if (!haRecebidasPendentes(estado)) return null
+  const peaoDoTurnoId = estado.peaoDoTurnoId ?? null
+  if (import.meta.env.DEV && peaoDoTurnoId === null && !avisoPeaoDoTurnoAusenteEmitido) {
+    avisoPeaoDoTurnoAusenteEmitido = true
+    console.warn(
+      '[interacaoPeoes] Recebidas pendentes sem Peão do Jogador Ativo — vagas/escolha ficam inertes (#326/M1)',
+    )
+  }
+  return peaoDoTurnoId
+}
+
 export function vagasDisponiveisDoPeao(
   estado: EstadoInteracaoPeoes,
 ): { borda: BordaCardinal; celula: Celula }[] {
-  const peaoId = estado.peaoSelecionadoId
+  const peaoId = peaoDeReferenciaDaSequencia(estado)
   if (peaoId === null) return []
   const peao = estado.peoes.find((p) => p.peaoId === peaoId)
   if (!peao || peao.celula === null) return []
@@ -327,7 +396,7 @@ export function mapearEscolhaDeVagaDaRecebida(
   recebidaId: string,
   borda: BordaCardinal,
 ): PeaoComandoDoCliente | null {
-  if (estado.peaoSelecionadoId === null) return null
+  if (peaoDeReferenciaDaSequencia(estado) === null) return null
   const pendente = estado.recebidasPendentes.find(
     (r) => r.recebidaId === recebidaId,
   )
@@ -479,8 +548,11 @@ export function mapearPosicionarRecebida(
  * Clique no próprio Peão ou na Peça sob ele (ambos na célula do Peão
  * selecionado) → PERMANECER. Exige tudo posicionado (US 15: recebidas
  * pendentes antes de permanecer → não reage). Posição já confirmada neste
- * turno → rejeição âmbar (AC3). Fora da célula do Peão, Peão não selecionado
- * ou ainda sobre a Mesa → null (não reage).
+ * turno → rejeição âmbar (AC3). Após mover no turno (`movimentouNoTurno`) →
+ * silencioso (null — revisão PR #309: PERMANECER pós-movimento é
+ * ENCERRAMENTO_INVALIDO no engine; encerrar depois de mover é confirmar →
+ * encerrar). Fora da célula do Peão, Peão não selecionado ou ainda sobre a
+ * Mesa → null (não reage).
  */
 export function mapearPermanencia(
   estado: EstadoInteracaoPeoes,
@@ -493,6 +565,7 @@ export function mapearPermanencia(
   if (!peao || peao.celula === null) return null
   if (chaveCelula(peao.celula) !== chaveCelula(celula)) return null
   if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
+  if (estado.movimentouNoTurno) return null
   return { tipo: 'comando', comando: { type: 'PERMANECER', peaoId } }
 }
 
@@ -520,6 +593,7 @@ export function mapearMovimentacao(
     estado.peoes,
     peaoId,
     estado.afetadosPorPeaoId,
+    estado.quantidadeDeJogadores,
   )
   const conectada = destinos.some(
     (d) => chaveCelula(d.peca.celula) === chaveCelula(celula),
@@ -602,7 +676,8 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  * Sem pendências, com peão selecionado (ciclo ativo — inclusive sobre a
  * Mesa, invariante binário #249):
  *   - célula do próprio peão → PERMANECER (ou rejeição âmbar se a posição já
- *     foi confirmada — AC3).
+ *     foi confirmada — AC3; silencioso se o peão já se moveu no turno —
+ *     revisão PR #309).
  *   - destino conectado → MOVER_PEAO (ou rejeição âmbar pós-confirmação).
  *   - peão sobre a Mesa e Peça Inicial clicada → POSICIONAR_PEAO.
  *   - demais → null (com ciclo ativo o chamador NÃO aplica o fallback ST-09:
@@ -739,10 +814,16 @@ export function despacharCliqueDeCelula(
     return
   }
   // Sem resultado do roteador: fallback ST-09 só quando o ciclo está inativo
-  // (alvos inválidos com ciclo ativo não reagem — decisão aprovada #91;
-  // com seleção vigente o ciclo está ativo por definição binária — #249 — e
-  // só DESELECIONAR_PEAO + ack libera o fallback para a Inicial).
-  if (estadoPeoes !== null && cicloAtivo(estadoPeoes)) return
+  // e a posição não foi confirmada (alvos inválidos com ciclo ativo não
+  // reagem — decisão aprovada #91; com seleção vigente o ciclo está ativo por
+  // definição binária — #249 — e só DESELECIONAR_PEAO + ack libera o fallback
+  // para a Inicial). Pós-confirmação (B2/review #333) a célula fica muda: a
+  // Confirmação trava o Peão e nada mais é clicável no tabuleiro.
+  if (
+    estadoPeoes !== null &&
+    (cicloAtivo(estadoPeoes) || estadoPeoes.posicaoConfirmadaNoTurno)
+  )
+    return
   despacho.onComando?.(fallbackST09ParaCelula(estadoInteracao, celula))
 }
 
@@ -751,15 +832,21 @@ export function despacharCliqueDeCelula(
  * na mesa roteiam o fallback ST-09 (SELECIONAR_PECA — o engine aceita a
  * seleção de iniciais via `encontrarNasIniciais`); com Recebidas pendentes a
  * rota fica silenciosa (null), preservando o foco de encaixe da peça sorteada
- * (padrão de bloqueio local da #91). Clique fora das iniciais conhecidas da
- * mesa → null (o roteador puro valida a identidade da peça).
+ * (padrão de bloqueio local da #91). Pós-confirmação (B2/review #333) a Mesa
+ * fica muda: a Confirmação trava o Peão e a seleção de peças não existe mais
+ * no turno. Clique fora das iniciais conhecidas da mesa → null (o roteador
+ * puro valida a identidade da peça).
  */
 export function mapearCliqueNaPecaDaMesa(
   estadoPeoes: EstadoInteracaoPeoes | null,
   estadoInteracao: EstadoInteracaoTabuleiro,
   pecaId: string,
 ): TabuleiroComandoDoCliente | null {
-  if (estadoPeoes !== null && haRecebidasPendentes(estadoPeoes)) return null
+  if (
+    estadoPeoes !== null &&
+    (haRecebidasPendentes(estadoPeoes) || estadoPeoes.posicaoConfirmadaNoTurno)
+  )
+    return null
   if (!estadoInteracao.iniciais.some((p) => p.pecaId === pecaId)) return null
   return { type: 'SELECIONAR_PECA', pecaId }
 }

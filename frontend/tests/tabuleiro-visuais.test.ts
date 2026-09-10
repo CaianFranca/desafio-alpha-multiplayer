@@ -4,8 +4,9 @@
  * Só comportamento externo observável, nunca detalhe interno de material ou
  * asset: o grid resolve um par map/normal empacotado (mesmo padrão
  * `publicDir` das peças), distinto entre si e das peças; a geometria segue
- * quadrada e inalterada; o fallback bege das bordas e o cursor pointer dos
- * destinos seguem preservados.
+ * quadrada e inalterada; o fallback grafite das bordas e o cursor pointer dos
+ * destinos seguem preservados. O piso usa o `obscuro` contínuo da grade
+ * (#274) e as paredes o par abismo (#278) — texturas distintas.
  */
 
 import {
@@ -22,7 +23,10 @@ import {
   TEXTURA_DO_TABULEIRO,
   texturaDoTabuleiro,
 } from '../web/src/game/tabuleiro/texturasDoTabuleiro'
-import { TEXTURAS_DAS_PECAS } from '../web/src/game/tabuleiro/texturasDasPecas'
+import {
+  TEXTURA_OBSCURO_DA_GRADE,
+  TEXTURAS_DAS_PECAS,
+} from '../web/src/game/tabuleiro/texturasDasPecas'
 import { handlersDeCursor } from '../web/src/game/tabuleiro/cursor'
 
 describe('visuais do tabuleiro', () => {
@@ -60,9 +64,16 @@ describe('visuais do tabuleiro', () => {
     expect(LARGURA_TABULEIRO).toBe(PROFUNDIDADE_TABULEIRO)
   })
 
-  it('contorno/cursor preservados: fallback bege e pointer nos destinos', () => {
-    // Fallback das bordas quando a textura ainda suspende.
-    expect(COR_BORDA_CELULA).toBe('#f2e0b6')
+  it('piso e paredes usam texturas distintas (obscuro contínuo #274 × abismo #278)', () => {
+    const par = texturaDoTabuleiro()
+    expect(TEXTURA_OBSCURO_DA_GRADE).toContain('assets/textures/')
+    expect(TEXTURA_OBSCURO_DA_GRADE).not.toBe(par.map)
+    expect(TEXTURA_OBSCURO_DA_GRADE).not.toBe(par.normalMap)
+  })
+
+  it('contorno/cursor preservados: fallback grafite e pointer nos destinos', () => {
+    // Fallback das bordas quando a textura ainda suspende (grafite da #274).
+    expect(COR_BORDA_CELULA).toBe('#2e3138')
     // Cursor pointer dos destinos (vizinho/alvo/vaga) segue com os 3 handlers.
     const pointer = handlersDeCursor('pointer')
     expect(typeof pointer.onPointerOver).toBe('function')

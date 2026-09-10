@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react'
+import { Suspense, useEffect, useMemo } from 'react'
 import { useLoader, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { TAMANHO_CELULA } from './contrato'
@@ -9,6 +9,7 @@ import {
   propsDoMaterialDeContorno,
 } from './contorno'
 import { handlersDeCursor } from './cursor'
+import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { rotacaoDoMotivo, texturaDaPeca } from './texturasDasPecas'
 
 interface PecaPlaceholderProps {
@@ -71,6 +72,13 @@ const Y_CORPO = 0.08
  */
 const RELEVO_TOPO_NORMAL_SCALE: readonly [number, number] = [1.6, 1.6]
 
+/**
+ * Intensidade da emissão própria do topo (os 10 tipos têm `emissiveMap`):
+ * ponto único de ajuste do brilho — 0 apaga, 1 é o neutro, acima disso
+ * estoura para o branco. Afinado por screenshot no jogo.
+ */
+export const INTENSIDADE_EMISSAO_DO_TOPO = 0.4
+
 interface CorpoProps extends PecaPlaceholderProps {
   destacada: boolean
   corDestaque: string
@@ -122,9 +130,10 @@ function usarClique(
 /**
  * Corpo final: caixa lisa nas mesmas dimensões, face superior (`material-2`,
  * +y — mesmo precedente da Mesa em `AmbienteCena`) com map (sRGB) +
- * normalMap (linear) do tipo, motivo girando com a `orientacao`; laterais
- * neutras. O topo ignora o tone mapping da cena (fiel à textura); o destaque
- * é contorno por casca invertida, sem emissivo sobre a textura.
+ * normalMap (linear) + emissiveMap (sRGB) do tipo, motivo girando com a
+ * `orientacao`; laterais neutras.
+ * O topo ignora o tone mapping da cena (fiel à textura); o destaque de
+ * seleção segue por contorno em casca invertida, sem interferir na emissão.
  */
 function CorpoTexturizado({
   tipo,
@@ -134,14 +143,14 @@ function CorpoTexturizado({
   cursor,
   onClick,
 }: CorpoProps) {
-  const { map, normalMap } = texturaDaPeca(tipo)
-  const [mapCarregado, normalCarregado] = useLoader(THREE.TextureLoader, [
-    map,
-    normalMap,
-  ])
+  const { map, normalMap, emissiveMap } = texturaDaPeca(tipo)
+  const [mapCarregado, normalCarregado, emissaoCarregada] = useLoader(
+    THREE.TextureLoader,
+    [map, normalMap, emissiveMap],
+  )
   // Clona para não mutar o cache do useLoader (precedente da Mesa): cor no
   // map, dado linear no normal; centro no meio para girar o motivo.
-  const { mapaTopo, normalTopo } = useMemo(() => {
+  const { mapaTopo, normalTopo, emissaoTopo } = useMemo(() => {
     const rotacao = rotacaoDoMotivo(orientacao)
     const mapa = mapCarregado.clone()
     mapa.colorSpace = THREE.SRGBColorSpace
@@ -152,19 +161,32 @@ function CorpoTexturizado({
     normal.center.set(0.5, 0.5)
     normal.rotation = rotacao
     normal.needsUpdate = true
-    return { mapaTopo: mapa, normalTopo: normal }
-  }, [mapCarregado, normalCarregado, orientacao])
+    // Emissão própria do tipo: mesmo giro do motivo; `emissive` branco na
+    // intensidade de `INTENSIDADE_EMISSAO_DO_TOPO` — o mapa dita o brilho.
+    const emissao = emissaoCarregada.clone()
+    emissao.colorSpace = THREE.SRGBColorSpace
+    emissao.center.set(0.5, 0.5)
+    emissao.rotation = rotacao
+    emissao.needsUpdate = true
+    return { mapaTopo: mapa, normalTopo: normal, emissaoTopo: emissao }
+  }, [mapCarregado, normalCarregado, emissaoCarregada, orientacao])
+  // B1: descarta os 3 clones no unmount/troca (~90 peças por mount) — o
+  // cache do `useLoader` segue intacto.
+  useEffect(
+    () => () => {
+      mapaTopo.dispose()
+      normalTopo.dispose()
+      emissaoTopo.dispose()
+    },
+    [mapaTopo, normalTopo, emissaoTopo],
+  )
 
   const cursorHandlers = handlersDeCursor(cursor)
   const handleClick = usarClique(onClick)
 
   return (
     <>
-      <mesh
-        position={[0, Y_CORPO, 0]}
-        onClick={handleClick}
-        {...cursorHandlers}
-      >
+      <mesh position={[0, Y_CORPO, 0]} raycast={() => null}>
         <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
         <meshStandardMaterial attach="material-0" color={COR_LATERAL} />
         <meshStandardMaterial attach="material-1" color={COR_LATERAL} />
@@ -173,11 +195,22 @@ function CorpoTexturizado({
           map={mapaTopo}
           normalMap={normalTopo}
           normal-scale={RELEVO_TOPO_NORMAL_SCALE}
+          emissiveMap={emissaoTopo}
+          emissive="#ffffff"
+          emissiveIntensity={INTENSIDADE_EMISSAO_DO_TOPO}
           toneMapped={false}
         />
         <meshStandardMaterial attach="material-3" color={COR_LATERAL} />
         <meshStandardMaterial attach="material-4" color={COR_LATERAL} />
         <meshStandardMaterial attach="material-5" color={COR_LATERAL} />
+      </mesh>
+      <mesh
+        position={[0, Y_CORPO, 0]}
+        onClick={handleClick}
+        {...cursorHandlers}
+      >
+        <boxGeometry args={[TAMANHO_CELULA, ESPESSURA_PECA, TAMANHO_CELULA]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
     </>
@@ -197,17 +230,21 @@ function CorpoFallback({
 
   return (
     <>
-      <mesh
-        position={[0, Y_CORPO, 0]}
-        onClick={handleClick}
-        {...cursorHandlers}
-      >
+      <mesh position={[0, Y_CORPO, 0]} raycast={() => null}>
         <boxGeometry args={[TAMANHO_PECA, ESPESSURA_PECA, TAMANHO_PECA]} />
         <meshStandardMaterial
           color={COR_POR_TIPO[tipo]}
           transparent
           opacity={0.88}
         />
+      </mesh>
+      <mesh
+        position={[0, Y_CORPO, 0]}
+        onClick={handleClick}
+        {...cursorHandlers}
+      >
+        <boxGeometry args={[TAMANHO_CELULA, ESPESSURA_PECA, TAMANHO_CELULA]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
     </>
@@ -231,12 +268,22 @@ export function PecaPlaceholder({
     cursor,
     onClick,
   }
+  const fallback = <CorpoFallback {...corpo} />
 
   return (
     <group position={position}>
-      <Suspense fallback={<CorpoFallback {...corpo} />}>
-        <CorpoTexturizado {...corpo} />
-      </Suspense>
+      {/* B4: falha da textura (404) cai no fallback chapado em vez de
+          derrubar o Canvas inteiro; o reset segue a troca de tipo (as URLs
+          derivam do tipo). */}
+      <LimiteDeErroDoModelo
+        key={tipo}
+        resetKey={tipo}
+        fallback={fallback}
+      >
+        <Suspense fallback={fallback}>
+          <CorpoTexturizado {...corpo} />
+        </Suspense>
+      </LimiteDeErroDoModelo>
     </group>
   )
 }

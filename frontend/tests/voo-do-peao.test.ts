@@ -435,7 +435,7 @@ describe('voo do peão — sem duplicado nem regressão (issue #242)', () => {
     expect(deveSuprimirPeaoEstatico(null, 'peao-branco', '3:4')).toBe(false)
   })
 
-  it('modelo pós-voo inalterado: PEAO_MOVIDO move e limpa seleção como antes', () => {
+  it('modelo pós-voo inalterado: PEAO_MOVIDO move e mantém seleção como antes', () => {
     let modelo = modeloComDuasPecas()
     modelo = reduzirEvento(modelo, {
       type: 'PEAO_SELECIONADO',
@@ -446,7 +446,7 @@ describe('voo do peão — sem duplicado nem regressão (issue #242)', () => {
     expect(
       modelo.peoes.find((p) => p.peaoId === 'peao-branco')?.celula,
     ).toEqual(DESTINO)
-    expect(modelo.peaoSelecionadoId).toBeNull()
+    expect(modelo.peaoSelecionadoId).toBe('peao-branco')
   })
 
   it('ponto de recusa intocado: seleção e movimento seguem em silêncio lá', () => {

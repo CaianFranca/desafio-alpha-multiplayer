@@ -206,6 +206,26 @@ describe('peões no contrato de exibição (issue #90)', () => {
     expect(destinosConectadosDoPeao(pos, noPortao(4), 'p1')).toEqual([])
   })
 
+  it('Portão usa o N do roster, não peoes.length (modo misto pré-fiação: 4 peões, N=2 → teto 2)', () => {
+    const pos = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('portao', 'portao_de_saida', 0, 3, 4),
+    ]
+    const peoes: EstadoExibicaoTabuleiro['peoes'] = [
+      { peaoId: 'p1', cor: 'branco', celula: { linha: 3, coluna: 3 } },
+      { peaoId: 'p2', cor: 'vermelho', celula: { linha: 3, coluna: 4 } },
+      { peaoId: 'p3', cor: 'azul', celula: { linha: 3, coluna: 4 } },
+      { peaoId: 'px', cor: 'amarelo', celula: null },
+    ]
+    // 2 ocupantes no Portão com N=2 → teto atingido, sem destino (por
+    // peoes.length o teto seria 4 e a entrada passaria).
+    expect(destinosConectadosDoPeao(pos, peoes, 'p1', new Set(), 2)).toEqual([])
+    // Sem o N explícito, a derivação legada por peoes.length é preservada.
+    expect(destinosConectadosDoPeao(pos, peoes, 'p1')).toEqual([
+      { peca: pos[1], tipo: 'movimento' },
+    ])
+  })
+
   it('Portão com afetado eleva o teto a 5 (espelho exato de tetoOcupacao — partida.ts:1489-1492)', () => {
     const pos = [
       peca('inicial', 'inicial', 0, 3, 3),

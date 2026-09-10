@@ -70,9 +70,17 @@ export function cursorParaPecaPosicionada(
   return pecaEmManipulacaoId === pecaId ? 'pointer' : 'default'
 }
 
-/** Delegação pura ao limiar da câmera (6px, ver cameraLimites.ts:11). */
-export function deveSuprimirCliquePorArrasto(dx: number, dy: number): boolean {
-  return atingiuLimiar(dx, dy)
+/**
+ * Delegação pura ao limiar da câmera (adaptativo por pointerType, ver cameraLimites.ts).
+ *
+ * NOTA — proteção real de ghost-click NÃO vive aqui: este helper é 100% puro
+ * e não tem chamador em produção. A supressão efetiva do clique após arrasto
+ * vive em `hooks/useCameraInterativa.ts` (`suprimirCliqueAposArrastoRef` +
+ * `atingiuLimiar` adaptativo por `tipoPorPointerIdRef` + `onClickCapture`).
+ * Use este helper apenas para testes unitários do limiar.
+ */
+export function deveSuprimirCliquePorArrasto(dx: number, dy: number, pointerType?: string): boolean {
+  return atingiuLimiar(dx, dy, pointerType)
 }
 
 // ── Mapeamento clique → comando ──

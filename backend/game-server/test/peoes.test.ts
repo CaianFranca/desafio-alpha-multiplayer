@@ -62,6 +62,17 @@ const DESLOCAMENTO_DA_VAGA = {
   leste: { linha: 0, coluna: 1 },
 } as const;
 
+// Giros horários necessários para a Recebida encaixar conectada (issue #311):
+// a borda voltada à Peça sob o Peão (o oposto da vaga) precisa estar aberta.
+// Em orientação 0, reta nas vagas leste/oeste e T na vaga norte fecham essa
+// borda (1 giro horário abre); os demais casos conectam direto (r=0), e
+// Especiais/Monstros (4 bordas) nunca precisam girar.
+function girosParaConectar(tipoDaPeca: string, borda: string): number {
+  if (tipoDaPeca === 'reta' && (borda === 'leste' || borda === 'oeste')) return 1;
+  if (tipoDaPeca === 'T' && borda === 'norte') return 1;
+  return 0;
+}
+
 // Vagas da Peça Inicial em `celula` (bordas abertas norte+leste, em ordem
 // canônica, com célula vizinha dentro da grade), na ordem em que as
 // pendências são geradas pelo Recebimento (issue #138).
@@ -362,6 +373,15 @@ async function concluirPrimeiroTurnoNoWs(
     assert.equal(escolhida.borda, borda);
     assert.deepEqual(escolhida.celulaAlvo, celulaAlvo);
 
+    // Encaixe conectado (issue #311): gira a Recebida (horário) até a borda
+    // voltada à Peça sob o Peão abrir; r=0 não emite GIRAR_PECA.
+    const giros = girosParaConectar(recebida.tipoDaPeca as string, borda);
+    for (let giro = 0; giro < giros; giro++) {
+      enviar(ws, { type: 'GIRAR_PECA', jogadorId, pecaId: pecaDoEncaixe, sentido: 'horario' });
+      const girada = await esperarEvento(ws, 'PECA_GIRADA');
+      assert.equal(girada.pecaId, pecaDoEncaixe);
+    }
+
     enviar(ws, { type: 'POSICIONAR_PECA', jogadorId, pecaId: pecaDoEncaixe, celula: celulaAlvo });
     const encaixada = await esperarEvento(ws, 'PECA_POSICIONADA');
     assert.equal(encaixada.pecaId, pecaDoEncaixe);
@@ -477,11 +497,28 @@ test('rejeição: mover para peça não conectada responde ERRO_DO_TABULEIRO MOV
     const ws = sockets[0]!;
 
     try {
+      // A reta-2 (3,4) encaixou conectada (orientação 90, leste-oeste, issue
+      // #311). Monta o estado desconectado diretamente (orientação 0,
+      // norte-sul: borda oeste fechada) — fora da janela de Manipulação a
+      // peça posicionada não gira mais (MANIPULACAO_ENCERRADA).
+      const estadoAtual = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.ok(estadoAtual !== null);
+      await salvarEstadoDaPartida(redis, aceite.partidaId, {
+        ...estadoAtual!,
+        tabuleiro: {
+          ...estadoAtual!.tabuleiro,
+          posicionadas: estadoAtual!.tabuleiro.posicionadas.map((peca) =>
+            peca.celula.linha === 3 && peca.celula.coluna === 4
+              ? { ...peca, orientacao: 0 }
+              : peca,
+          ),
+        },
+      });
+
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       await esperarEvento(ws, 'PEAO_SELECIONADO');
 
-      // A reta-2 (3,4) é norte-sul: não tem borda oeste para a leste da
-      // Peça Inicial em (3,3) — não é vizinha conectada; mover rejeita.
+      // Mover para (3,4) agora deve ser rejeitado por falta de conexão.
       enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 3, coluna: 4 } });
       const erro = await esperarEvento(ws, 'ERRO_DO_TABULEIRO');
       assert.equal(erro.type, 'ERRO_DO_TABULEIRO');

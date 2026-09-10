@@ -33,7 +33,7 @@ export { chaveDaPartida, chaveDoEstadoDaPartida };
 
 /**
  * Grava o estado inicial da partida no Redis com o TTL da partida preparada.
- * O domínio exige sucesso (roster com exatamente 4 jogadores únicos); a falha
+ * O domínio exige sucesso (roster com de 2 a 4 jogadores únicos); a falha
  * é propagada para o rollback em `criarPartidaPreparada`. `KEEPTTL` não é
  * usado aqui pois a chave ainda não existe.
  */
@@ -122,7 +122,7 @@ export async function aplicarRetencaoDeTermino(
   const aplicada = await redis.eval(
     SCRIPT_APLICAR_RETENCAO_DE_TERMINO,
     2,
-    `game-server:partida:${partidaId}`,
+    chaveDaPartida(partidaId),
     chaveDoEstadoDaPartida(partidaId),
     ttlSegundos,
   );

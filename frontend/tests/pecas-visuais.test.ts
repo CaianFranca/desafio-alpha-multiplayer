@@ -18,6 +18,7 @@ import {
 import type { TipoDaPeca } from '../web/src/game/tabuleiro/contrato'
 import {
   TEXTURAS_DAS_PECAS,
+  TEXTURA_OBSCURO_DA_GRADE,
   TIPOS_COM_TEXTURA,
   rotacaoDoMotivo,
   texturaDaPeca,
@@ -44,7 +45,7 @@ const TODOS_OS_TIPOS: readonly TipoDaPeca[] = [
 ]
 
 describe('visuais das peças', () => {
-  it('cobre os 10 tipos com par map/normal distinto por tipo', () => {
+  it('cobre os 10 tipos com trio map/normal/emissive distinto por tipo', () => {
     expect([...TIPOS_COM_TEXTURA].sort()).toEqual([...TODOS_OS_TIPOS].sort())
     expect(Object.keys(TEXTURAS_DAS_PECAS).sort()).toEqual([
       ...TODOS_OS_TIPOS,
@@ -56,14 +57,18 @@ describe('visuais das peças', () => {
       expect(par.normalMap).toContain('assets/textures/')
       expect(par.normalMap.endsWith('.jpg')).toBe(true)
       expect(par.normalMap).not.toBe(par.map)
+      expect(par.emissiveMap).toContain('assets/textures/')
+      expect(par.emissiveMap.endsWith('.jpg')).toBe(true)
     }
-    // 20 arquivos distintos: 10 maps + 10 normals, sem colisão entre tipos.
+    // 30 arquivos distintos: 10 maps + 10 normals + 10 emissives, sem colisão.
     const maps = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).map)
     const normals = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).normalMap)
+    const emissives = TODOS_OS_TIPOS.map((t) => texturaDaPeca(t).emissiveMap)
     expect(new Set(maps).size).toBe(TODOS_OS_TIPOS.length)
     expect(new Set(normals).size).toBe(TODOS_OS_TIPOS.length)
-    expect(new Set([...maps, ...normals]).size).toBe(
-      TODOS_OS_TIPOS.length * 2,
+    expect(new Set(emissives).size).toBe(TODOS_OS_TIPOS.length)
+    expect(new Set([...maps, ...normals, ...emissives]).size).toBe(
+      TODOS_OS_TIPOS.length * 3,
     )
   })
 
@@ -74,6 +79,11 @@ describe('visuais das peças', () => {
     const mapsBase = caminhosBase.map((t) => texturaDaPeca(t).map)
     expect(new Set(mapsBase).size).toBe(caminhosBase.length)
     expect(new Set(caminhos).size).toBe(TODOS_OS_TIPOS.length)
+  })
+
+  it('fundo do grid resolve o obscuro sob assets/textures/', () => {
+    expect(TEXTURA_OBSCURO_DA_GRADE).toContain('assets/textures/')
+    expect(TEXTURA_OBSCURO_DA_GRADE.endsWith('obscuro.jpg')).toBe(true)
   })
 
   it('motivo gira com a orientação (4 ângulos distintos, 0 na origem)', () => {
