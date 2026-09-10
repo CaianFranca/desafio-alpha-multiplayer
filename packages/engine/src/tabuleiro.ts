@@ -15,6 +15,8 @@
 import {
   BORDA_OPOSTA,
   conectaNaVaga,
+  ehPecaDeMonstro,
+  ehPecaEspecial,
   exigirCelulaNoAlcance,
   escolherVagaDaPecaRecebida,
   desselecionarPeao,
@@ -470,18 +472,28 @@ function criarPrng(seed: number): () => number {
   };
 }
 
-// Categorização de tipos para controle de distribuição
-function ehMonstro(tipo: TipoDePecaDaCaixa): boolean {
-  return tipo === 'vulto' || tipo === 'espectro';
-}
+// Estratificação da Caixa (issue #265): constantes das regras numa fonte
+// única para comentário e código não divergirem.
+const PRIMEIRAS_PROTEGIDAS = 10;
+// Raios da forma "janela por tipo": quantas posições anteriores bloqueiam a
+// repetição do mesmo tipo (monstro igual com 4 cartas entre, especial igual
+// com 2 cartas entre).
+const JANELA_MONSTRO_MESMO_TIPO = 4;
+const JANELA_ESPECIAL_MESMO_TIPO = 2;
+const MAX_ESPECIAIS_SEGUIDOS = 2;
 
-function ehEspecial(tipo: TipoDePecaDaCaixa): boolean {
-  return (
-    tipo === 'gerador' ||
-    tipo === 'sala_do_diretor' ||
-    tipo === 'sala_medica' ||
-    tipo === 'portao_de_saida'
-  );
+// Regras 2 e 4 são a mesma forma "janela por tipo" (diferem em raio e
+// categoria): o tipo aparece na janela das últimas `raio` posições da fila?
+function tipoNaJanela(
+  fila: PecaDaCaixa[],
+  tipo: TipoDePecaDaCaixa,
+  raio: number,
+): boolean {
+  const inicio = Math.max(0, fila.length - raio);
+  for (let i = inicio; i < fila.length; i++) {
+    if (fila[i].tipo === tipo) return true;
+  }
+  return false;
 }
 
 // Algoritmo clássico reutilizado internamente com o PRNG do sistema
@@ -501,10 +513,11 @@ function pecaValidaNaPosicao(
   const indice = fila.length;
   const tipo = candidata.tipo;
 
-  // 1. Nas 10 primeiras: proibido monstro, gerador ou chave (sala_do_diretor)
-  if (indice < 10) {
+  // 1. Nas 10 primeiras: proibido monstro, gerador ou cartão
+  // (sala_do_diretor)
+  if (indice < PRIMEIRAS_PROTEGIDAS) {
     if (
-      ehMonstro(tipo) ||
+      ehPecaDeMonstro(tipo) ||
       tipo === 'gerador' ||
       tipo === 'sala_do_diretor'
     ) {
@@ -513,20 +526,17 @@ function pecaValidaNaPosicao(
   }
 
   // 2. Distância mínima de 4 entre monstros do mesmo tipo
-  if (ehMonstro(tipo)) {
-    const inicioJanela = Math.max(0, indice - 4);
-    for (let i = inicioJanela; i < indice; i++) {
-      if (fila[i].tipo === tipo) return false;
-    }
+  if (ehPecaDeMonstro(tipo)) {
+    if (tipoNaJanela(fila, tipo, JANELA_MONSTRO_MESMO_TIPO)) return false;
   }
 
   // 3. Nunca mais de 2 especiais seguidos (vale mesmo para tipos
   // diferentes: gerador, sala_medica, portao barra o 3o).
-  if (ehEspecial(tipo)) {
+  if (ehPecaEspecial(tipo)) {
     if (
-      indice >= 2 &&
-      ehEspecial(fila[indice - 1].tipo) &&
-      ehEspecial(fila[indice - 2].tipo)
+      indice >= MAX_ESPECIAIS_SEGUIDOS &&
+      ehPecaEspecial(fila[indice - 1].tipo) &&
+      ehPecaEspecial(fila[indice - 2].tipo)
     ) {
       return false;
     }
@@ -536,11 +546,8 @@ function pecaValidaNaPosicao(
   // (diferença >= 3 entre índices): gerador em 0 barra outro gerador
   // em 1 e 2, libera em 3+. Tipos diferentes podem colar
   // (gerador + sala_medica, vulto + espectro, vulto + gerador).
-  if (ehEspecial(tipo)) {
-    const inicioJanela = Math.max(0, indice - 3);
-    for (let i = inicioJanela; i < indice; i++) {
-      if (fila[i].tipo === tipo) return false;
-    }
+  if (ehPecaEspecial(tipo)) {
+    if (tipoNaJanela(fila, tipo, JANELA_ESPECIAL_MESMO_TIPO)) return false;
   }
 
   return true;
