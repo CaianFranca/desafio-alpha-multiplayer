@@ -14,6 +14,7 @@ export type {
   AdmissaoRejeitadaEvento,
   AdmissaoEventoDoServidor,
   CodigoDeErroDeAdmissao,
+  DebugLogEvento,
 } from './protocol.ts';
 export type {
   Jogador,

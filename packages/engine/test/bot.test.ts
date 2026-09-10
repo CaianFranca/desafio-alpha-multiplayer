@@ -177,12 +177,15 @@ function concluirPrimeiroTurno(
   return aplicar(estado, encerrarTurno(), ator);
 }
 
+// Peões em (3,3), (0,0), (6,6) e (1,0): diogo foge de (6,0) porque a vaga
+// norte de bruno envolve para lá na grade toroidal (issue #260) — mesmo
+// fixture de monstros.test.ts.
 function partidaEmRodada2(seed?: number): EstadoDaPartida {
   let estado = partidaIniciadaCom(JOGADORES, seed);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
   estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
-  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 0 });
+  estado = concluirPrimeiroTurno(estado, { linha: 1, coluna: 0 });
   return estado;
 }
 
@@ -221,8 +224,8 @@ const recebidaBaixa: PecaRecebida = {
 
 // Cenário de Baixa Iluminação controlado (#341): ana em Baixa, com o Peão
 // sobre uma Peça Cruz sintética em (3,0) — as células vizinhas norte (2,0),
-// leste (3,1) e sul (4,0) estão vazias na Rodada 2 (longe das quatro
-// Iniciais e das vagas que elas geram), e o oeste cai fora da grade — e a
+// leste (3,1), sul (4,0) e o oeste toroidal (3,6) (issue #260) estão vazias
+// na Rodada 2 (longe das quatro Iniciais e das vagas que elas geram) — e a
 // pendência informada como estado direto: a FSM enumera sem aplicar comandos.
 function estadoDaBaixa(
   recebida: PecaRecebida,
@@ -430,8 +433,9 @@ test('subfase (b): sem Peão selecionado, planeja o Recebimento direto — pré-
 });
 
 test('subfase (b): em Baixa Iluminação a FSM enumera apenas vagas em células escuras (#341)', () => {
-  // A vaga norte (2,0) da Peça controle está iluminada; leste e sul seguem
-  // escuras — a engine rejeita a iluminada com DADOS_INVALIDOS.
+  // A vaga norte (2,0) da Peça controle está iluminada; leste, sul e o oeste
+  // toroidal (3,6) (issue #260) seguem escuros — a engine rejeita a iluminada
+  // com DADOS_INVALIDOS.
   const estado = estadoDaBaixa(recebidaBaixa, [{ linha: 2, coluna: 0 }]);
   const acoes = acoesValidasDaSubfase(estado, 'ana');
   // Conjunto de bordas enumeradas é exatamente o das vagas escuras — nenhuma
@@ -439,6 +443,7 @@ test('subfase (b): em Baixa Iluminação a FSM enumera apenas vagas em células 
   assert.deepEqual(acoes, [
     escolherVaga('rec-baixa', 'leste'),
     escolherVaga('rec-baixa', 'sul'),
+    escolherVaga('rec-baixa', 'oeste'),
   ]);
 });
 
@@ -463,10 +468,14 @@ test('subfase (b): em Baixa com todas as vagas iluminadas, escolher_vaga não é
   // forçado cai em PENDENCIA_NAO_RESOLVIDA); pendência irresolúvel em Baixa é
   // limitação pré-existente da engine para humanos e bots, fora do escopo
   // desta correção.
+  // Todas as QUATRO vagas iluminadas — incluindo o oeste toroidal (3,6)
+  // (issue #260): a pendência comum fica irresolúvel e o ramo não emite
+  // escolher_vaga — lista vazia.
   const estado = estadoDaBaixa(recebidaBaixa, [
     { linha: 2, coluna: 0 },
     { linha: 3, coluna: 1 },
     { linha: 4, coluna: 0 },
+    { linha: 3, coluna: 6 },
   ]);
   const acoes = acoesValidasDaSubfase(estado, 'ana');
   assert.deepEqual(acoes, []);

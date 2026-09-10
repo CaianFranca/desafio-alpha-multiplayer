@@ -34,6 +34,13 @@ import type {
   ResgateRealizadoWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
+import {
+  aoAtivarModo,
+  aoDesativarModo,
+  coletar,
+  estaModoAtivo,
+  resumirPayload,
+} from '../utils/coletorDeDepuracao'
 
 /**
  * Eventos que o canal da Partida entrega à página (issue #156): tabuleiro
@@ -152,6 +159,12 @@ export function usePartidaWebSocket({
       for (const comando of pendentes) {
         ws.send(JSON.stringify(comando))
       }
+      // Stream de debug do backend (issue #340): o escopo é a Partida da
+      // conexão (o `partida-id` do upgrade); enviado a cada open/reconexão.
+      if (estaModoAtivo()) {
+        coletar('ws→', 'info', () => resumirPayload({ type: 'ATIVAR_DEBUG' }), 'partida')
+        ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
+      }
     }
 
     ws.onmessage = (event: MessageEvent) => {
@@ -162,6 +175,17 @@ export function usePartidaWebSocket({
         return
       }
       if (typeof data !== 'object' || data === null || !('type' in data)) return
+
+      // Depuração (issue #340): linha espelhada do backend (DEBUG_LOG) vira
+      // fonte `backend`; o tráfego comum é capturado como `ws←` com payload
+      // truncado. DEBUG_LOG não é tráfego de aplicação — não vai como ws←.
+      const tipoDaMensagem = (data as { type?: unknown }).type
+      if (tipoDaMensagem === 'DEBUG_LOG') {
+        const evento = data as unknown as { nivel: 'info' | 'warn' | 'error'; contexto?: string; mensagem: string }
+        coletar('backend', evento.nivel, evento.mensagem, evento.contexto ?? 'partida')
+        return
+      }
+      coletar('ws←', 'info', () => resumirPayload(data), 'partida')
 
       switch ((data as { type: string }).type) {
         case 'ADMISSAO_ACEITA':
@@ -231,8 +255,33 @@ export function usePartidaWebSocket({
 
   useEffect(() => {
     montadoRef.current = true
+    // Ativação em sessão corrente (issue #340): envia o controle no instante
+    // da ativação (ou enfileira se o socket ainda conecta). Uma única
+    // assinatura por montagem, lendo o socket vigente via ref.
+    const desinscreverAtivacao = aoAtivarModo(() => {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        coletar('ws→', 'info', () => resumirPayload({ type: 'ATIVAR_DEBUG' }), 'partida')
+        ws.send(JSON.stringify({ type: 'ATIVAR_DEBUG' }))
+      } else if (ws) {
+        comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'ATIVAR_DEBUG' }]
+      }
+    })
+    // Desativação em sessão corrente (issue #340): espelha o ATIVAR_DEBUG no
+    // instante do Desligar (ou enfileira se o socket ainda conecta).
+    const desinscreverDesativacao = aoDesativarModo(() => {
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        coletar('ws→', 'info', () => resumirPayload({ type: 'DESATIVAR_DEBUG' }), 'partida')
+        ws.send(JSON.stringify({ type: 'DESATIVAR_DEBUG' }))
+      } else if (ws) {
+        comandosPendentesRef.current = [...comandosPendentesRef.current, { type: 'DESATIVAR_DEBUG' }]
+      }
+    })
     conectar()
     return () => {
+      desinscreverAtivacao()
+      desinscreverDesativacao()
       montadoRef.current = false
       encerrarConexao()
     }
@@ -244,6 +293,9 @@ export function usePartidaWebSocket({
   }, [encerrarConexao])
 
   const enviar = useCallback((comando: PartidaComandoDoCliente) => {
+    // Captura de saída no stream de depuração (issue #340): fonte `ws→`,
+    // contexto `partida`, payload truncado.
+    coletar('ws→', 'info', () => resumirPayload(comando), 'partida')
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(comando))

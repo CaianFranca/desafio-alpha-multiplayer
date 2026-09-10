@@ -345,9 +345,12 @@ export function acoesValidasDaSubfase(
       : null;
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
-    // Fluxo serial: enquanto uma Recebida aguarda o encaixe (vaga + alvo
-    // fixados), o bot resolve o encaixe antes de escolher outra vaga — assim
-    // o giro da expansão sempre encontra pecaSelecionadaId == pecaId.
+    // Fluxo serial — anti-softlock (issue #311): enquanto uma Recebida aguarda
+    // o encaixe (vaga + alvo fixados), a engine rejeita nova escolha de vaga
+    // com PENDENCIA_NAO_RESOLVIDA, então o bot resolve o encaixe antes de
+    // escolher outra vaga — assim o giro da expansão sempre encontra
+    // pecaSelecionadaId == pecaId. Sem isso, turnos com 2+ pendências (a regra
+    // na grade toroidal, issue #260) sorteavam a rejeição certa.
     // (Pendência travada da Travessia, com alvo mas sem vaga, nunca bloqueia
     // as demais: ela própria ainda precisa da escolha.)
     const haEncaixePendente = tabuleiro.recebidas.some(

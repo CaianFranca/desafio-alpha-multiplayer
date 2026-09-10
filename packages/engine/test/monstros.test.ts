@@ -326,14 +326,17 @@ function concluirPrimeiroTurno(
   return aplicar(estado, encerrarTurno(), ator);
 }
 
-// Partida em rodada 2 (vez de ana): peões em (3,3), (0,0), (6,6) e (6,0);
-// reta-1..6 encaixadas nas vagas dos Primeiros Turnos.
+// Partida em rodada 2 (vez de ana): peões em (3,3), (0,0), (6,6) e (1,0);
+// reta-1..6 encaixadas nas vagas dos Primeiros Turnos — 2+2+1+1, como antes
+// da grade toroidal (issue #260): a vaga norte de bruno envolve para (6,0)
+// e a de diogo em (6,0) colidiria com ela, então diogo joga em (1,0) (só a
+// vaga leste livre, norte ocupada pela inicial-2).
 function partidaEmRodada2(): EstadoDaPartida {
   let estado = partidaIniciada();
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
   estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
-  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 0 });
+  estado = concluirPrimeiroTurno(estado, { linha: 1, coluna: 0 });
   return estado;
 }
 
@@ -635,7 +638,9 @@ test('alcance do vulto: raios retos ortogonais encadeados por Conexão, distânc
     ...estadoInicialDoTabuleiro(),
     posicionadas: [
       peca('vulto-x', 'vulto', 0, 3, 3),
-      // norte: encadeia três peças até a borda da grade interromper.
+      // norte: encadeia três peças e envolve a borda — (0,3) conecta ao sul
+      // aberto da reta-s2 em (6,3) (wrap toroidal, issue #260); o raio para
+      // na célula vazia (5,3) logo depois.
       peca('reta-n1', 'reta', 0, 2, 3),
       peca('reta-n2', 'reta', 0, 1, 3),
       peca('reta-n3', 'reta', 0, 0, 3),
@@ -643,7 +648,8 @@ test('alcance do vulto: raios retos ortogonais encadeados por Conexão, distânc
       peca('espectro-e', 'espectro', 0, 3, 4),
       peca('reta-l1', 'reta', 90, 3, 5),
       peca('reta-l2', 'reta', 90, 3, 6),
-      // sul: a célula vazia (5,3) interrompe; reta-s2 fica fora.
+      // sul: a célula vazia (5,3) interrompe o raio sul; reta-s2 entra pelo
+      // raio NORTE, via wrap da borda (ver acima).
       peca('reta-s1', 'reta', 0, 4, 3),
       peca('reta-s2', 'reta', 0, 6, 3),
       // oeste: a Inicial conecta (leste aberto) mas sua borda oeste é
@@ -655,13 +661,15 @@ test('alcance do vulto: raios retos ortogonais encadeados por Conexão, distânc
       peca('reta-d2', 'reta', 0, 4, 4),
     ],
   };
-  // Ordem determinística: por direção (norte, leste, sul, oeste) e distância.
+  // Ordem determinística: por direção (norte, leste, sul, oeste) e distância
+  // — reta-s2 vem no raio norte, após o wrap da borda (issue #260).
   assert.deepEqual(
     calcularAlcance(tabuleiro, 'vulto-x').map((peca) => peca.pecaId),
     [
       'reta-n1',
       'reta-n2',
       'reta-n3',
+      'reta-s2',
       'espectro-e',
       'reta-l1',
       'reta-l2',
@@ -904,7 +912,9 @@ test('posicionamento de peça que estende o alcance não dispara; o ataque ocorr
   estado = aplicar(estado, selecionarPeao('peao-azul'), 'carla');
   estado = aplicar(estado, permanecer('peao-azul'), 'carla');
   estado = aplicar(estado, selecionarPeao('peao-amarelo'), 'diogo');
-  estado = aplicar(estado, moverPeao('peao-amarelo', 5, 0), 'diogo');
+  // Diogo joga em (1,0) (fixture toroidal, ver partidaEmRodada2): move para a
+  // própria recebida em (1,1), fora do alcance do vulto em (0,3).
+  estado = aplicar(estado, moverPeao('peao-amarelo', 1, 1), 'diogo');
   estado = aplicar(estado, selecionarPeao('peao-amarelo'), 'diogo');
   const silencio = aplicarComandoDePartida(estado, confirmarPosicao('peao-amarelo'), 'diogo');
   assert.equal(silencio.sucesso, true);
@@ -1224,9 +1234,10 @@ test('posicionar monstro não dispara ataque, mesmo com peão no alcance; o ataq
   estado = silencio.estado;
   estado = resolverRecebidas(estado, 'bruno');
   estado = aplicar(estado, encerrarTurno(), 'bruno');
-  // Carla e diogo posicionam fora do alcance: silêncio igual.
+  // Carla e diogo posicionam fora do alcance: silêncio igual (diogo em
+  // (1,0): a vaga norte de bruno envolve para (6,0) na grade toroidal).
   estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 6 });
-  estado = concluirPrimeiroTurno(estado, { linha: 6, coluna: 0 });
+  estado = concluirPrimeiroTurno(estado, { linha: 1, coluna: 0 });
 
   // Rodada 2: a vez volta a ana — o ATUANTE cujo peão está dentro do
   // alcance do vulto. Permanecer na Inicial (antes = depois, dentro) dispara

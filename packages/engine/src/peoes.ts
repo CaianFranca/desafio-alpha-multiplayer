@@ -147,22 +147,20 @@ export function tetoDoPortao(rosterN: number, temAfetado: boolean): number {
   return Math.min(rosterN, 4) + (temAfetado ? 1 : 0);
 }
 
-// Célula vizinha na direção da borda, ou null quando cai fora da grade.
-// Exportada para o Alcance do Vulto (monstros.ts / issue #172), que caminha
-// raios retos passo a passo com a mesma primitiva de vizinhança.
+// Célula vizinha na direção da borda, com continuidade toroidal (issue
+// #260): a grade 7x7 não tem "fora" — norte da linha 0 é a linha 6 (e
+// vice-versa), leste da coluna 6 é a coluna 0 (e vice-versa). Exportada para
+// o Alcance do Vulto (monstros.ts / issue #172), que caminha raios retos
+// passo a passo com a mesma primitiva de vizinhança.
 export function celulaVizinhaNaBorda(
   celula: Celula,
   borda: BordaCardinal,
-): Celula | null {
+): Celula {
   const deslocamento = DESLOCAMENTO_DA_BORDA[borda];
-  const vizinha: Celula = {
+  return normalizarCelula({
     linha: celula.linha + deslocamento.linha,
     coluna: celula.coluna + deslocamento.coluna,
-  };
-  if (!estaDentroDaGrade(vizinha.linha) || !estaDentroDaGrade(vizinha.coluna)) {
-    return null;
-  }
-  return vizinha;
+  });
 }
 
 // Conexões (ST-10): Peças posicionadas vizinhas cujas bordas abertas estão
@@ -180,9 +178,6 @@ export function vizinhasConectadas(
   const conectadas: PecaPosicionada[] = [];
   for (const borda of bordasAbertas(origem)) {
     const celulaVizinha = celulaVizinhaNaBorda(origem.celula, borda);
-    if (!celulaVizinha) {
-      continue;
-    }
     const vizinha = encontrarPosicionadaPorCelula(estado, celulaVizinha);
     if (!vizinha || !bordasAbertas(vizinha).includes(BORDA_OPOSTA[borda])) {
       continue;
@@ -320,7 +315,7 @@ export function vagasDisponiveis(
       continue;
     }
     const celula = celulaVizinhaNaBorda(peca.celula, borda);
-    if (!celula || encontrarPosicionadaPorCelula(estado, celula)) {
+    if (encontrarPosicionadaPorCelula(estado, celula)) {
       continue;
     }
     vagas.push({ borda, celula });
@@ -426,7 +421,10 @@ export function posicionarPeao(
     );
   }
 
-  const peca = encontrarPosicionadaPorCelula(estado, comando.celula);
+  // Grade toroidal (issue #260): a célula do comando normaliza antes de
+  // qualquer lookup — coordenadas fora de 0–6 alcançam o lado oposto.
+  const celulaPosicionar = normalizarCelula(comando.celula);
+  const peca = encontrarPosicionadaPorCelula(estado, celulaPosicionar);
   if (!peca) {
     return rejeitar('CELULA_SEM_PECA', 'A Célula não contém uma Peça.');
   }
@@ -465,7 +463,7 @@ export function posicionarPeao(
         tipo: 'peao_posicionado',
         peaoId: peao.peaoId,
         pecaId: peca.pecaId,
-        celula: comando.celula,
+        celula: celulaPosicionar,
       },
     ],
   );
@@ -629,7 +627,9 @@ export function moverPeao(
     return rejeitar('PEAO_NAO_SELECIONADO', 'A Peça do Peão não foi encontrada.');
   }
 
-  const alvo = encontrarPosicionadaPorCelula(estado, comando.celula);
+  // Grade toroidal (issue #260): ver posicionarPeao acima.
+  const celulaAlvo = normalizarCelula(comando.celula);
+  const alvo = encontrarPosicionadaPorCelula(estado, celulaAlvo);
   if (!alvo) {
     return rejeitar('CELULA_SEM_PECA', 'A Célula de destino não contém uma Peça.');
   }
@@ -688,7 +688,7 @@ export function moverPeao(
         peaoId: peao.peaoId,
         pecaIdDe: origem.pecaId,
         pecaIdPara: alvo.pecaId,
-        celula: comando.celula,
+        celula: celulaAlvo,
       },
     ],
   );
@@ -885,6 +885,19 @@ export function estaDentroDaGrade(valor: number): boolean {
   return Number.isInteger(valor) && valor >= 0 && valor < LADO_DA_GRADE;
 }
 
+// Normalização toroidal (issue #260): toda coordenada cai numa célula válida
+// da grade 7x7 — não existe "fora". Trata negativos e valores acima de 6.
+export function normalizarCoordenada(valor: number): number {
+  return ((valor % LADO_DA_GRADE) + LADO_DA_GRADE) % LADO_DA_GRADE;
+}
+
+export function normalizarCelula(celula: Celula): Celula {
+  return {
+    linha: normalizarCoordenada(celula.linha),
+    coluna: normalizarCoordenada(celula.coluna),
+  };
+}
+
 export function exigirCelulaNoAlcance(
   celula: Celula,
 ): OperacaoRejeitadaDoTabuleiro | undefined {
@@ -894,12 +907,9 @@ export function exigirCelulaNoAlcance(
       'Linha e coluna da Célula devem ser números inteiros.',
     );
   }
-  if (!estaDentroDaGrade(celula.linha) || !estaDentroDaGrade(celula.coluna)) {
-    return rejeitar(
-      'CELULA_NAO_ENCONTRADA',
-      'A Célula está fora da grade 7x7 do Tabuleiro.',
-    );
-  }
+  // Grade toroidal (issue #260): coordenadas fora de 0–6 normalizam via
+  // normalizarCelula em vez de rejeitar — CELULA_NAO_ENCONTRADA por alcance
+  // fica sem emissor (mantida no union como legado).
   return undefined;
 }
 

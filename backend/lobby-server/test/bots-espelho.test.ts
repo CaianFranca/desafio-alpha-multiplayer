@@ -508,7 +508,9 @@ test('loop: turno completo do Primeiro Turno contra servidor de mentira', async 
   const bot = new JogadorBot({
     jogadorId: 'ana',
     enviar: (comando) => {
-      enviados.push({ type: comando.type, jogadorId: comando.jogadorId });
+      // O wire agora tem variantes de controle de debug sem `jogadorId`
+      // (issue #340) — o bot nunca as envia, então o fallback nunca ocorre.
+      enviados.push({ type: comando.type, jogadorId: 'jogadorId' in comando ? comando.jogadorId : '' });
       // Assíncrono como o WS real: a resposta nunca chega antes da espera.
       setTimeout(() => responder(comando), 1);
     },

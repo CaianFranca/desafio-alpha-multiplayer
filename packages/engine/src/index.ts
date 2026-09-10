@@ -207,6 +207,8 @@ export {
   ehPecaEspecial,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
+  normalizarCelula,
+  normalizarCoordenada,
   sortearDaCaixa,
   tetoDoPortao,
   vagasDisponiveis,

@@ -4,6 +4,7 @@ import {
   aplicarComandoDeTabuleiro,
   estadoInicialDoTabuleiro,
   gerarRecebidas,
+  vagasDisponiveis,
   vizinhasConectadas,
   type BordaCardinal,
   type ComandoDeTabuleiro,
@@ -268,26 +269,34 @@ test('selecionar peão posicionado não gera recebimento (ST-11)', () => {
   assert.equal(selecao.estado.peaoSelecionadoId, 'peao-branco');
 });
 
-test('gerarRecebidas considera apenas células dentro da grade', () => {
+test('gerarRecebidas atravessa a borda: vaga toroidal vira sorteio (issue #260)', () => {
   let estado = aplicar(estadoInicialDoTabuleiro(), selecionar('inicial-1'));
   estado = aplicar(estado, posicionar('inicial-1', 0, 0));
 
-  // A borda norte cai fora da grade; só o leste vazio vira vaga — e a
-  // quantidade de peças sorteadas segue as vagas disponíveis.
+  // A borda norte da (0,0) envolve para (6,0): norte e leste vazios viram
+  // vaga — e a quantidade de peças sorteadas segue as vagas disponíveis.
   const peca = estado.posicionadas.find((item) => item.pecaId === 'inicial-1');
   assert.ok(peca);
+  assert.deepEqual(
+    vagasDisponiveis(estado, peca).map((vaga) => [vaga.borda, vaga.celula]),
+    [
+      ['norte', { linha: 6, coluna: 0 }],
+      ['leste', { linha: 0, coluna: 1 }],
+    ],
+  );
   const sorteio = gerarRecebidas(estado, peca);
   assert.deepEqual(
     sorteio.recebidas.map((recebida) => recebida.recebidaId),
-    ['recebida-reta-1'],
+    ['recebida-reta-1', 'recebida-reta-2'],
   );
   assert.equal(sorteio.recebidas[0].pecaId, 'reta-1');
   assert.equal(sorteio.recebidas[0].vaga, null);
   assert.equal(sorteio.recebidas[0].celulaAlvo, null);
   assert.deepEqual(sorteio.eventos, [
     { tipo: 'peca_sorteada', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0 },
+    { tipo: 'peca_sorteada', pecaId: 'reta-2', tipoDaPeca: 'reta', orientacao: 0 },
   ]);
-  assert.equal(sorteio.estado.caixa.length, estado.caixa.length - 1);
+  assert.equal(sorteio.estado.caixa.length, estado.caixa.length - 2);
 });
 
 test('o recebimento sorteia min(vagas, caixa) peças, uma a uma, e nunca é erro', () => {
@@ -781,18 +790,20 @@ test('comandos inválidos de peões e recebidas são rejeitados com códigos fec
     'PEAO_NAO_SELECIONADO',
   );
 
-  // Células malformadas ou fora da grade (validadas antes da seleção).
+  // Células malformadas (validadas antes da seleção); coordenadas fora de
+  // 0–6 normalizam pelo wrap toroidal (issue #260) — (7,0) vira (0,0) e a
+  // rejeição seguinte da sequência (sem seleção) é a que aparece.
   assert.equal(
     codigoDaRejeicao(estado, posicionarPeao('peao-branco', 1.5, 3)),
     'DADOS_INVALIDOS',
   );
   assert.equal(
     codigoDaRejeicao(estado, posicionarPeao('peao-branco', 7, 0)),
-    'CELULA_NAO_ENCONTRADA',
+    'PEAO_NAO_SELECIONADO',
   );
   assert.equal(
     codigoDaRejeicao(estado, moverPeao('peao-branco', 7, 0)),
-    'CELULA_NAO_ENCONTRADA',
+    'PEAO_NAO_SELECIONADO',
   );
 
   // Peão selecionado sobre a Mesa não participa de mover/permanecer.

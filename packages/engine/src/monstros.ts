@@ -82,14 +82,18 @@ export function calcularAlcance(
 
   // Vulto: raios retos — cada borda aberta da peça do Monstro inicia um raio
   // que avança sempre na mesma direção cardeal enquanto a Conexão persiste.
+  // Com o wrap toroidal (issue #260) um anel de peças conectadas voltaria à
+  // origem — o visitados por raio encerra o ciclo sem duplicadas.
   const alcance: PecaPosicionada[] = [];
   for (const borda of bordasAbertas(origem)) {
     let origemDoPasso = origem;
+    const visitados = new Set<string>([origem.pecaId]);
     for (;;) {
       const proxima = proximaConectadaNaBorda(estado, origemDoPasso, borda);
-      if (!proxima) {
+      if (!proxima || visitados.has(proxima.pecaId)) {
         break;
       }
+      visitados.add(proxima.pecaId);
       alcance.push(proxima);
       origemDoPasso = proxima;
     }
@@ -100,7 +104,9 @@ export function calcularAlcance(
 // Um passo do raio do Vulto: a borda indicada da origem deve estar aberta e a
 // peça vizinha naquela célula deve estar conectada (borda oposta aberta) — a
 // mesma semântica de vizinhasConectadas, filtrada pela direção do raio.
-// Célula vazia, fora da grade ou borda fechada encerra o raio (null).
+// Célula vazia ou borda fechada encerra o raio (null); com o wrap toroidal
+// (issue #260) não há "fora da grade" — ciclos são contidos pelo visitados
+// de calcularAlcance.
 function proximaConectadaNaBorda(
   estado: EstadoDoTabuleiro,
   origem: PecaPosicionada,
@@ -109,10 +115,8 @@ function proximaConectadaNaBorda(
   if (!bordasAbertas(origem).includes(borda)) {
     return null;
   }
+  // celulaVizinhaNaBorda é toroidal (issue #260): sempre retorna uma célula.
   const celulaAlvo = celulaVizinhaNaBorda(origem.celula, borda);
-  if (!celulaAlvo) {
-    return null;
-  }
   return (
     vizinhasConectadas(estado, origem.pecaId).find(
       (peca) =>

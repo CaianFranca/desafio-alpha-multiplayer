@@ -20,6 +20,7 @@ import type { WebSocket } from 'ws';
 import { aplicarComandoDePartida } from '@flicker/engine';
 import { PartidaBroadcaster } from './broadcast.ts';
 import { traduzirEventos } from './traducao.ts';
+import type { DebugStreamDaPartida } from '../ws/debug-stream.ts';
 import {
   ehComandoDaPartida,
   mapearComandoDaPartida,
@@ -39,6 +40,8 @@ export interface PartidaHandlersDeps {
   readonly broadcaster: PartidaBroadcaster;
   readonly partidaTerminadaTtlSegundos?: number;
   readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
+  /** Stream de debug (issue #340). Opcional: sem o campo, nenhuma linha é espelhada. */
+  readonly debug?: DebugStreamDaPartida;
 }
 
 export class PartidaHandlers {
@@ -46,6 +49,7 @@ export class PartidaHandlers {
   private readonly broadcaster: PartidaBroadcaster;
   private readonly partidaTerminadaTtlSegundos: number;
   private readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
+  private readonly debug?: DebugStreamDaPartida;
   // Serialização mononodo: uma cadeia de promessas por partidaId.
   private readonly cadeiasPorPartida: Map<string, Promise<unknown>> = new Map();
   private readonly retornosPendentes: Map<string, Promise<void>> = new Map();
@@ -56,6 +60,7 @@ export class PartidaHandlers {
     this.broadcaster = deps.broadcaster;
     this.partidaTerminadaTtlSegundos = deps.partidaTerminadaTtlSegundos ?? 3600;
     this.notificarRetorno = deps.notificarRetorno;
+    this.debug = deps.debug;
   }
 
   /**
@@ -79,6 +84,8 @@ export class PartidaHandlers {
         codigo: 'DADOS_INVALIDOS',
         mensagem: 'Comando fora do escopo da partida.',
       });
+      // Espelho do erro de guarda no stream de debug (issue #340).
+      this.debug?.emitirParaSocket(socket, 'error', 'Comando fora do escopo da partida.');
       return;
     }
 
@@ -116,8 +123,13 @@ export class PartidaHandlers {
           codigo: paraCodigoDaPartidaWire(resultado.erro.codigo),
           mensagem: resultado.erro.mensagem,
         });
+        // Espelho da Ação recusada no stream de debug (issue #340).
+        this.debug?.emitirParaSocket(socket, 'error', `Ação ${comando.tipo} recusada: ${paraCodigoDaPartidaWire(resultado.erro.codigo)} — ${resultado.erro.mensagem}`);
         return;
       }
+
+      // Espelho do julgamento de Ação no stream de debug (issue #340).
+      this.debug?.emitir(partidaId, 'info', `Ação ${comando.tipo} de ${sessaoJogadorId} julgada`);
 
       await salvarEstadoDaPartida(this.redis, partidaId, resultado.estado);
       this.broadcaster.enviar(partidaId, ...traduzirEventos(resultado.eventos));
@@ -237,6 +249,8 @@ export class PartidaHandlers {
         codigo: 'DADOS_INVALIDOS',
         mensagem: 'Erro interno ao processar comando da partida.',
       });
+      // Espelho do erro interno no stream de debug (issue #340).
+      this.debug?.emitirParaSocket(socket, 'error', `erro interno ao processar comando: ${(erro as Error).message}`);
     });
   }
 

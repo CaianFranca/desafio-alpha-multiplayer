@@ -348,3 +348,9 @@ Condição de vitória acompanhada coletivamente pela equipe: geradores ligados,
 **Peça**:
 Componente do tabuleiro posicionado pelos Jogadores durante a exploração; pode reconstruir o caminho do sanatório ou conceder conquistas (Peça Especial).
 _Avoid_: tile, bloco
+
+## Depuração
+
+**Modo Desenvolvedor**:
+Ferramenta escondida de diagnóstico do frontend, ativada por 5 cliques em até 3s no logo Ginga do footer; sobre um painel (PainelDeDepuração) que exibe em tempo real os logs capturados desde o boot (console, erros, boundaries, tráfego WS e linhas espelhadas do lobby-server/game-server quando o stream de debug está ligado), com marcadores de fase (login, registro, sala, turno por jogador) como fundo histórico das linhas. O modo sobrevive a reload e pode ser desligado pelo botão Desligar; esconder o painel não interrompe a captura nem o stream. Qualquer Jogador autenticado pode ativar o stream e recebe apenas linhas do próprio escopo (própria Sala no lobby, própria Partida no game-server) — risco aceito (ADR-0011).
+_Avoid_: modo debug, console escondido, painel de logs
