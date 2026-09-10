@@ -79,6 +79,7 @@ function cookieHeader(cookies: Cookies): string {
 import { pool } from '../config/pg.ts';
 import { criarSessao } from '../sessoes.ts';
 import { assinarAccess, assinarRefresh } from '../jwt.ts';
+import { getConfig, assinarBotToken } from '@flicker/config';
 
 // TTL de 2 horas para contas de bot no banco
 const BOT_DB_TTL_HOURS = 2;
@@ -219,13 +220,19 @@ async function executarBotEmBackground(args: {
           if (t === 'PARTIDA_DISPONIVEL') {
             const d = msg as { partidaId: string; serverId: string };
             log(`PARTIDA_DISPONIVEL partida=${d.partidaId} server=${d.serverId}`);
-            if (!partidaConectada && accessToken) {
+            if (!partidaConectada) {
               partidaConectada = true;
+              // Fase 2: assina Bot Service Token temporário dedicado para a partida
+              const { jwtSecret } = getConfig();
+              const botToken = assinarBotToken(
+                { jogadorId: jogador.id, apelido: jogador.apelido, partidaId: d.partidaId },
+                jwtSecret,
+              );
               const wsGame = conectarPartida({
                 wsBase: wsBase.replace('ws://localhost:', 'ws://127.0.0.1:').replace('ws://localhost/', 'ws://127.0.0.1/') || wsBase,
                 serverId: d.serverId,
                 partidaId: d.partidaId,
-                accessToken,
+                accessToken: botToken,
                 jogadorId: jogador.id,
                 apelido: jogador.apelido,
                 log,
