@@ -15,8 +15,12 @@
 //
 // Precedência das subfases em acoesValidasDaSubfase:
 //   (a) partida terminada ou vez de outro jogador → sem ações;
-//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida (em
-//       Baixa Iluminação, apenas vagas em células escuras — #341);
+//   (b) Recebimento pendente → com Recebida com vaga já escolhida, APENAS as
+//       ações dela (encaixe conectado, ou girar_peca sobre ela para abrir a
+//       borda voltada à Peça geradora — recuperação de vaga morta, #349);
+//       sem vaga fixada, escolher a vaga de cada pendência (em Baixa
+//       Iluminação, apenas vagas em células escuras — #341 — e, quando houver,
+//       apenas as vagas que conectam na orientação vigente — #349);
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
 //   (d) turno normal sem Confirmação → selecionar o Peão, mover, permanecer
@@ -28,11 +32,13 @@
 // Turno normal a requer e a Permanência só vale sobre a Peça de início); sem
 // ela o loop jamais alcançaria o encerrar_turno nos turnos normais.
 //
-// Fora do escopo deliberado: girar_peca/finalizar_manipulacao (janela
-// opcional de Manipulação — o bot encaixa na orientação sorteada),
-// atravessar_o_escuro (jogada opcional de Baixa Iluminação — o bot em Baixa
-// usa a movimentação normal; a pendência da Travessia, com célula travada,
-// segue enumerada em (b)) e desselecionar_peao (sem efeito útil no turno).
+// Fora do escopo deliberado: girar_peca sobre Peça posicionada e
+// finalizar_manipulacao (janela opcional de Manipulação aberta pelo próprio
+// encaixe — o bot retoma o ciclo e a janela fecha na próxima escolha de
+// vaga), atravessar_o_escuro (jogada opcional de Baixa Iluminação — o bot em
+// Baixa usa a movimentação normal; a pendência da Travessia, com célula
+// travada, segue enumerada em (b)) e desselecionar_peao (sem efeito útil no
+// turno).
 
 import {
   ehPecaDeMonstro,
@@ -53,7 +59,11 @@ import {
 // Failsafe contra loop infinito: teto de ações sorteadas por turno. Ao
 // atingi-lo, o loop tenta UMA vez o encerrar_turno forçado e, se a engine o
 // rejeitar (ex.: PENDENCIA_NAO_RESOLVIDA), desiste do turno sem contorno.
-export const MAX_ACOES_POR_TURNO_DO_BOT = 10;
+// Pior caso do turno completo (#349): 4 pendências × (escolher vaga + encaixe)
+// = 8, mais a recuperação de vaga morta da Recebida fixada (≤ 1 giro no fluxo
+// do bot — o pré-filtro de conexão evita fixar vaga morta; até 3 giros em
+// estados herdados) e a sequência de movimentação (4) — 20 cobre com folga.
+export const MAX_ACOES_POR_TURNO_DO_BOT = 20;
 
 export interface IdentidadeDoBot {
   readonly jogadorId: string;
@@ -137,6 +147,12 @@ export function acoesValidasDaSubfase(
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
   // referencia o Peão do próprio jogador, não a Seleção.
   //
+  // Sequencialidade por encaixe (#311/#349): a escolha de vaga é sequencial
+  // POR encaixe — o guard canônico da engine (peoes.ts) rejeita a escolha de
+  // vaga de uma pendência enquanto outra Recebida tem vaga escolhida e ainda
+  // não encaixada (PENDENCIA_NAO_RESOLVIDA). A FSM espelha o guard: com
+  // Recebida fixada, enumera APENAS as ações sobre ela.
+  //
   // Baixa Iluminação (#341): a engine rejeita vaga em célula iluminada
   // (DADOS_INVALIDOS) e a camada Tabuleiro não conhece iluminação — o filtro
   // vive aqui, na FSM, para a enumeração espelhar exatamente o que a engine
@@ -144,7 +160,41 @@ export function acoesValidasDaSubfase(
   // desdobra em desistência honesta pelo failsafe. A pendência da Travessia
   // (celulaAlvo fixado) não passa pelo filtro: a engine valida só o match da
   // célula travada, escura por construção.
+  //
+  // Vaga conectante (#349): a engine só valida a conexão no encaixe
+  // (MOVIMENTO_NAO_CONECTADO) — escolher vaga morta é aceito por design (a
+  // rotação pré-encaixe via girar_peca é o resgate do humano). A FSM
+  // pré-filtra as vagas com conectaNaVaga para o bot fixar vaga conectante
+  // quando ela existe; sem nenhuma vaga conectante, a escolha de vaga morta
+  // segue enumerada — o ramo da fixada recupera girando até a borda voltada
+  // à Peça geradora abrir, de modo que o turno nunca fica sem ação
+  // completável no meio do Recebimento.
   if (tabuleiro.recebidas.length > 0) {
+    const fixada = tabuleiro.recebidas.find((item) => item.vaga !== null);
+    if (fixada) {
+      const vagaFixada = fixada.vaga;
+      const alvoFixado = fixada.celulaAlvo;
+      if (
+        vagaFixada !== null &&
+        alvoFixado !== null &&
+        conectaNaVaga(fixada.tipo, fixada.orientacao, vagaFixada)
+      ) {
+        // Encaixe conectado (#311): a borda voltada à Peça geradora — o oposto
+        // da vaga — está aberta na orientação vigente, então a engine aceita.
+        return [
+          { tipo: 'posicionar_peca', pecaId: fixada.pecaId, celula: alvoFixado },
+        ];
+      }
+      // Vaga morta (ou alvo nulo defensivo): recuperação por girar_peca sobre
+      // a Recebida fixada — a escolha da vaga a torna a Selecionada
+      // (peoes.ts) e girarRecebida aceita o giro livremente, sem validar
+      // conexão. Cada sentido é uma ação; em ≤ 1 giro a borda abre (reta: 1
+      // de 2 orientações conecta; T: 3 de 4; Especiais e Monstros sempre).
+      return [
+        { tipo: 'girar_peca', pecaId: fixada.pecaId, sentido: 'horario' },
+        { tipo: 'girar_peca', pecaId: fixada.pecaId, sentido: 'anti_horario' },
+      ];
+    }
     const emBaixa = jogador.emBaixaIluminacao ?? false;
     const iluminadas = emBaixa
       ? new Set(
@@ -156,59 +206,43 @@ export function acoesValidasDaSubfase(
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
     for (const recebida of tabuleiro.recebidas) {
-      if (recebida.vaga === null) {
-        if (pecaSobOPeao === undefined) {
-          continue;
-        }
-        const vagas = vagasDisponiveis(
-          tabuleiro,
-          pecaSobOPeao,
-          tabuleiro.recebidas,
-        );
-        if (recebida.celulaAlvo !== null) {
-          // Pendência travada (Travessia do Escuro): só a borda que mapeia à
-          // célula travada é aceita pela engine.
-          const travada = vagas.find((vaga) =>
-            mesmaCelula(vaga.celula, recebida.celulaAlvo),
-          );
-          if (travada !== undefined) {
-            acoes.push({
-              tipo: 'escolher_vaga_da_peca_recebida',
-              recebidaId: recebida.recebidaId,
-              borda: travada.borda,
-            });
-          }
-          continue;
-        }
-        for (const vaga of vagas) {
-          // Em Baixa, vaga iluminada é rejeição certa (DADOS_INVALIDOS):
-          // enumera apenas as vagas escuras restantes.
-          if (
-            iluminadas !== null &&
-            iluminadas.has(`${vaga.celula.linha},${vaga.celula.coluna}`)
-          ) {
-            continue;
-          }
-          acoes.push({
-            tipo: 'escolher_vaga_da_peca_recebida',
-            recebidaId: recebida.recebidaId,
-            borda: vaga.borda,
-          });
-        }
+      if (pecaSobOPeao === undefined) {
         continue;
       }
+      const vagas = vagasDisponiveis(
+        tabuleiro,
+        pecaSobOPeao,
+        tabuleiro.recebidas,
+      );
+      let candidatas: typeof vagas;
       if (recebida.celulaAlvo !== null) {
-        // Encaixe só conectado (issue #311): sem conexão, NÃO age — a
-        // selecionada com vaga já teve prioridade absoluta acima, então
-        // recebida não selecionada desconectada é inalcançável no fluxo do
-        // próprio bot.
-        if (conectaNaVaga(recebida.tipo, recebida.orientacao, recebida.vaga)) {
-          acoes.push({
-            tipo: 'posicionar_peca',
-            pecaId: recebida.pecaId,
-            celula: recebida.celulaAlvo,
-          });
-        }
+        // Pendência travada (Travessia do Escuro): só a borda que mapeia à
+        // célula travada é aceita pela engine. Defensivo: a FSM nunca emite
+        // atravessar_o_escuro, então esta pendência não é criada por bots.
+        const travada = vagas.find((vaga) =>
+          mesmaCelula(vaga.celula, recebida.celulaAlvo),
+        );
+        candidatas = travada === undefined ? [] : [travada];
+      } else {
+        candidatas = vagas.filter(
+          (vaga) =>
+            iluminadas === null ||
+            !iluminadas.has(`${vaga.celula.linha},${vaga.celula.coluna}`),
+        );
+      }
+      // Pré-filtro de conexão (#349): vaga morta é rejeição certa no encaixe
+      // — enumere primeiro as conectantes; sem nenhuma, a vaga morta segue
+      // enumerada, pois o giro da fixada a torna encaixável.
+      const conectantes = candidatas.filter((vaga) =>
+        conectaNaVaga(recebida.tipo, recebida.orientacao, vaga.borda),
+      );
+      const finais = conectantes.length > 0 ? conectantes : candidatas;
+      for (const vaga of finais) {
+        acoes.push({
+          tipo: 'escolher_vaga_da_peca_recebida',
+          recebidaId: recebida.recebidaId,
+          borda: vaga.borda,
+        });
       }
     }
     return acoes;

@@ -5,10 +5,12 @@ import {
   acoesValidasDaSubfase,
   aplicarComandoDePartida,
   bordasAbertas,
+  conectaNaVaga,
   estadoInicialDaPartida,
   executarTurnoDoBot,
   mapearBot,
   sortearAcao,
+  type BordaCardinal,
   type Celula,
   type ComandoDePartida,
   type EstadoDaPartida,
@@ -205,13 +207,14 @@ function comJogador(
   };
 }
 
-// Pendência sintética do Recebimento (vaga e célula-alvo nulas até a escolha):
-// o ramo (b) da FSM não lê o pecaId da pendência, então o valor é irrelevante
-// para a enumeração.
+// Pendência sintética do Recebimento (vaga e célula-alvo nulas até a escolha).
+// Tipo Cruz: as 4 bordas abertas conectam em qualquer vaga (conectaNaVaga
+// sempre true), de modo que os testes da #341 exercem apenas o filtro de
+// Baixa — o pré-filtro de conexão da #349 fica coberto pelos testes próprios.
 const recebidaBaixa: PecaRecebida = {
   recebidaId: 'rec-baixa',
   pecaId: 'recebida-sintetica',
-  tipo: 'reta',
+  tipo: 'cruz',
   orientacao: 0,
   vaga: null,
   celulaAlvo: null,
@@ -376,7 +379,7 @@ test('subfase (b): Recebimento pendente só emite escolher a vaga', () => {
   );
 });
 
-test('subfase (b): após escolher a vaga, resta escolher ou encaixar', () => {
+test('subfase (b): após escolher a vaga, só as ações da Recebida fixada (#311/#349)', () => {
   let estado = partidaIniciadaCom(JOGADORES);
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
@@ -386,15 +389,28 @@ test('subfase (b): após escolher a vaga, resta escolher ou encaixar', () => {
   assert.ok(primeira);
   estado = aplicar(estado, escolherVaga(primeira.recebidaId, 'norte'), 'ana');
   const acoes = acoesValidasDaSubfase(estado, 'ana');
-  const tipos = new Set(acoes.map((acao) => acao.tipo));
-  assert.ok(tipos.has('posicionar_peca'));
-  assert.ok(
-    acoes.every(
-      (acao) =>
-        acao.tipo === 'posicionar_peca' ||
-        acao.tipo === 'escolher_vaga_da_peca_recebida',
-    ),
+  // Guard canônico espelhado (#311): com a fixada pendente, a engine rejeita
+  // escolher_vaga de outra pendência (PENDENCIA_NAO_RESOLVIDA) — a FSM
+  // enumera apenas o encaixe conectado dela ou, se a vaga não conecta na
+  // orientação sorteada, o giro que abre a borda voltada à geradora (#349).
+  const fixada = estado.tabuleiro.recebidas.find(
+    (item) => item.recebidaId === primeira.recebidaId,
   );
+  assert.ok(fixada && fixada.vaga !== null && fixada.celulaAlvo !== null);
+  if (conectaNaVaga(fixada.tipo, fixada.orientacao, fixada.vaga)) {
+    assert.deepEqual(acoes, [
+      {
+        tipo: 'posicionar_peca',
+        pecaId: fixada.pecaId,
+        celula: fixada.celulaAlvo,
+      },
+    ]);
+  } else {
+    assert.deepEqual(acoes, [
+      { tipo: 'girar_peca', pecaId: fixada.pecaId, sentido: 'horario' },
+      { tipo: 'girar_peca', pecaId: fixada.pecaId, sentido: 'anti_horario' },
+    ]);
+  }
 });
 
 test('subfase (b): sem Peão selecionado, planeja o Recebimento direto — pré-adoção do ator (#326)', () => {
@@ -467,6 +483,172 @@ test('subfase (b): em Baixa com todas as vagas iluminadas, escolher_vaga não é
   ]);
   const acoes = acoesValidasDaSubfase(estado, 'ana');
   assert.deepEqual(acoes, []);
+});
+
+// Pendência não fixada do Recebimento (#349): Reta na orientação 90° — bordas
+// abertas leste+oeste. Sobre a Peça controle (vagas norte/leste/sul), apenas a
+// vaga leste conecta (o oposto da vaga, oeste, está aberto); norte e sul são
+// vagas mortas para esta orientação.
+const recebidaMorta: PecaRecebida = {
+  recebidaId: 'rec-morta',
+  pecaId: 'recebida-morta',
+  tipo: 'reta',
+  orientacao: 90,
+  vaga: null,
+  celulaAlvo: null,
+};
+
+// A mesma Reta com a vaga norte já escolhida — vaga morta fixada: a borda
+// voltada à Peça geradora (sul, o oposto de norte) está fechada na
+// orientação 90°.
+const recebidaMortaFixada: PecaRecebida = {
+  ...recebidaMorta,
+  vaga: 'norte',
+  celulaAlvo: { linha: 2, coluna: 0 },
+};
+
+// Cenário controlado do Recebimento para a #349: ana na Rodada 2, sem Baixa,
+// com o Peão sobre a Peça controle Cruz sintética em (3,0) — as células
+// vizinhas norte (2,0), leste (3,1) e sul (4,0) estão vazias (o mesmo cenário
+// da #341). As Recebidas são informadas como estado direto; quando há
+// Recebida com vaga fixada, o helper seta a Seleção para ela — o mesmo efeito
+// do escolher_vaga na engine (peoes.ts).
+function estadoDoRecebimento(
+  recebidas: readonly PecaRecebida[],
+): EstadoDaPartida {
+  const base = partidaEmRodada2(7);
+  const fixada = recebidas.find((item) => item.vaga !== null);
+  return {
+    ...base,
+    tabuleiro: {
+      ...base.tabuleiro,
+      posicionadas: [
+        ...base.tabuleiro.posicionadas,
+        {
+          pecaId: 'peca-controle',
+          tipo: 'cruz',
+          orientacao: 0,
+          celula: { linha: 3, coluna: 0 },
+        },
+      ],
+      peoes: base.tabuleiro.peoes.map((peao) =>
+        peao.peaoId === 'peao-branco'
+          ? { ...peao, pecaId: 'peca-controle' }
+          : peao,
+      ),
+      pecaSelecionadaId: fixada ? fixada.pecaId : base.tabuleiro.pecaSelecionadaId,
+      recebidas,
+    },
+  };
+}
+
+test('subfase (b): com Recebida fixada conectada, a enumeração é exatamente o encaixe dela (#311/#349)', () => {
+  const fixada: PecaRecebida = {
+    ...recebidaBaixa,
+    recebidaId: 'rec-fixada',
+    pecaId: 'recebida-fixada',
+    vaga: 'norte',
+    celulaAlvo: { linha: 2, coluna: 0 },
+  };
+  const estado = estadoDoRecebimento([fixada, recebidaBaixa]);
+  // A segunda pendência (recebidaBaixa, sem vaga) NÃO gera escolher_vaga:
+  // com a fixada pendente, a engine rejeitaria (PENDENCIA_NAO_RESOLVIDA,
+  // guard da #311).
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  assert.deepEqual(acoes, [
+    {
+      tipo: 'posicionar_peca',
+      pecaId: 'recebida-fixada',
+      celula: { linha: 2, coluna: 0 },
+    },
+  ]);
+  // E o encaixe enumerado é aceito pela engine (Peça controle sob o Peão,
+  // Cruz com a borda norte aberta, célula-alvo (2,0) vazia).
+  aplicar(estado, acoes[0] as ComandoDePartida, 'ana');
+});
+
+test('subfase (b): Reta não-conectante enumera escolher_vaga só nas vagas conectantes (#349)', () => {
+  // Vagas da Peça controle: norte (2,0), leste (3,1) e sul (4,0) — na
+  // orientação 90° da Reta (abertas leste+oeste), apenas a leste conecta;
+  // norte e sul são vagas mortas e ficam FORA da enumeração.
+  const estado = estadoDoRecebimento([recebidaMorta]);
+  assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
+    escolherVaga('rec-morta', 'leste'),
+  ]);
+});
+
+test('subfase (b): Recebida fixada em vaga morta enumera girar_peca nos dois sentidos, e o giro abre o encaixe (#349)', () => {
+  const estado = estadoDoRecebimento([recebidaMortaFixada]);
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  assert.deepEqual(acoes, [
+    { tipo: 'girar_peca', pecaId: 'recebida-morta', sentido: 'horario' },
+    { tipo: 'girar_peca', pecaId: 'recebida-morta', sentido: 'anti_horario' },
+  ]);
+  // Qualquer sentido da Reta sai de 90° para um eixo norte–sul — a borda
+  // voltada à geradora abre e o encaixe passa a ser a ação enumerada.
+  const girado = aplicar(estado, acoes[0] as ComandoDePartida, 'ana');
+  assert.deepEqual(acoesValidasDaSubfase(girado, 'ana'), [
+    {
+      tipo: 'posicionar_peca',
+      pecaId: 'recebida-morta',
+      celula: { linha: 2, coluna: 0 },
+    },
+  ]);
+});
+
+test('executarTurnoDoBot: a Recebida morta é recuperada por giro e o turno encerra (#349)', () => {
+  const estado = estadoDoRecebimento([recebidaMortaFixada]);
+  const resultado = executarTurnoDoBot(estado, 'ana');
+  assert.equal(resultado.motivo, 'encerramento');
+  assert.equal(resultado.estado.jogadorAtivoId, 'bruno');
+  assert.equal(resultado.estado.tabuleiro.recebidas.length, 0);
+  // O giro de recuperação de fato ocorreu no turno.
+  assert.ok(
+    resultado.acoesExecutadas.some(
+      (acao) =>
+        acao.tipo === 'girar_peca' && acao.pecaId === 'recebida-morta',
+    ),
+  );
+});
+
+test('regressão do travamento da semente 7: a rodada dos 4 bots progrediu sem desistir em todos os turnos (#349)', () => {
+  // O travamento pré-correção: o bot fixava vaga morta, o ramo da fixada
+  // deixava de agir e 400/400 turnos morriam em desistência (fail do teste
+  // acima, padrão :694). Com a FSM exata, nenhum turno trava.
+  let estado = partidaIniciadaCom(JOGADORES, 7);
+  const rodadaInicial = estado.rodada;
+  let tentativas = 0;
+  let desistencias = 0;
+  let foraDaVez = 0;
+  while (estado.resultado === null && tentativas < 400) {
+    tentativas++;
+    const ator = estado.jogadorAtivoId;
+    const turno = executarTurnoDoBot(estado, ator);
+    if (turno.motivo === 'fora_da_vez') {
+      foraDaVez++;
+      break;
+    }
+    estado = turno.estado;
+    if (turno.motivo === 'desistencia') {
+      assert.notEqual(
+        turno.codigoDaDesistencia,
+        'DADOS_INVALIDOS',
+        'desistência DADOS_INVALIDOS: ação enumerada rejeitada pela engine',
+      );
+      desistencias++;
+      continue;
+    }
+  }
+  assert.equal(foraDaVez, 0, 'bot nunca perde a vez agindo nela');
+  assert.ok(
+    estado.resultado !== null || tentativas === 400,
+    'deveria terminar ou atingir o limite de tentativas',
+  );
+  assert.ok(
+    desistencias < tentativas,
+    `jogo travado na semente 7: ${desistencias}/${tentativas} turnos em desistência`,
+  );
+  assert.ok(estado.rodada >= rodadaInicial);
 });
 
 test('turno normal: início só seleciona o Peão; depois move ou permanece', () => {
