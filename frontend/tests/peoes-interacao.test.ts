@@ -60,7 +60,7 @@ function pendencia(
   vaga: BordaCardinal | null,
   celulaAlvo: Celula | null,
 ): PendenciaNoCliente {
-  return { recebidaId, pecaId, tipoDaPeca, vaga, celulaAlvo }
+  return { recebidaId, pecaId, tipoDaPeca, orientacao: 0, vaga, celulaAlvo }
 }
 
 const INICIAL = { linha: 3, coluna: 3 }
@@ -1043,7 +1043,7 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     pecaId: string,
     tipoDaPeca: 'reta' | 'T' | 'cruz' = 'reta',
   ): PendenciaNoCliente {
-    return { recebidaId, pecaId, tipoDaPeca, vaga: null, celulaAlvo: null }
+    return { recebidaId, pecaId, tipoDaPeca, orientacao: 0, vaga: null, celulaAlvo: null }
   }
 
   it('clique na corrente da bandeja de slot único puxa a primeira pendência sem vaga', () => {
@@ -1086,7 +1086,7 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     // Pull antigo: a pendência puxada ganhou vaga — a corrente agora é outra.
     const pullEncaminhado = estadoBase({
       recebidasPendentes: [
-        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta', vaga: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0, vaga: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
         pendSemVaga('r2', 't-1', 'T'),
       ],
       recebidaPuxadaId: 'r1',
@@ -1097,7 +1097,7 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
   it('sem pendência sem vaga não há o que puxar (vaga em aberto não puxa)', () => {
     const estado = estadoBase({
       recebidasPendentes: [
-        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta', vaga: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0, vaga: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
       ],
     })
     expect(mapearCliqueNaPecaDaBandeja(estado)).toBeNull()
@@ -1553,7 +1553,7 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
   const posicionadas = [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)]
   const pendencias = [pendencia('recebida-reta-1', 'reta-1', 'reta', null, null)]
 
-  test('com seleção nula e pendências, vagas e escolha usam o peão do turno', () => {
+  it('com seleção nula e pendências, vagas e escolha usam o peão do turno', () => {
     const estado = estadoBase({
       posicionadas,
       recebidasPendentes: pendencias,
@@ -1562,15 +1562,15 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
       peoes: [peao('peao-branco', INICIAL)],
     })
 
-    const vagas = vagasDisponiveisDoPeao(estado)
-    assert.ok(vagas.length > 0, 'fallback deveria derivar vagas do peão do turno')
+    expect(vagasDisponiveisDoPeao(estado).length).toBeGreaterThan(0)
 
+    const vagas = vagasDisponiveisDoPeao(estado)
     const comando = mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', vagas[0]!.borda)
-    assert.equal(comando?.type, 'ESCOLHER_VAGA_DA_PECA_RECEBIDA')
-    assert.equal((comando as { recebidaId?: string }).recebidaId, 'recebida-reta-1')
+    expect(comando?.type).toBe('ESCOLHER_VAGA_DA_PECA_RECEBIDA')
+    expect((comando as { recebidaId?: string }).recebidaId).toBe('recebida-reta-1')
   })
 
-  test('sem pendências, o fallback não atua (comportamento inalterado)', () => {
+  it('sem pendências, o fallback não atua (comportamento inalterado)', () => {
     const estado = estadoBase({
       posicionadas,
       recebidasPendentes: [],
@@ -1579,12 +1579,12 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
       peoes: [peao('peao-branco', INICIAL)],
     })
 
-    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
-    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
-    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
+    expect(vagasDisponiveisDoPeao(estado)).toEqual([])
+    expect(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte')).toBeNull()
+    expect(peaoDeReferenciaDaSequencia(estado)).toBeNull()
   })
 
-  test('seleção vigente tem precedência sobre o peão do turno', () => {
+  it('seleção vigente tem precedência sobre o peão do turno', () => {
     const estado = estadoBase({
       posicionadas,
       recebidasPendentes: pendencias,
@@ -1593,11 +1593,11 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
       peoes: [peao('peao-branco', INICIAL), peao('peao-vermelho', null)],
     })
 
-    assert.equal(peaoDeReferenciaDaSequencia(estado), 'peao-branco')
-    assert.ok(vagasDisponiveisDoPeao(estado).length > 0)
+    expect(peaoDeReferenciaDaSequencia(estado)).toBe('peao-branco')
+    expect(vagasDisponiveisDoPeao(estado).length).toBeGreaterThan(0)
   })
 
-  test('sem fallback disponível (peão do turno nulo), segue silencioso', () => {
+  it('sem fallback disponível (peão do turno nulo), segue silencioso', () => {
     const estado = estadoBase({
       posicionadas,
       recebidasPendentes: pendencias,
@@ -1606,9 +1606,9 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
       peoes: [peao('peao-branco', INICIAL)],
     })
 
-    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
-    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
-    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
+    expect(peaoDeReferenciaDaSequencia(estado)).toBeNull()
+    expect(vagasDisponiveisDoPeao(estado)).toEqual([])
+    expect(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte')).toBeNull()
   })
 
   // M1/review #333: a única fonte real é a PartidaPage; qualquer factory/cena
@@ -1619,7 +1619,7 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
   // escolha inertes (o warn DEV warn-once é estado de módulo e o
   // import.meta.env.DEV varia entre ambientes — o contrato testável é a
   // normalização sem lançamento).
-  test('factory sem peaoDoTurnoId não lança — referência null e vagas inertes (M1 #326)', () => {
+  it('factory sem peaoDoTurnoId não lança — referência null e vagas inertes (M1 #326)', () => {
     const estado = {
       ...estadoBase({
         posicionadas,
@@ -1630,9 +1630,9 @@ describe('fallback do peão do turno com pendências (issue #326)', () => {
     // A dupla asserção acima apaga o campo obrigatório (cenário do M1).
     delete (estado as { peaoDoTurnoId?: string | null }).peaoDoTurnoId
 
-    assert.equal(peaoDeReferenciaDaSequencia(estado), null)
-    assert.deepEqual(vagasDisponiveisDoPeao(estado), [])
-    assert.equal(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte'), null)
+    expect(peaoDeReferenciaDaSequencia(estado)).toBeNull()
+    expect(vagasDisponiveisDoPeao(estado)).toEqual([])
+    expect(mapearEscolhaDeVagaDaRecebida(estado, 'recebida-reta-1', 'norte')).toBeNull()
   })
 })
 

@@ -89,14 +89,13 @@ import type {
 
 /**
  * Pendência no cliente: a forma sorteada da #138 (o wire já traz o pecaId da
- * peça sorteada da Caixa; a vaga e a célula-alvo podem ser nulas até
- * ESCOLHER_VAGA_DA_PECA_RECEBIDA). `orientacao` é metadado client-side do
- * GIRAR_PECA em foco — o snapshot a popula na reconexão. A pendência só sai
+ * peça sorteada da Caixa, com tipo e orientação de composição; a vaga e a
+ * célula-alvo podem ser nulas até ESCOLHER_VAGA_DA_PECA_RECEBIDA). A
+ * `orientacao` do wire é a de nascimento (o snapshot a repopula na
+ * reconexão); o GIRAR_PECA local a atualiza em foco. A pendência só sai
  * da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
-export interface PendenciaNoCliente extends PendenciaDaPecaSorteada {
-  readonly orientacao?: Orientacao
-}
+export interface PendenciaNoCliente extends PendenciaDaPecaSorteada {}
 
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]

@@ -106,7 +106,7 @@ describe('som do encaixe — origem pura estado anterior → mesa/bandeja (issue
     const estado = {
       ...criarEstadoInicialDoCliente(),
       recebidasPendentes: [
-        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta' as const, vaga: null, celulaAlvo: null },
+        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta' as const, orientacao: 0 as const, vaga: null, celulaAlvo: null },
       ],
     }
     expect(origemDoEncaixe(estado, 'reta-1')).toEqual({ origem: 'bandeja', indiceNaMesa: null })

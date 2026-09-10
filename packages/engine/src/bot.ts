@@ -15,33 +15,53 @@
 //
 // Precedência das subfases em acoesValidasDaSubfase:
 //   (a) partida terminada ou vez de outro jogador → sem ações;
-//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida (em
-//       Baixa Iluminação, apenas vagas em células escuras — #341);
+//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida, em fluxo
+//       serial (enquanto uma Recebida aguarda o encaixe, não se escolhe a vaga
+//       de outra — o encaixe da pendente vem primeiro, preservando
+//       pecaSelecionadaId == pecaId para o giro; em Baixa Iluminação, apenas
+//       vagas em células escuras — #341);
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
-//   (d) turno normal sem Confirmação → selecionar o Peão, mover, permanecer
-//       ou confirmar a posição (quando houve mudança de peça);
+//   (d) turno normal sem Confirmação → selecionar o Peão e, sobre a Peça do
+//       início, mover (uma vez) ou permanecer; fora dela, só confirmar a
+//       posição — o bot nunca encadeia 2 movers no mesmo turno;
 //   (e) posição confirmada (e sem pendências) → encerrar o turno.
+//
+// Randomização da orientação: todo posicionar_peca sorteado passa por
+// expandirPosicionamentoDoBot, que sorteia um rótulo de giro (manter, 1x
+// horário, 1x anti-horário, 2x horário, 2x anti-horário) dentre os que geram
+// conexão com a peça geradora — e emite os girar_peca correspondentes antes
+// do encaixe. A Inicial (sem geradora) sorteia entre os 5 rótulos sem filtro.
+// Peças simétricas (cruz, especiais e monstros — 4 bordas abertas) dispensam
+// o giro: qualquer orientação conecta e o giro seria no-op visual.
 //
 // A confirmação em (d) — confirmar_posicao_do_peao quando o Peão saiu da Peça
 // do início do turno — é exigência estrutural da engine (o Encerramento do
 // Turno normal a requer e a Permanência só vale sobre a Peça de início); sem
 // ela o loop jamais alcançaria o encerrar_turno nos turnos normais.
 //
-// Fora do escopo deliberado: girar_peca/finalizar_manipulacao (janela
-// opcional de Manipulação — o bot encaixa na orientação sorteada),
-// atravessar_o_escuro (jogada opcional de Baixa Iluminação — o bot em Baixa
-// usa a movimentação normal; a pendência da Travessia, com célula travada,
-// segue enumerada em (b)) e desselecionar_peao (sem efeito útil no turno).
+// Fora do escopo deliberado: finalizar_manipulacao (janela de Manipulação
+// pós-encaixe — o bot não manipula após posicionar), atravessar_o_escuro
+// (jogada opcional de Baixa Iluminação — o bot em Baixa usa a movimentação
+// normal) e desselecionar_peao (sem efeito útil no turno). O girar_peca
+// pré-encaixe FAZ parte do plano, via expandirPosicionamentoDoBot. A
+// pendência da Travessia (Baixa, com célula travada) segue enumerada em (b).
 
 import {
+  bordasAbertas,
+  celulaVizinhaNaBorda,
   ehPecaDeMonstro,
+  ehPecaEspecial,
   tetoDoPortao,
   vagasDisponiveis,
   vizinhasConectadas,
+  type BordaCardinal,
   type Celula,
   type CorDoPeao,
+  type Orientacao,
   type PecaPosicionada,
+  type SentidoDeRotacao,
+  type TipoDaPeca,
 } from './tabuleiro.ts';
 import { conectaNaVaga } from './peoes.ts';
 import {
@@ -53,7 +73,10 @@ import {
 // Failsafe contra loop infinito: teto de ações sorteadas por turno. Ao
 // atingi-lo, o loop tenta UMA vez o encerrar_turno forçado e, se a engine o
 // rejeitar (ex.: PENDENCIA_NAO_RESOLVIDA), desiste do turno sem contorno.
-export const MAX_ACOES_POR_TURNO_DO_BOT = 10;
+// Teto em 20 para acomodar o pior caso de um turno de movimento único:
+// selecionar + mover + confirmar + até 4 recebidas × (escolher + encaixar)
+// + encerrar, com folga.
+export const MAX_ACOES_POR_TURNO_DO_BOT = 20;
 
 export interface IdentidadeDoBot {
   readonly jogadorId: string;
@@ -101,6 +124,174 @@ export function sortearAcao<T>(acoes: readonly T[]): T {
   return sorteada;
 }
 
+// --- Randomização da orientação do bot --------------------------------------
+//
+// O bot encaixa cada peça numa orientação sorteada entre 5 rótulos — manter,
+// 1x horário, 1x anti-horário, 2x horário, 2x anti-horário (os dois últimos
+// colapsam em 180°, dando peso duplo a essa orientação) — filtrados aos que
+// geram conexão com a peça geradora da vaga.
+
+const ORIENTACOES_CANDIDATAS: readonly Orientacao[] = [0, 90, 180, 270];
+
+const BORDA_OPOSTA_DO_BOT: Record<BordaCardinal, BordaCardinal> = {
+  norte: 'sul',
+  sul: 'norte',
+  leste: 'oeste',
+  oeste: 'leste',
+};
+
+export type RotuloDeGiroDoBot =
+  | 'manter'
+  | 'horario_1x'
+  | 'anti_horario_1x'
+  | 'horario_2x'
+  | 'anti_horario_2x';
+
+const ROTULOS_DE_GIRO_DO_BOT: readonly {
+  readonly rotulo: RotuloDeGiroDoBot;
+  readonly passosHorarios: 0 | 1 | 2 | 3;
+  readonly giros: readonly SentidoDeRotacao[];
+}[] = [
+  { rotulo: 'manter', passosHorarios: 0, giros: [] },
+  { rotulo: 'horario_1x', passosHorarios: 1, giros: ['horario'] },
+  { rotulo: 'anti_horario_1x', passosHorarios: 3, giros: ['anti_horario'] },
+  { rotulo: 'horario_2x', passosHorarios: 2, giros: ['horario', 'horario'] },
+  {
+    rotulo: 'anti_horario_2x',
+    passosHorarios: 2,
+    giros: ['anti_horario', 'anti_horario'],
+  },
+];
+
+// A nova peça conecta com a geradora quando tem aberta a borda voltada para
+// ela (a oposta da vaga — a geradora tem a vaga aberta por definição de
+// vagasDisponiveis).
+export function orientacaoConectaComGeradora(
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  vaga: BordaCardinal,
+): boolean {
+  return bordasAbertas({ tipo, orientacao }).includes(
+    BORDA_OPOSTA_DO_BOT[vaga],
+  );
+}
+
+// Peças de 4 bordas abertas em qualquer orientação: o giro é no-op visual e
+// toda orientação conecta — o bot poupa as ações de giro.
+function ehPecaSimetrica(tipo: TipoDaPeca): boolean {
+  return (
+    tipo === 'cruz' || ehPecaEspecial(tipo) || ehPecaDeMonstro(tipo)
+  );
+}
+
+// Conexões totais simuladas da peça numa célula (geradora + vizinhos
+// laterais já posicionados): fallback quando nenhuma das 4 orientações
+// conecta com a geradora — fica com as de maior contagem.
+export function contarConexoesTotaisDoBot(
+  posicionadas: readonly PecaPosicionada[],
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  celula: Celula,
+): number {
+  const porCelula = new Map(
+    posicionadas.map((peca) => [`${peca.celula.linha},${peca.celula.coluna}`, peca]),
+  );
+  let total = 0;
+  for (const borda of bordasAbertas({ tipo, orientacao })) {
+    const vizinha = celulaVizinhaNaBorda(celula, borda);
+    if (!vizinha) {
+      continue;
+    }
+    const pecaVizinha = porCelula.get(`${vizinha.linha},${vizinha.coluna}`);
+    if (
+      pecaVizinha &&
+      bordasAbertas(pecaVizinha).includes(BORDA_OPOSTA_DO_BOT[borda])
+    ) {
+      total++;
+    }
+  }
+  return total;
+}
+
+// Expande um posicionar_peca sorteado em [0..2 girar_peca, posicionar_peca],
+// com a orientação-alvo sorteada entre os rótulos que conectam com a geradora
+// (Inicial: entre os 5, sem filtro). Pura: não muta nada, só calcula.
+// Retorna [comando] intacto quando não há o que girar — peça simétrica, peça
+// fora da seleção (só a selecionada gira na engine) ou peça desconhecida.
+export function expandirPosicionamentoDoBot(
+  estado: EstadoDaPartida,
+  comando: {
+    readonly tipo: 'posicionar_peca';
+    readonly pecaId: string;
+    readonly celula: Celula;
+  },
+  sortear: <T>(acoes: readonly T[]) => T = sortearAcao,
+): ComandoDePartida[] {
+  const tabuleiro = estado.tabuleiro;
+  if (tabuleiro.pecaSelecionadaId !== comando.pecaId) {
+    return [comando];
+  }
+  const recebida = tabuleiro.recebidas.find(
+    (item) => item.pecaId === comando.pecaId,
+  );
+  const inicial = recebida
+    ? undefined
+    : tabuleiro.iniciais.find((peca) => peca.pecaId === comando.pecaId);
+  if (!recebida && !inicial) {
+    return [comando];
+  }
+  const tipo = recebida ? recebida.tipo : inicial!.tipo;
+  const atual = recebida ? recebida.orientacao : inicial!.orientacao;
+  if (ehPecaSimetrica(tipo)) {
+    return [comando];
+  }
+  let validas: Orientacao[];
+  if (recebida) {
+    if (recebida.vaga === null) {
+      return [comando];
+    }
+    validas = ORIENTACOES_CANDIDATAS.filter((orientacao) =>
+      orientacaoConectaComGeradora(tipo, orientacao, recebida.vaga!),
+    );
+    if (validas.length === 0) {
+      const alvo = recebida.celulaAlvo ?? comando.celula;
+      let melhor = -1;
+      let candidatas: Orientacao[] = [];
+      for (const orientacao of ORIENTACOES_CANDIDATAS) {
+        const total = contarConexoesTotaisDoBot(
+          tabuleiro.posicionadas,
+          tipo,
+          orientacao,
+          alvo,
+        );
+        if (total > melhor) {
+          melhor = total;
+          candidatas = [orientacao];
+        } else if (total === melhor) {
+          candidatas.push(orientacao);
+        }
+      }
+      validas = candidatas;
+    }
+  } else {
+    validas = [...ORIENTACOES_CANDIDATAS];
+  }
+  const rotulosValidos = ROTULOS_DE_GIRO_DO_BOT.filter((rotulo) =>
+    validas.includes(((atual + rotulo.passosHorarios * 90) % 360) as Orientacao),
+  );
+  if (rotulosValidos.length === 0) {
+    return [comando];
+  }
+  const escolhido = sortear(rotulosValidos);
+  return [
+    ...escolhido.giros.map(
+      (sentido) =>
+        ({ tipo: 'girar_peca', pecaId: comando.pecaId, sentido }) as const,
+    ),
+    comando,
+  ];
+}
+
 // Enumera EXATAMENTE as ações da subfase vigente do bot — nada da subfase
 // anterior ou seguinte, nada em nome de outro jogador. Cada comando emitido
 // carrega, quando houver campo de peão, exclusivamente o peaoId do bot.
@@ -137,14 +328,68 @@ export function acoesValidasDaSubfase(
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
   // referencia o Peão do próprio jogador, não a Seleção.
   //
+  // Sequencialidade por encaixe com anti-softlock (#311, #260, #349; grade
+  // toroidal: ADR-0012): a escolha de vaga é sequencial POR encaixe — o guard
+  // canônico da engine (peoes.ts) rejeita a escolha de vaga de uma pendência
+  // enquanto outra Recebida tem vaga escolhida e ainda não encaixada
+  // (PENDENCIA_NAO_RESOLVIDA). A FSM espelha o guard: com Recebida fixada,
+  // enumera APENAS as ações sobre ela — sem isso, turnos com 2+ pendências, a
+  // regra comum na grade toroidal, sorteavam a rejeição certa.
+  //
+  // Exatidão literal (review #350): a engine aceita escolher vaga morta — a
+  // conexão só é validada no encaixe (MOVIMENTO_NAO_CONECTADO, peoes.ts) — e
+  // o ramo da fixada recupera a vaga morta girando até a borda voltada à Peça
+  // geradora abrir. A enumeração lista TODAS as vagas elegíveis da pendência,
+  // conectantes ou mortas: filtrar um subconjunto de ações aceitas violaria a
+  // exatidão (diferente do filtro de Baixa abaixo, que remove rejeições
+  // certas). O tradeoff é aceito: o bot pode fixar vaga morta tendo
+  // conectante disponível — custa ≤ 1 giro (reta: 2 de 4 orientações
+  // conectam; T: 3 de 4; cruz/especial/monstro: sempre — não existe peça
+  // "curva", TipoDePecaDeCaminho em tabuleiro.ts), dentro do teto do
+  // failsafe.
+  //
   // Baixa Iluminação (#341): a engine rejeita vaga em célula iluminada
   // (DADOS_INVALIDOS) e a camada Tabuleiro não conhece iluminação — o filtro
   // vive aqui, na FSM, para a enumeração espelhar exatamente o que a engine
   // aceita. Sem vaga escura, a pendência comum não é enumerável e o turno
-  // desdobra em desistência honesta pelo failsafe. A pendência da Travessia
-  // (celulaAlvo fixado) não passa pelo filtro: a engine valida só o match da
-  // célula travada, escura por construção.
+  // desdobra em desistência honesta pelo failsafe (limitação pré-existente da
+  // engine para humanos e bots, documentada no teste da #341).
   if (tabuleiro.recebidas.length > 0) {
+    const fixada = tabuleiro.recebidas.find((item) => item.vaga !== null);
+    if (fixada) {
+      const vagaFixada = fixada.vaga;
+      const alvoFixado = fixada.celulaAlvo;
+      if (
+        vagaFixada !== null &&
+        alvoFixado !== null &&
+        conectaNaVaga(fixada.tipo, fixada.orientacao, vagaFixada)
+      ) {
+        // Encaixe conectado: a borda voltada à Peça geradora — o oposto
+        // da vaga — está aberta na orientação vigente, então a engine aceita.
+        return [
+          { tipo: 'posicionar_peca', pecaId: fixada.pecaId, celula: alvoFixado },
+        ];
+      }
+      // Vaga morta (ou alvo nulo defensivo): recuperação por girar_peca sobre
+      // a Recebida fixada. O girar da engine exige a peça selecionada
+      // (PECA_NAO_SELECIONADA, tabuleiro.ts): guard defensivo — a divergência
+      // é inalcançável por comandos válidos (a escolha da vaga fixa o
+      // pecaSelecionadaId na Recebida — seleção da camada engine, peoes.ts,
+      // não termo de domínio — e a desseleção é rejeitada com Recebidas
+      // pendentes), mas divergindo o ramo não enumera nada ([] honesto,
+      // inalcançável — o failsafe desiste sem girar em falso). Teste
+      // artesanal em bot.test.ts prova a divergência.
+      if (tabuleiro.pecaSelecionadaId !== fixada.pecaId) {
+        return [];
+      }
+      // girarRecebida aceita o giro livremente, sem validar conexão. Cada
+      // sentido é uma ação; em ≤ 1 giro a borda abre (reta: 2 de 4
+      // orientações conectam; T: 3 de 4; cruz/especial/monstro: sempre).
+      return [
+        { tipo: 'girar_peca', pecaId: fixada.pecaId, sentido: 'horario' },
+        { tipo: 'girar_peca', pecaId: fixada.pecaId, sentido: 'anti_horario' },
+      ];
+    }
     const emBaixa = jogador.emBaixaIluminacao ?? false;
     const iluminadas = emBaixa
       ? new Set(
@@ -154,18 +399,21 @@ export function acoesValidasDaSubfase(
         )
       : null;
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
-    // Anti-softlock (issue #311): com outra Recebida já com vaga escolhida e
-    // ainda não encaixada, a engine rejeita nova escolha de vaga com
-    // PENDENCIA_NAO_RESOLVIDA — a FSM não enumera escolher_vaga nesse caso,
-    // só o encaixe da escolhida. Sem isso, turnos com 2+ pendências (a regra
-    // na grade toroidal, issue #260) sorteavam a rejeição certa.
-    const algumaVagaEscolhida = tabuleiro.recebidas.some(
-      (item) => item.vaga !== null,
-    );
     const acoes: ComandoDePartida[] = [];
+    // Fluxo serial — anti-softlock (issue #311): enquanto uma Recebida aguarda
+    // o encaixe (vaga + alvo fixados), a engine rejeita nova escolha de vaga
+    // com PENDENCIA_NAO_RESOLVIDA, então o bot resolve o encaixe antes de
+    // escolher outra vaga — assim o giro da expansão sempre encontra
+    // pecaSelecionadaId == pecaId. Sem isso, turnos com 2+ pendências (a regra
+    // na grade toroidal, issue #260) sorteavam a rejeição certa.
+    // (Pendência travada da Travessia, com alvo mas sem vaga, nunca bloqueia
+    // as demais: ela própria ainda precisa da escolha.)
+    const haEncaixePendente = tabuleiro.recebidas.some(
+      (item) => item.vaga !== null && item.celulaAlvo !== null,
+    );
     for (const recebida of tabuleiro.recebidas) {
       if (recebida.vaga === null) {
-        if (algumaVagaEscolhida) {
+        if (recebida.celulaAlvo === null && haEncaixePendente) {
           continue;
         }
         if (pecaSobOPeao === undefined) {
@@ -207,19 +455,6 @@ export function acoesValidasDaSubfase(
           });
         }
         continue;
-      }
-      if (recebida.celulaAlvo !== null) {
-        // Encaixe só conectado (issue #311): sem conexão, NÃO age — a
-        // selecionada com vaga já teve prioridade absoluta acima, então
-        // recebida não selecionada desconectada é inalcançável no fluxo do
-        // próprio bot.
-        if (conectaNaVaga(recebida.tipo, recebida.orientacao, recebida.vaga)) {
-          acoes.push({
-            tipo: 'posicionar_peca',
-            pecaId: recebida.pecaId,
-            celula: recebida.celulaAlvo,
-          });
-        }
       }
     }
     return acoes;
@@ -281,8 +516,10 @@ export function acoesValidasDaSubfase(
     return [{ tipo: 'encerrar_turno' }];
   }
 
-  // (d) Turno normal sem confirmação: selecionar, mover, permanecer ou
-  // confirmar — conforme a posição do Peão.
+  // (d) Turno normal sem confirmação: selecionar, mover UMA vez ou
+  // permanecer — conforme a posição do Peão. Fora da Peça do início o bot
+  // já andou: só confirma (nunca encadeia outro mover, que causava o
+  // vai-e-vem até o failsafe desistir e strandar a partida).
   const peao = tabuleiro.peoes.find(
     (item) => item.peaoId === jogador.peaoId,
   );
@@ -291,6 +528,13 @@ export function acoesValidasDaSubfase(
   }
   if (tabuleiro.peaoSelecionadoId !== jogador.peaoId) {
     return [{ tipo: 'selecionar_peao', peaoId: jogador.peaoId }];
+  }
+  const sobreAPecaDoInicio = peao.pecaId === estado.pecaDoInicioDoTurnoId;
+  if (!sobreAPecaDoInicio) {
+    // Fora da Peça de início, terminar na peça atual exige a Confirmação de
+    // Posição (a Permanência seria ENCERRAMENTO_INVALIDO e outro mover
+    // seria o segundo passo do turno — proibido para o bot).
+    return [{ tipo: 'confirmar_posicao_do_peao', peaoId: jogador.peaoId }];
   }
   const origem = tabuleiro.posicionadas.find(
     (peca) => peca.pecaId === peao.pecaId,
@@ -316,21 +560,14 @@ export function acoesValidasDaSubfase(
       celula: vizinha.celula,
     });
   }
-  const sobreAPecaDoInicio = peao.pecaId === estado.pecaDoInicioDoTurnoId;
-  if (sobreAPecaDoInicio) {
-    // A Permanência vale só sobre a Peça do início do turno — e nunca sob o
-    // período de graça do Resgate (a engine rejeitaria).
-    const emGraca = (estado.pecasEmPeriodoDeGraca ?? []).includes(
-      peao.pecaId,
-    );
-    if (!emGraca) {
-      acoes.push({ tipo: 'permanecer', peaoId: jogador.peaoId });
-    }
-    return acoes;
+  // A Permanência vale só sobre a Peça do início do turno — e nunca sob o
+  // período de graça do Resgate (a engine rejeitaria).
+  const emGraca = (estado.pecasEmPeriodoDeGraca ?? []).includes(
+    peao.pecaId,
+  );
+  if (!emGraca) {
+    acoes.push({ tipo: 'permanecer', peaoId: jogador.peaoId });
   }
-  // Fora da Peça de início, terminar na peça atual exige a Confirmação de
-  // Posição (a Permanência seria ENCERRAMENTO_INVALIDO).
-  acoes.push({ tipo: 'confirmar_posicao_do_peao', peaoId: jogador.peaoId });
   return acoes;
 }
 
@@ -405,30 +642,50 @@ export function executarTurnoDoBot(
       };
     }
     const comando = sortear(validas);
-    const resultado = aplicarComandoDePartida(estado, comando, jogadorId);
-    if (!resultado.sucesso) {
-      if (resultado.erro.codigo === 'FORA_DA_VEZ') {
-        return { estado, acoesExecutadas, motivo: 'fora_da_vez' };
+    // O posicionar sorteado vira a sequência de orientação + encaixe (0..2
+    // girar_peca com conexão garantida + o posicionar). Cada passo é aplicado
+    // e registrado como os demais — a macro é auto-curativa: se interrompida,
+    // a próxima expansão recalcula a partir da orientação corrente.
+    const sequencia =
+      comando.tipo === 'posicionar_peca'
+        ? expandirPosicionamentoDoBot(estado, comando, sortear)
+        : [comando];
+    let fimAntecipado: ResultadoDoTurnoDoBot | undefined;
+    for (const passo of sequencia) {
+      const resultado = aplicarComandoDePartida(estado, passo, jogadorId);
+      if (!resultado.sucesso) {
+        if (resultado.erro.codigo === 'FORA_DA_VEZ') {
+          fimAntecipado = { estado, acoesExecutadas, motivo: 'fora_da_vez' };
+          break;
+        }
+        // Defesa: a enumeração deveria ser exata — rejeição inesperada vira
+        // desistência em vez de girar em falso.
+        fimAntecipado = {
+          estado,
+          acoesExecutadas,
+          motivo: 'desistencia',
+          codigoDaDesistencia: resultado.erro.codigo,
+        };
+        break;
       }
-      // Defesa: a enumeração deveria ser exata — rejeição inesperada vira
-      // desistência em vez de girar em falso.
-      return {
-        estado,
-        acoesExecutadas,
-        motivo: 'desistencia',
-        codigoDaDesistencia: resultado.erro.codigo,
-      };
+      estado = resultado.estado;
+      acoesExecutadas.push(passo);
+      // Fim de turno próprio: o encerrar_turno e a permanência (que encerra o
+      // turno direto) emitem turno_encerrado no lote. O término da partida tem
+      // prioridade, como no funil do dispatch.
+      if (estado.resultado !== null) {
+        fimAntecipado = { estado, acoesExecutadas, motivo: 'resultado' };
+        break;
+      }
+      if (
+        resultado.eventos.some((evento) => evento.tipo === 'turno_encerrado')
+      ) {
+        fimAntecipado = { estado, acoesExecutadas, motivo: 'encerramento' };
+        break;
+      }
     }
-    estado = resultado.estado;
-    acoesExecutadas.push(comando);
-    // Fim de turno próprio: o encerrar_turno e a permanência (que encerra o
-    // turno direto) emitem turno_encerrado no lote. O término da partida tem
-    // prioridade, como no funil do dispatch.
-    if (estado.resultado !== null) {
-      return { estado, acoesExecutadas, motivo: 'resultado' };
-    }
-    if (resultado.eventos.some((evento) => evento.tipo === 'turno_encerrado')) {
-      return { estado, acoesExecutadas, motivo: 'encerramento' };
+    if (fimAntecipado) {
+      return fimAntecipado;
     }
   }
 }

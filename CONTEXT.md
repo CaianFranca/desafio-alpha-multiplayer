@@ -53,19 +53,23 @@ Jogo entre os 2 a 4 Jogadores de uma Sala, do Encaminhamento até a vitória ou 
 _Avoid_: jogo, sessão
 
 **Resultado**:
-Vitória, derrota ou não-início declarados no término ou cancelamento da Partida; em evento simultâneo das condições, a vitória tem prioridade.
+Vitória, derrota ou não-início declarados no término ou cancelamento da Partida; em evento simultâneo das condições, a vitória tem prioridade, exceto o quórum mínimo — um Jogador restante após desistências encerra em derrota por desistência.
 _Avoid_: desfecho, fim de jogo
+
+**Desistência**:
+Ato irreversível de um Jogador em Partida em andamento; só o próprio Jogador desiste, no próprio turno ou fora dele. Remove o peão (liberando a célula) e a vez da ordem — com Passagem de Vez imediata se era o Jogador Ativo —, recalcula a Iluminação com os restantes e aplica a Limpeza no ato; a vitória é re-avaliada com os N−1 peões no Portão (+ 3 Geradores + Cartão) e, quando resta 1, a Partida termina em derrota. Queda de conexão sem desistência continua voltável, sem expiração.
+_Avoid_: abandono, saída da partida
 
 **Partida Não Iniciada**:
 Cancelamento de Partida preparada sem completar a admissão dos 2 a 4 Jogadores; com todos desconectados libera em 10s, com admissão parcial libera no teto de 90s; encerra conexões com PARTIDA_NAO_INICIADA e avisa o lobby para reabrir a Sala.
-_Avoid_: abandono, desistência, timeout
+_Avoid_: abandono, timeout
 
 **Partida Órfã**:
 Sala encaminhada cuja Partida preparada foi cancelada, expirou ou está com todos em reconexão; libera SAIR_DA_SALA e ENTRAR_NA_SALA em nova Sala.
 _Avoid_: sala fantasma, sala presa
 
 **Retorno à Sala**:
-Volta dos Jogadores à Sala de origem após o término da Partida; a Sala reabre com os mesmos Membros, mantendo a ordem de entrada e o Anfitrião, com a Prontidão redefinida.
+Volta dos Jogadores à Sala de origem após o término da Partida — incluindo a derrota por desistência, pelos restantes —; a Sala reabre com os mesmos Membros, mantendo a ordem de entrada e o Anfitrião, com a Prontidão redefinida.
 _Avoid_: retorno ao lobby, volta ao lobby
 
 **Encaminhamento**:

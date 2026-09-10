@@ -368,8 +368,8 @@ test('primeiro turno: Peça Inicial própria, Peão com Recebimento automático 
     {
       tipo: 'recebimento_gerado',
       recebidas: [
-        { recebidaId: 'recebida-reta-1', pecaId: 'reta-1', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
-        { recebidaId: 'recebida-reta-2', pecaId: 'reta-2', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
+        { recebidaId: 'recebida-reta-1', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
+        { recebidaId: 'recebida-reta-2', pecaId: 'reta-2', tipoDaPeca: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
       ],
     },
     {
@@ -669,7 +669,7 @@ test('turno normal: mover, desfazer pela conexão simétrica, confirmar com Rece
     {
       tipo: 'recebimento_gerado',
       recebidas: [
-        { recebidaId: 'recebida-reta-7', pecaId: 'reta-7', tipoDaPeca: 'reta', vaga: null, celulaAlvo: null },
+        { recebidaId: 'recebida-reta-7', pecaId: 'reta-7', tipoDaPeca: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
       ],
     },
     {
@@ -1473,6 +1473,7 @@ test('travessia do Escuro: atravessar, encaixar a Recebida travada, confirmar se
           recebidaId: 'recebida-reta-x',
           pecaId: 'reta-x',
           tipoDaPeca: 'reta',
+          orientacao: 0,
           vaga: null,
           celulaAlvo: { linha: 1, coluna: 3 },
         },
@@ -1993,10 +1994,18 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
     codigoDaRejeicao(estado, encerrarTurno(), 'ana'),
     'ENCERRAMENTO_INVALIDO',
   );
-  // Permanência: o Peão segue selecionado após o mover (Re-seleção da
-  // Movimentação, #334); após a mudança de Peça o permanecer responde
-  // ENCERRAMENTO_INVALIDO direto — nenhum caminho fecha o turno sem o
+  // Permanência: o mover re-seleciona o Peão (semântica única, issue #334),
+  // então o guarda do Tabuleiro não barra por seleção — após a mudança de
+  // Peça é direto ENCERRAMENTO_INVALIDO. Nenhum caminho fecha o turno sem o
   // confirmar.
+  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+  assert.equal(
+    codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
+    'ENCERRAMENTO_INVALIDO',
+  );
+  // Re-selecionar o próprio Peão é idempotente (sem novo Recebimento) e não
+  // muda o veredito.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   assert.equal(
     codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
     'ENCERRAMENTO_INVALIDO',
