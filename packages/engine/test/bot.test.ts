@@ -9,9 +9,12 @@ import {
   executarTurnoDoBot,
   mapearBot,
   sortearAcao,
+  type Celula,
   type ComandoDePartida,
   type EstadoDaPartida,
   type Orientacao,
+  type JogadorDaPartida,
+  type PecaRecebida,
 } from '../src/index.ts';
 
 const selecionarPeca = (pecaId: string) =>
@@ -185,6 +188,67 @@ function peaoIdDo(jogadorId: string): string {
   const ordem = JOGADORES.indexOf(jogadorId);
   const cores = ['branco', 'vermelho', 'azul', 'amarelo'];
   return `peao-${cores[ordem]}`;
+}
+
+// Patch inline do Jogador (mesmo espírito do comJogador de sanidade.test.ts):
+// injeta flags de estado (ex.: emBaixaIluminacao) sem percorrer a engine.
+function comJogador(
+  estado: EstadoDaPartida,
+  jogadorId: string,
+  patch: Partial<JogadorDaPartida>,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    jogadores: estado.jogadores.map((item) =>
+      item.jogadorId === jogadorId ? { ...item, ...patch } : item,
+    ),
+  };
+}
+
+// Pendência sintética do Recebimento (vaga e célula-alvo nulas até a escolha):
+// o ramo (b) da FSM não lê o pecaId da pendência, então o valor é irrelevante
+// para a enumeração.
+const recebidaBaixa: PecaRecebida = {
+  recebidaId: 'rec-baixa',
+  pecaId: 'recebida-sintetica',
+  tipo: 'reta',
+  orientacao: 0,
+  vaga: null,
+  celulaAlvo: null,
+};
+
+// Cenário de Baixa Iluminação controlado (#341): ana em Baixa, com o Peão
+// sobre uma Peça Cruz sintética em (3,0) — as células vizinhas norte (2,0),
+// leste (3,1) e sul (4,0) estão vazias na Rodada 2 (longe das quatro
+// Iniciais e das vagas que elas geram), e o oeste cai fora da grade — e a
+// pendência informada como estado direto: a FSM enumera sem aplicar comandos.
+function estadoDaBaixa(
+  recebida: PecaRecebida,
+  celulasIluminadas: readonly Celula[],
+): EstadoDaPartida {
+  const base = partidaEmRodada2(7);
+  return {
+    ...comJogador(base, 'ana', { emBaixaIluminacao: true }),
+    celulasIluminadas,
+    tabuleiro: {
+      ...base.tabuleiro,
+      posicionadas: [
+        ...base.tabuleiro.posicionadas,
+        {
+          pecaId: 'peca-controle',
+          tipo: 'cruz',
+          orientacao: 0,
+          celula: { linha: 3, coluna: 0 },
+        },
+      ],
+      peoes: base.tabuleiro.peoes.map((peao) =>
+        peao.peaoId === 'peao-branco'
+          ? { ...peao, pecaId: 'peca-controle' }
+          : peao,
+      ),
+      recebidas: [recebida],
+    },
+  };
 }
 
 test('mapearBot traduz botId em peão, cor, ordem e flag do Primeiro Turno', () => {
@@ -362,6 +426,49 @@ test('subfase (b): sem Peão selecionado, planeja o Recebimento direto — pré-
   );
 });
 
+test('subfase (b): em Baixa Iluminação a FSM enumera apenas vagas em células escuras (#341)', () => {
+  // A vaga norte (2,0) da Peça controle está iluminada; leste e sul seguem
+  // escuras — a engine rejeita a iluminada com DADOS_INVALIDOS.
+  const estado = estadoDaBaixa(recebidaBaixa, [{ linha: 2, coluna: 0 }]);
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  // Conjunto de bordas enumeradas é exatamente o das vagas escuras — nenhuma
+  // ação mira célula iluminada.
+  assert.deepEqual(acoes, [
+    escolherVaga('rec-baixa', 'leste'),
+    escolherVaga('rec-baixa', 'sul'),
+  ]);
+});
+
+test('subfase (b): pendência da Travessia segue enumerando a borda travada em Baixa (#341)', () => {
+  // Pendência da Travessia do Escuro: célula-alvo pré-fixada — aqui, na vaga
+  // norte, ILUMINADA. A engine valida só o match da célula travada, então a
+  // FSM não aplica o filtro de Baixa a esta pendência.
+  const travessia: PecaRecebida = {
+    ...recebidaBaixa,
+    celulaAlvo: { linha: 2, coluna: 0 },
+  };
+  const estado = estadoDaBaixa(travessia, [{ linha: 2, coluna: 0 }]);
+  assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
+    escolherVaga('rec-baixa', 'norte'),
+  ]);
+});
+
+test('subfase (b): em Baixa com todas as vagas iluminadas, escolher_vaga não é enumerada (#341)', () => {
+  // Todas as três vagas da Peça controle iluminadas: a pendência comum fica
+  // irresolúvel e o ramo não emite escolher_vaga — lista vazia. No driver,
+  // isso desdobra em desistência honesta via failsafe (o encerrar_turno
+  // forçado cai em PENDENCIA_NAO_RESOLVIDA); pendência irresolúvel em Baixa é
+  // limitação pré-existente da engine para humanos e bots, fora do escopo
+  // desta correção.
+  const estado = estadoDaBaixa(recebidaBaixa, [
+    { linha: 2, coluna: 0 },
+    { linha: 3, coluna: 1 },
+    { linha: 4, coluna: 0 },
+  ]);
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  assert.deepEqual(acoes, []);
+});
+
 test('turno normal: início só seleciona o Peão; depois move ou permanece', () => {
   const estado = partidaEmRodada2();
   assert.deepEqual(acoesValidasDaSubfase(estado, 'ana'), [
@@ -443,7 +550,9 @@ test('via da permanência: ficar na peça de início encerra o turno direto', ()
 });
 
 test('toda ação enumerada é aceita pela engine (exatidão da FSM)', () => {
-  for (let semente = 1; semente <= 10; semente++) {
+  // 25 sementes: o caminho do bug da #341 era seed-dependente (bot em Baixa
+  // Iluminação com vaga candidata iluminada) e escapava de amostras curtas.
+  for (let semente = 1; semente <= 25; semente++) {
     let estado = partidaIniciadaCom(JOGADORES, semente);
     for (let passo = 0; passo < 40; passo++) {
       if (estado.resultado !== null) break;
@@ -604,6 +713,14 @@ test('4 bots jogam até o resultado ou o limite de rodadas, sem exceção', () =
       }
       estado = turno.estado;
       if (turno.motivo === 'desistencia') {
+        // Guarda da #341: a FSM não enumera mais vaga iluminada em Baixa, e
+        // nenhuma outra ação enumerada é rejeitada pela engine — desistência
+        // DADOS_INVALIDOS indica regressão da enumeração.
+        assert.notEqual(
+          turno.codigoDaDesistencia,
+          'DADOS_INVALIDOS',
+          'desistência DADOS_INVALIDOS: ação enumerada rejeitada pela engine',
+        );
         // Desistência é desdobramento legítimo do failsafe: o turno não
         // avançou (o ator segue na vez) e a função é pura com sorteio
         // aleatório — re-executar o turno do mesmo ator em vez de abortar a
@@ -617,13 +734,12 @@ test('4 bots jogam até o resultado ou o limite de rodadas, sem exceção', () =
       estado.resultado !== null || tentativas === 400,
       'deveria terminar ou atingir o limite de tentativas',
     );
-    // Detector de travamento real, temporário até a #341: falha apenas quando
-    // NENHUM turno progrediu (todas as tentativas morreram em desistência sem
-    // avançar o estado). Com a FSM ainda enumerando vaga iluminada em Baixa
-    // (DADOS_INVALIDOS → desistência, #341), desistências legítimas podem ser
-    // frequentes — tempestade de 274 desistências observada em seed 7, numa
-    // partida que terminou — enquanto o estado segue avançando entre elas
-    // (#334). Quando a #341 filtrar as vagas escuras, revisitar este detector.
+    // Detector de travamento real: falha apenas quando NENHUM turno progrediu
+    // (todas as tentativas morreram em desistência sem avançar o estado).
+    // Desistências legítimas podem ocorrer — o wander aleatório não garante
+    // progresso por turno — mas o estado segue avançando entre elas (#334),
+    // e nenhuma delas é DADOS_INVALIDOS com o filtro de vagas escuras em
+    // Baixa (#341).
     assert.ok(
       desistencias < tentativas,
       `jogo travado na semente ${semente}: ${desistencias}/${tentativas} turnos em desistência`,

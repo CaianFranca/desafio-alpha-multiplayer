@@ -15,7 +15,8 @@
 //
 // Precedência das subfases em acoesValidasDaSubfase:
 //   (a) partida terminada ou vez de outro jogador → sem ações;
-//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida;
+//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida (em
+//       Baixa Iluminação, apenas vagas em células escuras — #341);
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
 //   (d) turno normal sem Confirmação → selecionar o Peão, mover, permanecer
@@ -27,11 +28,11 @@
 // Turno normal a requer e a Permanência só vale sobre a Peça de início); sem
 // ela o loop jamais alcançaria o encerrar_turno nos turnos normais.
 //
-// Fora do escopo deliberado: finalizar_manipulacao (janela opcional de
-// Manipulação — o bot gira Recebidas exclusivamente para encaixar conectado e
-// não manipula a peça posicionada), atravessar_o_escuro (jogada opcional de
-// Baixa Iluminação — o bot em Baixa usa a movimentação normal) e
-// desselecionar_peao (sem efeito útil no turno).
+// Fora do escopo deliberado: girar_peca/finalizar_manipulacao (janela
+// opcional de Manipulação — o bot encaixa na orientação sorteada),
+// atravessar_o_escuro (jogada opcional de Baixa Iluminação — o bot em Baixa
+// usa a movimentação normal; a pendência da Travessia, com célula travada,
+// segue enumerada em (b)) e desselecionar_peao (sem efeito útil no turno).
 
 import {
   ehPecaDeMonstro,
@@ -134,45 +135,24 @@ export function acoesValidasDaSubfase(
   // peça sorteada exige a escolha da vaga e o encaixe, sem pular. O planejador
   // emite as ações direto, mesmo sem Peão selecionado — o engine pré-adopta a
   // seleção do ator quando nula (review #333), e `pecaSobOPeaoDoJogador`
-  // referencia o Peão do próprio jogador, não a Seleção. O encaixe só vale
-  // conectado à Peça sob o Peão (issue #311): a Recebida selecionada com vaga
-  // tem prioridade absoluta — encaixa quando conectada, gira até conectar caso
-  // contrário — impedindo a intercalação de pendências (consistente com a
-  // guarda anti-softlock do domínio).
+  // referencia o Peão do próprio jogador, não a Seleção.
+  //
+  // Baixa Iluminação (#341): a engine rejeita vaga em célula iluminada
+  // (DADOS_INVALIDOS) e a camada Tabuleiro não conhece iluminação — o filtro
+  // vive aqui, na FSM, para a enumeração espelhar exatamente o que a engine
+  // aceita. Sem vaga escura, a pendência comum não é enumerável e o turno
+  // desdobra em desistência honesta pelo failsafe. A pendência da Travessia
+  // (celulaAlvo fixado) não passa pelo filtro: a engine valida só o match da
+  // célula travada, escura por construção.
   if (tabuleiro.recebidas.length > 0) {
-    const recebidaSelecionada = tabuleiro.recebidas.find(
-      (recebida) => recebida.pecaId === tabuleiro.pecaSelecionadaId,
-    );
-    if (
-      recebidaSelecionada !== undefined &&
-      recebidaSelecionada.vaga !== null &&
-      recebidaSelecionada.celulaAlvo !== null
-    ) {
-      if (
-        conectaNaVaga(
-          recebidaSelecionada.tipo,
-          recebidaSelecionada.orientacao,
-          recebidaSelecionada.vaga,
+    const emBaixa = jogador.emBaixaIluminacao ?? false;
+    const iluminadas = emBaixa
+      ? new Set(
+          estado.celulasIluminadas.map(
+            (celula) => `${celula.linha},${celula.coluna}`,
+          ),
         )
-      ) {
-        return [
-          {
-            tipo: 'posicionar_peca',
-            pecaId: recebidaSelecionada.pecaId,
-            celula: recebidaSelecionada.celulaAlvo,
-          },
-        ];
-      }
-      // Gira até a borda voltada à Peça sob o Peão abrir (sentido fixo; o
-      // próximo desvio gira de novo até conectar).
-      return [
-        {
-          tipo: 'girar_peca',
-          pecaId: recebidaSelecionada.pecaId,
-          sentido: 'horario',
-        },
-      ];
-    }
+      : null;
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
     for (const recebida of tabuleiro.recebidas) {
@@ -201,6 +181,14 @@ export function acoesValidasDaSubfase(
           continue;
         }
         for (const vaga of vagas) {
+          // Em Baixa, vaga iluminada é rejeição certa (DADOS_INVALIDOS):
+          // enumera apenas as vagas escuras restantes.
+          if (
+            iluminadas !== null &&
+            iluminadas.has(`${vaga.celula.linha},${vaga.celula.coluna}`)
+          ) {
+            continue;
+          }
           acoes.push({
             tipo: 'escolher_vaga_da_peca_recebida',
             recebidaId: recebida.recebidaId,
