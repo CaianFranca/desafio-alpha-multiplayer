@@ -54,7 +54,7 @@ describe('aplicarSnapshot com roster N=2..4 (#284)', () => {
     const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([], [...PEOES_4]))
     expect(estado.peoes).toHaveLength(0)
     expect(estado.iniciais).toHaveLength(0)
-    expect(estado.quantidadeDeJogadores).toBeNull()
+    expect(estado.quantidadeParaLayout).toBeNull()
   })
 
   it('roster fora da faixa não inventa fantasmas: N cru é exibido, layout usa clamp', () => {
@@ -66,6 +66,6 @@ describe('aplicarSnapshot com roster N=2..4 (#284)', () => {
     // Só o peão real aparece (sem os 3 fantasmas); o N de layout/teto vai
     // ao clamp 2..4 enquanto o anúncio deriva o N real do roster.
     expect(estado.peoes.map((p) => p.peaoId)).toEqual(['peao-branco'])
-    expect(estado.quantidadeDeJogadores).toBe(2)
+    expect(estado.quantidadeParaLayout).toBe(2)
   })
 })

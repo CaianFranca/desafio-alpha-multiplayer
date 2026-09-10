@@ -84,7 +84,7 @@ function reduzirModelo(
     // recria o estado inicial com o N atualizado da Sala. Com jogadores já
     // presentes (snapshot), a autoridade é do servidor — não sobrescreve.
     if (Object.keys(estado.jogadorPorId).length > 0) return estado
-    if (estado.quantidadeDeJogadores === acao.quantidade) return estado
+    if (estado.quantidadeParaLayout === acao.quantidade) return estado
     return criarEstadoInicialDoCliente(acao.quantidade)
   }
   return reduzirEvento(estado, acao.evento)
@@ -129,12 +129,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     if (
       quantidadeDeMembrosDaSala !== null &&
-      modelo.quantidadeDeJogadores !== quantidadeDeMembrosDaSala &&
+      modelo.quantidadeParaLayout !== quantidadeDeMembrosDaSala &&
       Object.keys(modelo.jogadorPorId).length === 0
     ) {
       despachar({ type: 'SYNC_QUANTIDADE', quantidade: quantidadeDeMembrosDaSala })
     }
-  }, [quantidadeDeMembrosDaSala, modelo.quantidadeDeJogadores, modelo.jogadorPorId])
+  }, [quantidadeDeMembrosDaSala, modelo.quantidadeParaLayout, modelo.jogadorPorId])
   const despacharEvento = useCallback(
     (evento: Parameters<typeof reduzirEvento>[1]) => despachar({ type: 'EVENTO', evento }),
     [],
@@ -446,15 +446,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
   // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
   // (solo anuncia 1, nunca um N falso), teto usa o N válido (#284, #281).
+  // Solo (N=1) é estado transitório, nunca partida válida (#281 "solo
+  // continua impossível"): o seed da Sala clampa para layout, o anúncio
+  // pós-snapshot mostra o N cru.
   // Risco 5: quantidade é obrigatória na cadeia — não deriva de peoes.length
   // (modo misto). Antes do snapshot, a autoridade é o seed da Sala (já clampeado).
   // Definido antes do ciclo para alimentar o teto do Portão no espelho.
   const quantidadeRealDeJogadores = useMemo(() => {
     const doSnapshot = Object.keys(modelo.jogadorPorId).length
     if (doSnapshot > 0) return doSnapshot
-    if (modelo.quantidadeDeJogadores != null) return modelo.quantidadeDeJogadores
+    if (modelo.quantidadeParaLayout != null) return modelo.quantidadeParaLayout
     return quantidadeDeMembrosDaSala ?? 4
-  }, [modelo.jogadorPorId, modelo.quantidadeDeJogadores, quantidadeDeMembrosDaSala])
+  }, [modelo.jogadorPorId, modelo.quantidadeParaLayout, quantidadeDeMembrosDaSala])
   const quantidadeParaTeto = quantidadeValidaDeJogadores(quantidadeRealDeJogadores)
   // ── Estado de interação dos peões (derivado do modelo) — indisponível em resultado ──
   // Fallback da sequência pendente (#326): se o espelho ficar sem seleção

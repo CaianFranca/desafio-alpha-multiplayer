@@ -219,8 +219,8 @@ export interface EstadoDoTabuleiroNoCliente {
    * desempate visual em recarregamentos.
    */
   readonly ordemDeChegadaPorChave: Readonly<Record<string, readonly PeaoId[]>>
-  /** Quantidade de jogadores N=2..4 derivada do roster (snapshot); null antes do snapshot. */
-  readonly quantidadeDeJogadores: number | null
+  /** N de layout/teto 2..4 derivado do roster (snapshot, clamp); null antes do snapshot. Não é o N real do anúncio. */
+  readonly quantidadeParaLayout: number | null
 }
 
 /** Estado inicial determinístico do cliente (deltas a partir do zero). Suporta N=2..4; fallback 4. */
@@ -259,7 +259,7 @@ export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): 
     cartaoDeAcessoObtido: false,
     // Sem fila de chegada até o primeiro posicionamento/movimento (issue #298).
     ordemDeChegadaPorChave: {},
-    quantidadeDeJogadores: n,
+    quantidadeParaLayout: n,
   }
 }
 

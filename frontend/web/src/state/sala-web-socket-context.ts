@@ -23,6 +23,7 @@ export function useQuantidadeDeMembrosDaSalaOptional(): number | null {
   const quantidade = ctx?.sala?.membros.length
   if (typeof quantidade !== 'number' || quantidade <= 0) return null
   // Clamp 2..4 para N=1/5+ (risco 4): solo transitório e quórum parcial não geram partida válida,
-  // mas o seed não deve criar mesa com N fora da faixa.
+  // mas o seed não deve criar mesa com N fora da faixa. Solo (N=1) é estado
+  // transitório, nunca partida válida (#281); o anúncio pós-snapshot mostra o N cru.
   return quantidadeValidaDeJogadores(quantidade)
 }

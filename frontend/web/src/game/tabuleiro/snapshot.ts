@@ -224,7 +224,7 @@ export function aplicarSnapshot(
     geradoresLigados: snapshot.geradoresLigados ?? [],
     cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido ?? false,
     ordemDeChegadaPorChave,
-    quantidadeDeJogadores:
+    quantidadeParaLayout:
       quantidadeSnapshot > 0 ? quantidadeValidaDeJogadores(quantidadeSnapshot) : null,
   }
 }

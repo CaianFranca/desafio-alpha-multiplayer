@@ -10,20 +10,20 @@ describe('criarEstadoInicialDoCliente com N (#284)', () => {
     const estado = criarEstadoInicialDoCliente()
     expect(estado.peoes).toHaveLength(4)
     expect(estado.iniciais).toHaveLength(4)
-    expect(estado.quantidadeDeJogadores).toBe(4)
+    expect(estado.quantidadeParaLayout).toBe(4)
   })
 
   it('com N=2 semeia 2 peões e 2 iniciais', () => {
     const estado = criarEstadoInicialDoCliente(2)
     expect(estado.peoes.map((p) => p.peaoId)).toEqual(['peao-branco', 'peao-vermelho'])
     expect(estado.iniciais.map((p) => p.pecaId)).toEqual(['inicial-1', 'inicial-2'])
-    expect(estado.quantidadeDeJogadores).toBe(2)
+    expect(estado.quantidadeParaLayout).toBe(2)
   })
 
   it('com N=3 semeia 3 peões e 3 iniciais', () => {
     const estado = criarEstadoInicialDoCliente(3)
     expect(estado.peoes).toHaveLength(3)
     expect(estado.iniciais).toHaveLength(3)
-    expect(estado.quantidadeDeJogadores).toBe(3)
+    expect(estado.quantidadeParaLayout).toBe(3)
   })
 })
