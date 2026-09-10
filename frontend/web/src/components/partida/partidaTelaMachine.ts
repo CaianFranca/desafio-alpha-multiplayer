@@ -1,4 +1,4 @@
-export type EstadoDaTela = 'carregando' | 'aguardando' | 'disponivel' | 'falha' | 'resultado'
+export type EstadoDaTela = 'carregando' | 'aguardando' | 'disponivel' | 'falha' | 'resultado' | 'partidaNaoIniciada'
 
 export type ResultadoDaPartida = 'vitoria' | 'derrota'
 
@@ -25,10 +25,19 @@ export type EventoDaTela =
   | { type: 'falhar' }
   | { type: 'tentarNovamente' }
   | { type: 'forcar'; estado: EstadoDaTela }
+  | {
+      /**
+       * Partida declarada não iniciada (issue #329): estado terminal de tela,
+       * distinto de `falha` (sem "Tentar novamente" — o retry recairia no
+       * loop de reconexão) e de `resultado` (sem semântica de vitória/derrota
+       * do glossário). O destino é o Retorno à Sala pela Sala reaberta.
+       */
+      type: 'partidaNaoIniciada'
+    }
 
 export const estadoInicial: EstadoDaTela = 'carregando'
 
-const estadosValidos: readonly EstadoDaTela[] = ['carregando', 'aguardando', 'disponivel', 'falha', 'resultado'] as const
+const estadosValidos: readonly EstadoDaTela[] = ['carregando', 'aguardando', 'disponivel', 'falha', 'resultado', 'partidaNaoIniciada'] as const
 
 export function isEstadoDaTela(value: unknown): value is EstadoDaTela {
   return typeof value === 'string' && (estadosValidos as readonly string[]).includes(value)
@@ -44,12 +53,17 @@ export function transicao(estado: EstadoDaTela, evento: EventoDaTela): EstadoDaT
       return 'disponivel'
     case 'partidaTerminada':
       return 'resultado'
+    case 'partidaNaoIniciada':
+      return 'partidaNaoIniciada'
     case 'falhar':
       if (estado === 'resultado') return 'resultado'
+      if (estado === 'partidaNaoIniciada') return 'partidaNaoIniciada'
       return 'falha'
     case 'tentarNovamente':
-      // Resultado é terminal — retry não sai do resultado (requer navegação)
+      // Resultado e não-início são terminais — retry não sai deles (o
+      // não-início requer navegação de volta à Sala reaberta).
       if (estado === 'resultado') return 'resultado'
+      if (estado === 'partidaNaoIniciada') return 'partidaNaoIniciada'
       return 'carregando'
     case 'forcar':
       return evento.estado

@@ -108,7 +108,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const navigate = useNavigate()
   const codigoDeSala = useSalaCodigoOptional()
 
-  const { estado, resultado, motivo, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
+  const { estado, resultado, motivo, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar, partidaNaoIniciada } =
     usePartidaTela({
       estadoInicial: !temAlvo ? 'falha' : estadoInicial,
       loader,
@@ -222,6 +222,21 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     emResultadoRef.current = emResultado
   }, [emResultado])
+  // Não-início (issue #329): estado terminal de tela — como o resultado, a
+  // partida fica em somente-leitura e o destino é o Retorno à Sala.
+  const emNaoInicio = estado === 'partidaNaoIniciada'
+  const emNaoInicioRef = useRef(emNaoInicio)
+  useEffect(() => {
+    emNaoInicioRef.current = emNaoInicio
+  }, [emNaoInicio])
+  // Ref de desconexão para o handler de não-início: o hook do canal precisa
+  // do handler na construção (antes de `desconectar` existir) e o mantém em
+  // ref — a leitura tardia via ref evita a circularidade sem re-subscrever.
+  const desconectarRef = useRef<() => void>(() => {})
+  const aoPartidaNaoIniciada = useCallback(() => {
+    desconectarRef.current()
+    partidaNaoIniciada()
+  }, [partidaNaoIniciada])
 
   // ── Pendentes otimistas anti-duplo-place (issue #249) ──
   // Conjunto de alvos em voo (POSICIONAR_PECA/POSICIONAR_PEAO/
@@ -237,6 +252,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     partidaId,
     onEvento: useCallback(
       (evento) => {
+        // Após o não-início, ignora eventos tardios (terminal) — via ref para evitar stale closure
+        if (emNaoInicioRef.current) return
         // Consumo dos pendentes otimistas (#249): ack remove o alvo em voo;
         // erro e snapshot reconciliam (autoridade total — limpam).
         if (
@@ -376,6 +393,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     ),
     onAdmissao: useCallback(
       (evento) => {
+        // Terminal de não-início: admissões tardias não reabrem a tela.
+        if (emNaoInicioRef.current) return
         if (evento.estado === 'preparada') partidaPreparada()
         else if (evento.estado === 'terminada') {
           // ADMISSAO_ACEITA não carrega resultado (shared/protocol.ts); o
@@ -387,7 +406,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       [partidaPreparada, partidaEmAndamento],
     ),
     onFalhaDeConexao: useCallback(() => falhar(), [falhar]),
+    // Não-início (issue #329): encerra sem loop de reconexão e devolve o
+    // Jogador à Sala reaberta por botão (`voltarASala` no overlay).
+    onPartidaNaoIniciada: aoPartidaNaoIniciada,
   })
+  useEffect(() => {
+    desconectarRef.current = desconectar
+  }, [desconectar])
 
   // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
   const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
@@ -400,12 +425,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     else navigate('/salas/criar')
   }, [desconectar, navigate, codigoDeSala])
 
-  // ── Injeção única de jogadorId (issue #91) — bloqueada após término ──
+  // ── Injeção única de jogadorId (issue #91) — bloqueada após término e no não-início ──
   // Com gate anti-duplo-place (#249): o mesmo alvo em voo não é reenviado.
   const enviarComJogador = useCallback(
     (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
       if (emResultado) return
+      if (emNaoInicio) return
       const chave = chaveDeComandoPendente(comando)
       if (chave !== null) {
         if (pendentesEmVoo.current.has(chave)) return
@@ -413,7 +439,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       }
       enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
-    [enviar, jogadorId, emResultado],
+    [enviar, jogadorId, emResultado, emNaoInicio],
   )
 
   const onComando = useCallback(
@@ -428,7 +454,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const onComandoPeao = enviarComJogador
 
   // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
-  const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+  const minhaVez = !emResultado && !emNaoInicio && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
 
   // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
   // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
@@ -498,6 +524,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
+    if (emNaoInicio) return null
     if (!temAlvo || !estadoEmAndamento) return null
     return {
       peoes: modelo.peoes,
@@ -519,7 +546,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       // N do roster para o teto do Portão (#284): nunca peoes.length.
       quantidadeDeJogadores: quantidadeParaTeto,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto, peaoDoTurnoId])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, emNaoInicio, quantidadeParaTeto, peaoDoTurnoId])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa

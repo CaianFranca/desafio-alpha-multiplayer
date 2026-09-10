@@ -6,7 +6,10 @@
  * os comandos de tabuleiro (SELECIONAR/GIRAR/POSICIONAR/FINALIZAR) pelo canal.
  *
  * Padrão de `useSalaWebSocket`: reconexão simples (1s), fila de comandos
- * pendentes até o `open`, cleanup no unmount. Trata apenas `ADMISSAO_ACEITA`
+ * pendentes até o `open`, cleanup no unmount. Exceção (issue #329): o
+ * fechamento de não-início (`4000 PARTIDA_NAO_INICIADA`) e a
+ * `ADMISSAO_REJEITADA` com `PARTIDA_NAO_ENCONTRADA` são terminais — não
+ * reagendam reconexão e sinalizam `onPartidaNaoIniciada`. Trata apenas `ADMISSAO_ACEITA`
  * (sinaliza que a partida ficou disponível) e eventos da partida
  * (`EventoDoCanalDaPartida` via callback — tabuleiro, peões/ciclo, turnos
  * (ST-11) e iluminação/limpeza da issue #151); mensagens desconhecidas são
@@ -17,6 +20,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type {
   AdmissaoAceitaEvento,
+  AdmissaoRejeitadaEvento,
   PartidaComandoDoCliente,
   TabuleiroEventoDoServidor,
   PeaoEventoDoServidor,
@@ -87,6 +91,29 @@ interface UsePartidaWebSocketOptions {
   onAdmissao: (evento: AdmissaoAceitaEvento) => void
   /** Chamado quando a conexão falha (WebSocket não pôde abrir). */
   onFalhaDeConexao: () => void
+  /**
+   * Chamado quando a Partida é declarada não iniciada (issue #329): caminho
+   * terminal, sem reconexão — o Jogador volta à Sala reaberta por gesto
+   * próprio (Retorno à Sala). Dispara no fechamento `4000
+   * PARTIDA_NAO_INICIADA` do game-server ou na `ADMISSAO_REJEITADA` com
+   * `PARTIDA_NAO_ENCONTRADA` do retry pós-não-início (o upgrade já não
+   * encontra a Partida cancelada).
+   */
+  onPartidaNaoIniciada?: () => void
+}
+
+/**
+ * Fechamento de não-início da Partida (game-server `fecharSocketsDeNaoInicio`,
+ * PR #304): código de aplicação `4000` com reason `PARTIDA_NAO_INICIADA`.
+ * Aceita qualquer um dos dois sinais — o código é a fonte primária, o reason
+ * cobre relays que reescrevem o código.
+ */
+export const CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA = 4000
+export const MOTIVO_PARTIDA_NAO_INICIADA = 'PARTIDA_NAO_INICIADA'
+
+function fechamentoDeNaoInicio(code: number, reason: string | undefined): boolean {
+  if (code === CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA) return true
+  return typeof reason === 'string' && reason.includes(MOTIVO_PARTIDA_NAO_INICIADA)
 }
 
 /**
@@ -101,6 +128,7 @@ export function usePartidaWebSocket({
   onEvento,
   onAdmissao,
   onFalhaDeConexao,
+  onPartidaNaoIniciada,
 }: UsePartidaWebSocketOptions): UsePartidaWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
@@ -112,11 +140,13 @@ export function usePartidaWebSocket({
   const onEventoRef = useRef(onEvento)
   const onAdmissaoRef = useRef(onAdmissao)
   const onFalhaDeConexaoRef = useRef(onFalhaDeConexao)
+  const onPartidaNaoIniciadaRef = useRef(onPartidaNaoIniciada)
   useEffect(() => {
     onEventoRef.current = onEvento
     onAdmissaoRef.current = onAdmissao
     onFalhaDeConexaoRef.current = onFalhaDeConexao
-  }, [onEvento, onAdmissao, onFalhaDeConexao])
+    onPartidaNaoIniciadaRef.current = onPartidaNaoIniciada
+  }, [onEvento, onAdmissao, onFalhaDeConexao, onPartidaNaoIniciada])
 
   const encerrarConexao = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -191,6 +221,30 @@ export function usePartidaWebSocket({
         case 'ADMISSAO_ACEITA':
           onAdmissaoRef.current(data as AdmissaoAceitaEvento)
           return
+        case 'ADMISSAO_REJEITADA': {
+          // Pós-não-início (issue #329): o retry encontra o upgrade sem a
+          // Partida cancelada (HTTP 404 `PARTIDA_NAO_ENCONTRADA`) e o canal o
+          // entrega como mensagem. É o mesmo terminal do close 4000: encerra
+          // sem reagendar e devolve o Jogador à Sala reaberta. Demais códigos
+          // de admissão seguem ignorados como antes.
+          const codigo = (data as AdmissaoRejeitadaEvento).codigo
+          if (codigo === 'PARTIDA_NAO_ENCONTRADA') {
+            if (!montadoRef.current) return
+            ws.onclose = null
+            if (reconnectTimerRef.current !== null) {
+              clearTimeout(reconnectTimerRef.current)
+              reconnectTimerRef.current = null
+            }
+            wsRef.current = null
+            try {
+              ws.close()
+            } catch {
+              // ignora
+            }
+            onPartidaNaoIniciadaRef.current?.()
+          }
+          return
+        }
         case 'PECA_SELECIONADA':
         case 'PECA_DESELECIONADA':
         case 'PECA_GIRADA':
@@ -226,9 +280,24 @@ export function usePartidaWebSocket({
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       if (!montadoRef.current) return
       wsRef.current = null
+      // Não-início (issue #329): a Partida foi declarada não iniciada e o
+      // lobby reabriu a Sala — terminal, sem reagendar reconexão (o retry
+      // cairia no upgrade 404 em loop). Demais fechamentos mantêm a
+      // reconexão simples após 1s.
+      if (fechamentoDeNaoInicio(event.code, event.reason)) {
+        if (reconnectTimerRef.current !== null) {
+          clearTimeout(reconnectTimerRef.current)
+          reconnectTimerRef.current = null
+        }
+        // Socket terminal: nula o handler como no encerramento manual para
+        // sinalizar "encerrado sem reconexão" ao inspetor/testes.
+        ws.onclose = null
+        onPartidaNaoIniciadaRef.current?.()
+        return
+      }
       // Reconexão simples após 1s se ainda montado.
       if (reconnectTimerRef.current === null) {
         reconnectTimerRef.current = window.setTimeout(() => {
