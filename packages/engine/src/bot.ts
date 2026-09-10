@@ -43,6 +43,7 @@ import {
   type CorDoPeao,
   type PecaPosicionada,
 } from './tabuleiro.ts';
+import { conectaNaVaga } from './peoes.ts';
 import {
   aplicarComandoDePartida,
   type ComandoDePartida,
@@ -197,11 +198,17 @@ export function acoesValidasDaSubfase(
         continue;
       }
       if (recebida.celulaAlvo !== null) {
-        acoes.push({
-          tipo: 'posicionar_peca',
-          pecaId: recebida.pecaId,
-          celula: recebida.celulaAlvo,
-        });
+        // Encaixe só conectado (issue #311): sem conexão, NÃO age — a
+        // selecionada com vaga já teve prioridade absoluta acima, então
+        // recebida não selecionada desconectada é inalcançável no fluxo do
+        // próprio bot.
+        if (conectaNaVaga(recebida.tipo, recebida.orientacao, recebida.vaga)) {
+          acoes.push({
+            tipo: 'posicionar_peca',
+            pecaId: recebida.pecaId,
+            celula: recebida.celulaAlvo,
+          });
+        }
       }
     }
     return acoes;

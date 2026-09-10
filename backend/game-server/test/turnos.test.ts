@@ -234,6 +234,17 @@ const DESLOCAMENTO_DA_VAGA = {
   leste: { linha: 0, coluna: 1 },
 } as const;
 
+// Giros horários necessários para a Recebida encaixar conectada (issue #311):
+// a borda voltada à Peça sob o Peão (o oposto da vaga) precisa estar aberta.
+// Em orientação 0, reta nas vagas leste/oeste e T na vaga norte fecham essa
+// borda (1 giro horário abre); os demais casos e Especiais/Monstros (4
+// bordas) conectam direto (r=0).
+function girosParaConectar(tipoDaPeca: string, borda: string): number {
+  if (tipoDaPeca === 'reta' && (borda === 'leste' || borda === 'oeste')) return 1;
+  if (tipoDaPeca === 'T' && borda === 'norte') return 1;
+  return 0;
+}
+
 // Vagas da Peça Inicial em `celula` (bordas abertas norte+leste, em ordem
 // canônica, com célula vizinha dentro da grade), na ordem em que as
 // pendências são geradas pelo Recebimento (issue #138).
@@ -338,6 +349,14 @@ test('fluxo feliz: encerrar o Primeiro Turno avança a vez (TURNO_ENCERRADO + TU
         assert.equal(escolhida.recebidaId, recebidaId);
         assert.equal(escolhida.borda, borda);
         assert.deepEqual(escolhida.celulaAlvo, celulaAlvo);
+
+        // Encaixe conectado (issue #311): gira a Recebida (horário) até a
+        // borda voltada à Peça sob o Peão abrir; r=0 não emite GIRAR_PECA.
+        const giros = girosParaConectar(recebida.tipoDaPeca as string, borda);
+        for (let giro = 0; giro < giros; giro++) {
+          enviar(ws, { type: 'GIRAR_PECA', jogadorId: 'jogador-1', pecaId: pecaDoEncaixe, sentido: 'horario' });
+          await esperarEvento(ws, 'PECA_GIRADA');
+        }
 
         enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-1', pecaId: pecaDoEncaixe, celula: celulaAlvo });
         const encaixada = await esperarEvento(ws, 'PECA_POSICIONADA');
@@ -446,6 +465,14 @@ test('comando com jogadorId de outro jogador é aceito e aplicado como a Sessão
 
         enviar(ws, { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', jogadorId: 'jogador-2', recebidaId, borda });
         await esperarEvento(ws, 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO');
+
+        // Encaixe conectado (issue #311): gira a Recebida (horário) até a
+        // borda voltada à Peça sob o Peão abrir; r=0 não emite GIRAR_PECA.
+        const giros = girosParaConectar(recebida.tipoDaPeca as string, borda);
+        for (let giro = 0; giro < giros; giro++) {
+          enviar(ws, { type: 'GIRAR_PECA', jogadorId: 'jogador-2', pecaId: pecaDoEncaixe, sentido: 'horario' });
+          await esperarEvento(ws, 'PECA_GIRADA');
+        }
 
         enviar(ws, { type: 'POSICIONAR_PECA', jogadorId: 'jogador-2', pecaId: pecaDoEncaixe, celula: celulaAlvo });
         await esperarEvento(ws, 'PECA_POSICIONADA');

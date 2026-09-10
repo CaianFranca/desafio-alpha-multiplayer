@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BORDA_OPOSTA,
   COMPOSICAO_DA_CAIXA,
   aplicarComandoDePartida,
   aplicarComandoDeTabuleiro,
@@ -16,6 +17,7 @@ import {
   type ComandoDeTabuleiro,
   type EstadoDaPartida,
   type EstadoDoTabuleiro,
+  type Orientacao,
   type TipoDaPeca,
   type TipoDePecaEspecial,
 } from '../src/index.ts';
@@ -137,6 +139,10 @@ function comEspecialPrimeiroNaCaixa(
   };
 }
 
+// Resolve todas as pendências do Recebimento: escolhe a vaga de cada peça
+// sorteada (primeira borda canônica ainda disponível), gira a Recebida até a
+// borda voltada à Peça sob o Peão abrir (encaixe conectado, issue #311 — as
+// Especiais têm as 4 bordas abertas e nunca giram) e encaixa na célula-alvo.
 function resolverRecebidas(estado: EstadoDaPartida, ator: string): EstadoDaPartida {
   while (estado.tabuleiro.recebidas.length > 0) {
     const pendente = estado.tabuleiro.recebidas[0];
@@ -159,8 +165,30 @@ function resolverRecebidas(estado: EstadoDaPartida, ator: string): EstadoDaParti
     const escolhida = estado.tabuleiro.recebidas.find(
       (item) => item.recebidaId === pendente.recebidaId,
     );
-    if (!escolhida || escolhida.celulaAlvo === null) {
+    if (!escolhida || escolhida.celulaAlvo === null || escolhida.vaga === null) {
       throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+    }
+    // Gira (horário) até a borda voltada à Peça sob o Peão — o oposto da
+    // vaga — abrir; sem conexão o encaixe é rejeitado (issue #311).
+    const alvo = BORDA_OPOSTA[escolhida.vaga];
+    let giros = 0;
+    while (
+      giros < 4 &&
+      !bordasAbertas({
+        tipo: escolhida.tipo,
+        orientacao: ((escolhida.orientacao + 90 * giros) %
+          360) as Orientacao,
+      }).includes(alvo)
+    ) {
+      giros++;
+    }
+    if (giros === 4) {
+      throw new Error(
+        `nenhuma rotação conecta a pendência ${pendente.recebidaId}`,
+      );
+    }
+    for (let giro = 0; giro < giros; giro++) {
+      estado = aplicar(estado, girar(escolhida.pecaId), ator);
     }
     estado = aplicar(
       estado,
