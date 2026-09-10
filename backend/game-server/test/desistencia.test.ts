@@ -1,0 +1,611 @@
+// Efeito atômico da desistência no servidor, com aviso e Retorno (issue #288).
+//
+// Comportamento externo observável via `PartidaHandlers` + Redis em memória
+// (stub do subconjunto usado pelo canal: get/set/ttl/eval) + `PartidaBroadcaster`
+// real com sockets falsos — sem WS/HTTP, sem Redis real:
+//
+// - Guarda/mapeamento wire de DESISTIR_DA_PARTIDA e código JOGADOR_NAO_NA_PARTIDA
+// - Tradução de desistencia_registrada (+ derrota por desistencia) e ordem do lote
+// - Fora do turno: remove peão e vez, preserva Ativo/rodada, avisa os restantes
+// - No próprio turno: Passagem imediata destrava (o seguinte assume, sem travar)
+// - 4→3 e 3→2 continuam (sem término) e vencem com N−1
+// - 2→1 declara derrota por desistência + callback de Retorno uma única vez
+// - Limpeza só-do-ausente (remove só peças fora da iluminação dos restantes)
+// - Lote integral aos restantes (ordem do engine: desistência abre o lote)
+// - Recusas: não-membro, desistente que tenta de novo e comando pós-término
+// - Ator = sessão (#155): o `jogadorId` do wire é vestigial
+// - Queda sem desistência continua voltável (snapshot + turno atual, sem expiração)
+
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { Redis } from 'ioredis';
+import type { WebSocket } from 'ws';
+import {
+  calcularIluminacao,
+  estadoInicialDaPartida,
+  type EstadoDaPartida,
+} from '@flicker/engine';
+import type { MembroDaSala } from '@flicker/shared';
+import type { AvisoDeRetorno } from '../src/retorno/cliente.ts';
+import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
+import {
+  chaveDaPartida,
+  chaveDoEstadoDaPartida,
+  obterEstadoDaPartida,
+} from '../src/partidas/estado.ts';
+import { PartidaHandlers } from '../src/partidas/handlers.ts';
+import { paraSnapshotWire } from '../src/partidas/snapshot.ts';
+import {
+  ehComandoDaPartida,
+  mapearComandoDaPartida,
+  paraCodigoDaPartidaWire,
+} from '../src/partidas/wire.ts';
+import { traduzirEventos } from '../src/partidas/traducao.ts';
+
+// ─── Redis em memória (subconjunto do canal de Partida) ───
+
+class RedisEmMemoria {
+  private readonly dados = new Map<string, string>();
+
+  async get(chave: string): Promise<string | null> {
+    return this.dados.get(chave) ?? null;
+  }
+
+  async set(chave: string, valor: string, ..._resto: unknown[]): Promise<'OK'> {
+    this.dados.set(chave, valor);
+    return 'OK';
+  }
+
+  async ttl(_chave: string): Promise<number> {
+    // Sem expiração: o estado é repersistido sem TTL (partida em_andamento).
+    return -1;
+  }
+
+  async eval(_script: string, _nChaves: number, ...args: unknown[]): Promise<number> {
+    // Retenção do término: as duas chaves existem no stub em todos os cenários
+    // de derrota por desistência — aplica como o Lua (retorna 1).
+    const ttl = args[args.length - 1];
+    const chaves = args.slice(0, -1) as string[];
+    assert.ok(typeof ttl === 'number' && ttl > 0, 'retenção exige TTL positivo');
+    for (const chave of chaves) {
+      assert.ok(this.dados.has(chave), `retenção com chave ausente: ${chave}`);
+    }
+    return 1;
+  }
+
+  comoRedis(): Redis {
+    return this as unknown as Redis;
+  }
+}
+
+// ─── Sockets falsos (capturam o que o broadcaster entrega) ───
+
+interface SocketFalso {
+  readonly mensagens: Array<Record<string, unknown>>;
+  comoWebSocket(): WebSocket;
+}
+
+function criarSocketFalso(): SocketFalso {
+  const mensagens: Array<Record<string, unknown>> = [];
+  const socket = {
+    OPEN: 1,
+    readyState: 1,
+    send(payload: string): void {
+      mensagens.push(JSON.parse(payload) as Record<string, unknown>);
+    },
+  };
+  return {
+    mensagens,
+    comoWebSocket: () => socket as unknown as WebSocket,
+  };
+}
+
+function tiposRecebidos(socket: SocketFalso): string[] {
+  return socket.mensagens.map((mensagem) => mensagem.type as string);
+}
+
+// ─── Montagem de partida ───
+
+function membro(n: number): MembroDaSala {
+  return {
+    id: `membro-${n}`,
+    jogadorId: `jogador-${n}`,
+    apelido: `Jogador ${n}`,
+    ordemDeEntrada: n,
+    presenca: 'conectado',
+    prontidao: true,
+  };
+}
+
+interface PartidaMontada {
+  readonly partidaId: string;
+  readonly redis: RedisEmMemoria;
+  readonly broadcaster: PartidaBroadcaster;
+  readonly handlers: PartidaHandlers;
+  readonly avisos: AvisoDeRetorno[];
+  readonly sockets: Map<string, SocketFalso>;
+}
+
+async function montarPartida(jogadores: readonly string[]): Promise<PartidaMontada> {
+  const partidaId = `partida-desistencia-${crypto.randomUUID()}`;
+  const redis = new RedisEmMemoria();
+  const broadcaster = new PartidaBroadcaster();
+  const avisos: AvisoDeRetorno[] = [];
+  const handlers = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarRetorno: async (aviso) => {
+      avisos.push(aviso);
+    },
+  });
+
+  const inicial = estadoInicialDaPartida(jogadores);
+  assert.equal(inicial.sucesso, true, 'estado inicial do engine deve nascer');
+  if (!inicial.sucesso) throw new Error('inacessível');
+  await redis.set(chaveDoEstadoDaPartida(partidaId), JSON.stringify(inicial.estado));
+
+  const numeros = jogadores.map((id) => Number(id.replace('jogador-', '')));
+  const roster = numeros.map((n) => membro(n));
+  await redis.set(
+    chaveDaPartida(partidaId),
+    JSON.stringify({
+      partidaId,
+      serverId: 'game-server-teste-desistencia',
+      salaId: 'sala-1',
+      codigoDeSala: 'ABC123',
+      roster,
+      estado: 'em_andamento',
+      criadaEm: new Date().toISOString(),
+    }),
+  );
+
+  const sockets = new Map<string, SocketFalso>();
+  for (const jogadorId of jogadores) {
+    const falso = criarSocketFalso();
+    sockets.set(jogadorId, falso);
+    broadcaster.registrar(partidaId, falso.comoWebSocket());
+  }
+  return { partidaId, redis, broadcaster, handlers, avisos, sockets };
+}
+
+async function lerEstado(montada: PartidaMontada): Promise<EstadoDaPartida> {
+  const estado = await obterEstadoDaPartida(montada.redis.comoRedis(), montada.partidaId);
+  assert.ok(estado !== null, 'estado deve existir no Redis');
+  return estado;
+}
+
+function desistir(jogadorId: string): Record<string, unknown> {
+  return { type: 'DESISTIR_DA_PARTIDA', jogadorId };
+}
+
+// ─── Guarda / mapeamento / códigos ───
+
+test('guarda aceita DESISTIR_DA_PARTIDA só com jogadorId', () => {
+  assert.equal(ehComandoDaPartida({ type: 'DESISTIR_DA_PARTIDA', jogadorId: 'j1' }), true);
+  assert.equal(ehComandoDaPartida({ type: 'DESISTIR_DA_PARTIDA' }), false);
+  assert.equal(ehComandoDaPartida({ type: 'DESISTIR_DA_PARTIDA', jogadorId: '' }), false);
+  assert.equal(ehComandoDaPartida({ type: 'DESISTIR_DA_PARTIDAA', jogadorId: 'j1' }), false);
+});
+
+test('mapeamento converte DESISTIR_DA_PARTIDA para desistir_da_partida', () => {
+  assert.deepEqual(
+    mapearComandoDaPartida({ type: 'DESISTIR_DA_PARTIDA', jogadorId: 'j1' }),
+    { tipo: 'desistir_da_partida' },
+  );
+});
+
+test('JOGADOR_NAO_NA_PARTIDA pertence ao contrato wire; fora dele vira DADOS_INVALIDOS', () => {
+  assert.equal(paraCodigoDaPartidaWire('JOGADOR_NAO_NA_PARTIDA'), 'JOGADOR_NAO_NA_PARTIDA');
+  assert.equal(paraCodigoDaPartidaWire('PARTIDA_TERMINADA'), 'PARTIDA_TERMINADA');
+  assert.equal(
+    paraCodigoDaPartidaWire('CODIGO_INEXISTENTE' as never),
+    'DADOS_INVALIDOS',
+  );
+});
+
+// ─── Tradução ───
+
+test('tradução de desistencia_registrada é 1:1 e abre o lote', () => {
+  const saida = traduzirEventos([
+    { tipo: 'desistencia_registrada', jogadorId: 'jogador-4', peaoId: 'peao-amarelo' },
+    { tipo: 'celulas_iluminadas', celulas: [] },
+    { tipo: 'turno_iniciado', jogadorId: 'jogador-1', rodada: 1 },
+  ]);
+  assert.deepEqual(saida, [
+    { type: 'DESISTENCIA_REGISTRADA', jogadorId: 'jogador-4', peaoId: 'peao-amarelo' },
+    { type: 'CELULAS_ILUMINADAS', celulas: [] },
+    { type: 'TURNO_INICIADO', jogadorId: 'jogador-1', rodada: 1 },
+  ]);
+});
+
+test('tradução da derrota por desistencia projeta o motivo no wire', () => {
+  const saida = traduzirEventos([
+    { tipo: 'partida_terminada', desfecho: { tipo: 'derrota', motivo: 'desistencia' } },
+  ]);
+  assert.deepEqual(saida, [
+    { type: 'PARTIDA_TERMINADA', resultado: 'derrota', motivo: 'desistencia' },
+  ]);
+});
+
+// ─── Fora do turno: remove peão e vez, preserva Ativo, avisa ───
+
+test('desistência fora do turno remove peão e vez sem trocar o Ativo', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
+  const { partidaId, handlers, sockets } = montada;
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-4')!.comoWebSocket(),
+    partidaId,
+    'jogador-4',
+    desistir('jogador-4'),
+  );
+
+  const estado = await lerEstado(montada);
+  assert.deepEqual(
+    estado.jogadores.map((j) => j.jogadorId),
+    ['jogador-1', 'jogador-2', 'jogador-3'],
+  );
+  assert.equal(estado.jogadorAtivoId, 'jogador-1');
+  assert.equal(estado.rodada, 1);
+  assert.ok(
+    estado.tabuleiro.peoes.every((peao) => peao.peaoId !== 'peao-amarelo'),
+    'peão do desistente sai do tabuleiro',
+  );
+  assert.equal(estado.resultado, null);
+
+  // Aviso aos restantes: o lote abre com a desistência e não troca o turno.
+  for (const jogadorId of ['jogador-1', 'jogador-2', 'jogador-3']) {
+    const tipos = tiposRecebidos(sockets.get(jogadorId)!);
+    assert.equal(tipos[0], 'DESISTENCIA_REGISTRADA', `${jogadorId} é avisado primeiro da saída`);
+    assert.ok(!tipos.includes('TURNO_INICIADO'), 'sem Passagem fora do turno');
+    assert.ok(!tipos.includes('PARTIDA_TERMINADA'), '4→3 continua');
+  }
+  assert.deepEqual(sockets.get('jogador-1')!.mensagens[0], {
+    type: 'DESISTENCIA_REGISTRADA',
+    jogadorId: 'jogador-4',
+    peaoId: 'peao-amarelo',
+  });
+
+  // Snapshot pós-remoção consistente (N−1, com apelidos do roster).
+  const snapshot = paraSnapshotWire(
+    estado,
+    [membro(1), membro(2), membro(3), membro(4)],
+    'em_andamento',
+  );
+  assert.equal(snapshot.jogadores.length, 3);
+  assert.deepEqual(
+    snapshot.jogadores.map((j) => `${j.jogadorId}/${j.apelido}`),
+    ['jogador-1/Jogador 1', 'jogador-2/Jogador 2', 'jogador-3/Jogador 3'],
+  );
+  assert.equal(snapshot.jogadorAtivoId, 'jogador-1');
+  assert.equal(snapshot.estado, 'em_andamento');
+});
+
+// ─── No próprio turno: Passagem imediata destrava ───
+
+test('desistência no próprio turno passa a vez ao seguinte sem travar', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
+  const { partidaId, handlers, sockets } = montada;
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-1')!.comoWebSocket(),
+    partidaId,
+    'jogador-1',
+    desistir('jogador-1'),
+  );
+
+  const estado = await lerEstado(montada);
+  assert.equal(estado.jogadorAtivoId, 'jogador-2');
+  assert.equal(estado.rodada, 1);
+  assert.ok(
+    estado.jogadores.every((j) => j.jogadorId !== 'jogador-1'),
+    'desistente sai do roster',
+  );
+
+  const tipos = tiposRecebidos(sockets.get('jogador-2')!);
+  assert.deepEqual(tipos.slice(0, 3), [
+    'DESISTENCIA_REGISTRADA',
+    'TURNO_ENCERRADO',
+    'TURNO_INICIADO',
+  ]);
+  assert.deepEqual(sockets.get('jogador-2')!.mensagens[2], {
+    type: 'TURNO_INICIADO',
+    jogadorId: 'jogador-2',
+    rodada: 1,
+  });
+
+  // A vez é mesmo do seguinte: fora-da-vez para o terceiro prova o destrave.
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-3')!.comoWebSocket(),
+    partidaId,
+    'jogador-3',
+    { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-3' },
+  );
+  const erros = sockets
+    .get('jogador-3')!
+    .mensagens.filter((m) => m.type === 'ERRO_DO_TABULEIRO');
+  assert.equal(erros.length, 1);
+  assert.equal(erros[0]!.codigo, 'FORA_DA_VEZ');
+});
+
+// ─── 3→2 continua; 4→3 vence com N−1 ───
+
+test('3→2 continua sem término', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
+  const { partidaId, handlers, sockets } = montada;
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-3')!.comoWebSocket(),
+    partidaId,
+    'jogador-3',
+    desistir('jogador-3'),
+  );
+
+  const estado = await lerEstado(montada);
+  assert.equal(estado.jogadores.length, 2);
+  assert.equal(estado.resultado, null);
+  const tipos = tiposRecebidos(sockets.get('jogador-1')!);
+  assert.ok(tipos.includes('DESISTENCIA_REGISTRADA'));
+  assert.ok(!tipos.includes('PARTIDA_TERMINADA'), '3→2 continua');
+});
+
+test('4→3 continua e vence com N−1', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
+  const { partidaId, handlers, sockets, redis } = montada;
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-4')!.comoWebSocket(),
+    partidaId,
+    'jogador-4',
+    desistir('jogador-4'),
+  );
+
+  // Semeia o estado pronto para vitória com os N−1 restantes sobre o Portão.
+  const estado = await lerEstado(montada);
+  const portao = {
+    pecaId: 'portao-de-teste',
+    tipo: 'portao_de_saida' as const,
+    orientacao: 0 as const,
+    celula: { linha: 3, coluna: 3 },
+  };
+  await redis.set(
+    chaveDoEstadoDaPartida(partidaId),
+    JSON.stringify({
+      ...estado,
+      tabuleiro: {
+        ...estado.tabuleiro,
+        posicionadas: [portao],
+        peoes: estado.tabuleiro.peoes.map((peao) => ({ ...peao, pecaId: portao.pecaId })),
+      },
+      geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+      cartaoDeAcessoObtido: true,
+    }),
+  );
+
+  for (const socket of sockets.values()) socket.mensagens.length = 0;
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-1')!.comoWebSocket(),
+    partidaId,
+    'jogador-1',
+    { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' },
+  );
+
+  // O quórum N−1 não impede a vitória: todos os restantes recebem o término.
+  for (const jogadorId of ['jogador-1', 'jogador-2', 'jogador-3']) {
+    const eventos = sockets.get(jogadorId)!.mensagens;
+    const ultimo = eventos[eventos.length - 1]!;
+    assert.deepEqual(ultimo, { type: 'PARTIDA_TERMINADA', resultado: 'vitoria' });
+  }
+});
+
+// ─── 2→1: derrota por desistência + Retorno uma vez ───
+
+test('2→1 declara derrota por desistência e dispara o Retorno uma única vez', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, handlers, sockets, avisos } = montada;
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-2')!.comoWebSocket(),
+    partidaId,
+    'jogador-2',
+    desistir('jogador-2'),
+  );
+
+  const estado = await lerEstado(montada);
+  assert.equal(estado.jogadores.length, 1);
+  assert.deepEqual(estado.resultado, { tipo: 'derrota', motivo: 'desistencia' });
+
+  // A derrota por desistência é o último evento do lote, após o aviso.
+  const tipos = tiposRecebidos(sockets.get('jogador-1')!);
+  assert.equal(tipos[0], 'DESISTENCIA_REGISTRADA');
+  assert.deepEqual(sockets.get('jogador-1')!.mensagens[tipos.length - 1], {
+    type: 'PARTIDA_TERMINADA',
+    resultado: 'derrota',
+    motivo: 'desistencia',
+  });
+
+  assert.equal(avisos.length, 1);
+  assert.deepEqual(avisos[0], {
+    salaId: 'sala-1',
+    partidaId,
+    serverId: 'game-server-teste-desistencia',
+    resultado: 'derrota',
+    jogadores: ['jogador-1', 'jogador-2'],
+  });
+
+  // Comando pós-término é recusado e não duplica o callback.
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-1')!.comoWebSocket(),
+    partidaId,
+    'jogador-1',
+    { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' },
+  );
+  const erros = sockets
+    .get('jogador-1')!
+    .mensagens.filter((m) => m.type === 'ERRO_DO_TABULEIRO');
+  assert.equal(erros.length, 1);
+  assert.equal(erros[0]!.codigo, 'PARTIDA_TERMINADA');
+  await handlers.drenarRetornosPendentes();
+  assert.equal(avisos.length, 1, 'callback de Retorno sai uma única vez');
+});
+
+// ─── Limpeza só-do-ausente ───
+
+test('desistência recalcula a Iluminação e limpa só as peças do ausente', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
+  const { partidaId, handlers, sockets, redis } = montada;
+
+  // Peças sob os restantes + peças só iluminadas pelo ausente (jogador-4 em (0,0)).
+  const posicionadas = [
+    { pecaId: 'p-a', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 3 } },
+    { pecaId: 'p-b', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 5, coluna: 3 } },
+    { pecaId: 'p-d', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 5 } },
+    { pecaId: 'p-c', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 0 } },
+    { pecaId: 'p-extra', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 1 } },
+  ];
+  const base = await lerEstado(montada);
+  const tabuleiro = {
+    ...base.tabuleiro,
+    posicionadas,
+    peoes: [
+      { peaoId: 'peao-branco', cor: 'branco' as const, pecaId: 'p-a' },
+      { peaoId: 'peao-vermelho', cor: 'vermelho' as const, pecaId: 'p-b' },
+      { peaoId: 'peao-azul', cor: 'azul' as const, pecaId: 'p-d' },
+      { peaoId: 'peao-amarelo', cor: 'amarelo' as const, pecaId: 'p-c' },
+    ],
+  };
+  await redis.set(
+    chaveDoEstadoDaPartida(partidaId),
+    JSON.stringify({
+      ...base,
+      tabuleiro,
+      celulasIluminadas: calcularIluminacao(tabuleiro),
+    }),
+  );
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-4')!.comoWebSocket(),
+    partidaId,
+    'jogador-4',
+    desistir('jogador-4'),
+  );
+
+  const estado = await lerEstado(montada);
+  const restantes = estado.tabuleiro.posicionadas.map((peca) => peca.pecaId);
+  assert.ok(!restantes.includes('p-c'), 'peça do ausente sai');
+  assert.ok(!restantes.includes('p-extra'), 'peça só iluminada pelo ausente sai');
+  assert.deepEqual(restantes, ['p-a', 'p-b', 'p-d']);
+
+  const mensagens = sockets.get('jogador-1')!.mensagens;
+  const limpeza = mensagens.find((m) => m.type === 'LIMPEZA_APLICADA');
+  assert.deepEqual(limpeza, { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['p-c', 'p-extra'] });
+  const iluminadas = mensagens.find((m) => m.type === 'CELULAS_ILUMINADAS') as
+    | { celulas: Array<{ linha: number; coluna: number }> }
+    | undefined;
+  assert.ok(iluminadas !== undefined, 'tabuleiro novo viaja no lote');
+  assert.ok(
+    iluminadas.celulas.every((c) => !(c.linha === 0 && c.coluna <= 1)),
+    'células do ausente apagam',
+  );
+});
+
+// ─── Recusas: não-membro, desistente reincidente, ator = sessão ───
+
+test('não-membro e desistente reincidente recebem JOGADOR_NAO_NA_PARTIDA', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
+  const { partidaId, handlers, sockets } = montada;
+
+  const intruso = criarSocketFalso();
+  await handlers.aplicarMensagem(
+    intruso.comoWebSocket(),
+    partidaId,
+    'intruso',
+    desistir('intruso'),
+  );
+  assert.deepEqual(intruso.mensagens, [
+    {
+      type: 'ERRO_DO_TABULEIRO',
+      codigo: 'JOGADOR_NAO_NA_PARTIDA',
+      mensagem: intruso.mensagens[0]!.mensagem,
+    },
+  ]);
+  assert.ok(typeof intruso.mensagens[0]!.mensagem === 'string');
+
+  // A recusa não altera o estado nem avisa ninguém.
+  assert.equal((await lerEstado(montada)).jogadores.length, 3);
+  assert.equal(sockets.get('jogador-1')!.mensagens.length, 0);
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-3')!.comoWebSocket(),
+    partidaId,
+    'jogador-3',
+    desistir('jogador-3'),
+  );
+  assert.equal((await lerEstado(montada)).jogadores.length, 2);
+
+  // Desistente que tenta de novo é recusado pelo domínio.
+  const antes = sockets.get('jogador-3')!.mensagens.length;
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-3')!.comoWebSocket(),
+    partidaId,
+    'jogador-3',
+    desistir('jogador-3'),
+  );
+  const depois = sockets.get('jogador-3')!.mensagens.slice(antes);
+  assert.equal(depois.length, 1);
+  assert.equal(depois[0]!.type, 'ERRO_DO_TABULEIRO');
+  assert.equal(depois[0]!.codigo, 'JOGADOR_NAO_NA_PARTIDA');
+});
+
+test('ator é a sessão: jogadorId alheio no wire não desiste por outro', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
+  const { partidaId, handlers, sockets } = montada;
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-1')!.comoWebSocket(),
+    partidaId,
+    'jogador-1',
+    { type: 'DESISTIR_DA_PARTIDA', jogadorId: 'jogador-2' },
+  );
+
+  const estado = await lerEstado(montada);
+  assert.deepEqual(
+    estado.jogadores.map((j) => j.jogadorId),
+    ['jogador-2', 'jogador-3'],
+    'quem sai é a sessão, não o jogadorId declarado',
+  );
+  assert.deepEqual(sockets.get('jogador-2')!.mensagens[0], {
+    type: 'DESISTENCIA_REGISTRADA',
+    jogadorId: 'jogador-1',
+    peaoId: 'peao-branco',
+  });
+});
+
+// ─── Queda sem desistência continua voltável ───
+
+test('queda sem desistência volta com snapshot N e turno atual', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
+  const { partidaId, handlers, sockets } = montada;
+
+  // Queda = fechar a conexão sem desistir: nenhum comando, nenhum aviso.
+  const caido = sockets.get('jogador-2')!;
+  assert.equal((await lerEstado(montada)).jogadores.length, 3);
+  assert.equal(sockets.get('jogador-1')!.mensagens.length, 0);
+
+  // Reconexão: snapshot consistente com N jogadores + turno atual inalterado.
+  const estado = await lerEstado(montada);
+  const snapshot = paraSnapshotWire(estado, [membro(1), membro(2), membro(3)], 'em_andamento');
+  assert.equal(snapshot.jogadores.length, 3);
+  assert.equal(snapshot.jogadorAtivoId, 'jogador-1');
+  assert.equal(snapshot.rodada, 1);
+  assert.equal(snapshot.estado, 'em_andamento');
+
+  const retorno = criarSocketFalso();
+  await handlers.anunciarTurnoAtual(partidaId, retorno.comoWebSocket());
+  assert.deepEqual(retorno.mensagens[0], {
+    type: 'TURNO_INICIADO',
+    jogadorId: 'jogador-1',
+    rodada: 1,
+  });
+  assert.ok(caido !== undefined);
+});

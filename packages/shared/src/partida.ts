@@ -17,6 +17,7 @@
 //   shared type:'PERMANECER' + jogadorId <-> engine tipo:'permanecer' + ator
 //   shared type:'CONFIRMAR_POSICAO_DO_PEAO' + jogadorId <-> engine tipo:'confirmar_posicao_do_peao' + ator
 //   shared type:'ENCERRAR_TURNO' + jogadorId <-> engine tipo:'encerrar_turno' + ator
+//   shared type:'DESISTIR_DA_PARTIDA' + jogadorId <-> engine tipo:'desistir_da_partida' + ator — issue #288 (rota própria: vale no próprio turno ou fora dele, só o próprio Jogador; PARTIDA_TERMINADA antes de tudo; JOGADOR_NAO_NA_PARTIDA para fora do roster/já-saído)
 //   Eventos:
 //   shared type:'TURNO_INICIADO' { jogadorId, rodada } <-> engine tipo:'turno_iniciado' { jogadorId, rodada }
 //   shared type:'TURNO_ENCERRADO' { jogadorId } <-> engine tipo:'turno_encerrado' { jogadorId }
@@ -29,7 +30,8 @@
 //   ST-10 (#140/#143) removeu os switches legados do cliente.)
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
-//   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp)
+//   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #288)
+//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — issue #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
 //   motivo da derrota viaja em campo opcional separado (MotivoDeDerrotaWire,
 //   sync com DesfechoDaPartida — engine/src/partida.ts:128-133): presente só
@@ -71,7 +73,7 @@ import type {
 } from './tabuleiro.ts';
 import type { PeaoId, RecebidaId, BordaCardinal, VagaDaPecaRecebidaEscolhidaEvento } from './peoes.ts';
 
-// --- Comandos cliente → servidor (12) ---
+// --- Comandos cliente → servidor (14 + 2 de controle de debug) ---
 
 export interface SelecionarPecaPartidaComando {
   readonly type: 'SELECIONAR_PECA';
@@ -162,6 +164,15 @@ export interface EncerrarTurnoComando {
   readonly jogadorId: string;
 }
 
+// Desistência (issue #288): ato irreversível de sair da Partida em andamento.
+// Rota própria — vale no próprio turno ou fora dele, sem FORA_DA_VEZ; só o
+// próprio Jogador desiste (ator = sessão autenticada, o `jogadorId` do wire é
+// vestigial como nos demais comandos, #155).
+export interface DesistirDaPartidaComando {
+  readonly type: 'DESISTIR_DA_PARTIDA';
+  readonly jogadorId: string;
+}
+
 // Controle do stream de debug (issue #340, "Modo Desenvolvedor"): interceptados
 // na camada `ws.ts` do game-server, ANTES de `aplicarMensagem` — a guarda do
 // contrato (`ehComandoDaPartida`) os recusaria como DADOS_INVALIDOS. Sem
@@ -188,6 +199,7 @@ export type PartidaComandoDoCliente =
   | ConfirmarPosicaoDoPeaoComando
   | AtravessarOEscuroPartidaComando
   | EncerrarTurnoComando
+  | DesistirDaPartidaComando
   | AtivarDebugDaPartidaComando
   | DesativarDebugDaPartidaComando;
 
@@ -241,12 +253,17 @@ export type { VagaDaPecaRecebidaEscolhidaEvento };
 export type ResultadoDaPartidaWire = 'vitoria' | 'derrota';
 
 // Motivo da derrota (issue #145-exp): sync manual com o motivo de
-// DesfechoDaPartida do engine (packages/engine/src/partida.ts:130-132) —
+// DesfechoDaPartida do engine (packages/engine/src/partida.ts:160-165) —
 // 'caixa_esgotada' (Caixa Esgotada sem objetivos alcançáveis,
-// caixaEsgotadaSemObjetivos) e 'equipe_amedrontada' (Sanidade 0 em toda a
-// equipe). Tipo fechado: a vitória não tem motivo no domínio e o wire não
-// inventa um. Terminais do glossário (CONTEXT.md): Caixa, Amedrontado.
-export type MotivoDeDerrotaWire = 'caixa_esgotada' | 'equipe_amedrontada';
+// caixaEsgotadaSemObjetivos), 'equipe_amedrontada' (Sanidade 0 em toda a
+// equipe) e 'desistencia' (quórum mínimo — um Jogador restante após
+// desistências, issue #288). Tipo fechado: a vitória não tem motivo no
+// domínio e o wire não inventa um. Terminais do glossário (CONTEXT.md):
+// Caixa, Amedrontado.
+export type MotivoDeDerrotaWire =
+  | 'caixa_esgotada'
+  | 'equipe_amedrontada'
+  | 'desistencia';
 
 export type EstadoDaPartidaWire = 'preparada' | 'em_andamento' | 'terminada';
 
@@ -441,6 +458,17 @@ export interface ResgateRealizadoWireEvento {
   readonly resgatadorPeaoId: PeaoId;
 }
 
+// Desistência (issue #288): eco do domínio — o Jogador saiu da Partida em
+// andamento; o peão indicado foi removido e a vez saiu da ordem. Abre o lote
+// do comando e serve de aviso aos restantes (com a nova ordem via
+// TURNO_INICIADO e o tabuleiro via CELULAS_ILUMINADAS/LIMPEZA_APLICADA do
+// mesmo lote). Shape 1:1 com DesistenciaRegistradaEvento do domínio.
+export interface DesistenciaRegistradaWireEvento {
+  readonly type: 'DESISTENCIA_REGISTRADA';
+  readonly jogadorId: string;
+  readonly peaoId: PeaoId;
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
@@ -453,7 +481,8 @@ export type PartidaEventoDoServidor =
   | EstadoDaPartidaEvento
   | PartidaTerminadaWireEvento
   | AtaqueResolvidoWireEvento
-  | ResgateRealizadoWireEvento;
+  | ResgateRealizadoWireEvento
+  | DesistenciaRegistradaWireEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

@@ -1,7 +1,7 @@
 // Guarda wire e mapeamento wire→domínio do canal de Partida (issue #117).
 //
 // O canal de Partida substitui o seam isolado de tabuleiro/Peões (issues #80
-// e #88): os 12 comandos agora viajam com o `jogadorId` da mensagem
+// e #88): os comandos agora viajam com o `jogadorId` da mensagem
 // (contrato do ST-11). O ator do dispatch, porém, é a sessão autenticada do
 // socket (#155): o `jogadorId` do wire é vestigial no dispatch — segue
 // obrigatório só pela guarda de forma, e comandos com `jogadorId` alheio são
@@ -40,6 +40,7 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'CONFIRMAR_POSICAO_DO_PEAO',
   'ATRAVESSAR_O_ESCURO',
   'ENCERRAR_TURNO',
+  'DESISTIR_DA_PARTIDA',
 ]);
 
 function ehIdNaoVazio(valor: unknown): boolean {
@@ -122,6 +123,10 @@ export function ehComandoDaPartida(value: unknown): value is ComandoDaPartidaAce
       return ehIdNaoVazio(mensagem.peaoId) && ehCelulaValida(mensagem.celula);
     case 'ENCERRAR_TURNO':
       return true;
+    // Desistência (issue #288): rota própria — só o `jogadorId` (vestigial no
+    // dispatch, #155); vale no próprio turno ou fora dele, sem FORA_DA_VEZ.
+    case 'DESISTIR_DA_PARTIDA':
+      return true;
     default:
       return false;
   }
@@ -171,6 +176,8 @@ export function mapearComandoDaPartida(
       };
     case 'ENCERRAR_TURNO':
       return { tipo: 'encerrar_turno' };
+    case 'DESISTIR_DA_PARTIDA':
+      return { tipo: 'desistir_da_partida' };
     case 'ATIVAR_DEBUG':
     case 'DESATIVAR_DEBUG':
       // Inalcançável: `ehComandoDaPartida` recusa os comandos de controle de
@@ -219,6 +226,7 @@ const CODIGOS_DA_PARTIDA_WIRE: ReadonlySet<string> = new Set([
   'ENCERRAMENTO_INVALIDO',
   'MOVIMENTO_INDISPONIVEL',
   'PARTIDA_TERMINADA',
+  'JOGADOR_NAO_NA_PARTIDA',
 ]);
 
 export function paraCodigoDaPartidaWire(

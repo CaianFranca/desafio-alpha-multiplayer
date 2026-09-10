@@ -137,7 +137,10 @@ export type CodigoDeErroDoTabuleiro =
   | 'MOVIMENTO_INDISPONIVEL'
   // Término da Partida (issue #179): recusa de qualquer comando de jogo
   // pós-término; viaja pelo ERRO_DO_TABULEIRO como os demais códigos de Turno.
-  | 'PARTIDA_TERMINADA';
+  | 'PARTIDA_TERMINADA'
+  // Desistência (issue #288): recusa de quem não está no roster (fora do
+  // roster ou já removido pela desistência); viaja pelo ERRO_DO_TABULEIRO.
+  | 'JOGADOR_NAO_NA_PARTIDA';
 
 export interface ErroDoTabuleiroEvento {
   readonly type: 'ERRO_DO_TABULEIRO';

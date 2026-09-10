@@ -135,9 +135,10 @@ export function traduzirEventos(
         break;
       // Término (issues #176 e #179): broadcast com o Resultado; o motivo da
       // derrota viaja em campo opcional (issue #145-exp — sync
-      // DesfechoDaPartida, engine/src/partida.ts:128-133). A vitória não tem
-      // motivo no domínio — a chave `motivo` só aparece nas derrotas. O
-      // engine emite partida_terminada como último evento do lote da Ação.
+      // DesfechoDaPartida, engine/src/partida.ts:158-165; 'desistencia' pela
+      // issue #288). A vitória não tem motivo no domínio — a chave `motivo`
+      // só aparece nas derrotas. O engine emite partida_terminada como último
+      // evento do lote da Ação.
       case 'partida_terminada': {
         const desfecho = evento.desfecho;
         saida.push(
@@ -166,6 +167,16 @@ export function traduzirEventos(
           peoesAtingidos: evento.peoesAtingidos,
           protegidos: evento.protegidos,
           estadosAplicados: evento.estadosAplicados,
+        });
+        break;
+      // Desistência (issue #288): shape 1:1 com o domínio — abre o lote do
+      // comando e serve de aviso aos restantes (nova ordem via TURNO_INICIADO
+      // e tabuleiro via CELULAS_ILUMINADAS/LIMPEZA_APLICADA do mesmo lote).
+      case 'desistencia_registrada':
+        saida.push({
+          type: 'DESISTENCIA_REGISTRADA',
+          jogadorId: evento.jogadorId,
+          peaoId: evento.peaoId,
         });
         break;
       // Resgate (issue #171): shape 1:1 com o domínio — wire follow-up #173

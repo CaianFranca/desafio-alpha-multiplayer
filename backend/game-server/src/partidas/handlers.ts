@@ -1,8 +1,13 @@
 // Handlers WS do canal de Partida (issue #117).
 //
-// Roteia os 12 comandos wire de Partida (`@flicker/shared`) para o domínio
+// Roteia os comandos wire de Partida (`@flicker/shared`) para o domínio
 // (`@flicker/engine`) via `aplicarComandoDePartida`, persiste o novo estado
-// (tabuleiro + Turnos) no Redis e faz broadcast dos eventos traduzidos. O
+// (tabuleiro + Turnos) no Redis e faz broadcast dos eventos traduzidos —
+// incluindo a desistência (issue #288), cujo efeito atômico do engine
+// (remoção do peão, exclusão da vez com Passagem imediata se era o Ativo,
+// Iluminação, Limpeza e reavaliação do término em N−1 num único lote) viaja
+// integral no broadcast, com o término em N−1 reutilizando a retenção e o
+// callback de Retorno existentes. O
 // ator do dispatch é sempre a sessão autenticada do socket (passada por
 // `ws.ts` como `sessaoJogadorId`), nunca o `jogadorId` autodeclarado no wire:
 // o campo permanece obrigatório no contrato (guarda de forma) mas é vestigial
