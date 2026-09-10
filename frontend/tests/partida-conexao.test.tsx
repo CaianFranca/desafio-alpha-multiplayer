@@ -727,6 +727,61 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
     })
   })
 
+  it('Permanecer com peão desselecionado (rodada 2+) auto-seleciona o peão da vez e permanece (review #338)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Minha vez (rodada 2), peão próprio aprendido mas DESELECIONADO (o fim
+    // do turno anterior deseleciona — PEAO_PERMANECEU limpa a seleção).
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_PERMANECEU',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+      })
+    })
+
+    // Um clique no botão emite SELECIONAR_PEAO + PERMANECER em ordem, com o
+    // peão da vez (não o PERMANECER cru, que o engine recusaria).
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('botao-permanecer'))
+    await waitFor(() => {
+      expect(ws.sentMessages.length).toBeGreaterThanOrEqual(2)
+    })
+    expect(ws.sentMessages.slice(-2).map((m) => JSON.parse(m))).toEqual([
+      { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco', jogadorId: MEU_JOGADOR_ID },
+      { type: 'PERMANECER', peaoId: 'peao-branco', jogadorId: MEU_JOGADOR_ID },
+    ])
+  })
+
+  it('Espaço com manipulação aberta equivale ao OK do overlay 3D (a11y, review #338)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Posiciona inicial-1 → abre janela de manipulação.
+    act(() =>
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      }),
+    )
+    await screen.findByTestId('peca-posicionada')
+
+    const user = userEvent.setup()
+    await user.keyboard(' ')
+
+    await waitFor(() => {
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'FINALIZAR_MANIPULACAO',
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+      })
+    })
+  })
+
   it('ERRO_DO_TABULEIRO FORA_DA_VEZ toca som de recusa com motivo e anuncia (issue #118)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 

@@ -323,6 +323,50 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(ws.sentMessages).toHaveLength(comandosAteAqui)
   })
 
+  it('duplo-clique rápido na vaga não reenvia a escolha (gate por recebidaId, review #338)', async () => {
+    const ws = await partidaDisponivel()
+    const user = userEvent.setup()
+
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+    })
+    act(() => {
+      ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
+    })
+    await user.click(peaoDoEspelho('branco'))
+    act(() => {
+      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [recebidaSorteada('recebida-1', 'reta-1', 'reta')],
+      })
+    })
+    await puxarCorrente(user)
+
+    // Dois cliques na mesma vaga sem ack entre eles: só a primeira escolha
+    // (e seu encaixe) é enviada — a segunda é bloqueada pelo gate em voo.
+    await user.click(celulaDoEspelho(2, 3))
+    await user.click(celulaDoEspelho(2, 3))
+    const escolhas = ws.sentMessages
+      .map((m) => JSON.parse(m) as Record<string, unknown>)
+      .filter((c) => c['type'] === 'ESCOLHER_VAGA_DA_PECA_RECEBIDA')
+    expect(escolhas).toHaveLength(1)
+  })
+
   it('bandeja de slot único: clique único encaixa cada corrente (r1→r2→esvazia) (#143/#261)', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
