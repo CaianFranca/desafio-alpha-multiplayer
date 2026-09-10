@@ -147,7 +147,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
     expect(screen.getAllByTestId('mesa-peca-inicial')).toHaveLength(3)
   })
 
-  it('rotação via botão DOM envia GIRAR_PECA para a peça em manipulação ao WS', async () => {
+  it('rotação por tecla R envia GIRAR_PECA para a peça em manipulação ao WS', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
     // Posiciona inicial-1 → abre janela de manipulação.
@@ -161,8 +161,10 @@ describe('partida conectada ao game-server (issue #85)', () => {
     )
     await screen.findByTestId('peca-posicionada')
 
+    // Os controles de giro são 3D (overlay) — o atalho R do teclado mantém o
+    // caminho de teste DOM para o wire (a cena WebGL é caixa-preta no jsdom).
     const user = userEvent.setup()
-    await user.click(screen.getByTestId('girar-horario'))
+    await user.keyboard('r')
 
     await waitFor(() => {
       const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
@@ -289,20 +291,24 @@ describe('partida conectada ao game-server (issue #85)', () => {
     expect(screen.getByTestId('overlay-carregando')).toBeInTheDocument()
   })
 
-  it('controles de giro desabilitam sem seleção e após finalização', async () => {
+  it('overlay de giro 3D: presente apenas com peça em manipulação (pós-encaixe)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
-    // 1. Sem nada selecionado: botões desabilitados.
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
-    expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
+    // 1. Sem nada selecionado: sem overlay emitido (a cena 3D é caixa-preta
+    // no jsdom; o seam data-manipulacao espelha a mesma fonte).
+    const semJanela = () =>
+      screen.queryAllByTestId('peca-posicionada').some((el) => el.hasAttribute('data-manipulacao'))
+    expect(semJanela()).toBe(false)
 
-    // 2. Seleciona: habilita.
+    // 2. Seleciona (ainda não posiciona): o overlay só existe pós-encaixe —
+    //    a peça selecionada da mesa não recebe controles (rotação pré-encaixe
+    //    permanece só por teclas R/E).
     act(() => {
       ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' })
     })
-    expect(screen.getByTestId('girar-horario')).not.toBeDisabled()
+    expect(semJanela()).toBe(false)
 
-    // 3. Posiciona: abre manipulação (continua habilitado).
+    // 3. Posiciona: abre manípulação → data-manipulacao liga na peça.
     act(() => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
@@ -311,13 +317,19 @@ describe('partida conectada ao game-server (issue #85)', () => {
         orientacao: 0,
       })
     })
-    expect(screen.getByTestId('girar-horario')).not.toBeDisabled()
+    const comManipulacao = () =>
+      screen
+        .getAllByTestId('peca-posicionada')
+        .find((el) => el.getAttribute('data-peca-id') === 'inicial-1')
+        ?.getAttribute('data-manipulacao')
+    await waitFor(() => expect(comManipulacao()).toBe('true'))
 
-    // 4. Finaliza: desabilita (manipulação e seleção nulas).
+    // 4. Finaliza: manipulação e seleção nulas → overlay some.
     act(() => {
       ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
     })
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
+    // Atributo ausente → getAttribute devolve null (elemento permanece no DOM).
+    expect(comManipulacao()).toBeNull()
   })
 
   it('envia apenas comandos Partida com jogadorId (hook restrito)', async () => {
@@ -730,9 +742,11 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
     })
   })
 
-  it('botão Permanecer com peão já selecionado (token+botão) envia PERMANECER direto', async () => {
+  it('Permanecer com peão desselecionado (rodada 2+) auto-seleciona o peão da vez e permanece (review #338)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
+    // Minha vez (rodada 2), peão próprio aprendido mas DESELECIONADO (o fim
+    // do turno anterior deseleciona — PEAO_PERMANECEU limpa a seleção).
     act(() => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
     })
@@ -743,108 +757,44 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
         pecaId: 'inicial-1',
       })
     })
-    // Seleção prévia via token (ack do servidor).
-    act(() => {
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-    })
 
+    // Um clique no botão emite SELECIONAR_PEAO + PERMANECER em ordem, com o
+    // peão da vez (não o PERMANECER cru, que o engine recusaria).
     const user = userEvent.setup()
     await user.click(screen.getByTestId('botao-permanecer'))
+    await waitFor(() => {
+      expect(ws.sentMessages.length).toBeGreaterThanOrEqual(2)
+    })
+    expect(ws.sentMessages.slice(-2).map((m) => JSON.parse(m))).toEqual([
+      { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco', jogadorId: MEU_JOGADOR_ID },
+      { type: 'PERMANECER', peaoId: 'peao-branco', jogadorId: MEU_JOGADOR_ID },
+    ])
+  })
+
+  it('Espaço com manipulação aberta equivale ao OK do overlay 3D (a11y, review #338)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Posiciona inicial-1 → abre janela de manipulação.
+    act(() =>
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      }),
+    )
+    await screen.findByTestId('peca-posicionada')
+
+    const user = userEvent.setup()
+    await user.keyboard(' ')
+
     await waitFor(() => {
       const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
       expect(JSON.parse(ultimo)).toEqual({
-        type: 'PERMANECER',
-        peaoId: 'peao-branco',
-        jogadorId: MEU_JOGADOR_ID,
+        type: 'FINALIZAR_MANIPULACAO',
+        jogadorId: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
       })
     })
-    // Nenhum SELECIONAR_PEAO extra no caminho direto.
-    expect(
-      ws.sentMessages.map((m) => (JSON.parse(m) as { type: string }).type),
-    ).not.toContain('SELECIONAR_PEAO')
-  })
-
-  it('duplo-clique no botão antes do ack envia 1 só SELECIONAR e 1 PERMANECER após o ack', async () => {
-    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
-
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
-    })
-    act(() => {
-      ws.simulateMessage({
-        type: 'PEAO_PERMANECEU',
-        peaoId: 'peao-branco',
-        pecaId: 'inicial-1',
-      })
-    })
-
-    const user = userEvent.setup()
-    await user.click(screen.getByTestId('botao-permanecer'))
-    await user.click(screen.getByTestId('botao-permanecer'))
-    await waitFor(() => {
-      expect(
-        ws.sentMessages.filter(
-          (m) => (JSON.parse(m) as { type: string }).type === 'SELECIONAR_PEAO',
-        ),
-      ).toHaveLength(1)
-    })
-
-    act(() => {
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-    })
-    await waitFor(() => {
-      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
-      expect(JSON.parse(ultimo)).toEqual({
-        type: 'PERMANECER',
-        peaoId: 'peao-branco',
-        jogadorId: MEU_JOGADOR_ID,
-      })
-    })
-    expect(
-      ws.sentMessages.filter(
-        (m) => (JSON.parse(m) as { type: string }).type === 'PERMANECER',
-      ),
-    ).toHaveLength(1)
-  })
-
-  it('ERRO após o SELECIONAR do 1-clique descarta o PERMANECER pendente', async () => {
-    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
-
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
-    })
-    act(() => {
-      ws.simulateMessage({
-        type: 'PEAO_PERMANECEU',
-        peaoId: 'peao-branco',
-        pecaId: 'inicial-1',
-      })
-    })
-
-    const user = userEvent.setup()
-    await user.click(screen.getByTestId('botao-permanecer'))
-    await waitFor(() => {
-      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
-      expect((JSON.parse(ultimo) as { type: string }).type).toBe('SELECIONAR_PEAO')
-    })
-
-    // Seleção rejeitada pelo servidor: o pendente é descartado.
-    act(() => {
-      ws.simulateMessage({
-        type: 'ERRO_DO_TABULEIRO',
-        codigo: 'PENDENCIA_NAO_RESOLVIDA',
-        mensagem: 'Há pendências.',
-      })
-    })
-    // Seleção tardia (de outro fluxo) não deve disparar PERMANECER fantasma:
-    // a vez segue minha, mas o pendente foi descartado no erro.
-    act(() => {
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-    })
-    await act(async () => {})
-    expect(
-      ws.sentMessages.map((m) => (JSON.parse(m) as { type: string }).type),
-    ).not.toContain('PERMANECER')
   })
 
   it('ERRO_DO_TABULEIRO FORA_DA_VEZ toca som de recusa com motivo e anuncia (issue #118)', async () => {
@@ -1449,6 +1399,8 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
         snapshot: snapshotComObjetivos({ posicionadas: [GERADOR_1, SALA_MEDICA_1] }),
       }),
     )
+    // Sem janela de Manipulação: o overlay 3D não emite (data-manipulacao
+    // ausente no espelho) — os controles DOM de giro não existem mais.
     const pospecas = await screen.findAllByTestId('peca-posicionada')
     expect(pospecas).toHaveLength(2)
     expect(
@@ -1457,8 +1409,8 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
     expect(
       pospecas.find((el) => el.getAttribute('data-peca-id') === 'sala-medica-1')?.getAttribute('data-tipo'),
     ).toBe('sala_medica')
-    // Sem janela de Manipulação: os controles de giro nascem desabilitados.
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
+    expect(pospecas.some((el) => el.hasAttribute('data-manipulacao'))).toBe(false)
+    expect(screen.queryByTestId('controles-de-giro')).not.toBeInTheDocument()
 
     // Via delta: sorteio + encaixe direto de outra especial no mesmo lote.
     act(() => {
@@ -1476,9 +1428,11 @@ describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
       .find((el) => el.getAttribute('data-peca-id') === 'sala-medica-2')
     expect(delta?.getAttribute('data-tipo')).toBe('sala_medica')
     // O encaixe da especial não abriu janela de Manipulação (o modelo local
-    // reflete o engine): giro segue desabilitado.
-    expect(screen.getByTestId('girar-horario')).toBeDisabled()
-    expect(screen.getByTestId('girar-anti-horario')).toBeDisabled()
+    // reflete o engine): sem data-manipulacao nas peças e sem controles DOM.
+    expect(
+      screen.getAllByTestId('peca-posicionada').some((el) => el.hasAttribute('data-manipulacao')),
+    ).toBe(false)
+    expect(screen.queryByTestId('controles-de-giro')).not.toBeInTheDocument()
   })
 })
 

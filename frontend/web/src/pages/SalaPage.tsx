@@ -112,7 +112,7 @@ export function SalaPage() {
         // interno (ou a barra de rolagem entrando/saindo) não desloca nem
         // recalcula o `cover`.
         background:
-          'linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url("/assets/criar-sala-background.jpeg") center / cover no-repeat',
+          'linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url("/assets/criar-sala-background.jpg") center / cover no-repeat',
         backgroundAttachment: 'fixed',
       }}
     >

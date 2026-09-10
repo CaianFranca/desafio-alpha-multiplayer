@@ -6,8 +6,11 @@
  * chamador React (PartidaPage) e é consumido em ack/erro/snapshot
  * contraditório — nunca permite duplo envio do mesmo alvo.
  *
- * Alvos cobertos: POSICIONAR_PECA / POSICIONAR_PEAO / DESELECIONAR_PEAO.
- * Demais comandos (seleção, giro, vaga, mover/permanecer) seguem sem gate —
+ * Alvos cobertos: POSICIONAR_PECA / POSICIONAR_PEAO / DESELECIONAR_PEAO /
+ * ESCOLHER_VAGA_DA_PECA_RECEBIDA (por recebidaId — review #338: sem ele,
+ * cliques rápidos na vaga reenviavam a escolha no intervalo até o ack de
+ * PECA_POSICIONADA, e o ERRO_DO_TABULEIRO soava junto ao som de sucesso).
+ * Demais comandos (seleção, giro, mover/permanecer) seguem sem gate —
  * o domínio já os trata como idempotentes ou rejeita com erro próprio.
  */
 
@@ -17,11 +20,15 @@ interface FormaDeComando {
   readonly type: string
   readonly pecaId?: string
   readonly peaoId?: string
+  readonly recebidaId?: string
   readonly celula?: Celula
 }
 
 /** Chave estável do alvo em voo, ou null quando o comando não tem gate. */
 export function chaveDeComandoPendente(comando: FormaDeComando): string | null {
+  if (comando.type === 'ESCOLHER_VAGA_DA_PECA_RECEBIDA' && typeof comando.recebidaId === 'string') {
+    return `ESCOLHER_VAGA:${comando.recebidaId}`
+  }
   if (comando.type === 'POSICIONAR_PECA' && typeof comando.pecaId === 'string' && comando.celula) {
     return `POSICIONAR_PECA:${comando.pecaId}:${comando.celula.linha}:${comando.celula.coluna}`
   }
@@ -38,6 +45,7 @@ interface FormaDeAck {
   readonly type: string
   readonly pecaId?: string
   readonly peaoId?: string
+  readonly recebidaId?: string
   readonly celula?: Celula
 }
 
@@ -68,12 +76,26 @@ function consumirPorChaveExataOuPrefixo(
 }
 
 export function consumirAck(pendentes: Set<string>, evento: FormaDeAck): boolean {
+  if (evento.type === 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO' && typeof evento.recebidaId === 'string') {
+    return pendentes.delete(`ESCOLHER_VAGA:${evento.recebidaId}`)
+  }
   if (evento.type === 'PECA_POSICIONADA' && typeof evento.pecaId === 'string') {
-    return consumirPorChaveExataOuPrefixo(
+    const consumiuPosicao = consumirPorChaveExataOuPrefixo(
       pendentes,
       `POSICIONAR_PECA:${evento.pecaId}`,
       evento.celula,
     )
+    // O encaixe conclui a janela da vaga: limpa escolhas em voo (cobre o
+    // intervalo entre o ack da vaga e o ack do encaixe, sem mapear
+    // recebidaId→pecaId aqui — o ciclo é sequencial por slot único).
+    let consumiuVaga = false
+    for (const chave of [...pendentes]) {
+      if (chave.startsWith('ESCOLHER_VAGA:')) {
+        pendentes.delete(chave)
+        consumiuVaga = true
+      }
+    }
+    return consumiuPosicao || consumiuVaga
   }
   if (evento.type === 'PEAO_POSICIONADO' && typeof evento.peaoId === 'string') {
     return consumirPorChaveExataOuPrefixo(

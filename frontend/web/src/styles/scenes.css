@@ -4,13 +4,20 @@
    sem equivalente 1:1, fica no CSS). */
 
 @layer components {
-  /* Hero: fundo com sangria de 14% (parallax só via `transform` JS/rAF).
-     Sem overlay — legibilidade via sombra de texto em `#hero`. */
+  /* Hero: fundo com sangria de 14% (parallax só via `transform` JS/rAF). */
   .hero-media {
     position: absolute;
     inset: -14% 0;
     background: var(--background-image-hero) center 35% / cover no-repeat, var(--color-background);
     will-change: transform;
+  }
+
+  .hero-media::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: none;
   }
   /* Texto da Hero legível sem véu: sombra sobre a imagem. */
   #hero h1,

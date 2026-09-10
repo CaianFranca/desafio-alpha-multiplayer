@@ -45,10 +45,10 @@ import {
   peoesEmBaixaIluminacaoDe,
 } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
-import { mapearGiro } from '../game/tabuleiro/interacao'
+import { mapearFinalizarManipulacao, mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
-import { quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
+import { giroAlteraConexao, quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
 import type {
@@ -258,7 +258,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         if (
           evento.type === 'PECA_POSICIONADA' ||
           evento.type === 'PEAO_POSICIONADO' ||
-          evento.type === 'PEAO_DESELECIONADO'
+          evento.type === 'PEAO_DESELECIONADO' ||
+          evento.type === 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO'
         ) {
           consumirAck(pendentesEmVoo.current, evento)
         }
@@ -651,9 +652,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           : null
         : modelo.movimentouNoTurno
           ? 'confirmar'
-          : 'permanecer'
+          : modelo.recebidasPendentes.length > 0
+            ? null
+            : 'permanecer'
 
-  // ── Rotação: botões DOM (horário/anti-horário) + teclas R/E ──
+  // ── Rotação: teclas R/E (a peça em manipulação gira pelo overlay 3D) ──
   const pecaAlvoDeGiro = estadoInteracao
     ? (estadoInteracao.pecaEmManipulacaoId ?? estadoInteracao.pecaSelecionadaId)
     : null
@@ -661,10 +664,28 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const girar = useCallback(
     (sentido: 'horario' | 'anti_horario') => {
       if (pecaAlvoDeGiro === null) return
+      // Peça de 4 caminhos (cruz): giro redundante, sem setas no overlay e
+      // sem R/E (review PR #338). O tipo vem da posicionada em manipulação
+      // ou da pendência em foco (pré-encaixe).
+      const emManipulacao = estadoInteracao?.pecaEmManipulacaoId ?? null
+      const tipoAlvo =
+        emManipulacao !== null && pecaAlvoDeGiro === emManipulacao
+          ? (estadoExibicao?.posicionadas.find((p) => p.pecaId === pecaAlvoDeGiro)?.tipo ?? null)
+          : (modelo.recebidasPendentes.find((r) => r.pecaId === pecaAlvoDeGiro)?.tipoDaPeca ?? null)
+      if (tipoAlvo !== null && !giroAlteraConexao(tipoAlvo)) return
       enviarComJogador(mapearGiro(pecaAlvoDeGiro, sentido))
     },
-    [enviarComJogador, pecaAlvoDeGiro],
+    [enviarComJogador, pecaAlvoDeGiro, estadoInteracao, estadoExibicao, modelo.recebidasPendentes],
   )
+
+  // ── Acessibilidade do overlay 3D (review #338): o botão "OK" é exclusivo
+  // de ponteiro no canvas — Espaço/Enter com manipulação ativa equivale ao
+  // OK (fora de botões/campos, para não duplicar o clique nativo).
+  const pecaEmManipulacaoId = estadoInteracao?.pecaEmManipulacaoId ?? null
+  const finalizarManipulacao = useCallback(() => {
+    if (pecaEmManipulacaoId === null) return
+    enviarComJogador(mapearFinalizarManipulacao())
+  }, [enviarComJogador, pecaEmManipulacaoId])
 
   useEffect(() => {
     if (!estadoEmAndamento) return
@@ -673,10 +694,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA')) return
       if (e.key === 'r' || e.key === 'R') girar('horario')
       if (e.key === 'e' || e.key === 'E') girar('anti_horario')
+      if (e.key === ' ' || e.key === 'Enter') {
+        if (alvo && (alvo.tagName === 'BUTTON' || alvo.tagName === 'A')) return
+        if (pecaEmManipulacaoId === null) return
+        e.preventDefault()
+        finalizarManipulacao()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [estadoEmAndamento, girar])
+  }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao])
 
   const tentarNovamenteComConexao = useCallback(() => {
     desconectar()
@@ -693,22 +720,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader])
 
   // ── Comandos de turno (issue #118) — todos via enviarComJogador ──
-  // Permanecer em 1 clique: com o próprio peão já selecionado envia
-  // PERMANECER direto (cobre 2º clique no token e token+botão); sem seleção
-  // envia SELECIONAR_PEAO e arma o pendente — o ack PEAO_SELECIONADO no
-  // onEvento acima encadeia o PERMANECER. Duplo-clique no botão com seleção
-  // pendente é no-op (não reenvia SELECIONAR).
+  // Permanecer auto-seleciona o peão da vez (bloqueante review #338): no
+  // fluxo padrão (rodada 2+, peão desselecionado) o PERMANECER cru seria
+  // recusado com PEAO_NAO_SELECIONADO — a cadeia SELECIONAR+PERMANECER segue
+  // o padrão serial da #261, na mesma conexão e em ordem.
   const permanecerNoTurno = useCallback(() => {
-    if (peaoProprioId === null) return
-    if (modelo.peaoSelecionadoId === peaoProprioId) {
-      permanecerPendenteRef.current = false
-      enviarComJogador({ type: 'PERMANECER', peaoId: peaoProprioId })
-      return
+    if (peaoProprioId === null || !minhaVez) return
+    if (peaoDoTurnoId !== null && peaoProprioId !== peaoDoTurnoId) return
+    if (modelo.peaoSelecionadoId !== peaoProprioId) {
+      enviarComJogador({ type: 'SELECIONAR_PEAO', peaoId: peaoProprioId })
     }
-    if (permanecerPendenteRef.current) return
-    permanecerPendenteRef.current = true
-    enviarComJogador({ type: 'SELECIONAR_PEAO', peaoId: peaoProprioId })
-  }, [enviarComJogador, modelo.peaoSelecionadoId, peaoProprioId])
+    enviarComJogador({ type: 'PERMANECER', peaoId: peaoProprioId })
+  }, [enviarComJogador, peaoProprioId, minhaVez, peaoDoTurnoId, modelo.peaoSelecionadoId])
 
   const confirmarPosicaoNoTurno = useCallback(() => {
     if (peaoProprioId === null) return
@@ -866,33 +889,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               Encerrar Turno
             </button>
           ) : null}
-        </div>
-      ) : null}
-      {estadoEmAndamento ? (
-        // Controles de giro acima das conquistas soltas do HUD (inf-centro,
-        // #226) para não sobrepor Geradores/Cartão.
-        <div
-          data-testid="controles-de-giro"
-          className="pointer-events-auto absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 gap-2"
-        >
-          <button
-            type="button"
-            data-testid="girar-anti-horario"
-            onClick={() => girar('anti_horario')}
-            disabled={pecaAlvoDeGiro === null}
-            className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
-          >
-            Girar ◀
-          </button>
-          <button
-            type="button"
-            data-testid="girar-horario"
-            onClick={() => girar('horario')}
-            disabled={pecaAlvoDeGiro === null}
-            className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
-          >
-            Girar ▶
-          </button>
         </div>
       ) : null}
       </div>
