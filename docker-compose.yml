@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:17
-    profiles: [db, backend, nginx, full]
+    profiles: [db, backend, nginx, full, test]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-flicker}
       POSTGRES_USER: ${POSTGRES_USER:-flicker}
@@ -19,7 +19,7 @@ services:
 
   db-migrate:
     build: ./db
-    profiles: [db, backend, nginx, full]
+    profiles: [db, backend, nginx, full, test]
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,7 +33,7 @@ services:
 
   redis:
     image: redis:7
-    profiles: [db, backend, nginx, full]
+    profiles: [db, backend, nginx, full, test]
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
