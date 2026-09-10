@@ -37,6 +37,11 @@ export type EventoDaTela =
 
 export const estadoInicial: EstadoDaTela = 'carregando'
 
+/** Estados terminais de tela: sem retry — o destino é o Retorno à Sala. */
+function isTerminal(estado: EstadoDaTela): boolean {
+  return estado === 'resultado' || estado === 'partidaNaoIniciada'
+}
+
 const estadosValidos: readonly EstadoDaTela[] = ['carregando', 'aguardando', 'disponivel', 'falha', 'resultado', 'partidaNaoIniciada'] as const
 
 export function isEstadoDaTela(value: unknown): value is EstadoDaTela {
@@ -56,14 +61,12 @@ export function transicao(estado: EstadoDaTela, evento: EventoDaTela): EstadoDaT
     case 'partidaNaoIniciada':
       return 'partidaNaoIniciada'
     case 'falhar':
-      if (estado === 'resultado') return 'resultado'
-      if (estado === 'partidaNaoIniciada') return 'partidaNaoIniciada'
+      if (isTerminal(estado)) return estado
       return 'falha'
     case 'tentarNovamente':
       // Resultado e não-início são terminais — retry não sai deles (o
       // não-início requer navegação de volta à Sala reaberta).
-      if (estado === 'resultado') return 'resultado'
-      if (estado === 'partidaNaoIniciada') return 'partidaNaoIniciada'
+      if (isTerminal(estado)) return estado
       return 'carregando'
     case 'forcar':
       return evento.estado

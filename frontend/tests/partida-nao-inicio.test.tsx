@@ -108,20 +108,32 @@ describe('partida não iniciada no cliente (issue #329)', () => {
     expect(screen.getByTestId('overlay-partida-nao-iniciada')).toBeInTheDocument()
   })
 
-  it('reason PARTIDA_NAO_INICIADA sem código 4000 também é terminal', async () => {
+  it('reason PARTIDA_NAO_INICIADA sem código 4000 segue em reconexão (par estrito)', async () => {
     const ws = await socketDaPartida('/partida?serverId=s&partidaId=p')
 
     act(() => ws.simulateClose(1000, MOTIVO_PARTIDA_NAO_INICIADA))
 
-    await screen.findByTestId('overlay-partida-nao-iniciada')
+    // Par estrito (issue #329): reason sozinho não é terminal.
     await esperarJanelaDeReconexao()
-    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(MockWebSocket.instances).toHaveLength(2)
+    expect(screen.queryByTestId('overlay-partida-nao-iniciada')).not.toBeInTheDocument()
   })
 
-  it('ADMISSAO_REJEITADA PARTIDA_NAO_ENCONTRADA encerra no mesmo terminal sem loop', async () => {
+  it('código 4000 sem reason PARTIDA_NAO_INICIADA segue em reconexão (par estrito)', async () => {
     const ws = await socketDaPartida('/partida?serverId=s&partidaId=p')
 
-    // Pós-não-início: o retry encontra o upgrade sem a Partida cancelada.
+    act(() => ws.simulateClose(CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA, 'OUTRO_MOTIVO'))
+
+    await esperarJanelaDeReconexao()
+    expect(MockWebSocket.instances).toHaveLength(2)
+    expect(screen.queryByTestId('overlay-partida-nao-iniciada')).not.toBeInTheDocument()
+  })
+
+  it('ADMISSAO_REJEITADA PARTIDA_NAO_ENCONTRADA sem contexto vai para falha com retry e voltar', async () => {
+    const ws = await socketDaPartida('/partida?serverId=s&partidaId=p')
+
+    // Primeira entrada com partidaId inválido/expirado: sem close 4000 prévio,
+    // é falha com retry — não diagnóstico enganoso de não-início.
     act(() =>
       ws.simulateMessage({
         type: 'ADMISSAO_REJEITADA',
@@ -130,10 +142,33 @@ describe('partida não iniciada no cliente (issue #329)', () => {
       }),
     )
 
-    await screen.findByTestId('overlay-partida-nao-iniciada')
+    await screen.findByTestId('overlay-falha')
+    expect(screen.getByTestId('partida-tentar-novamente')).toBeInTheDocument()
     expect(screen.getByTestId('voltar-a-sala')).toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-partida-nao-iniciada')).not.toBeInTheDocument()
     // Socket encerrado sem reagendar: onclose nulado, sem instância nova.
     expect(ws.onclose).toBeNull()
+    await esperarJanelaDeReconexao()
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('ADMISSAO_REJEITADA pós-não-início (após close 4000) mantém o terminal sem loop', async () => {
+    const ws = await socketDaPartida('/partida?serverId=s&partidaId=p')
+
+    act(() => ws.simulateClose(CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA, MOTIVO_PARTIDA_NAO_INICIADA))
+    await screen.findByTestId('overlay-partida-nao-iniciada')
+
+    // Retry tardio que encontra o upgrade sem a Partida cancelada.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_REJEITADA',
+        codigo: 'PARTIDA_NAO_ENCONTRADA',
+        motivo: 'Partida não encontrada.',
+      }),
+    )
+
+    expect(screen.getByTestId('overlay-partida-nao-iniciada')).toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-falha')).not.toBeInTheDocument()
     await esperarJanelaDeReconexao()
     expect(MockWebSocket.instances).toHaveLength(1)
   })
@@ -178,6 +213,68 @@ describe('partida não iniciada no cliente (issue #329)', () => {
     const user = userEvent.setup()
     await user.click(screen.getByTestId('voltar-a-sala'))
     expect(await screen.findByTestId('criar-pagina')).toBeInTheDocument()
+  })
+
+  it('?codigoDeSala= na URL supre o contexto ausente no voltar à sala', async () => {
+    const ws = await socketDaPartida('/partida?serverId=s&partidaId=p&codigoDeSala=A3K9M2', null)
+
+    act(() => ws.simulateClose(CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA, MOTIVO_PARTIDA_NAO_INICIADA))
+    await screen.findByTestId('overlay-partida-nao-iniciada')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('voltar-a-sala'))
+    expect(await screen.findByTestId('sala-pagina')).toBeInTheDocument()
+  })
+
+  it('overlay de falha tem voltar à sala que navega sem reconectar', async () => {
+    const ws = await socketDaPartida('/partida?serverId=s&partidaId=p', 'A3K9M2')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_REJEITADA',
+        codigo: 'PARTIDA_NAO_ENCONTRADA',
+        motivo: 'Partida não encontrada.',
+      }),
+    )
+    await screen.findByTestId('overlay-falha')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('voltar-a-sala'))
+    expect(await screen.findByTestId('sala-pagina')).toBeInTheDocument()
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it('PARTIDA_TERMINADA segue indo para resultado (sem terminal de não-início)', async () => {
+    const ws = await socketDaPartida('/partida?serverId=s&partidaId=p')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'PARTIDA_TERMINADA',
+        resultado: 'derrota',
+        motivo: null,
+      }),
+    )
+
+    await screen.findByTestId('overlay-resultado')
+    expect(screen.queryByTestId('overlay-partida-nao-iniciada')).not.toBeInTheDocument()
+  })
+
+  it('PARTIDA_TERMINADA tardia após não-início é ignorada (terminal mantido)', async () => {
+    const ws = await socketDaPartida('/partida?serverId=s&partidaId=p')
+
+    act(() => ws.simulateClose(CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA, MOTIVO_PARTIDA_NAO_INICIADA))
+    await screen.findByTestId('overlay-partida-nao-iniciada')
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'PARTIDA_TERMINADA',
+        resultado: 'vitoria',
+        motivo: null,
+      }),
+    )
+
+    expect(screen.getByTestId('overlay-partida-nao-iniciada')).toBeInTheDocument()
+    expect(screen.queryByTestId('overlay-resultado')).not.toBeInTheDocument()
   })
 })
 

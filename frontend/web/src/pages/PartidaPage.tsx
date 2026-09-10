@@ -51,6 +51,7 @@ import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
+import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
@@ -107,6 +108,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     authState.status === 'authenticated' ? authState.jogador.id : null
   const navigate = useNavigate()
   const codigoDeSala = useSalaCodigoOptional()
+  // Retorno à Sala (issue #329): o redirect do Encaminhamento usa
+  // window.location.assign (reload) e o contexto da Sala morre na /partida —
+  // ?codigoDeSala= é o fallback que sobrevive ao reload. Contexto primeiro,
+  // URL depois, /salas/criar por último.
+  const codigoDeSalaUrl = normalizarCodigoDeSala(searchParams.get('codigoDeSala') ?? '')
+  const codigoEfetivo = codigoDeSala ?? codigoDeSalaUrl
 
   const { estado, resultado, motivo, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar, partidaNaoIniciada } =
     usePartidaTela({
@@ -421,9 +428,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
   const voltarASala = useCallback(() => {
     desconectar()
-    if (codigoDeSala) navigate(`/sala/${codigoDeSala}`)
+    if (codigoEfetivo) navigate(`/sala/${codigoEfetivo}`)
     else navigate('/salas/criar')
-  }, [desconectar, navigate, codigoDeSala])
+  }, [desconectar, navigate, codigoEfetivo])
 
   // ── Injeção única de jogadorId (issue #91) — bloqueada após término e no não-início ──
   // Com gate anti-duplo-place (#249): o mesmo alvo em voo não é reenviado.

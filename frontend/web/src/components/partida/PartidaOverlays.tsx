@@ -129,6 +129,14 @@ export function PartidaOverlays({
         >
           Tentar novamente
         </button>
+        <button
+          type="button"
+          data-testid="voltar-a-sala"
+          onClick={onVoltar}
+          className="pointer-events-auto rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600 focus-visible:outline-2 focus-visible:outline-amber-500"
+        >
+          Voltar à sala
+        </button>
       </div>
     </div>
   )

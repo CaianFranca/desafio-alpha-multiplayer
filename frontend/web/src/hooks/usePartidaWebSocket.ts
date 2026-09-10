@@ -7,9 +7,11 @@
  *
  * Padrão de `useSalaWebSocket`: reconexão simples (1s), fila de comandos
  * pendentes até o `open`, cleanup no unmount. Exceção (issue #329): o
- * fechamento de não-início (`4000 PARTIDA_NAO_INICIADA`) e a
- * `ADMISSAO_REJEITADA` com `PARTIDA_NAO_ENCONTRADA` são terminais — não
- * reagendam reconexão e sinalizam `onPartidaNaoIniciada`. Trata apenas `ADMISSAO_ACEITA`
+ * fechamento de não-início (par `4000 PARTIDA_NAO_INICIADA`) é terminal —
+ * não reagenda reconexão e sinaliza `onPartidaNaoIniciada`. A
+ * `ADMISSAO_REJEITADA` com `PARTIDA_NAO_ENCONTRADA` só é terminal no retry
+ * pós-não-início (após o close 4000); sem esse contexto, é falha com retry.
+ * Trata apenas `ADMISSAO_ACEITA`
  * (sinaliza que a partida ficou disponível) e eventos da partida
  * (`EventoDoCanalDaPartida` via callback — tabuleiro, peões/ciclo, turnos
  * (ST-11) e iluminação/limpeza da issue #151); mensagens desconhecidas são
@@ -104,16 +106,15 @@ interface UsePartidaWebSocketOptions {
 
 /**
  * Fechamento de não-início da Partida (game-server `fecharSocketsDeNaoInicio`,
- * PR #304): código de aplicação `4000` com reason `PARTIDA_NAO_INICIADA`.
- * Aceita qualquer um dos dois sinais — o código é a fonte primária, o reason
- * cobre relays que reescrevem o código.
+ * PR #304): par estrito — código de aplicação `4000` com reason
+ * `PARTIDA_NAO_INICIADA`. Ambos são exigidos juntos; code ou reason sozinhos
+ * caem na reconexão simples.
  */
 export const CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA = 4000
 export const MOTIVO_PARTIDA_NAO_INICIADA = 'PARTIDA_NAO_INICIADA'
 
 function fechamentoDeNaoInicio(code: number, reason: string | undefined): boolean {
-  if (code === CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA) return true
-  return typeof reason === 'string' && reason.includes(MOTIVO_PARTIDA_NAO_INICIADA)
+  return code === CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA && reason === MOTIVO_PARTIDA_NAO_INICIADA
 }
 
 /**
@@ -141,6 +142,11 @@ export function usePartidaWebSocket({
   const onAdmissaoRef = useRef(onAdmissao)
   const onFalhaDeConexaoRef = useRef(onFalhaDeConexao)
   const onPartidaNaoIniciadaRef = useRef(onPartidaNaoIniciada)
+  // Pós-não-início (issue #329): marca que o close 4000 já foi visto — só
+  // então ADMISSAO_REJEITADA/PARTIDA_NAO_ENCONTRADA é terminal. Sem esse
+  // contexto (ex.: primeira entrada com partidaId inválido), cai em falha
+  // com retry em vez de diagnóstico enganoso de não-início.
+  const viuNaoInicioRef = useRef(false)
   useEffect(() => {
     onEventoRef.current = onEvento
     onAdmissaoRef.current = onAdmissao
@@ -166,11 +172,30 @@ export function usePartidaWebSocket({
     }
   }, [])
 
+  const encerrarSemReconexao = useCallback((ws: WebSocket) => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+    // Socket terminal: nula o handler como no encerramento manual para
+    // sinalizar "encerrado sem reconexão" ao inspetor/testes.
+    ws.onclose = null
+    if (wsRef.current === ws) wsRef.current = null
+    try {
+      ws.close()
+    } catch {
+      // ignora
+    }
+  }, [])
+
   const conectar = useCallback(() => {
     // Sem alvo (URL sem serverId/partidaId), não há canal para abrir — a
     // conexão fica inerte (a página exibirá tela de falha pelo caminho DEV/não-DEV).
     if (!serverId || !partidaId) return
     if (typeof window === 'undefined') return
+    // Novo socket, novo contexto de admissão: o não-início visto numa
+    // Partida anterior não contamina a próxima na mesma montagem.
+    viuNaoInicioRef.current = false
     const url = buildGameWsUrl(serverId, partidaId)
     let ws: WebSocket
     try {
@@ -224,24 +249,21 @@ export function usePartidaWebSocket({
         case 'ADMISSAO_REJEITADA': {
           // Pós-não-início (issue #329): o retry encontra o upgrade sem a
           // Partida cancelada (HTTP 404 `PARTIDA_NAO_ENCONTRADA`) e o canal o
-          // entrega como mensagem. É o mesmo terminal do close 4000: encerra
-          // sem reagendar e devolve o Jogador à Sala reaberta. Demais códigos
-          // de admissão seguem ignorados como antes.
+          // entrega como mensagem. Só é o mesmo terminal do close 4000 quando
+          // o não-início já foi visto — sem esse contexto (primeira entrada
+          // com partidaId inválido/expirado), é falha com retry, não
+          // diagnóstico de não-início. Demais códigos de admissão seguem
+          // ignorados como antes.
           const codigo = (data as AdmissaoRejeitadaEvento).codigo
           if (codigo === 'PARTIDA_NAO_ENCONTRADA') {
             if (!montadoRef.current) return
-            ws.onclose = null
-            if (reconnectTimerRef.current !== null) {
-              clearTimeout(reconnectTimerRef.current)
-              reconnectTimerRef.current = null
+            if (viuNaoInicioRef.current) {
+              encerrarSemReconexao(ws)
+              onPartidaNaoIniciadaRef.current?.()
+            } else {
+              encerrarSemReconexao(ws)
+              onFalhaDeConexaoRef.current()
             }
-            wsRef.current = null
-            try {
-              ws.close()
-            } catch {
-              // ignora
-            }
-            onPartidaNaoIniciadaRef.current?.()
           }
           return
         }
@@ -288,13 +310,8 @@ export function usePartidaWebSocket({
       // cairia no upgrade 404 em loop). Demais fechamentos mantêm a
       // reconexão simples após 1s.
       if (fechamentoDeNaoInicio(event.code, event.reason)) {
-        if (reconnectTimerRef.current !== null) {
-          clearTimeout(reconnectTimerRef.current)
-          reconnectTimerRef.current = null
-        }
-        // Socket terminal: nula o handler como no encerramento manual para
-        // sinalizar "encerrado sem reconexão" ao inspetor/testes.
-        ws.onclose = null
+        viuNaoInicioRef.current = true
+        encerrarSemReconexao(ws)
         onPartidaNaoIniciadaRef.current?.()
         return
       }
@@ -320,7 +337,7 @@ export function usePartidaWebSocket({
       }
       onFalhaDeConexaoRef.current()
     }
-  }, [serverId, partidaId])
+  }, [serverId, partidaId, encerrarSemReconexao])
 
   useEffect(() => {
     montadoRef.current = true
