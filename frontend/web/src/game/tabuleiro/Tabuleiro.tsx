@@ -127,7 +127,7 @@ export function Tabuleiro({
   vooPendente = null,
   onVooAterrissou,
   ocultarPecaId = null,
-   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
+  emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   ordemDeChegadaPorChave = {},
   quantidadeDePeoes = peoes.length || 4,
 }: TabuleiroProps) {

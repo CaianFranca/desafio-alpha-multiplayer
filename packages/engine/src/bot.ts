@@ -15,40 +15,53 @@
 //
 // Precedência das subfases em acoesValidasDaSubfase:
 //   (a) partida terminada ou vez de outro jogador → sem ações;
-//   (b) Recebimento pendente → com Recebida com vaga já escolhida, APENAS as
-//       ações dela (encaixe conectado, ou girar_peca sobre ela para abrir a
-//       borda voltada à Peça geradora — recuperação de vaga morta, #349);
-//       sem vaga fixada, escolher a vaga de cada pendência (em Baixa
-//       Iluminação, apenas vagas em células escuras — #341 — e TODAS as
-//       escuras, conectantes ou mortas: a engine aceita escolher vaga morta
-//       e o giro da fixada é o resgate — exatidão literal, review #350);
+//   (b) Recebimento pendente → escolher a vaga / encaixar a Recebida, em fluxo
+//       serial (enquanto uma Recebida aguarda o encaixe, não se escolhe a vaga
+//       de outra — o encaixe da pendente vem primeiro, preservando
+//       pecaSelecionadaId == pecaId para o giro; em Baixa Iluminação, apenas
+//       vagas em células escuras — #341);
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
-//   (d) turno normal sem Confirmação → selecionar o Peão, mover, permanecer
-//       ou confirmar a posição (quando houve mudança de peça);
+//   (d) turno normal sem Confirmação → selecionar o Peão e, sobre a Peça do
+//       início, mover (uma vez) ou permanecer; fora dela, só confirmar a
+//       posição — o bot nunca encadeia 2 movers no mesmo turno;
 //   (e) posição confirmada (e sem pendências) → encerrar o turno.
+//
+// Randomização da orientação: todo posicionar_peca sorteado passa por
+// expandirPosicionamentoDoBot, que sorteia um rótulo de giro (manter, 1x
+// horário, 1x anti-horário, 2x horário, 2x anti-horário) dentre os que geram
+// conexão com a peça geradora — e emite os girar_peca correspondentes antes
+// do encaixe. A Inicial (sem geradora) sorteia entre os 5 rótulos sem filtro.
+// Peças simétricas (cruz, especiais e monstros — 4 bordas abertas) dispensam
+// o giro: qualquer orientação conecta e o giro seria no-op visual.
 //
 // A confirmação em (d) — confirmar_posicao_do_peao quando o Peão saiu da Peça
 // do início do turno — é exigência estrutural da engine (o Encerramento do
 // Turno normal a requer e a Permanência só vale sobre a Peça de início); sem
 // ela o loop jamais alcançaria o encerrar_turno nos turnos normais.
 //
-// Fora do escopo deliberado: girar_peca sobre Peça posicionada e
-// finalizar_manipulacao (janela opcional de Manipulação aberta pelo próprio
-// encaixe — o bot retoma o ciclo e a janela fecha na próxima escolha de
-// vaga), atravessar_o_escuro (ação opcional de Baixa Iluminação — o bot em
-// Baixa usa a movimentação normal; a pendência da Travessia, com célula
-// travada, jamais nasce de ações de bot — prova no ramo travada de (b)) e
-// desselecionar_peao (sem efeito útil no turno).
+// Fora do escopo deliberado: finalizar_manipulacao (janela de Manipulação
+// pós-encaixe — o bot não manipula após posicionar), atravessar_o_escuro
+// (jogada opcional de Baixa Iluminação — o bot em Baixa usa a movimentação
+// normal) e desselecionar_peao (sem efeito útil no turno). O girar_peca
+// pré-encaixe FAZ parte do plano, via expandirPosicionamentoDoBot. A
+// pendência da Travessia (Baixa, com célula travada) segue enumerada em (b).
 
 import {
+  bordasAbertas,
+  celulaVizinhaNaBorda,
   ehPecaDeMonstro,
+  ehPecaEspecial,
   tetoDoPortao,
   vagasDisponiveis,
   vizinhasConectadas,
+  type BordaCardinal,
   type Celula,
   type CorDoPeao,
+  type Orientacao,
   type PecaPosicionada,
+  type SentidoDeRotacao,
+  type TipoDaPeca,
 } from './tabuleiro.ts';
 import { conectaNaVaga } from './peoes.ts';
 import {
@@ -60,12 +73,9 @@ import {
 // Failsafe contra loop infinito: teto de ações sorteadas por turno. Ao
 // atingi-lo, o loop tenta UMA vez o encerrar_turno forçado e, se a engine o
 // rejeitar (ex.: PENDENCIA_NAO_RESOLVIDA), desiste do turno sem contorno.
-// Pior caso do turno completo (#349; cálculo do review #350): 4 pendências ×
-// (escolher vaga + ≤ 1 giro de recuperação de vaga morta + encaixar) = 12,
-// mais a sequência de movimentação (4) — 16 ≤ 20. Sem o teto de 20, o
-// failsafe estrangularia turnos legítimos de 2+ pendências com giro (a
-// exatidão literal pode fixar vaga morta com conectante disponível; o giro
-// da fixada é o resgate).
+// Teto em 20 para acomodar o pior caso de um turno de movimento único:
+// selecionar + mover + confirmar + até 4 recebidas × (escolher + encaixar)
+// + encerrar, com folga.
 export const MAX_ACOES_POR_TURNO_DO_BOT = 20;
 
 export interface IdentidadeDoBot {
@@ -112,6 +122,174 @@ export function sortearAcao<T>(acoes: readonly T[]): T {
     throw new Error('O sorteio caiu fora da lista de ações válidas.');
   }
   return sorteada;
+}
+
+// --- Randomização da orientação do bot --------------------------------------
+//
+// O bot encaixa cada peça numa orientação sorteada entre 5 rótulos — manter,
+// 1x horário, 1x anti-horário, 2x horário, 2x anti-horário (os dois últimos
+// colapsam em 180°, dando peso duplo a essa orientação) — filtrados aos que
+// geram conexão com a peça geradora da vaga.
+
+const ORIENTACOES_CANDIDATAS: readonly Orientacao[] = [0, 90, 180, 270];
+
+const BORDA_OPOSTA_DO_BOT: Record<BordaCardinal, BordaCardinal> = {
+  norte: 'sul',
+  sul: 'norte',
+  leste: 'oeste',
+  oeste: 'leste',
+};
+
+export type RotuloDeGiroDoBot =
+  | 'manter'
+  | 'horario_1x'
+  | 'anti_horario_1x'
+  | 'horario_2x'
+  | 'anti_horario_2x';
+
+const ROTULOS_DE_GIRO_DO_BOT: readonly {
+  readonly rotulo: RotuloDeGiroDoBot;
+  readonly passosHorarios: 0 | 1 | 2 | 3;
+  readonly giros: readonly SentidoDeRotacao[];
+}[] = [
+  { rotulo: 'manter', passosHorarios: 0, giros: [] },
+  { rotulo: 'horario_1x', passosHorarios: 1, giros: ['horario'] },
+  { rotulo: 'anti_horario_1x', passosHorarios: 3, giros: ['anti_horario'] },
+  { rotulo: 'horario_2x', passosHorarios: 2, giros: ['horario', 'horario'] },
+  {
+    rotulo: 'anti_horario_2x',
+    passosHorarios: 2,
+    giros: ['anti_horario', 'anti_horario'],
+  },
+];
+
+// A nova peça conecta com a geradora quando tem aberta a borda voltada para
+// ela (a oposta da vaga — a geradora tem a vaga aberta por definição de
+// vagasDisponiveis).
+export function orientacaoConectaComGeradora(
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  vaga: BordaCardinal,
+): boolean {
+  return bordasAbertas({ tipo, orientacao }).includes(
+    BORDA_OPOSTA_DO_BOT[vaga],
+  );
+}
+
+// Peças de 4 bordas abertas em qualquer orientação: o giro é no-op visual e
+// toda orientação conecta — o bot poupa as ações de giro.
+function ehPecaSimetrica(tipo: TipoDaPeca): boolean {
+  return (
+    tipo === 'cruz' || ehPecaEspecial(tipo) || ehPecaDeMonstro(tipo)
+  );
+}
+
+// Conexões totais simuladas da peça numa célula (geradora + vizinhos
+// laterais já posicionados): fallback quando nenhuma das 4 orientações
+// conecta com a geradora — fica com as de maior contagem.
+export function contarConexoesTotaisDoBot(
+  posicionadas: readonly PecaPosicionada[],
+  tipo: TipoDaPeca,
+  orientacao: Orientacao,
+  celula: Celula,
+): number {
+  const porCelula = new Map(
+    posicionadas.map((peca) => [`${peca.celula.linha},${peca.celula.coluna}`, peca]),
+  );
+  let total = 0;
+  for (const borda of bordasAbertas({ tipo, orientacao })) {
+    const vizinha = celulaVizinhaNaBorda(celula, borda);
+    if (!vizinha) {
+      continue;
+    }
+    const pecaVizinha = porCelula.get(`${vizinha.linha},${vizinha.coluna}`);
+    if (
+      pecaVizinha &&
+      bordasAbertas(pecaVizinha).includes(BORDA_OPOSTA_DO_BOT[borda])
+    ) {
+      total++;
+    }
+  }
+  return total;
+}
+
+// Expande um posicionar_peca sorteado em [0..2 girar_peca, posicionar_peca],
+// com a orientação-alvo sorteada entre os rótulos que conectam com a geradora
+// (Inicial: entre os 5, sem filtro). Pura: não muta nada, só calcula.
+// Retorna [comando] intacto quando não há o que girar — peça simétrica, peça
+// fora da seleção (só a selecionada gira na engine) ou peça desconhecida.
+export function expandirPosicionamentoDoBot(
+  estado: EstadoDaPartida,
+  comando: {
+    readonly tipo: 'posicionar_peca';
+    readonly pecaId: string;
+    readonly celula: Celula;
+  },
+  sortear: <T>(acoes: readonly T[]) => T = sortearAcao,
+): ComandoDePartida[] {
+  const tabuleiro = estado.tabuleiro;
+  if (tabuleiro.pecaSelecionadaId !== comando.pecaId) {
+    return [comando];
+  }
+  const recebida = tabuleiro.recebidas.find(
+    (item) => item.pecaId === comando.pecaId,
+  );
+  const inicial = recebida
+    ? undefined
+    : tabuleiro.iniciais.find((peca) => peca.pecaId === comando.pecaId);
+  if (!recebida && !inicial) {
+    return [comando];
+  }
+  const tipo = recebida ? recebida.tipo : inicial!.tipo;
+  const atual = recebida ? recebida.orientacao : inicial!.orientacao;
+  if (ehPecaSimetrica(tipo)) {
+    return [comando];
+  }
+  let validas: Orientacao[];
+  if (recebida) {
+    if (recebida.vaga === null) {
+      return [comando];
+    }
+    validas = ORIENTACOES_CANDIDATAS.filter((orientacao) =>
+      orientacaoConectaComGeradora(tipo, orientacao, recebida.vaga!),
+    );
+    if (validas.length === 0) {
+      const alvo = recebida.celulaAlvo ?? comando.celula;
+      let melhor = -1;
+      let candidatas: Orientacao[] = [];
+      for (const orientacao of ORIENTACOES_CANDIDATAS) {
+        const total = contarConexoesTotaisDoBot(
+          tabuleiro.posicionadas,
+          tipo,
+          orientacao,
+          alvo,
+        );
+        if (total > melhor) {
+          melhor = total;
+          candidatas = [orientacao];
+        } else if (total === melhor) {
+          candidatas.push(orientacao);
+        }
+      }
+      validas = candidatas;
+    }
+  } else {
+    validas = [...ORIENTACOES_CANDIDATAS];
+  }
+  const rotulosValidos = ROTULOS_DE_GIRO_DO_BOT.filter((rotulo) =>
+    validas.includes(((atual + rotulo.passosHorarios * 90) % 360) as Orientacao),
+  );
+  if (rotulosValidos.length === 0) {
+    return [comando];
+  }
+  const escolhido = sortear(rotulosValidos);
+  return [
+    ...escolhido.giros.map(
+      (sentido) =>
+        ({ tipo: 'girar_peca', pecaId: comando.pecaId, sentido }) as const,
+    ),
+    comando,
+  ];
 }
 
 // Enumera EXATAMENTE as ações da subfase vigente do bot — nada da subfase
@@ -222,51 +400,61 @@ export function acoesValidasDaSubfase(
       : null;
     const pecaSobOPeao = pecaSobOPeaoDoJogador(estado, jogador.peaoId);
     const acoes: ComandoDePartida[] = [];
+    // Fluxo serial — anti-softlock (issue #311): enquanto uma Recebida aguarda
+    // o encaixe (vaga + alvo fixados), a engine rejeita nova escolha de vaga
+    // com PENDENCIA_NAO_RESOLVIDA, então o bot resolve o encaixe antes de
+    // escolher outra vaga — assim o giro da expansão sempre encontra
+    // pecaSelecionadaId == pecaId. Sem isso, turnos com 2+ pendências (a regra
+    // na grade toroidal, issue #260) sorteavam a rejeição certa.
+    // (Pendência travada da Travessia, com alvo mas sem vaga, nunca bloqueia
+    // as demais: ela própria ainda precisa da escolha.)
+    const haEncaixePendente = tabuleiro.recebidas.some(
+      (item) => item.vaga !== null && item.celulaAlvo !== null,
+    );
     for (const recebida of tabuleiro.recebidas) {
-      if (pecaSobOPeao === undefined) {
+      if (recebida.vaga === null) {
+        if (recebida.celulaAlvo === null && haEncaixePendente) {
+          continue;
+        }
+        if (pecaSobOPeao === undefined) {
+          continue;
+        }
+        const vagas = vagasDisponiveis(
+          tabuleiro,
+          pecaSobOPeao,
+          tabuleiro.recebidas,
+        );
+        if (recebida.celulaAlvo !== null) {
+          // Pendência travada (Travessia do Escuro): só a borda que mapeia à
+          // célula travada é aceita pela engine.
+          const travada = vagas.find((vaga) =>
+            mesmaCelula(vaga.celula, recebida.celulaAlvo),
+          );
+          if (travada !== undefined) {
+            acoes.push({
+              tipo: 'escolher_vaga_da_peca_recebida',
+              recebidaId: recebida.recebidaId,
+              borda: travada.borda,
+            });
+          }
+          continue;
+        }
+        for (const vaga of vagas) {
+          // Em Baixa, vaga iluminada é rejeição certa (DADOS_INVALIDOS):
+          // enumera apenas as vagas escuras restantes.
+          if (
+            iluminadas !== null &&
+            iluminadas.has(`${vaga.celula.linha},${vaga.celula.coluna}`)
+          ) {
+            continue;
+          }
+          acoes.push({
+            tipo: 'escolher_vaga_da_peca_recebida',
+            recebidaId: recebida.recebidaId,
+            borda: vaga.borda,
+          });
+        }
         continue;
-      }
-      const vagas = vagasDisponiveis(
-        tabuleiro,
-        pecaSobOPeao,
-        tabuleiro.recebidas,
-      );
-      let vagasElegiveis: typeof vagas;
-      if (recebida.celulaAlvo !== null) {
-        // Pendência travada (Travessia do Escuro): só a borda que mapeia à
-        // célula travada é aceita pela engine (o escolher da travada valida
-        // só o match da célula, peoes.ts). Inalcançável por bots — prova
-        // dupla: (i) ESTÁTICA: a pendência travada nasce EXCLUSIVAMENTE em
-        // atravessarOEscuroDaPartida (partida.ts), que mapeia celulaAlvo ao
-        // atravessar; gerarRecebidas nasce com celulaAlvo nulo (peoes.ts) e o
-        // escolher de vaga fixa vaga e célula-alvo JUNTAS (peoes.ts); (ii)
-        // DINÂMICA: esta FSM nunca emite atravessar_o_escuro (fora do escopo
-        // deliberado) e o teste de sementes em bot.test.ts afirma que
-        // nenhum estado alcançado por ações de bot contém pendência travada.
-        // Sem a célula travada entre as vagas disponíveis, não há ação aceita
-        // a enumerar ([] honesto — enumerar outra coisa seria rejeição
-        // certa; a lista vazia desdobra em desistência pelo failsafe).
-        const travada = vagas.find((vaga) =>
-          mesmaCelula(vaga.celula, recebida.celulaAlvo),
-        );
-        vagasElegiveis = travada === undefined ? [] : [travada];
-      } else {
-        // Todas as escuras — conectantes ou mortas: a engine aceita escolher
-        // vaga morta (a conexão só valida no encaixe) e o giro da fixada é o
-        // resgate. Enumerar subconjunto violaria a exatidão literal
-        // (review #350).
-        vagasElegiveis = vagas.filter(
-          (vaga) =>
-            iluminadas === null ||
-            !iluminadas.has(`${vaga.celula.linha},${vaga.celula.coluna}`),
-        );
-      }
-      for (const vaga of vagasElegiveis) {
-        acoes.push({
-          tipo: 'escolher_vaga_da_peca_recebida',
-          recebidaId: recebida.recebidaId,
-          borda: vaga.borda,
-        });
       }
     }
     return acoes;
@@ -328,8 +516,10 @@ export function acoesValidasDaSubfase(
     return [{ tipo: 'encerrar_turno' }];
   }
 
-  // (d) Turno normal sem confirmação: selecionar, mover, permanecer ou
-  // confirmar — conforme a posição do Peão.
+  // (d) Turno normal sem confirmação: selecionar, mover UMA vez ou
+  // permanecer — conforme a posição do Peão. Fora da Peça do início o bot
+  // já andou: só confirma (nunca encadeia outro mover, que causava o
+  // vai-e-vem até o failsafe desistir e strandar a partida).
   const peao = tabuleiro.peoes.find(
     (item) => item.peaoId === jogador.peaoId,
   );
@@ -338,6 +528,13 @@ export function acoesValidasDaSubfase(
   }
   if (tabuleiro.peaoSelecionadoId !== jogador.peaoId) {
     return [{ tipo: 'selecionar_peao', peaoId: jogador.peaoId }];
+  }
+  const sobreAPecaDoInicio = peao.pecaId === estado.pecaDoInicioDoTurnoId;
+  if (!sobreAPecaDoInicio) {
+    // Fora da Peça de início, terminar na peça atual exige a Confirmação de
+    // Posição (a Permanência seria ENCERRAMENTO_INVALIDO e outro mover
+    // seria o segundo passo do turno — proibido para o bot).
+    return [{ tipo: 'confirmar_posicao_do_peao', peaoId: jogador.peaoId }];
   }
   const origem = tabuleiro.posicionadas.find(
     (peca) => peca.pecaId === peao.pecaId,
@@ -363,21 +560,14 @@ export function acoesValidasDaSubfase(
       celula: vizinha.celula,
     });
   }
-  const sobreAPecaDoInicio = peao.pecaId === estado.pecaDoInicioDoTurnoId;
-  if (sobreAPecaDoInicio) {
-    // A Permanência vale só sobre a Peça do início do turno — e nunca sob o
-    // período de graça do Resgate (a engine rejeitaria).
-    const emGraca = (estado.pecasEmPeriodoDeGraca ?? []).includes(
-      peao.pecaId,
-    );
-    if (!emGraca) {
-      acoes.push({ tipo: 'permanecer', peaoId: jogador.peaoId });
-    }
-    return acoes;
+  // A Permanência vale só sobre a Peça do início do turno — e nunca sob o
+  // período de graça do Resgate (a engine rejeitaria).
+  const emGraca = (estado.pecasEmPeriodoDeGraca ?? []).includes(
+    peao.pecaId,
+  );
+  if (!emGraca) {
+    acoes.push({ tipo: 'permanecer', peaoId: jogador.peaoId });
   }
-  // Fora da Peça de início, terminar na peça atual exige a Confirmação de
-  // Posição (a Permanência seria ENCERRAMENTO_INVALIDO).
-  acoes.push({ tipo: 'confirmar_posicao_do_peao', peaoId: jogador.peaoId });
   return acoes;
 }
 
@@ -452,30 +642,50 @@ export function executarTurnoDoBot(
       };
     }
     const comando = sortear(validas);
-    const resultado = aplicarComandoDePartida(estado, comando, jogadorId);
-    if (!resultado.sucesso) {
-      if (resultado.erro.codigo === 'FORA_DA_VEZ') {
-        return { estado, acoesExecutadas, motivo: 'fora_da_vez' };
+    // O posicionar sorteado vira a sequência de orientação + encaixe (0..2
+    // girar_peca com conexão garantida + o posicionar). Cada passo é aplicado
+    // e registrado como os demais — a macro é auto-curativa: se interrompida,
+    // a próxima expansão recalcula a partir da orientação corrente.
+    const sequencia =
+      comando.tipo === 'posicionar_peca'
+        ? expandirPosicionamentoDoBot(estado, comando, sortear)
+        : [comando];
+    let fimAntecipado: ResultadoDoTurnoDoBot | undefined;
+    for (const passo of sequencia) {
+      const resultado = aplicarComandoDePartida(estado, passo, jogadorId);
+      if (!resultado.sucesso) {
+        if (resultado.erro.codigo === 'FORA_DA_VEZ') {
+          fimAntecipado = { estado, acoesExecutadas, motivo: 'fora_da_vez' };
+          break;
+        }
+        // Defesa: a enumeração deveria ser exata — rejeição inesperada vira
+        // desistência em vez de girar em falso.
+        fimAntecipado = {
+          estado,
+          acoesExecutadas,
+          motivo: 'desistencia',
+          codigoDaDesistencia: resultado.erro.codigo,
+        };
+        break;
       }
-      // Defesa: a enumeração deveria ser exata — rejeição inesperada vira
-      // desistência em vez de girar em falso.
-      return {
-        estado,
-        acoesExecutadas,
-        motivo: 'desistencia',
-        codigoDaDesistencia: resultado.erro.codigo,
-      };
+      estado = resultado.estado;
+      acoesExecutadas.push(passo);
+      // Fim de turno próprio: o encerrar_turno e a permanência (que encerra o
+      // turno direto) emitem turno_encerrado no lote. O término da partida tem
+      // prioridade, como no funil do dispatch.
+      if (estado.resultado !== null) {
+        fimAntecipado = { estado, acoesExecutadas, motivo: 'resultado' };
+        break;
+      }
+      if (
+        resultado.eventos.some((evento) => evento.tipo === 'turno_encerrado')
+      ) {
+        fimAntecipado = { estado, acoesExecutadas, motivo: 'encerramento' };
+        break;
+      }
     }
-    estado = resultado.estado;
-    acoesExecutadas.push(comando);
-    // Fim de turno próprio: o encerrar_turno e a permanência (que encerra o
-    // turno direto) emitem turno_encerrado no lote. O término da partida tem
-    // prioridade, como no funil do dispatch.
-    if (estado.resultado !== null) {
-      return { estado, acoesExecutadas, motivo: 'resultado' };
-    }
-    if (resultado.eventos.some((evento) => evento.tipo === 'turno_encerrado')) {
-      return { estado, acoesExecutadas, motivo: 'encerramento' };
+    if (fimAntecipado) {
+      return fimAntecipado;
     }
   }
 }

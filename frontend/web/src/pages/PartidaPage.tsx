@@ -250,6 +250,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         if (evento.type === 'ERRO_DO_TABULEIRO') {
           pendentesEmVoo.current.clear()
         }
+        if (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') {
+          // Virada de turno invalida gates de posicionamento em voo: se o
+          // ack/erro da jogada anterior se perdeu no canal, o alvo não pode
+          // ficar bloqueado no turno seguinte (bloqueio silencioso).
+          pendentesEmVoo.current.clear()
+        }
         if (evento.type === 'PARTIDA_TERMINADA') {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante a
           // tela de resultado.

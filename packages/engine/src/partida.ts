@@ -747,8 +747,11 @@ function moverPeaoDaPartida(
         const peoes = estado.tabuleiro.peoes.map((item) =>
           item.peaoId === comando.peaoId ? { ...item, pecaId: destino.pecaId } : item,
         );
-        // Sem limpeza de Seleção aqui: a Re-seleção do Peão é semântica única
-        // da Movimentação e vive no fechamento abaixo (#334).
+        // Semântica única do mover (issue #334): TODOS os ramos re-selecionam
+        // o Peão movido — o fechamento da função fixa peaoSelecionadoId no
+        // peão do comando. Este ramo de exceção (resgate por co-ocupação)
+        // herdava o `peaoSelecionadoId: null` da época do revert e divergia do
+        // fechamento; a limpeza aqui era sobrescrita de qualquer forma.
         tabuleiroNovo = { ...estado.tabuleiro, peoes };
         eventosTab = [
           {
@@ -1619,14 +1622,16 @@ function delegarAoTabuleiro(
 }
 
 // O evento de Recebimento carrega a projeção da pendência (issue #138):
-// recebidaId, a peça sorteada (pecaId + tipoDaPeca) e a vaga (com a
-// célula-alvo derivada dela), nulas até a escolha.
+// recebidaId, a peça sorteada (pecaId + tipoDaPeca + orientacao) e a vaga
+// (com a célula-alvo derivada dela), nulas até a escolha. A orientação é
+// obrigatória: o espelho do bot calcula o giro pré-encaixe a partir dela.
 function projetarRecebidas(recebidas: readonly PecaRecebida[]) {
   return recebidas.map(
-    ({ recebidaId, pecaId, tipo, vaga, celulaAlvo }) => ({
+    ({ recebidaId, pecaId, tipo, orientacao, vaga, celulaAlvo }) => ({
       recebidaId,
       pecaId,
       tipoDaPeca: tipo,
+      orientacao,
       vaga,
       celulaAlvo,
     }),

@@ -51,13 +51,17 @@ export type {
   MotivoDoFimDoTurnoDoBot,
   OpcoesDoTurnoDoBot,
   ResultadoDoTurnoDoBot,
+  RotuloDeGiroDoBot,
 } from './bot.ts';
 
 export {
   MAX_ACOES_POR_TURNO_DO_BOT,
   acoesValidasDaSubfase,
+  contarConexoesTotaisDoBot,
   executarTurnoDoBot,
+  expandirPosicionamentoDoBot,
   mapearBot,
+  orientacaoConectaComGeradora,
   sortearAcao,
 } from './bot.ts';
 
