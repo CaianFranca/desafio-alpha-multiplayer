@@ -8,7 +8,7 @@ import type { Knex } from 'knex';
 export async function up(knex: Knex): Promise<void> {
   await knex.schema.alterTable('usuarios', (table) => {
     table.boolean('bot').nullable().defaultTo(false);
-    table.timestampTz('expira_em').nullable();
+    table.timestamp('expira_em', { useTz: true }).nullable();
   });
   // Índice parcial: o job de limpeza filtra apenas contas bot com TTL vencido.
   await knex.raw(
