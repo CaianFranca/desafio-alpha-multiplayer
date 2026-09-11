@@ -187,7 +187,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
     // SÓ pelo BotRunner via INSERT direto (bypass intencional desta validação).
     // CLI e testes usam @teste.local via registro público. @exemplo.local é
     // legado reservado (linhas antigas). Nenhum dos dois passa no registro público.
-    erros.push({ campo: 'email', mensagem: 'Domínio reservado para contas internas.' });
+    erros.push({ campo: 'email', mensagem: 'Domínio reservado para Cadastros internos.' });
   }
 
   if (typeof body.senha !== 'string') {

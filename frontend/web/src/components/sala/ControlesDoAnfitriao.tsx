@@ -98,7 +98,10 @@ export function ControlesDoAnfitriao({
   // Conta o pendente como vaga ocupada: cobre 202 → MEMBRO_ENTROU.
   const temVaga = sala.membros.length + (botPendente !== null ? 1 : 0) < 4
   const botsDesabilitados = botsDisponiveis === false
-  const podeAdicionarBot = temVaga && !adicionandoBot && botPendente === null && !botsDesabilitados
+  const botsVerificando = botsDisponiveis === null
+  // Enquanto o probe não resolve, o botão fica desabilitado para não
+  // piscar habilitado num ambiente sem rota (#365 descoberta de feature).
+  const podeAdicionarBot = temVaga && !adicionandoBot && botPendente === null && botsDisponiveis === true
 
   const confirmarEncerramento = () => {
     if (window.confirm('Encerrar a Sala para todos os Membros?')) aoEncerrarSala()
@@ -153,11 +156,13 @@ export function ControlesDoAnfitriao({
               onClick={() => void handleAdicionarBot()}
               disabled={!podeAdicionarBot}
               title={
-                !temVaga
-                  ? 'Sala cheia (máximo 4 membros)'
-                  : adicionandoBot || botPendente !== null
-                    ? 'Adicionando bot...'
-                    : 'Adicionar um bot à sala'
+                botsVerificando
+                  ? 'Verificando disponibilidade de bots…'
+                  : !temVaga
+                    ? 'Sala cheia (máximo 4 membros)'
+                    : adicionandoBot || botPendente !== null
+                      ? 'Adicionando bot...'
+                      : 'Adicionar um bot à sala'
               }
               className="border border-white/30 text-white/60 px-4 py-2 text-xs font-bold tracking-wider uppercase hover:border-white/60 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-white/30 disabled:hover:text-white/60"
             >

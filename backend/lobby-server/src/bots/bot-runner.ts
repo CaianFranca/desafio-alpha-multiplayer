@@ -182,7 +182,6 @@ export async function iniciarBot(opcoes: BotRunnerOpcoes): Promise<BotInfo> {
   // Roda em background (não await) — o endpoint HTTP retorna logo
   void executarBotEmBackground({
     codigoDeSala,
-    salaId,
     wsBase,
     cookies,
     accessToken,
@@ -198,7 +197,6 @@ export async function iniciarBot(opcoes: BotRunnerOpcoes): Promise<BotInfo> {
 
 async function executarBotEmBackground(args: {
   codigoDeSala: string;
-  salaId: string;
   wsBase: string;
   cookies: Cookies;
   accessToken: string;
@@ -208,8 +206,7 @@ async function executarBotEmBackground(args: {
   aoFalhar?: (bot: { jogadorId: string; apelido: string; codigo: string; mensagem: string }) => void;
   aoEncerrar?: (bot: { jogadorId: string }) => void;
 }): Promise<void> {
-  const { codigoDeSala, salaId, wsBase, cookies, jogador, log, aoAdmitir, aoFalhar, aoEncerrar } = args;
-  void salaId;
+  const { codigoDeSala, wsBase, cookies, jogador, log, aoAdmitir, aoFalhar, aoEncerrar } = args;
   const conexoes: WebSocket[] = [];
 
   let falhou = false;
@@ -359,6 +356,19 @@ async function executarBotEmBackground(args: {
                   apelido: jogador.apelido,
                   log,
                   onClose: resolve,
+                  // Rejeição na partida usa o mesmo caminho visível da admissão:
+                  // marca `falhou` (não vira `encerrado` no finally), purga o
+                  // Cadastro, difunde BOT_FALHOU via callback e sai da Sala
+                  // fechando o WS do lobby (remove o Membro).
+                  onFalha: (codigo, mensagem) => {
+                    void finalizarFalha(codigo, mensagem).then(() => {
+                      try {
+                        wsLobby.close(1000, 'admissao-rejeitada');
+                      } catch {
+                        /* ignora */
+                      }
+                    });
+                  },
                 });
                 conexoes.push(wsGame);
               })();
@@ -405,8 +415,9 @@ function conectarPartida(args: {
   apelido: string;
   log: (...a: unknown[]) => void;
   onClose: () => void;
+  onFalha: (codigo: string, mensagem: string) => void;
 }): WebSocket {
-  const { wsBase, serverId, partidaId, accessToken, jogadorId, apelido, log, onClose } = args;
+  const { wsBase, serverId, partidaId, accessToken, jogadorId, apelido, log, onClose, onFalha } = args;
   const wsUrl =
     `${wsBase}/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}&token=${encodeURIComponent(accessToken)}`;
   // Segurança (#365 item 1): nunca logar o Bearer token — só host/ids + sufixo.
@@ -442,14 +453,24 @@ function conectarPartida(args: {
       return;
     }
     if (t === 'ADMISSAO_REJEITADA') {
-      const e = msg as { codigo?: string; motivo?: string };
-      log(`ADMISSAO_REJEITADA ${e.codigo ?? ''} ${e.motivo ?? ''}`);
-      // Entrou na Sala mas foi rejeitado na partida: falha visível + purga,
-      // para não deixar Cadastro órfão sem feedback ao Anfitrião.
-      void (async () => {
-        marcarBotFalhou(jogadorId, e.codigo ?? 'ADMISSAO_REJEITADA', e.motivo ?? 'Admissão na partida rejeitada.');
-        await purgarCadastroOrfao(jogadorId, log);
-      })();
+      const e = msg as { codigo?: string; motivo?: string; mensagem?: string };
+      const codigo = e.codigo ?? 'ADMISSAO_REJEITADA';
+      const mensagem = e.motivo ?? e.mensagem ?? 'Admissão na partida rejeitada.';
+      log(`ADMISSAO_REJEITADA ${codigo} ${mensagem}`);
+      // Mesmo caminho visível da falha de admissão no lobby (#365 item 3):
+      // finalizarFalha marca `falhou` (o finally não sobrescreve com
+      // `encerrado`), purga o Cadastro e difunde BOT_FALHOU. Fecha o WS do
+      // jogo para não vazar a Conexão.
+      try {
+        onFalha(codigo, mensagem);
+      } catch (err) {
+        log(`callback onFalha lançou: ${(err as Error).message}`);
+      }
+      try {
+        ws.close(1000, 'admissao-rejeitada');
+      } catch {
+        /* ignora */
+      }
       return;
     }
     bot.aoReceberEvento(msg);
