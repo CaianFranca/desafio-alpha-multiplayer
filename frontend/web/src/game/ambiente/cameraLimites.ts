@@ -1,6 +1,10 @@
 import {
   ESPESSURA_MESA,
   LARGURA_MESA,
+  NEVOA_LONGE,
+  NEVOA_LONGE_PADRAO,
+  NEVOA_PERTO,
+  NEVOA_PERTO_PADRAO,
   PROFUNDIDADE_MESA,
   FOV_CAMERA,
   componenteInclinacao45,
@@ -43,6 +47,14 @@ export function ehAspectoLargoBaixo(aspect: number): boolean {
 export function margemParaAspecto(aspect?: number): number {
   if (aspect === undefined) return MARGEM_CAMERA_INTERATIVA
   return ehAspectoLargoBaixo(aspect) ? MARGEM_CAMERA_LARGA_BAIXA : MARGEM_CAMERA_INTERATIVA
+}
+
+/** Névoa efetiva por aspecto visível: afastada no largo-baixo, padrão acima. */
+export function nevoaParaAspecto(aspect?: number): { perto: number; longe: number } {
+  if (aspect !== undefined && ehAspectoLargoBaixo(aspect)) {
+    return { perto: NEVOA_PERTO, longe: NEVOA_LONGE }
+  }
+  return { perto: NEVOA_PERTO_PADRAO, longe: NEVOA_LONGE_PADRAO }
 }
 
 /**

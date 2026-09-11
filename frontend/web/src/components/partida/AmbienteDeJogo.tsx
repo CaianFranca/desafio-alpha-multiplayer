@@ -285,6 +285,7 @@ export function AmbienteDeJogo({
       >
         <CameraRig bordaPx={bordaPx} />
         <AmbienteCena
+          bordaPx={bordaPx}
           estadoExibicao={estadoExibicao}
           estadoInteracao={estadoInteracao}
           onComando={onComando}
