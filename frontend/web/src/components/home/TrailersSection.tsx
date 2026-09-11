@@ -115,7 +115,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
               <path d="M8 5v14l11-7z" />
             </svg>
           </span>
-          <span className="text-muted text-sm italic text-center">{trailers.mensagens.indisponivel}</span>
+          <span className="text-muted text-base italic text-center">{trailers.mensagens.indisponivel}</span>
         </span>
       </TrailerCover>
     )
@@ -125,7 +125,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
         <TrailerCover titulo={titulo}>
           {capa ? <img src={capa} alt="" className="w-full h-full object-cover rounded-none" /> : null}
         </TrailerCover>
-        <p role="status" className="mt-3 text-muted text-sm">{trailers.mensagens.falha}</p>
+        <p role="status" className="mt-3 text-muted text-base">{trailers.mensagens.falha}</p>
       </div>
     )
   } else if (shouldLoad) {
@@ -151,7 +151,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
           className="w-full h-full object-contain cursor-pointer"
         />
         {!ready && (
-          <p role="status" className="absolute top-3 left-3 m-0 rounded-md bg-black/70 px-3 py-1 text-white text-sm">
+          <p role="status" className="absolute top-3 left-3 m-0 rounded-md bg-black/70 px-3 py-1 text-white text-base">
             {trailers.mensagens.carregando}
           </p>
         )}
@@ -218,7 +218,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
           {media}
           <h3 className="trailers-card-label">{titulo}</h3>
         </div>
-        <p className="mt-3 text-muted text-sm leading-relaxed">{descricao}</p>
+        <p className="mt-3 text-muted text-base leading-relaxed">{descricao}</p>
       </div>
     )
   }
@@ -227,7 +227,7 @@ function TrailerPlayer({ trailer }: { trailer: Trailer }) {
     <div ref={containerRef}>
       <h3 className="text-[clamp(1.125rem,2vw,1.375rem)] font-bold text-center mb-4">{titulo}</h3>
       {media}
-      <p className="mt-3 text-muted text-sm leading-relaxed text-center">{descricao}</p>
+      <p className="mt-3 text-muted text-base leading-relaxed text-center">{descricao}</p>
     </div>
   )
 }
