@@ -618,9 +618,22 @@ function posicionarPeaoDaPartida(
   // uma Peça; sem Peça, o Recebimento simplesmente não é gerado. O Recebimento
   // sorteia as peças da Caixa (#138) — peca_sorteada por peça — e cria as
   // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
+  // ADR-0013 / issue #354: em Baixa, só vagas escuras geram puxada — sem vaga
+  // escura não há peça (evita pendência irresolúvel da #343). Em Baixa a
+  // iluminação para o filtro é a fresca pós-posicionamento (inclui o novo peão).
   const emBaixa = ator.emBaixaIluminacao ?? false;
+  const celulasParaFiltroPrimeiroTurno = emBaixa
+    ? calcularIluminacao(
+        resultado.estado,
+        estado.jogadores
+          .filter((j) => (j.emBaixaIluminacao ?? false))
+          .map((j) => j.peaoId),
+      )
+    : undefined;
   const sorteio = peca
-    ? gerarRecebidas(resultado.estado, peca, emBaixa)
+    ? emBaixa
+      ? gerarRecebidas(resultado.estado, peca, true, celulasParaFiltroPrimeiroTurno!)
+      : gerarRecebidas(resultado.estado, peca, false)
     : { estado: resultado.estado, recebidas: [], eventos: [] as EventoDoTabuleiro[] };
 
   // O Peão segue selecionado: a sequência (escolher a vaga de cada peça e
@@ -741,6 +754,38 @@ function moverPeaoDaPartida(
     ).length;
     if (ocupantes >= teto) {
       return rejeitarDaPartida('PECA_JA_TEM_PEAO', 'A Peça de destino já abriga outro Peão.');
+    }
+  }
+
+  // Zona da origem: o Peão só pousa na Peça do início do turno ou em vizinha
+  // diretamente conectada a ela — ida-e-volta livre até a Confirmação de
+  // Posição, sem viajar pelo tabuleiro dentro do turno. Célula vazia não é
+  // barrada aqui (vaza para CELULA_NAO_ENCONTRADA do Tabuleiro). Pousa depois
+  // das guardas de conexão/ocupação para preservar erros mais específicos
+  // (MOVIMENTO_NAO_CONECTADO, PECA_JA_TEM_PEAO). A Travessia do Escuro (#272)
+  // é isenta: o mover_peao da cadeia nasce de atravessar_o_escuro — Baixa
+  // Iluminação — e sai da zona de propósito.
+  const origemDoTurnoId = estado.pecaDoInicioDoTurnoId;
+  const origemDoTurno = origemDoTurnoId
+    ? estado.tabuleiro.posicionadas.find((peca) => peca.pecaId === origemDoTurnoId)
+    : undefined;
+  if (
+    !(estado.atravessouNoTurno ?? false) &&
+    origemDoTurnoId !== null &&
+    origemDoTurno !== undefined &&
+    destino
+  ) {
+    const zona = [
+      origemDoTurnoId,
+      ...vizinhasConectadas(estado.tabuleiro, origemDoTurnoId).map(
+        (peca) => peca.pecaId,
+      ),
+    ];
+    if (!zona.includes(destino.pecaId)) {
+      return rejeitarDaPartida(
+        'MOVIMENTO_INDISPONIVEL',
+        'O Peão só se move dentro da zona da Peça do início do turno.',
+      );
     }
   }
 
@@ -1017,8 +1062,14 @@ function atravessarOEscuroDaPartida(
       'A célula de destino não é uma vaga escura conectada à Peça sob o Peão.',
     );
   }
+  // ADR-0013 bloqueante 3: iluminação fresca unificada — mesmo preamble de
+  // avancarVez/posicionarPeao, não o snapshot stale do turno anterior.
+  const celulasParaFiltroTravessia = calcularIluminacao(
+    estado.tabuleiro,
+    estado.jogadores.filter((j) => (j.emBaixaIluminacao ?? false)).map((j) => j.peaoId),
+  );
   if (
-    estado.celulasIluminadas.some(
+    celulasParaFiltroTravessia.some(
       (celula) => celula.linha === alvo.linha && celula.coluna === alvo.coluna,
     )
   ) {
@@ -1034,7 +1085,10 @@ function atravessarOEscuroDaPartida(
   // Peão é preservada para a sequência (escolher vaga → encaixar → mover) —
   // e, quando nula (AC-3 do #272), adotada a partir do Peão do ator: nenhum
   // passo intermediário exige re-seleção.
-  const sorteio = gerarRecebidas(estado.tabuleiro, pecaSobOPeao, true);
+  // ADR-0013: mantido como legado; o fluxo canônico é Puxar no início do turno
+  // (avancarVez). Aqui o sorteio respeita vagas escuras (sem vaga escura → 0)
+  // com iluminação fresca — unificada com avancarVez/posicionarPeao (bloqueante 3).
+  const sorteio = gerarRecebidas(estado.tabuleiro, pecaSobOPeao, true, celulasParaFiltroTravessia);
   const recebidas = sorteio.recebidas.map((recebida) => ({
     ...recebida,
     celulaAlvo: alvo,
@@ -1171,6 +1225,18 @@ function permanecerNaPartida(
       'ENCERRAMENTO_INVALIDO',
       'A Permanência está bloqueada na peça em período de graça até que um peão saia.',
     );
+  }
+
+  // ADR-0013 / issue #354: Permanência com seleção nula adota o peão do ator
+  // (mesmo AC-3 de mover/confirmar) — evita PEAO_NAO_SELECIONADO quando o turno
+  // em Baixa não tem seleção vigente mas tem pecaDoInicio válida.
+  // NB2: adoção só para null; seleção alheia permanece rejeitada (PEAO_NAO_SELECIONADO)
+  // e depende da pré-condição de avancarVez limpar peaoSelecionadoId ao trocar de vez.
+  if (estado.tabuleiro.peaoSelecionadoId === null) {
+    estado = {
+      ...estado,
+      tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: comando.peaoId },
+    };
   }
 
   const resultado = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
@@ -1316,7 +1382,12 @@ function confirmarPosicaoDoPeao(
   // Issue #264 / spec #272: em Baixa o Recebimento acontece na Travessia do
   // Escuro (ou não acontece — célula iluminada consome 0); a Confirmação em
   // Baixa NÃO sorteia (recebidas = []), mantendo Limpeza/Ataque do gatilho.
-  const emBaixa = ator.emBaixaIluminacao ?? false;
+  // Review PR #370 (Bug 1): quem entra saudável e sai em Baixa no MESMO
+  // gatilho também não recebe sorteio nesse CONFIRMAR — o emBaixa acima é
+  // pré-ataque; a Baixa nova do gatilho descarta o sorteio abaixo (0 no turno
+  // atual, 1 no próximo avancarVez, ADR-0013).
+  const emBaixaAntes = ator.emBaixaIluminacao ?? false;
+  const emBaixa = emBaixaAntes;
   const sorteio = emBaixa
     ? { estado: estado.tabuleiro, recebidas: [] as readonly PecaRecebida[], eventos: [] as readonly EventoDoTabuleiro[] }
     : gerarRecebidas(estado.tabuleiro, peca, emBaixa);
@@ -1357,6 +1428,26 @@ function confirmarPosicaoDoPeao(
       iluminacao,
       eventos,
     );
+  // Review PR #370 (Bug 1): o sorteio acima usou a Baixa pré-ataque — se o
+  // gatilho impôs Baixa nova ao ator, o turno encerra sem sortear: remove
+  // peca_sorteada/recebimento_gerado do lote e restaura a Caixa consumida. O
+  // puxar-1 vem no próximo avancarVez (ADR-0013).
+  const atorAposAtaque = ataque.jogadores.find(
+    (jogador) => jogador.jogadorId === ator.jogadorId,
+  );
+  const baixaNovaDoAtor =
+    !emBaixaAntes && ((atorAposAtaque?.emBaixaIluminacao ?? false) === true);
+  const recebidasFinais = baixaNovaDoAtor ? [] : sorteio.recebidas;
+  if (baixaNovaDoAtor && sorteio.recebidas.length > 0) {
+    for (let indice = eventos.length - 1; indice >= 0; indice--) {
+      if (
+        eventos[indice].tipo === 'peca_sorteada' ||
+        eventos[indice].tipo === 'recebimento_gerado'
+      ) {
+        eventos.splice(indice, 1);
+      }
+    }
+  }
   // B3/review #333: a adoção da seleção só existe quando a Confirmação gera
   // Recebimento — em Baixa Iluminação (sorteio [], ADR-0005) a seleção não
   // nasce sem sequência (invariante "a seleção vive durante a sequência").
@@ -1374,9 +1465,11 @@ function confirmarPosicaoDoPeao(
   }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
+    caixa: baixaNovaDoAtor ? estado.tabuleiro.caixa : tabuleiroPosLimpeza.caixa,
+    recebidas: recebidasFinais,
     posicionadas: posicionadasPosAtaque,
     peaoSelecionadoId:
-      sorteio.recebidas.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
+      recebidasFinais.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
   };
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a
@@ -1793,8 +1886,52 @@ function avancarVez(
   const peaoDoAlvo = tabuleiroLimpo.peoes.find(
     (item) => item.peaoId === alvo.peaoId,
   );
+  // ADR-0013 / issue #354: Puxar no início do turno em Baixa — se o próximo
+  // jogador está em Baixa e há vaga escura disponível, sorteia 1 peça para a
+  // Bandeja já no turno_iniciado. Sem vaga escura ou caixa vazia → 0 (sem
+  // pendência irresolúvel, regra do relator: "quando não tem célula disponível,
+  // não puxa"). Primeiro turno pendente (peão sobre a Mesa) não puxa.
+  // Iluminação fresca para filtro escuro (não o snapshot stale do turno anterior).
+  let tabuleiroDoNovoTurno: EstadoDoTabuleiro = tabuleiroLimpo;
+  let eventosDoSorteioInicial: readonly EventoDaPartida[] = [];
+  const alvoEmBaixa = alvo !== null ? (alvo.emBaixaIluminacao ?? false) : false;
+  if (alvo !== null && alvoEmBaixa && peaoDoAlvo?.pecaId !== null && peaoDoAlvo?.pecaId !== undefined) {
+    const pecaSobPeaoDoAlvo = tabuleiroLimpo.posicionadas.find(
+      (p) => p.pecaId === peaoDoAlvo.pecaId,
+    );
+    if (pecaSobPeaoDoAlvo) {
+      const celulasParaFiltroAvanco = calcularIluminacao(
+        tabuleiroLimpo,
+        estado.jogadores
+          .filter((j) => (j.emBaixaIluminacao ?? false))
+          .map((j) => j.peaoId),
+      );
+      const sorteioInicial = gerarRecebidas(
+        tabuleiroLimpo,
+        pecaSobPeaoDoAlvo,
+        true,
+        celulasParaFiltroAvanco,
+      );
+      if (sorteioInicial.recebidas.length > 0) {
+        tabuleiroDoNovoTurno = {
+          ...sorteioInicial.estado,
+          recebidas: sorteioInicial.recebidas,
+          // Mantém seleção nula no início; o gesto Puxar na Bandeja habilita a
+          // escolha de vaga, sem auto-selecionar aqui (evita travar PERMANECER).
+          peaoSelecionadoId: null,
+        };
+        eventosDoSorteioInicial = [
+          ...sorteioInicial.eventos,
+          { tipo: 'recebimento_gerado', recebidas: projetarRecebidas(sorteioInicial.recebidas) },
+        ];
+      } else {
+        // Sem vaga escura ou caixa vazia → 0, mantém tabuleiroLimpo sem recebidas
+        tabuleiroDoNovoTurno = sorteioInicial.estado;
+      }
+    }
+  }
   const novoEstado: EstadoDaPartida = {
-    tabuleiro: tabuleiroLimpo,
+    tabuleiro: tabuleiroDoNovoTurno,
     jogadores: estado.jogadores,
     jogadorAtivoId: alvo.jogadorId,
     rodada: rodadaAlvo,
@@ -1808,10 +1945,14 @@ function avancarVez(
     peoesNoAlcance: estado.peoesNoAlcance,
     pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
   };
+  // Ordem do lote: turno_iniciado vem antes do sorteio inicial para que o
+  // redutor do cliente (TURNO_INICIADO limpa pendências) não apague a
+  // recebida de Baixa recém-gerada — o RECEBIMENTO_GERADO repopula depois.
   const eventosFinais: readonly EventoDaPartida[] = [
     ...eventos,
     ...fechamentoDaManipulacao,
     { tipo: 'turno_iniciado', jogadorId: alvo.jogadorId, rodada: rodadaAlvo },
+    ...eventosDoSorteioInicial,
   ];
   return sucessoDaPartida(novoEstado, eventosFinais);
 }

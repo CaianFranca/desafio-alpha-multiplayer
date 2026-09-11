@@ -275,6 +275,69 @@ describe('peões no contrato de exibição (issue #90)', () => {
     expect(destinosConectadosDoPeao(comEspectro, umPeao, 'p1')).toEqual([])
   })
 
+  // ── Zona da origem (issue do movimento encadeado): o Peão só pousa na
+  // Peça do início do turno ou em vizinha diretamente conectada a ela —
+  // ida-e-volta de 1 salto até a Confirmação. Espelho de partida.ts.
+  it('com a Peça do início do turno, destinos fora da zona somem (2º salto barrado)', () => {
+    const pos = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('reta-1', 'reta', 0, 2, 3),
+      peca('reta-2', 'reta', 0, 1, 3),
+    ]
+    // p1 já deu o 1º salto (está sobre a reta-1): a origem do turno é a
+    // inicial; a reta-2 é vizinha conectada da reta-1, mas FORA da zona
+    // {inicial} ∪ vizinhas(inicial).
+    const peoes: EstadoExibicaoTabuleiro['peoes'] = [
+      { peaoId: 'p1', cor: 'branco', celula: { linha: 2, coluna: 3 } },
+    ]
+    expect(
+      destinosConectadosDoPeao(pos, peoes, 'p1', new Set(), undefined, 'inicial'),
+    ).toEqual([{ peca: pos[0], tipo: 'movimento' }])
+  })
+
+  it('sem zona (null/ausente) mantém o comportamento legado de todas as conectadas', () => {
+    const pos = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('reta-1', 'reta', 0, 2, 3),
+      peca('reta-2', 'reta', 0, 1, 3),
+    ]
+    const peoes: EstadoExibicaoTabuleiro['peoes'] = [
+      { peaoId: 'p1', cor: 'branco', celula: { linha: 2, coluna: 3 } },
+    ]
+    // null (Peão na Mesa do Primeiro Turno / entre turnos) e ausente (legado)
+    // ficam sem filtro: inicial e reta-2 são destinos (ordem de varredura da
+    // grade: linha-menor primeiro).
+    expect(
+      destinosConectadosDoPeao(pos, peoes, 'p1', new Set(), undefined, null),
+    ).toEqual([
+      { peca: pos[2], tipo: 'movimento' },
+      { peca: pos[0], tipo: 'movimento' },
+    ])
+    expect(destinosConectadosDoPeao(pos, peoes, 'p1')).toEqual([
+      { peca: pos[2], tipo: 'movimento' },
+      { peca: pos[0], tipo: 'movimento' },
+    ])
+  })
+
+  it('Peça do início removida da mesa degrada para as conectadas (fail-open do engine)', () => {
+    const pos = [
+      peca('inicial', 'inicial', 0, 3, 3),
+      peca('reta-1', 'reta', 0, 2, 3),
+      peca('reta-2', 'reta', 0, 1, 3),
+    ]
+    const peoes: EstadoExibicaoTabuleiro['peoes'] = [
+      { peaoId: 'p1', cor: 'branco', celula: { linha: 2, coluna: 3 } },
+    ]
+    // 'removida' não está em posicionadas (ex.: Limpeza a tirou da mesa):
+    // sem origem conhecida não há zona a impor — igual ao fail-open do motor.
+    expect(
+      destinosConectadosDoPeao(pos, peoes, 'p1', new Set(), undefined, 'removida'),
+    ).toEqual([
+      { peca: pos[2], tipo: 'movimento' },
+      { peca: pos[0], tipo: 'movimento' },
+    ])
+  })
+
   // ── Fileira na Mesa ──
 
   it('peaoMesaParaMundo coloca 4 slots distintos no lado oposto à Caixa (-X)', () => {

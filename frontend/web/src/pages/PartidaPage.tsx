@@ -47,10 +47,12 @@ import {
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearFinalizarManipulacao, mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
+import { mapearFinalizarRecebida } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
+import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   EncerrarTurnoComando,
@@ -107,8 +109,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     authState.status === 'authenticated' ? authState.jogador.id : null
   const navigate = useNavigate()
   const codigoDeSala = useSalaCodigoOptional()
+  // Retorno à Sala (issue #329): o redirect do Encaminhamento usa
+  // window.location.assign (reload) e o contexto da Sala morre na /partida —
+  // ?codigoDeSala= é o fallback que sobrevive ao reload. Contexto primeiro,
+  // URL depois, /salas/criar por último.
+  const codigoDeSalaUrl = normalizarCodigoDeSala(searchParams.get('codigoDeSala') ?? '')
+  const codigoEfetivo = codigoDeSala ?? codigoDeSalaUrl
 
-  const { estado, resultado, motivo, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
+  const { estado, resultado, motivo, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar, partidaNaoIniciada } =
     usePartidaTela({
       estadoInicial: !temAlvo ? 'falha' : estadoInicial,
       loader,
@@ -222,6 +230,45 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     emResultadoRef.current = emResultado
   }, [emResultado])
+  // Não-início (issue #329): estado terminal de tela — como o resultado, a
+  // partida fica em somente-leitura e o destino é o Retorno à Sala.
+  const emNaoInicio = estado === 'partidaNaoIniciada'
+  const emNaoInicioRef = useRef(emNaoInicio)
+  useEffect(() => {
+    emNaoInicioRef.current = emNaoInicio
+  }, [emNaoInicio])
+  // Ref de desconexão para o handler de não-início: o hook do canal precisa
+  // do handler na construção (antes de `desconectar` existir) e o mantém em
+  // ref — a leitura tardia via ref evita a circularidade sem re-subscrever.
+  const desconectarRef = useRef<() => void>(() => {})
+  const aoPartidaNaoIniciada = useCallback(() => {
+    desconectarRef.current()
+    partidaNaoIniciada()
+  }, [partidaNaoIniciada])
+
+  // ── Batch atômico de lote de turno (ADR-0013 / B8): TURNO_INICIADO +
+  // PECA_SORTEADA + RECEBIMENTO_GERADO do avancarVez em Baixa chegam como 3
+  // WS messages no mesmo tick. Sem batch, despacharEvento por mensagem causa
+  // flash de 1 frame com recebidasPendentes=[] (faseDoTurno mostraria
+  // permanecer indevido). Queue + microtask coalesce em um único render.
+  const loteDeTurnoRef = useRef<Parameters<typeof reduzirEvento>[1][]>([])
+  const loteAgendadoRef = useRef(false)
+  const agendarFlushLote = useCallback(() => {
+    if (loteAgendadoRef.current) return
+    loteAgendadoRef.current = true
+    queueMicrotask(() => {
+      const lote = [...loteDeTurnoRef.current]
+      loteDeTurnoRef.current = []
+      loteAgendadoRef.current = false
+      for (const ev of lote) despacharEvento(ev as Parameters<typeof reduzirEvento>[1])
+    })
+  }, [despacharEvento])
+
+  // Ref do ponto único de injeção do jogadorId (#91): o `onEvento` do canal
+  // é declarado antes do `enviarComJogador` (useCallback abaixo), então usa a
+  // ref para quebrar o TDZ e manter o callback do socket estável (mesmo
+  // padrão de modeloRef/emResultadoRef acima — refs não entram em deps).
+  const enviarComJogadorRef = useRef<(comando: ComandoDoCanal) => void>(() => {})
 
   // ── Pendentes otimistas anti-duplo-place (issue #249) ──
   // Conjunto de alvos em voo (POSICIONAR_PECA/POSICIONAR_PEAO/
@@ -237,6 +284,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     partidaId,
     onEvento: useCallback(
       (evento) => {
+        // Após o não-início, ignora eventos tardios (terminal) — via ref para evitar stale closure
+        if (emNaoInicioRef.current) return
         // Consumo dos pendentes otimistas (#249): ack remove o alvo em voo;
         // erro e snapshot reconciliam (autoridade total — limpam).
         if (
@@ -279,6 +328,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         }
         if (evento.type === 'PARTIDA_INICIADA') {
           partidaEmAndamento()
+          return
+        }
+        // Batch atômico ADR-0013/B8: TURNO_INICIADO + PECA_SORTEADA + RECEBIMENTO_GERADO
+        // do lote de Baixa chegam em 3 WS messages no mesmo tick. Sem batch há
+        // flash de 1 frame com recebidas=[].
+        if (
+          evento.type === 'TURNO_INICIADO' ||
+          (loteDeTurnoRef.current.length > 0 &&
+            (evento.type === 'PECA_SORTEADA' ||
+              evento.type === 'RECEBIMENTO_GERADO' ||
+              evento.type === 'CELULAS_ILUMINADAS'))
+        ) {
+          loteDeTurnoRef.current.push(evento as Parameters<typeof reduzirEvento>[1])
+          agendarFlushLote()
           return
         }
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
@@ -342,7 +405,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               key: encaixeKeyRef.current,
             })
           }
+
+          // Checa no modelo ANTES do despacho se a peça pertencia às pendências
+          const eraRecebida = modeloRef.current.recebidasPendentes.some(
+            (r) => r.pecaId === evento.pecaId,
+          )
+
           despacharEvento(evento)
+
+          // Auto-finaliza a manipulação para não exigir o segundo OK na tela
+          if (eraRecebida) {
+            enviarComJogadorRef.current(mapearFinalizarManipulacao())
+          }
           return
         }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
@@ -372,10 +446,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         const motivo = motivoDeRecusaDoEvento(evento)
         if (motivo !== null) tocarRecusa(motivo)
       },
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote],
     ),
     onAdmissao: useCallback(
       (evento) => {
+        // Terminal de não-início: admissões tardias não reabrem a tela.
+        if (emNaoInicioRef.current) return
         if (evento.estado === 'preparada') partidaPreparada()
         else if (evento.estado === 'terminada') {
           // ADMISSAO_ACEITA não carrega resultado (shared/protocol.ts); o
@@ -387,7 +463,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       [partidaPreparada, partidaEmAndamento],
     ),
     onFalhaDeConexao: useCallback(() => falhar(), [falhar]),
+    // Não-início (issue #329): encerra sem loop de reconexão e devolve o
+    // Jogador à Sala reaberta por botão (`voltarASala` no overlay).
+    onPartidaNaoIniciada: aoPartidaNaoIniciada,
   })
+  useEffect(() => {
+    desconectarRef.current = desconectar
+  }, [desconectar])
 
   // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
   const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
@@ -396,16 +478,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
   const voltarASala = useCallback(() => {
     desconectar()
-    if (codigoDeSala) navigate(`/sala/${codigoDeSala}`)
+    if (codigoEfetivo) navigate(`/sala/${codigoEfetivo}`)
     else navigate('/salas/criar')
-  }, [desconectar, navigate, codigoDeSala])
+  }, [desconectar, navigate, codigoEfetivo])
 
-  // ── Injeção única de jogadorId (issue #91) — bloqueada após término ──
+  // ── Injeção única de jogadorId (issue #91) — bloqueada após término e no não-início ──
   // Com gate anti-duplo-place (#249): o mesmo alvo em voo não é reenviado.
   const enviarComJogador = useCallback(
     (comando: ComandoDoCanal) => {
       if (jogadorId === null) return
       if (emResultado) return
+      if (emNaoInicio) return
       const chave = chaveDeComandoPendente(comando)
       if (chave !== null) {
         if (pendentesEmVoo.current.has(chave)) return
@@ -413,8 +496,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       }
       enviar({ ...comando, jogadorId } as PartidaComandoDoCliente)
     },
-    [enviar, jogadorId, emResultado],
+    [enviar, jogadorId, emResultado, emNaoInicio],
   )
+  useEffect(() => {
+    enviarComJogadorRef.current = enviarComJogador
+  }, [enviarComJogador])
 
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
@@ -428,7 +514,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const onComandoPeao = enviarComJogador
 
   // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
-  const minhaVez = !emResultado && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+  const minhaVez = !emResultado && !emNaoInicio && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
 
   // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
   // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
@@ -454,6 +540,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Amedrontado — único ponto onde a regra vive, sobre a projeção #174.
   // Alimenta a exceção de ocupação de resgate (+1 teto, #171) em
   // destinosConectadosDoPeao/mapearMovimentacao.
+  // NB5: memo estável por conteúdo (evita Set novo toda render que quebra memo de estadoInteracaoPeoes)
   const afetadosPorPeaoId: ReadonlySet<string> = useMemo(() => {
     const out = new Set<string>()
     for (const [peaoId, dados] of Object.entries(sanidadePorPeao)) {
@@ -461,6 +548,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
     return out
   }, [sanidadePorPeao])
+  const afetadosRef = useRef<ReadonlySet<string>>(afetadosPorPeaoId)
+  if (
+    afetadosPorPeaoId.size !== afetadosRef.current.size ||
+    [...afetadosPorPeaoId].some((id) => !afetadosRef.current.has(id))
+  ) {
+    afetadosRef.current = afetadosPorPeaoId
+  }
+  const afetadosEstavel = afetadosRef.current
 
   // ── Peões em Baixa Iluminação (issue #297): avatar do Diretor apagado ──
   // Projeção de exibição do estado do Vulto por jogador (`emBaixaIluminacao`,
@@ -469,6 +564,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     () => peoesEmBaixaIluminacaoDe(sanidadePorPeao),
     [sanidadePorPeao],
   )
+  const emBaixaRef = useRef<ReadonlySet<PeaoId>>(emBaixaIluminacaoPorPeaoId)
+  if (
+    emBaixaIluminacaoPorPeaoId.size !== emBaixaRef.current.size ||
+    [...emBaixaIluminacaoPorPeaoId].some((id) => !emBaixaRef.current.has(id))
+  ) {
+    emBaixaRef.current = emBaixaIluminacaoPorPeaoId
+  }
+  const emBaixaEstavel = emBaixaRef.current
 
   // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
   // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
@@ -498,6 +601,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }
   const estadoInteracaoPeoes: EstadoInteracaoPeoes | null = useMemo(() => {
     if (emResultado) return null
+    if (emNaoInicio) return null
     if (!temAlvo || !estadoEmAndamento) return null
     return {
       peoes: modelo.peoes,
@@ -507,19 +611,25 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       peaoDoTurnoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
+      // Zona da origem: Peça do início do turno derivada no TURNO_INICIADO
+      // (+ baseline do snapshot); o espelho de destinos a respeita.
+      pecaDoInicioDoTurnoId: modelo.pecaDoInicioDoTurnoId,
       // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no
       // turno o clique no próprio Peão fica silencioso — encerrar depois de
-      // mover é confirmar → encerrar, e Permanecer só vale antes de mover.
+      // mover é confirmar → encerrar, e Permanecer só vale ANTES de mover.
       movimentouNoTurno: modelo.movimentouNoTurno,
       // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
       // bandeja continua pública (as pendências vêm do broadcast sem filtro).
       donoDoCiclo: minhaVez,
       // Projeção dos afetados (exceção de resgate #171 no espelho de destinos).
-      afetadosPorPeaoId,
+      afetadosPorPeaoId: afetadosEstavel,
       // N do roster para o teto do Portão (#284): nunca peoes.length.
       quantidadeDeJogadores: quantidadeParaTeto,
+      // ADR-0013: espelho de vagas escuras em Baixa — filtra vagas iluminadas
+      celulasIluminadas: modelo.celulasIluminadas,
+      peaoIdsEmBaixa: emBaixaEstavel,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto, peaoDoTurnoId])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosEstavel, emResultado, emNaoInicio, quantidadeParaTeto, peaoDoTurnoId, emBaixaEstavel])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa
@@ -572,14 +682,22 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     [enviarComJogador, pecaAlvoDeGiro, estadoInteracao, estadoExibicao, modelo.recebidasPendentes],
   )
 
-  // ── Acessibilidade do overlay 3D (review #338): o botão "OK" é exclusivo
-  // de ponteiro no canvas — Espaço/Enter com manipulação ativa equivale ao
-  // OK (fora de botões/campos, para não duplicar o clique nativo).
+  // ── Acessibilidade do overlay 3D (review #338 + issue #357): o botão "OK"
+  // é exclusivo de ponteiro no canvas — Espaço/Enter com manipulação ativa
+  // equivale ao OK (fora de botões/campos, para não duplicar o clique nativo).
+  // Com preview provisório pré-encaixe em foco (sem manipulação aberta),
+  // Espaço/Enter equivale ao OK do preview (POSICIONAR_PECA na célula-alvo).
   const pecaEmManipulacaoId = estadoInteracao?.pecaEmManipulacaoId ?? null
   const finalizarManipulacao = useCallback(() => {
-    if (pecaEmManipulacaoId === null) return
-    enviarComJogador(mapearFinalizarManipulacao())
-  }, [enviarComJogador, pecaEmManipulacaoId])
+    if (pecaEmManipulacaoId !== null) {
+      enviarComJogador(mapearFinalizarManipulacao())
+      return
+    }
+    if (estadoInteracaoPeoes !== null) {
+      const posicionar = mapearFinalizarRecebida(estadoInteracaoPeoes)
+      if (posicionar !== null) enviarComJogador(posicionar)
+    }
+  }, [enviarComJogador, pecaEmManipulacaoId, estadoInteracaoPeoes])
 
   useEffect(() => {
     if (!estadoEmAndamento) return
@@ -590,14 +708,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       if (e.key === 'e' || e.key === 'E') girar('anti_horario')
       if (e.key === ' ' || e.key === 'Enter') {
         if (alvo && (alvo.tagName === 'BUTTON' || alvo.tagName === 'A')) return
-        if (pecaEmManipulacaoId === null) return
+        // OK do preview (issue #357): sem manipulação aberta mas com preview
+        // em foco, Espaço/Enter também confirma (POSICIONAR_PECA).
+        const previewEmFoco =
+          estadoInteracaoPeoes !== null &&
+          estadoInteracao?.pecaEmManipulacaoId == null &&
+          mapearFinalizarRecebida(estadoInteracaoPeoes) !== null
+        if (pecaEmManipulacaoId === null && !previewEmFoco) return
         e.preventDefault()
         finalizarManipulacao()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao])
+  }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao, estadoInteracao, estadoInteracaoPeoes])
 
   const tentarNovamenteComConexao = useCallback(() => {
     desconectar()
@@ -703,7 +827,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         limpezaTrigger={limpezaTrigger}
         encaixeTrigger={encaixeTrigger}
         onFimEncaixe={onFimEncaixe}
-        emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
+        emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*

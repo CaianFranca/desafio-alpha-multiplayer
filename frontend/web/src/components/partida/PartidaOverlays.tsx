@@ -28,6 +28,7 @@ const baseClasses = 'absolute inset-0 z-10 flex items-center justify-center bg-z
 const TEXTO_MOTIVO_DERROTA: Record<MotivoDeDerrota, string> = {
   caixa_esgotada: 'A Caixa esgotou antes de a equipe completar a fuga',
   equipe_amedrontada: 'A equipe perdeu toda a Sanidade',
+  desistencia: 'Restou só você na partida',
 }
 
 export function PartidaOverlays({
@@ -72,6 +73,31 @@ export function PartidaOverlays({
     )
   }
 
+  if (estado === 'partidaNaoIniciada') {
+    return (
+      <div
+        data-testid="overlay-partida-nao-iniciada"
+        role="status"
+        className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/80"
+      >
+        <div className="flex flex-col items-center gap-4">
+          <p className="text-white text-2xl font-bold">Partida não iniciada</p>
+          <p className="text-zinc-400 text-sm">
+            Não houve Jogadores suficientes para iniciar a partida. A Sala foi reaberta.
+          </p>
+          <button
+            type="button"
+            data-testid="voltar-a-sala"
+            onClick={onVoltar}
+            className="pointer-events-auto rounded bg-amber-500 px-6 py-2 text-sm font-medium text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+          >
+            Voltar à sala
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (estado === 'carregando') {
     return (
       <div data-testid="overlay-carregando" role="status" className={baseClasses}>
@@ -103,6 +129,14 @@ export function PartidaOverlays({
           className="pointer-events-auto rounded bg-amber-500 px-4 py-2 text-[length:var(--hud-corpo,0.875rem)] leading-5 font-medium text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
         >
           Tentar novamente
+        </button>
+        <button
+          type="button"
+          data-testid="voltar-a-sala"
+          onClick={onVoltar}
+          className="pointer-events-auto rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600 focus-visible:outline-2 focus-visible:outline-amber-500"
+        >
+          Voltar à sala
         </button>
       </div>
     </div>

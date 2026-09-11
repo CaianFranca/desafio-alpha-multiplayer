@@ -41,6 +41,13 @@ export interface SalasState {
    * atualizado quando um jogador novo entra no broadcast.
    */
   readonly apelidoPorJogadorId: Map<string, string>;
+  /**
+   * Flag bot por jogadorId para a tradução engine→wire
+   * (`MembroDaSala.ehBot`). Hidratado no boot via `repo.obterFlagsDeBot`
+   * e atualizado quando um jogador novo entra no broadcast. Ausente =
+   * não-bot (compat com vínculos anteriores à flag).
+   */
+  readonly botPorJogadorId: Map<string, boolean>;
 
   carregar(repo: SalasRepo, projecao: SalasProjecao): Promise<void>;
 
@@ -84,6 +91,7 @@ class SalasStateImpl implements SalasState {
   private _estado: EstadoDoLobby = estadoDoLobbyVazio();
   private readonly _abertas: Map<string, SalaStateInterna> = new Map();
   private readonly _apelidoPorJogadorId: Map<string, string> = new Map();
+  private readonly _botPorJogadorId: Map<string, boolean> = new Map();
 
   get estado(): EstadoDoLobby {
     return this._estado;
@@ -95,6 +103,10 @@ class SalasStateImpl implements SalasState {
 
   get apelidoPorJogadorId(): Map<string, string> {
     return this._apelidoPorJogadorId;
+  }
+
+  get botPorJogadorId(): Map<string, boolean> {
+    return this._botPorJogadorId;
   }
 
   async carregar(repo: SalasRepo, projecao: SalasProjecao): Promise<void> {
@@ -116,6 +128,10 @@ class SalasStateImpl implements SalasState {
       const apelidos = await repo.obterApelidos([...jogadorIds]);
       for (const [id, apelido] of apelidos) {
         this._apelidoPorJogadorId.set(id, apelido);
+      }
+      const flagsDeBot = await repo.obterFlagsDeBot([...jogadorIds]);
+      for (const [id, ehBot] of flagsDeBot) {
+        if (ehBot) this._botPorJogadorId.set(id, true);
       }
     }
 

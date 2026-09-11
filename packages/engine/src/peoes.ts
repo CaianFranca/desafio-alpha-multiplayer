@@ -332,23 +332,49 @@ export interface RecebimentoGerado {
   readonly eventos: EventoDoTabuleiro[];
 }
 
-// Recebimento (ST-12 / issue #138, refinado pela ST-15 / issue #170): sorteia
-// N = min(vagas, caixa, baixa?1:Inf) peças da Caixa — uma a uma, consumindo a
-// primeira peça restante N vezes — e cria uma pendência por peça sorteada, sem
-// vaga: a escolha da vaga de cada peça é o comando
-// escolher_vaga_da_peca_recebida. Baixa Iluminação (issue #170) limita o
-// Recebimento a no máximo 1 peça; sem vaga ou caixa esgotada, 0. Caixa vazia ou
-// insuficiente NÃO é erro: N apenas diminui (o Jogador recebe as restantes;
-// sem Caixa, nenhuma). Exportada para a camada da Partida (ST-11), que decide
-// quando o Recebimento acontece. O consumo da primeira peça espelha a primitiva
-// sortearDaCaixa (tabuleiro.ts) — a dependência em runtime é única
-// (tabuleiro.ts → peoes.ts), então o sorteio é refeito aqui em sequência.
+// Recebimento (ST-12 / issue #138, refinado pela ST-15 / issue #170 e
+// ADR-0013 / issue #354): sorteia N = min(vagas, caixa, baixa?1:Inf) peças da
+// Caixa — uma a uma, consumindo a primeira peça restante N vezes — e cria uma
+// pendência por peça sorteada, sem vaga: a escolha da vaga de cada peça é o
+// comando escolher_vaga_da_peca_recebida. Baixa Iluminação (issue #170) limita
+// o Recebimento a no máximo 1 peça; sem vaga ou caixa esgotada, 0. Em Baixa
+// com celulasIluminadas informadas (ADR-0013), só vagas ESCURAS contam — sem
+// vaga escura não há puxada (evita pendência irresolúvel da #343, regra do
+// relator: "quando não tem célula disponível, não puxa"). Caixa vazia ou
+// insuficiente NÃO é erro: N apenas diminui. Exportada para a camada da
+// Partida (ST-11), que decide quando o Recebimento acontece.
+export function gerarRecebidas(
+  estado: EstadoDoTabuleiro,
+  peca: PecaPosicionada,
+  emBaixaIluminacao: true,
+  celulasIluminadas: readonly Celula[],
+): RecebimentoGerado;
+export function gerarRecebidas(
+  estado: EstadoDoTabuleiro,
+  peca: PecaPosicionada,
+  emBaixaIluminacao?: false,
+  celulasIluminadas?: readonly Celula[],
+): RecebimentoGerado;
 export function gerarRecebidas(
   estado: EstadoDoTabuleiro,
   peca: PecaPosicionada,
   emBaixaIluminacao = false,
+  celulasIluminadas?: readonly Celula[],
 ): RecebimentoGerado {
-  const vagas = vagasDisponiveis(estado, peca);
+  if (emBaixaIluminacao && celulasIluminadas === undefined) {
+    throw new Error(
+      'gerarRecebidas em Baixa Iluminação exige celulasIluminadas (ADR-0013)',
+    );
+  }
+  const vagasTodas = vagasDisponiveis(estado, peca);
+  const vagas = emBaixaIluminacao
+    ? vagasTodas.filter(
+        (vaga) =>
+          !celulasIluminadas!.some(
+            (cel) => cel.linha === vaga.celula.linha && cel.coluna === vaga.celula.coluna,
+          ),
+      )
+    : vagasTodas;
   const limiteBaixa = emBaixaIluminacao ? 1 : vagas.length;
   const quantidade = Math.min(
     vagas.length,

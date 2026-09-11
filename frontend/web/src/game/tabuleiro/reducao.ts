@@ -175,6 +175,15 @@ export interface EstadoDoTabuleiroNoCliente {
   /** A posição do peão do Jogador Ativo já foi confirmada (POSICAO_CONFIRMADA). */
   readonly posicaoConfirmadaNoTurno: boolean
   /**
+   * Peça do início do turno (zona da origem — espelho de partida.ts:119): a
+   * Peça sob o Peão do Jogador Ativo quando o turno iniciou. O Peão só pode
+   * pousar nela ou numa vizinha diretamente conectada a ela (ida-e-volta de
+   * 1 salto, livre até a Confirmação) — nunca viajar pela mesa dentro do
+   * turno. `null` = zona inativa (Peão na Mesa no Primeiro Turno, entre
+   * turnos). Derivada no TURNO_INICIADO real; baseline do snapshot.
+   */
+  readonly pecaDoInicioDoTurnoId: string | null
+  /**
     * Mapa aprendido jogadorId→peaoId (issue #118): cada evento de peão dentro
     * da janela do turno (TURNO_INICIADO→TURNO_ENCERRADO) atribui o peão ao
     * Jogador Ativo — turnos são serializados, então o dono é o ativo. Sem
@@ -250,6 +259,7 @@ export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): 
     rodada: null,
     movimentouNoTurno: false,
     posicaoConfirmadaNoTurno: false,
+    pecaDoInicioDoTurnoId: null,
     peaoPorJogador: {},
     jogadorPorId: {},
     // Objetivos globais (issue #145): sem baseline até o primeiro snapshot —
@@ -563,12 +573,28 @@ export function reduzirEvento(
       if (mesmoTurno) {
         return { ...estado, jogadorAtivoId: evento.jogadorId, rodada: evento.rodada }
       }
+      // Zona da origem (espelho de partida.ts:1689/1710): a Peça sob o Peão
+      // do novo Jogador Ativo no início do turno. Peão na Mesa (Primeiro
+      // Turno) → null → zona inativa.
+      const peaoDoNovoAtivoId =
+        estado.peaoPorJogador[evento.jogadorId] ?? null
+      const peaoDoNovoAtivo = estado.peoes.find(
+        (p) => p.peaoId === peaoDoNovoAtivoId,
+      )
+      const pecaDoInicioDoTurnoId =
+        peaoDoNovoAtivo && peaoDoNovoAtivo.celula !== null
+          ? (estado.posicionadas.find(
+              (p) =>
+                chaveCelula(p.celula) === chaveCelula(peaoDoNovoAtivo.celula as Celula),
+            )?.pecaId ?? null)
+          : null
       return {
         ...estado,
         jogadorAtivoId: evento.jogadorId,
         rodada: evento.rodada,
         movimentouNoTurno: false,
         posicaoConfirmadaNoTurno: false,
+        pecaDoInicioDoTurnoId,
         peaoSelecionadoId: null,
         pecaSelecionadaId: null,
         pecaEmManipulacaoId: null,
@@ -581,6 +607,7 @@ export function reduzirEvento(
         jogadorAtivoId: null,
         movimentouNoTurno: false,
         posicaoConfirmadaNoTurno: false,
+        pecaDoInicioDoTurnoId: null,
         peaoSelecionadoId: null,
         pecaSelecionadaId: null,
         pecaEmManipulacaoId: null,

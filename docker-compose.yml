@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:17
-    profiles: [db, backend, nginx, full]
+    profiles: [db, backend, nginx, full, test]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-flicker}
       POSTGRES_USER: ${POSTGRES_USER:-flicker}
@@ -19,7 +19,7 @@ services:
 
   db-migrate:
     build: ./db
-    profiles: [db, backend, nginx, full]
+    profiles: [db, backend, nginx, full, test]
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,7 +33,7 @@ services:
 
   redis:
     image: redis:7
-    profiles: [db, backend, nginx, full]
+    profiles: [db, backend, nginx, full, test]
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -87,6 +87,7 @@ services:
       PARTIDA_NAO_INICIO_SEGUNDOS: ${PARTIDA_NAO_INICIO_SEGUNDOS:-90}
       NODE_ENV: ${NODE_ENV:-development}
       PG_POOL_MAX: ${PG_POOL_MAX:-10}
+      BOTS_HABILITADOS: ${BOTS_HABILITADOS:-true}
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:'+(process.env.LOBBY_SERVER_PORT||3001)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 5s
