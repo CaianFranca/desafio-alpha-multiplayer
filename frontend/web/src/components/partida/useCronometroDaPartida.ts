@@ -25,12 +25,17 @@ interface CronometroDaPartidaOptions {
   iniciadaEm?: number | null
 }
 
+/** Leitura do relógio de parede fora do render (mantém o render puro). */
+function agoraAtual(): number {
+  return Date.now()
+}
+
 /**
  * Segundos corridos desde o marco do servidor. Defensivo: marco ausente,
  * não finito ou não positivo devolve 0 (sem origem inventada); epoch no
  * futuro é clampado em 0 (skew negativo).
  */
-function segundosDesde(iniciadaEm: number | null | undefined, agora: number = Date.now()): number {
+function segundosDesde(iniciadaEm: number | null | undefined, agora: number = agoraAtual()): number {
   if (
     iniciadaEm === null ||
     iniciadaEm === undefined ||
@@ -58,28 +63,24 @@ export function useCronometroDaPartida({
   texto: string
   segundos: number
 } {
-  // Estado inicial síncrono do marco: já no primeiro render mostra o tempo
-  // decorrido (sem flash de 00:00 e sem depender de efeito).
-  const [segundos, setSegundos] = useState(() => segundosDesde(iniciadaEm))
   const contando = emAndamento && !emResultado
+  // Leitura do relógio atualizada a cada tick; a última leitura ativa é
+  // mantida quando a contagem para (congelamento no resultado).
+  const [agora, setAgora] = useState(agoraAtual)
 
   useEffect(() => {
-    // Resultado congela: recomputa uma última vez do marco e para — sem timer.
-    if (emResultado) {
-      setSegundos(segundosDesde(iniciadaEm))
-      return
-    }
     if (!contando) return
-    // Recomputa imediatamente (o marco pode chegar depois do mount) e a cada
-    // segundo; sempre de `Date.now()` — nunca incremento local acumulado.
-    setSegundos(segundosDesde(iniciadaEm))
+    // setState no callback do intervalo (assinatura de relógio), nunca de
+    // forma síncrona no corpo do efeito.
     const id = window.setInterval(() => {
-      setSegundos(segundosDesde(iniciadaEm))
+      setAgora(agoraAtual())
     }, 1000)
     return () => {
       window.clearInterval(id)
     }
-  }, [contando, iniciadaEm, emResultado])
+  }, [contando])
+
+  const segundos = segundosDesde(iniciadaEm, agora)
 
   return { texto: formatarCronometroDaPartida(segundos), segundos }
 }
