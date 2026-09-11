@@ -6,15 +6,16 @@ interface Props {
   encaminhamento: EstadoDoEncaminhamento
   wsAlvo?: string | null
   href?: string | null
+  codigoDeSala?: string | null
 }
 
-export function EncaminhamentoOverlay({ encaminhamento, wsAlvo: wsAlvoProp, href: hrefProp }: Props) {
+export function EncaminhamentoOverlay({ encaminhamento, wsAlvo: wsAlvoProp, href: hrefProp, codigoDeSala }: Props) {
   const { fase, alvo } = encaminhamento
   const timeoutRef = useRef<number | null>(null)
 
   const visivel = fase === 'preparando' || (fase === 'disponivel' && alvo !== null)
   const wsAlvo = wsAlvoProp !== undefined ? wsAlvoProp : alvo !== null ? buildGameWsUrl(alvo.serverId, alvo.partidaId) : null
-  const href = hrefProp !== undefined ? hrefProp : alvo !== null ? buildGameRedirectHref(alvo.serverId, alvo.partidaId) : null
+  const href = hrefProp !== undefined ? hrefProp : alvo !== null ? buildGameRedirectHref(alvo.serverId, alvo.partidaId, codigoDeSala ?? null) : null
 
   useEffect(() => {
     if (fase === 'disponivel' && href !== null) {
