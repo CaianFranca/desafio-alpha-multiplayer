@@ -28,6 +28,7 @@ const baseClasses = 'absolute inset-0 z-10 flex items-center justify-center bg-z
 const TEXTO_MOTIVO_DERROTA: Record<MotivoDeDerrota, string> = {
   caixa_esgotada: 'A Caixa esgotou antes de a equipe completar a fuga',
   equipe_amedrontada: 'A equipe perdeu toda a Sanidade',
+  desistencia: 'Restou só você na partida',
 }
 
 export function PartidaOverlays({

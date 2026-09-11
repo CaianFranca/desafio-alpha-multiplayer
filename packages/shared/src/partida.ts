@@ -32,10 +32,12 @@
 //   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
 //   motivo da derrota viaja em campo opcional separado (MotivoDeDerrotaWire,
-//   sync com DesfechoDaPartida — engine/src/partida.ts:128-133): presente só
+//   sync com DesfechoDaPartida — engine/src/partida.ts:156-161; 'desistencia'
+//   incluído pela ADR-0013/#289): presente só
 //   com resultado 'derrota'; payloads de binário anterior omitem o campo —
 //   o cliente trata ausente/null como "motivo desconhecido". A vitória não
 //   tem motivo no domínio; o wire não inventa um.)
+//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — issue #289 (ADR-0013)
 //   shared type:'ATAQUE_RESOLVIDO' { atacantes, peoesAtingidos, protegidos, estadosAplicados } <-> engine tipo:'ataque_resolvido' idem — issues #172/#173
 //   (Shape 1:1 com o evento de domínio; o refinamento do wire/feedback da
 //   issue #173 está concluído neste commit: `estadosAplicados` carrega o
@@ -150,6 +152,9 @@ export interface ConfirmarPosicaoDoPeaoComando {
 // Atravessar o Escuro (issue #264 / spec #272): o comando wire do canal de
 // Partida — o `jogadorId` viaja aqui (forma do ST-11); o contrato do Peão em
 // si (sem `jogadorId`) vive em ./peoes.ts (AtravessarOEscuroComando).
+// @deprecated ADR-0013: fluxo canônico em Baixa é puxar no início do turno
+// (avancarVez com gerarRecebidas filtrando vagas escuras). Mantido como legado
+// funcional até remoção em issue futura.
 export interface AtravessarOEscuroPartidaComando {
   readonly type: 'ATRAVESSAR_O_ESCURO';
   readonly jogadorId: string;
@@ -241,12 +246,14 @@ export type { VagaDaPecaRecebidaEscolhidaEvento };
 export type ResultadoDaPartidaWire = 'vitoria' | 'derrota';
 
 // Motivo da derrota (issue #145-exp): sync manual com o motivo de
-// DesfechoDaPartida do engine (packages/engine/src/partida.ts:130-132) —
+// DesfechoDaPartida do engine (packages/engine/src/partida.ts:156-161) —
 // 'caixa_esgotada' (Caixa Esgotada sem objetivos alcançáveis,
-// caixaEsgotadaSemObjetivos) e 'equipe_amedrontada' (Sanidade 0 em toda a
-// equipe). Tipo fechado: a vitória não tem motivo no domínio e o wire não
-// inventa um. Terminais do glossário (CONTEXT.md): Caixa, Amedrontado.
-export type MotivoDeDerrotaWire = 'caixa_esgotada' | 'equipe_amedrontada';
+// caixaEsgotadaSemObjetivos), 'equipe_amedrontada' (Sanidade 0 em toda a
+// equipe) e 'desistencia' (quórum mínimo — um Jogador restante após
+// desistências, ADR-0013/#289; precede a vitória). Tipo fechado: a vitória
+// não tem motivo no domínio e o wire não inventa um. Terminais do glossário
+// (CONTEXT.md): Caixa, Amedrontado, Desistência.
+export type MotivoDeDerrotaWire = 'caixa_esgotada' | 'equipe_amedrontada' | 'desistencia';
 
 export type EstadoDaPartidaWire = 'preparada' | 'em_andamento' | 'terminada';
 
@@ -441,6 +448,18 @@ export interface ResgateRealizadoWireEvento {
   readonly resgatadorPeaoId: PeaoId;
 }
 
+// Desistência (issue #289, ADR-0013): eco do domínio — o Jogador saiu da
+// Partida em andamento; o peão indicado foi removido (a célula fica livre) e
+// a vez saiu da ordem. Abre o lote do comando, antes de
+// CELULAS_ILUMINADAS/LIMPEZA_APLICADA e da Passagem de Vez (quando o
+// desistente era o Jogador Ativo). Shape 1:1 com DesistenciaRegistradaEvento
+// do domínio.
+export interface DesistenciaRegistradaWireEvento {
+  readonly type: 'DESISTENCIA_REGISTRADA';
+  readonly jogadorId: string;
+  readonly peaoId: PeaoId;
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
@@ -453,7 +472,8 @@ export type PartidaEventoDoServidor =
   | EstadoDaPartidaEvento
   | PartidaTerminadaWireEvento
   | AtaqueResolvidoWireEvento
-  | ResgateRealizadoWireEvento;
+  | ResgateRealizadoWireEvento
+  | DesistenciaRegistradaWireEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

@@ -10,10 +10,9 @@ const styleVoltar = 'site-header__cta'
 const styleCriarSala = 'site-header__cta site-header__cta--accent'
 
 const secoesDoHeader = [
-  { rotulo: 'Trailers', id: 'trailers' },
-  { rotulo: 'História', id: 'historia' },
   { rotulo: 'Características', id: 'caracteristicas' },
   { rotulo: 'Objetivos', id: 'objetivos' },
+  { rotulo: 'História', id: 'historia' },
 ] as const
 
 export function Header() {
