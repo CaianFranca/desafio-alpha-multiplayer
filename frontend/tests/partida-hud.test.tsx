@@ -468,6 +468,20 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     vi.useRealTimers()
   })
 
+  it('a partir de 1h o cronômetro passa a exibir H:MM:SS', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:00')
+
+    act(() => {
+      vi.advanceTimersByTime(3_600_000)
+    })
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('1:00:00')
+    expect(screen.getByTestId('hud-cronometro')).toHaveAttribute('data-segundos', '3600')
+    vi.useRealTimers()
+  })
+
   it('retoma ao remontar com o mesmo marco (sair e voltar/recarregar)', () => {
     vi.useFakeTimers()
     vi.setSystemTime(T0)

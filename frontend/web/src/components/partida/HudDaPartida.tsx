@@ -117,8 +117,8 @@ function ordenarCircularPorAtivo(
 
 /**
  * Cronômetro isolado do resto do HUD (revisão PR #279): o tick de 1×/s fica
- * confinado a este subcomponente, então re-renderiza só o MM:SS — as 6
- * regiões não reconciliam a cada segundo.
+ * confinado a este subcomponente, então re-renderiza só o texto do cronômetro
+ * — as 6 regiões não reconciliam a cada segundo.
  */
 function CronometroDoHud({
   emAndamento,

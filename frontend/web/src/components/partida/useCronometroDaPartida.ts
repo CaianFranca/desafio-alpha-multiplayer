@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
 
-/** Formata segundos corridos como MM:SS (cronômetro do HUD, issue #226). */
+/**
+ * Formata segundos corridos como MM:SS; a partir de 1h usa H:MM:SS (hora sem
+ * zero à esquerda) — cronômetro do HUD, issues #226/#259.
+ */
 export function formatarCronometroDaPartida(totalSegundos: number): string {
-  const minutos = Math.floor(totalSegundos / 60)
+  const horas = Math.floor(totalSegundos / 3600)
+  const minutos = Math.floor((totalSegundos % 3600) / 60)
   const segundos = totalSegundos % 60
-  return `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`
+  const mmss = `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`
+  return horas > 0 ? `${horas}:${mmss}` : mmss
 }
 
 interface CronometroDaPartidaOptions {
@@ -41,7 +46,8 @@ function segundosDesde(iniciadaEm: number | null | undefined, agora: number = Da
  * Cronômetro da Partida (issue #259): deriva do marco autoritativo do
  * servidor, recomputado a cada segundo de `Date.now()`, e congela no
  * resultado. Como todos os Jogadores partilham o mesmo `iniciadaEm`, o HUD
- * mostra o mesmo MM:SS e a retomada (sair/voltar, recarregar) não reinicia.
+ * mostra o mesmo MM:SS (ou H:MM:SS a partir de 1h) e a retomada (sair/voltar,
+ * recarregar) não reinicia.
  * Somente leitura de tela — o marco não afeta regras.
  */
 export function useCronometroDaPartida({
