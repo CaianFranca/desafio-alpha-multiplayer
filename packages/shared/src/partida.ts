@@ -372,10 +372,13 @@ export interface EstadoDaPartidaSnapshot {
 export interface PartidaIniciadaEvento {
   readonly type: 'PARTIDA_INICIADA';
   readonly partidaId: string;
-  // Marco autoritativo do início (epoch ms, issue #259), sempre presente: os
-  // Jogadores que receberam snapshot `preparada` (iniciadaEm null) obtêm o
-  // marco por este broadcast no instante atômico da virada para em_andamento.
-  readonly iniciadaEm: number;
+  // Marco autoritativo do início (epoch ms, issue #259): os Jogadores que
+  // receberam snapshot `preparada` (iniciadaEm null) obtêm o marco por este
+  // broadcast no instante atômico da virada para em_andamento.
+  // Opcional/defensivo (review PR #374): espelha `EstadoDaPartidaSnapshot.
+  // iniciadaEm?` — binário legado pode omitir o campo e o reducer do cliente
+  // preserva o marco vigente em vez de gravar `undefined`.
+  readonly iniciadaEm?: number | null;
 }
 
 export interface EstadoDaPartidaEvento {

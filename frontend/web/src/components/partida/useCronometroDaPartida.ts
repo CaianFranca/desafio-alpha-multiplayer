@@ -70,15 +70,22 @@ export function useCronometroDaPartida({
 
   useEffect(() => {
     if (!contando) return
-    // setState no callback do intervalo (assinatura de relógio), nunca de
-    // forma síncrona no corpo do efeito.
+    // Refresh imediato (review PR #374): `iniciadaEm` pode chegar depois do
+    // mount (broadcast PARTIDA_INICIADA), e o `agora` capturado no mount fica
+    // stale até o próximo tick. O timeout 0 sincroniza o relógio na entrada
+    // do efeito sem setState síncrono no corpo (react-hooks/set-state-in-
+    // effect); o intervalo mantém a assinatura de relógio a cada segundo.
+    const refreshId = window.setTimeout(() => {
+      setAgora(agoraAtual())
+    }, 0)
     const id = window.setInterval(() => {
       setAgora(agoraAtual())
     }, 1000)
     return () => {
+      window.clearTimeout(refreshId)
       window.clearInterval(id)
     }
-  }, [contando])
+  }, [contando, iniciadaEm])
 
   const segundos = segundosDesde(iniciadaEm, agora)
 

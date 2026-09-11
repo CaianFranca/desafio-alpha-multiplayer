@@ -308,9 +308,10 @@ export function criarWebSocketServer(
                   type: 'PARTIDA_INICIADA',
                   partidaId,
                   // Marco autoritativo do início (issue #259): a transição o
-                  // grava atomicamente; o fallback Date.now() cobre apenas um
-                  // resultado legado sem o campo.
-                  iniciadaEm: transicao.iniciadaEm ?? Date.now(),
+                  // grava atomicamente e devolve o valor persistido; NÃO usar
+                  // relógio local aqui (review PR #374) — o snapshot abaixo
+                  // projeta a MESMA fonte, então evento e foto nunca divergem.
+                  iniciadaEm: transicao.iniciadaEm,
                 });
               }
               try {
@@ -323,7 +324,7 @@ export function criarWebSocketServer(
                     estadoEngine,
                     partidaAtual.roster,
                     transicao.estado,
-                    partidaAtual.iniciadaEm ?? null,
+                    transicao.iniciadaEm,
                   );
                   depsPartida.broadcaster.enviarParaSocket(ws, {
                     type: 'ESTADO_DA_PARTIDA',

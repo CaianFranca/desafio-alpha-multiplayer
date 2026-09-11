@@ -457,6 +457,16 @@ export function reduzirEvento(
       // Marco de início autoritativo (issue #259): os Jogadores admitidos
       // antes da virada receberam snapshot `preparada` (iniciadaEm null) — o
       // broadcast entrega o mesmo marco a todos para o HUD sincronizar.
+      // Guard de runtime (review PR #374): wire de binário anterior pode
+      // omitir o campo — o assign cego deixava `undefined` no modelo e
+      // corrompia a baseline do cronômetro; inválido preserva o marco vigente.
+      if (
+        typeof evento.iniciadaEm !== 'number' ||
+        !Number.isFinite(evento.iniciadaEm) ||
+        evento.iniciadaEm <= 0
+      ) {
+        return estado
+      }
       return { ...estado, iniciadaEm: evento.iniciadaEm }
 
     // ── Eventos de Peão / Ciclo (ST-10) ──

@@ -1637,3 +1637,53 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
     expect(troca.recebidasPendentes).toEqual([])
   })
 })
+
+describe('PARTIDA_INICIADA no modelo do cliente — marco defensivo (issue #259)', () => {
+  const MARCO = 1_700_000_000_000
+
+  it('atribui o marco válido recebido no broadcast', () => {
+    const estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PARTIDA_INICIADA',
+      partidaId: 'partida-1',
+      iniciadaEm: MARCO,
+    })
+    expect(estado.iniciadaEm).toBe(MARCO)
+  })
+
+  it('evento legado sem iniciadaEm preserva o marco vigente (não grava undefined)', () => {
+    const comMarco = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PARTIDA_INICIADA',
+      partidaId: 'partida-1',
+      iniciadaEm: MARCO,
+    })
+    // Reproduz o wire de binário anterior ao marco (#4): PARTIDA_INICIADA sem
+    // o campo. O assign cego antigo deixava `iniciadaEm: undefined` no modelo.
+    const legado = reduzirEvento(comMarco, { type: 'PARTIDA_INICIADA', partidaId: 'partida-1' })
+    expect(legado.iniciadaEm).toBe(MARCO)
+    expect(legado.iniciadaEm).not.toBeUndefined()
+  })
+
+  it('marco inválido (zero, negativo ou NaN) é no-op e preserva o marco vigente', () => {
+    const comMarco = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PARTIDA_INICIADA',
+      partidaId: 'partida-1',
+      iniciadaEm: MARCO,
+    })
+    for (const invalido of [0, -1, Number.NaN]) {
+      const resultado = reduzirEvento(comMarco, {
+        type: 'PARTIDA_INICIADA',
+        partidaId: 'partida-1',
+        iniciadaEm: invalido,
+      })
+      expect(resultado.iniciadaEm).toBe(MARCO)
+    }
+  })
+
+  it('sem marco vigente, evento inválido mantém null (nunca undefined)', () => {
+    const resultado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PARTIDA_INICIADA',
+      partidaId: 'partida-1',
+    })
+    expect(resultado.iniciadaEm).toBeNull()
+  })
+})
