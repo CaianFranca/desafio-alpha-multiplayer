@@ -1769,15 +1769,21 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
     'CELULA_NAO_ENCONTRADA',
   );
   // Iluminada: sem a reta-1, o Peão volta à inicial-1 e (2,3) — vaga norte
-  // dela — continua iluminada; a travessia exige uma célula ESCURA.
+  // dela — precisa estar iluminada por terceiro para testar o guard fresco
+  // (em Baixa a própria ana só ilumina 3,3). Coloca peao-vermelho em 2,2
+  // para iluminar 2,3 via cálculo fresco.
   {
     let semReta1 = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
     semReta1 = {
       ...semReta1,
       tabuleiro: {
         ...semReta1.tabuleiro,
-        posicionadas: semReta1.tabuleiro.posicionadas.filter(
-          (peca) => peca.pecaId !== 'reta-1',
+        posicionadas: [
+          ...semReta1.tabuleiro.posicionadas.filter((peca) => peca.pecaId !== 'reta-1'),
+          { pecaId: 'ilum-22', tipo: 'cruz' as const, orientacao: 0 as const, celula: { linha: 2, coluna: 2 } },
+        ],
+        peoes: semReta1.tabuleiro.peoes.map((peao) =>
+          peao.peaoId === 'peao-vermelho' ? { ...peao, pecaId: 'ilum-22' } : peao,
         ),
       },
     };
@@ -2024,4 +2030,134 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
     aplicarComandoDePartida(confirmacao.estado, encerrarTurno(), 'ana').sucesso,
     true,
   );
+});
+
+// ADR-0013 / issue #354 — bloqueantes do review #364
+
+test('ADR-0013: permanecer com seleção nula adota o peão do ator (bloqueante 1)', () => {
+  let estado = partidaEmRodada2();
+  // Ana em turno normal, peça do início = inicial-1 (3,3), sem pendências
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
+  // Simula avancarVez que limpa peaoSelecionadoId (turno_iniciado já limpa)
+  const semSelecao: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: null },
+  };
+  const permanencia = aplicarComandoDePartida(semSelecao, permanecer('peao-branco'), 'ana');
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  assert.equal(permanencia.estado.jogadorAtivoId, 'bruno');
+  assert.ok(permanencia.eventos.some((e) => e.tipo === 'peao_permaneceu'));
+  // Seleção alheia permanece rejeitada — não adota cegamente
+  const comOutroSelecao: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: 'peao-vermelho' },
+  };
+  assert.equal(
+    codigoDaRejeicao(comOutroSelecao, permanecer('peao-branco'), 'ana'),
+    'PEAO_NAO_SELECIONADO',
+  );
+});
+
+test('ADR-0013: avancarVez em Baixa sem vaga escura ou caixa vazia não puxa (0 peças) — permanecer sem seleção sucede', () => {
+  // Usa N=2 para controlar o wrap ana→bruno→ana
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  // Bloqueia vagas de ana (inicial-1 em 3,3: norte 2,3 e leste 3,4) para forçar 0
+  for (const cel of [{ linha: 2, coluna: 3 }, { linha: 3, coluna: 4 }] as const) {
+    if (!estado.tabuleiro.posicionadas.some((p) => p.celula.linha === cel.linha && p.celula.coluna === cel.coluna)) {
+      estado = comPecaFora(estado, `bloq-${cel.linha}-${cel.coluna}`, 'reta', cel.linha, cel.coluna);
+    }
+  }
+  estado = comJogadorEmBaixa(estado, 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const encerrarBruno = aplicarComandoDePartida(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(encerrarBruno.sucesso, true);
+  if (!encerrarBruno.sucesso) return;
+  // avancarVez para ana (Baixa, sem vaga escura) → 0 peças, sem recebimento_gerado
+  assert.equal(encerrarBruno.estado.jogadorAtivoId, 'ana');
+  assert.equal(encerrarBruno.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!encerrarBruno.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.equal(encerrarBruno.estado.tabuleiro.peaoSelecionadoId, null);
+  // Agora ana com seleção nula e 0 recebidas deve permanecer com adoção
+  const permanecerAna = aplicarComandoDePartida(encerrarBruno.estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanecerAna.sucesso, true);
+  if (!permanecerAna.sucesso) return;
+  assert.equal(permanecerAna.estado.jogadorAtivoId, 'bruno');
+});
+
+test('ADR-0013: avancarVez em Baixa com caixa vazia não puxa (0 peças)', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  // Evita derrota caixa_esgotada: posiciona objetivos atingíveis antes de esvaziar a caixa
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [],
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId: 'gerador-1', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 2, coluna: 3 } },
+        { pecaId: 'gerador-2', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 2 } },
+        { pecaId: 'gerador-3', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 4, coluna: 3 } },
+        { pecaId: 'sala-1', tipo: 'sala_do_diretor' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 4 } },
+        { pecaId: 'portao-1', tipo: 'portao_de_saida' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 1 } },
+      ],
+    },
+  };
+  estado = comJogadorEmBaixa(estado, 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, permanecer('peao-branco'), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const retorno = aplicarComandoDePartida(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(retorno.sucesso, true);
+  if (!retorno.sucesso) return;
+  assert.equal(retorno.estado.jogadorAtivoId, 'ana');
+  assert.equal(retorno.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!retorno.eventos.some((e) => e.tipo === 'peca_sorteada'));
+});
+
+test('ADR-0013: confirmar_posicao em Baixa mantém recebidas [] (sem sorteio no confirmar)', () => {
+  let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+  // Move para peça vizinha conectada e confirma — em Baixa o confirmar não sorteia
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // reta-2 em 3,4 girada para conectar oeste com inicial-1, permite mover
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: estado.tabuleiro.posicionadas.map((p) =>
+        p.pecaId === 'reta-2' ? { ...p, orientacao: 90 as const } : p,
+      ),
+    },
+  };
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+});
+
+test('ADR-0013: travessia usa iluminação fresca (unificada com avancarVez)', () => {
+  let estado = estadoDaTravessia();
+  // Injeta iluminação stale divergente: adiciona célula iluminada que cobre a vaga norte (1,3)
+  // Se a travessia usasse stale, consideraria (1,3) iluminada e falharia; com fresca deve suceder
+  // pois (1,3) é escura na iluminação fresca (peões em 3,3 etc).
+  const stale: EstadoDaPartida = {
+    ...estado,
+    celulasIluminadas: [...estado.celulasIluminadas, { linha: 1, coluna: 3 }],
+  };
+  const travessia = aplicarComandoDePartida(stale, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  assert.equal(travessia.sucesso, true);
+  if (!travessia.sucesso) return;
+  assert.equal(travessia.estado.tabuleiro.recebidas.length, 1);
 });
