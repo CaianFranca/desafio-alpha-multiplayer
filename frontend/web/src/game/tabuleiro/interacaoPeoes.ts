@@ -395,8 +395,10 @@ export function vagasDisponiveisDoPeao(
     if (jaEscolhidas.has(borda)) continue
     const celula = celulaVizinhaNaBorda(origem.celula, borda)
     if (encontrarPecaNaCelula(estado.posicionadas, celula)) continue
-    // ADR-0013: em Baixa, só vagas escuras são disponíveis no espelho
-    if (emBaixa && iluminadas !== undefined) {
+    // ADR-0013: em Baixa, só vagas escuras são disponíveis no espelho — fail-closed:
+    // se emBaixa e iluminadas === undefined, nenhuma vaga é considerada escura.
+    if (emBaixa) {
+      if (iluminadas === undefined) continue
       if (iluminadas.some((c) => c.linha === celula.linha && c.coluna === celula.coluna))
         continue
     }
