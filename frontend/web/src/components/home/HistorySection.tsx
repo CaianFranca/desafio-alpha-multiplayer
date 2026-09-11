@@ -59,7 +59,7 @@ export function HistorySection() {
         <HistoryRevealItem index={1}>
           <h2 id="history-title" className="history-eyebrow">{history.title}</h2>
           {history.paragraphs.map((p, i) => (
-            <p key={i} className="text-muted leading-7 mb-4 last:mb-0">{p}</p>
+            <p key={i} className="text-muted text-lg leading-7 mb-4 last:mb-0">{p}</p>
           ))}
         </HistoryRevealItem>
       </div>
