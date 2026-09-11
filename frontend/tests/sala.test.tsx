@@ -696,6 +696,22 @@ describe('lobby - saída própria via broadcast (issue #290)', () => {
     expect(await screen.findAllByText('Criar / Entrar na Sala')).not.toHaveLength(0)
     expect(screen.queryByText('Retornar para Sala')).not.toBeInTheDocument()
     expect(screen.queryByText(/foi expulso/i)).not.toBeInTheDocument()
+
+    // Lote real do lobby: o SALA_ATUALIZADA trailing (sala ainda
+    // 'encaminhada', já sem a vítima) não pode ressuscitar a sala — sem F5.
+    const salaEncaminhadaSemMim = { ...salaSemMim, estado: 'encaminhada' as const }
+    act(() => {
+      ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaEncaminhadaSemMim })
+    })
+    expect(await screen.findAllByText('Criar / Entrar na Sala')).not.toHaveLength(0)
+    expect(screen.queryByText('Retornar para Sala')).not.toBeInTheDocument()
+
+    // Reingresso libera o gate: nova sala com o jogador volta a Retornar.
+    act(() => {
+      ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: criarSala({ membros: [eu], anfitriaoId: 'm-eu' }) })
+    })
+    expect(await screen.findAllByText('Retornar para Sala')).not.toHaveLength(0)
+    expect(screen.queryByText('Criar / Entrar na Sala')).not.toBeInTheDocument()
   })
 
   it('MEMBRO_SAIU de outro membro mantém a sala', async () => {

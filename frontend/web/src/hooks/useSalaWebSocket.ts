@@ -235,6 +235,12 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   // criou sala nova), ignora eventos atrasados da sala antiga — inclusive o
   // SALA_ATUALIZADA trailing com estado 'aberta', que ressuscitaria a sala.
   const expulsoRef = useRef(false)
+  // Gate de saída própria (issue #290): mesmo papel do gate acima, mas sem
+  // modal nem lista de bloqueados — armado quando o próprio MEMBRO_SAIU
+  // confirma a desvinculação (ex.: desistência da partida). Sem ele, o
+  // SALA_ATUALIZADA trailing do mesmo lote (sala ainda 'encaminhada', já sem
+  // a vítima) ressuscitaria a sala local até o próximo F5.
+  const saiuRef = useRef(false)
 
   // Ao trocar de sala (código diferente), descarta chat e bloqueados da sala
   // anterior. Avisos só são descartados ao ENTRAR em outra sala: ao voltar
@@ -393,6 +399,16 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
               if (!reingressou) return
               expulsoRef.current = false
             }
+            // Gate de saída própria: mesmos atrasados da sala antiga são
+            // ignorados até o jogador voltar a ser membro (reentrou ou criou
+            // sala nova), momento em que o gate é liberado.
+            if (saiuRef.current) {
+              const reingressou = jogadorId
+                ? evento.sala.membros.some((m) => m.jogadorId === jogadorId)
+                : false
+              if (!reingressou) return
+              saiuRef.current = false
+            }
             // Auto-expulsão: o anfitrião expulsou a si mesmo identificado pelo
             // jogadorId. O backend entrega MEMBRO_EXPULSO ao socket do expulso;
             // aqui o jogador sai visualmente da sala, sem aviso nem inclusão na
@@ -426,6 +442,9 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
               setMensagensDeChat([])
               setJogadoresBloqueados([])
               setEncaminhamento(estadoInicialDoEncaminhamento())
+              // Ativa o gate que ignora o SALA_ATUALIZADA trailing do mesmo
+              // lote (e outros atrasados da sala antiga) até reingressar.
+              saiuRef.current = true
               const msgSaida = mensagemDeAviso(evento, salaAnterior)
               if (msgSaida) adicionarAviso(msgSaida, evento.type)
               return
@@ -532,6 +551,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       setConectado(false)
       setExpulso(false)
       expulsoRef.current = false
+      saiuRef.current = false
       return () => {
         desinscreverAtivacao()
         desinscreverDesativacao()
