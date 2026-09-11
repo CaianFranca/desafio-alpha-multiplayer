@@ -672,7 +672,7 @@ describe('lobby - página do lobby', () => {
     // Na home, a navegação principal reaparece.
     expect(await screen.findByRole('heading', { name: /prepare-se para a partida/i })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: /navegação principal/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Trailers' })).toHaveAttribute('href', '/#trailers')
+    expect(screen.queryByRole('link', { name: 'Trailers' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /história/i })).toHaveAttribute('href', '/#historia')
     expect(screen.getByRole('link', { name: /características/i })).toHaveAttribute('href', '/#caracteristicas')
     expect(screen.getByRole('link', { name: /objetivos/i })).toHaveAttribute('href', '/#objetivos')
