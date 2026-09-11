@@ -2209,7 +2209,7 @@ test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no
   };
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
-  const caixaAntes = estado.tabuleiro.caixa.length;
+  const caixaAntes = [...estado.tabuleiro.caixa];
   const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
   assert.equal(confirmacao.sucesso, true);
   if (!confirmacao.sucesso) return;
@@ -2218,5 +2218,71 @@ test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no
   assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
   assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
   assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
-  assert.equal(confirmacao.estado.tabuleiro.caixa.length, caixaAntes);
+  assert.deepEqual(confirmacao.estado.tabuleiro.caixa, caixaAntes);
+  // 1 no próximo avancarVez (ADR-0013): encerra o turno de ana, bruno
+  // permanece (o permanecer já avança a vez) e ana reabre em Baixa com o
+  // puxar-1 na Bandeja.
+  estado = aplicar(confirmacao.estado, encerrarTurno(), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const turnoBruno = aplicarComandoDePartida(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(turnoBruno.sucesso, true);
+  if (!turnoBruno.sucesso) return;
+  assert.equal(turnoBruno.estado.jogadorAtivoId, 'ana');
+  assert.equal(turnoBruno.estado.tabuleiro.recebidas.length, 1);
+  assert.ok(turnoBruno.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(turnoBruno.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.equal(turnoBruno.estado.tabuleiro.caixa.length, caixaAntes.length - 1);
+});
+
+test('review PR #370 (Bug 2): fluxo Baixa completo — colocar, OK, selecionar, mover, confirmar e encerrar', () => {
+  // O "puxar" é gesto local do cliente (sem comando wire — coberto no
+  // frontend); aqui a cadeia começa na vaga do puxar-1 do avancarVez,
+  // injetado com peça determinística (cruz conecta sempre, 0 giros).
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  const [, ...restoCaixa] = estado.tabuleiro.caixa;
+  const cruzX = { pecaId: 'cruz-x', tipo: 'cruz' as const, orientacao: 0 as const };
+  estado = {
+    ...estado,
+    jogadores: estado.jogadores.map((j) =>
+      j.jogadorId === 'ana' ? { ...j, emBaixaIluminacao: true } : j,
+    ),
+    // Peão terminou o turno anterior sobre reta-2: origem do turno = reta-2.
+    pecaDoInicioDoTurnoId: 'reta-2',
+    tabuleiro: {
+      ...estado.tabuleiro,
+      peoes: estado.tabuleiro.peoes.map((p) =>
+        p.peaoId === 'peao-branco' ? { ...p, pecaId: 'reta-2' } : p,
+      ),
+      caixa: [cruzX, ...restoCaixa],
+      recebidas: [
+        { recebidaId: 'recebida-cruz-x', pecaId: 'cruz-x', tipo: 'cruz' as const, orientacao: 0 as const, vaga: null, celulaAlvo: null },
+      ],
+    },
+  };
+  // Colocar: escolher a vaga (a pré-adoção supre a seleção nula, #326) e OK
+  // (posicionar_peca — a recusa desconectada vive em peoes.test.ts).
+  estado = aplicar(estado, escolherVaga('recebida-cruz-x', 'leste'), 'ana');
+  const pendente = estado.tabuleiro.recebidas.find(
+    (r) => r.recebidaId === 'recebida-cruz-x',
+  );
+  assert.deepEqual(pendente?.celulaAlvo, { linha: 3, coluna: 5 });
+  estado = aplicar(estado, posicionarPeca('cruz-x', 3, 5), 'ana');
+  assert.equal(estado.tabuleiro.recebidas.length, 0);
+  // Peão selecionável após o OK (núcleo do Bug 2): sem pendências, a seleção
+  // volta a emitir.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+  // Mover, confirmar sem sortear (emBaixa mantido) e encerrar.
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 5), 'ana');
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.equal(confirmacao.estado.jogadores.find((j) => j.jogadorId === 'ana')?.emBaixaIluminacao, true);
+  estado = aplicar(confirmacao.estado, encerrarTurno(), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
 });
