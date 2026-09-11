@@ -465,9 +465,16 @@ before(async () => {
 });
 
 after(async () => {
-  if (redis.status === 'ready') {
-    await redis.quit();
-  } else {
+  // Teardown blindado: o quit() pode lançar ("Connection is closed.") quando
+  // o socket do Redis já caiu com ECONNABORTED transiente no fim da bateria —
+  // o erro não tratado vira teste sintético falho do runner (não do teste).
+  try {
+    if (redis.status === 'ready') {
+      await redis.quit();
+    } else {
+      redis.disconnect();
+    }
+  } catch {
     redis.disconnect();
   }
 });
@@ -490,14 +497,13 @@ test('Limpeza: broadcast simultâneo de LIMPEZA_APLICADA + CELULAS_ILUMINADAS ao
 
       // Rodada 2 de jogador-1: mover de (3,3) para (2,3) e confirmar.
       // Nova iluminação (2,3) = (1,3),(2,2),(2,3),(2,4),(3,3) deixa pecaEsperadaRemovida em (3,4) fora → limpeza remove.
+      // O mover re-seleciona o Peão movido (re-seleção pós-mover, #263/#324):
+      // o confirmar segue direto, sem SELECIONAR_PEAO.
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       await esperarEvento(ws, 'PEAO_SELECIONADO');
 
       enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 2, coluna: 3 } });
       await esperarEvento(ws, 'PEAO_MOVIDO');
-
-      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
-      await esperarEvento(ws, 'PEAO_SELECIONADO');
 
       // Contadores de unicidade: prova que LIMPEZA foi emitida exatamente 1x por socket,
       // simultaneamente, sem segundo broadcast.
@@ -616,13 +622,12 @@ test('Limpeza: admissão tardia recebe CELULAS_ILUMINADAS correntes pós-limpeza
     try {
       const { pecaEsperadaRemovida } = await prepararRodada2(ws, ws2, ws3, ws4);
 
-      // Gerar limpeza via CONFIRMAR
+      // Gerar limpeza via CONFIRMAR — o mover re-seleciona o Peão movido
+      // (re-seleção pós-mover, #263/#324): o confirmar segue direto.
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       await esperarEvento(ws, 'PEAO_SELECIONADO');
       enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 2, coluna: 3 } });
       await esperarEvento(ws, 'PEAO_MOVIDO');
-      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
-      await esperarEvento(ws, 'PEAO_SELECIONADO');
 
       const limpezaEspera = esperarEvento(ws, 'LIMPEZA_APLICADA');
       const celulasEspera = esperarEvento(ws, 'CELULAS_ILUMINADAS');
@@ -708,11 +713,9 @@ test('Limpeza: comandos que não mudam Iluminação não emitem LIMPEZA_APLICADA
       const houveLimpezaNoMover = await semLimpezaMover;
       assert.equal(houveLimpezaNoMover, false, 'MOVER_PEAO não deve emitir LIMPEZA_APLICADA');
 
-      // Reselecionar para poder confirmar depois
-      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
-      await esperarEvento(ws, 'PEAO_SELECIONADO');
-
       // D2: CONFIRMAR com limpeza deve emitir LIMPEZA (peca derivada dinamicamente)
+      // O mover re-seleciona o Peão movido (re-seleção pós-mover, #263/#324):
+      // o confirmar segue direto, sem SELECIONAR_PEAO.
       const limpezaEspera = esperarEvento(ws, 'LIMPEZA_APLICADA');
       const posicaoEspera = esperarEvento(ws, 'POSICAO_CONFIRMADA');
       enviar(ws, { type: 'CONFIRMAR_POSICAO_DO_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
