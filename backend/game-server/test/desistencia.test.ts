@@ -435,7 +435,7 @@ test('2→1 declara derrota por desistência e dispara o Retorno uma única vez'
   // N × N−1 lado a lado: o aviso carrega N (vínculo de sala preservado — o
   // lobby revalida `jogadores == membros ativos` e rejeita subconjunto com
   // 409 definitivo; ver `montarAviso`), enquanto o estado carrega N−1. A
-  // remoção do desistente do roster da sala é follow-up fora deste ticket.
+  // remoção do desistente do roster da sala é follow-up na issue #371.
   assert.equal(avisos.length, 1);
   assert.deepEqual(avisos[0], {
     salaId: 'sala-1',

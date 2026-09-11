@@ -319,8 +319,8 @@ export class PartidaHandlers {
    * "volta à Sala" da spec #288, que manda reutilizar o callback de Retorno
    * existente com "os mesmos Membros" (CONTEXT.md). O N−1 vive no
    * `estado.jogadores` do engine (participação na partida), não no aviso.
-   * A eventual remoção do desistente do roster da sala é follow-up fora deste
-   * ticket (exigiria o lobby aceitar subconjunto N−1 + remoção de membro).
+   * A eventual remoção do desistente do roster da sala é follow-up na issue
+   * #371 (exigiria o lobby aceitar subconjunto N−1 + remoção de membro).
    */
   private montarAviso(partida: PartidaPreparada, resultado: 'vitoria' | 'derrota'): AvisoDeRetorno {
     return {
