@@ -340,42 +340,42 @@ function partidaEmRodada2(): EstadoDaPartida {
   return estado;
 }
 
-test('a composição da caixa inclui 6 vultos e 6 espectros entre as demais', () => {
+test('a composição da caixa inclui 9 vultos e 9 espectros entre as demais', () => {
   const vulto = COMPOSICAO_DA_CAIXA.find((entrada) => entrada.tipo === 'vulto');
   const espectro = COMPOSICAO_DA_CAIXA.find(
     (entrada) => entrada.tipo === 'espectro',
   );
-  assert.equal(vulto?.quantidade, 6);
-  assert.equal(espectro?.quantidade, 6);
+  assert.equal(vulto?.quantidade, 9);
+  assert.equal(espectro?.quantidade, 9);
 
   const estado = estadoInicialDoTabuleiro();
-  assert.equal(estado.caixa.filter((peca) => peca.tipo === 'vulto').length, 6);
+  assert.equal(estado.caixa.filter((peca) => peca.tipo === 'vulto').length, 9);
   assert.equal(
     estado.caixa.filter((peca) => peca.tipo === 'espectro').length,
-    6,
+    9,
   );
   // Ids determinísticos por tipo, no mesmo padrão das demais peças.
   const ids = new Set(estado.caixa.map((peca) => peca.pecaId));
   assert.ok(ids.has('vulto-1'));
-  assert.ok(ids.has('vulto-6'));
+  assert.ok(ids.has('vulto-9'));
   assert.ok(ids.has('espectro-1'));
-  assert.ok(ids.has('espectro-6'));
+  assert.ok(ids.has('espectro-9'));
 });
 
 test('monstros embaralhados: a mesma seed produz exatamente a mesma ordem da caixa', () => {
   const primeira = estadoInicialDoTabuleiro({ seed: 20260901 });
   const segunda = estadoInicialDoTabuleiro({ seed: 20260901 });
 
-  assert.equal(primeira.caixa.length, 83);
+  assert.equal(primeira.caixa.length, 89);
   assert.deepEqual(
     primeira.caixa.map((peca) => peca.pecaId),
     segunda.caixa.map((peca) => peca.pecaId),
   );
-  // A composição é preservada: os 12 monstros continuam no embaralhamento.
-  assert.equal(primeira.caixa.filter((peca) => peca.tipo === 'vulto').length, 6);
+  // A composição é preservada: os 18 monstros continuam no embaralhamento.
+  assert.equal(primeira.caixa.filter((peca) => peca.tipo === 'vulto').length, 9);
   assert.equal(
     primeira.caixa.filter((peca) => peca.tipo === 'espectro').length,
-    6,
+    9,
   );
 });
 

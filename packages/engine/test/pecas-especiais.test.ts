@@ -253,8 +253,8 @@ test('a caixa contém 17 peças especiais com ids e tipos corretos (6 gerador, 3
   for (let i = 1; i <= 4; i++) assert.ok(ids.has(`sala-medica-${i}`));
   for (let i = 1; i <= 4; i++) assert.ok(ids.has(`portao-de-saida-${i}`));
 
-  // Composição total permanece 83 (inclui caminho + monstros).
-  assert.equal(estado.caixa.length, 83);
+  // Composição total permanece 89 (inclui caminho + monstros).
+  assert.equal(estado.caixa.length, 89);
   assert.deepEqual(
     COMPOSICAO_DA_CAIXA.find((e) => e.tipo === 'gerador')?.quantidade,
     6,

@@ -222,7 +222,7 @@ test('estadoInicialDaPartida monta o roster, a vez e o evento de abertura', () =
   assert.equal(estado.rodada, 1);
   assert.equal(estado.pecaDoInicioDoTurnoId, null);
   assert.equal(estado.posicaoConfirmada, false);
-  assert.equal(estado.tabuleiro.caixa.length, 83);
+  assert.equal(estado.tabuleiro.caixa.length, 89);
   assert.equal(estado.tabuleiro.iniciais.length, 4);
   assert.equal(estado.tabuleiro.peoes.length, 4);
   assert.deepEqual(resultado.eventos, [
@@ -253,7 +253,7 @@ test('estadoInicialDaPartida aceita rosters de 2 e 3 com N cores, iniciais e peÃ
     dois.estado.tabuleiro.peoes.map((peao) => peao.peaoId),
     ['peao-branco', 'peao-vermelho'],
   );
-  assert.equal(dois.estado.tabuleiro.caixa.length, 83);
+  assert.equal(dois.estado.tabuleiro.caixa.length, 89);
   assert.equal(dois.estado.jogadorAtivoId, 'ana');
   assert.equal(dois.estado.rodada, 1);
 
@@ -272,7 +272,7 @@ test('estadoInicialDaPartida aceita rosters de 2 e 3 com N cores, iniciais e peÃ
     tres.estado.tabuleiro.peoes.map((peao) => peao.peaoId),
     ['peao-branco', 'peao-vermelho', 'peao-azul'],
   );
-  assert.equal(tres.estado.tabuleiro.caixa.length, 83);
+  assert.equal(tres.estado.tabuleiro.caixa.length, 89);
 });
 
 test('estadoInicialDaPartida rejeita rosters com 1 e 5+ jogadores, duplicidade ou id invÃ¡lido', () => {

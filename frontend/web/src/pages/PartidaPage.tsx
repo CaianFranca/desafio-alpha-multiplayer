@@ -264,6 +264,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
   }, [despacharEvento])
 
+  // Ref do ponto único de injeção do jogadorId (#91): o `onEvento` do canal
+  // é declarado antes do `enviarComJogador` (useCallback abaixo), então usa a
+  // ref para quebrar o TDZ e manter o callback do socket estável (mesmo
+  // padrão de modeloRef/emResultadoRef acima — refs não entram em deps).
+  const enviarComJogadorRef = useRef<(comando: ComandoDoCanal) => void>(() => {})
+
   // ── Pendentes otimistas anti-duplo-place (issue #249) ──
   // Conjunto de alvos em voo (POSICIONAR_PECA/POSICIONAR_PEAO/
   // DESELECIONAR_PEAO): bloqueia o reenvio do mesmo alvo até ack/erro/
@@ -409,7 +415,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
           // Auto-finaliza a manipulação para não exigir o segundo OK na tela
           if (eraRecebida) {
-            enviarComJogador(mapearFinalizarManipulacao())
+            enviarComJogadorRef.current(mapearFinalizarManipulacao())
           }
           return
         }
@@ -492,6 +498,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     },
     [enviar, jogadorId, emResultado, emNaoInicio],
   )
+  useEffect(() => {
+    enviarComJogadorRef.current = enviarComJogador
+  }, [enviarComJogador])
 
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
