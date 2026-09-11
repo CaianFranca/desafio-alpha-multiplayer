@@ -127,7 +127,6 @@ describe('partida-alvos-de-dedo — botões 44px', () => {
       cartaoDeAcessoObtido: false,
       emAndamento: true,
       emResultado: false,
-      partidaId: 'p1',
       onSair: () => {},
     }
     render(<HudDaPartida {...baseProps} />)

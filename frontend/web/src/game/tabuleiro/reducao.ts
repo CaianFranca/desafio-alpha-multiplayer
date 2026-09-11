@@ -88,6 +88,7 @@ import type {
   PecaSorteadaEvento,
   VagaDaPecaRecebidaEscolhidaEvento,
   PosicaoConfirmadaEvento,
+  PartidaIniciadaEvento,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
 } from '@flicker/shared'
@@ -144,6 +145,7 @@ export type EventoDoJogoNoCliente =
   | VagaDaPecaRecebidaEscolhidaEvento
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
+  | PartidaIniciadaEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -170,6 +172,12 @@ export interface EstadoDoTabuleiroNoCliente {
   readonly jogadorAtivoId: string | null
   /** Rodada corrente (TURNO_INICIADO; rodada 1 = Primeiro Turno de todos). */
   readonly rodada: number | null
+  /**
+   * Marco autoritativo do início da Partida (epoch ms, issue #259): baseline
+   * do snapshot ou do broadcast PARTIDA_INICIADA, de onde o HUD deriva o
+   * cronômetro. `null` enquanto a Partida não iniciou/sem snapshot.
+   */
+  readonly iniciadaEm: number | null
   /** O peão do Jogador Ativo já se moveu neste turno (PEAO_MOVIDO). */
   readonly movimentouNoTurno: boolean
   /** A posição do peão do Jogador Ativo já foi confirmada (POSICAO_CONFIRMADA). */
@@ -248,6 +256,8 @@ export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): 
     // Turnos (issue #118): sem vez nem rodada até o primeiro TURNO_INICIADO.
     jogadorAtivoId: null,
     rodada: null,
+    // Sem marco de início até o snapshot/PARTIDA_INICIADA (issue #259).
+    iniciadaEm: null,
     movimentouNoTurno: false,
     posicaoConfirmadaNoTurno: false,
     peaoPorJogador: {},
@@ -433,6 +443,11 @@ export function reduzirEvento(
     case 'ERRO_DO_TABULEIRO':
       // Rejeição não altera o modelo local (recusa é da PartidaPage: som + anúncio).
       return estado
+    case 'PARTIDA_INICIADA':
+      // Marco de início autoritativo (issue #259): os Jogadores admitidos
+      // antes da virada receberam snapshot `preparada` (iniciadaEm null) — o
+      // broadcast entrega o mesmo marco a todos para o HUD sincronizar.
+      return { ...estado, iniciadaEm: evento.iniciadaEm }
 
     // ── Eventos de Peão / Ciclo (ST-10) ──
     case 'PEAO_SELECIONADO':

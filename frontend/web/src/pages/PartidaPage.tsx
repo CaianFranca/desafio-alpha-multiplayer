@@ -320,6 +320,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           return
         }
         if (evento.type === 'PARTIDA_INICIADA') {
+          // O broadcast carrega o marco autoritativo do início (issue #259):
+          // reduzi-lo no modelo sincroniza o cronômetro dos Jogadores que
+          // receberam o snapshot ainda em `preparada`.
+          despacharEvento(evento)
           partidaEmAndamento()
           return
         }
@@ -827,7 +831,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           cartaoDeAcessoObtido={modelo.cartaoDeAcessoObtido}
           emAndamento={estadoEmAndamento}
           emResultado={emResultado}
-          partidaId={partidaId}
+          iniciadaEm={modelo.iniciadaEm}
           onSair={voltarASala}
         />
       ) : null}

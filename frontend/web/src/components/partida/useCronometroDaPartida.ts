@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-/** Formata segundos corridos como MM:SS (cronômetro local do HUD, issue #226). */
+/** Formata segundos corridos como MM:SS (cronômetro do HUD, issue #226). */
 export function formatarCronometroDaPartida(totalSegundos: number): string {
   const minutos = Math.floor(totalSegundos / 60)
   const segundos = totalSegundos % 60
@@ -10,105 +10,70 @@ export function formatarCronometroDaPartida(totalSegundos: number): string {
 interface CronometroDaPartidaOptions {
   /** A partida entrou em andamento (inicia a contagem). */
   emAndamento: boolean
-  /** A partida terminou (congela a contagem no valor atual). */
+  /** A partida terminou (congela a contagem no valor corrente). */
   emResultado: boolean
   /**
-   * Identificador da Partida para persistir o início em `sessionStorage`
-   * (paliativo: sair e voltar na mesma aba retoma em vez de zerar).
-   * Ausente/null mantém o comportamento legado zerado.
+   * Marco autoritativo do início da Partida (epoch ms, issue #259), vindo do
+   * snapshot ou de `PARTIDA_INICIADA`. `null`/ausente mantém o cronômetro em
+   * `00:00` (partida ainda sem marco) — nunca conta a partir do mount local.
    */
-  partidaId?: string | null
-}
-
-function chaveDoInicio(partidaId: string): string {
-  return `hud-cronometro-inicio:${partidaId}`
-}
-
-/** Guard único de partidaId opcional (ausente/null/'' = sem persistência). */
-function temPartidaId(partidaId: string | null | undefined): partidaId is string {
-  return partidaId !== null && partidaId !== undefined && partidaId !== ''
-}
-
-function lerInicio(chave: string): number | null {
-  try {
-    const bruto = window.sessionStorage.getItem(chave)
-    if (bruto === null) return null
-    const valor = Number(bruto)
-    return Number.isFinite(valor) && valor > 0 ? valor : null
-  } catch {
-    return null
-  }
-}
-
-function persistirInicio(chave: string): void {
-  try {
-    window.sessionStorage.setItem(chave, String(Date.now()))
-  } catch {
-    // Sem persistência: o intervalo abaixo conta de forma incremental.
-  }
-}
-
-function limparInicio(chave: string): void {
-  try {
-    window.sessionStorage.removeItem(chave)
-  } catch {
-    // Sem persistência: nada a limpar.
-  }
-}
-
-function segundosDesde(inicio: number, agora: number = Date.now()): number {
-  return Math.max(0, Math.floor((agora - inicio) / 1000))
-}
-
-function segundosIniciais(partidaId: string | null | undefined): number {
-  if (!temPartidaId(partidaId) || typeof window === 'undefined') return 0
-  const inicio = lerInicio(chaveDoInicio(partidaId))
-  return inicio === null ? 0 : segundosDesde(inicio)
+  iniciadaEm?: number | null
 }
 
 /**
- * Cronômetro local da Partida (issue #226): conta segundos a partir da
- * entrada em andamento e congela no resultado. Somente leitura de tela —
- * não deriva do servidor nem afeta regras.
+ * Segundos corridos desde o marco do servidor. Defensivo: marco ausente,
+ * não finito ou não positivo devolve 0 (sem origem inventada); epoch no
+ * futuro é clampado em 0 (skew negativo).
  */
-export function useCronometroDaPartida({ emAndamento, emResultado, partidaId = null }: CronometroDaPartidaOptions): {
+function segundosDesde(iniciadaEm: number | null | undefined, agora: number = Date.now()): number {
+  if (
+    iniciadaEm === null ||
+    iniciadaEm === undefined ||
+    !Number.isFinite(iniciadaEm) ||
+    iniciadaEm <= 0
+  ) {
+    return 0
+  }
+  return Math.max(0, Math.floor((agora - iniciadaEm) / 1000))
+}
+
+/**
+ * Cronômetro da Partida (issue #259): deriva do marco autoritativo do
+ * servidor, recomputado a cada segundo de `Date.now()`, e congela no
+ * resultado. Como todos os Jogadores partilham o mesmo `iniciadaEm`, o HUD
+ * mostra o mesmo MM:SS e a retomada (sair/voltar, recarregar) não reinicia.
+ * Somente leitura de tela — o marco não afeta regras.
+ */
+export function useCronometroDaPartida({
+  emAndamento,
+  emResultado,
+  iniciadaEm = null,
+}: CronometroDaPartidaOptions): {
   texto: string
   segundos: number
 } {
-  // Remount da mesma partida retoma do marco persistido (sem setState em
-  // efeito: o inicializador lê o `sessionStorage` de forma síncrona).
-  const [segundos, setSegundos] = useState(() => segundosIniciais(partidaId))
+  // Estado inicial síncrono do marco: já no primeiro render mostra o tempo
+  // decorrido (sem flash de 00:00 e sem depender de efeito).
+  const [segundos, setSegundos] = useState(() => segundosDesde(iniciadaEm))
   const contando = emAndamento && !emResultado
 
   useEffect(() => {
-    // Resultado congela e dispensa o marco: sem intervalo e sem chave órfã.
-    if (emResultado && temPartidaId(partidaId)) {
-      limparInicio(chaveDoInicio(partidaId))
+    // Resultado congela: recomputa uma última vez do marco e para — sem timer.
+    if (emResultado) {
+      setSegundos(segundosDesde(iniciadaEm))
       return
     }
     if (!contando) return
-    if (!temPartidaId(partidaId)) {
-      const id = window.setInterval(() => {
-        setSegundos((atual) => atual + 1)
-      }, 1000)
-      return () => {
-        window.clearInterval(id)
-      }
-    }
-    const chave = chaveDoInicio(partidaId)
-    if (lerInicio(chave) === null) persistirInicio(chave)
+    // Recomputa imediatamente (o marco pode chegar depois do mount) e a cada
+    // segundo; sempre de `Date.now()` — nunca incremento local acumulado.
+    setSegundos(segundosDesde(iniciadaEm))
     const id = window.setInterval(() => {
-      const marco = lerInicio(chave)
-      if (marco === null) {
-        setSegundos((atual) => atual + 1)
-        return
-      }
-      setSegundos(segundosDesde(marco))
+      setSegundos(segundosDesde(iniciadaEm))
     }, 1000)
     return () => {
       window.clearInterval(id)
     }
-  }, [contando, partidaId, emResultado])
+  }, [contando, iniciadaEm, emResultado])
 
   return { texto: formatarCronometroDaPartida(segundos), segundos }
 }

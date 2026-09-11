@@ -304,6 +304,10 @@ export function criarWebSocketServer(
                 depsPartida.broadcaster.enviar(partidaId, {
                   type: 'PARTIDA_INICIADA',
                   partidaId,
+                  // Marco autoritativo do início (issue #259): a transição o
+                  // grava atomicamente; o fallback Date.now() cobre apenas um
+                  // resultado legado sem o campo.
+                  iniciadaEm: transicao.iniciadaEm ?? Date.now(),
                 });
               }
               try {
@@ -316,6 +320,7 @@ export function criarWebSocketServer(
                     estadoEngine,
                     partidaAtual.roster,
                     transicao.estado,
+                    partidaAtual.iniciadaEm ?? null,
                   );
                   depsPartida.broadcaster.enviarParaSocket(ws, {
                     type: 'ESTADO_DA_PARTIDA',

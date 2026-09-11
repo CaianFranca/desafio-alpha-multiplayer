@@ -37,10 +37,10 @@ export interface HudDaPartidaProps {
   /** Partida em resultado (cronômetro congela). */
   emResultado: boolean
   /**
-   * Identificador da Partida (paliativo do cronômetro: persiste o início em
-   * `sessionStorage` para retomar ao sair e voltar na mesma aba).
+   * Marco autoritativo do início da Partida (epoch ms, issue #259), baseline
+   * do cronômetro. `null`/ausente mantém o tempo em `00:00`.
    */
-  partidaId?: string | null
+  iniciadaEm?: number | null
   /**
    * Foto por jogador (jogadorId → URL); ausente/null mantém as iniciais.
    * Ainda sem fonte no snapshot — prop pronta para quando o servidor expor.
@@ -123,13 +123,13 @@ function ordenarCircularPorAtivo(
 function CronometroDoHud({
   emAndamento,
   emResultado,
-  partidaId = null,
+  iniciadaEm = null,
 }: {
   emAndamento: boolean
   emResultado: boolean
-  partidaId?: string | null
+  iniciadaEm?: number | null
 }) {
-  const { texto: tempo, segundos } = useCronometroDaPartida({ emAndamento, emResultado, partidaId })
+  const { texto: tempo, segundos } = useCronometroDaPartida({ emAndamento, emResultado, iniciadaEm })
   return (
     <span
       data-testid="hud-cronometro"
@@ -159,7 +159,7 @@ export function HudDaPartida({
   cartaoDeAcessoObtido,
   emAndamento,
   emResultado,
-  partidaId = null,
+  iniciadaEm = null,
   imagemPorJogador = {},
   onSair,
 }: HudDaPartidaProps) {
@@ -302,7 +302,7 @@ export function HudDaPartida({
         data-testid="hud-controles-partida"
         className="absolute right-6 top-6 flex origin-top-right scale-90 items-center gap-3 rounded bg-zinc-900/80 px-3 py-1.5 lg:scale-100"
       >
-        <CronometroDoHud emAndamento={emAndamento} emResultado={emResultado} partidaId={partidaId} />
+        <CronometroDoHud emAndamento={emAndamento} emResultado={emResultado} iniciadaEm={iniciadaEm} />
         <span
           data-testid="hud-volume"
           role="img"

@@ -687,22 +687,32 @@ test('PARTIDA_INICIADA broadcast apenas na 4ª admissão', async () => {
     // 4ª admissão deve gerar PARTIDA_INICIADA e estado em_andamento — ordem exata ST-14
     const c4 = await conectarComMensagens(4, ['ADMISSAO_ACEITA', 'PARTIDA_INICIADA', 'ESTADO_DA_PARTIDA', 'TURNO_INICIADO']);
     assertOrdemTipos(c4.mensagens, ['ADMISSAO_ACEITA', 'PARTIDA_INICIADA', 'ESTADO_DA_PARTIDA', 'TURNO_INICIADO']);
-    const parsed4 = c4.mensagens.map((m) => JSON.parse(m) as { type: string; estado?: string; snapshot?: { estado: string }; partidaId?: string });
+    const parsed4 = c4.mensagens.map((m) => JSON.parse(m) as { type: string; estado?: string; snapshot?: { estado: string; iniciadaEm?: number | null }; partidaId?: string; iniciadaEm?: number });
     const adm4 = parsed4.find((m) => m.type === 'ADMISSAO_ACEITA') as { estado: string } | undefined;
     assert.ok(adm4, '4º jogador deve receber ADMISSAO_ACEITA');
     assert.equal(adm4.estado, 'em_andamento');
-    const estado4 = parsed4.find((m) => m.type === 'ESTADO_DA_PARTIDA') as { snapshot: { estado: string } } | undefined;
+    const estado4 = parsed4.find((m) => m.type === 'ESTADO_DA_PARTIDA') as { snapshot: { estado: string; iniciadaEm?: number | null } } | undefined;
     assert.ok(estado4, '4º jogador deve receber ESTADO_DA_PARTIDA');
     assert.equal(estado4.snapshot.estado, 'em_andamento');
     const iniciadas = parsed4.filter((m) => m.type === 'PARTIDA_INICIADA');
     assert.equal(iniciadas.length, 1, '4º jogador deve receber PARTIDA_INICIADA');
-    assert.equal((iniciadas[0] as { partidaId: string }).partidaId, partidaId);
+    const iniciada4 = iniciadas[0]!;
+    assert.equal(iniciada4.partidaId, partidaId);
+    // Marco autoritativo do início (issue #259): epoch ms e o mesmo valor do
+    // snapshot do 4º — o evento e a foto não divergem.
+    assert.ok(typeof iniciada4.iniciadaEm === 'number', 'PARTIDA_INICIADA deve carregar iniciadaEm numérico');
+    assert.ok(iniciada4.iniciadaEm > 0, 'marco de início deve ser epoch ms positivo');
+    assert.equal(estado4.snapshot.iniciadaEm, iniciada4.iniciadaEm);
 
     // Verifica que os 3 primeiros também receberam o broadcast após a 4ª
     await new Promise((r) => setTimeout(r, 300));
     for (const c of [c1, c2, c3]) {
-      const tipos = c.mensagens.map((m) => (JSON.parse(m) as { type: string }).type);
-      assert.ok(tipos.includes('PARTIDA_INICIADA'), 'jogadores anteriores devem receber PARTIDA_INICIADA via broadcast na 4ª admissão');
+      const iniciada = c.mensagens
+        .map((m) => JSON.parse(m) as { type: string; iniciadaEm?: number })
+        .find((m) => m.type === 'PARTIDA_INICIADA');
+      assert.ok(iniciada, 'jogadores anteriores devem receber PARTIDA_INICIADA via broadcast na 4ª admissão');
+      // Todos os 4 Jogadores recebem o MESMO marco — o cronômetro não diverge.
+      assert.equal(iniciada.iniciadaEm, iniciada4.iniciadaEm);
     }
 
     // Verifica persistência sem TTL para partida e estado
