@@ -30,8 +30,8 @@
 //   ST-10 (#140/#143) removeu os switches legados do cliente.)
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
-//   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #288)
-//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — issue #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez)
+//   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #289/ADR-0013, consumida na #288)
+//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
 //   motivo da derrota viaja em campo opcional separado (MotivoDeDerrotaWire,
 //   sync com DesfechoDaPartida — engine/src/partida.ts:156-161; 'desistencia'
@@ -39,7 +39,6 @@
 //   com resultado 'derrota'; payloads de binário anterior omitem o campo —
 //   o cliente trata ausente/null como "motivo desconhecido". A vitória não
 //   tem motivo no domínio; o wire não inventa um.)
-//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — issue #289 (ADR-0013)
 //   shared type:'ATAQUE_RESOLVIDO' { atacantes, peoesAtingidos, protegidos, estadosAplicados } <-> engine tipo:'ataque_resolvido' idem — issues #172/#173
 //   (Shape 1:1 com o evento de domínio; o refinamento do wire/feedback da
 //   issue #173 está concluído neste commit: `estadosAplicados` carrega o
