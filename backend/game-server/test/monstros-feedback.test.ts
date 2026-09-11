@@ -73,8 +73,16 @@ async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
     wsUrl: (partidaId: string, token: string) =>
       `ws://127.0.0.1:${port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${token}`,
     fechar: async () => {
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      // Encerramento à prova de hang: destrói as conexões ANTES de aguardar o
+      // wss.close() — se um assert lançou cedo e deixou um socket de cliente
+      // aberto, o wss.close() penduraria esperando o último cliente e a falha
+      // real se mascararia até o timeout do runner. terminate() nos clientes
+      // e closeAllConnections() no HTTP forçam o fechamento imediato (~ms).
+      for (const cliente of wss.clients) {
+        cliente.terminate();
+      }
       server.closeAllConnections();
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err === undefined ? resolve() : reject(err)));
       });
@@ -367,44 +375,74 @@ async function prepararPartidaDePermanencia(servidor: ServidorEfemero): Promise<
 }> {
   const aceite = await criarPartidaViaPost(servidor.baseUrl);
   await semearCaixaComMonstros(aceite.partidaId);
-  const ws = await conectarPartida(servidor, aceite.partidaId, 1);
-  const ws2 = await conectarPartida(servidor, aceite.partidaId, 2);
-  const ws3 = await conectarPartida(servidor, aceite.partidaId, 3);
-  const ws4 = await conectarPartida(servidor, aceite.partidaId, 4);
+  // Criação dos sockets sob guarda: se um assert do setup lançar, os sockets
+  // já abertos são fechados antes de propagar o erro — senão o
+  // servidor.fechar() penduraria no wss.close() esperando o último cliente
+  // e a falha real viraria timeout do runner (hang de 30s).
+  const sockets: WebSocket[] = [];
+  let ws!: WebSocket;
+  let ws2!: WebSocket;
+  let ws3!: WebSocket;
+  let ws4!: WebSocket;
+  try {
+    ws = await conectarPartida(servidor, aceite.partidaId, 1);
+    sockets.push(ws);
+    ws2 = await conectarPartida(servidor, aceite.partidaId, 2);
+    sockets.push(ws2);
+    ws3 = await conectarPartida(servidor, aceite.partidaId, 3);
+    sockets.push(ws3);
+    ws4 = await conectarPartida(servidor, aceite.partidaId, 4);
+    sockets.push(ws4);
 
-  // ── Primeiro Turno de jogador-1: Vulto e Espectro na Vizinhança ──
-  // Inicial-1 em (3,3), Peão em cima; o Recebimento (Caixa semeada) sorteia
-  // vulto-1 e espectro-1, encaixados ao norte (2,3) e ao leste (3,4). O
-  // gatilho do posicionamento do Peão roda ANTES dos encaixes (monstros
-  // ainda na Caixa): silêncio; o encaixe de peça NUNCA dispara.
-  await selecionarEPosicionarInicial(ws, 1, { linha: 3, coluna: 3 });
-  const recebidas = await selecionarEPosicionarPeao(ws, 1, 'peao-branco', { linha: 3, coluna: 3 });
-  assert.deepEqual(recebidas.map((r) => r.pecaId), ['vulto-1', 'espectro-1']);
-  await escolherVagaEPosicionar(ws, 1, 'vulto-1', 'norte', { linha: 2, coluna: 3 });
-  await escolherVagaEPosicionar(ws, 1, 'espectro-1', 'leste', { linha: 3, coluna: 4 });
-  await encerrarTurnoEAvancar(ws, ws2, 1, 2, 1);
+    // ── Primeiro Turno de jogador-1: Vulto e Espectro na Vizinhança ──
+    // Inicial-1 em (3,3), Peão em cima; o Recebimento (Caixa semeada) sorteia
+    // vulto-1 e espectro-1, encaixados ao norte (2,3) e ao leste (3,4). O
+    // gatilho do posicionamento do Peão roda ANTES dos encaixes (monstros
+    // ainda na Caixa): silêncio; o encaixe de peça NUNCA dispara.
+    await selecionarEPosicionarInicial(ws, 1, { linha: 3, coluna: 3 });
+    const recebidas = await selecionarEPosicionarPeao(ws, 1, 'peao-branco', { linha: 3, coluna: 3 });
+    assert.deepEqual(recebidas.map((r) => r.pecaId), ['vulto-1', 'espectro-1']);
+    await escolherVagaEPosicionar(ws, 1, 'vulto-1', 'norte', { linha: 2, coluna: 3 });
+    await escolherVagaEPosicionar(ws, 1, 'espectro-1', 'leste', { linha: 3, coluna: 4 });
+    await encerrarTurnoEAvancar(ws, ws2, 1, 2, 1);
 
-  // ── Primeiros Turnos de jogador-2/3/4: fora→fora é silêncio ─────
-  // O peão de jogador-1 fica DENTRO do Alcance dos Monstros encaixados,
-  // mas quem atua (jogador-2/3/4) posiciona FORA do Alcance: o peão
-  // parado de terceiro não é atingido (issue #262 eliminada).
-  const rec2 = await selecionarEPosicionarInicialEPosicionarPeao(ws2, 2, { linha: 0, coluna: 0 });
-  assert.equal(rec2.length, 1); // inicial-2 em (0,0): única vaga leste (0,1)
-  await escolherVagaEPosicionar(ws2, 2, rec2[0]!.pecaId as string, 'leste', { linha: 0, coluna: 1 });
-  await encerrarTurnoEAvancar(ws2, ws3, 2, 3, 1);
+    // ── Primeiros Turnos de jogador-2/3/4: fora→fora é silêncio ─────
+    // O peão de jogador-1 fica DENTRO do Alcance dos Monstros encaixados,
+    // mas quem atua (jogador-2/3/4) posiciona FORA do Alcance: o peão
+    // parado de terceiro não é atingido (issue #262 eliminada).
+    //
+    // Geometria toroidal (ADR-0012): inicial-2 em (4,3) tem bordas abertas
+    // norte/leste; a norte (3,3) está ocupada pela inicial-1 — cuja borda
+    // sul é FECHADA, então não há conexão e o raio sul do Vulto (2,3)
+    // encerra nela. Resta exatamente 1 vaga (leste 4,4): o Recebimento
+    // sorteia 1 peça e o peão-vermelho fica FORA do Alcance dos Monstros.
+    const rec2 = await selecionarEPosicionarInicialEPosicionarPeao(ws2, 2, { linha: 4, coluna: 3 });
+    assert.equal(rec2.length, 1); // inicial-2 em (4,3): única vaga leste (4,4) — a norte (3,3) está ocupada
+    await escolherVagaEPosicionar(ws2, 2, rec2[0]!.pecaId as string, 'leste', { linha: 4, coluna: 4 });
+    await encerrarTurnoEAvancar(ws2, ws3, 2, 3, 1);
 
-  const rec3 = await selecionarEPosicionarInicialEPosicionarPeao(ws3, 3, { linha: 6, coluna: 6 });
-  assert.equal(rec3.length, 1); // inicial-3 em (6,6): única vaga norte (5,6)
-  await escolherVagaEPosicionar(ws3, 3, rec3[0]!.pecaId as string, 'norte', { linha: 5, coluna: 6 });
-  await encerrarTurnoEAvancar(ws3, ws4, 3, 4, 1);
+    // Inicial-3 em (5,3): a borda norte (4,3) está ocupada pela inicial-2
+    // (sem conexão, borda sul fechada) — resta a vaga leste (5,4), exatamente
+    // 1 recebida; o peão-azul fica FORA do Alcance e de qualquer iluminação
+    // que reduza com a Baixa do peão-branco.
+    const rec3 = await selecionarEPosicionarInicialEPosicionarPeao(ws3, 3, { linha: 5, coluna: 3 });
+    assert.equal(rec3.length, 1); // inicial-3 em (5,3): única vaga leste (5,4) — a norte (4,3) está ocupada
+    await escolherVagaEPosicionar(ws3, 3, rec3[0]!.pecaId as string, 'leste', { linha: 5, coluna: 4 });
+    await encerrarTurnoEAvancar(ws3, ws4, 3, 4, 1);
 
-  const rec4 = await selecionarEPosicionarInicialEPosicionarPeao(ws4, 4, { linha: 6, coluna: 0 });
-  assert.equal(rec4.length, 2); // inicial-4 em (6,0): vagas norte (5,0) e leste (6,1)
-  await escolherVagaEPosicionar(ws4, 4, rec4[0]!.pecaId as string, 'norte', { linha: 5, coluna: 0 });
-  await escolherVagaEPosicionar(ws4, 4, rec4[1]!.pecaId as string, 'leste', { linha: 6, coluna: 1 });
-  await encerrarTurnoEAvancar(ws4, ws, 4, 1, 2);
+    const rec4 = await selecionarEPosicionarInicialEPosicionarPeao(ws4, 4, { linha: 6, coluna: 0 });
+    assert.equal(rec4.length, 2); // inicial-4 em (6,0): vagas norte (5,0) e leste (6,1)
+    await escolherVagaEPosicionar(ws4, 4, rec4[0]!.pecaId as string, 'norte', { linha: 5, coluna: 0 });
+    await escolherVagaEPosicionar(ws4, 4, rec4[1]!.pecaId as string, 'leste', { linha: 6, coluna: 1 });
+    await encerrarTurnoEAvancar(ws4, ws, 4, 1, 2);
 
-  return { aceite, sockets: [ws, ws2, ws3, ws4] };
+    return { aceite, sockets: [ws, ws2, ws3, ws4] };
+  } catch (erro) {
+    for (const socket of sockets) {
+      socket.close();
+    }
+    throw erro;
+  }
 }
 
 before(async () => {
@@ -417,9 +455,16 @@ before(async () => {
 });
 
 after(async () => {
-  if (redis.status === 'ready') {
-    await redis.quit();
-  } else {
+  // Teardown blindado: o quit() pode lançar ("Connection is closed.") quando
+  // o socket do Redis já caiu com ECONNABORTED transiente no fim da bateria —
+  // o erro não tratado vira teste sintético falho do runner (não do teste).
+  try {
+    if (redis.status === 'ready') {
+      await redis.quit();
+    } else {
+      redis.disconnect();
+    }
+  } catch {
     redis.disconnect();
   }
 });
@@ -501,10 +546,10 @@ test('broadcast: ATAQUE_RESOLVIDO com estadosAplicados e LIMPEZA_APLICADA chegam
       }
     } finally {
       // ws fecha idempotente (no caminho feliz ele já foi fechado antes da
-      // reconexão tardia). Sem ele, um assert lançado cedo deixaria o socket
-      // do jogador-1 aberto e o servidor.fechar() penduraria no wss.close()
-      // esperando o último cliente — mascarando o erro real até o timeout do
-      // arquivo (relato do flake: recebidas em ordem trocada).
+      // reconexão tardia). O anti-hang é garantido em duas camadas: os sockets
+      // do setup já nascem sob guarda em prepararPartidaDePermanencia e o
+      // fechar() destrói as conexões antes de aguardar o wss.close() — uma
+      // falha de assert se manifesta como falha rápida, nunca como timeout.
       ws.close();
       ws2.close();
       ws3.close();
@@ -532,11 +577,13 @@ test('silencio: mover e confirmar fora→fora não emite ATAQUE_RESOLVIDO a nenh
     // Turnos (2+1+1+2) e vulto-1/espectro-1 logo depois — jogador-1 só os
     // sorteia no Recebimento da rodada 2, encaixando o Vulto ao norte da peça
     // recém-ocupada, onde o peão de terceiro (peão-branco) fica DENTRO do
-    // Alcance enquanto o atuante permanece fora. As retas-1/5 (orientação 0,
-    // bordas N/S) em (2,3) e (5,6) são os destinos conectados dos movers da
-    // rodada 2; a reta-4 em (0,1) tem borda oeste FECHADA (sem conexão com
-    // inicial-2), forçando a Permanência de jogador-2; cruz-1/t-2 preenchem
-    // as recebidas de jogador-4 (nunca destino de movimentação). A Caixa
+    // Alcance enquanto o atuante permanece fora. As retas-1/4 (r=1, bordas
+    // L/O) em (2,3) e (5,4) são os destinos conectados dos movers da rodada
+    // 2; cruz-1/t-2 preenchem as recebidas de jogador-4 (nunca destino de
+    // movimentação). Inicial-2 em (4,3) e inicial-3 em (5,3) ficam adjacentes
+    // a peças já posicionadas (bordas sul fechadas, sem conexão) para terem
+    // exatamente 1 vaga sob a grade toroidal (ADR-0012): a borda norte de
+    // (4,3) cai na inicial-1 (3,3) e a de (5,3) na inicial-2 (4,3). A Caixa
     // nasce embaralhada (sorteio no serviço), então a ordem é imposta peça a
     // peça.
     await semearCaixa(aceite.partidaId, [
@@ -563,14 +610,14 @@ test('silencio: mover e confirmar fora→fora não emite ATAQUE_RESOLVIDO a nenh
       await escolherVagaEPosicionar(ws, 1, 'reta-2', 'leste', { linha: 3, coluna: 4 });
       await encerrarTurnoEAvancar(ws, ws2, 1, 2, 1);
 
-      const rec2 = await selecionarEPosicionarInicialEPosicionarPeao(ws2, 2, { linha: 0, coluna: 0 });
-      assert.deepEqual(rec2.map((r) => r.pecaId), ['reta-4']); // inicial-2 em (0,0): única vaga leste (0,1)
-      await escolherVagaEPosicionar(ws2, 2, 'reta-4', 'leste', { linha: 0, coluna: 1 });
+      const rec2 = await selecionarEPosicionarInicialEPosicionarPeao(ws2, 2, { linha: 4, coluna: 3 });
+      assert.deepEqual(rec2.map((r) => r.pecaId), ['reta-4']); // inicial-2 em (4,3): única vaga leste (4,4) — a norte (3,3) está ocupada
+      await escolherVagaEPosicionar(ws2, 2, 'reta-4', 'leste', { linha: 4, coluna: 4 });
       await encerrarTurnoEAvancar(ws2, ws3, 2, 3, 1);
 
-      const rec3 = await selecionarEPosicionarInicialEPosicionarPeao(ws3, 3, { linha: 6, coluna: 6 });
-      assert.deepEqual(rec3.map((r) => r.pecaId), ['reta-5']); // inicial-3 em (6,6): única vaga norte (5,6)
-      await escolherVagaEPosicionar(ws3, 3, 'reta-5', 'norte', { linha: 5, coluna: 6 });
+      const rec3 = await selecionarEPosicionarInicialEPosicionarPeao(ws3, 3, { linha: 5, coluna: 3 });
+      assert.deepEqual(rec3.map((r) => r.pecaId), ['reta-5']); // inicial-3 em (5,3): única vaga leste (5,4) — a norte (4,3) está ocupada
+      await escolherVagaEPosicionar(ws3, 3, 'reta-5', 'leste', { linha: 5, coluna: 4 });
       await encerrarTurnoEAvancar(ws3, ws4, 3, 4, 1);
 
       const rec4 = await selecionarEPosicionarInicialEPosicionarPeao(ws4, 4, { linha: 6, coluna: 0 });
@@ -597,14 +644,12 @@ test('silencio: mover e confirmar fora→fora não emite ATAQUE_RESOLVIDO a nenh
       // ── Rodada 2, jogador-1: mover e confirmar entre as retas — fora→fora
       // com Monstros na Caixa (silêncio); o Recebimento sorteia vulto-1,
       // encaixado ao norte de reta-1 em (1,3), de onde o Alcance dele cobre
-      // o peão-branco (2,3).
+      // o peão-branco (2,3). O mover re-seleciona o Peão movido
+      // (re-seleção pós-mover, #263/#324): o confirmar segue direto.
       enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
       await esperarEvento(ws, 'PEAO_SELECIONADO');
       enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 2, coluna: 3 } });
       await esperarEvento(ws, 'PEAO_MOVIDO');
-      // Mover deseleciona (ST-10); é preciso reselecionar antes de confirmar.
-      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
-      await esperarEvento(ws, 'PEAO_SELECIONADO');
       const confirmado1Espera = esperarEvento(ws, 'POSICAO_CONFIRMADA');
       const recebimento1Espera = esperarEvento(ws, 'RECEBIMENTO_GERADO');
       enviar(ws, { type: 'CONFIRMAR_POSICAO_DO_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
@@ -617,9 +662,9 @@ test('silencio: mover e confirmar fora→fora não emite ATAQUE_RESOLVIDO a nenh
       await escolherVagaEPosicionar(ws, 1, 'vulto-1', 'norte', { linha: 1, coluna: 3 });
       await encerrarTurnoEAvancar(ws, ws2, 1, 2, 2);
 
-      // ── Rodada 2, jogador-2: a reta-4 (0,1) não conecta a oeste (bordas
-      // N/S da orientação 0), o mover é impossível — a Permanência fora→fora
-      // encerra a vez em silêncio, com o Vulto já no tabuleiro.
+      // ── Rodada 2, jogador-2: o peão-vermelho segue na inicial-2 (4,3),
+      // FORA do Alcance do Vulto (1,3) — a Permanência fora→fora encerra a
+      // vez em silêncio, com o Vulto já no tabuleiro.
       enviar(ws2, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-2', peaoId: 'peao-vermelho' });
       await esperarEvento(ws2, 'PEAO_SELECIONADO');
       const permaneceuEspera = esperarEvento(ws2, 'PEAO_PERMANECEU');
@@ -629,17 +674,15 @@ test('silencio: mover e confirmar fora→fora não emite ATAQUE_RESOLVIDO a nenh
 
       // ── Rodada 2, jogador-3: mover e confirmar fora→fora COM o Vulto no
       // tabuleiro — o peão-branco (2,3) está DENTRO do Alcance do Vulto
-      // (1,3) e o atuante (5,6) está fora: a classe do bug #262 (peão parado
+      // (1,3) e o atuante (5,4) está fora: a classe do bug #262 (peão parado
       // de terceiro atingido pela jogada alheia) não existe na regra
-      // centrada no atuante.
+      // centrada no atuante. O mover re-seleciona o Peão movido (re-seleção
+      // pós-mover, #263/#324): o confirmar segue direto.
       const movidoEsperas = sockets.map((s) => esperarEvento(s, 'PEAO_MOVIDO'));
       enviar(ws3, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-3', peaoId: 'peao-azul' });
       await esperarEvento(ws3, 'PEAO_SELECIONADO');
-      enviar(ws3, { type: 'MOVER_PEAO', jogadorId: 'jogador-3', peaoId: 'peao-azul', celula: { linha: 5, coluna: 6 } });
+      enviar(ws3, { type: 'MOVER_PEAO', jogadorId: 'jogador-3', peaoId: 'peao-azul', celula: { linha: 5, coluna: 4 } });
       await Promise.all(movidoEsperas);
-      // Mover deseleciona (ST-10); é preciso reselecionar antes de confirmar.
-      enviar(ws3, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-3', peaoId: 'peao-azul' });
-      await esperarEvento(ws3, 'PEAO_SELECIONADO');
       const confirmado3Esperas = sockets.map((s) => esperarEvento(s, 'POSICAO_CONFIRMADA'));
       const recebimento3Espera = esperarEvento(ws3, 'RECEBIMENTO_GERADO');
       enviar(ws3, { type: 'CONFIRMAR_POSICAO_DO_PEAO', jogadorId: 'jogador-3', peaoId: 'peao-azul' });
@@ -649,7 +692,7 @@ test('silencio: mover e confirmar fora→fora não emite ATAQUE_RESOLVIDO a nenh
         (recebimento3.recebidas as Array<Record<string, unknown>>).map((r) => r.pecaId),
         ['espectro-1'],
       );
-      await escolherVagaEPosicionar(ws3, 3, 'espectro-1', 'norte', { linha: 4, coluna: 6 });
+      await escolherVagaEPosicionar(ws3, 3, 'espectro-1', 'leste', { linha: 5, coluna: 5 });
       await encerrarTurnoEAvancar(ws3, ws4, 3, 4, 2);
 
       // Folga pós-fim do lote: nenhum ATAQUE_RESOLVIDO pode chegar depois
