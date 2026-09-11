@@ -664,6 +664,114 @@ test('presença: desistência anuncia a saída; queda não faz broadcast nenhum'
   assert.equal((await lerEstado(comQueda)).jogadores.length, 3);
 });
 
+// ─── Ressalvas #290 (R1/R3/R5) ───
+
+test('R1: detach travado não bloqueia o retorno (teto por desistente)', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, redis, broadcaster, sockets } = montada;
+  const avisos: AvisoDeRetorno[] = [];
+  const handlers = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    tetoDesvinculoMs: 50,
+    notificarRetorno: async (aviso) => {
+      avisos.push(aviso);
+    },
+    // Lobby fora do ar: retry infinito que nunca resolve.
+    notificarDesistencia: () => new Promise<void>(() => undefined),
+  });
+
+  const inicio = Date.now();
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-2')!.comoWebSocket(),
+    partidaId,
+    'jogador-2',
+    desistir('jogador-2'),
+  );
+  const duracao = Date.now() - inicio;
+
+  assert.ok(duracao < 2000, `teto estourou a cadeia: ${duracao}ms`);
+  assert.equal(avisos.length, 1, 'retorno sai mesmo com detach travado');
+  assert.deepEqual(avisos[0]!.jogadores, ['jogador-1'], 'N−1 em memória, sem depender do detach');
+  await handlers.drenarRetornosPendentes(100);
+});
+
+test('R3: aviso usa N−1 em memória; sem memória e sem estado não inventa N', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, redis } = montada;
+  const bruto = await redis.get(chaveDaPartida(partidaId));
+  assert.ok(bruto !== null);
+  const partida = JSON.parse(bruto!) as import('../src/partidas/partidas.ts').PartidaPreparada;
+  const qualquer = montada.handlers as unknown as {
+    montarAviso(
+      partida: import('../src/partidas/partidas.ts').PartidaPreparada,
+      resultado: 'vitoria' | 'derrota',
+      emMemoria: readonly string[] | null,
+      teveDesistencia: boolean,
+    ): Promise<AvisoDeRetorno | null>;
+  };
+
+  // Caminho normal: N−1 em memória, sem tocar o Redis.
+  const comMemoria = await qualquer.montarAviso(partida, 'derrota', ['jogador-1'], true);
+  assert.deepEqual(comMemoria!.jogadores, ['jogador-1']);
+
+  // Sem memória, sem estado no Redis e com desistência: null (não inventa N).
+  const redisVazio = {
+    get: async () => null,
+    set: async () => 'OK' as const,
+    ttl: async () => -1,
+    eval: async () => 1,
+  } as unknown as Redis;
+  const handlersVazio = new PartidaHandlers({
+    redis: redisVazio,
+    broadcaster: montada.broadcaster,
+  });
+  const semEstado = (handlersVazio as unknown as typeof qualquer).montarAviso(partida, 'derrota', null, true);
+  assert.equal(await semEstado, null);
+
+  // Sem desistência: fallback ao roster preservado (não-início).
+  const semDesistencia = await (handlersVazio as unknown as typeof qualquer).montarAviso(partida, 'derrota', null, false);
+  assert.deepEqual(semDesistencia!.jogadores, ['jogador-1', 'jogador-2']);
+});
+
+test('R5: drain enxerga o detach parcial em voo (placeholder)', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
+  const { partidaId, redis, broadcaster, sockets } = montada;
+  const desistencias: AvisoDeDesistencia[] = [];
+  let liberar!: () => void;
+  const porta = new Promise<void>((resolver) => {
+    liberar = resolver;
+  });
+  const handlers = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarDesistencia: async (aviso) => {
+      await porta;
+      desistencias.push(aviso);
+    },
+  });
+
+  const aplicacao = handlers.aplicarMensagem(
+    sockets.get('jogador-4')!.comoWebSocket(),
+    partidaId,
+    'jogador-4',
+    desistir('jogador-4'),
+  );
+  // Dá um giro para a mutação registrar o placeholder antes do drain.
+  await new Promise((r) => setTimeout(r, 20));
+  let drenou = false;
+  const drenagem = handlers.drenarRetornosPendentes(2000).then(() => {
+    drenou = true;
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(drenou, false, 'drain espera o detach em voo');
+  liberar();
+  await drenagem;
+  await aplicacao;
+  assert.equal(drenou, true);
+  assert.equal(desistencias.length, 1);
+});
+
 // ─── Queda sem desistência continua voltável ───
 
 test('queda sem desistência volta com snapshot N e turno atual, sem expiração', async () => {

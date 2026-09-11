@@ -264,7 +264,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const pendentesEmVoo = useRef<Set<string>>(new Set())
 
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
-  const { enviar, conectar: reconectarSocket, desconectar } = usePartidaWebSocket({
+  const { enviar, conectar: reconectarSocket, desconectar, aguardarConexao } = usePartidaWebSocket({
     serverId,
     partidaId,
     onEvento: useCallback(
@@ -493,18 +493,29 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const desistirEIrParaPrincipal = useCallback(() => {
     if (desistindoRef.current) return
     desistindoRef.current = true
-    if (jogadorId !== null && !emResultadoRef.current) {
-      enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
-    }
     setDesistiu(true)
     try {
       if (partidaId !== null) window.sessionStorage.setItem(`partida-desistiu:${partidaId}`, '1')
     } catch {
       // sessionStorage indisponível: a flag em memória já bloqueia o retry.
     }
-    desconectar()
-    navigate('/')
-  }, [desconectar, enviar, jogadorId, navigate, partidaId])
+    // R2: entrega o DESISTIR antes de cortar a conexão. Se o socket está
+    // OPEN, o envio é imediato; se está CONNECTING (janela de reconexão), o
+    // comando fica enfileirado e aguardamos o open até o teto — sem a espera,
+    // o desconectar() abaixo limparia a fila e o servidor nunca saberia.
+    // No timeout navegamos mesmo assim (best-effort; a flag já bloqueia retry).
+    const entregarESair = async () => {
+      if (jogadorId !== null && !emResultadoRef.current) {
+        const destino = enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
+        if (destino === 'enfileirado') {
+          await aguardarConexao(2000).catch(() => false)
+        }
+      }
+      desconectar()
+      navigate('/')
+    }
+    void entregarESair()
+  }, [aguardarConexao, desconectar, enviar, jogadorId, navigate, partidaId])
 
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
@@ -819,16 +830,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa.motivo) : ''}
       </div>
       {/*
-        Aviso de desistência alheia (issue #290): visível + anúncio SR
-        (desistência, nova ordem e fim). O fim (derrota-quando-sobra-1) chega
-        via PARTIDA_TERMINADA com motivo desistencia no overlay de resultado.
+        Aviso de desistência alheia (issue #290, R4): visível + anúncio SR
+        (desistência, nova ordem e fim). Permanece em resultado (derrota-
+        quando-sobra-1) até o auto-dismiss de 8s — o fim chega também via
+        PARTIDA_TERMINADA com motivo desistencia no overlay de resultado.
       */}
-      {avisoDesistencia !== null && estadoEmAndamento ? (
+      {avisoDesistencia !== null && (estadoEmAndamento || emResultado) ? (
         <div
           data-testid="aviso-desistencia"
           data-jogador-id={avisoDesistencia.jogadorId}
           role="status"
-          className="pointer-events-auto absolute left-1/2 top-20 z-40 -translate-x-1/2 rounded bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-xl"
+          className="pointer-events-auto absolute left-1/2 top-20 z-50 -translate-x-1/2 rounded bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-xl"
         >
           {avisoDesistencia.apelido} desistiu. Nova ordem: {avisoDesistencia.ordemTexto || '—'}.
         </div>

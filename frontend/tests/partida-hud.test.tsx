@@ -700,6 +700,59 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     expect(overlay).toHaveTextContent(/Restou só você/i)
   })
 
+  it('R2: SAIR com socket CONNECTING aguarda o OPEN e entrega o DESISTIR', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      expect(ws.readyState).toBe(MockWebSocket.CONNECTING)
+      act(() =>
+        ws.simulateMessage({
+          type: 'ADMISSAO_ACEITA',
+          jogadorId: MEU_JOGADOR_ID,
+          apelido: 'JogadorTeste',
+          partidaId: 'partida-1',
+          estado: 'em_andamento',
+        }),
+      )
+      act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+      await screen.findByTestId('hud-da-partida')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      // Enfileirado, não enviado — e ainda sem navegar.
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(screen.queryByTestId('principal-pagina')).not.toBeInTheDocument()
+
+      // O open drena a fila (entrega) e só então desconecta e navega.
+      act(() => ws.simulateOpen())
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+      expect(ws.sentMessages.map((m) => JSON.parse(m))).toContainEqual(
+        expect.objectContaining({ type: 'DESISTIR_DA_PARTIDA', jogadorId: MEU_JOGADOR_ID }),
+      )
+      expect(ws.onclose).toBeNull()
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+    }
+  })
+
+  it('R4: aviso de desistência permanece visível no resultado 2→1', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-4',
+        peaoId: 'peao-amarelo',
+      }),
+    )
+    await screen.findByTestId('aviso-desistencia')
+    act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'derrota', motivo: 'desistencia' }))
+    await screen.findByTestId('overlay-resultado')
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Cara desistiu/i)
+  })
+
   it('desistente que volta à URL vê falha terminal sem retry nem voltar-à-sala', async () => {
     window.sessionStorage.setItem('partida-desistiu:p', '1')
     try {
