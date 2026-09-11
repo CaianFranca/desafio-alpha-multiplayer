@@ -155,6 +155,10 @@ export interface EstadoInteracaoPeoes {
    * sempre fornece o N clampeado.
    */
   readonly quantidadeDeJogadores?: number
+  /** Células iluminadas do snapshot (ADR-0013): filtra vagas escuras em Baixa. */
+  readonly celulasIluminadas?: readonly Celula[]
+  /** Peões em Baixa Iluminação (per-player) — para filtrar vagas iluminadas. */
+  readonly peaoIdsEmBaixa?: ReadonlySet<PeaoId>
 }
 
 // ── Resultado de clique/ação do ciclo ──
@@ -382,10 +386,22 @@ export function vagasDisponiveisDoPeao(
       .filter((v): v is BordaCardinal => v !== null),
   )
   const vagas: { borda: BordaCardinal; celula: Celula }[] = []
+  const emBaixa =
+    estado.peaoIdsEmBaixa !== undefined && peaoId !== null
+      ? estado.peaoIdsEmBaixa.has(peaoId)
+      : false
+  const iluminadas = estado.celulasIluminadas
   for (const borda of bordas) {
     if (jaEscolhidas.has(borda)) continue
     const celula = celulaVizinhaNaBorda(origem.celula, borda)
     if (encontrarPecaNaCelula(estado.posicionadas, celula)) continue
+    // ADR-0013: em Baixa, só vagas escuras são disponíveis no espelho — fail-closed:
+    // se emBaixa e iluminadas === undefined, nenhuma vaga é considerada escura.
+    if (emBaixa) {
+      if (iluminadas === undefined) continue
+      if (iluminadas.some((c) => c.linha === celula.linha && c.coluna === celula.coluna))
+        continue
+    }
     vagas.push({ borda, celula })
   }
   return vagas

@@ -223,6 +223,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     emResultadoRef.current = emResultado
   }, [emResultado])
 
+  // ── Batch atômico de lote de turno (ADR-0013 / B8): TURNO_INICIADO +
+  // PECA_SORTEADA + RECEBIMENTO_GERADO do avancarVez em Baixa chegam como 3
+  // WS messages no mesmo tick. Sem batch, despacharEvento por mensagem causa
+  // flash de 1 frame com recebidasPendentes=[] (faseDoTurno mostraria
+  // permanecer indevido). Queue + microtask coalesce em um único render.
+  const loteDeTurnoRef = useRef<Parameters<typeof reduzirEvento>[1][]>([])
+  const loteAgendadoRef = useRef(false)
+  const agendarFlushLote = useCallback(() => {
+    if (loteAgendadoRef.current) return
+    loteAgendadoRef.current = true
+    queueMicrotask(() => {
+      const lote = [...loteDeTurnoRef.current]
+      loteDeTurnoRef.current = []
+      loteAgendadoRef.current = false
+      for (const ev of lote) despacharEvento(ev as Parameters<typeof reduzirEvento>[1])
+    })
+  }, [despacharEvento])
+
   // ── Pendentes otimistas anti-duplo-place (issue #249) ──
   // Conjunto de alvos em voo (POSICIONAR_PECA/POSICIONAR_PEAO/
   // DESELECIONAR_PEAO): bloqueia o reenvio do mesmo alvo até ack/erro/
@@ -279,6 +297,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         }
         if (evento.type === 'PARTIDA_INICIADA') {
           partidaEmAndamento()
+          return
+        }
+        // Batch atômico ADR-0013/B8: TURNO_INICIADO + PECA_SORTEADA + RECEBIMENTO_GERADO
+        // do lote de Baixa chegam em 3 WS messages no mesmo tick. Sem batch há
+        // flash de 1 frame com recebidas=[].
+        if (
+          evento.type === 'TURNO_INICIADO' ||
+          (loteDeTurnoRef.current.length > 0 &&
+            (evento.type === 'PECA_SORTEADA' ||
+              evento.type === 'RECEBIMENTO_GERADO' ||
+              evento.type === 'CELULAS_ILUMINADAS'))
+        ) {
+          loteDeTurnoRef.current.push(evento as Parameters<typeof reduzirEvento>[1])
+          agendarFlushLote()
           return
         }
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
@@ -372,7 +404,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         const motivo = motivoDeRecusaDoEvento(evento)
         if (motivo !== null) tocarRecusa(motivo)
       },
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote],
     ),
     onAdmissao: useCallback(
       (evento) => {
@@ -454,6 +486,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Amedrontado — único ponto onde a regra vive, sobre a projeção #174.
   // Alimenta a exceção de ocupação de resgate (+1 teto, #171) em
   // destinosConectadosDoPeao/mapearMovimentacao.
+  // NB5: memo estável por conteúdo (evita Set novo toda render que quebra memo de estadoInteracaoPeoes)
   const afetadosPorPeaoId: ReadonlySet<string> = useMemo(() => {
     const out = new Set<string>()
     for (const [peaoId, dados] of Object.entries(sanidadePorPeao)) {
@@ -461,6 +494,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
     return out
   }, [sanidadePorPeao])
+  const afetadosRef = useRef<ReadonlySet<string>>(afetadosPorPeaoId)
+  if (
+    afetadosPorPeaoId.size !== afetadosRef.current.size ||
+    [...afetadosPorPeaoId].some((id) => !afetadosRef.current.has(id))
+  ) {
+    afetadosRef.current = afetadosPorPeaoId
+  }
+  const afetadosEstavel = afetadosRef.current
 
   // ── Peões em Baixa Iluminação (issue #297): avatar do Diretor apagado ──
   // Projeção de exibição do estado do Vulto por jogador (`emBaixaIluminacao`,
@@ -469,6 +510,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     () => peoesEmBaixaIluminacaoDe(sanidadePorPeao),
     [sanidadePorPeao],
   )
+  const emBaixaRef = useRef<ReadonlySet<PeaoId>>(emBaixaIluminacaoPorPeaoId)
+  if (
+    emBaixaIluminacaoPorPeaoId.size !== emBaixaRef.current.size ||
+    [...emBaixaIluminacaoPorPeaoId].some((id) => !emBaixaRef.current.has(id))
+  ) {
+    emBaixaRef.current = emBaixaIluminacaoPorPeaoId
+  }
+  const emBaixaEstavel = emBaixaRef.current
 
   // ── N da partida: o N real vem do roster do snapshot (jogadores reais);
   // o teto do Portão de Saída usa o clamp 2..4. Anúncio fala o N real
@@ -509,17 +558,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
       // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no
       // turno o clique no próprio Peão fica silencioso — encerrar depois de
-      // mover é confirmar → encerrar, e Permanecer só vale antes de mover.
+      // mover é confirmar → encerrar, e Permanecer só vale ANTES de mover.
       movimentouNoTurno: modelo.movimentouNoTurno,
       // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
       // bandeja continua pública (as pendências vêm do broadcast sem filtro).
       donoDoCiclo: minhaVez,
       // Projeção dos afetados (exceção de resgate #171 no espelho de destinos).
-      afetadosPorPeaoId,
+      afetadosPorPeaoId: afetadosEstavel,
       // N do roster para o teto do Portão (#284): nunca peoes.length.
       quantidadeDeJogadores: quantidadeParaTeto,
+      // ADR-0013: espelho de vagas escuras em Baixa — filtra vagas iluminadas
+      celulasIluminadas: modelo.celulasIluminadas,
+      peaoIdsEmBaixa: emBaixaEstavel,
     }
-  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosPorPeaoId, emResultado, quantidadeParaTeto, peaoDoTurnoId])
+  }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosEstavel, emResultado, quantidadeParaTeto, peaoDoTurnoId, emBaixaEstavel])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
   const onRejeicaoPeao = tocarRecusa
@@ -703,7 +755,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         limpezaTrigger={limpezaTrigger}
         encaixeTrigger={encaixeTrigger}
         onFimEncaixe={onFimEncaixe}
-        emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
+        emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
       />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
       {/*
