@@ -683,10 +683,27 @@ function posicionarPeaoDaPartida(
     ...tabuleiroPosLimpeza,
     posicionadas: posicionadasFinais,
   };
+  // Issue #343: o sorteio nasceu como não-Baixa mas o Ataque impôs a Baixa ao
+  // ator no mesmo gatilho — poda as recebidas à regra de Baixa (vaga escura +
+  // máximo 1 peça), senão a pendência comum fica irresolúvel e o turno trava.
+  const baixaNovaDoAtor =
+    !emBaixa &&
+    (ataque.jogadores.find((jogador) => jogador.jogadorId === ator.jogadorId)
+      ?.emBaixaIluminacao ?? false);
+  const tabuleiroFinalPodado =
+    baixaNovaDoAtor && sorteio.recebidas.length > 0
+      ? podarRecebidasParaBaixaNova(
+          tabuleiroFinal,
+          sorteio.recebidas,
+          eventos,
+          celulasIluminadas,
+          ator.peaoId,
+        )
+      : tabuleiroFinal;
   return sucessoDaPartida(
     {
       ...estado,
-      tabuleiro: tabuleiroFinal,
+      tabuleiro: tabuleiroFinalPodado,
       celulasIluminadas,
       peoesNoAlcance: ataque.peoesNoAlcance,
       jogadores: ataque.jogadores,
@@ -1406,11 +1423,32 @@ function confirmarPosicaoDoPeao(
       'Invariante da Confirmação: outro Peão está selecionado.',
     );
   }
-  const tabuleiroFinal: EstadoDoTabuleiro = {
+  const tabuleiroPosAtaque: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
     posicionadas: posicionadasPosAtaque,
+  };
+  // Issue #343: mesma poda do Primeiro Turno — o sorteio de não-Baixa não
+  // sobrevive à Baixa nova imposta pelo Ataque do mesmo gatilho.
+  const baixaNovaDoAtor =
+    !emBaixa &&
+    (ataque.jogadores.find((jogador) => jogador.jogadorId === ator.jogadorId)
+      ?.emBaixaIluminacao ?? false);
+  const tabuleiroPodado =
+    baixaNovaDoAtor && sorteio.recebidas.length > 0
+      ? podarRecebidasParaBaixaNova(
+          tabuleiroPosAtaque,
+          sorteio.recebidas,
+          eventos,
+          celulasIluminadas,
+          ator.peaoId,
+        )
+      : tabuleiroPosAtaque;
+  const tabuleiroFinal: EstadoDoTabuleiro = {
+    ...tabuleiroPodado,
     peaoSelecionadoId:
-      sorteio.recebidas.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
+      tabuleiroPodado.recebidas.length > 0
+        ? (selecaoVigente ?? peao.peaoId)
+        : selecaoVigente,
   };
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a
@@ -2139,6 +2177,89 @@ function houveBaixaNova(
 ): boolean {
   const antesSet = new Set(antes);
   return depois.some((peaoId) => !antesSet.has(peaoId));
+}
+
+// Poda do Recebimento sob Baixa Iluminação nova (issue #343): o sorteio do
+// gatilho nasceu como não-Baixa (emBaixa era false antes do Ataque) mas o
+// Vulto impôs a Baixa ao ator no MESMO gatilho — as pendências nascidas
+// precisam obedecer à regra de Baixa (vaga escura + máximo 1 peça, ADR-0013),
+// senão o turno trava (escolher_vaga recusa tudo com DADOS_INVALIDOS e o
+// encerramento recusa com PENDENCIA_NAO_RESOLVIDA). Mantém no máximo a
+// primeira sorteada quando há vaga escura em vagasDisponiveis sobre o
+// tabuleiro final; sem vaga escura (ou sem Peça sob o Peão — defensivo, a Peça
+// do Peão é sempre iluminada) mantém 0. As excedentes voltam à frente da Caixa
+// em ordem de sorteio (desfaz o consumo N vezes a primeira restante de
+// gerarRecebidas) e os peca_sorteada correspondentes saem do lote (o
+// recebimento_gerado é atualizado ou removido quando zera) — a ordem canônica
+// do lote é preservada (ADR-0005). Só o ator importa para a poda (terceiros
+// atingidos pelo Ataque não têm sequência/pendências); Baixa prévia segue o
+// caminho atual sem poda adicional.
+// @mutates eventos — remove os `peca_sorteada` podados e ajusta/remove o
+// `recebimento_gerado` do sorteio.
+function podarRecebidasParaBaixaNova(
+  tabuleiro: EstadoDoTabuleiro,
+  sorteadas: readonly PecaRecebida[],
+  eventos: EventoDaPartida[],
+  celulasIluminadas: readonly Celula[],
+  peaoIdDoAtor: string,
+): EstadoDoTabuleiro {
+  if (sorteadas.length === 0) {
+    return tabuleiro;
+  }
+  const peao = tabuleiro.peoes.find((item) => item.peaoId === peaoIdDoAtor);
+  const pecaSobOPeao = peao?.pecaId
+    ? tabuleiro.posicionadas.find((item) => item.pecaId === peao.pecaId)
+    : undefined;
+  const escuras =
+    pecaSobOPeao === undefined
+      ? []
+      : vagasDisponiveis(tabuleiro, pecaSobOPeao).filter(
+          (vaga) =>
+            !celulasIluminadas.some(
+              (celula) =>
+                celula.linha === vaga.celula.linha &&
+                celula.coluna === vaga.celula.coluna,
+            ),
+        );
+  // No máximo 1 pendência mantida (a primeira sorteada), mesmo com várias
+  // vagas escuras — o Recebimento em Baixa é de 1 peça (CONTEXT.md).
+  const mantidas = escuras.length > 0 ? sorteadas.slice(0, 1) : [];
+  const podadas = sorteadas.slice(mantidas.length);
+  if (podadas.length === 0) {
+    return tabuleiro;
+  }
+  const podadasIds = new Set(podadas.map((recebida) => recebida.pecaId));
+  const semPodadas = eventos.filter(
+    (evento) =>
+      evento.tipo !== 'peca_sorteada' || !podadasIds.has(evento.pecaId),
+  );
+  eventos.length = 0;
+  eventos.push(...semPodadas);
+  const indiceRecebimento = eventos.findIndex(
+    (evento) => evento.tipo === 'recebimento_gerado',
+  );
+  if (indiceRecebimento >= 0) {
+    if (mantidas.length === 0) {
+      eventos.splice(indiceRecebimento, 1);
+    } else {
+      eventos[indiceRecebimento] = {
+        tipo: 'recebimento_gerado',
+        recebidas: projetarRecebidas(mantidas),
+      };
+    }
+  }
+  return {
+    ...tabuleiro,
+    caixa: [
+      ...podadas.map((recebida) => ({
+        pecaId: recebida.pecaId,
+        tipo: recebida.tipo,
+        orientacao: recebida.orientacao,
+      })),
+      ...tabuleiro.caixa,
+    ],
+    recebidas: mantidas,
+  };
 }
 
 function reaplicarIluminacaoSeBaixaNova(

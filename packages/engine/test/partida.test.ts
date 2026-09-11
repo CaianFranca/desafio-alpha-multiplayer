@@ -10,6 +10,7 @@ import {
   type ComandoDePartida,
   type CodigoDeErroDaPartida,
   type EstadoDaPartida,
+  type EventoDaPartida,
   type Orientacao,
 } from '../src/index.ts';
 
@@ -2160,4 +2161,303 @@ test('ADR-0013: travessia usa iluminação fresca (unificada com avancarVez)', (
   assert.equal(travessia.sucesso, true);
   if (!travessia.sucesso) return;
   assert.equal(travessia.estado.tabuleiro.recebidas.length, 1);
+});
+
+// Issue #343 — Baixa Iluminação nova no mesmo gatilho poda o Recebimento
+// nascido como não-Baixa (podar-depois-do-ataque, ADR-0013): sem a poda, a
+// pendência comum fica irresolúvel (escolher_vaga recusa tudo com
+// DADOS_INVALIDOS e o turno trava com PENDENCIA_NAO_RESOLVIDA).
+
+function comPosicionada(
+  estado: EstadoDaPartida,
+  pecaId: string,
+  tipo: 'cruz' | 'inicial' | 'vulto',
+  orientacao: Orientacao,
+  linha: number,
+  coluna: number,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId, tipo, orientacao, celula: { linha, coluna } },
+      ],
+    },
+  };
+}
+
+function comPeaoSobre(
+  estado: EstadoDaPartida,
+  peaoId: string,
+  pecaId: string,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      peoes: estado.tabuleiro.peoes.map((peao) =>
+        peao.peaoId === peaoId ? { ...peao, pecaId } : peao,
+      ),
+    },
+  };
+}
+
+function ataqueDoLoteDaPartida(eventos: readonly EventoDaPartida[]) {
+  const ataque = eventos.find((evento) => evento.tipo === 'ataque_resolvido');
+  assert.ok(ataque && ataque.tipo === 'ataque_resolvido');
+  if (!ataque || ataque.tipo !== 'ataque_resolvido') {
+    throw new Error('esperava ataque_resolvido no lote');
+  }
+  return ataque;
+}
+
+test('issue #343: Primeiro Turno com Baixa nova e todas as vagas iluminadas poda a 0 e libera o turno', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno', 'carla']);
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Vulto ao norte da Inicial (ocupa a vaga norte): o posicionamento do Peão
+  // entra no Alcance (conexão norte) e impõe Baixa nova. As pontes iluminam as
+  // vagas finais: bruno em (3,5) ilumina o leste (3,4); carla em (1,3) — peça
+  // com o sul fechado, fora do raio do Vulto — ilumina o norte (2,3).
+  estado = comPosicionada(estado, 'vulto-x', 'vulto', 0, 2, 3);
+  estado = comPosicionada(estado, 'ponte-b', 'cruz', 0, 3, 5);
+  estado = comPosicionada(estado, 'ponte-c', 'inicial', 0, 1, 3);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'ponte-b');
+  estado = comPeaoSobre(estado, 'peao-azul', 'ponte-c');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  const gatilho = aplicarComandoDePartida(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(gatilho.sucesso, true);
+  if (!gatilho.sucesso) return;
+  const ataque = ataqueDoLoteDaPartida(gatilho.eventos);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  const ana = gatilho.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.emBaixaIluminacao, true);
+  // Poda total: 0 pendências, sem sorteio no lote e Caixa intacta (devolução).
+  assert.equal(gatilho.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!gatilho.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!gatilho.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(gatilho.estado.tabuleiro.caixa.length, caixaAntes);
+  // O turno avança: encerrar_turno aprova sem PENDENCIA_NAO_RESOLVIDA.
+  const encerrado = aplicarComandoDePartida(gatilho.estado, encerrarTurno(), 'ana');
+  assert.equal(encerrado.sucesso, true);
+  if (!encerrado.sucesso) return;
+  assert.equal(encerrado.estado.jogadorAtivoId, 'bruno');
+});
+
+test('issue #343: Primeiro Turno com Baixa nova e 1 vaga escura mantém 1 resolvível pela escura', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Mesmo ataque do caso anterior, mas só o leste (3,4) é iluminado (bruno em
+  // (3,5)); o norte (2,3) reabre escuro com a remoção do Vulto na segunda
+  // Limpeza — a poda mantém exatamente 1.
+  estado = comPosicionada(estado, 'vulto-x', 'vulto', 0, 2, 3);
+  estado = comPosicionada(estado, 'ponte-b', 'cruz', 0, 3, 5);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'ponte-b');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  const gatilho = aplicarComandoDePartida(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(gatilho.sucesso, true);
+  if (!gatilho.sucesso) return;
+  const ataque = ataqueDoLoteDaPartida(gatilho.eventos);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  const ana = gatilho.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.emBaixaIluminacao, true);
+  assert.ok(
+    !gatilho.estado.tabuleiro.posicionadas.some((peca) => peca.pecaId === 'vulto-x'),
+    'o Vulto fora da luz deveria cair na segunda Limpeza',
+  );
+  assert.equal(gatilho.estado.tabuleiro.recebidas.length, 1);
+  assert.equal(gatilho.eventos.filter((evento) => evento.tipo === 'peca_sorteada').length, 1);
+  const recebimento = gatilho.eventos.find((evento) => evento.tipo === 'recebimento_gerado');
+  assert.ok(recebimento && recebimento.tipo === 'recebimento_gerado');
+  if (!recebimento || recebimento.tipo !== 'recebimento_gerado') return;
+  assert.equal(recebimento.recebidas.length, 1);
+  assert.equal(gatilho.estado.tabuleiro.caixa.length, caixaAntes - 1);
+  // A vaga iluminada (leste → (3,4)) recusa; a escura (norte → (2,3)) aprova.
+  const pendente = gatilho.estado.tabuleiro.recebidas[0];
+  assert.equal(
+    codigoDaRejeicao(gatilho.estado, escolherVaga(pendente.recebidaId, 'leste'), 'ana'),
+    'DADOS_INVALIDOS',
+  );
+  let resolvido = aplicar(gatilho.estado, escolherVaga(pendente.recebidaId, 'norte'), 'ana');
+  // Encaixe conectado (issue #311): gira até o sul abrir e posiciona em (2,3).
+  const escolhida = resolvido.tabuleiro.recebidas.find(
+    (item) => item.recebidaId === pendente.recebidaId,
+  );
+  if (!escolhida || escolhida.celulaAlvo === null || escolhida.vaga === null) {
+    throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+  }
+  const alvo = BORDA_OPOSTA[escolhida.vaga];
+  let giros = 0;
+  while (
+    giros < 4 &&
+    !bordasAbertas({
+      tipo: escolhida.tipo,
+      orientacao: ((escolhida.orientacao + 90 * giros) % 360) as Orientacao,
+    }).includes(alvo)
+  ) {
+    giros++;
+  }
+  assert.ok(giros < 4, 'a sorteada deveria conectar à vaga');
+  for (let giro = 0; giro < giros; giro++) {
+    resolvido = aplicar(resolvido, girarPeca(escolhida.pecaId), 'ana');
+  }
+  resolvido = aplicar(
+    resolvido,
+    posicionarPeca(escolhida.pecaId, escolhida.celulaAlvo.linha, escolhida.celulaAlvo.coluna),
+    'ana',
+  );
+  assert.equal(resolvido.tabuleiro.recebidas.length, 0);
+  const encerrado = aplicarComandoDePartida(resolvido, encerrarTurno(), 'ana');
+  assert.equal(encerrado.sucesso, true);
+  if (!encerrado.sucesso) return;
+  assert.equal(encerrado.estado.jogadorAtivoId, 'bruno');
+});
+
+test('issue #343: Confirmação com Baixa nova e todas as vagas iluminadas poda a 0 e libera o turno', () => {
+  let estado = partidaEmRodada2();
+  // Destino com 2 vagas: troca a reta-2 (3,4) pela cruz e encosta o Vulto ao
+  // norte (2,4) — a Confirmação entra no Alcance e impõe Baixa nova. O sorteio
+  // de não-Baixa nasce com 2 (leste (3,5) + sul (4,4)); o tabuleiro final não
+  // tem vaga escura — o norte segue ocupado pelo Vulto (iluminado por diogo em
+  // (2,5), oeste fechado, fora do raio), o oeste segue ocupado pela Inicial
+  // (iluminada por bruno em (3,2)), o leste (3,5) é iluminado por diogo e o sul
+  // (4,4) por carla em (5,4).
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas.filter((peca) => peca.pecaId !== 'reta-2'),
+        { pecaId: 'cruz-y', tipo: 'cruz' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 4 } },
+      ],
+    },
+  };
+  estado = comPosicionada(estado, 'vulto-x', 'vulto', 0, 2, 4);
+  estado = comPosicionada(estado, 'ponte-b', 'cruz', 0, 3, 2);
+  estado = comPosicionada(estado, 'ponte-c', 'cruz', 0, 5, 4);
+  estado = comPosicionada(estado, 'ponte-d', 'inicial', 0, 2, 5);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'ponte-b');
+  estado = comPeaoSobre(estado, 'peao-azul', 'ponte-c');
+  estado = comPeaoSobre(estado, 'peao-amarelo', 'ponte-d');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
+  // Sem re-seleção manual (o mover re-seleciona o Peão, #334): a Confirmação
+  // direta sucede (AC-3 da #272) e, com a poda a 0, preserva a seleção vigente
+  // sem adoção nova.
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  const gatilho = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(gatilho.sucesso, true);
+  if (!gatilho.sucesso) return;
+  const ataque = ataqueDoLoteDaPartida(gatilho.eventos);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  const ana = gatilho.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.emBaixaIluminacao, true);
+  // Poda total: 0 pendências, sem sorteio no lote e Caixa intacta (devolução).
+  assert.equal(gatilho.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!gatilho.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!gatilho.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(gatilho.estado.tabuleiro.caixa.length, caixaAntes);
+  assert.equal(gatilho.estado.posicaoConfirmada, true);
+  // Sem sequência (0 mantidas), a seleção vigente do mover (#334) é preservada
+  // sem adoção nova — a poda não toca na seleção.
+  assert.equal(gatilho.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+  const encerrado = aplicarComandoDePartida(gatilho.estado, encerrarTurno(), 'ana');
+  assert.equal(encerrado.sucesso, true);
+  if (!encerrado.sucesso) return;
+  assert.equal(encerrado.estado.jogadorAtivoId, 'bruno');
+});
+
+test('issue #343: Confirmação com Baixa nova e 1 vaga escura mantém 1 resolvível pela escura', () => {
+  let estado = partidaEmRodada2();
+  // Mesmo cenário do caso anterior, sem a ponte-c: o norte segue ocupado pelo
+  // Vulto, o oeste pela Inicial e o leste (3,5) iluminado por diogo — só o sul
+  // (4,4) segue escuro.
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas.filter((peca) => peca.pecaId !== 'reta-2'),
+        { pecaId: 'cruz-y', tipo: 'cruz' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 4 } },
+      ],
+    },
+  };
+  estado = comPosicionada(estado, 'vulto-x', 'vulto', 0, 2, 4);
+  estado = comPosicionada(estado, 'ponte-b', 'cruz', 0, 3, 2);
+  estado = comPosicionada(estado, 'ponte-d', 'inicial', 0, 2, 5);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'ponte-b');
+  estado = comPeaoSobre(estado, 'peao-amarelo', 'ponte-d');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  const gatilho = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(gatilho.sucesso, true);
+  if (!gatilho.sucesso) return;
+  const ataque = ataqueDoLoteDaPartida(gatilho.eventos);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  const ana = gatilho.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.emBaixaIluminacao, true);
+  // Poda a exatamente 1, com a ordem canônica do lote preservada.
+  assert.equal(gatilho.estado.tabuleiro.recebidas.length, 1);
+  assert.equal(gatilho.eventos.filter((evento) => evento.tipo === 'peca_sorteada').length, 1);
+  const recebimento = gatilho.eventos.find((evento) => evento.tipo === 'recebimento_gerado');
+  assert.ok(recebimento && recebimento.tipo === 'recebimento_gerado');
+  if (!recebimento || recebimento.tipo !== 'recebimento_gerado') return;
+  assert.equal(recebimento.recebidas.length, 1);
+  assert.equal(gatilho.estado.tabuleiro.caixa.length, caixaAntes - 1);
+  // Com sequência viva (1 mantida), a seleção do Peão é adotada.
+  assert.equal(gatilho.estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+  const tipos = gatilho.eventos.map((evento) => evento.tipo);
+  assert.ok(
+    tipos.indexOf('peca_sorteada') < tipos.indexOf('recebimento_gerado') &&
+      tipos.indexOf('recebimento_gerado') < tipos.indexOf('ataque_resolvido'),
+  );
+  // A vaga iluminada (leste → (3,5)) recusa; a escura (sul → (4,4)) aprova.
+  const pendente = gatilho.estado.tabuleiro.recebidas[0];
+  assert.equal(
+    codigoDaRejeicao(gatilho.estado, escolherVaga(pendente.recebidaId, 'leste'), 'ana'),
+    'DADOS_INVALIDOS',
+  );
+  let resolvido = aplicar(gatilho.estado, escolherVaga(pendente.recebidaId, 'sul'), 'ana');
+  const escolhida = resolvido.tabuleiro.recebidas.find(
+    (item) => item.recebidaId === pendente.recebidaId,
+  );
+  if (!escolhida || escolhida.celulaAlvo === null || escolhida.vaga === null) {
+    throw new Error('Recebida escolhida deveria ter vaga com célula-alvo');
+  }
+  const alvo = BORDA_OPOSTA[escolhida.vaga];
+  let giros = 0;
+  while (
+    giros < 4 &&
+    !bordasAbertas({
+      tipo: escolhida.tipo,
+      orientacao: ((escolhida.orientacao + 90 * giros) % 360) as Orientacao,
+    }).includes(alvo)
+  ) {
+    giros++;
+  }
+  assert.ok(giros < 4, 'a sorteada deveria conectar à vaga');
+  for (let giro = 0; giro < giros; giro++) {
+    resolvido = aplicar(resolvido, girarPeca(escolhida.pecaId), 'ana');
+  }
+  resolvido = aplicar(
+    resolvido,
+    posicionarPeca(escolhida.pecaId, escolhida.celulaAlvo.linha, escolhida.celulaAlvo.coluna),
+    'ana',
+  );
+  assert.equal(resolvido.tabuleiro.recebidas.length, 0);
+  const encerrado = aplicarComandoDePartida(resolvido, encerrarTurno(), 'ana');
+  assert.equal(encerrado.sucesso, true);
+  if (!encerrado.sucesso) return;
+  assert.equal(encerrado.estado.jogadorAtivoId, 'bruno');
 });
