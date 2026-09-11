@@ -49,15 +49,15 @@ export function ChatDoLobby({ mensagens, aoEnviar }: Props) {
       </div>
 
       <div
-        className="flex flex-col gap-1 bg-[#161616] border border-white/10 px-3 py-2 h-44 overflow-y-auto font-mono text-sm uppercase"
+        className="flex flex-col gap-1 bg-[#161616] border border-white/10 px-3 py-2 h-44 overflow-y-auto font-mono text-base uppercase"
         aria-live="polite"
         aria-label="Histórico do chat"
       >
         {mensagensDoFeed.length === 0 ? (
-          <p className="text-white/70">Sem mensagens ainda</p>
+          <p className="text-white/85">Sem mensagens ainda</p>
         ) : (
           mensagensDoFeed.map((item) => (
-            <p key={item.chave} className="text-white/60">
+            <p key={item.chave} className="text-white/85">
               {item.texto}
             </p>
           ))
@@ -77,9 +77,9 @@ export function ChatDoLobby({ mensagens, aoEnviar }: Props) {
           placeholder="ENVIAR MENSAGEM..."
           maxLength={LIMITE_DE_CARACTERES_DO_CHAT}
           aria-label="Nova mensagem"
-          className="flex-1 min-w-0 bg-transparent text-base text-white placeholder:text-white/60 focus:outline-none"
+          className="flex-1 min-w-0 bg-transparent text-lg text-white placeholder:text-white/80 focus:outline-none"
         />
-        <span className="text-sm text-white/60 tabular-nums" aria-hidden>
+        <span className="text-base text-white/80 tabular-nums" aria-hidden>
           {rascunho.length}/{LIMITE_DE_CARACTERES_DO_CHAT}
         </span>
         <button

@@ -19,8 +19,8 @@ export function LinkDiretoCard({ link }: Props) {
   })()
 
   return (
-    <div className="border border-white/10 bg-[#1e1e1e] p-5 flex flex-col gap-2">
-      <p className="text-sm tracking-[0.18em] uppercase text-white/60">Link Direto</p>
+    <div className="border border-white/30 bg-[#1e1e1e] p-5 flex flex-col gap-2">
+      <p className="text-sm tracking-[0.18em] uppercase text-white/80">Link Direto</p>
       <div className="flex items-center justify-between gap-3">
         <p className="text-base text-white/90 truncate" title={link} aria-label="Link Direto">
           {exibicao}

@@ -14,10 +14,10 @@ export function ModalDeExpulsao({ onOk }: ModalDeExpulsaoProps) {
         role="alertdialog"
         aria-modal="true"
         aria-label="Você foi expulso da sala"
-        className="max-w-sm w-full bg-[#1e1e1e] border border-white/10 p-8 flex flex-col items-start gap-4"
+        className="max-w-sm w-full bg-[#1e1e1e] border border-white/30 p-8 flex flex-col items-start gap-4"
       >
         <h2 className="text-xl font-bold text-white">Você foi expulso da sala</h2>
-        <p className="text-base text-white/70 leading-relaxed">
+        <p className="text-base text-white/85 leading-relaxed">
           O Anfitrião encerrou sua participação nesta sala. Você pode criar uma nova sala ou entrar em outra pelo código.
         </p>
         <button
