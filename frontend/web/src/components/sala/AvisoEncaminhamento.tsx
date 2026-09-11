@@ -16,14 +16,14 @@ export function AvisoEncaminhamento({ encaminhamento, onFechar }: Props) {
         <div>
           <p className="text-sm font-bold text-amber-900">{titulo}</p>
           <p className="mt-1 text-sm text-amber-800">{mensagem ?? 'Tente novamente.'}</p>
-          <p className="mt-2 text-xs text-amber-700">A Sala permanece aberta — você pode tentar iniciar novamente quando todos estiverem prontos.</p>
+          <p className="mt-2 text-sm text-amber-700">A Sala permanece aberta — você pode tentar iniciar novamente quando todos estiverem prontos.</p>
         </div>
         <button
           type="button"
           onClick={onFechar}
           aria-label="Fechar aviso"
           data-testid="fechar-aviso"
-          className="shrink-0 rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 shadow hover:bg-amber-100"
+          className="shrink-0 rounded-md bg-white px-3 py-1.5 text-sm font-semibold text-amber-900 shadow hover:bg-amber-100"
         >
           Fechar
         </button>

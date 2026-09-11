@@ -17,7 +17,7 @@ export function FinalCtaSection() {
       <div ref={bgRef} className="final-cta-media" aria-hidden="true" />
       <div className="relative max-w-7xl mx-auto">
         <h2 id="final-cta-title" className="text-[clamp(1.75rem,4vw,2.5rem)] text-center mb-2 uppercase tracking-[.06em]">{finalCta.title}</h2>
-        <p className="text-text text-center mb-8 font-display">{finalCta.copy}</p>
+        <p className="text-text text-lg text-center mb-8 font-display">{finalCta.copy}</p>
         <AuthActions className="flex gap-3 justify-center flex-wrap" />
       </div>
     </section>

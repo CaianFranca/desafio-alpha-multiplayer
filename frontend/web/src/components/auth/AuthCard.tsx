@@ -12,7 +12,7 @@ export function AuthCard({ title, subtitle, children }: AuthCardProps) {
       <div className="auth-media" aria-hidden="true" />
       <div className="auth-card max-w-md w-full p-8 sm:p-10">
         <h1 className="text-3xl font-bold text-center tracking-wide">{title}</h1>
-        <p className="text-sm text-muted text-center mt-2">{subtitle}</p>
+        <p className="text-base text-muted text-center mt-2">{subtitle}</p>
         {children}
       </div>
     </div>

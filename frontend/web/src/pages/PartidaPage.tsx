@@ -881,7 +881,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               data-testid="botao-permanecer"
               onClick={permanecerNoTurno}
               disabled={peaoProprioId === null}
-              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Permanecer
             </button>
@@ -892,7 +892,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               data-testid="botao-confirmar-posicao"
               onClick={confirmarPosicaoNoTurno}
               disabled={peaoProprioId === null}
-              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-40"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Confirmar Posição
             </button>
@@ -902,7 +902,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-encerrar-turno"
               onClick={encerrarTurno}
-              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-sm text-white hover:bg-zinc-700"
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700"
             >
               Encerrar Turno
             </button>

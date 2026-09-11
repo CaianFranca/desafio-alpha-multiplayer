@@ -19,3 +19,32 @@
   --shadow-auth-card: 0 24px 64px rgba(0, 0, 0, 0.55);
   --shadow-cta-hero: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
+
+/* Piso tipográfico — tamanhos mínimos de leitura (nomes fora dos
+   namespaces do Tailwind v4 para não gerar utilities; usados via
+   `var()` com fallback em scenes.css/patterns.css):
+   `--piso-rotulo` (0.875rem/14px, rótulos compactos),
+   `--piso-corpo` (1rem/16px, corpo mínimo),
+   `--corpo-ampliado` (1.125rem/18px, teto do corpo ampliado). */
+:root {
+  --piso-rotulo: 0.875rem;
+  --piso-corpo: 1rem;
+  --corpo-ampliado: 1.125rem;
+}
+
+/* HUD da partida — escala original do HUD (fora do piso tipográfico):
+   os tamanhos do HUD voltam aos valores do `main`, governados por vars
+   próprias (nomes fora dos namespaces do Tailwind v4; usados via `var()`
+   com fallback nos componentes da partida):
+   `--hud-micro` (0.625rem/10px), `--hud-rotulo` (0.75rem/12px),
+   `--hud-corpo` (0.875rem/14px), `--hud-destaque` (1rem/16px),
+   `--hud-titulo` (1.125rem/18px, títulos dos overlays),
+   `--hud-display` (1.5rem/24px). */
+:root {
+  --hud-micro: 0.625rem;
+  --hud-rotulo: 0.75rem;
+  --hud-corpo: 0.875rem;
+  --hud-destaque: 1rem;
+  --hud-titulo: 1.125rem;
+  --hud-display: 1.5rem;
+}
