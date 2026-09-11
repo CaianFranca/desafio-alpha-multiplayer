@@ -112,6 +112,7 @@ function renderPartidaParaSaida(codigoSala: string | null) {
   const router = createMemoryRouter(
     [
       { path: '/partida', element: <PartidaPage /> },
+      { path: '/', element: <div data-testid="principal-pagina">principal</div> },
       { path: '/sala/:codigoDeSala', element: <div data-testid="sala-pagina">sala</div> },
       { path: '/salas/criar', element: <div data-testid="criar-pagina">criar</div> },
     ],
@@ -623,7 +624,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     vi.useRealTimers()
   })
 
-  it('SAIR pede confirmação; confirmar volta à sala e encerra o WS', async () => {
+  it('SAIR pede confirmação de desistência; confirmar desiste e vai à principal com login', async () => {
     renderPartidaParaSaida('A3K9M2')
     await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
     const ws = MockWebSocket.last()!
@@ -643,16 +644,60 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     // Sem confirmação, sem saída.
     await user.click(screen.getByTestId('hud-sair'))
     expect(screen.getByTestId('hud-confirmacao-saida')).toBeInTheDocument()
+    expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/peão será removido/i)
+    expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/equipe continua sem você/i)
     await user.click(screen.getByTestId('hud-sair-cancelar'))
     expect(screen.queryByTestId('hud-confirmacao-saida')).not.toBeInTheDocument()
     expect(screen.getByTestId('hud-da-partida')).toBeInTheDocument()
+    expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
 
-    // Confirmar devolve à sala de origem e encerra o WS da partida.
+    // Confirmar envia DESISTIR_DA_PARTIDA, encerra o WS e vai à principal.
     await user.click(screen.getByTestId('hud-sair'))
     const wsInst = MockWebSocket.last()!
     await user.click(screen.getByTestId('hud-sair-confirmar'))
-    expect(await screen.findByTestId('sala-pagina')).toBeInTheDocument()
+    expect(wsInst.sentMessages.map((m) => JSON.parse(m))).toContainEqual(
+      expect.objectContaining({ type: 'DESISTIR_DA_PARTIDA', jogadorId: MEU_JOGADOR_ID }),
+    )
+    expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
     expect(wsInst.onclose).toBeNull()
+  })
+
+  it('desistência alheia projeta remoção, avisa e anuncia SR; derrota-quando-sobra-1 com retorno', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    expect(screen.getAllByTestId('hud-avatar-adversario')).toHaveLength(3)
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-4',
+        peaoId: 'peao-amarelo',
+      }),
+    )
+
+    // Projeção: peão do desistente sai da ordem (3→2 adversários visíveis).
+    await waitFor(() =>
+      expect(screen.getAllByTestId('hud-avatar-adversario')).toHaveLength(2),
+    )
+    // Aviso visível + anúncio SR com desistência e nova ordem.
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Cara desistiu/i)
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Nova ordem/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/Cara desistiu/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/Nova ordem/i)
+    // Repetição idempotente não quebra.
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-4',
+        peaoId: 'peao-amarelo',
+      }),
+    )
+    expect(screen.getAllByTestId('hud-avatar-adversario')).toHaveLength(2)
+
+    // Derrota-quando-sobra-1: motivo desistencia no overlay.
+    act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'derrota', motivo: 'desistencia' }))
+    const overlay = await screen.findByTestId('overlay-resultado')
+    expect(overlay).toHaveAttribute('data-motivo', 'desistencia')
+    expect(overlay).toHaveTextContent(/Restou só você/i)
   })
 
   it('overlay de resultado fica legível acima do HUD', async () => {

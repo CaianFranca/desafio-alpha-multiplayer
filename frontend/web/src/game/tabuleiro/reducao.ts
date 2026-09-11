@@ -81,6 +81,7 @@ import type {
   AtaqueResolvidoWireEvento,
   Celula,
   CelulasIluminadasWireEvento,
+  DesistenciaRegistradaWireEvento,
   LimpezaAplicadaWireEvento,
   PeaoEventoDoServidor,
   ResgateRealizadoWireEvento,
@@ -129,8 +130,9 @@ export function peoesEmBaixaIluminacaoDe(
 /**
  * Eventos que o canal da Partida entrega ao redutor: tabuleiro (ST-09),
  * peões/ciclo (ST-10), turnos (ST-11, issue #118), iluminação/limpeza
- * (issue #151) e monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO e
- * RESGATE_REALIZADO). É o tipo roteado pelo socket e aceito pelo reducer.
+ * (issue #151), monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO e
+ * RESGATE_REALIZADO) e desistência (issue #290 — DESISTENCIA_REGISTRADA).
+ * É o tipo roteado pelo socket e aceito pelo reducer.
  */
 export type EventoDoJogoNoCliente =
   | TabuleiroEventoDoServidor
@@ -144,6 +146,7 @@ export type EventoDoJogoNoCliente =
   | VagaDaPecaRecebidaEscolhidaEvento
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
+  | DesistenciaRegistradaWireEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -736,6 +739,39 @@ export function reduzirEvento(
     case 'ATRAVESSOU_O_ESCURO': {
       // Sem lógica visual — ticket #268. Marco para exibição futura.
       return estado
+    }
+
+    case 'DESISTENCIA_REGISTRADA': {
+      // Desistência (issue #290, espelho do lote atômico #288): remove o peão
+      // do desistente e sua vez da ordem. Iluminação/Limpeza/Passagem chegam
+      // no mesmo lote via CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* — aqui
+      // só a remoção imediata, sem recalcular regra. Snapshot reconcilia.
+      // Idempotente: evento repetido (replay/reconexão) é no-op.
+      const jogadorId = evento.jogadorId
+      const peaoId = evento.peaoId
+      const temJogador = Object.prototype.hasOwnProperty.call(estado.jogadorPorId, jogadorId)
+      const temPeao = estado.peoes.some((p) => p.peaoId === peaoId)
+      const temMapeamento = Object.prototype.hasOwnProperty.call(estado.peaoPorJogador, jogadorId)
+      if (!temJogador && !temPeao && !temMapeamento) return estado
+      const jogadorPorId = { ...estado.jogadorPorId }
+      delete jogadorPorId[jogadorId]
+      const peaoPorJogador = { ...estado.peaoPorJogador }
+      delete peaoPorJogador[jogadorId]
+      const peoes = estado.peoes.filter((p) => p.peaoId !== peaoId)
+      const ordemDeChegadaPorChave: Record<string, readonly PeaoId[]> = {}
+      for (const [chave, fila] of Object.entries(estado.ordemDeChegadaPorChave)) {
+        const filtrada = fila.filter((id) => id !== peaoId)
+        if (filtrada.length > 0) ordemDeChegadaPorChave[chave] = filtrada
+      }
+      return {
+        ...estado,
+        peoes,
+        jogadorPorId,
+        peaoPorJogador,
+        peaoSelecionadoId:
+          estado.peaoSelecionadoId === peaoId ? null : estado.peaoSelecionadoId,
+        ordemDeChegadaPorChave,
+      }
     }
 
     default: {

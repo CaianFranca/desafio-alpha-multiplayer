@@ -32,6 +32,7 @@ import type {
   PartidaTerminadaWireEvento,
   AtaqueResolvidoWireEvento,
   ResgateRealizadoWireEvento,
+  DesistenciaRegistradaWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 import {
@@ -45,8 +46,9 @@ import {
 /**
  * Eventos que o canal da Partida entrega à página (issue #156): tabuleiro
  * (ST-09), peões (ST-10), os três eventos de turno (ST-11), iluminação/
- * limpeza (issue #151), snapshot (PARTIDA_INICIADA/ESTADO_DA_PARTIDA) e
+ * limpeza (issue #151), snapshot (PARTIDA_INICIADA/ESTADO_DA_PARTIDA),
  * monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO)
+ * e desistência (issue #290 — DESISTENCIA_REGISTRADA)
  * agora roteados exclusivamente pelo contrato de Partida.
  */
 export type EventoDoCanalDaPartida =
@@ -64,6 +66,7 @@ export type EventoDoCanalDaPartida =
   | PartidaTerminadaWireEvento
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
+  | DesistenciaRegistradaWireEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -215,6 +218,7 @@ export function usePartidaWebSocket({
         case 'PARTIDA_TERMINADA':
         case 'ATAQUE_RESOLVIDO':
         case 'RESGATE_REALIZADO':
+        case 'DESISTENCIA_REGISTRADA':
           // O grupo de cases acima é intencionalmente vazio (fall-through):
           // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
           // o cliente apenas espelha).
