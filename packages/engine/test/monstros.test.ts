@@ -340,42 +340,42 @@ function partidaEmRodada2(): EstadoDaPartida {
   return estado;
 }
 
-test('a composição da caixa inclui 6 vultos e 6 espectros entre as demais', () => {
+test('a composição da caixa inclui 9 vultos e 9 espectros entre as demais', () => {
   const vulto = COMPOSICAO_DA_CAIXA.find((entrada) => entrada.tipo === 'vulto');
   const espectro = COMPOSICAO_DA_CAIXA.find(
     (entrada) => entrada.tipo === 'espectro',
   );
-  assert.equal(vulto?.quantidade, 6);
-  assert.equal(espectro?.quantidade, 6);
+  assert.equal(vulto?.quantidade, 9);
+  assert.equal(espectro?.quantidade, 9);
 
   const estado = estadoInicialDoTabuleiro();
-  assert.equal(estado.caixa.filter((peca) => peca.tipo === 'vulto').length, 6);
+  assert.equal(estado.caixa.filter((peca) => peca.tipo === 'vulto').length, 9);
   assert.equal(
     estado.caixa.filter((peca) => peca.tipo === 'espectro').length,
-    6,
+    9,
   );
   // Ids determinísticos por tipo, no mesmo padrão das demais peças.
   const ids = new Set(estado.caixa.map((peca) => peca.pecaId));
   assert.ok(ids.has('vulto-1'));
-  assert.ok(ids.has('vulto-6'));
+  assert.ok(ids.has('vulto-9'));
   assert.ok(ids.has('espectro-1'));
-  assert.ok(ids.has('espectro-6'));
+  assert.ok(ids.has('espectro-9'));
 });
 
 test('monstros embaralhados: a mesma seed produz exatamente a mesma ordem da caixa', () => {
   const primeira = estadoInicialDoTabuleiro({ seed: 20260901 });
   const segunda = estadoInicialDoTabuleiro({ seed: 20260901 });
 
-  assert.equal(primeira.caixa.length, 83);
+  assert.equal(primeira.caixa.length, 89);
   assert.deepEqual(
     primeira.caixa.map((peca) => peca.pecaId),
     segunda.caixa.map((peca) => peca.pecaId),
   );
-  // A composição é preservada: os 12 monstros continuam no embaralhamento.
-  assert.equal(primeira.caixa.filter((peca) => peca.tipo === 'vulto').length, 6);
+  // A composição é preservada: os 18 monstros continuam no embaralhamento.
+  assert.equal(primeira.caixa.filter((peca) => peca.tipo === 'vulto').length, 9);
   assert.equal(
     primeira.caixa.filter((peca) => peca.tipo === 'espectro').length,
-    6,
+    9,
   );
 });
 
@@ -1020,12 +1020,13 @@ test('confirmação sobre a sala médica concede a Proteção após o ataque do 
   estado = comPeca(estado, 'escada-1', 'reta', 90, 0, 4);
   estado = comPeca(estado, 'escada-2', 'reta', 90, 0, 5);
   estado = comPeaoSobre(estado, 'peao-vermelho', 'escada-1');
+  // Ana abre o turno sobre a reta-1, vizinha da Sala Médica (zona da origem:
+  // {reta-1} ∪ conectadas), e confirma SOBRE a Sala em um único salto —
+  // dentro do alcance do espectro: o ataque do gatilho a atinge (a Proteção
+  // ainda não existe) e a Sala Médica concede a Proteção DEPOIS da resolução.
+  estado = comPeaoSobre(estado, 'peao-branco', 'reta-1');
+  estado = { ...estado, pecaDoInicioDoTurnoId: 'reta-1' };
 
-  // Ana passa por reta-1 e confirma SOBRE a Sala Médica — dentro do alcance
-  // do espectro: o ataque do gatilho a atinge (a Proteção ainda não existe)
-  // e a Sala Médica concede a Proteção DEPOIS da resolução.
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -1073,10 +1074,12 @@ test('confirmação sobre a sala médica concede a Proteção após o ataque do 
 test('a Confirmação sobre a Sala Médica emite posicao_confirmada com protegido: true (issue #227)', () => {
   let estado = partidaEmRodada2();
   estado = comPeca(estado, 'sala-x', 'sala_medica', 0, 1, 3);
-  // Ana passa por reta-1 e confirma SOBRE a Sala Médica — sem Monstro no
-  // cenário: a concessão acontece e o evento carrega o estado resultante.
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  // Ana abre o turno sobre a reta-1, vizinha da Sala Médica (zona da origem:
+  // {reta-1} ∪ conectadas), e confirma SOBRE ela em um único salto — sem
+  // Monstro no cenário: a concessão acontece e o evento carrega o estado
+  // resultante.
+  estado = comPeaoSobre(estado, 'peao-branco', 'reta-1');
+  estado = { ...estado, pecaDoInicioDoTurnoId: 'reta-1' };
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -1123,6 +1126,10 @@ test('a Confirmação cujo ataque consumiu a Proteção prévia emite protegido:
   let estado = partidaEmRodada2();
   estado = comPeca(estado, 'espectro-x', 'espectro', 0, 0, 3);
   estado = comPeca(estado, 'reta-nova', 'reta', 0, 1, 3);
+  // Ana abre o turno sobre a reta-1, vizinha da reta-nova (zona da origem:
+  // {reta-1} ∪ conectadas), e entra no alcance do espectro em um único salto.
+  estado = comPeaoSobre(estado, 'peao-branco', 'reta-1');
+  estado = { ...estado, pecaDoInicioDoTurnoId: 'reta-1' };
   // Ana já chegou à Confirmação COM Proteção (concedida por gatilho anterior).
   estado = {
     ...estado,
@@ -1130,8 +1137,6 @@ test('a Confirmação cujo ataque consumiu a Proteção prévia emite protegido:
       jogador.jogadorId === 'ana' ? { ...jogador, protegido: true } : jogador,
     ),
   };
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');

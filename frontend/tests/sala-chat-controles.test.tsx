@@ -24,6 +24,7 @@ function criarMembro(overrides: Partial<{
   ordemDeEntrada: number
   presenca: 'conectado' | 'em_reconexao'
   prontidao: boolean
+  ehBot?: boolean
 }> = {}) {
   return {
     id: overrides.id ?? `membro-${(overrides.ordemDeEntrada ?? 0) + 1}`,
@@ -32,6 +33,7 @@ function criarMembro(overrides: Partial<{
     ordemDeEntrada: overrides.ordemDeEntrada ?? 0,
     presenca: (overrides.presenca ?? 'conectado') as 'conectado' | 'em_reconexao',
     prontidao: overrides.prontidao ?? false,
+    ...(overrides.ehBot === true ? { ehBot: true as const } : {}),
   }
 }
 
@@ -246,6 +248,25 @@ describe('lobby - chat e controles do Anfitrião', () => {
     await montarLobbyComoAnfitriao()
 
     expect(screen.queryByLabelText('Jogadores bloqueados')).not.toBeInTheDocument()
+  })
+
+  it('MEMBRO_EXPULSO de bot não entra na lista de bloqueados (humano sim)', async () => {
+    const zanetti = criarMembro({ id: 'm2', jogadorId: 'j-zanetti', apelido: 'Zanetti', ordemDeEntrada: 1 })
+    const bot = criarMembro({ id: 'm3', jogadorId: 'j-bot', apelido: 'Irmã do Turno', ordemDeEntrada: 2, ehBot: true })
+    const ws = await montarLobbyComoAnfitriao([criarEu(), zanetti, bot])
+
+    // Humano expulso: entra na lista.
+    const salaSemZanetti = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarEu(), bot], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm2', jogadorId: 'j-zanetti', sala: salaSemZanetti })
+    const secaoBloqueados = await screen.findByLabelText('Jogadores bloqueados')
+    expect(within(secaoBloqueados).getByText('Zanetti')).toBeInTheDocument()
+
+    // Bot removido: o aviso chega, mas a lista não ganha entrada.
+    const salaSemBot = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarEu()], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'MEMBRO_EXPULSO', membroId: 'm3', jogadorId: 'j-bot', ehBot: true, sala: salaSemBot })
+    await screen.findByText(/irmã do turno foi expulso/i)
+    expect(within(secaoBloqueados).queryByText('Irmã do Turno')).not.toBeInTheDocument()
+    expect(within(secaoBloqueados).getAllByRole('listitem')).toHaveLength(1)
   })
 
   // --- Encerrar ---

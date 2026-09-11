@@ -371,3 +371,12 @@ export function getConfig(): Config {
     gameServerAdvertiseHost,
   };
 }
+
+export {
+  SERVICE_TOKEN_AUDIENCE,
+  BOT_TOKEN_AUDIENCE,
+  assinarServiceToken,
+  assinarBotToken,
+  verificarBotToken,
+  type PayloadBotToken,
+} from './serviceToken.js';

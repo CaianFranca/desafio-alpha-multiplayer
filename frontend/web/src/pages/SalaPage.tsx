@@ -40,9 +40,9 @@ export function SalaPage() {
 
   const { alvoHref, alvoWs } = useMemo(() => {
     if (encaminhamento.alvo === null) return { alvoHref: null, alvoWs: null }
-    const { href, wsUrl } = urlsDoAlvo(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId)
+    const { href, wsUrl } = urlsDoAlvo(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId, sala?.codigoDeSala ?? null)
     return { alvoHref: href, alvoWs: wsUrl }
-  }, [encaminhamento.alvo])
+  }, [encaminhamento.alvo, sala?.codigoDeSala])
 
   const isDisponivel = encaminhamento.fase === 'disponivel'
   const [codigoInput, setCodigoInput] = useState('')
@@ -298,7 +298,7 @@ export function SalaPage() {
           </div>
         </div>
       </div>
-      <EncaminhamentoOverlay encaminhamento={encaminhamento} wsAlvo={alvoWs} href={alvoHref} />
+      <EncaminhamentoOverlay encaminhamento={encaminhamento} wsAlvo={alvoWs} href={alvoHref} codigoDeSala={sala?.codigoDeSala ?? null} />
     </div>
   )
 }

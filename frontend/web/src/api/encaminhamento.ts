@@ -8,9 +8,11 @@ export function buildGameWsUrl(serverId: string, partidaId: string): string {
   return `${protocol}//${window.location.host}/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}`
 }
 
-export function buildGameRedirectHref(serverId: string, partidaId: string): string {
+export function buildGameRedirectHref(serverId: string, partidaId: string, codigoDeSala?: string | null): string {
   // Rota SPA da partida — a PartidaPage abrirá o WS de jogo.
-  return `/partida?serverId=${encodeURIComponent(serverId)}&partidaId=${encodeURIComponent(partidaId)}`
+  const base = `/partida?serverId=${encodeURIComponent(serverId)}&partidaId=${encodeURIComponent(partidaId)}`
+  if (codigoDeSala) return `${base}&codigoDeSala=${encodeURIComponent(codigoDeSala)}`
+  return base
 }
 
 /** URL legível exibida como alvo do redirect (ex.: wss://host/ws/game/...). */
@@ -19,8 +21,8 @@ export function alvoDoRedirectLegivel(serverId: string, partidaId: string): stri
 }
 
 /** Fonte única para URLs do alvo do encaminhamento — evita duplicar buildGame* entre SalaPage e overlay. */
-export function urlsDoAlvo(serverId: string, partidaId: string): { wsUrl: string; href: string } {
-  return { wsUrl: buildGameWsUrl(serverId, partidaId), href: buildGameRedirectHref(serverId, partidaId) }
+export function urlsDoAlvo(serverId: string, partidaId: string, codigoDeSala?: string | null): { wsUrl: string; href: string } {
+  return { wsUrl: buildGameWsUrl(serverId, partidaId), href: buildGameRedirectHref(serverId, partidaId, codigoDeSala) }
 }
 
 const MENSAGENS_POR_CODIGO: Record<string, string> = {

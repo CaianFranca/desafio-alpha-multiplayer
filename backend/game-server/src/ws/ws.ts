@@ -219,10 +219,13 @@ export function criarWebSocketServer(
     }
 
     void (async () => {
-      const sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
-      if (!sessaoValida) {
-        enviarErroNoSocket(socket, 401, erroRejeitada('SESSAO_INVALIDA', 'sessão revogada ou inexistente'));
-        return;
+      // Bots autenticados por Service Token não dependem de sessão no Redis
+      if (!sessao.isBot) {
+        const sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
+        if (!sessaoValida) {
+          enviarErroNoSocket(socket, 401, erroRejeitada('SESSAO_INVALIDA', 'sessão revogada ou inexistente'));
+          return;
+        }
       }
 
       const partida = await obterPartida(contexto.redis, partidaId);

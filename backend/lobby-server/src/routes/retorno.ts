@@ -77,6 +77,8 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
                     salaDominio,
                     contexto.estado.apelidoPorJogadorId,
                     contexto.handlers.handlersLinkBase,
+                    undefined,
+                    contexto.estado.botPorJogadorId,
                   );
                   // Recupera projeção/markers/broadcast perdidos no crash após COMMIT
                   await contexto.projecao.definirEstadoSala(salaId, serializarSala(salaDominio));
@@ -100,6 +102,7 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
                       ordemDeEntrada: m.ordemDeEntrada,
                       presenca: m.presenca,
                       prontidao: m.pronto,
+                      ...(contexto.estado.botPorJogadorId.get(m.jogadorId) === true ? { ehBot: true as const } : {}),
                     })),
                     convite: { codigoDeSala: proj.codigo, link: `${linkBase}/${proj.codigo}` },
                   } as const;
@@ -175,7 +178,7 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
         await contexto.projecao.marcarReaberta(salaId);
 
         // Broadcast SALA_ATUALIZADA
-        const salaWire = mapearSala(salaDominio, contexto.estado.apelidoPorJogadorId, contexto.handlers.handlersLinkBase);
+        const salaWire = mapearSala(salaDominio, contexto.estado.apelidoPorJogadorId, contexto.handlers.handlersLinkBase, undefined, contexto.estado.botPorJogadorId);
         contexto.broadcast.enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaWire });
 
         return { tipo: 'sucesso' as const, sala: salaWire, idempotente: false };

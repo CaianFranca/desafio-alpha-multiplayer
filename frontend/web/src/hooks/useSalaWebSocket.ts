@@ -384,6 +384,13 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           setErro(evento.mensagem)
           adicionarAviso(evento.mensagem, evento.type)
           return
+        case 'BOT_FALHOU': {
+          // Falha pós-202 do bot (#352): sem snapshot, só aviso + erro visível.
+          const msg = `Bot ${evento.apelido} não entrou: ${evento.mensagem}`
+          setErro(msg)
+          adicionarAviso(msg, evento.type)
+          return
+        }
         case 'MENSAGEM_DE_CHAT': {
           // Expulsão/saída própria: ignora mensagens atrasadas da sala antiga
           // (mesma janela trailing do SALA_ATUALIZADA, issue #290).
@@ -485,14 +492,21 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
               // Lista local da sessão: o Anfitrião acumula expulsos observados
               // (apelido lido da sala anterior ao evento). Não há protocolo
               // para listar bloqueados — pendência registrada na issue #35.
-              const apelido =
-                salaAnterior?.membros.find((m) => m.id === evento.membroId)?.apelido ??
-                apelidoDeFallback(evento.jogadorId)
-              setJogadoresBloqueados((prev) =>
-                prev.some((j) => j.jogadorId === evento.jogadorId)
-                  ? prev
-                  : [...prev, { jogadorId: evento.jogadorId, apelido }],
-              )
+              // Bots saem sem bloqueio (o backend purga o Cadastro): nunca
+              // entram na lista — checa a flag do evento e o snapshot anterior.
+              const eraBot =
+                evento.ehBot === true ||
+                salaAnterior?.membros.find((m) => m.id === evento.membroId)?.ehBot === true
+              if (!eraBot) {
+                const apelido =
+                  salaAnterior?.membros.find((m) => m.id === evento.membroId)?.apelido ??
+                  apelidoDeFallback(evento.jogadorId)
+                setJogadoresBloqueados((prev) =>
+                  prev.some((j) => j.jogadorId === evento.jogadorId)
+                    ? prev
+                    : [...prev, { jogadorId: evento.jogadorId, apelido }],
+                )
+              }
             }
             // Reconciliação: um jogador bloqueado re-admitido (retorno após
             // DESBLOQUEAR chega como retorno_autorizado -> SALA_ATUALIZADA, e

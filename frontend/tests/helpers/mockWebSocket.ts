@@ -41,8 +41,21 @@ export class MockWebSocket {
     this.sentMessages.push(data)
   }
 
-  close() {
-    this.onclose?.(new CloseEvent('close') as CloseEvent)
+  /**
+   * Fecha o socket repassando `code`/`reason` no CloseEvent (issue #329: o
+   * cliente distingue o não-início `4000 PARTIDA_NAO_INICIADA` dos demais
+   * fechamentos). Sem argumentos, comporta-se como antes (fechamento sem
+   * código — cai na reconexão simples do hook).
+   */
+  close(code?: number, reason?: string) {
+    this.simulateClose(code, reason)
+  }
+
+  simulateClose(code?: number, reason?: string) {
+    this.readyState = MockWebSocket.CLOSED
+    this.onclose?.(
+      new CloseEvent('close', { code: code ?? 1005, reason: reason ?? '' }) as CloseEvent,
+    )
   }
 
   simulateMessage(data: unknown) {

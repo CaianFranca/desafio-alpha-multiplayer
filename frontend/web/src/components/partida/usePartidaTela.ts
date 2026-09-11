@@ -26,6 +26,8 @@ export interface UsePartidaTelaReturn {
   partidaTerminada: (resultado: ResultadoDaPartida, motivo?: MotivoDeDerrota | null) => void
   falhar: () => void
   tentarNovamente: () => void
+  /** Transita ao estado terminal de Partida Não Iniciada (issue #329). */
+  partidaNaoIniciada: () => void
   forcarEstado: (estado: EstadoDaTela) => void
 }
 
@@ -76,6 +78,7 @@ export function usePartidaTela(opts?: UsePartidaTelaOptions): UsePartidaTelaRetu
     [],
   )
   const falhar = useCallback(() => dispatch({ type: 'falhar' }), [])
+  const partidaNaoIniciada = useCallback(() => dispatch({ type: 'partidaNaoIniciada' }), [])
 
   const tentarNovamente = useCallback(() => {
     dispatch({ type: 'tentarNovamente' })
@@ -98,6 +101,7 @@ export function usePartidaTela(opts?: UsePartidaTelaOptions): UsePartidaTelaRetu
     partidaTerminada,
     falhar,
     tentarNovamente,
+    partidaNaoIniciada,
     forcarEstado,
   }
 }

@@ -35,19 +35,18 @@ const LIMIAR_AMPLITUDE_MUNDO = 5
 
 /** Altura alvo após a normalização: maior que a pegada do placeholder (0.5)
  * para dar presença de Diretor na cena. */
-const ALTURA_ALVO = 1.16
+const ALTURA_ALVO = 0.93
 
 /** Diâmetro máximo alvo da base após a normalização (mesma proporção da altura). */
-const BASE_ALVO = 0.93
+const BASE_ALVO = 0.74
 
 /**
  * Raio interno/externo do anel de seleção (unidades do grupo normalizado,
  * escala default 1): fica logo além da pegada do corpo (escalado junto com o
  * modelo), sem invadir o corpo — nenhum branco sobre a textura.
  */
-const ANEL_SELECAO_INTERNO = 0.56
-const ANEL_SELECAO_EXTERNO = 0.79
-
+const ANEL_SELECAO_INTERNO = 0.35
+const ANEL_SELECAO_EXTERNO = 0.50
 /**
  * Clona os materiais da cena: o `useLoader` cacheia o GLTF bruto e o
  * `clone()` do Object3D compartilha materiais — o clone por instância isola
@@ -162,7 +161,7 @@ export function PeaoAvatar({
     anel.material.opacity = 0.9
     anel.material.depthWrite = false
     // Nunca rouba clique do corpo selecionável.
-    anel.raycast = () => {}
+    anel.raycast = () => { }
     return anel
   }, [selecionado])
 
@@ -172,19 +171,19 @@ export function PeaoAvatar({
   const baseCursor = handlersDeCursor(aoClicar ? 'pointer' : 'default')
   const groupHandlers = aoClicar
     ? {
-        onPointerOver: (e: ThreeEvent<PointerEvent>) => {
-          e.stopPropagation()
-          baseCursor.onPointerOver(e)
-        },
-        onPointerOut: baseCursor.onPointerOut,
-        onPointerLeave: baseCursor.onPointerLeave,
-      }
+      onPointerOver: (e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation()
+        baseCursor.onPointerOver(e)
+      },
+      onPointerOut: baseCursor.onPointerOut,
+      onPointerLeave: baseCursor.onPointerLeave,
+    }
     : {}
   const hitboxClick = aoClicar
     ? (e: ThreeEvent<MouseEvent>) => {
-        e.stopPropagation()
-        aoClicar()
-      }
+      e.stopPropagation()
+      aoClicar()
+    }
     : undefined
 
   return (
@@ -192,8 +191,8 @@ export function PeaoAvatar({
       <primitive object={cena} />
       {anelDeSelecao !== null ? <primitive object={anelDeSelecao} /> : null}
       {hitboxClick ? (
-        <mesh position={[0, 0.58, 0]} onClick={hitboxClick}>
-          <cylinderGeometry args={[0.7, 0.7, 1.16, 24]} />
+        <mesh position={[0, 0.46, 0]} onClick={hitboxClick}>
+          <cylinderGeometry args={[0.56, 0.56, 0.93, 24]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       ) : null}
