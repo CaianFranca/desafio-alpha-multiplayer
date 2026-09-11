@@ -24,19 +24,21 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS, type CorDoPeao } from '../../game/tabuleiro/contrato'
+import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
+import { useCronometroDaPartida } from './useCronometroDaPartida'
 
 /**
- * Modo compacto paisagem-celular (issue #230, 800x360): paisagem curta e
- * estreita — altura <500, largura <900 — mantém local/turno/sistema
- * integrais, só compacta (avatares menores, estados locais em ícones ao lado
- * do nome, conquistas só ícones, título fora). Puro e testável, sem ler
- * window — o componente deriva via prop ou viewport.
+ * Modo compacto paisagem-celular (issue #230, 800x360): paisagem curta —
+ * altura <500 — mantém local/turno/sistema integrais, só compacta (avatares
+ * menores, estados locais em ícones ao lado do nome, conquistas só ícones,
+ * título fora). Puro e testável, sem ler window — o componente deriva via
+ * prop ou viewport.
  */
 export function deveUsarHudCompacto(largura: number, altura: number): boolean {
   if (!Number.isFinite(largura) || !Number.isFinite(altura)) return false
   if (largura <= 0 || altura <= 0) return false
   const emPaisagem = largura > altura
-  return emPaisagem && altura < 500 && largura < 900
+  return emPaisagem && altura < 500
 }
 
 /** Lê o viewport atual (jsdom-safe): fallback 1024x768 fora do browser. */
@@ -44,8 +46,6 @@ function lerViewport(): { largura: number; altura: number } {
   if (typeof window === 'undefined') return { largura: 1024, altura: 768 }
   return { largura: window.innerWidth, altura: window.innerHeight }
 }
-import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
-import { useCronometroDaPartida } from './useCronometroDaPartida'
 
 export interface HudDaPartidaProps {
   /** Projeção jogadorId → dados de exibição (snapshot + deltas, somente leitura). */
@@ -473,7 +473,6 @@ export function HudDaPartida({
                       data-ativo={icone.ativo ? 'true' : 'false'}
                       title={icone.titulo}
                       aria-label={icone.ativo ? `${icone.titulo} ativo` : `${icone.titulo} inativo`}
-                      aria-hidden={icone.ativo ? undefined : 'true'}
                       className={`text-sm leading-none ${icone.ativo ? 'opacity-100' : 'opacity-30 grayscale'}`}
                     >
                       {icone.simbolo}
@@ -641,7 +640,7 @@ export function HudDaPartida({
             right: 'calc(1.5rem + env(safe-area-inset-right))',
             bottom: 'calc(1.5rem + env(safe-area-inset-bottom))',
           }}
-          className="absolute bottom-6 right-6 flex origin-bottom-right flex-col gap-2 bg-transparent px-1 py-1 lg:scale-100 scale-90"
+          className={`absolute bottom-6 right-6 flex origin-bottom-right flex-col gap-2 bg-transparent px-1 py-1 lg:scale-100 ${emModoCompacto ? 'scale-75' : 'scale-90'}`}
         >
           <span className="text-right font-display text-xs font-semibold uppercase tracking-[0.28em] text-amber-200/90">
             Turno
