@@ -705,6 +705,26 @@ export function sairDaSalaEncaminhadaNaoIniciada(
   return executarSaidaDeSala(estado, comando, { permitirEncaminhada: true });
 }
 
+/**
+ * Remoção do desistente de sala `encaminhada` com partida em andamento (#290).
+ *
+ * Origem exclusiva: callback game-server → lobby após `desistir_da_partida`
+ * aplicado no engine da partida — nunca comando de cliente (`SAIR_DA_SALA`
+ * do cliente segue recusado em `encaminhada` pelo `sairDaSala` canônico).
+ * Reaproveita o núcleo de saída com `permitirEncaminhada` (sucessão do
+ * Anfitrião e `sala_encerrada` se esvaziar, como no bypass da #222), mas sem
+ * exigir orfandade: a partida existe e continua com os restantes. A sala
+ * segue `encaminhada` enquanto houver membros ativos. O motivo registrado é
+ * `saida` (vocabulário do vínculo no lobby, CONTEXT.md — Membro); a causa
+ * (desistência da partida) vive no game-server.
+ */
+export function removerDesistenteDaSala(
+  estado: EstadoDoLobby,
+  comando: SairDaSalaComando,
+): Resultado {
+  return executarSaidaDeSala(estado, comando, { permitirEncaminhada: true });
+}
+
 export function expulsarMembro(
   estado: EstadoDoLobby,
   comando: ExpulsarMembroComando,

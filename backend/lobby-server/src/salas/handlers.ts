@@ -29,6 +29,7 @@ import {
   type Comando,
   type EstadoDoLobby,
   type Sala as SalaDominio,
+  removerDesistenteDaSala,
   sairDaSalaEncaminhadaNaoIniciada,
 } from '@flicker/engine';
 import type {
@@ -1693,6 +1694,55 @@ export class SalasHandlers {
     // Remoção por jogador (review JF532, O3): o bypass só tem o `jogadorId` —
     // sem cast no-op de socket falso.
     this.broadcast.removerSocketPorJogadorId(jogadorId);
+    return true;
+  }
+
+  /**
+   * Desvinculação do desistente de sala `encaminhada` com partida em andamento
+   * (issue #290) — origem exclusiva: callback game-server → lobby
+   * (`POST /api/desistencia`), nunca comando de cliente.
+   *
+   * Espelha a parte pós-sucesso do bypass de órfã: engine (com sucessão do
+   * Anfitrião no mesmo commit), PG, estado em memória, projeção e broadcast
+   * `MEMBRO_SAIU` (a vítima recebe antes da remoção dos sockets e zera a sala
+   * local pelo próprio `jogadorId` do evento). A sala segue `encaminhada`
+   * enquanto houver membros ativos; o desistente NÃO entra em
+   * `jogadoresBloqueados` — ele pode criar/entrar em outra sala na hora.
+   * Idempotente para re-chamadas: engine sem membro ativo devolve false (o
+   * chamador trata como já-desvinculado).
+   */
+  async removerDesistente(salaId: string, jogadorId: string): Promise<boolean> {
+    const res = removerDesistenteDaSala(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
+    if (!res.sucesso) {
+      console.warn('[salas] remoção de desistente rejeitada pelo engine', { salaId, jogadorId, codigo: res.erro.codigo });
+      return false;
+    }
+    const salaEncerrada = res.eventos.some((e) => e.tipo === 'sala_encerrada');
+    const sucessao = res.eventos.find(
+      (e) => e.tipo === 'anfitriao_sucedido',
+    );
+    const novoAnfitriaoJogadorId = sucessao?.tipo === 'anfitriao_sucedido'
+      ? jogadorNovoAnfitriao(res.estado, salaId, sucessao.anfitriaoNovoId)
+      : undefined;
+    await this.repo.sairMembroAtomico(salaId, jogadorId, 'saida', salaEncerrada, novoAnfitriaoJogadorId);
+    const codigoPre = this.estado.abertas.get(salaId)?.sala.codigo ?? null;
+    this.estado.substituirEstado(res.estado);
+    if (salaEncerrada) {
+      if (codigoPre !== null) {
+        await this.projecao.limparSala(salaId, codigoPre);
+      }
+      this.estado.abertas.delete(salaId);
+    } else {
+      await this.atualizarProjecaoEstado(res.estado, salaId);
+    }
+    await this.projecao.limparAssociacaoJogador(jogadorId);
+    const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase, undefined, this.estado.botPorJogadorId);
+    this.difundir(eventos, salaId);
+    // A vítima recebe o MEMBRO_SAIU acima e depois sai do fan-out da sala —
+    // broadcasts futuros (ex.: SALA_ATUALIZADA da reabertura) não ressuscitam
+    // a sala local dela.
+    this.broadcast.removerSocketPorJogadorId(jogadorId);
+    this.espelhar(salaId, 'info', `${this.apelidoDe(jogadorId)} desistiu da partida e saiu da sala`);
     return true;
   }
 

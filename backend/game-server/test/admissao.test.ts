@@ -391,6 +391,35 @@ test('Jogador FORA do roster é recusado', async () => {
   }
 });
 
+test('Desistente não readmite: fora do engine recebe 403 JOGADOR_NAO_NA_PARTIDA', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaComEstadoNoRedis(partidaId, roster);
+
+    // Simula a desistência do jogador-4: engine em N−1, roster intacto.
+    const bruto = await redis.get(chaveDoEstadoDaPartida(partidaId));
+    assert.ok(bruto !== null);
+    const estado = JSON.parse(bruto!);
+    estado.jogadores = estado.jogadores.filter((j: { jogadorId: string }) => j.jogadorId !== 'jogador-4');
+    await redis.set(chaveDoEstadoDaPartida(partidaId), JSON.stringify(estado), 'EX', 600);
+
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-4');
+    const token = criarJwt('jogador-4', 'Jogador 4', sessaoId);
+
+    const resultado = await fazerUpgradeHttp(servidor.port, token, partidaId);
+
+    assert.equal(resultado.status, 403);
+    const msg = JSON.parse(resultado.texto);
+    assert.equal(msg.type, 'ADMISSAO_REJEITADA');
+    assert.equal(msg.codigo, 'JOGADOR_NAO_NA_PARTIDA');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
 test('JWT inválido/expirado é recusado', async () => {
   const servidor = await subirServidor();
   try {

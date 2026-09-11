@@ -135,9 +135,10 @@ export function traduzirEventos(
         break;
       // Término (issues #176 e #179): broadcast com o Resultado; o motivo da
       // derrota viaja em campo opcional (issue #145-exp — sync
-      // DesfechoDaPartida, engine/src/partida.ts:128-133). A vitória não tem
-      // motivo no domínio — a chave `motivo` só aparece nas derrotas. O
-      // engine emite partida_terminada como último evento do lote da Ação.
+      // DesfechoDaPartida, engine/src/partida.ts:158-165; 'desistencia' pela
+      // issue #288). A vitória não tem motivo no domínio — a chave `motivo`
+      // só aparece nas derrotas. O engine emite partida_terminada como último
+      // evento do lote da Ação.
       case 'partida_terminada': {
         const desfecho = evento.desfecho;
         saida.push(
@@ -168,6 +169,23 @@ export function traduzirEventos(
           estadosAplicados: evento.estadosAplicados,
         });
         break;
+      // Desistência (issues #288/#289, ADR-0013): shape 1:1 com o domínio —
+      // abre o lote do comando e é o anúncio de presença da saída definitiva:
+      // a partida nunca fez broadcast de `em_reconexao` (a queda é silenciosa
+      // — só marca presença via `marcarDesconexao`, sem mensagem aos
+      // restantes), então este evento é a novidade que avisa os restantes
+      // antes da nova ordem (TURNO_INICIADO, com Passagem de Vez quando o
+      // desistente era o Jogador Ativo) e do tabuleiro (CELULAS_ILUMINADAS/
+      // LIMPEZA_APLICADA) do mesmo lote; o término por quórum mínimo (N−1)
+      // chega como PARTIDA_TERMINADA no fim do lote. Sem evento wire novo de
+      // roster.
+      case 'desistencia_registrada':
+        saida.push({
+          type: 'DESISTENCIA_REGISTRADA',
+          jogadorId: evento.jogadorId,
+          peaoId: evento.peaoId,
+        });
+        break;
       // Resgate (issue #171): shape 1:1 com o domínio — wire follow-up #173
       // pode refinar feedback, mas o broadcast já expõe o resgate.
       case 'resgate_realizado':
@@ -177,17 +195,6 @@ export function traduzirEventos(
           resgatadoJogadorId: evento.resgatadoJogadorId,
           resgatadorJogadorId: evento.resgatadorJogadorId,
           resgatadorPeaoId: evento.resgatadorPeaoId,
-        });
-        break;
-      // Desistência (issue #289, ADR-0013): shape 1:1 com o domínio — abre o
-      // lote do comando, antes de CELULAS_ILUMINADAS/LIMPEZA_APLICADA e da
-      // Passagem de Vez (quando o desistente era o Jogador Ativo); o término
-      // por quórum mínimo (N−1) chega como PARTIDA_TERMINADA no fim do lote.
-      case 'desistencia_registrada':
-        saida.push({
-          type: 'DESISTENCIA_REGISTRADA',
-          jogadorId: evento.jogadorId,
-          peaoId: evento.peaoId,
         });
         break;
       default: {

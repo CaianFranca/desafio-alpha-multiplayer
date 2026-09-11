@@ -55,6 +55,7 @@ import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import type {
   ConfirmarPosicaoDoPeaoComando,
+  DesistirDaPartidaComando,
   EncerrarTurnoComando,
   EstadoDaPartidaSnapshot,
   PartidaComandoDoCliente,
@@ -62,13 +63,14 @@ import type {
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
 
-/** Comandos do canal: tabuleiro (ST-09), peões (ST-10) e turnos (ST-11, #118),
- * sem o jogadorId — injetado uma única vez em enviarComJogador. */
+/** Comandos do canal: tabuleiro (ST-09), peões (ST-10), turnos (ST-11, #118)
+ * e desistência (#290), sem o jogadorId — injetado uma única vez em enviarComJogador. */
 type ComandoDoCanal =
   | TabuleiroComandoDoCliente
   | PeaoComandoDoCliente
   | Omit<ConfirmarPosicaoDoPeaoComando, 'jogadorId'>
   | Omit<EncerrarTurnoComando, 'jogadorId'>
+  | Omit<DesistirDaPartidaComando, 'jogadorId'>
 
 type AcaoDoModelo =
   | { type: 'EVENTO'; evento: Parameters<typeof reduzirEvento>[1] }
@@ -224,6 +226,36 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     setEncaixeTrigger((atual) => (atual?.key === key ? null : atual))
   }, [])
 
+  // ── Aviso de desistência alheia (issue #290) ──
+  // Evento-driven: DESISTENCIA_REGISTRADA projeta no modelo + exibe toast
+  // visível e anúncio para leitor de tela (desistência, nova ordem e fim).
+  // Snapshot reconcilia; auto-dismiss em 8s como AvisosDoLobby.
+  const [avisoDesistencia, setAvisoDesistencia] = useState<{
+    id: number
+    jogadorId: string
+    apelido: string
+    restantes: number
+    ordemTexto: string
+  } | null>(null)
+  const avisoDesistenciaIdRef = useRef(0)
+  const avisoDesistenciaTimerRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (avisoDesistencia === null) return
+    if (avisoDesistenciaTimerRef.current !== null) {
+      window.clearTimeout(avisoDesistenciaTimerRef.current)
+    }
+    avisoDesistenciaTimerRef.current = window.setTimeout(() => {
+      setAvisoDesistencia(null)
+      avisoDesistenciaTimerRef.current = null
+    }, 8000)
+    return () => {
+      if (avisoDesistenciaTimerRef.current !== null) {
+        window.clearTimeout(avisoDesistenciaTimerRef.current)
+        avisoDesistenciaTimerRef.current = null
+      }
+    }
+  }, [avisoDesistencia])
+
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
   const emResultado = estado === 'resultado'
   const emResultadoRef = useRef(emResultado)
@@ -350,6 +382,30 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         }
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
         if (emResultadoRef.current) return
+        // Desistência (issue #290): projeta remoção do peão/ordem no modelo
+        // (CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* do mesmo lote completam
+        // o tabuleiro) + toast visível e anúncio SR. Snapshot reconcilia.
+        if (evento.type === 'DESISTENCIA_REGISTRADA') {
+          const anterior = modeloRef.current
+          const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          const restantes = Object.keys(anterior.jogadorPorId).filter((id) => id !== evento.jogadorId)
+          const ordemTexto = Object.entries(anterior.jogadorPorId)
+            .filter(([id]) => id !== evento.jogadorId)
+            .map(([id, d]) => ({ id, ordem: d.ordem }))
+            .sort((a, b) => a.ordem - b.ordem)
+            .map((o) => anterior.jogadorPorId[o.id]?.apelido ?? o.id)
+            .join(', ')
+          avisoDesistenciaIdRef.current += 1
+          setAvisoDesistencia({
+            id: avisoDesistenciaIdRef.current,
+            jogadorId: evento.jogadorId,
+            apelido,
+            restantes: restantes.length,
+            ordemTexto,
+          })
+          return
+        }
         // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
         // projetados no modelo sem recarregar página. Só o ataque COM
         // penalidade (`estadosAplicados.length > 0`, issue #228) toca a
@@ -505,6 +561,40 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     enviarComJogadorRef.current = enviarComJogador
   }, [enviarComJogador])
+
+  // ── Desistência (issue #290) ──
+  // Confirmar no modal envia DESISTIR_DA_PARTIDA (irreversível, só o próprio
+  // Jogador, vale no próprio turno ou fora dele) e navega à principal (/),
+  // mantendo o login (AuthProvider persiste a Sessão). Gate local anti-duplo
+  // clique: DESISTIR não tem chave pendente (#249 retorna null).
+  // Quem desistiu não readmite: o servidor rejeita o upgrade com
+  // JOGADOR_NAO_NA_PARTIDA — a volta à URL cai em falha terminal sem retry
+  // nem voltar-à-sala (só queda/logout mantém retry). A flag sobrevive a
+  // F5/voltar pelo histórico na mesma aba via sessionStorage.
+  const desistindoRef = useRef(false)
+  const [desistiu, setDesistiu] = useState(() => {
+    if (typeof window === 'undefined' || partidaId === null) return false
+    try {
+      return window.sessionStorage.getItem(`partida-desistiu:${partidaId}`) === '1'
+    } catch {
+      return false
+    }
+  })
+  const desistirEIrParaPrincipal = useCallback(() => {
+    if (desistindoRef.current) return
+    desistindoRef.current = true
+    if (jogadorId !== null && !emResultadoRef.current) {
+      enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
+    }
+    setDesistiu(true)
+    try {
+      if (partidaId !== null) window.sessionStorage.setItem(`partida-desistiu:${partidaId}`, '1')
+    } catch {
+      // sessionStorage indisponível: a flag em memória já bloqueia o retry.
+    }
+    desconectar()
+    navigate('/')
+  }, [desconectar, enviar, jogadorId, navigate, partidaId])
 
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
@@ -728,6 +818,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao, estadoInteracao, estadoInteracaoPeoes])
 
   const tentarNovamenteComConexao = useCallback(() => {
+    // Desistente não reconecta (o servidor rejeitaria com
+    // JOGADOR_NAO_NA_PARTIDA) — falha terminal sem retry.
+    if (desistiu) return
     desconectar()
     if (!temAlvo) {
       falhar()
@@ -739,7 +832,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       carregar()
     }
     reconectarSocket()
-  }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader])
+  }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader, desistiu])
 
   // ── Comandos de turno (issue #118) — todos via enviarComJogador ──
   // Permanecer auto-seleciona o peão da vez (bloqueante review #338): no
@@ -833,7 +926,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
       />
-      <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
+      <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
       {/*
         Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
         região viva sempre presente; o texto atualiza a cada recusa (som +
@@ -854,6 +947,35 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         {anuncioDeRecusa !== null ? textoDoAnuncioDeRecusa(anuncioDeRecusa.motivo) : ''}
       </div>
       {/*
+        Aviso de desistência alheia (issue #290): visível + anúncio SR
+        (desistência, nova ordem e fim). O fim (derrota-quando-sobra-1) chega
+        via PARTIDA_TERMINADA com motivo desistencia no overlay de resultado.
+      */}
+      {avisoDesistencia !== null && estadoEmAndamento ? (
+        <div
+          data-testid="aviso-desistencia"
+          data-jogador-id={avisoDesistencia.jogadorId}
+          role="status"
+          className="pointer-events-auto absolute left-1/2 top-20 z-40 -translate-x-1/2 rounded bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-xl"
+        >
+          {avisoDesistencia.apelido} desistiu. Nova ordem: {avisoDesistencia.ordemTexto || '—'}.
+        </div>
+      ) : null}
+      <div
+        key={avisoDesistencia?.id ?? 'sem-desistencia'}
+        data-testid="anuncio-desistencia"
+        data-jogador-id={avisoDesistencia?.jogadorId ?? undefined}
+        data-anuncio-id={avisoDesistencia?.id ?? undefined}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {avisoDesistencia !== null
+          ? `${avisoDesistencia.apelido} desistiu da partida. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por desistência.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
+          : ''}
+      </div>
+      {/*
         HUD definitivo da Partida (issue #226, spec pai #224): irmão de
         AmbienteDeJogo/PartidaMoldura no ponto mais alto, somente leitura do
         modelo existente (reducao.ts/snapshot.ts). Substitui os indicadores
@@ -870,7 +992,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           emAndamento={estadoEmAndamento}
           emResultado={emResultado}
           iniciadaEm={modelo.iniciadaEm}
-          onSair={voltarASala}
+          onSair={desistirEIrParaPrincipal}
         />
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (

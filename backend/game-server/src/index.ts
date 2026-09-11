@@ -8,7 +8,7 @@ import { redisClient } from './config/redis.ts';
 import { PartidaBroadcaster } from './partidas/broadcast.ts';
 import { PartidaHandlers } from './partidas/handlers.ts';
 import type { ContextoDoGameServer } from './contexto.ts';
-import { criarClienteDeRetorno } from './retorno/cliente.ts';
+import { criarClienteDeRetorno, criarClienteDeDesistencia } from './retorno/cliente.ts';
 import { configurarNaoInicio, definirBroadcasterParaNaoInicio, definirRedisParaNaoInicio, rearmarNaoInicioAposRestart } from './partidas/nao-inicio.ts';
 import {
   iniciarHeartbeat,
@@ -25,6 +25,7 @@ const {
   partidaTerminadaTtlSegundos,
   partidaNaoInicioSegundos,
   lobbyRetornoCallbackUrl,
+  lobbyDesistenciaCallbackUrl,
   gameServerHeartbeatIntervalMs,
   gameServerHeartbeatTtlMs,
   gameServerId: configServerId,
@@ -40,6 +41,7 @@ const contexto: ContextoDoGameServer = {
   partidaNaoInicioSegundos,
   partidaTerminadaTtlSegundos,
   lobbyRetornoCallbackUrl,
+  lobbyDesistenciaCallbackUrl,
 };
 const app = createApp(contexto);
 
@@ -49,6 +51,10 @@ const notificarRetorno = criarClienteDeRetorno({
   lobbyRetornoCallbackUrl,
   jwtSecret,
 });
+const notificarDesistencia = criarClienteDeDesistencia({
+  lobbyDesistenciaCallbackUrl,
+  jwtSecret,
+});
 const broadcaster = new PartidaBroadcaster();
 const streamDeDebug = new DebugStreamDaPartida();
 const handlers = new PartidaHandlers({
@@ -56,6 +62,7 @@ const handlers = new PartidaHandlers({
   broadcaster,
   partidaTerminadaTtlSegundos,
   notificarRetorno,
+  notificarDesistencia,
   debug: streamDeDebug,
 });
 configurarNaoInicio(notificarRetorno, partidaNaoInicioSegundos);
