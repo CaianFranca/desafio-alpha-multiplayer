@@ -104,6 +104,7 @@ function mockSalaContext(codigo: string | null): UseSalaWebSocketReturn {
     iniciarPartida: () => {},
     expulso: false,
     descartarExpulsao: () => {},
+    marcarSaidaPropria: () => {},
   }
 }
 
@@ -660,6 +661,45 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     )
     expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
     expect(wsInst.onclose).toBeNull()
+  })
+
+  it('B1: SAIR na tela de resultado não marca desistência nem envia DESISTIR', async () => {
+    window.sessionStorage.removeItem('partida-desistiu:p')
+    try {
+      const ws = await partidaComSnapshot(criarSnapshotBase())
+      act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'vitoria' }))
+      await screen.findByTestId('overlay-resultado')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+
+      const wsInst = MockWebSocket.last()!
+      expect(wsInst.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(window.sessionStorage.getItem('partida-desistiu:p')).toBeNull()
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+    } finally {
+      window.sessionStorage.removeItem('partida-desistiu:p')
+    }
+  })
+
+  it('F4: desistência 2→1 anuncia o fim por desistência no SR', async () => {
+    const ws = await partidaComSnapshot(
+      criarSnapshotBase({ jogadores: JOGADORES_BASE.slice(0, 2) }),
+    )
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+      }),
+    )
+    await screen.findByTestId('aviso-desistencia')
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Ana desistiu/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/Ana desistiu/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(
+      /Partida terminada em derrota por desistência/i,
+    )
   })
 
   it('desistência alheia projeta remoção, avisa e anuncia SR; derrota-quando-sobra-1 com retorno', async () => {

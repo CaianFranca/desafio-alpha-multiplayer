@@ -481,6 +481,9 @@ test('2→1 declara derrota por desistência e dispara o Retorno uma única vez'
     serverId: 'game-server-teste-desistencia',
     resultado: 'derrota',
     jogadores: ['jogador-1'],
+    // B2: o término com desistência marca o aviso para que o 409 transitório
+    // do lobby (detach ainda em voo) retente em vez de encerrar definitivo.
+    teveDesistencia: true,
   });
 
   // Comando pós-término é recusado e não duplica o callback.

@@ -747,6 +747,9 @@ export function reduzirEvento(
       // no mesmo lote via CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* — aqui
       // só a remoção imediata, sem recalcular regra. Snapshot reconcilia.
       // Idempotente: evento repetido (replay/reconexão) é no-op.
+      // pecaSelecionadaId/pecaEmManipulacaoId ficam para o TURNO_* do lote
+      // (que os zera) — sem mapeamento peça→jogador aqui, adivinhar o dono
+      // seria pior que aguardar o próximo evento do lote.
       const jogadorId = evento.jogadorId
       const peaoId = evento.peaoId
       const temJogador = Object.prototype.hasOwnProperty.call(estado.jogadorPorId, jogadorId)

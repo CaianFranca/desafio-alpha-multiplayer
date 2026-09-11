@@ -73,8 +73,14 @@ export function criarDesistenciaRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
         }
 
-        const desvinculado = await contexto.handlers.removerDesistente(salaId, jogadorId);
-        if (!desvinculado) {
+        const resultado = await contexto.handlers.removerDesistente(salaId, jogadorId);
+        if (!resultado.desvinculado) {
+          // B4 (issue #290): SALA_INCONSISTENTE é transitória (pós-restart) —
+          // 409 retentável para o game-server retentar. Nunca responde 200
+          // sem o PG convergido quando ainda há vínculo com esta sala.
+          if (resultado.codigo === 'SALA_INCONSISTENTE') {
+            return { tipo: 'erro' as const, status: 409, codigo: 'SALA_INCONSISTENTE' };
+          }
           // Engine sem membro ativo (ex.: saída concorrente removeu entre o
           // check e a mutação): converge PG/Redis e responde idempotente.
           await contexto.repo.obterSalaAtivaDoJogador(jogadorId).then(async (atual) => {
@@ -93,6 +99,7 @@ export function criarDesistenciaRouter(contexto: SalasContexto): Router {
           DADOS_INVALIDOS: 'Payload inválido.',
           SALA_NAO_ENCONTRADA: 'Sala não encontrada.',
           SALA_NAO_ENCAMINHADA: 'Sala não está encaminhada.',
+          SALA_INCONSISTENTE: 'Sala temporariamente inconsistente, tente novamente.',
           DESISTENCIA_INVALIDA: 'Desistência não corresponde a esta sala.',
           ERRO_INTERNO: 'Erro interno.',
         };

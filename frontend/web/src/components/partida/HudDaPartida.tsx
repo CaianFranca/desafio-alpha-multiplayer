@@ -164,6 +164,9 @@ export function HudDaPartida({
   onSair,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
+  // Trava local anti-duplo-clique no Confirmar (#290): o gate de rede vive na
+  // página, mas o modal segue aberto até o navigate assíncrono.
+  const [saidaEnviada, setSaidaEnviada] = useState(false)
 
   // Ordenação estável: recomputada apenas quando o modelo muda — o cronômetro
   // vive isolado em <CronometroDoHud>, então o tick de 1×/s não re-renderiza
@@ -323,7 +326,10 @@ export function HudDaPartida({
         <button
           type="button"
           data-testid="hud-sair"
-          onClick={() => setConfirmandoSaida(true)}
+          onClick={() => {
+            setSaidaEnviada(false)
+            setConfirmandoSaida(true)
+          }}
           className="pointer-events-auto min-h-[44px] min-w-[44px] rounded border border-amber-500/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-400 hover:border-amber-400 hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-500"
         >
           Sair
@@ -343,7 +349,12 @@ export function HudDaPartida({
             <button
               type="button"
               data-testid="hud-sair-confirmar"
-              onClick={onSair}
+              disabled={saidaEnviada}
+              onClick={() => {
+                if (saidaEnviada) return
+                setSaidaEnviada(true)
+                onSair()
+              }}
               className="min-h-[44px] min-w-[44px] rounded bg-amber-500 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >
               Confirmar

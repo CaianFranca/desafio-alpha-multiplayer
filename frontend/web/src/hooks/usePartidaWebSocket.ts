@@ -322,7 +322,13 @@ export function usePartidaWebSocket({
   }, [conectar, encerrarConexao])
 
   const desconectar = useCallback(() => {
-    comandosPendentesRef.current = []
+    // Preserva DESISTIR_DA_PARTIDA enfileirado (#290, R2): no timeout do
+    // aguardarConexao a página navega mesmo assim, mas o comando continua
+    // válido para a próxima abertura do socket em vez de ser descartado em
+    // silêncio. Demais comandos de contexto anterior são descartados.
+    comandosPendentesRef.current = comandosPendentesRef.current.filter(
+      (comando) => comando.type === 'DESISTIR_DA_PARTIDA',
+    )
     encerrarConexao()
   }, [encerrarConexao])
 

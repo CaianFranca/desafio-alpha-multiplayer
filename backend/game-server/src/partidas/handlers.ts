@@ -126,9 +126,9 @@ export class PartidaHandlers {
         return;
       }
 
-      // Captura antecipada dos metadados da partida para fallback do callback (B1).
+      // Captura antecipada dos metadados da partida para fallback do callback (B1/B3).
       let partidaPrevia: import('./partidas.ts').PartidaPreparada | null = null;
-      if (this.notificarRetorno !== undefined) {
+      if (this.notificarRetorno !== undefined || this.notificarDesistencia !== undefined) {
         try {
           partidaPrevia = await obterPartida(this.redis, partidaId);
         } catch {
@@ -284,6 +284,14 @@ export class PartidaHandlers {
                           console.error('[partida] callback ainda sem metadados após segundo reagendamento', { partidaId });
                           return;
                         }
+                        // F9 (#290): o detach pode ter sido pulado por falta de
+                        // metadados no término — tenta antes do retorno para
+                        // não esbarrar no 409 do lobby (mesma ordem do feliz).
+                        await this.desvincularDesistentes(
+                          partidaId,
+                          partidaReagendada2,
+                          resultado.estado.jogadores.map((j) => j.jogadorId),
+                        );
                         const avisoReagendado2 = await this.montarAviso(
                           partidaReagendada2,
                           termino.desfecho.tipo,
@@ -304,6 +312,12 @@ export class PartidaHandlers {
                     return;
                   }
                   if (this.notificarRetorno === undefined) return;
+                  // F9 (#290): idem acima — detach antes do retorno reagendado.
+                  await this.desvincularDesistentes(
+                    partidaId,
+                    partidaReagendada,
+                    resultado.estado.jogadores.map((j) => j.jogadorId),
+                  );
                   const avisoReagendado = await this.montarAviso(
                     partidaReagendada,
                     termino.desfecho.tipo,
@@ -329,7 +343,7 @@ export class PartidaHandlers {
                 desistencias.length > 0,
               );
               if (avisoMontado === null) {
-                console.error('[partida] sem N−1 confiável para retorno, reagendando', { partidaId });
+                console.error('[partida] sem N−1 confiável para retorno, descartando', { partidaId });
               } else {
                 aviso = avisoMontado;
                 this.callbacksEnviados.add(partidaId);
@@ -436,7 +450,9 @@ export class PartidaHandlers {
     }
     const naPartida = new Set(jogadoresNaPartida);
     const desistentes = partida.roster.map((m) => m.jogadorId).filter((id) => !naPartida.has(id));
-    for (const jogadorId of desistentes) {
+    // Em paralelo com teto individual: jogadorIds distintos, lobby idempotente
+    // e serializado na fila — o tempo total vira max(teto), não soma.
+    await Promise.all(desistentes.map(async (jogadorId) => {
       const promessa = notificar({ salaId: partida.salaId, partidaId, serverId: partida.serverId, jogadorId });
       // Rastreia em mapa próprio (nunca no de retornos — o dedup do retorno
       // abaixo não pode ver detach como "callback em voo").
@@ -456,7 +472,7 @@ export class PartidaHandlers {
         // para não travar os demais.
         console.error('[partida] falha ao desvincular desistente', { partidaId, jogadorId, erro });
       }
-    }
+    }));
   }
 
   /** Corre com teto: 'ok' se resolveu/rejeitou a tempo, 'teto' se estourou. */
@@ -497,6 +513,7 @@ export class PartidaHandlers {
         serverId: partida.serverId,
         resultado,
         jogadores: jogadoresEmMemoria,
+        teveDesistencia,
       };
     }
     let jogadores: readonly string[] | null = null;
@@ -513,6 +530,7 @@ export class PartidaHandlers {
         serverId: partida.serverId,
         resultado,
         jogadores,
+        teveDesistencia,
       };
     }
     if (teveDesistencia) return null;
@@ -522,6 +540,7 @@ export class PartidaHandlers {
       serverId: partida.serverId,
       resultado,
       jogadores: partida.roster.map((m) => m.jogadorId),
+      teveDesistencia,
     };
   }
 
@@ -566,18 +585,27 @@ export class PartidaHandlers {
   }
 
   async drenarRetornosPendentes(timeoutMs = 5000): Promise<void> {
-    const pendentes: Promise<unknown>[] = [...this.retornosPendentes.values()];
-    for (const conjunto of this.desvinculosPendentes.values()) {
-      pendentes.push(...conjunto);
+    // B3 (issue #290): loop com re-snapshot até o teto total. Os callbacks
+    // reais nascem após `obterPartida` (o placeholder de `rastrearEspera`
+    // existe antes) — com snapshot único, o drain retornava após o
+    // placeholder sem esperar o payload. Reamostra enquanto houver pendentes.
+    const inicio = Date.now();
+    for (;;) {
+      const pendentes: Promise<unknown>[] = [...this.retornosPendentes.values()];
+      for (const conjunto of this.desvinculosPendentes.values()) {
+        pendentes.push(...conjunto);
+      }
+      if (pendentes.length === 0) return;
+      const restante = timeoutMs - (Date.now() - inicio);
+      if (restante <= 0) return;
+      await Promise.race([
+        Promise.allSettled(pendentes),
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, restante);
+          timer.unref?.();
+        }),
+      ]);
     }
-    if (pendentes.length === 0) return;
-    await Promise.race([
-      Promise.allSettled(pendentes),
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, timeoutMs);
-        timer.unref?.();
-      }),
-    ]);
   }
 
   private limparCadeia(partidaId: string, proxima: Promise<unknown>): void {

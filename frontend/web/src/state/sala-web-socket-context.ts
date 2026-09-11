@@ -17,6 +17,12 @@ export function useSalaCodigoOptional(): string | null {
   return ctx?.sala?.codigoDeSala ?? null
 }
 
+/** Limpeza otimista da sala ao desistir (F2, #290) — null sem provider. */
+export function useMarcarSaidaPropriaOptional(): (() => void) | null {
+  const ctx = useContext(SalaWebSocketContext)
+  return ctx?.marcarSaidaPropria ?? null
+}
+
 /** Quantidade de Membros na Sala (N=2..4), ou null sem sala — seed pré-snapshot da Partida (#284). */
 export function useQuantidadeDeMembrosDaSalaOptional(): number | null {
   const ctx = useContext(SalaWebSocketContext)

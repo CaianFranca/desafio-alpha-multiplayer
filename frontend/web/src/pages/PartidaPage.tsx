@@ -50,7 +50,7 @@ import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
-import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
+import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional, useMarcarSaidaPropriaOptional } from '../state/sala-web-socket-context'
 import type {
   ConfirmarPosicaoDoPeaoComando,
   DesistirDaPartidaComando,
@@ -109,6 +109,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     authState.status === 'authenticated' ? authState.jogador.id : null
   const navigate = useNavigate()
   const codigoDeSala = useSalaCodigoOptional()
+  // F2 (#290): limpeza otimista da sala do lobby ao desistir — o broadcast
+  // MEMBRO_SAIU reconcilia depois (idempotente), mas não é a única fonte.
+  const marcarSaidaPropria = useMarcarSaidaPropriaOptional()
 
   const { estado, resultado, motivo, carregar, tentarNovamente, partidaPreparada, partidaEmAndamento, partidaTerminada, falhar } =
     usePartidaTela({
@@ -322,6 +325,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           const anterior = modeloRef.current
           const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          // F4 (#290): sem snapshot ainda não há roster — projeta a remoção,
+          // mas suprime toast/SR (apelido/ordem/restantes seriam falsos:
+          // "Um jogador desistiu", "—", "sem jogadores restantes").
+          if (Object.keys(anterior.jogadorPorId).length === 0) return
           const restantes = Object.keys(anterior.jogadorPorId).filter((id) => id !== evento.jogadorId)
           const ordemTexto = Object.entries(anterior.jogadorPorId)
             .filter(([id]) => id !== evento.jogadorId)
@@ -493,11 +500,33 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const desistirEIrParaPrincipal = useCallback(() => {
     if (desistindoRef.current) return
     desistindoRef.current = true
-    setDesistiu(true)
+    // B1 (#290): sair da tela de resultado (vitória/derrota normal) não é
+    // desistência — o DESISTIR nem é enviado nesse caso. Só marca `desistiu`
+    // (flag que bloqueia retry e volta à URL com falha terminal) quando a
+    // desistência é real (fora de resultado). Sem isso, sair do resultado
+    // poluía o sessionStorage e a volta futura à URL caía em falha indevida.
+    const vaiDesistir = !emResultadoRef.current
+    if (vaiDesistir) {
+      setDesistiu(true)
+      try {
+        if (partidaId !== null) window.sessionStorage.setItem(`partida-desistiu:${partidaId}`, '1')
+      } catch {
+        // sessionStorage indisponível: a flag em memória já bloqueia o retry.
+      }
+      // F2: zera a sala local na hora (nova aba / lobby fechado não recebem o
+      // broadcast); o MEMBRO_SAIU posterior reconcilia sem ressuscitar.
+      try {
+        marcarSaidaPropria?.()
+      } catch {
+        // Sem provider do lobby: o broadcast continua sendo a fonte.
+      }
+    }
+    // A chave do cronômetro do HUD (#226) é limpa ao sair da página nos dois
+    // caminhos — a desistência em andamento nunca chega ao emResultado.
     try {
-      if (partidaId !== null) window.sessionStorage.setItem(`partida-desistiu:${partidaId}`, '1')
+      if (partidaId !== null) window.sessionStorage.removeItem(`hud-cronometro-inicio:${partidaId}`)
     } catch {
-      // sessionStorage indisponível: a flag em memória já bloqueia o retry.
+      // ignora
     }
     // R2: entrega o DESISTIR antes de cortar a conexão. Se o socket está
     // OPEN, o envio é imediato; se está CONNECTING (janela de reconexão), o
@@ -505,7 +534,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     // o desconectar() abaixo limparia a fila e o servidor nunca saberia.
     // No timeout navegamos mesmo assim (best-effort; a flag já bloqueia retry).
     const entregarESair = async () => {
-      if (jogadorId !== null && !emResultadoRef.current) {
+      if (jogadorId !== null && vaiDesistir) {
         const destino = enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
         if (destino === 'enfileirado') {
           await aguardarConexao(2000).catch(() => false)
@@ -515,7 +544,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       navigate('/')
     }
     void entregarESair()
-  }, [aguardarConexao, desconectar, enviar, jogadorId, navigate, partidaId])
+  }, [aguardarConexao, desconectar, enviar, jogadorId, marcarSaidaPropria, navigate, partidaId])
 
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
