@@ -58,7 +58,7 @@ test('bots/estado: ocupacao = membros + in-flight (teto de 4)', () => {
   assert.ok(membrosAtivos + contarBotsEmAdmissao('s1') >= 4);
 });
 
-test('bots/estado: lista apelidos in-flight por sala (sorteio não repete)', () => {
+test('bots/estado: lista apelidos in-flight por sala (escolha não repete)', () => {
   limparEstadoDeBotsParaTeste();
   registrarBotEmAdmissao({ jogadorId: 'j1', apelido: 'Coelho Sabido', salaId: 's1', codigoDeSala: 'ABCDEF' });
   registrarBotEmAdmissao({ jogadorId: 'j2', apelido: 'Raposa Astuta', salaId: 's1', codigoDeSala: 'ABCDEF' });

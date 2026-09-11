@@ -6,11 +6,16 @@
 // Regras:
 //   - ASCII, 3–17 chars cada (reserva para o sufixo " 99" dentro do teto de
 //     20 do contrato `CadastroRequest.apelido` — ver `routes/auth.ts`).
-//   - Unicidade por Sala: a rota monta os ocupados (membros via PG — a
-//     projeção/engine não carregam Apelido — + in-flight via `estado.ts`)
-//     e o sorteio exclui; sufixo numérico só quando o pool esgota.
+//   - Unicidade por Sala: a rota monta os ocupados (membros via
+//     `repo.obterApelidos` — a projeção/engine não carregam Apelido — +
+//     in-flight via `estado.ts`) e a escolha exclui; sufixo numérico só
+//     quando o pool esgota.
 //   - `UNIQUE` global do PG continua como árbitro final (outra Sala pode
 //     reutilizar a base); colisão vira retry no `bot-runner.ts`.
+//
+// Divergência intencional: o CLI dev `scripts/bots-entrar-na-sala.ts` mantém
+// o hash `b-xxxx-xxxxxx` via registro público (`@teste.local`); só o
+// BotRunner usa esta lista (INSERT direto, `@bot.teste`).
 
 import { randomInt } from 'node:crypto';
 
@@ -54,11 +59,22 @@ export function apelidoComSufixo(base: string, n: number): string {
 }
 
 /**
- * Sorteia um Apelido livre na Sala.
+ * Junta ocupados de membros (PG) + in-flight (`estado.ts`) para a exclusão
+ * por Sala. Pura para cobrir sem I/O.
+ */
+export function mesclarApelidosOcupados(
+  apelidosDeMembros: readonly string[],
+  apelidosEmAdmissao: readonly string[],
+): string[] {
+  return [...apelidosDeMembros, ...apelidosEmAdmissao];
+}
+
+/**
+ * Escolhe um Apelido livre na Sala (usa-se "escolha": `Sorteio` é o da Caixa).
  * `ocupados` usa comparação normalizada (case-insensitive).
  * `indiceAleatorio` existe para testes determinísticos.
  */
-export function sortearApelidoDeBot(
+export function escolherApelidoDeBot(
   ocupados: readonly string[] = [],
   indiceAleatorio: (limite: number) => number = (limite) => randomInt(limite),
 ): string {

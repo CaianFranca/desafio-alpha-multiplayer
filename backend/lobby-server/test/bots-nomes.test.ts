@@ -4,11 +4,12 @@ import {
   APELIDO_MAX,
   NOMES_DE_BOTS,
   apelidoComSufixo,
+  escolherApelidoDeBot,
+  mesclarApelidosOcupados,
   normalizarApelido,
-  sortearApelidoDeBot,
 } from '../src/bots/nomes-de-bots.ts';
 
-// Sorteio temático sem repetir nome na Sala (#352, follow-up #365): puro, sem I/O.
+// Escolha temática sem repetir nome na Sala (#352, follow-up #365): puro, sem I/O.
 test('bots/nomes: lista cabe no contrato (3-20, ASCII, sem duplicata)', () => {
   assert.ok(NOMES_DE_BOTS.length >= 16);
   const normalizados = new Set<string>();
@@ -28,23 +29,32 @@ test('bots/nomes: sufixo só em colisão e sempre <= 20', () => {
   assert.ok(apelidoComSufixo('Enfermeira Insone', 12).length <= APELIDO_MAX);
 });
 
-test('bots/nomes: sorteio exclui ocupados da Sala (case-insensitive)', () => {
+test('bots/nomes: escolha exclui ocupados da Sala (case-insensitive)', () => {
   const ocupados = ['coelho sabido', '  Raposa Astuta '];
   for (let i = 0; i < 50; i++) {
-    const sorteado = sortearApelidoDeBot(ocupados);
-    assert.ok(!ocupados.map(normalizarApelido).includes(normalizarApelido(sorteado)));
-    assert.ok(sorteado.length >= 3 && sorteado.length <= APELIDO_MAX);
+    const escolhido = escolherApelidoDeBot(ocupados);
+    assert.ok(!ocupados.map(normalizarApelido).includes(normalizarApelido(escolhido)));
+    assert.ok(escolhido.length >= 3 && escolhido.length <= APELIDO_MAX);
   }
 });
 
 test('bots/nomes: com um livre restante, sempre o retorna', () => {
   const quaseTodos = NOMES_DE_BOTS.slice(1);
-  assert.equal(sortearApelidoDeBot(quaseTodos, () => 0), NOMES_DE_BOTS[0]);
+  assert.equal(escolherApelidoDeBot(quaseTodos, () => 0), NOMES_DE_BOTS[0]);
 });
 
 test('bots/nomes: pool esgotado usa sufixo livre sem exceder 20', () => {
   const todos = [...NOMES_DE_BOTS];
-  const sorteado = sortearApelidoDeBot(todos, () => 0);
-  assert.equal(sorteado, apelidoComSufixo(NOMES_DE_BOTS[0]!, 2));
-  assert.ok(sorteado.length <= APELIDO_MAX);
+  const escolhido = escolherApelidoDeBot(todos, () => 0);
+  assert.equal(escolhido, apelidoComSufixo(NOMES_DE_BOTS[0]!, 2));
+  assert.ok(escolhido.length <= APELIDO_MAX);
+});
+
+test('bots/nomes: mescla membros + in-flight para exclusão (ordem preservada)', () => {
+  assert.deepEqual(
+    mesclarApelidosOcupados(['Ana', 'Beto'], ['Coelho Sabido']),
+    ['Ana', 'Beto', 'Coelho Sabido'],
+  );
+  assert.deepEqual(mesclarApelidosOcupados([], []), []);
+  assert.deepEqual(mesclarApelidosOcupados([], ['Corvo Insone']), ['Corvo Insone']);
 });

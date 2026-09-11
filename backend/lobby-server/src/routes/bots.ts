@@ -10,9 +10,10 @@
 //   - Trava por Sala contra corrida: 2 POSTs concorrentes antes de qualquer
 //     ENTRAR_NA_SALA recebem 409 no segundo (BOT_EM_ADMISSAO). Sem isso, dois
 //     cliques rápidos furam o teto de 4 Membros (#365 item 2).
-//   - Apelido temático único por Sala (follow-up #365): sorteio em
-//     `bots/nomes-de-bots.ts` excluindo membros (PG) + in-flight (`estado.ts`);
-//     sufixo " 2"... só com pool esgotado; UNIQUE global + retry como árbitro.
+//   - Apelido temático único por Sala (follow-up #365): escolha em
+//     `bots/nomes-de-bots.ts` excluindo membros (`repo.obterApelidos`) +
+//     in-flight (`estado.ts`); sufixo " 2"... só com pool esgotado;
+//     UNIQUE global + retry como árbitro.
 //   - Só disponível quando BOTS_HABILITADOS=true ou NODE_ENV !== 'production'.
 //
 // Resposta:
@@ -34,8 +35,8 @@
 import { Router, type Request, type Response } from 'express';
 import { getConfig } from '@flicker/config';
 import { requireSessao } from '../middleware/auth.ts';
-import { pool } from '../config/pg.ts';
 import { iniciarBot } from '../bots/bot-runner.ts';
+import { mesclarApelidosOcupados } from '../bots/nomes-de-bots.ts';
 import {
   contarBotsEmAdmissao,
   listarApelidosDeBotsEmAdmissao,
@@ -137,22 +138,18 @@ export function criarBotsRouter(contextoSalas: SalasContexto): Router {
       return;
     }
 
-    // 5b. Apelidos ocupados na Sala para o sorteio temático não repetir nome
-    // (follow-up #365). A projeção/engine não carregam Apelido (só jogadorId),
-    // por isso os membros vêm do PG; in-flight vem do `estado.ts`. Falha aqui
-    // é fail-open para nomes: o UNIQUE global + retry ainda protege.
+    // 5b. Apelidos ocupados na Sala para a escolha temática não repetir nome
+    // (follow-up #365). Membros via `repo.obterApelidos` (a projeção/engine
+    // não carregam Apelido, só jogadorId); in-flight via `estado.ts`. Falha
+    // aqui é fail-open para nomes: o UNIQUE global + retry ainda protege.
     let apelidosOcupados: string[] = [];
     try {
       const ids = estadoSala.membros.map((m) => m.jogadorId);
-      let apelidosDeMembros: string[] = [];
-      if (ids.length > 0) {
-        const resApelidos = await pool.query<{ apelido: string }>(
-          `SELECT apelido FROM usuarios WHERE id = ANY($1)`,
-          [ids],
-        );
-        apelidosDeMembros = resApelidos.rows.map((r) => r.apelido);
-      }
-      apelidosOcupados = [...apelidosDeMembros, ...listarApelidosDeBotsEmAdmissao(salaId)];
+      const apelidosPorId = await contextoSalas.repo.obterApelidos(ids);
+      apelidosOcupados = mesclarApelidosOcupados(
+        [...apelidosPorId.values()],
+        listarApelidosDeBotsEmAdmissao(salaId),
+      );
     } catch (err) {
       console.error('[bots-route] falha ao listar apelidos ocupados, seguindo só com in-flight:', (err as Error).message);
       apelidosOcupados = listarApelidosDeBotsEmAdmissao(salaId);

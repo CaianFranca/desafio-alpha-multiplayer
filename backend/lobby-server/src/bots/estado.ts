@@ -86,7 +86,7 @@ export function contarBotsEmAdmissao(salaId: string): number {
 }
 
 /**
- * Apelidos dos bots in-flight da Sala (para o sorteio temático não repetir
+ * Apelidos dos bots in-flight da Sala (para a escolha temática não repetir
  * nome na mesma Sala — ver `nomes-de-bots.ts`). Ordem de registro.
  */
 export function listarApelidosDeBotsEmAdmissao(salaId: string): string[] {

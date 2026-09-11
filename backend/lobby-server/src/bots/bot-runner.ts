@@ -20,7 +20,7 @@ import { randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared';
 import { JogadorBot } from './jogador-bot.ts';
-import { sortearApelidoDeBot } from './nomes-de-bots.ts';
+import { escolherApelidoDeBot } from './nomes-de-bots.ts';
 
 const MAX_TENTATIVAS_REGISTRO = 6;
 // Timeout total do bot: 30 minutos. Uma partida longa não deve ultrapassar isso.
@@ -35,7 +35,7 @@ export interface BotRunnerOpcoes {
   readonly baseUrl: string;
   /**
    * Apelidos ocupados na Sala (membros + in-flight, montados pela rota).
-   * O sorteio temático exclui para não repetir nome na mesma Sala.
+   * A escolha temática exclui para não repetir nome na mesma Sala.
    */
   readonly apelidosOcupados?: readonly string[];
   /** Callback opcional de log (padrão: console.log). */
@@ -63,9 +63,9 @@ function gerarCredenciaisEfemeras(
   // Domínio canônico de bots (opção A da review #365): também reservado no
   // registro público, mesma regra do CLI e dos testes.
   const email = `bot-${uniq}@bot.teste`;
-  // Apelido temático do Sanatório (follow-up #365): sorteio excluindo os
+  // Apelido temático do Sanatório (follow-up #365): escolha excluindo os
   // ocupados da Sala; sufixo " 2", " 3"... só quando o pool esgota.
-  const apelido = sortearApelidoDeBot(apelidosOcupados);
+  const apelido = escolherApelidoDeBot(apelidosOcupados);
   const senha = randomBytes(12).toString('base64url');
   return { email, apelido, senha };
 }
