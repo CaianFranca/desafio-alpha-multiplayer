@@ -10,16 +10,23 @@ import {
 } from '../src/bots/nomes-de-bots.ts';
 
 // Escolha temática sem repetir nome na Sala (#352, follow-up #365): puro, sem I/O.
-test('bots/nomes: lista cabe no contrato (3-20, ASCII, sem duplicata)', () => {
+test('bots/nomes: lista cabe no contrato (3-20, sem duplicata)', () => {
   assert.ok(NOMES_DE_BOTS.length >= 16);
   const normalizados = new Set<string>();
   for (const nome of NOMES_DE_BOTS) {
     assert.ok(nome.length >= 3 && nome.length <= APELIDO_MAX - 3, `tamanho: ${nome}`);
-    assert.match(nome, /^[\x20-\x7e]+$/, `ASCII: ${nome}`);
+    // Sem controles/espaço nas bordas (acentos são permitidos).
+    assert.match(nome, /^[^\p{C}][^\p{C}]*[^\p{C}]$/u, `caracteres: ${nome}`);
     const norm = normalizarApelido(nome);
     assert.ok(!normalizados.has(norm), `duplicata: ${nome}`);
     normalizados.add(norm);
   }
+});
+
+test('bots/nomes: nomes com acento estão na lista (Irmã, Porão, Médico)', () => {
+  assert.ok(NOMES_DE_BOTS.includes('Irmã do Turno'));
+  assert.ok(NOMES_DE_BOTS.includes('Rato do Porão'));
+  assert.ok(NOMES_DE_BOTS.includes('Médico de Plantão'));
 });
 
 test('bots/nomes: sufixo só em colisão e sempre <= 20', () => {

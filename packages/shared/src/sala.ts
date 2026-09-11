@@ -37,6 +37,12 @@ export interface MembroDaSala {
   ordemDeEntrada: number;
   presenca: Presenca;
   prontidao: boolean;
+  /**
+   * Verdadeiro quando o vínculo pertence a um bot efêmero (Cadastro com
+   * `bot=true`). Opcional por compatibilidade: ausente = não-bot. O lobby
+   * usa para exibir o rótulo "Bot" e para não listar bots como bloqueados.
+   */
+  ehBot?: boolean;
 }
 
 export interface EncaminhamentoDaSala {
@@ -163,6 +169,11 @@ export interface MembroExpulsoEvento {
   membroId: string;
   jogadorId: string;
   sala: Sala;
+  /**
+   * Verdadeiro quando o expulso era um bot efêmero (removido sem bloqueio).
+   * Opcional por compatibilidade: ausente = jogador humano (bloqueado).
+   */
+  ehBot?: boolean;
 }
 
 export interface AnfitriaoSubstituidoEvento {

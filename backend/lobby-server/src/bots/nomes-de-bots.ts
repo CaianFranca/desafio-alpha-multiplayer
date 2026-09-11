@@ -4,8 +4,9 @@
 // `BOT_FALHOU` ("Bot Coelho Sabido não entrou: ...").
 //
 // Regras:
-//   - ASCII, 3–17 chars cada (reserva para o sufixo " 99" dentro do teto de
+//   - 3–17 chars cada (reserva para o sufixo " 99" dentro do teto de
 //     20 do contrato `CadastroRequest.apelido` — ver `routes/auth.ts`).
+//     Acentos são permitidos (o contrato só limita tamanho).
 //   - Unicidade por Sala: a rota monta os ocupados (membros via
 //     `repo.obterApelidos` — a projeção/engine não carregam Apelido — +
 //     in-flight via `estado.ts`) e a escolha exclui; sufixo numérico só
@@ -22,7 +23,7 @@ import { randomInt } from 'node:crypto';
 /** Teto do contrato de Apelido (OpenAPI `CadastroRequest.apelido` 3–20). */
 export const APELIDO_MAX = 20;
 
-/** Base temática do Sanatório — ASCII, sem acento, 3–17 chars. */
+/** Base temática do Sanatório — 3–17 chars (acentos ok). */
 export const NOMES_DE_BOTS: readonly string[] = [
   'Coelho Sabido',
   'Raposa Astuta',
@@ -32,12 +33,12 @@ export const NOMES_DE_BOTS: readonly string[] = [
   'Espectro Manso',
   'Paciente Zero',
   'Guarda Noturno',
-  'Rato do Porao',
-  'Medico de Plantao',
+  'Rato do Porão',
+  'Médico de Plantão',
   'Enfermeira Insone',
   'Vigia Sonolento',
   'Doutor Sombrio',
-  'Irma do Turno',
+  'Irmã do Turno',
   'Faxineiro Zero',
   'Porteiro Calmo',
   'Coveiro Manso',

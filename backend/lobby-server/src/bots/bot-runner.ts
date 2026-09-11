@@ -313,6 +313,21 @@ async function executarBotEmBackground(args: {
               } else if (eu.prontidao && prontoEnviado) {
                 log('prontidao confirmada');
               }
+            } else if (
+              entrou &&
+              (t === 'MEMBRO_EXPULSO' || t === 'MEMBRO_SAIU') &&
+              (msg as { jogadorId?: string }).jogadorId === jogador.id
+            ) {
+              // Removido da Sala pelo Anfitrião (bots saem sem bloqueio e com
+              // o Cadastro purgado pelo handler): encerra sem falha — o close
+              // abaixo não vira `falhou` porque `entrou` já é true.
+              log('removido da sala pelo anfitriao, encerrando');
+              marcarBotEncerrado(jogador.id);
+              try {
+                wsLobby.close(1000, 'removido-da-sala');
+              } catch {
+                /* ignora */
+              }
             }
           }
           if (t === 'PARTIDA_DISPONIVEL') {
