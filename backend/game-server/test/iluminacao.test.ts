@@ -354,9 +354,16 @@ before(async () => {
 });
 
 after(async () => {
-  if (redis.status === 'ready') {
-    await redis.quit();
-  } else {
+  // Teardown blindado: o quit() pode lançar ("Connection is closed.") quando
+  // o socket do Redis já caiu com ECONNABORTED transiente no fim da bateria —
+  // o erro não tratado vira teste sintético falho do runner (não do teste).
+  try {
+    if (redis.status === 'ready') {
+      await redis.quit();
+    } else {
+      redis.disconnect();
+    }
+  } catch {
     redis.disconnect();
   }
 });
@@ -458,7 +465,8 @@ test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da ilumin
       // ── Rodada 2 de jogador-1 ────────────────────────────────────
       // Mover peao-branco de (3,3) para (2,3) — onde está a peça ao norte. Nova iluminação de (2,3): (1,3),(2,2),(2,3),(2,4),(3,3)
       // A peça em (3,4) (leste da inicial) fica FORA → limpeza deve removê-la.
-      // mover deseleciona (ST-10); é preciso reselecionar antes de confirmar
+      // O mover re-seleciona o Peão movido (re-seleção pós-mover, #263/#324):
+      // o confirmar segue direto, sem SELECIONAR_PEAO.
       // Descobre dinamicamente qual peça está em (3,4) antes da limpeza
       const estadoPreLimpeza = await obterEstadoDaPartida(redis, aceite.partidaId);
       assert.ok(estadoPreLimpeza !== null);
@@ -469,9 +477,6 @@ test('fluxo feliz: LIMPEZA_APLICADA é recebido quando peça fica fora da ilumin
 
       enviar(ws, { type: 'MOVER_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco', celula: { linha: 2, coluna: 3 } });
       await esperarEvento(ws, 'PEAO_MOVIDO');
-
-      enviar(ws, { type: 'SELECIONAR_PEAO', jogadorId: 'jogador-1', peaoId: 'peao-branco' });
-      await esperarEvento(ws, 'PEAO_SELECIONADO');
 
       const limpezaEspera = esperarEvento(ws, 'LIMPEZA_APLICADA');
       const posicaoConfirmadaEspera = esperarEvento(ws, 'POSICAO_CONFIRMADA');

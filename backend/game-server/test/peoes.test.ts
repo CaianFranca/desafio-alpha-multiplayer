@@ -8,8 +8,11 @@
 //
 // Os fluxos de turno normal (mover/permanecer) só existem a partir da Rodada
 // 2: `concluirQuatroPrimeirosTurnos` completa os quatro Primeiros Turnos via
-// WS (posições das Iniciais: (3,3), (0,0), (6,6), (6,0) — as Recebidas nunca
-// colidem entre si e consomem exatamente as 6 Retas da Reserva).
+// WS (posições das Iniciais: (3,3), (4,3), (5,3), (6,0) — sob a grade
+// toroidal (ADR-0012) as duas iniciais do meio ficam ao sul das anteriores,
+// com a borda norte aberta caindo numa célula ocupada (e sem conexão, borda
+// sul fechada), para 2/1/1/2 Recebidas: as Recebidas nunca colidem entre si
+// e consomem exatamente as 6 Retas da Reserva).
 //
 // As conexões passam pelo fluxo de admissão (issue #46): JWT de sessão +
 // sessão no Redis + roster da partida; o primeiro evento recebido é sempre
@@ -47,12 +50,16 @@ const redis = criarClienteRedis();
 // Cores canônicas dos 4 Peões, pela ordem de entrada (mesma do domínio).
 const PEAO_PELA_ORDEM = ['branco', 'vermelho', 'azul', 'amarelo'] as const;
 
-// Posições das Iniciais dos 4 Primeiros Turnos: as Recebidas geradas caem em
-// células sempre vazias e distintas (norte/leste da borda base da Inicial).
+// Posições das Iniciais dos 4 Primeiros Turnos (ADR-0012, grade toroidal):
+// inicial-2 em (4,3) e inicial-3 em (5,3) ficam ao sul das anteriores — a
+// borda norte (aberta) cai numa célula ocupada e sai das vagas, deixando
+// exatamente 1 vaga por inicial; as bordas sul das anteriores são fechadas,
+// então a adjacência não cria conexão. As Recebidas caem em células sempre
+// vazias e distintas (leste da borda base da Inicial).
 const CELULAS_DAS_INICIAIS = [
   { linha: 3, coluna: 3 },
-  { linha: 0, coluna: 0 },
-  { linha: 6, coluna: 6 },
+  { linha: 4, coluna: 3 },
+  { linha: 5, coluna: 3 },
   { linha: 6, coluna: 0 },
 ] as const;
 
@@ -73,15 +80,28 @@ function girosParaConectar(tipoDaPeca: string, borda: string): number {
   return 0;
 }
 
-// Vagas da Peça Inicial em `celula` (bordas abertas norte+leste, em ordem
-// canônica, com célula vizinha dentro da grade), na ordem em que as
-// pendências são geradas pelo Recebimento (issue #138).
+// Vagas da Peça Inicial em `celula` sob a grade toroidal (ADR-0012): as
+// bordas abertas norte+leste da Inicial sempre têm célula vizinha (wrap % 7);
+// a vizinha sai das vagas quando já está ocupada por peça posicionada (ex.: a
+// norte da inicial-2 (4,3) é a inicial-1 (3,3)). Em ordem canônica, na ordem
+// em que as pendências são geradas pelo Recebimento (issue #138); `ocupadas`
+// lista as células já posicionadas antes da vez do jogador.
 function vagasDaInicialEm(
   celula: { linha: number; coluna: number },
-): Array<'norte' | 'leste'> {
-  const vagas: Array<'norte' | 'leste'> = [];
-  if (celula.linha > 0) vagas.push('norte');
-  if (celula.coluna < 6) vagas.push('leste');
+  ocupadas: ReadonlySet<string> = new Set(),
+): Array<{ borda: 'norte' | 'leste'; celulaAlvo: { linha: number; coluna: number } }> {
+  const vagas: Array<{ borda: 'norte' | 'leste'; celulaAlvo: { linha: number; coluna: number } }> = [];
+  for (const borda of ['norte', 'leste'] as const) {
+    const deslocamento = DESLOCAMENTO_DA_VAGA[borda];
+    const celulaAlvo = {
+      // Wrap toroidal (issue #260): toda coordenada cai na grade 7x7.
+      linha: (((celula.linha + deslocamento.linha) % 7) + 7) % 7,
+      coluna: (((celula.coluna + deslocamento.coluna) % 7) + 7) % 7,
+    };
+    if (!ocupadas.has(`${celulaAlvo.linha},${celulaAlvo.coluna}`)) {
+      vagas.push({ borda, celulaAlvo });
+    }
+  }
   return vagas;
 }
 
@@ -115,12 +135,17 @@ async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
     port,
     wsUrl: (partidaId: string, token: string) =>
       `ws://127.0.0.1:${port}/ws/game/${SERVER_ID}?partida-id=${partidaId}&token=${token}`,
-    // Fecha os clientes WS primeiro (senão `server.close()` espera conexões
-    // ativas para sempre) e depois o HTTP, com belt-and-braces para
-    // keep-alive remanescente do fetch.
+    // Encerramento à prova de hang: destrói as conexões ANTES de aguardar o
+    // wss.close() — se um assert lançou cedo e deixou um socket de cliente
+    // aberto, o wss.close() penduraria esperando o último cliente e a falha
+    // real se mascararia até o timeout do runner. terminate() nos clientes e
+    // closeAllConnections() no HTTP forçam o fechamento imediato (~ms).
     fechar: async () => {
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      for (const cliente of wss.clients) {
+        cliente.terminate();
+      }
       server.closeAllConnections();
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err === undefined ? resolve() : reject(err)));
       });
@@ -353,19 +378,23 @@ async function concluirPrimeiroTurnoNoWs(
   const recebidas = (recebimento.recebidas ?? []) as Array<Record<string, unknown>>;
 
   // Uma escolha de vaga POR peça sorteada (issue #138): as vagas seguem a
-  // ordem canônica das pendências geradas para a Peça Inicial.
-  const vagas = vagasDaInicialEm(celula);
+  // ordem canônica das pendências geradas para a Peça Inicial. A ocupação
+  // até a vez são as Iniciais dos jogadores anteriores — as Recebidas deles
+  // caem ao norte/leste das próprias geradoras e, neste layout fixo, nunca
+  // sobre as vizinhas norte/leste da Inicial seguinte.
+  const ocupadas = new Set(
+    CELULAS_DAS_INICIAIS
+      .slice(0, jogador - 1)
+      .map((c) => `${c.linha},${c.coluna}`),
+  );
+  const vagas = vagasDaInicialEm(celula, ocupadas);
   assert.equal(recebidas.length, vagas.length);
   for (let indice = 0; indice < recebidas.length; indice++) {
     const recebida = recebidas[indice]!;
     const recebidaId = recebida.recebidaId as string;
     const pecaDoEncaixe = recebida.pecaId as string;
-    const borda = vagas[indice]!;
-    const deslocamento = DESLOCAMENTO_DA_VAGA[borda];
-    const celulaAlvo = {
-      linha: celula.linha + deslocamento.linha,
-      coluna: celula.coluna + deslocamento.coluna,
-    };
+    const borda = vagas[indice]!.borda;
+    const celulaAlvo = vagas[indice]!.celulaAlvo;
 
     enviar(ws, { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', jogadorId, recebidaId, borda });
     const escolhida = await esperarEvento(ws, 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO');
@@ -402,16 +431,26 @@ async function concluirQuatroPrimeirosTurnos(
   servidor: ServidorEfemero,
   partidaId: string,
 ): Promise<WebSocket[]> {
-  const sockets = [
-    await conectarPartida(servidor, partidaId, 1),
-    await conectarPartida(servidor, partidaId, 2),
-    await conectarPartida(servidor, partidaId, 3),
-    await conectarPartida(servidor, partidaId, 4),
-  ];
-  for (let jogador = 1; jogador <= 4; jogador++) {
-    await concluirPrimeiroTurnoNoWs(sockets[jogador - 1]!, jogador, CELULAS_DAS_INICIAIS[jogador - 1]!);
+  // Criação dos sockets sob guarda: se um assert do setup lançar, os sockets
+  // já abertos são fechados antes de propagar o erro — senão o
+  // servidor.fechar() penduraria no wss.close() esperando o último cliente
+  // e a falha real viraria timeout do runner (hang).
+  const sockets: WebSocket[] = [];
+  try {
+    sockets.push(await conectarPartida(servidor, partidaId, 1));
+    sockets.push(await conectarPartida(servidor, partidaId, 2));
+    sockets.push(await conectarPartida(servidor, partidaId, 3));
+    sockets.push(await conectarPartida(servidor, partidaId, 4));
+    for (let jogador = 1; jogador <= 4; jogador++) {
+      await concluirPrimeiroTurnoNoWs(sockets[jogador - 1]!, jogador, CELULAS_DAS_INICIAIS[jogador - 1]!);
+    }
+    return sockets;
+  } catch (erro) {
+    for (const socket of sockets) {
+      socket.close();
+    }
+    throw erro;
   }
-  return sockets;
 }
 
 before(async () => {
@@ -424,9 +463,16 @@ before(async () => {
 });
 
 after(async () => {
-  if (redis.status === 'ready') {
-    await redis.quit();
-  } else {
+  // Teardown blindado: o quit() pode lançar ("Connection is closed.") quando
+  // o socket do Redis já caiu com ECONNABORTED transiente no fim da bateria —
+  // o erro não tratado vira teste sintético falho do runner (não do teste).
+  try {
+    if (redis.status === 'ready') {
+      await redis.quit();
+    } else {
+      redis.disconnect();
+    }
+  } catch {
     redis.disconnect();
   }
 });

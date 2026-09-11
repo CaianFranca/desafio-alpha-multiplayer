@@ -47,6 +47,7 @@ import {
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearFinalizarManipulacao, mapearGiro } from '../game/tabuleiro/interacao'
 import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
+import { mapearFinalizarRecebida } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
@@ -263,6 +264,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
   }, [despacharEvento])
 
+  // Ref do ponto único de injeção do jogadorId (#91): o `onEvento` do canal
+  // é declarado antes do `enviarComJogador` (useCallback abaixo), então usa a
+  // ref para quebrar o TDZ e manter o callback do socket estável (mesmo
+  // padrão de modeloRef/emResultadoRef acima — refs não entram em deps).
+  const enviarComJogadorRef = useRef<(comando: ComandoDoCanal) => void>(() => {})
+
   // ── Pendentes otimistas anti-duplo-place (issue #249) ──
   // Conjunto de alvos em voo (POSICIONAR_PECA/POSICIONAR_PEAO/
   // DESELECIONAR_PEAO): bloqueia o reenvio do mesmo alvo até ack/erro/
@@ -398,7 +405,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               key: encaixeKeyRef.current,
             })
           }
+
+          // Checa no modelo ANTES do despacho se a peça pertencia às pendências
+          const eraRecebida = modeloRef.current.recebidasPendentes.some(
+            (r) => r.pecaId === evento.pecaId,
+          )
+
           despacharEvento(evento)
+
+          // Auto-finaliza a manipulação para não exigir o segundo OK na tela
+          if (eraRecebida) {
+            enviarComJogadorRef.current(mapearFinalizarManipulacao())
+          }
           return
         }
         // Promoção de tela só por admissão em_andamento, PARTIDA_INICIADA ou
@@ -480,6 +498,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     },
     [enviar, jogadorId, emResultado, emNaoInicio],
   )
+  useEffect(() => {
+    enviarComJogadorRef.current = enviarComJogador
+  }, [enviarComJogador])
 
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
@@ -590,6 +611,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       peaoDoTurnoId,
       pecaSelecionadaId: modelo.pecaSelecionadaId,
       posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
+      // Zona da origem: Peça do início do turno derivada no TURNO_INICIADO
+      // (+ baseline do snapshot); o espelho de destinos a respeita.
+      pecaDoInicioDoTurnoId: modelo.pecaDoInicioDoTurnoId,
       // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no
       // turno o clique no próprio Peão fica silencioso — encerrar depois de
       // mover é confirmar → encerrar, e Permanecer só vale ANTES de mover.
@@ -658,14 +682,22 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     [enviarComJogador, pecaAlvoDeGiro, estadoInteracao, estadoExibicao, modelo.recebidasPendentes],
   )
 
-  // ── Acessibilidade do overlay 3D (review #338): o botão "OK" é exclusivo
-  // de ponteiro no canvas — Espaço/Enter com manipulação ativa equivale ao
-  // OK (fora de botões/campos, para não duplicar o clique nativo).
+  // ── Acessibilidade do overlay 3D (review #338 + issue #357): o botão "OK"
+  // é exclusivo de ponteiro no canvas — Espaço/Enter com manipulação ativa
+  // equivale ao OK (fora de botões/campos, para não duplicar o clique nativo).
+  // Com preview provisório pré-encaixe em foco (sem manipulação aberta),
+  // Espaço/Enter equivale ao OK do preview (POSICIONAR_PECA na célula-alvo).
   const pecaEmManipulacaoId = estadoInteracao?.pecaEmManipulacaoId ?? null
   const finalizarManipulacao = useCallback(() => {
-    if (pecaEmManipulacaoId === null) return
-    enviarComJogador(mapearFinalizarManipulacao())
-  }, [enviarComJogador, pecaEmManipulacaoId])
+    if (pecaEmManipulacaoId !== null) {
+      enviarComJogador(mapearFinalizarManipulacao())
+      return
+    }
+    if (estadoInteracaoPeoes !== null) {
+      const posicionar = mapearFinalizarRecebida(estadoInteracaoPeoes)
+      if (posicionar !== null) enviarComJogador(posicionar)
+    }
+  }, [enviarComJogador, pecaEmManipulacaoId, estadoInteracaoPeoes])
 
   useEffect(() => {
     if (!estadoEmAndamento) return
@@ -676,14 +708,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       if (e.key === 'e' || e.key === 'E') girar('anti_horario')
       if (e.key === ' ' || e.key === 'Enter') {
         if (alvo && (alvo.tagName === 'BUTTON' || alvo.tagName === 'A')) return
-        if (pecaEmManipulacaoId === null) return
+        // OK do preview (issue #357): sem manipulação aberta mas com preview
+        // em foco, Espaço/Enter também confirma (POSICIONAR_PECA).
+        const previewEmFoco =
+          estadoInteracaoPeoes !== null &&
+          estadoInteracao?.pecaEmManipulacaoId == null &&
+          mapearFinalizarRecebida(estadoInteracaoPeoes) !== null
+        if (pecaEmManipulacaoId === null && !previewEmFoco) return
         e.preventDefault()
         finalizarManipulacao()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao])
+  }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao, estadoInteracao, estadoInteracaoPeoes])
 
   const tentarNovamenteComConexao = useCallback(() => {
     desconectar()

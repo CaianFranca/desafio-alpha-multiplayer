@@ -281,6 +281,7 @@ export function AmbienteCena({
       <ManipulacaoOverlay
         estadoExibicao={estadoExibicao}
         estadoInteracao={estadoInteracao ?? null}
+        estadoPeoes={estadoPeoes}
         onComando={onComando ?? noop}
       />
     </>
