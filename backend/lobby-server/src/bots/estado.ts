@@ -85,6 +85,21 @@ export function contarBotsEmAdmissao(salaId: string): number {
   return emAdmissaoPorSala.get(salaId)?.size ?? 0;
 }
 
+/**
+ * Apelidos dos bots in-flight da Sala (para o sorteio temático não repetir
+ * nome na mesma Sala — ver `nomes-de-bots.ts`). Ordem de registro.
+ */
+export function listarApelidosDeBotsEmAdmissao(salaId: string): string[] {
+  const conjunto = emAdmissaoPorSala.get(salaId);
+  if (conjunto === undefined) return [];
+  const apelidos: string[] = [];
+  for (const jogadorId of conjunto) {
+    const estado = botsPorJogador.get(jogadorId);
+    if (estado !== undefined) apelidos.push(estado.apelido);
+  }
+  return apelidos;
+}
+
 function removerEmAdmissao(salaId: string, jogadorId: string): void {
   const conjunto = emAdmissaoPorSala.get(salaId);
   if (conjunto === undefined) return;

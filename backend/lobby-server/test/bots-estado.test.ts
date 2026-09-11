@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   contarBotsEmAdmissao,
   limparEstadoDeBotsParaTeste,
+  listarApelidosDeBotsEmAdmissao,
   marcarBotAtivo,
   marcarBotEncerrado,
   marcarBotFalhou,
@@ -55,4 +56,21 @@ test('bots/estado: ocupacao = membros + in-flight (teto de 4)', () => {
   registrarBotEmAdmissao({ jogadorId: 'j1', apelido: 'b-1', salaId: 's1', codigoDeSala: 'ABCDEF' });
   const membrosAtivos = 3;
   assert.ok(membrosAtivos + contarBotsEmAdmissao('s1') >= 4);
+});
+
+test('bots/estado: lista apelidos in-flight por sala (sorteio não repete)', () => {
+  limparEstadoDeBotsParaTeste();
+  registrarBotEmAdmissao({ jogadorId: 'j1', apelido: 'Coelho Sabido', salaId: 's1', codigoDeSala: 'ABCDEF' });
+  registrarBotEmAdmissao({ jogadorId: 'j2', apelido: 'Raposa Astuta', salaId: 's1', codigoDeSala: 'ABCDEF' });
+  registrarBotEmAdmissao({ jogadorId: 'j3', apelido: 'Corvo Insone', salaId: 's2', codigoDeSala: 'GHIJKL' });
+  assert.deepEqual(listarApelidosDeBotsEmAdmissao('s1'), ['Coelho Sabido', 'Raposa Astuta']);
+  assert.deepEqual(listarApelidosDeBotsEmAdmissao('s2'), ['Corvo Insone']);
+  assert.deepEqual(listarApelidosDeBotsEmAdmissao('s3'), []);
+});
+
+test('bots/estado: ativo sai do in-flight (nome segue via membros/PG)', () => {
+  limparEstadoDeBotsParaTeste();
+  registrarBotEmAdmissao({ jogadorId: 'j1', apelido: 'Coelho Sabido', salaId: 's1', codigoDeSala: 'ABCDEF' });
+  marcarBotAtivo('j1');
+  assert.deepEqual(listarApelidosDeBotsEmAdmissao('s1'), []);
 });

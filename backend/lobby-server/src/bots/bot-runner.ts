@@ -20,6 +20,7 @@ import { randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared';
 import { JogadorBot } from './jogador-bot.ts';
+import { sortearApelidoDeBot } from './nomes-de-bots.ts';
 
 const MAX_TENTATIVAS_REGISTRO = 6;
 // Timeout total do bot: 30 minutos. Uma partida longa não deve ultrapassar isso.
@@ -32,6 +33,11 @@ export interface BotRunnerOpcoes {
   readonly salaId: string;
   /** URL base do lobby (ex.: http://localhost:3001). */
   readonly baseUrl: string;
+  /**
+   * Apelidos ocupados na Sala (membros + in-flight, montados pela rota).
+   * O sorteio temático exclui para não repetir nome na mesma Sala.
+   */
+  readonly apelidosOcupados?: readonly string[];
   /** Callback opcional de log (padrão: console.log). */
   readonly log?: (...args: unknown[]) => void;
   /** Chamado quando o bot confirma entrada na Sala (vira Membro). */
@@ -50,12 +56,16 @@ export interface BotInfo {
 
 type Cookies = { access_token?: string };
 
-function gerarCredenciaisEfemeras(): { email: string; apelido: string; senha: string } {
+function gerarCredenciaisEfemeras(
+  apelidosOcupados: readonly string[] = [],
+): { email: string; apelido: string; senha: string } {
   const uniq = `${Date.now().toString(36)}${randomBytes(6).toString('hex')}`.toLowerCase();
   // Domínio canônico de bots (opção A da review #365): também reservado no
   // registro público, mesma regra do CLI e dos testes.
   const email = `bot-${uniq}@bot.teste`;
-  const apelido = `b-${Date.now().toString(36).slice(-4)}-${randomBytes(3).toString('hex')}`.toLowerCase().slice(0, 20);
+  // Apelido temático do Sanatório (follow-up #365): sorteio excluindo os
+  // ocupados da Sala; sufixo " 2", " 3"... só quando o pool esgota.
+  const apelido = sortearApelidoDeBot(apelidosOcupados);
   const senha = randomBytes(12).toString('base64url');
   return { email, apelido, senha };
 }
@@ -111,9 +121,13 @@ const ERROS_FATAIS_ADMISSAO = new Set([
 
 async function registrarBotEfemero(
   log: (...args: unknown[]) => void,
+  apelidosOcupados: readonly string[] = [],
 ): Promise<{ cookies: Cookies; jogador: { id: string; apelido: string; email: string } }> {
+  // Candidatos já tentados nesta chamada entram na exclusão: em 23505 o retry
+  // nunca repete o mesmo Apelido (o UNIQUE global é o árbitro final).
+  const tentados: string[] = [...apelidosOcupados];
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_REGISTRO; tentativa++) {
-    const cred = gerarCredenciaisEfemeras();
+    const cred = gerarCredenciaisEfemeras(tentados);
     try {
       // Inserção direta no PostgreSQL com bot=true e expira_em calculado.
       // Bypass intencional do POST /api/auth/register: o domínio @bot.teste é
@@ -137,6 +151,7 @@ async function registrarBotEfemero(
     } catch (err: unknown) {
       const pgError = err as { code?: string };
       if (pgError.code === '23505') {
+        tentados.push(cred.apelido);
         log(`bot-runner: colisão de chave na tentativa ${tentativa}, gerando novas credenciais...`);
         await new Promise((r) => setTimeout(r, 50 * tentativa));
         continue;
@@ -169,7 +184,7 @@ export async function iniciarBot(opcoes: BotRunnerOpcoes): Promise<BotInfo> {
   const log = opcoes.log ?? ((...args: unknown[]) => console.log('[bot-runner]', ...args));
   const wsBase = baseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
 
-  const { cookies, jogador } = await registrarBotEfemero(log);
+  const { cookies, jogador } = await registrarBotEfemero(log, opcoes.apelidosOcupados ?? []);
   const accessToken = cookies.access_token!;
 
   registrarBotEmAdmissao({
