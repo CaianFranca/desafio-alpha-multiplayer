@@ -1382,7 +1382,12 @@ function confirmarPosicaoDoPeao(
   // Issue #264 / spec #272: em Baixa o Recebimento acontece na Travessia do
   // Escuro (ou não acontece — célula iluminada consome 0); a Confirmação em
   // Baixa NÃO sorteia (recebidas = []), mantendo Limpeza/Ataque do gatilho.
-  const emBaixa = ator.emBaixaIluminacao ?? false;
+  // Review PR #370 (Bug 1): quem entra saudável e sai em Baixa no MESMO
+  // gatilho também não recebe sorteio nesse CONFIRMAR — o emBaixa acima é
+  // pré-ataque; a Baixa nova do gatilho descarta o sorteio abaixo (0 no turno
+  // atual, 1 no próximo avancarVez, ADR-0013).
+  const emBaixaAntes = ator.emBaixaIluminacao ?? false;
+  const emBaixa = emBaixaAntes;
   const sorteio = emBaixa
     ? { estado: estado.tabuleiro, recebidas: [] as readonly PecaRecebida[], eventos: [] as readonly EventoDoTabuleiro[] }
     : gerarRecebidas(estado.tabuleiro, peca, emBaixa);
@@ -1423,6 +1428,26 @@ function confirmarPosicaoDoPeao(
       iluminacao,
       eventos,
     );
+  // Review PR #370 (Bug 1): o sorteio acima usou a Baixa pré-ataque — se o
+  // gatilho impôs Baixa nova ao ator, o turno encerra sem sortear: remove
+  // peca_sorteada/recebimento_gerado do lote e restaura a Caixa consumida. O
+  // puxar-1 vem no próximo avancarVez (ADR-0013).
+  const atorAposAtaque = ataque.jogadores.find(
+    (jogador) => jogador.jogadorId === ator.jogadorId,
+  );
+  const baixaNovaDoAtor =
+    !emBaixaAntes && ((atorAposAtaque?.emBaixaIluminacao ?? false) === true);
+  const recebidasFinais = baixaNovaDoAtor ? [] : sorteio.recebidas;
+  if (baixaNovaDoAtor && sorteio.recebidas.length > 0) {
+    for (let indice = eventos.length - 1; indice >= 0; indice--) {
+      if (
+        eventos[indice].tipo === 'peca_sorteada' ||
+        eventos[indice].tipo === 'recebimento_gerado'
+      ) {
+        eventos.splice(indice, 1);
+      }
+    }
+  }
   // B3/review #333: a adoção da seleção só existe quando a Confirmação gera
   // Recebimento — em Baixa Iluminação (sorteio [], ADR-0005) a seleção não
   // nasce sem sequência (invariante "a seleção vive durante a sequência").
@@ -1440,9 +1465,11 @@ function confirmarPosicaoDoPeao(
   }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
+    caixa: baixaNovaDoAtor ? estado.tabuleiro.caixa : tabuleiroPosLimpeza.caixa,
+    recebidas: recebidasFinais,
     posicionadas: posicionadasPosAtaque,
     peaoSelecionadoId:
-      sorteio.recebidas.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
+      recebidasFinais.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
   };
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a

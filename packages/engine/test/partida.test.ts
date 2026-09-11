@@ -2188,3 +2188,35 @@ test('ADR-0013: travessia usa iluminação fresca (unificada com avancarVez)', (
   if (!travessia.sucesso) return;
   assert.equal(travessia.estado.tabuleiro.recebidas.length, 1);
 });
+
+test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no turno, 1 no avancarVez)', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  // Destino com vagas livres (cruz em 3,4) para que o sorteio pré-ataque
+  // geraria recebidas; o Vulto em 3,5 ataca o destino pelo raio oeste.
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas.map((p) =>
+          p.pecaId === 'reta-2' ? { ...p, tipo: 'cruz' as const } : p,
+        ),
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 5 } },
+      ],
+    },
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.jogadores.find((j) => j.jogadorId === 'ana')?.emBaixaIluminacao, true);
+  assert.ok(confirmacao.eventos.some((e) => e.tipo === 'ataque_resolvido'));
+  assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.equal(confirmacao.estado.tabuleiro.caixa.length, caixaAntes);
+});
