@@ -633,9 +633,10 @@ export function previewsProvisorios(
  * célula-alvo da pendência em foco (issue #357: o posicionamento só se torna
  * realidade no OK). Exige a coerência tripla do encaixe: célula-alvo
  * existente + vaga escolhida + peça em foco (`pecaSelecionadaId`). A
- * validação de conexão é autoritativa do engine (MOVIMENTO_NAO_CONECTADO):
- * sem conexão o servidor recusa com som de recusa e a etapa permanece para
- * continuar girando. Sem preview em foco → null.
+ * validação de conexão é autoritativa do engine (MOVIMENTO_NAO_CONECTADO,
+ * review PR #370 Bug 2): o OK emite SEMPRE — sem conexão o servidor recusa
+ * com som de recusa e a etapa permanece para continuar girando. Sem preview
+ * em foco → null.
  */
 export function mapearFinalizarRecebida(
   estado: EstadoInteracaoPeoes,
@@ -647,12 +648,6 @@ export function mapearFinalizarRecebida(
   )
   if (pendencia === undefined || pendencia.vaga === null) return null
   if (estado.posicionadas.some((p) => p.pecaId === pecaId)) return null
-
-  // Validação opcional pré-envio: checa se a orientação conecta na vaga
-  // Se não conectar, retorna null (ou dispara recusa) para continuar girando
-  if (!recebidaConectaNaVaga(pendencia.tipoDaPeca, pendencia.orientacao, pendencia.vaga)) {
-    return null
-  }
 
   return {
     type: 'POSICIONAR_PECA',

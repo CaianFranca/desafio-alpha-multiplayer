@@ -1002,6 +1002,24 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     })
   })
 
+  it('OK do preview emite mesmo desconectado — a conexão é autoritativa do engine (review PR #370 Bug 2)', () => {
+    // reta-0 abre norte/sul; na vaga leste a borda oposta (oeste) está
+    // fechada — preview sem conexão. O OK emite POSICIONAR_PECA assim mesmo;
+    // o servidor recusa com MOVIMENTO_NAO_CONECTADO + som e a etapa permanece.
+    const estado = estadoComPendencias({
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', 'leste', VAGA_LESTE),
+      ],
+      pecaSelecionadaId: 'reta-1',
+    })
+    expect(recebidaConectaNaVaga('reta', 0, 'leste')).toBe(false)
+    expect(mapearFinalizarRecebida(estado)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-1',
+      celula: VAGA_LESTE,
+    })
+  })
+
   it('OK do preview sem peça em foco → null', () => {
     const estado = estadoComPendencias({
       recebidasPendentes: [
