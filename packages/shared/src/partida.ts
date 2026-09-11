@@ -34,10 +34,12 @@
 //   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — issue #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
 //   motivo da derrota viaja em campo opcional separado (MotivoDeDerrotaWire,
-//   sync com DesfechoDaPartida — engine/src/partida.ts:128-133): presente só
+//   sync com DesfechoDaPartida — engine/src/partida.ts:156-161; 'desistencia'
+//   incluído pela ADR-0013/#289): presente só
 //   com resultado 'derrota'; payloads de binário anterior omitem o campo —
 //   o cliente trata ausente/null como "motivo desconhecido". A vitória não
 //   tem motivo no domínio; o wire não inventa um.)
+//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — issue #289 (ADR-0013)
 //   shared type:'ATAQUE_RESOLVIDO' { atacantes, peoesAtingidos, protegidos, estadosAplicados } <-> engine tipo:'ataque_resolvido' idem — issues #172/#173
 //   (Shape 1:1 com o evento de domínio; o refinamento do wire/feedback da
 //   issue #173 está concluído neste commit: `estadosAplicados` carrega o
@@ -255,17 +257,14 @@ export type { VagaDaPecaRecebidaEscolhidaEvento };
 export type ResultadoDaPartidaWire = 'vitoria' | 'derrota';
 
 // Motivo da derrota (issue #145-exp): sync manual com o motivo de
-// DesfechoDaPartida do engine (packages/engine/src/partida.ts:160-165) —
+// DesfechoDaPartida do engine (packages/engine/src/partida.ts:156-161) —
 // 'caixa_esgotada' (Caixa Esgotada sem objetivos alcançáveis,
 // caixaEsgotadaSemObjetivos), 'equipe_amedrontada' (Sanidade 0 em toda a
 // equipe) e 'desistencia' (quórum mínimo — um Jogador restante após
-// desistências, issue #288). Tipo fechado: a vitória não tem motivo no
-// domínio e o wire não inventa um. Terminais do glossário (CONTEXT.md):
-// Caixa, Amedrontado.
-export type MotivoDeDerrotaWire =
-  | 'caixa_esgotada'
-  | 'equipe_amedrontada'
-  | 'desistencia';
+// desistências, ADR-0013/#289; precede a vitória). Tipo fechado: a vitória
+// não tem motivo no domínio e o wire não inventa um. Terminais do glossário
+// (CONTEXT.md): Caixa, Amedrontado, Desistência.
+export type MotivoDeDerrotaWire = 'caixa_esgotada' | 'equipe_amedrontada' | 'desistencia';
 
 export type EstadoDaPartidaWire = 'preparada' | 'em_andamento' | 'terminada';
 

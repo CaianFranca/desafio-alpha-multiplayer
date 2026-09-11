@@ -194,6 +194,17 @@ export function traduzirEventos(
           resgatadorPeaoId: evento.resgatadorPeaoId,
         });
         break;
+      // Desistência (issue #289, ADR-0013): shape 1:1 com o domínio — abre o
+      // lote do comando, antes de CELULAS_ILUMINADAS/LIMPEZA_APLICADA e da
+      // Passagem de Vez (quando o desistente era o Jogador Ativo); o término
+      // por quórum mínimo (N−1) chega como PARTIDA_TERMINADA no fim do lote.
+      case 'desistencia_registrada':
+        saida.push({
+          type: 'DESISTENCIA_REGISTRADA',
+          jogadorId: evento.jogadorId,
+          peaoId: evento.peaoId,
+        });
+        break;
       default: {
         const _exaustivo: never = evento;
         break;
