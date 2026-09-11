@@ -22,12 +22,15 @@ import {
   clampDistancia,
   ehAspectoLargoBaixo,
   margemParaAspecto,
+  nevoaParaAspecto,
   panDeltaToWorld,
 } from '../web/src/game/ambiente/cameraLimites'
 import {
   FOV_CAMERA,
   NEVOA_LONGE,
+  NEVOA_LONGE_PADRAO,
   NEVOA_PERTO,
+  NEVOA_PERTO_PADRAO,
 } from '../web/src/game/ambiente/contrato'
 
 // Calibragem 800x360 com HUD contido e mínimo mobile (issue #230, spec #229).
@@ -163,16 +166,28 @@ describe('800x360 — Mesa enquadra sem esmaecer, pan/pinch funcionais', () => {
     expect(afastada).toBeLessThan(calcularDistanciaAfastada(1))
     // Centro enquadra sem deslocamento.
     expect(clampAlvo({ x: 0, z: 0 }, afastada, FOV_CAMERA, aspect)).toEqual({ x: 0, z: 0 })
-    // Névoa além do teto do zoom + cantos (~32): Mesa não esmaece.
+    // Névoa largo-baixo além do teto do zoom + cantos (~32): Mesa não esmaece.
     expect(NEVOA_PERTO).toBe(32)
     expect(NEVOA_LONGE).toBe(95)
     expect(afastada).toBeLessThan(NEVOA_PERTO)
   })
 
-  it('AmbienteCena usa a névoa calibrada (sem fog fixo que esmaeça a Mesa)', () => {
+  it('névoa gateada por aspecto: largo-baixo afastada, desktop/tablet padrão', () => {
+    expect(nevoaParaAspecto(800 / 360)).toEqual({ perto: NEVOA_PERTO, longe: NEVOA_LONGE })
+    expect(nevoaParaAspecto(16 / 9)).toEqual({ perto: NEVOA_PERTO_PADRAO, longe: NEVOA_LONGE_PADRAO })
+    expect(nevoaParaAspecto(1)).toEqual({ perto: NEVOA_PERTO_PADRAO, longe: NEVOA_LONGE_PADRAO })
+    expect(nevoaParaAspecto(undefined)).toEqual({ perto: NEVOA_PERTO_PADRAO, longe: NEVOA_LONGE_PADRAO })
+    expect(NEVOA_PERTO_PADRAO).toBe(24)
+    expect(NEVOA_LONGE_PADRAO).toBe(70)
+    // Desktop enquadrado antes da névoa padrão (sem regressão de atmosfera).
+    expect(calcularDistanciaAfastada(16 / 9)).toBeLessThan(NEVOA_PERTO_PADRAO)
+  })
+
+  it('AmbienteCena gateia a névoa pelo aspecto visível (sem fog global)', () => {
     const fonte = lerFonte('frontend/web/src/game/scenes/AmbienteCena.tsx')
-    expect(fonte).toContain('NEVOA_PERTO')
-    expect(fonte).toContain('NEVOA_LONGE')
+    expect(fonte).toContain('nevoaParaAspecto')
+    expect(fonte).toContain('aspectoVisivel')
+    expect(fonte).not.toContain('args={[COR_FUNDO, NEVOA_PERTO, NEVOA_LONGE]}')
     expect(fonte).not.toContain('args={[COR_FUNDO, 24, 70]}')
   })
 
@@ -199,10 +214,21 @@ describe('800x360 — HUD compacto: mínimo integral, título fora, safe-area', 
   it('deveUsarHudCompacto: 800x360 sim; desktop/tablet/portrait não', () => {
     expect(deveUsarHudCompacto(800, 360)).toBe(true)
     expect(deveUsarHudCompacto(812, 375)).toBe(true)
+    expect(deveUsarHudCompacto(912, 360)).toBe(true)
+    expect(deveUsarHudCompacto(932, 430)).toBe(true)
     expect(deveUsarHudCompacto(1024, 768)).toBe(false)
     expect(deveUsarHudCompacto(1280, 720)).toBe(false)
     expect(deveUsarHudCompacto(768, 1024)).toBe(false)
     expect(deveUsarHudCompacto(375, 812)).toBe(false)
+  })
+
+  it('deveUsarHudCompacto: borda altura=500 inclusa; forma 16:9 fora mesmo baixa', () => {
+    expect(deveUsarHudCompacto(1000, 500)).toBe(true)
+    expect(deveUsarHudCompacto(1000, 501)).toBe(false)
+    expect(deveUsarHudCompacto(900, 500)).toBe(false)
+    expect(deveUsarHudCompacto(800, 400)).toBe(true)
+    expect(deveUsarHudCompacto(Number.NaN, 360)).toBe(false)
+    expect(deveUsarHudCompacto(0, 360)).toBe(false)
   })
 
   it('compacto mantém local/turno/sistema integrais; estados locais viram ícones; conquistas só ícones; título fora', () => {
@@ -313,6 +339,13 @@ describe('800x360 — controles de turno contidos com safe-area', () => {
       expect(controles).toHaveAttribute('data-compacto', 'true')
       const estilo = (controles.getAttribute('style') ?? '').replace(/\s/g, '')
       expect(estilo).toMatch(/env\(safe-area-inset-(right|bottom)\)/)
+      // Sem sobreposição: controles ancorados em 5.5rem da base, card de Turno
+      // em 1.5rem — faixas verticais disjuntas em 360px de altura.
+      const turno = screen.getByTestId('hud-turno')
+      const estiloTurno = (turno.getAttribute('style') ?? '').replace(/\s/g, '')
+      expect(estilo).toContain('5.5rem')
+      expect(estiloTurno).toContain('1.5rem')
+      expect(estiloTurno).toMatch(/env\(safe-area-inset-(right|bottom)\)/)
     } finally {
       restaurarViewport()
     }
