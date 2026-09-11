@@ -193,7 +193,7 @@ function apelidoUnico(prefixo: string): string {
 }
 
 function emailUnico(prefixo: string): string {
-  return `${prefixo}-${sufixo()}@exemplo.local`;
+  return `${prefixo}-${sufixo()}@teste.local`;
 }
 
 function extrairCookies(res: Response): Cookies {

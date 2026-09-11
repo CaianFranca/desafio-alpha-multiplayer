@@ -7,6 +7,7 @@ import { redisClient } from './config/redis.ts';
 import { verificarAccess } from './jwt.ts';
 import { obterSessao } from './sessoes.ts';
 import { criarContextoDasSalas } from './salas/index.ts';
+import { iniciarServicoDeExpiracaoDeBots } from './bots/expiracaoDeBots.ts';
 
 const contextoSalas = criarContextoDasSalas();
 
@@ -33,6 +34,15 @@ async function inicializarDependencias(): Promise<void> {
   await contextoSalas.estado.carregar(contextoSalas.repo, contextoSalas.projecao);
   await contextoSalas.handlers.rearmarAposRestart();
   console.log('[lobby-server] salas carregadas do PG');
+
+  // Só com bots habilitados (mesma regra de app.ts): sem rota, sem job.
+  if (
+    process.env['BOTS_HABILITADOS'] === 'true' ||
+    (process.env['NODE_ENV'] !== 'production' && process.env['BOTS_HABILITADOS'] !== 'false')
+  ) {
+    iniciarServicoDeExpiracaoDeBots();
+    console.log('[lobby-server] servico de expiracao de bots ativo');
+  }
 }
 
 async function iniciar(): Promise<void> {

@@ -36,6 +36,8 @@ export function ListaDeMembros({ sala, jogadorIdLocal, ehAnfitriao, onExpulsar }
       <ul className="flex flex-col gap-3" aria-label="Lista de Membros" aria-live="polite">
         {membrosOrdenados.map((membro) => {
           const membroEhAnfitriao = sala?.anfitriaoId === membro.id
+          const membroEhBot = membro.ehBot === true
+          const rotuloDoVinculo = membroEhAnfitriao ? 'Anfitrião' : membroEhBot ? 'Bot' : 'Membro'
           return (
             <li
               key={membro.id}
@@ -50,13 +52,17 @@ export function ListaDeMembros({ sala, jogadorIdLocal, ehAnfitriao, onExpulsar }
               <div className="flex-1 min-w-0">
                 <p className="text-white text-sm font-medium truncate">{membro.apelido}</p>
                 <p className="text-[10px] tracking-wider uppercase text-[#c9a86a]">
-                  {membroEhAnfitriao ? 'Anfitrião' : 'Membro'} / {membro.presenca === 'conectado' ? 'Conectado' : 'Em reconexão'} {membro.prontidao ? '• Pronto' : ''}
+                  {rotuloDoVinculo} / {membro.presenca === 'conectado' ? 'Conectado' : 'Em reconexão'} {membro.prontidao ? '• Pronto' : ''}
                 </p>
               </div>
               {/* ícone de prontidão no canto */}
               <div
                 className={`w-6 h-6 border flex items-center justify-center shrink-0 ${membro.prontidao ? 'border-green-500 text-green-400' : 'border-white/20 text-white/40'}`}
-                aria-label={membro.prontidao ? 'Membro pronto' : 'Membro não pronto'}
+                aria-label={
+                  membroEhBot
+                    ? membro.prontidao ? 'Bot pronto' : 'Bot não pronto'
+                    : membro.prontidao ? 'Membro pronto' : 'Membro não pronto'
+                }
               >
                 <span className="text-[10px]">{membro.prontidao ? '✓' : '○'}</span>
               </div>
