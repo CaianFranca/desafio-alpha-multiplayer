@@ -7,6 +7,7 @@ import {
   reduzirEventos,
 } from '../web/src/game/tabuleiro/reducao'
 import { aplicarSnapshot } from '../web/src/game/tabuleiro/snapshot'
+import { motivoDeRecusaDoEvento } from '../web/src/components/partida/somDeRecusa'
 import { TabuleiroMirrorDOM } from '../web/src/components/partida/TabuleiroMirrorDOM'
 import { todasAsCelulas } from '../web/src/game/tabuleiro/contrato'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
@@ -251,5 +252,70 @@ describe('percepção de Sanidade e estados no cliente — tradução dos novos 
     expect(vermelho?.getAttribute('data-sanidade')).toBe('2')
     expect(vermelho?.getAttribute('data-em-baixa')).toBe('true')
     expect(vermelho?.getAttribute('data-amedrontado')).toBeNull()
+  })
+})
+
+describe('ataque centrado no atuante — momentos novos da Permanência (issue #234, ADR-0008)', () => {
+  function baseComAna() {
+    return aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+    ]))
+  }
+
+  const ATAQUE_COM_PENALIDADE = {
+    type: 'ATAQUE_RESOLVIDO',
+    atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] }],
+    peoesAtingidos: ['peao-branco'],
+    protegidos: [],
+    estadosAplicados: [{ jogadorId: 'j1', emBaixaIluminacao: true, sanidade: 2, amedrontado: false }],
+  } as const
+
+  it('permanecer dentro do Alcance: PEAO_PERMANECEU + ATAQUE_RESOLVIDO projeta Baixa Iluminação/Sanidade e pede som', () => {
+    const estado = reduzirEventos(baseComAna(), [
+      { type: 'PEAO_PERMANECEU', peaoId: 'peao-branco', pecaId: 'inicial-1' },
+      { ...ATAQUE_COM_PENALIDADE },
+    ])
+    // Projeção agnóstica ao gatilho: o cliente só espelha estadosAplicados.
+    expect(estado.jogadorPorId['j1'].emBaixaIluminacao).toBe(true)
+    expect(estado.jogadorPorId['j1'].sanidade).toBe(2)
+    expect(estado.jogadorPorId['j1'].amedrontado).toBe(false)
+    // O mesmo payload com som da #228 segue a nova regra (penalidade → toca).
+    expect(motivoDeRecusaDoEvento({ ...ATAQUE_COM_PENALIDADE })).toBe('ataque_com_penalidade')
+  })
+
+  it('permanecer fora→fora: PEAO_PERMANECEU + ATAQUE_RESOLVIDO vazio é no-op silencioso', () => {
+    const base = baseComAna()
+    const ataqueVazio = {
+      type: 'ATAQUE_RESOLVIDO',
+      atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [] }],
+      peoesAtingidos: [],
+      protegidos: [],
+      estadosAplicados: [],
+    } as const
+    const aposPermanecer = reduzirEvento(base, {
+      type: 'PEAO_PERMANECEU',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-1',
+    })
+    // O permanecer por si só não toca nos estados do Jogador.
+    expect(aposPermanecer.jogadorPorId['j1']).toEqual(base.jogadorPorId['j1'])
+    const final = reduzirEvento(aposPermanecer, { ...ataqueVazio })
+    // Gatilho vazio: referência preservada (no-op) e silêncio no som.
+    expect(final).toBe(aposPermanecer)
+    expect(final.jogadorPorId['j1']).toEqual(base.jogadorPorId['j1'])
+    expect(motivoDeRecusaDoEvento({ ...ataqueVazio })).toBeNull()
+  })
+
+  it('lote da Permanência [ataque_resolvido, turno_encerrado] reduz em ordem sem quebrar', () => {
+    const estado = reduzirEventos(baseComAna(), [
+      { type: 'PEAO_PERMANECEU', peaoId: 'peao-branco', pecaId: 'inicial-1' },
+      { ...ATAQUE_COM_PENALIDADE },
+      { type: 'TURNO_ENCERRADO', jogadorId: 'j1' },
+    ])
+    // O ataque projeta antes do encerramento; o turno limpa a vez sem apagar os estados.
+    expect(estado.jogadorPorId['j1'].emBaixaIluminacao).toBe(true)
+    expect(estado.jogadorPorId['j1'].sanidade).toBe(2)
+    expect(estado.jogadorAtivoId).toBeNull()
+    expect(motivoDeRecusaDoEvento({ type: 'TURNO_ENCERRADO', jogadorId: 'j1' })).toBeNull()
   })
 })

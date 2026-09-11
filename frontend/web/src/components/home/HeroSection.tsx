@@ -47,7 +47,7 @@ export function HeroSection() {
     <section ref={sectionRef} id="hero" className="relative overflow-hidden" aria-labelledby="home-title">
       <div ref={bgRef} className="hero-media" aria-hidden="true" />
       <div className="relative max-w-4xl text-center mx-auto py-[clamp(4rem,15vh,8rem)] px-8">
-        <p className={`hero-reveal ${revealState} delay-0 flex items-center justify-center gap-4 text-accent text-xs font-bold tracking-[.22em] uppercase`}>
+        <p className={`hero-reveal ${revealState} delay-0 flex items-center justify-center gap-4 text-accent text-sm font-bold tracking-[.22em] uppercase`}>
           <span className="inline-block h-px w-12 bg-accent/70" aria-hidden="true" />
           {hero.eyebrow}
           <span className="inline-block h-px w-12 bg-accent/70" aria-hidden="true" />

@@ -64,7 +64,7 @@ test('estado inicial com N jogadores tem N iniciais e N peões; fora de 2–4 la
     dois.peoes.map((peao) => peao.peaoId),
     ['peao-branco', 'peao-vermelho'],
   );
-  assert.equal(dois.caixa.length, 83);
+  assert.equal(dois.caixa.length, 89);
 
   const tres = estadoInicialDoTabuleiro({ numeroDeJogadores: 3 });
   assert.deepEqual(
@@ -106,7 +106,7 @@ test('tetoDoPortao é a fonte única do teto: N limitado a 4, +1 com afetado', (
   assert.equal(tetoDoPortao(9, true), 5);
 });
 
-test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças', () => {
+test('estado inicial tem 4 iniciais fora da caixa e a caixa de 89 peças', () => {
   const estado = estadoInicialDoTabuleiro();
 
   // As 4 Peças Iniciais ficam fora da Caixa (ST-12).
@@ -121,7 +121,7 @@ test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças', () =>
   }
 
   // Sem seed, a Caixa permanece na ordem de composição.
-  assert.equal(estado.caixa.length, 83);
+  assert.equal(estado.caixa.length, 89);
   const porTipo: Record<string, number> = {};
   for (const peca of estado.caixa) {
     porTipo[peca.tipo] = (porTipo[peca.tipo] ?? 0) + 1;
@@ -136,12 +136,12 @@ test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças', () =>
     sala_do_diretor: 3,
     sala_medica: 4,
     portao_de_saida: 4,
-    vulto: 6,
-    espectro: 6,
+    vulto: 9,
+    espectro: 9,
   });
 
   const ids = new Set(estado.caixa.map((peca) => peca.pecaId));
-  assert.equal(ids.size, 83);
+  assert.equal(ids.size, 89);
   assert.ok(ids.has('reta-10'));
   assert.ok(ids.has('t-32'));
   assert.ok(ids.has('cruz-12'));
@@ -149,8 +149,8 @@ test('estado inicial tem 4 iniciais fora da caixa e a caixa de 83 peças', () =>
   assert.ok(ids.has('sala-do-diretor-3'));
   assert.ok(ids.has('sala-medica-4'));
   assert.ok(ids.has('portao-de-saida-4'));
-  assert.ok(ids.has('vulto-6'));
-  assert.ok(ids.has('espectro-6'));
+  assert.ok(ids.has('vulto-9'));
+  assert.ok(ids.has('espectro-9'));
 
   assert.deepEqual(estado.posicionadas, []);
   assert.equal(estado.pecaSelecionadaId, null);

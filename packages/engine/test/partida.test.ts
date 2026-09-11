@@ -10,6 +10,7 @@ import {
   type ComandoDePartida,
   type CodigoDeErroDaPartida,
   type EstadoDaPartida,
+  type EventoDaPartida,
   type Orientacao,
 } from '../src/index.ts';
 
@@ -222,7 +223,7 @@ test('estadoInicialDaPartida monta o roster, a vez e o evento de abertura', () =
   assert.equal(estado.rodada, 1);
   assert.equal(estado.pecaDoInicioDoTurnoId, null);
   assert.equal(estado.posicaoConfirmada, false);
-  assert.equal(estado.tabuleiro.caixa.length, 83);
+  assert.equal(estado.tabuleiro.caixa.length, 89);
   assert.equal(estado.tabuleiro.iniciais.length, 4);
   assert.equal(estado.tabuleiro.peoes.length, 4);
   assert.deepEqual(resultado.eventos, [
@@ -253,7 +254,7 @@ test('estadoInicialDaPartida aceita rosters de 2 e 3 com N cores, iniciais e pe�
     dois.estado.tabuleiro.peoes.map((peao) => peao.peaoId),
     ['peao-branco', 'peao-vermelho'],
   );
-  assert.equal(dois.estado.tabuleiro.caixa.length, 83);
+  assert.equal(dois.estado.tabuleiro.caixa.length, 89);
   assert.equal(dois.estado.jogadorAtivoId, 'ana');
   assert.equal(dois.estado.rodada, 1);
 
@@ -272,7 +273,7 @@ test('estadoInicialDaPartida aceita rosters de 2 e 3 com N cores, iniciais e pe�
     tres.estado.tabuleiro.peoes.map((peao) => peao.peaoId),
     ['peao-branco', 'peao-vermelho', 'peao-azul'],
   );
-  assert.equal(tres.estado.tabuleiro.caixa.length, 83);
+  assert.equal(tres.estado.tabuleiro.caixa.length, 89);
 });
 
 test('estadoInicialDaPartida rejeita rosters com 1 e 5+ jogadores, duplicidade ou id inválido', () => {
@@ -1216,6 +1217,33 @@ function comPecaFora(
 const temLimpeza = (eventos: readonly { readonly tipo: string }[]) =>
   eventos.some((evento) => evento.tipo === 'limpeza_aplicada');
 
+test('zona da origem: o segundo salto do Peão dentro do turno é barrado (MOVIMENTO_INDISPONIVEL)', () => {
+  let estado = partidaEmRodada2();
+  // Peça além do 1º salto: vizinha da reta-1 e conectada a ela (reta norte-sul
+  // em (1,3)), mas FORA da zona de inicial-1 (3,3).
+  estado = comPecaFora(estado, 'longe-1', 'reta', 1, 3);
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // 1º salto (3,3) → (2,3): dentro da zona {inicial-1} ∪ suas vizinhas.
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  // 2º salto (2,3) → (1,3): conectado à origem atual, mas fora da zona do
+  // início do turno → barrado antes de qualquer movimento.
+  const segundo = aplicarComandoDePartida(
+    estado,
+    moverPeao('peao-branco', 1, 3),
+    'ana',
+  );
+  assert.equal(segundo.sucesso, false);
+  if (segundo.sucesso) return;
+  assert.equal(segundo.erro.codigo, 'MOVIMENTO_INDISPONIVEL');
+  // Ida-e-volta livre permanece: voltar à Peça do início do turno segue ok.
+  const volta = aplicarComandoDePartida(
+    estado,
+    moverPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(volta.sucesso, true);
+});
+
 test('limpeza: Primeiro Turno remove peça fora da iluminação sem retorno à Caixa', () => {
   let estado = partidaIniciada();
   const caixaAntes = estado.tabuleiro.caixa.length;
@@ -1769,15 +1797,21 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
     'CELULA_NAO_ENCONTRADA',
   );
   // Iluminada: sem a reta-1, o Peão volta à inicial-1 e (2,3) — vaga norte
-  // dela — continua iluminada; a travessia exige uma célula ESCURA.
+  // dela — precisa estar iluminada por terceiro para testar o guard fresco
+  // (em Baixa a própria ana só ilumina 3,3). Coloca peao-vermelho em 2,2
+  // para iluminar 2,3 via cálculo fresco.
   {
     let semReta1 = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
     semReta1 = {
       ...semReta1,
       tabuleiro: {
         ...semReta1.tabuleiro,
-        posicionadas: semReta1.tabuleiro.posicionadas.filter(
-          (peca) => peca.pecaId !== 'reta-1',
+        posicionadas: [
+          ...semReta1.tabuleiro.posicionadas.filter((peca) => peca.pecaId !== 'reta-1'),
+          { pecaId: 'ilum-22', tipo: 'cruz' as const, orientacao: 0 as const, celula: { linha: 2, coluna: 2 } },
+        ],
+        peoes: semReta1.tabuleiro.peoes.map((peao) =>
+          peao.peaoId === 'peao-vermelho' ? { ...peao, pecaId: 'ilum-22' } : peao,
         ),
       },
     };
@@ -2024,4 +2058,349 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
     aplicarComandoDePartida(confirmacao.estado, encerrarTurno(), 'ana').sucesso,
     true,
   );
+});
+
+// ADR-0013 / issue #354 — bloqueantes do review #364
+
+test('ADR-0013: permanecer com seleção nula adota o peão do ator (bloqueante 1)', () => {
+  let estado = partidaEmRodada2();
+  // Ana em turno normal, peça do início = inicial-1 (3,3), sem pendências
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
+  // Simula avancarVez que limpa peaoSelecionadoId (turno_iniciado já limpa)
+  const semSelecao: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: null },
+  };
+  const permanencia = aplicarComandoDePartida(semSelecao, permanecer('peao-branco'), 'ana');
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  assert.equal(permanencia.estado.jogadorAtivoId, 'bruno');
+  assert.ok(permanencia.eventos.some((e) => e.tipo === 'peao_permaneceu'));
+  // Seleção alheia permanece rejeitada — não adota cegamente
+  const comOutroSelecao: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: { ...estado.tabuleiro, peaoSelecionadoId: 'peao-vermelho' },
+  };
+  assert.equal(
+    codigoDaRejeicao(comOutroSelecao, permanecer('peao-branco'), 'ana'),
+    'PEAO_NAO_SELECIONADO',
+  );
+});
+
+test('ADR-0013: avancarVez em Baixa sem vaga escura ou caixa vazia não puxa (0 peças) — permanecer sem seleção sucede', () => {
+  // Usa N=2 para controlar o wrap ana→bruno→ana
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  // Bloqueia vagas de ana (inicial-1 em 3,3: norte 2,3 e leste 3,4) para forçar 0
+  for (const cel of [{ linha: 2, coluna: 3 }, { linha: 3, coluna: 4 }] as const) {
+    if (!estado.tabuleiro.posicionadas.some((p) => p.celula.linha === cel.linha && p.celula.coluna === cel.coluna)) {
+      estado = comPecaFora(estado, `bloq-${cel.linha}-${cel.coluna}`, 'reta', cel.linha, cel.coluna);
+    }
+  }
+  estado = comJogadorEmBaixa(estado, 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const encerrarBruno = aplicarComandoDePartida(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(encerrarBruno.sucesso, true);
+  if (!encerrarBruno.sucesso) return;
+  // avancarVez para ana (Baixa, sem vaga escura) → 0 peças, sem recebimento_gerado
+  assert.equal(encerrarBruno.estado.jogadorAtivoId, 'ana');
+  assert.equal(encerrarBruno.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!encerrarBruno.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.equal(encerrarBruno.estado.tabuleiro.peaoSelecionadoId, null);
+  // Agora ana com seleção nula e 0 recebidas deve permanecer com adoção
+  const permanecerAna = aplicarComandoDePartida(encerrarBruno.estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanecerAna.sucesso, true);
+  if (!permanecerAna.sucesso) return;
+  assert.equal(permanecerAna.estado.jogadorAtivoId, 'bruno');
+});
+
+test('ADR-0013: avancarVez em Baixa com caixa vazia não puxa (0 peças)', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  // Evita derrota caixa_esgotada: posiciona objetivos atingíveis antes de esvaziar a caixa
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [],
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId: 'gerador-1', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 2, coluna: 3 } },
+        { pecaId: 'gerador-2', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 2 } },
+        { pecaId: 'gerador-3', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 4, coluna: 3 } },
+        { pecaId: 'sala-1', tipo: 'sala_do_diretor' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 4 } },
+        { pecaId: 'portao-1', tipo: 'portao_de_saida' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 1 } },
+      ],
+    },
+  };
+  estado = comJogadorEmBaixa(estado, 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, permanecer('peao-branco'), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const retorno = aplicarComandoDePartida(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(retorno.sucesso, true);
+  if (!retorno.sucesso) return;
+  assert.equal(retorno.estado.jogadorAtivoId, 'ana');
+  assert.equal(retorno.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!retorno.eventos.some((e) => e.tipo === 'peca_sorteada'));
+});
+
+test('ADR-0013: confirmar_posicao em Baixa mantém recebidas [] (sem sorteio no confirmar)', () => {
+  let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+  // Move para peça vizinha conectada e confirma — em Baixa o confirmar não sorteia
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // reta-2 em 3,4 girada para conectar oeste com inicial-1, permite mover
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: estado.tabuleiro.posicionadas.map((p) =>
+        p.pecaId === 'reta-2' ? { ...p, orientacao: 90 as const } : p,
+      ),
+    },
+  };
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+});
+
+test('ADR-0013: travessia usa iluminação fresca (unificada com avancarVez)', () => {
+  let estado = estadoDaTravessia();
+  // Injeta iluminação stale divergente: adiciona célula iluminada que cobre a vaga norte (1,3)
+  // Se a travessia usasse stale, consideraria (1,3) iluminada e falharia; com fresca deve suceder
+  // pois (1,3) é escura na iluminação fresca (peões em 3,3 etc).
+  const stale: EstadoDaPartida = {
+    ...estado,
+    celulasIluminadas: [...estado.celulasIluminadas, { linha: 1, coluna: 3 }],
+  };
+  const travessia = aplicarComandoDePartida(stale, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  assert.equal(travessia.sucesso, true);
+  if (!travessia.sucesso) return;
+  assert.equal(travessia.estado.tabuleiro.recebidas.length, 1);
+});
+
+// Issue #343 — Baixa nova no mesmo gatilho descarta o sorteio (espelha 8063dfe
+// do CONFIRMAR): 0 no turno, puxar-1 no proximo avancarVez (ADR-0013). Sem o
+// descarte, a pendencia comum fica irresoluvel e o turno trava com
+// PENDENCIA_NAO_RESOLVIDA. O puxar-1 e coberto pelos testes do avancarVez
+// (90f6cb3, review PR #370 Bug 1); aqui o Primeiro Turno prova 0 + encerrar.
+
+function comPosicionada(
+  estado: EstadoDaPartida,
+  pecaId: string,
+  tipo: 'cruz' | 'inicial' | 'vulto',
+  orientacao: Orientacao,
+  linha: number,
+  coluna: number,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId, tipo, orientacao, celula: { linha, coluna } },
+      ],
+    },
+  };
+}
+
+function comPeaoSobre(
+  estado: EstadoDaPartida,
+  peaoId: string,
+  pecaId: string,
+): EstadoDaPartida {
+  return {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      peoes: estado.tabuleiro.peoes.map((peao) =>
+        peao.peaoId === peaoId ? { ...peao, pecaId } : peao,
+      ),
+    },
+  };
+}
+
+function ataqueDoLoteDaPartida(eventos: readonly EventoDaPartida[]) {
+  const ataque = eventos.find((evento) => evento.tipo === 'ataque_resolvido');
+  assert.ok(ataque && ataque.tipo === 'ataque_resolvido');
+  if (!ataque || ataque.tipo !== 'ataque_resolvido') {
+    throw new Error('esperava ataque_resolvido no lote');
+  }
+  return ataque;
+}
+
+test('issue #343: Primeiro Turno com Baixa nova e todas as vagas iluminadas descarta a 0 e libera o turno', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno', 'carla']);
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Vulto ao norte da Inicial (ocupa a vaga norte): o posicionamento do Peao
+  // entra no Alcance (conexao norte) e impoe Baixa nova. As pontes iluminam as
+  // vagas finais: bruno em (3,5) ilumina o leste (3,4); carla em (1,3) — peca
+  // com o sul fechado, fora do raio do Vulto — ilumina o norte (2,3).
+  estado = comPosicionada(estado, 'vulto-x', 'vulto', 0, 2, 3);
+  estado = comPosicionada(estado, 'ponte-b', 'cruz', 0, 3, 5);
+  estado = comPosicionada(estado, 'ponte-c', 'inicial', 0, 1, 3);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'ponte-b');
+  estado = comPeaoSobre(estado, 'peao-azul', 'ponte-c');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  const gatilho = aplicarComandoDePartida(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(gatilho.sucesso, true);
+  if (!gatilho.sucesso) return;
+  const ataque = ataqueDoLoteDaPartida(gatilho.eventos);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  const ana = gatilho.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.emBaixaIluminacao, true);
+  // Descarte total: 0 pendencias, sem sorteio no lote e Caixa intacta.
+  assert.equal(gatilho.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!gatilho.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!gatilho.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(gatilho.estado.tabuleiro.caixa.length, caixaAntes);
+  // O turno avanca: encerrar_turno aprova sem PENDENCIA_NAO_RESOLVIDA.
+  const encerrado = aplicarComandoDePartida(gatilho.estado, encerrarTurno(), 'ana');
+  assert.equal(encerrado.sucesso, true);
+  if (!encerrado.sucesso) return;
+  assert.equal(encerrado.estado.jogadorAtivoId, 'bruno');
+});
+
+test('issue #343: Primeiro Turno com Baixa nova e vaga escura descarta a 0 (sem manter 1)', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // Mesmo ataque do caso anterior, mas so o leste (3,4) e iluminado (bruno em
+  // (3,5)); o norte (2,3) reabre escuro com a remocao do Vulto na segunda
+  // Limpeza — mesmo assim o gatilho descarta tudo (0), sem manter 1.
+  estado = comPosicionada(estado, 'vulto-x', 'vulto', 0, 2, 3);
+  estado = comPosicionada(estado, 'ponte-b', 'cruz', 0, 3, 5);
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'ponte-b');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  const gatilho = aplicarComandoDePartida(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(gatilho.sucesso, true);
+  if (!gatilho.sucesso) return;
+  const ataque = ataqueDoLoteDaPartida(gatilho.eventos);
+  assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
+  const ana = gatilho.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.emBaixaIluminacao, true);
+  // Descarte total mesmo com vaga escura: 0 pendencias, sem sorteio, Caixa intacta.
+  assert.equal(gatilho.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!gatilho.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!gatilho.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(gatilho.estado.tabuleiro.caixa.length, caixaAntes);
+  const encerrado = aplicarComandoDePartida(gatilho.estado, encerrarTurno(), 'ana');
+  assert.equal(encerrado.sucesso, true);
+  if (!encerrado.sucesso) return;
+  assert.equal(encerrado.estado.jogadorAtivoId, 'bruno');
+});
+
+test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no turno, 1 no avancarVez)', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  // Destino com vagas livres (cruz em 3,4) para que o sorteio pré-ataque
+  // geraria recebidas; o Vulto em 3,5 ataca o destino pelo raio oeste.
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas.map((p) =>
+          p.pecaId === 'reta-2' ? { ...p, tipo: 'cruz' as const } : p,
+        ),
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 5 } },
+      ],
+    },
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 4), 'ana');
+  const caixaAntes = [...estado.tabuleiro.caixa];
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.estado.jogadores.find((j) => j.jogadorId === 'ana')?.emBaixaIluminacao, true);
+  assert.ok(confirmacao.eventos.some((e) => e.tipo === 'ataque_resolvido'));
+  assert.equal(confirmacao.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.deepEqual(confirmacao.estado.tabuleiro.caixa, caixaAntes);
+  // 1 no próximo avancarVez (ADR-0013): encerra o turno de ana, bruno
+  // permanece (o permanecer já avança a vez) e ana reabre em Baixa com o
+  // puxar-1 na Bandeja.
+  estado = aplicar(confirmacao.estado, encerrarTurno(), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const turnoBruno = aplicarComandoDePartida(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(turnoBruno.sucesso, true);
+  if (!turnoBruno.sucesso) return;
+  assert.equal(turnoBruno.estado.jogadorAtivoId, 'ana');
+  assert.equal(turnoBruno.estado.tabuleiro.recebidas.length, 1);
+  assert.ok(turnoBruno.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(turnoBruno.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.equal(turnoBruno.estado.tabuleiro.caixa.length, caixaAntes.length - 1);
+});
+
+test('review PR #370 (Bug 2): fluxo Baixa completo — colocar, OK, selecionar, mover, confirmar e encerrar', () => {
+  // O "puxar" é gesto local do cliente (sem comando wire — coberto no
+  // frontend); aqui a cadeia começa na vaga do puxar-1 do avancarVez,
+  // injetado com peça determinística (cruz conecta sempre, 0 giros).
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  const [, ...restoCaixa] = estado.tabuleiro.caixa;
+  const cruzX = { pecaId: 'cruz-x', tipo: 'cruz' as const, orientacao: 0 as const };
+  estado = {
+    ...estado,
+    jogadores: estado.jogadores.map((j) =>
+      j.jogadorId === 'ana' ? { ...j, emBaixaIluminacao: true } : j,
+    ),
+    // Peão terminou o turno anterior sobre reta-2: origem do turno = reta-2.
+    pecaDoInicioDoTurnoId: 'reta-2',
+    tabuleiro: {
+      ...estado.tabuleiro,
+      peoes: estado.tabuleiro.peoes.map((p) =>
+        p.peaoId === 'peao-branco' ? { ...p, pecaId: 'reta-2' } : p,
+      ),
+      caixa: [cruzX, ...restoCaixa],
+      recebidas: [
+        { recebidaId: 'recebida-cruz-x', pecaId: 'cruz-x', tipo: 'cruz' as const, orientacao: 0 as const, vaga: null, celulaAlvo: null },
+      ],
+    },
+  };
+  // Colocar: escolher a vaga (a pré-adoção supre a seleção nula, #326) e OK
+  // (posicionar_peca — a recusa desconectada vive em peoes.test.ts).
+  estado = aplicar(estado, escolherVaga('recebida-cruz-x', 'leste'), 'ana');
+  const pendente = estado.tabuleiro.recebidas.find(
+    (r) => r.recebidaId === 'recebida-cruz-x',
+  );
+  assert.deepEqual(pendente?.celulaAlvo, { linha: 3, coluna: 5 });
+  estado = aplicar(estado, posicionarPeca('cruz-x', 3, 5), 'ana');
+  assert.equal(estado.tabuleiro.recebidas.length, 0);
+  // Peão selecionável após o OK (núcleo do Bug 2): sem pendências, a seleção
+  // volta a emitir.
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
+  // Mover, confirmar sem sortear (emBaixa mantido) e encerrar.
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 5), 'ana');
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.equal(confirmacao.estado.jogadores.find((j) => j.jogadorId === 'ana')?.emBaixaIluminacao, true);
+  estado = aplicar(confirmacao.estado, encerrarTurno(), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
 });

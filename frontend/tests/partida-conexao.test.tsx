@@ -1155,6 +1155,108 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
   })
 })
 
+describe('ataque da Permanência — momentos novos do gatilho centrado no atuante (#234, ADR-0008)', () => {
+  function avatarDoAdversario(jogadorId: string): HTMLElement | undefined {
+    return screen
+      .getAllByTestId('hud-avatar-adversario')
+      .find((el) => el.getAttribute('data-jogador-id') === jogadorId)
+  }
+
+  it('permanecer dentro do Alcance: PEAO_PERMANECEU + ATAQUE projeta no HUD e toca 1 recusa', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+
+    // Gatilho da Permanência (wire #235): o peão permanece na peça do início do turno.
+    act(() => ws.simulateMessage({ type: 'PEAO_PERMANECEU', peaoId: 'peao-vermelho', pecaId: 'inicial-1' }))
+    expect(toquesDeAudio).toHaveLength(0)
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-vermelho'] }],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+        ],
+      }),
+    )
+
+    await waitFor(() => {
+      const avatar = avatarDoAdversario('jogador-2')
+      expect(avatar).toHaveAttribute('data-sanidade', '2')
+      expect(avatar).toHaveAttribute('data-em-baixa', 'true')
+    })
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
+    expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe(
+      'ataque_com_penalidade',
+    )
+    // Texto neutro (#234): o som é global, sem "Seu".
+    expect(screen.getByTestId('anuncio-de-recusa')).toHaveTextContent('Um peão sofreu um ataque.')
+  })
+
+  it('permanecer fora→fora: PEAO_PERMANECEU + ATAQUE vazio é silêncio no-op no HUD', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+    await waitFor(() => {
+      expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    })
+
+    act(() => ws.simulateMessage({ type: 'PEAO_PERMANECEU', peaoId: 'peao-vermelho', pecaId: 'inicial-1' }))
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [] }],
+        peoesAtingidos: [],
+        protegidos: [],
+        estadosAplicados: [],
+      }),
+    )
+
+    expect(toquesDeAudio).toHaveLength(0)
+    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
+    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
+  })
+
+  it('lote da Permanência [ataque_resolvido, turno_encerrado] reduz em ordem sem quebrar', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+
+    // Ordem do lote no wire (engine #235/#236): ataque antes de turno_encerrado.
+    act(() => ws.simulateMessage({ type: 'PEAO_PERMANECEU', peaoId: 'peao-vermelho', pecaId: 'inicial-1' }))
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-vermelho'] }],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+        ],
+      }),
+    )
+    act(() => ws.simulateMessage({ type: 'TURNO_ENCERRADO', jogadorId: 'jogador-2' }))
+
+    // A projeção do ataque sobrevive ao encerramento; só o ataque tocou som.
+    await waitFor(() => {
+      expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '2')
+    })
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
+
+    // O ciclo segue: o próximo turno assume sem quebrar a tela.
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-3', rodada: 2 }))
+    const ativo = await screen.findByTestId('hud-turno-ativo')
+    expect(ativo).toHaveAttribute('data-jogador-id', 'jogador-3')
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '2')
+    expect(toquesDeAudio).toHaveLength(1)
+  })
+})
+
 describe('HUD de objetivos globais sem recarregamento (issue #145)', () => {
   function snapshotComObjetivos(opts: {
     pecasRestantes?: number

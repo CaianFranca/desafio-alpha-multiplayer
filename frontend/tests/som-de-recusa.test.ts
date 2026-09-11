@@ -132,4 +132,10 @@ describe('som de recusa — anúncio ao leitor de tela (issue #228)', () => {
       expect(textoDoAnuncioDeRecusa(motivo).length).toBeGreaterThan(0)
     }
   })
+
+  it('ataque com penalidade usa texto neutro (som global, #234)', () => {
+    // Decisão de produto: o som é global (toca para penalidade de terceiros),
+    // então o anúncio não pode dizer "Seu peão".
+    expect(textoDoAnuncioDeRecusa('ataque_com_penalidade')).toBe('Um peão sofreu um ataque.')
+  })
 })

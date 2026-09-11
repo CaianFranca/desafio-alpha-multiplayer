@@ -17,6 +17,7 @@ describe('partidaTelaMachine', () => {
     expect(isEstadoDaTela('disponivel')).toBe(true)
     expect(isEstadoDaTela('falha')).toBe(true)
     expect(isEstadoDaTela('resultado')).toBe(true)
+    expect(isEstadoDaTela('partidaNaoIniciada')).toBe(true)
     expect(isEstadoDaTela('invalido')).toBe(false)
     expect(isEstadoDaTela(null)).toBe(false)
     expect(isEstadoDaTela(undefined)).toBe(false)
@@ -48,7 +49,7 @@ describe('partidaTelaMachine', () => {
   })
 
   it('forcar transita para estado alvo idempotente', () => {
-    const estados: EstadoDaTela[] = ['carregando', 'aguardando', 'disponivel', 'falha', 'resultado']
+    const estados: EstadoDaTela[] = ['carregando', 'aguardando', 'disponivel', 'falha', 'resultado', 'partidaNaoIniciada']
     for (const alvo of estados) {
       for (const origem of estados) {
         expect(transicao(origem, { type: 'forcar', estado: alvo })).toBe(alvo)
@@ -71,5 +72,14 @@ describe('partidaTelaMachine', () => {
 
   it('tentarNovamente em resultado permanece em resultado', () => {
     expect(transicao('resultado', { type: 'tentarNovamente' })).toBe('resultado')
+  })
+
+  it('partidaNaoIniciada => estado terminal sem retry (issue #329)', () => {
+    expect(transicao('carregando', { type: 'partidaNaoIniciada' })).toBe('partidaNaoIniciada')
+    expect(transicao('aguardando', { type: 'partidaNaoIniciada' })).toBe('partidaNaoIniciada')
+    expect(transicao('disponivel', { type: 'partidaNaoIniciada' })).toBe('partidaNaoIniciada')
+    // Terminal como resultado: falhar/tentarNovamente não saem dele.
+    expect(transicao('partidaNaoIniciada', { type: 'falhar' })).toBe('partidaNaoIniciada')
+    expect(transicao('partidaNaoIniciada', { type: 'tentarNovamente' })).toBe('partidaNaoIniciada')
   })
 })
