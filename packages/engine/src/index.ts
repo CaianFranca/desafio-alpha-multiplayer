@@ -35,6 +35,7 @@ export type {
   RegistrarFalhaDoEncaminhamentoComando,
   RegistrarReinicioDaSalaComando,
   ReinicioRegistradoEvento,
+  RemoverBotDaSalaComando,
   Resultado,
   RetornoAutorizadoEvento,
   Sala,
@@ -179,6 +180,7 @@ export {
   registrarFalhaDoEncaminhamento,
   registrarReinicioDaSala,
   removerDesistenteDaSala,
+  removerBotDaSala,
   sairDaSala,
   // @internal (#222): bypass de sala encaminhada não iniciada — só após
   // `partidaDaSalaEstaOrfa` confirmar a orfandade. Ver JSDoc em lobby.ts.

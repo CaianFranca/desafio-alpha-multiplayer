@@ -49,6 +49,8 @@ import type {
 } from '@flicker/shared';
 
 export type ApelidoPorJogadorId = ReadonlyMap<string, string>;
+/** Flag bot por jogadorId (`MembroDaSala.ehBot`). Ausente = não-bot. */
+export type BotPorJogadorId = ReadonlyMap<string, boolean>;
 
 function mapearEstado(engine: SalaDominio['estado']): EstadoDaSala {
   return engine as EstadoDaSala;
@@ -62,8 +64,9 @@ function mapearMembro(
   membro: MembroDominio,
   apelido: string,
   anfitriaoId: string | null,
+  botPorJogadorId?: BotPorJogadorId,
 ): MembroDaSala {
-  return {
+  const base: MembroDaSala = {
     id: membro.id,
     jogadorId: membro.jogadorId,
     apelido,
@@ -71,11 +74,18 @@ function mapearMembro(
     presenca: mapearPresenca(membro.presenca),
     prontidao: membro.pronto,
   };
+  // Só bots carregam a flag — vínculos humanos ficam sem o campo (compat
+  // com snapshots e clients que desconhecem `ehBot`).
+  if (botPorJogadorId?.get(membro.jogadorId) === true) {
+    return { ...base, ehBot: true };
+  }
+  return base;
 }
 
 function membrosAtivos(
   sala: SalaDominio,
   apelidoPorJogadorId: ApelidoPorJogadorId,
+  botPorJogadorId?: BotPorJogadorId,
 ): MembroDaSala[] {
   return sala.membros
     .filter((membro) => membro.estado === 'ativo')
@@ -84,6 +94,7 @@ function membrosAtivos(
         membro,
         apelidoPorJogadorId.get(membro.jogadorId) ?? '',
         sala.anfitriaoId,
+        botPorJogadorId,
       ),
     );
 }
@@ -93,13 +104,14 @@ export function mapearSala(
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
   encaminhamento?: EncaminhamentoDaSala,
+  botPorJogadorId?: BotPorJogadorId,
 ): Sala {
   const base: Sala = {
     id: sala.id,
     codigoDeSala: sala.codigo,
     estado: mapearEstado(sala.estado),
     anfitriaoId: sala.anfitriaoId,
-    membros: membrosAtivos(sala, apelidoPorJogadorId),
+    membros: membrosAtivos(sala, apelidoPorJogadorId, botPorJogadorId),
     convite: {
       codigoDeSala: sala.codigo,
       link: `${linkBase}/${sala.codigo}`,
@@ -123,8 +135,9 @@ export function salaAtualizada(
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
   encaminhamento?: EncaminhamentoDaSala,
+  botPorJogadorId?: BotPorJogadorId,
 ): SalaAtualizadaEvento {
-  return { type: 'SALA_ATUALIZADA', sala: mapearSala(sala, apelidoPorJogadorId, linkBase, encaminhamento) };
+  return { type: 'SALA_ATUALIZADA', sala: mapearSala(sala, apelidoPorJogadorId, linkBase, encaminhamento, botPorJogadorId) };
 }
 
 /**
@@ -144,6 +157,7 @@ export function traduzirEventos(
   apelidoPorJogadorId: ApelidoPorJogadorId,
   linkBase: string,
   encaminhamentoPorSalaId?: ReadonlyMap<string, EncaminhamentoDaSala>,
+  botPorJogadorId?: BotPorJogadorId,
 ): readonly (SalaEventoDoServidor | EncaminhamentoEventoDoServidor)[] {
   const saida: (SalaEventoDoServidor | EncaminhamentoEventoDoServidor)[] = [];
 
@@ -153,11 +167,11 @@ export function traduzirEventos(
       continue;
     }
     const enc = encaminhamentoPorSalaId?.get(sala.id);
-    const salaWire = mapearSala(sala, apelidoPorJogadorId, linkBase, enc);
+    const salaWire = mapearSala(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId);
 
     switch (evento.tipo) {
       case 'sala_criada': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -170,6 +184,7 @@ export function traduzirEventos(
           membro,
           apelidoPorJogadorId.get(membro.jogadorId) ?? '',
           sala.anfitriaoId,
+          botPorJogadorId,
         );
         const eventoMembro: MembroEntrouEvento = {
           type: 'MEMBRO_ENTROU',
@@ -177,7 +192,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoMembro);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -189,12 +204,12 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoMembro);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
       case 'sala_encerrada': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -206,7 +221,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoAnfitriao);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -216,14 +231,16 @@ export function traduzirEventos(
           membroId: evento.membroId,
           jogadorId: evento.jogadorId,
           sala: salaWire,
+          // Só bots carregam a flag (compat com clients sem `ehBot`).
+          ...(evento.ehBot === true ? { ehBot: true as const } : {}),
         };
         saida.push(eventoExpulso);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
       case 'retorno_autorizado': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -235,7 +252,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoProntidao);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -248,7 +265,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoDesconectado);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -261,7 +278,7 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoReconectado);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -273,25 +290,25 @@ export function traduzirEventos(
           sala: salaWire,
         };
         saida.push(eventoExpirado);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
       case 'sala_expirada': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
       case 'reinicio_registrado':
       case 'consistencia_confirmada': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
       case 'encaminhamento_iniciado': {
         const ev: PartidaPreparandoEvento = { type: 'PARTIDA_PREPARANDO' };
         saida.push(ev);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -299,7 +316,7 @@ export function traduzirEventos(
         // PARTIDA_DISPONIVEL precisa de serverId/partidaId — não há no domínio,
         // será emitido diretamente pelo handler com dados do game-server.
         // Aqui emitimos só SALA_ATUALIZADA para manter compatibilidade se chamado via engine.
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -310,7 +327,7 @@ export function traduzirEventos(
           motivo: 'Encaminhamento recusado pelo game-server',
         };
         saida.push(ev);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
@@ -321,12 +338,12 @@ export function traduzirEventos(
           motivo: 'Falha ao encaminhar para o game-server',
         };
         saida.push(ev);
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 
       case 'sala_reaberta': {
-        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc));
+        saida.push(salaAtualizada(sala, apelidoPorJogadorId, linkBase, enc, botPorJogadorId));
         break;
       }
 

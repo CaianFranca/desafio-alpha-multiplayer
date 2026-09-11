@@ -153,6 +153,9 @@ export interface ConfirmarPosicaoDoPeaoComando {
 // Atravessar o Escuro (issue #264 / spec #272): o comando wire do canal de
 // Partida — o `jogadorId` viaja aqui (forma do ST-11); o contrato do Peão em
 // si (sem `jogadorId`) vive em ./peoes.ts (AtravessarOEscuroComando).
+// @deprecated ADR-0013: fluxo canônico em Baixa é puxar no início do turno
+// (avancarVez com gerarRecebidas filtrando vagas escuras). Mantido como legado
+// funcional até remoção em issue futura.
 export interface AtravessarOEscuroPartidaComando {
   readonly type: 'ATRAVESSAR_O_ESCURO';
   readonly jogadorId: string;

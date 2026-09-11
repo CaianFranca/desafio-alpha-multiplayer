@@ -85,6 +85,7 @@ import {
   type ApelidoPorJogadorId,
 } from './eventos.ts';
 import { SalasReconexao, JANELA_RECONEXAO_SEGUNDOS } from './reconexao.ts';
+import { marcarBotEncerrado } from '../bots/estado.ts';
 import { idadeDoEmVoo, limparEmVoo, marcarEmVoo } from './encaminhamento-voo.ts';
 import { GAME_SERVERS_PARTIDA_PREFIXO, getConfig } from '@flicker/config';
 import type { AuthenticatedWebSocket } from '../ws/ws.ts';
@@ -449,7 +450,7 @@ export class SalasHandlers {
     // Garantir que o apelido do criador está no cache para a tradução
     // engine→wire. O handler já recebeu `WsAuthData.apelido` no
     // handshake; aqui atualizamos o cache do SalasState.
-      this.atualizarApelidoSeConhecido(jogadorId, socket.data.apelido);
+      await this.atualizarCacheDeJogador(jogadorId, socket.data.apelido);
 
     // Projeção quente: codigo → salaId, salaId → estado, jogadorId → salaId.
       await this.projecao.definirCodigo(codigo, salaId);
@@ -466,6 +467,8 @@ export class SalasHandlers {
         resultado.estado,
         this.estado.apelidoPorJogadorId,
         this.linkBase,
+        undefined,
+        this.estado.botPorJogadorId,
       );
       this.difundir(eventos, salaId);
 
@@ -536,7 +539,7 @@ export class SalasHandlers {
     }
 
     this.estado.substituirEstado(resultado.estado);
-    this.atualizarApelidoSeConhecido(jogadorId, socket.data.apelido);
+    await this.atualizarCacheDeJogador(jogadorId, socket.data.apelido);
     await this.atualizarProjecaoEstado(resultado.estado, salaId);
     await this.projecao.definirAssociacaoJogador(jogadorId, salaId);
 
@@ -547,6 +550,8 @@ export class SalasHandlers {
       resultado.estado,
       this.estado.apelidoPorJogadorId,
       this.linkBase,
+      undefined,
+      this.estado.botPorJogadorId,
     );
     this.difundir(eventos, salaId);
 
@@ -668,6 +673,8 @@ export class SalasHandlers {
       resultado.estado,
       this.estado.apelidoPorJogadorId,
       this.linkBase,
+      undefined,
+      this.estado.botPorJogadorId,
     );
     this.difundir(eventos, salaId);
 
@@ -743,24 +750,69 @@ export class SalasHandlers {
       return;
     }
 
-    const resultado = this.estado.aplicar({
-      tipo: 'expulsar_membro',
-      salaId,
-      anfitriaoMembroId,
-      membroAlvoId: membroId,
-    });
+    // Bot ou jogador? Bots efêmeros (Cadastro `bot=true`) saem SEM bloqueio
+    // e com purga do Cadastro — sem isso, cada expulsão deixaria um apelido
+    // ocupado globalmente até o TTL de 2h e o pool de 20 nomes esgotaria
+    // ("Falha ao iniciar bot" após muitas expulsões).
+    const membroAlvo = salaInfo.sala.membros.find(
+      (m) => m.id === membroId && m.estado === 'ativo',
+    );
+    let alvoEhBot =
+      membroAlvo !== undefined &&
+      this.estado.botPorJogadorId.get(membroAlvo.jogadorId) === true;
+    if (membroAlvo !== undefined && !alvoEhBot) {
+      try {
+        alvoEhBot = await this.repo.ehBot(membroAlvo.jogadorId);
+      } catch {
+        alvoEhBot = false;
+      }
+      if (alvoEhBot) {
+        this.estado.botPorJogadorId.set(membroAlvo.jogadorId, true);
+      }
+    }
+
+    const resultado = this.estado.aplicar(
+      alvoEhBot
+        ? {
+            tipo: 'remover_bot_da_sala',
+            salaId,
+            anfitriaoMembroId,
+            membroAlvoId: membroId,
+          }
+        : {
+            tipo: 'expulsar_membro',
+            salaId,
+            anfitriaoMembroId,
+            membroAlvoId: membroId,
+          },
+    );
 
     if (!resultado.sucesso) {
       this.enviarErro(socket, resultado.erro.codigo, resultado.erro.mensagem);
       return;
     }
 
-    // Extrair jogadorId alvo do evento de domínio para persistir a expulsão.
+    // Extrair jogadorId alvo do evento de domínio para persistir a saída.
     const eventoExpulsao = resultado.eventos.find(
       (e) => e.tipo === 'membro_expulsado',
     );
     if (eventoExpulsao?.tipo === 'membro_expulsado') {
-      await this.repo.expulsarMembroAtomico(salaId, eventoExpulsao.jogadorId);
+      if (alvoEhBot) {
+        await this.repo.removerBotDaSalaAtomico(salaId, eventoExpulsao.jogadorId);
+        // Purga best-effort FORA da transação: nunca desfaz a remoção. Quando
+        // falha (ex.: bot referenciado como anfitriao_id), o GC de 2h assume.
+        try {
+          const purgado = await this.repo.purgarCadastroDeBot(eventoExpulsao.jogadorId);
+          if (!purgado) {
+            console.warn(`[salas] bot removido sem purga (cai no GC de 2h): ${eventoExpulsao.jogadorId}`);
+          }
+        } catch (err) {
+          console.warn(`[salas] falha ao purgar bot removido: ${(err as Error).message}`);
+        }
+        marcarBotEncerrado(eventoExpulsao.jogadorId);
+      } else {
+        await this.repo.expulsarMembroAtomico(salaId, eventoExpulsao.jogadorId);
+      }
     }
 
     this.estado.substituirEstado(resultado.estado);
@@ -780,6 +832,8 @@ export class SalasHandlers {
       resultado.estado,
       this.estado.apelidoPorJogadorId,
       this.linkBase,
+      undefined,
+      this.estado.botPorJogadorId,
     );
     this.difundir(eventos, salaId);
 
@@ -875,6 +929,8 @@ export class SalasHandlers {
       resultado.estado,
       this.estado.apelidoPorJogadorId,
       this.linkBase,
+      undefined,
+      this.estado.botPorJogadorId,
     );
     this.difundir(eventos, salaId);
   }
@@ -939,6 +995,8 @@ export class SalasHandlers {
       resultado.estado,
       this.estado.apelidoPorJogadorId,
       this.linkBase,
+      undefined,
+      this.estado.botPorJogadorId,
     );
     this.difundir(eventos, salaId);
   }
@@ -1019,6 +1077,8 @@ export class SalasHandlers {
       resultado.estado,
       this.estado.apelidoPorJogadorId,
       this.linkBase,
+      undefined,
+      this.estado.botPorJogadorId,
     );
     this.difundir(eventos, salaId);
 
@@ -1101,7 +1161,7 @@ export class SalasHandlers {
     await this.atualizarProjecaoEstado(resultado.estado, salaId);
 
     // Broadcast via tradutor (PARTIDA_PREPARANDO + SALA_ATUALIZADA)
-    const evs = traduzirEventos(resultado.eventos, resultado.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+    const evs = traduzirEventos(resultado.eventos, resultado.estado, this.estado.apelidoPorJogadorId, this.linkBase, undefined, this.estado.botPorJogadorId);
     this.difundir(evs, salaId);
 
     // Espelho do encaminhamento no stream de debug (issue #340).
@@ -1134,6 +1194,7 @@ export class SalasHandlers {
       ordemDeEntrada: m.ordemDeEntrada,
       presenca: m.presenca,
       prontidao: m.pronto,
+      ...(this.estado.botPorJogadorId.get(m.jogadorId) === true ? { ehBot: true as const } : {}),
     }));
 
     const oferta: OfertaDeEncaminhamento = {
@@ -1249,10 +1310,10 @@ export class SalasHandlers {
               // SALA_ATUALIZADA com snapshot encaminhada
               const salaAtual = this.estado.abertas.get(salaId)?.sala;
               if (salaAtual) {
-                const salaWire = mapearSala(salaAtual, this.estado.apelidoPorJogadorId, this.linkBase, { serverId: aceite.serverId, partidaId: aceite.partidaId });
+                const salaWire = mapearSala(salaAtual, this.estado.apelidoPorJogadorId, this.linkBase, { serverId: aceite.serverId, partidaId: aceite.partidaId }, this.estado.botPorJogadorId);
                 this.broadcast.enviar(salaId, { type: 'SALA_ATUALIZADA', sala: salaWire });
               } else {
-                const evs2 = traduzirEventos(resAceite.eventos, resAceite.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+                const evs2 = traduzirEventos(resAceite.eventos, resAceite.estado, this.estado.apelidoPorJogadorId, this.linkBase, undefined, this.estado.botPorJogadorId);
                 this.difundir(evs2, salaId);
               }
             } catch (e) {
@@ -1278,7 +1339,7 @@ export class SalasHandlers {
             }
             const falhou: PartidaFalhouEvento = { type: 'PARTIDA_FALHOU', codigo: 'ENCAMINHAMENTO_FALHOU', motivo: resAceite.erro?.mensagem ?? 'composicao alterada — partida cancelada' };
             this.broadcast.enviar(salaId, falhou);
-            const evs3 = traduzirEventos(resFalha.sucesso ? resFalha.eventos : [], resFalha.sucesso ? resFalha.estado : this.estado.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+            const evs3 = traduzirEventos(resFalha.sucesso ? resFalha.eventos : [], resFalha.sucesso ? resFalha.estado : this.estado.estado, this.estado.apelidoPorJogadorId, this.linkBase, undefined, this.estado.botPorJogadorId);
             // Filtrar duplicado de PARTIDA_FALHOU já enviado
             this.difundir(
               evs3.filter((ev) => (ev as { type: string }).type !== 'PARTIDA_FALHOU'),
@@ -1628,7 +1689,7 @@ export class SalasHandlers {
     } else {
       await this.atualizarProjecaoEstado(res.estado, salaId);
     }
-    const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+    const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase, undefined, this.estado.botPorJogadorId);
     this.difundir(eventos, salaId);
     // Remoção por jogador (review JF532, O3): o bypass só tem o `jogadorId` —
     // sem cast no-op de socket falso.
@@ -1675,7 +1736,7 @@ export class SalasHandlers {
       await this.atualizarProjecaoEstado(res.estado, salaId);
     }
     await this.projecao.limparAssociacaoJogador(jogadorId);
-    const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase);
+    const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase, undefined, this.estado.botPorJogadorId);
     this.difundir(eventos, salaId);
     // A vítima recebe o MEMBRO_SAIU acima e depois sai do fan-out da sala —
     // broadcasts futuros (ex.: SALA_ATUALIZADA da reabertura) não ressuscitam
@@ -1850,6 +1911,8 @@ export class SalasHandlers {
         resultado.estado,
         this.estado.apelidoPorJogadorId,
         this.linkBase,
+        undefined,
+        this.estado.botPorJogadorId,
       );
       this.difundir(eventos, salaId);
       // Espelho de desconexão no stream de debug (issue #340) — saída temporária.
@@ -1912,7 +1975,7 @@ export class SalasHandlers {
       return;
     }
     // Atualizar cache de apelido antes do broadcast.
-    this.atualizarApelidoSeConhecido(jogadorId, socket.data.apelido);
+    await this.atualizarCacheDeJogador(jogadorId, socket.data.apelido);
     // Segunda aba/F5 e reconexão serializados na fila de mutações (#335,
     // B1 da PR #345): o snapshot unicast é montado do estado confirmado
     // dentro da mesma mutação, sem inversão contra broadcasts concorrentes.
@@ -1939,7 +2002,7 @@ export class SalasHandlers {
             : undefined;
         this.broadcast.enviarParaSocket(
           socket,
-          salaAtualizada(salaAtual.sala, this.estado.apelidoPorJogadorId, this.linkBase, encaminhamento),
+          salaAtualizada(salaAtual.sala, this.estado.apelidoPorJogadorId, this.linkBase, encaminhamento, this.estado.botPorJogadorId),
         );
         return;
       }
@@ -1985,6 +2048,7 @@ export class SalasHandlers {
         this.estado.apelidoPorJogadorId,
         this.linkBase,
         encMap,
+        this.estado.botPorJogadorId,
       );
       this.difundir(eventos, salaId!);
     });
@@ -2068,6 +2132,8 @@ export class SalasHandlers {
         resultado.estado,
         this.estado.apelidoPorJogadorId,
         this.linkBase,
+        undefined,
+        this.estado.botPorJogadorId,
       );
       this.difundir(eventos, salaId);
     });
@@ -2129,6 +2195,23 @@ export class SalasHandlers {
   private atualizarApelidoSeConhecido(jogadorId: string, apelido: string): void {
     if (typeof apelido === 'string' && apelido.length > 0) {
       this.estado.apelidoPorJogadorId.set(jogadorId, apelido);
+    }
+  }
+
+  /**
+   * Cache de apelido + flag bot para a tradução engine→wire
+   * (`MembroDaSala.apelido/ehBot`). Uma leitura PG por entrada — entradas
+   * são raras; o broadcast usa só o cache. Fail-open: sem a flag o membro
+   * aparece como jogador humano.
+   */
+  private async atualizarCacheDeJogador(jogadorId: string, apelido: string): Promise<void> {
+    this.atualizarApelidoSeConhecido(jogadorId, apelido);
+    try {
+      if (await this.repo.ehBot(jogadorId)) {
+        this.estado.botPorJogadorId.set(jogadorId, true);
+      }
+    } catch {
+      // ignora: fail-open como humano
     }
   }
 

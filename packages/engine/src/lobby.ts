@@ -67,6 +67,20 @@ export interface ExpulsarMembroComando {
   readonly membroAlvoId: string;
 }
 
+/**
+ * Remoção de bot efêmero pelo Anfitrião. Mesmas guardas da Expulsão, mas
+ * SEM bloqueio: bots não são Jogadores (CONTEXT.md: Jogador é pessoa
+ * autenticada) e o Cadastro efêmero é purgado pelo chamador — bloquear só
+ * acumularia nomes na lista e ocuparia apelidos até o TTL de 2h esgotar o
+ * pool de nomes (falha "Falha ao iniciar bot" após muitas expulsões).
+ */
+export interface RemoverBotDaSalaComando {
+  readonly tipo: 'remover_bot_da_sala';
+  readonly salaId: string;
+  readonly anfitriaoMembroId: string;
+  readonly membroAlvoId: string;
+}
+
 export interface AutorizarRetornoComando {
   readonly tipo: 'autorizar_retorno';
   readonly salaId: string;
@@ -145,6 +159,7 @@ export type Comando =
   | EntrarNaSalaComando
   | SairDaSalaComando
   | ExpulsarMembroComando
+  | RemoverBotDaSalaComando
   | AutorizarRetornoComando
   | DesconectarJogadorComando
   | ReconectarJogadorComando
@@ -198,6 +213,8 @@ export interface MembroExpulsoEvento {
   readonly jogadorId: string;
   readonly ordemDeEntrada: number;
   readonly motivo: 'expulsao';
+  /** Verdadeiro quando o removido era bot (via `remover_bot_da_sala`, sem bloqueio). */
+  readonly ehBot?: boolean;
 }
 
 export interface AnfitriaoSucedidoEvento {
@@ -362,6 +379,8 @@ export function aplicarComando(
       return sairDaSala(estado, comando);
     case 'expulsar_membro':
       return expulsarMembro(estado, comando);
+    case 'remover_bot_da_sala':
+      return removerBotDaSala(estado, comando);
     case 'autorizar_retorno':
       return autorizarRetorno(estado, comando);
     case 'desconectar_jogador':
@@ -775,6 +794,81 @@ export function expulsarMembro(
       jogadorId: alvo.jogadorId,
       ordemDeEntrada: alvo.ordemDeEntrada,
       motivo: 'expulsao',
+    },
+  ]);
+}
+
+export function removerBotDaSala(
+  estado: EstadoDoLobby,
+  comando: RemoverBotDaSalaComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(
+    comando.salaId,
+    comando.anfitriaoMembroId,
+    comando.membroAlvoId,
+  );
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+
+  const contexto = exigirAnfitriaoAtual(
+    estado,
+    comando.salaId,
+    comando.anfitriaoMembroId,
+    'remover bots',
+  );
+  if (!('sala' in contexto)) {
+    return contexto;
+  }
+  const { sala, anfitriao } = contexto;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  const salaCongelada = exigirSalaNaoEncaminhada(sala);
+  if (salaCongelada) {
+    return salaCongelada;
+  }
+
+  const contextoDoAlvo = exigirMembroAtivo(sala, { membroId: comando.membroAlvoId });
+  if (!('membro' in contextoDoAlvo)) {
+    return contextoDoAlvo;
+  }
+  const alvo = contextoDoAlvo.membro;
+
+  if (alvo.id === anfitriao.id) {
+    return rejeitar(
+      'APENAS_ANFITRIAO',
+      'O Anfitrião não pode remover a si mesmo; ele deve sair da Sala.',
+      { salaId: sala.id, membroId: alvo.id },
+    );
+  }
+
+  const alvoEncerrado: Membro = {
+    ...alvo,
+    estado: 'encerrado',
+    motivoEncerramento: 'expulsao',
+  };
+  // Sem `jogadoresBloqueados`: o vínculo do bot termina, mas nada é
+  // bloqueado — o chamador purga o Cadastro efêmero em seguida.
+  const novaSala: Sala = {
+    ...sala,
+    membros: sala.membros.map((item) =>
+      item.id === alvo.id ? alvoEncerrado : item,
+    ),
+  };
+
+  return sucesso(substituirSala(estado, novaSala), [
+    {
+      tipo: 'membro_expulsado',
+      salaId: sala.id,
+      membroId: alvo.id,
+      jogadorId: alvo.jogadorId,
+      ordemDeEntrada: alvo.ordemDeEntrada,
+      motivo: 'expulsao',
+      ehBot: true,
     },
   ]);
 }

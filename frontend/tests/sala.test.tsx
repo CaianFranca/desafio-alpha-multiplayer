@@ -43,6 +43,7 @@ function criarMembro(overrides: Partial<{
   ordemDeEntrada: number
   presenca: 'conectado' | 'em_reconexao'
   prontidao: boolean
+  ehBot?: boolean
 }> = {}) {
   return {
     id: overrides.id ?? `membro-${(overrides.ordemDeEntrada ?? 0) + 1}`,
@@ -51,6 +52,7 @@ function criarMembro(overrides: Partial<{
     ordemDeEntrada: overrides.ordemDeEntrada ?? 0,
     presenca: (overrides.presenca ?? 'conectado') as 'conectado' | 'em_reconexao',
     prontidao: overrides.prontidao ?? false,
+    ...(overrides.ehBot === true ? { ehBot: true as const } : {}),
   }
 }
 
@@ -207,6 +209,30 @@ describe('lobby - página do lobby', () => {
     expect(itens[2]).toHaveTextContent('Carla')
     // Anfitrião identificado
     expect(screen.getByText(/anfitrião/i)).toBeInTheDocument()
+  })
+
+  it('bot aparece como Bot / Conectado pronto em vez de Membro', async () => {
+    renderWithRouter(['/salas/criar'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    await waitFor(() => expect(ws.onopen).toBeDefined())
+    // simula microtask de open
+    await new Promise((r) => setTimeout(r, 0))
+
+    const membros = [
+      criarMembro({ id: 'm1', apelido: 'Ana', ordemDeEntrada: 0 }),
+      criarMembro({ id: 'm2', apelido: 'Irmã do Turno', ordemDeEntrada: 1, prontidao: true, ehBot: true }),
+    ]
+    const sala = criarSala({ codigoDeSala: 'X1Y2Z3', membros, anfitriaoId: 'm1' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala })
+
+    await screen.findByText('Irmã do Turno')
+    const lista = screen.getByLabelText('Lista de Membros')
+    const itens = within(lista).getAllByRole('listitem')
+    expect(itens[1]).toHaveTextContent(/bot \/ conectado/i)
+    expect(itens[1]).toHaveTextContent(/pronto/i)
+    expect(within(lista).getByLabelText('Bot pronto')).toBeInTheDocument()
+    // humano (Anfitrião aqui) mantém o rótulo original
+    expect(itens[0]).toHaveTextContent(/anfitrião \/ conectado/i)
   })
 
   it('vagas fantasmas não são exibidas: sala com 1 membro mostra 1 de 4 sem aguardando', async () => {
