@@ -995,8 +995,14 @@ function atravessarOEscuroDaPartida(
       'A célula de destino não é uma vaga escura conectada à Peça sob o Peão.',
     );
   }
+  // ADR-0013 bloqueante 3: iluminação fresca unificada — mesmo preamble de
+  // avancarVez/posicionarPeao, não o snapshot stale do turno anterior.
+  const celulasParaFiltroTravessia = calcularIluminacao(
+    estado.tabuleiro,
+    estado.jogadores.filter((j) => (j.emBaixaIluminacao ?? false)).map((j) => j.peaoId),
+  );
   if (
-    estado.celulasIluminadas.some(
+    celulasParaFiltroTravessia.some(
       (celula) => celula.linha === alvo.linha && celula.coluna === alvo.coluna,
     )
   ) {
@@ -1013,8 +1019,9 @@ function atravessarOEscuroDaPartida(
   // e, quando nula (AC-3 do #272), adotada a partir do Peão do ator: nenhum
   // passo intermediário exige re-seleção.
   // ADR-0013: mantido como legado; o fluxo canônico é Puxar no início do turno
-  // (avancarVez). Aqui o sorteio respeita vagas escuras (sem vaga escura → 0).
-  const sorteio = gerarRecebidas(estado.tabuleiro, pecaSobOPeao, true, estado.celulasIluminadas);
+  // (avancarVez). Aqui o sorteio respeita vagas escuras (sem vaga escura → 0)
+  // com iluminação fresca — unificada com avancarVez/posicionarPeao (bloqueante 3).
+  const sorteio = gerarRecebidas(estado.tabuleiro, pecaSobOPeao, true, celulasParaFiltroTravessia);
   const recebidas = sorteio.recebidas.map((recebida) => ({
     ...recebida,
     celulaAlvo: alvo,
