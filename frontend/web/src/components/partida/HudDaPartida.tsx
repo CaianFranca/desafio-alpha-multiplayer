@@ -23,22 +23,26 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { LIMIAR_ASPECTO_LARGO_BAIXO } from '../../game/ambiente/cameraLimites'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS, type CorDoPeao } from '../../game/tabuleiro/contrato'
 import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
 import { useCronometroDaPartida } from './useCronometroDaPartida'
 
 /**
- * Modo compacto paisagem-celular (issue #230, 800x360): paisagem curta —
- * altura <500 — mantém local/turno/sistema integrais, só compacta (avatares
- * menores, estados locais em ícones ao lado do nome, conquistas só ícones,
- * título fora). Puro e testável, sem ler window — o componente deriva via
- * prop ou viewport.
+ * Modo compacto paisagem-celular (issue #230, 800x360): paisagem curta de
+ * aspecto largo-baixo (≥2, mesmo `LIMIAR_ASPECTO_LARGO_BAIXO` da câmera) com
+ * altura ≤500 (borda inclusa) — mantém local/turno/sistema integrais, só
+ * compacta (avatares menores, estados locais em ícones ao lado do nome,
+ * conquistas só ícones, título fora). O gate de aspecto exclui janelas
+ * desktop baixas de forma 16:9 (ex. 900x500) e paisagens altas. Puro e
+ * testável, sem ler window — o componente deriva via prop ou viewport.
  */
 export function deveUsarHudCompacto(largura: number, altura: number): boolean {
   if (!Number.isFinite(largura) || !Number.isFinite(altura)) return false
   if (largura <= 0 || altura <= 0) return false
-  const emPaisagem = largura > altura
-  return emPaisagem && altura < 500
+  if (largura <= altura) return false
+  if (altura > 500) return false
+  return largura / altura >= LIMIAR_ASPECTO_LARGO_BAIXO
 }
 
 /** Lê o viewport atual (jsdom-safe): fallback 1024x768 fora do browser. */
