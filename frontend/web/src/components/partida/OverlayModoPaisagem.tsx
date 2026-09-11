@@ -46,10 +46,10 @@ export function OverlayModoPaisagem() {
             <path d="M16 8l3-1v6l-3-1" />
           </svg>
         </span>
-        <p className="font-display text-2xl font-bold tracking-wide text-white">
+        <p className="font-display text-[length:var(--hud-display,1.5rem)] leading-8 font-bold tracking-wide text-white">
           Vire o aparelho para jogar
         </p>
-        <p className="max-w-xs text-base leading-relaxed text-zinc-400">
+        <p className="max-w-xs text-[length:var(--hud-corpo,0.875rem)] leading-relaxed text-zinc-400">
           Esta experiência foi pensada para o modo paisagem no celular.
         </p>
       </div>

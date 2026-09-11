@@ -136,7 +136,7 @@ function CronometroDoHud({
       data-segundos={String(segundos)}
       role="timer"
       aria-label={`Tempo de partida: ${tempo}`}
-      className="text-base tabular-nums text-zinc-100"
+      className="text-[length:var(--hud-corpo,0.875rem)] leading-5 tabular-nums text-zinc-100"
     >
       {tempo}
     </span>
@@ -250,7 +250,7 @@ export function HudDaPartida({
                   role="img"
                 aria-label={`${dados.apelido}, Sanidade ${dados.sanidade} de 3${dados.emBaixaIluminacao ? ', em Baixa Iluminação' : ''}${dados.amedrontado ? ', Amedrontado' : ''}${dados.protegido ? ', protegido' : ''}`}
                 title={dados.apelido}
-                  className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display text-base font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${
+                  className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display text-[length:var(--hud-destaque,1rem)] leading-6 font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${
                     dados.amedrontado
                       ? 'opacity-70 grayscale'
                       : dados.emBaixaIluminacao
@@ -267,17 +267,17 @@ export function HudDaPartida({
               </div>
               <div className="flex flex-col gap-0.5" aria-hidden="true">
                 {dados.emBaixaIluminacao ? (
-                  <span data-testid="hud-estado-baixa-iluminacao" title="Baixa Iluminação" className="rounded border border-amber-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-sm leading-none text-amber-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
+                  <span data-testid="hud-estado-baixa-iluminacao" title="Baixa Iluminação" className="rounded border border-amber-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none text-amber-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
                     ◐
                   </span>
                 ) : null}
                 {dados.amedrontado ? (
-                  <span data-testid="hud-estado-amedrontado" title="Amedrontado" className="rounded border border-red-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-sm leading-none text-red-400 shadow-[0_0_8px_rgba(248,113,113,0.35)]">
+                  <span data-testid="hud-estado-amedrontado" title="Amedrontado" className="rounded border border-red-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none text-red-400 shadow-[0_0_8px_rgba(248,113,113,0.35)]">
                     ⚠
                   </span>
                 ) : null}
                 {dados.protegido ? (
-                  <span data-testid="hud-estado-protecao" title="Proteção" className="rounded border border-cyan-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-sm leading-none text-cyan-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
+                  <span data-testid="hud-estado-protecao" title="Proteção" className="rounded border border-cyan-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none text-cyan-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
                     🛡
                   </span>
                 ) : null}
@@ -291,7 +291,7 @@ export function HudDaPartida({
       <div className="absolute left-1/2 top-6 -translate-x-1/2">
         <h1
           data-testid="hud-titulo"
-          className="font-display text-sm font-semibold uppercase tracking-[0.28em] text-zinc-100"
+          className="font-display text-[length:var(--hud-corpo,0.875rem)] leading-5 font-semibold uppercase tracking-[0.28em] text-zinc-100"
         >
           Flicker of Sanity
         </h1>
@@ -324,7 +324,7 @@ export function HudDaPartida({
           type="button"
           data-testid="hud-sair"
           onClick={() => setConfirmandoSaida(true)}
-          className="pointer-events-auto min-h-[44px] min-w-[44px] rounded border border-amber-500/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.14em] text-amber-400 hover:border-amber-400 hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-500"
+          className="pointer-events-auto min-h-[44px] min-w-[44px] rounded border border-amber-500/70 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-[0.14em] text-amber-400 hover:border-amber-400 hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-500"
         >
           Sair
         </button>
@@ -335,7 +335,7 @@ export function HudDaPartida({
           role="alertdialog"
           aria-modal="true"
           aria-label="Confirmar saída da partida"
-          className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-base text-zinc-100 shadow-xl"
+          className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-zinc-100 shadow-xl"
         >
           <p>Sair da partida e voltar à sala?</p>
           <div className="flex gap-2">
@@ -343,7 +343,7 @@ export function HudDaPartida({
               type="button"
               data-testid="hud-sair-confirmar"
               onClick={onSair}
-              className="min-h-[44px] min-w-[44px] rounded bg-amber-500 px-4 py-2 text-sm font-semibold uppercase tracking-wider text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+              className="min-h-[44px] min-w-[44px] rounded bg-amber-500 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-wider text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >
               Confirmar
             </button>
@@ -351,7 +351,7 @@ export function HudDaPartida({
               type="button"
               data-testid="hud-sair-cancelar"
               onClick={() => setConfirmandoSaida(false)}
-              className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-sm uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+              className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >
               Cancelar
             </button>
@@ -373,7 +373,7 @@ export function HudDaPartida({
             <div
               role="img"
               aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMinhaVez ? ', com a vez' : ''}`}
-              className={`flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display text-2xl font-semibold transition-colors duration-500 ${
+              className={`flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display text-[length:var(--hud-display,1.5rem)] leading-8 font-semibold transition-colors duration-500 ${
                 ehMinhaVez ? 'border-amber-300/40' : 'border-zinc-700'
               }`}
             >
@@ -385,10 +385,10 @@ export function HudDaPartida({
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-semibold uppercase tracking-[0.18em] text-zinc-100">
+            <span className="text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-[0.18em] text-zinc-100">
               {jogadorLocal.dados.apelido}
             </span>
-            <span className="text-sm uppercase tracking-[0.18em] text-amber-300">Sanidade</span>
+            <span className="text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-[0.18em] text-amber-300">Sanidade</span>
             <div
               data-testid="hud-sanidade"
               data-sanidade={String(jogadorLocal.dados.sanidade)}
@@ -417,7 +417,7 @@ export function HudDaPartida({
             data-ativo={jogadorLocal.dados.emBaixaIluminacao ? 'true' : 'false'}
             role="status"
             aria-label={jogadorLocal.dados.emBaixaIluminacao ? 'Baixa Iluminação ativa' : 'Baixa Iluminação inativa'}
-            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-sm font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[length:var(--hud-micro,0.625rem)] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
               jogadorLocal.dados.emBaixaIluminacao
                 ? 'border-amber-400/70 bg-amber-400/10 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.35)]'
                 : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
@@ -425,7 +425,7 @@ export function HudDaPartida({
           >
             <span
               aria-hidden="true"
-              className={`block text-sm ${jogadorLocal.dados.emBaixaIluminacao ? 'text-amber-300' : 'text-zinc-600'}`}
+              className={`block text-[length:var(--hud-corpo,0.875rem)] leading-5 ${jogadorLocal.dados.emBaixaIluminacao ? 'text-amber-300' : 'text-zinc-600'}`}
             >
               ◐
             </span>
@@ -436,7 +436,7 @@ export function HudDaPartida({
             data-ativo={jogadorLocal.dados.amedrontado ? 'true' : 'false'}
             role="status"
             aria-label={jogadorLocal.dados.amedrontado ? 'Amedrontado ativo' : 'Amedrontado inativo'}
-            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-sm font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[length:var(--hud-micro,0.625rem)] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
               jogadorLocal.dados.amedrontado
                 ? 'border-red-400/70 bg-red-400/10 text-red-200 shadow-[0_0_16px_rgba(248,113,113,0.35)]'
                 : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
@@ -444,7 +444,7 @@ export function HudDaPartida({
           >
             <span
               aria-hidden="true"
-              className={`block text-sm ${jogadorLocal.dados.amedrontado ? 'text-red-300' : 'text-zinc-600'}`}
+              className={`block text-[length:var(--hud-corpo,0.875rem)] leading-5 ${jogadorLocal.dados.amedrontado ? 'text-red-300' : 'text-zinc-600'}`}
             >
               ⚠
             </span>
@@ -455,7 +455,7 @@ export function HudDaPartida({
             data-ativo={jogadorLocal.dados.protegido ? 'true' : 'false'}
             role="status"
             aria-label={jogadorLocal.dados.protegido ? 'Proteção ativa' : 'Proteção inativa'}
-            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-sm font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
+            className={`w-24 max-w-[6rem] break-words rounded-md border px-1.5 py-1.5 text-center text-[length:var(--hud-micro,0.625rem)] font-semibold uppercase leading-tight tracking-wider transition-all duration-500 ${
               jogadorLocal.dados.protegido
                 ? 'border-cyan-400/70 bg-cyan-400/10 text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.35)]'
                 : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-500'
@@ -463,7 +463,7 @@ export function HudDaPartida({
           >
             <span
               aria-hidden="true"
-              className={`block text-sm ${jogadorLocal.dados.protegido ? 'text-cyan-300' : 'text-zinc-600'}`}
+              className={`block text-[length:var(--hud-corpo,0.875rem)] leading-5 ${jogadorLocal.dados.protegido ? 'text-cyan-300' : 'text-zinc-600'}`}
             >
               🛡
             </span>
@@ -491,7 +491,7 @@ export function HudDaPartida({
                   role="status"
                   aria-label={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1} desligado`}
                   title={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1}`}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm transition-all duration-500 ${
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-[length:var(--hud-corpo,0.875rem)] leading-5 transition-all duration-500 ${
                     acesa
                       ? 'border-amber-300 bg-amber-400/15 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.5)]'
                       : 'border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40'
@@ -502,7 +502,7 @@ export function HudDaPartida({
               )
             })}
           </div>
-          <span className="font-display text-sm font-semibold uppercase tracking-[0.28em] text-zinc-400">
+          <span className="font-display text-[length:var(--hud-micro,0.625rem)] font-semibold uppercase tracking-[0.28em] text-zinc-400">
             Geradores
           </span>
         </div>
@@ -513,7 +513,7 @@ export function HudDaPartida({
             role="status"
             aria-label={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso não obtido'}
             title={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso'}
-            className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm transition-all duration-500 ${
+            className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-[length:var(--hud-corpo,0.875rem)] leading-5 transition-all duration-500 ${
               cartaoDeAcessoObtido
                   ? 'border-emerald-300 bg-emerald-400/15 text-emerald-200 shadow-[0_0_16px_rgba(52,211,153,0.5)]'
                   : 'border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40'
@@ -521,7 +521,7 @@ export function HudDaPartida({
           >
             <span aria-hidden="true" className={cartaoDeAcessoObtido ? 'drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]' : ''}>▣</span>
           </div>
-          <span className="font-display text-sm font-semibold uppercase tracking-[0.28em] text-zinc-400">
+          <span className="font-display text-[length:var(--hud-micro,0.625rem)] font-semibold uppercase tracking-[0.28em] text-zinc-400">
             Cartão
           </span>
         </div>
@@ -537,7 +537,7 @@ export function HudDaPartida({
           aria-label="Turno"
           className="absolute bottom-6 right-6 flex origin-bottom-right scale-90 flex-col gap-2 bg-transparent px-1 py-1 lg:scale-100"
         >
-          <span className="text-right font-display text-sm font-semibold uppercase tracking-[0.28em] text-amber-200/90">
+          <span className="text-right font-display text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-[0.28em] text-amber-200/90">
             Turno
           </span>
           <div className="flex items-center gap-1.5">
@@ -558,7 +558,7 @@ export function HudDaPartida({
                     role="img"
                     aria-label={ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}
                     title={dados.apelido}
-                    className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border font-display text-sm transition-all duration-500 ${
+                    className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border font-display text-[length:var(--hud-rotulo,0.75rem)] leading-4 transition-all duration-500 ${
                       ehAtivo
                         ? 'border-amber-300/40 bg-zinc-800'
                         : 'border-zinc-800 bg-zinc-950 opacity-50 grayscale'

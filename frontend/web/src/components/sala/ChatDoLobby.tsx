@@ -54,7 +54,7 @@ export function ChatDoLobby({ mensagens, aoEnviar }: Props) {
         aria-label="Histórico do chat"
       >
         {mensagensDoFeed.length === 0 ? (
-          <p className="text-white/85">Sem mensagens ainda</p>
+          <p className="text-sm text-white/85">Sem mensagens ainda</p>
         ) : (
           mensagensDoFeed.map((item) => (
             <p key={item.chave} className="text-white/85">
@@ -77,7 +77,7 @@ export function ChatDoLobby({ mensagens, aoEnviar }: Props) {
           placeholder="ENVIAR MENSAGEM..."
           maxLength={LIMITE_DE_CARACTERES_DO_CHAT}
           aria-label="Nova mensagem"
-          className="flex-1 min-w-0 bg-transparent text-lg text-white placeholder:text-white/80 focus:outline-none"
+          className="flex-1 min-w-0 bg-transparent text-base text-white placeholder:text-white/80 focus:outline-none"
         />
         <span className="text-base text-white/80 tabular-nums" aria-hidden>
           {rascunho.length}/{LIMITE_DE_CARACTERES_DO_CHAT}

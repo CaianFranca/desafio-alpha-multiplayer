@@ -124,7 +124,7 @@
     bottom: 1rem;
     z-index: 2;
     margin: 0;
-    font-size: 1.0625rem;
+    font-size: var(--piso-corpo, 1rem);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -379,9 +379,9 @@
   }
   .objectives-item-desc {
     margin: 0;
-    font-size: clamp(1rem, 1vw, 1.125rem);
+    font-size: clamp(var(--piso-corpo, 1rem), 1vw, var(--corpo-ampliado, 1.125rem));
     line-height: 1.65;
-    color: var(--color-text);
+    color: var(--color-muted);
   }
 
   @media (max-width: 767px) {
