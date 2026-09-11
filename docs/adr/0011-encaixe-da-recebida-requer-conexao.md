@@ -46,10 +46,36 @@ sempre conectam. Três consequências foram tomadas junto:
 
 ## Alternativas consideradas
 
+A exigência de Conexão permanece — mas deslocada para o OK: após Puxar +
+escolha da vaga, a peça surge na célula-alvo em estado PROVISÓRIO mesmo sem
+conexão na orientação atual; o jogador gira livremente (R/E/setas do overlay)
+e o OK emite o `POSICIONAR_PECA`. Sem conexão, o engine recusa com
+`MOVIMENTO_NAO_CONECTADO` (som de recusa pelo contrato da ADR-0007) e a etapa
+permanece para continuar girando; com conexão, aprova e avança. O encaixe
+imediato no clique da vaga (issue #261) foi removido: ele suprimia o preview
+sem conexão (peça saía da Bandeja, célula vazia, turno travado). Controles do
+overlay (setas/OK) sempre no topo (`depthTest={false}`, `renderOrder`
+999/1000, altura 0.7, hitbox do OK reforçada) para o clique chegar mesmo com o
+avatar sobre a célula. Wire e códigos de erro inalterados.
+
 - **DADOS_INVALIDOS ou código novo para o encaixe desconectado** — rejeitado:
   MOVIMENTO_NAO_CONECTADO já comunica a semântica e viaja sem mudança de wire.
 - **Permitir re-selecionar/re-vagar a Recebida presa** — rejeitado: muda o
   modelo de seleção; o sequenciamento per-encaixe resolve por construção.
 - **Manter o bot sem girar** — rejeitado: o bot passaria a desistir de turnos
   com encaixe desconectado sorteado, quebrando os jogos automáticos.
+
+## Aditivo (issue #357, 2026-09-10)
+
+A exigência de Conexão permanece — mas deslocada para o OK: após Puxar +
+escolha da vaga, a peça surge na célula-alvo em estado PROVISÓRIO mesmo sem
+conexão na orientação atual; o jogador gira livremente (R/E/setas do overlay)
+e o OK emite o `POSICIONAR_PECA`. Sem conexão, o engine recusa com
+`MOVIMENTO_NAO_CONECTADO` (som de recusa pelo contrato da ADR-0007) e a etapa
+permanece para continuar girando; com conexão, aprova e avança. O encaixe
+imediato no clique da vaga (issue #261) foi removido: ele suprimia o preview
+sem conexão (peça saía da Bandeja, célula vazia, turno travado). Controles do
+overlay (setas/OK) sempre no topo (`depthTest={false}`, `renderOrder`
+999/1000, altura 0.7, hitbox do OK reforçada) para o clique chegar mesmo com o
+avatar sobre a célula. Wire e códigos de erro inalterados.
 

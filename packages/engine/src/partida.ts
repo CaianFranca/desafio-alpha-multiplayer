@@ -757,6 +757,38 @@ function moverPeaoDaPartida(
     }
   }
 
+  // Zona da origem: o Peão só pousa na Peça do início do turno ou em vizinha
+  // diretamente conectada a ela — ida-e-volta livre até a Confirmação de
+  // Posição, sem viajar pelo tabuleiro dentro do turno. Célula vazia não é
+  // barrada aqui (vaza para CELULA_NAO_ENCONTRADA do Tabuleiro). Pousa depois
+  // das guardas de conexão/ocupação para preservar erros mais específicos
+  // (MOVIMENTO_NAO_CONECTADO, PECA_JA_TEM_PEAO). A Travessia do Escuro (#272)
+  // é isenta: o mover_peao da cadeia nasce de atravessar_o_escuro — Baixa
+  // Iluminação — e sai da zona de propósito.
+  const origemDoTurnoId = estado.pecaDoInicioDoTurnoId;
+  const origemDoTurno = origemDoTurnoId
+    ? estado.tabuleiro.posicionadas.find((peca) => peca.pecaId === origemDoTurnoId)
+    : undefined;
+  if (
+    !(estado.atravessouNoTurno ?? false) &&
+    origemDoTurnoId !== null &&
+    origemDoTurno !== undefined &&
+    destino
+  ) {
+    const zona = [
+      origemDoTurnoId,
+      ...vizinhasConectadas(estado.tabuleiro, origemDoTurnoId).map(
+        (peca) => peca.pecaId,
+      ),
+    ];
+    if (!zona.includes(destino.pecaId)) {
+      return rejeitarDaPartida(
+        'MOVIMENTO_INDISPONIVEL',
+        'O Peão só se move dentro da zona da Peça do início do turno.',
+      );
+    }
+  }
+
   const resultadoTab = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
   let tabuleiroNovo: EstadoDoTabuleiro;
   let eventosTab: readonly EventoDoTabuleiro[];
@@ -1350,7 +1382,12 @@ function confirmarPosicaoDoPeao(
   // Issue #264 / spec #272: em Baixa o Recebimento acontece na Travessia do
   // Escuro (ou não acontece — célula iluminada consome 0); a Confirmação em
   // Baixa NÃO sorteia (recebidas = []), mantendo Limpeza/Ataque do gatilho.
-  const emBaixa = ator.emBaixaIluminacao ?? false;
+  // Review PR #370 (Bug 1): quem entra saudável e sai em Baixa no MESMO
+  // gatilho também não recebe sorteio nesse CONFIRMAR — o emBaixa acima é
+  // pré-ataque; a Baixa nova do gatilho descarta o sorteio abaixo (0 no turno
+  // atual, 1 no próximo avancarVez, ADR-0013).
+  const emBaixaAntes = ator.emBaixaIluminacao ?? false;
+  const emBaixa = emBaixaAntes;
   const sorteio = emBaixa
     ? { estado: estado.tabuleiro, recebidas: [] as readonly PecaRecebida[], eventos: [] as readonly EventoDoTabuleiro[] }
     : gerarRecebidas(estado.tabuleiro, peca, emBaixa);
@@ -1391,6 +1428,26 @@ function confirmarPosicaoDoPeao(
       iluminacao,
       eventos,
     );
+  // Review PR #370 (Bug 1): o sorteio acima usou a Baixa pré-ataque — se o
+  // gatilho impôs Baixa nova ao ator, o turno encerra sem sortear: remove
+  // peca_sorteada/recebimento_gerado do lote e restaura a Caixa consumida. O
+  // puxar-1 vem no próximo avancarVez (ADR-0013).
+  const atorAposAtaque = ataque.jogadores.find(
+    (jogador) => jogador.jogadorId === ator.jogadorId,
+  );
+  const baixaNovaDoAtor =
+    !emBaixaAntes && ((atorAposAtaque?.emBaixaIluminacao ?? false) === true);
+  const recebidasFinais = baixaNovaDoAtor ? [] : sorteio.recebidas;
+  if (baixaNovaDoAtor && sorteio.recebidas.length > 0) {
+    for (let indice = eventos.length - 1; indice >= 0; indice--) {
+      if (
+        eventos[indice].tipo === 'peca_sorteada' ||
+        eventos[indice].tipo === 'recebimento_gerado'
+      ) {
+        eventos.splice(indice, 1);
+      }
+    }
+  }
   // B3/review #333: a adoção da seleção só existe quando a Confirmação gera
   // Recebimento — em Baixa Iluminação (sorteio [], ADR-0005) a seleção não
   // nasce sem sequência (invariante "a seleção vive durante a sequência").
@@ -1408,9 +1465,11 @@ function confirmarPosicaoDoPeao(
   }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
+    caixa: baixaNovaDoAtor ? estado.tabuleiro.caixa : tabuleiroPosLimpeza.caixa,
+    recebidas: recebidasFinais,
     posicionadas: posicionadasPosAtaque,
     peaoSelecionadoId:
-      sorteio.recebidas.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
+      recebidasFinais.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
   };
   // Conquistas (issue #176): contadores globais atualizados APENAS aqui, de
   // forma idempotente — gerador ainda não ligado acrescenta o pecaId a

@@ -39,9 +39,9 @@
  * PUXADA — não há mais "primeira pendência sem vaga" automática. Sem peça
  * puxada, o clique de vaga é silencioso (padrão #91: alvos inválidos não
  * reagem). Puxar é restrito ao dono do ciclo (espectador: clique mudo). O
- * clique de vaga já carrega o encaixe imediato (issue #261):
- * ESCOLHER_VAGA seguido de POSICIONAR_PECA no MESMO clique — a peça encaixa
- * com um único clique.
+ * clique de vaga emite SÓ a escolha (issue #357: o encaixe imediato no mesmo
+ * clique, da issue #261, foi removido — ele suprimia o preview sem conexão);
+ * a peça surge em preview provisório e o OK finaliza com POSICIONAR_PECA.
  *
  * Guard pós-confirmação (AC3 — review #165): com `posicaoConfirmadaNoTurno`,
  * os alvos que seriam válidos (permanecer/mover) retornam rejeição com motivo
@@ -95,7 +95,7 @@ import type {
  * reconexão); o GIRAR_PECA local a atualiza em foco. A pendência só sai
  * da lista no encaixe (PECA_POSICIONADA na célula-alvo).
  */
-export interface PendenciaNoCliente extends PendenciaDaPecaSorteada {}
+export type PendenciaNoCliente = PendenciaDaPecaSorteada
 
 export interface EstadoInteracaoPeoes {
   readonly peoes: readonly PeaoDaExibicao[]
@@ -159,6 +159,14 @@ export interface EstadoInteracaoPeoes {
   readonly celulasIluminadas?: readonly Celula[]
   /** Peões em Baixa Iluminação (per-player) — para filtrar vagas iluminadas. */
   readonly peaoIdsEmBaixa?: ReadonlySet<PeaoId>
+  /**
+   * Peça do início do turno (zona da origem — espelho de partida.ts:119): a
+   * Peça sob o Peão do Jogador Ativo quando o turno iniciou. O Peão só pousa
+   * nela ou em vizinha diretamente conectada a ela; `null` (Peão na Mesa do
+   * Primeiro Turno) desativa a zona; ausente (unidades puras/testes) mantém
+   * o comportamento legado. Fonte: derivada no TURNO_INICIADO + snapshot.
+   */
+  readonly pecaDoInicioDoTurnoId?: string | null
 }
 
 // ── Resultado de clique/ação do ciclo ──
@@ -224,9 +232,13 @@ function corDoPeaoId(peaoId: string): string | null {
 }
 
 /**
- * Gate "Inicial primeiro" (issue #249): SELECIONAR_PEAO só é emitido quando
- * a própria Inicial do dono já está posicionada — sem ela em `posicionadas`,
- * a seleção fica silenciosa (null no mapeador, sem comando ao servidor).
+ * Gate "Inicial primeiro" (issue #249): SELECIONAR_PEAO do Peão ainda SOBRE
+ * a Mesa só é emitido quando a própria Inicial do dono já está posicionada —
+ * sem ela em `posicionadas`, a seleção fica silenciosa (null no mapeador,
+ * sem comando ao servidor). O mapeador NÃO avalia este gate para Peão já
+ * posicionado (revisão do critério por presença da Inicial): a Inicial é
+ * removida pela Limpeza (#147/ADR-0005) quando o Peão se afasta dela, então a
+ * presença dela não pode travar a seleção de turns seguintes.
  *
  * O dono é inferido pela cor (`peao-branco` → `inicial-1`, espelhando
  * `estadoInicialDaPartida` do engine: ordem ↔ cor ↔ inicial-<ordem>). Sem
@@ -276,8 +288,10 @@ export function mapearDesselecaoDePeao(
  * encerravam o turno por engano); re-selecionar o próprio Peão também não
  * emite comando. Com pendências, clicar em OUTRO Peão não emite comando e
  * retorna rejeição local (espelha PENDENCIA_NAO_RESOLVIDA). Peão inexistente
- * → null (não reage). Gate "Inicial primeiro" (#249): sem a própria Inicial
- * posicionada, SELECIONAR_PEAO é silencioso (null).
+ * → null (não reage). Gate "Inicial primeiro" (#249) só SE APLICA ao Peão
+ * ainda sobre a Mesa (Primeiro Turno): sem a própria Inicial posicionada,
+ * SELECIONAR_PEAO é silencioso (null); uma vez posicionado, a Inicial pode
+ * ter sido removida pela Limpeza (#147/ADR-0005) e a seleção segue liberada.
  */
 export function mapearCliqueNoPeao(
   estado: EstadoInteracaoPeoes,
@@ -297,8 +311,11 @@ export function mapearCliqueNoPeao(
     }
   }
   // Gate "Inicial primeiro" (#249): travar SELECIONAR_PEAO até a própria
-  // Inicial estar posicionada — silencioso, sem comando.
-  if (!podeSelecionarPeao(estado, peaoId)) return null
+  // Inicial estar posicionada — silencioso, sem comando. SÓ vale para o Peão
+  // ainda SOBRE a Mesa (Primeiro Turno): uma vez posicionado, a própria
+  // Inicial pode ter sido removida pela Limpeza (#147/ADR-0005 — o Peão se
+  // afasta dela e a peça sai da Iluminação) e a seleção segue liberada.
+  if (peao.celula === null && !podeSelecionarPeao(estado, peaoId)) return null
   return { tipo: 'comando', comando: { type: 'SELECIONAR_PEAO', peaoId } }
 }
 
@@ -457,6 +474,13 @@ export interface PuxadaDaBandeja {
  *   - só a CORRENTE (primeira pendência sem vaga) é puxável;
  *   - espectador (`donoDoCiclo === false`) não puxa — clique silencioso, a
  *     bandeja continua pública (a corrente é exibida a todos);
+ *   - posição confirmada EM BAIXA (`posicaoConfirmadaNoTurno` + peão do ciclo
+ *     em `peaoIdsEmBaixa`, review PR #370 Bug 1) trava o pull — moveu →
+ *     sofreu ataque/Baixa → o turno encerra sem sortear e o puxar-1 vem no
+ *     próximo `avancarVez` (ADR-0013); o mover checa a confirmação, o pull
+ *     também. Fora da Baixa o pull pós-confirmação segue liberado: no fluxo
+ *     saudável o CONFIRMAR sorteia e o encaixe (puxar → vaga → OK) acontece
+ *     DEPOIS da confirmação, antes do encerramento (issue #326);
  *   - re-clique na já puxada é no-op (null), sem reação repetida;
  *   - sem pendências correntes → null.
  * O consumo do pull: com a vaga escolhida o engine move a peça para
@@ -467,6 +491,18 @@ export function mapearCliqueNaPecaDaBandeja(
   puxadaAtual: string | null = estado.recebidaPuxadaId ?? null,
 ): PuxadaDaBandeja | null {
   if (estado.donoDoCiclo === false) return null
+  if (estado.posicaoConfirmadaNoTurno) {
+    // Review PR #370 (Bug 1): só a Baixa trava o pull pós-confirmação — o
+    // peão de referência é o do ciclo (seleção, ou o do turno com pendências,
+    // #326); sem o mapa de Baixa (unidades puras) a trava fica aberta,
+    // espelhando o fail-open de vagasDisponiveisDoPeao.
+    const peaoRef = peaoDeReferenciaDaSequencia(estado)
+    const emBaixa =
+      estado.peaoIdsEmBaixa !== undefined && peaoRef !== null
+        ? estado.peaoIdsEmBaixa.has(peaoRef)
+        : false
+    if (emBaixa) return null
+  }
   const corrente = estado.recebidasPendentes.find((r) => r.vaga === null)
   if (corrente === undefined) return null
   if (puxadaAtual === corrente.recebidaId) return null
@@ -576,6 +612,70 @@ export function mapearPosicionarRecebida(
 }
 
 /**
+ * Peça em preview provisório (issue #357): pendência com vaga escolhida
+ * (`vaga` + `celulaAlvo` fixados) ainda NÃO posicionada. A cena a renderiza
+ * na célula-alvo em estado provisório — mesmo sem conexão na orientação
+ * atual — e o overlay de Manipulação a ancora para giro livre + OK.
+ */
+export interface PecaProvisoria {
+  readonly pecaId: string
+  readonly tipo: Pick<PecaPosicionada, 'tipo'>['tipo']
+  readonly orientacao: Orientacao
+  readonly celula: Celula
+  readonly recebidaId: string
+}
+
+/**
+ * Previews provisórios do ciclo (issue #357): uma entrada por pendência com
+ * célula-alvo cuja peça ainda não foi posicionada. Fonte única da cena
+ * (Tabuleiro), do overlay (ManipulacaoOverlay) e do espelho DOM.
+ */
+export function previewsProvisorios(
+  estado: EstadoInteracaoPeoes,
+): readonly PecaProvisoria[] {
+  const posicionadasPorId = new Set(
+    estado.posicionadas.map((p) => p.pecaId),
+  )
+  return estado.recebidasPendentes
+    .filter((r) => r.celulaAlvo !== null && !posicionadasPorId.has(r.pecaId))
+    .map((r) => ({
+      pecaId: r.pecaId,
+      tipo: r.tipoDaPeca,
+      orientacao: r.orientacao,
+      celula: r.celulaAlvo as Celula,
+      recebidaId: r.recebidaId,
+    }))
+}
+
+/**
+ * OK da Manipulação sobre o preview provisório → POSICIONAR_PECA na
+ * célula-alvo da pendência em foco (issue #357: o posicionamento só se torna
+ * realidade no OK). Exige a coerência tripla do encaixe: célula-alvo
+ * existente + vaga escolhida + peça em foco (`pecaSelecionadaId`). A
+ * validação de conexão é autoritativa do engine (MOVIMENTO_NAO_CONECTADO,
+ * review PR #370 Bug 2): o OK emite SEMPRE — sem conexão o servidor recusa
+ * com som de recusa e a etapa permanece para continuar girando. Sem preview
+ * em foco → null.
+ */
+export function mapearFinalizarRecebida(
+  estado: EstadoInteracaoPeoes,
+): TabuleiroComandoDoCliente | null {
+  const pecaId = estado.pecaSelecionadaId
+  if (pecaId === null) return null
+  const pendencia = estado.recebidasPendentes.find(
+    (r) => r.pecaId === pecaId && r.vaga !== null && r.celulaAlvo !== null,
+  )
+  if (pendencia === undefined || pendencia.vaga === null) return null
+  if (estado.posicionadas.some((p) => p.pecaId === pecaId)) return null
+
+  return {
+    type: 'POSICIONAR_PECA',
+    pecaId,
+    celula: pendencia.celulaAlvo as Celula,
+  }
+}
+
+/**
  * Clique em Peça vizinha conectada destacada do Peão selecionado →
  * MOVER_PEAO. Exige tudo posicionado (US 15: recebidas pendentes antes de
  * mover → não reage). Posição já confirmada neste turno → rejeição âmbar
@@ -600,6 +700,7 @@ export function mapearMovimentacao(
     peaoId,
     estado.afetadosPorPeaoId,
     estado.quantidadeDeJogadores,
+    estado.pecaDoInicioDoTurnoId,
   )
   const conectada = destinos.some(
     (d) => chaveCelula(d.peca.celula) === chaveCelula(celula),
@@ -613,11 +714,12 @@ export function mapearMovimentacao(
 
 /**
  * Resultado do clique em célula com o ciclo ativo: comando do ciclo (peão ou
- * tabuleiro — POSICIONAR_PECA da Recebida), escolha de vaga com encaixe
- * imediato no MESMO clique (issue #261: ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido
- * de POSICIONAR_PECA — a cadeia serial do servidor processa a sequência em
- * ordem), rejeição local com feedback (guard pós-confirmação, AC3), ou null
- * (alvo inválido não reage; sem ciclo ativo o chamador aplica o fallback ST-09).
+ * tabuleiro — POSICIONAR_PECA da Recebida via célula-alvo ou OK do preview),
+ * escolha de vaga no MESMO clique com encaixe imediato (formato legado da
+ * issue #261, mantido no tipo para compatibilidade do despacho — o roteador
+ * não o emite mais desde a issue #357), rejeição local com feedback (guard
+ * pós-confirmação, AC3), ou null (alvo inválido não reage; sem ciclo ativo o
+ * chamador aplica o fallback ST-09).
  */
 export type ResultadoDeCliqueEmCelula =
   | { readonly ciclo: PeaoComandoDoCliente | TabuleiroComandoDoCliente }
@@ -679,15 +781,13 @@ export function cicloAtivo(estado: EstadoInteracaoPeoes): boolean {
  *
  * Com pendências:
  *   - célula = vaga disponível E há pendência PUXADA sem vaga →
- *     ESCOLHER_VAGA + encaixe imediato (POSICIONAR_PECA na célula da vaga)
- *     para a recebida puxada — issue #261: UM clique na vaga seleciona E
-  *     encaixa (2 comandos em sequência na mesma conexão, processados em
-  *     ordem pela cadeia serial do servidor); fluxo #143/revisão #199: a vaga
-  *     vai para a peça puxada da bandeja — sem puxada ativa, ou com a puxada
-  *     já encaminhada, o clique de vaga é silencioso. Gate de conexão
-  *     (review PR #338): sem a borda voltada à geradora aberta (ex.: reta@0
-  *     em vaga leste), emite SÓ a escolha — o encaixe imediato seria
-  *     recusado com MOVIMENTO_NAO_CONECTADO.
+ *     SÓ ESCOLHER_VAGA para a recebida puxada (issue #357: sem encaixe
+ *     imediato — a peça aparece na célula-alvo em estado PROVISÓRIO, o
+ *     jogador gira livremente (R/E/setas) e o OK finaliza com POSICIONAR_PECA
+ *     via `mapearFinalizarRecebida`; a conexão só é validada no OK, pelo
+ *     engine, com recusa sonora e permanência na etapa se desconectada).
+ *     Sem puxada ativa, ou com a puxada já encaminhada, o clique de vaga é
+ *     silencioso.
  *   - célula = célula-alvo de pendência com pendência.pecaId ===
  *     pecaSelecionadaId → POSICIONAR_PECA (encaixe; coerência tripla:
  *     célula-alvo + vaga escolhida + peça em foco).
@@ -735,34 +835,12 @@ export function rotearCliqueDeCelula(
             alvo.recebidaId,
             vaga.borda,
           )
-          // issue #261: UM clique na vaga escolhe E já encaixa a peça —
-          // ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido de POSICIONAR_PECA; a
-          // cadeia serial do servidor processa a sequência em ordem.
-          // Gate de conexão (review PR #338): a reta@0 numa vaga leste, por
-          // exemplo, seria recusada com MOVIMENTO_NAO_CONECTADO (o engine
-          // exige a borda voltada à geradora aberta) — a escolha seria
-          // aceita mas o encaixe não, deixando a pendência com vaga sem
-          // peça posicionada ("não aparece e trava"). Sem conexão, emite
-          // SÓ a escolha: o jogador gira (R/E) e clica a célula-alvo.
+          // issue #357: o clique na vaga SÓ escolhe — sem encaixe imediato
+          // (o antigo 1-clique da #261 suprimia o preview sem conexão: a
+          // peça saía da Bandeja mas a célula continuava vazia e o turno
+          // travava). A peça surge em preview provisório na célula-alvo e o
+          // OK (`mapearFinalizarRecebida`) emite o POSICIONAR_PECA.
           if (comando) {
-            if (
-              recebidaConectaNaVaga(
-                alvo.tipoDaPeca,
-                alvo.orientacao ?? 0,
-                vaga.borda,
-              )
-            ) {
-              return {
-                escolhaDeVagaEEncaixe: {
-                  escolhaDeVaga: comando,
-                  encaixe: {
-                    type: 'POSICIONAR_PECA',
-                    pecaId: alvo.pecaId,
-                    celula: vaga.celula,
-                  },
-                },
-              }
-            }
             return { ciclo: comando }
           }
         }
@@ -855,8 +933,8 @@ export function despacharCliqueDeCelula(
       return
     }
     if ('escolhaDeVagaEEncaixe' in resultado) {
-      // issue #261: escolha e encaixe no MESMO clique — o encaixe segue a
-      // escolha na ordem (2 mensagens WS em sequência na mesma conexão).
+      // Formato legado da issue #261 (o roteador não o emite mais desde a
+      // #357, mas o despacho o honra caso algum chamador o construa).
       despacho.onComandoPeao?.(resultado.escolhaDeVagaEEncaixe.escolhaDeVaga)
       despacho.onComando?.(resultado.escolhaDeVagaEEncaixe.encaixe)
       return
