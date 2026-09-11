@@ -7,6 +7,8 @@ import {
   COR_LATERAIS_MESA,
   ESPESSURA_MESA,
   LARGURA_MESA,
+  NEVOA_LONGE,
+  NEVOA_PERTO,
   PROFUNDIDADE_MESA,
 } from '../ambiente/contrato'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
@@ -199,7 +201,8 @@ export function AmbienteCena({
     <>
       {/* Vazio quase-preto delimitando a cena, com fog no mesmo tom para profundidade. */}
       <color attach="background" args={[COR_FUNDO]} />
-      <fog attach="fog" args={[COR_FUNDO, 24, 70]} />
+      {/* #230: névoa afastada (NEVOA_PERTO/LONGE) para a Mesa 20×20 não esmaecer em 800x360. */}
+      <fog attach="fog" args={[COR_FUNDO, NEVOA_PERTO, NEVOA_LONGE]} />
       <Iluminacao />
       {/*
         Wrapper de desseleção (issue #90): clique em qualquer alvo inerte da

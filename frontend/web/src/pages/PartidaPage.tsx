@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AmbienteDeJogo } from '../components/partida/AmbienteDeJogo'
-import { HudDaPartida } from '../components/partida/HudDaPartida'
+import { HudDaPartida, deveUsarHudCompacto } from '../components/partida/HudDaPartida'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
 import { usePartidaTela } from '../components/partida/usePartidaTela'
@@ -637,6 +637,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [enviarComJogador])
   const requerModoPaisagem = useRequerModoPaisagem()
   const [bordaPx, setBordaPx] = useState(0)
+  // Modo compacto paisagem-celular (#230, 800x360): mesmo breakpoint do HUD
+  // para conter os controles de turno sem sobrepor HUD/alvos, com safe-area.
+  const [viewportCompacto, setViewportCompacto] = useState(() =>
+    typeof window !== 'undefined'
+      ? deveUsarHudCompacto(window.innerWidth, window.innerHeight)
+      : false,
+  )
+  useEffect(() => {
+    function atualizar(): void {
+      setViewportCompacto(deveUsarHudCompacto(window.innerWidth, window.innerHeight))
+    }
+    window.addEventListener('resize', atualizar)
+    window.addEventListener('orientationchange', atualizar)
+    return () => {
+      window.removeEventListener('resize', atualizar)
+      window.removeEventListener('orientationchange', atualizar)
+    }
+  }, [])
 
   // Devolução de foco do overlay bloqueante: rastreia o último foco fora
   // do overlay (via focusin — o auto-focus do filho roda antes do efeito
@@ -743,13 +761,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           emResultado={emResultado}
           partidaId={partidaId}
           onSair={voltarASala}
+          compacto={viewportCompacto}
         />
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (
-        // Botões de turno acima do card de Turno do HUD (inf-dir, #226).
+        // Botões de turno acima do card de Turno do HUD (inf-dir, #226;
+        // contidos no compacto #230 com safe-area, sem sobrepor HUD/alvos).
         <div
           data-testid="controles-de-turno"
-          className="pointer-events-auto absolute bottom-32 right-6 z-30 flex gap-2"
+          data-compacto={viewportCompacto ? 'true' : 'false'}
+          style={
+            viewportCompacto
+              ? {
+                  right: 'calc(1rem + env(safe-area-inset-right))',
+                  bottom: 'calc(5.5rem + env(safe-area-inset-bottom))',
+                }
+              : undefined
+          }
+          className={`pointer-events-auto absolute z-30 flex gap-2 ${viewportCompacto ? 'bottom-20 right-4' : 'bottom-32 right-6'}`}
         >
           {faseDoTurno === 'permanecer' ? (
             <button
