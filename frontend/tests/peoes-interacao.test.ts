@@ -1238,6 +1238,74 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     expect(mapearCliqueNaPecaDaBandeja(estado)).toEqual({ recebidaId: 'r1' })
   })
 
+  it('fluxo Baixa completo no cliente: puxar → vaga → OK → selecionar → mover (review PR #370 Bug 2)', () => {
+    // Turno em Baixa (puxar-1 do avancarVez já na Bandeja): cada etapa da
+    // cadeia emite o comando esperado; confirmar/encerrar são botões de fase
+    // (engine, cobertos em packages/engine/test/partida.test.ts).
+    const baseBaixa = estadoBase({
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('reta-9', 'reta', 90, 3, 4),
+      ],
+      peoes: [peao('peao-1-branco', INICIAL), peao('peao-2-vermelho', null)],
+      recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
+      peaoSelecionadoId: null,
+      peaoDoTurnoId: 'peao-1-branco',
+      pecaSelecionadaId: null,
+      posicaoConfirmadaNoTurno: false,
+      movimentouNoTurno: false,
+      peaoIdsEmBaixa: new Set(['peao-1-branco']),
+      afetadosPorPeaoId: new Set(['peao-1-branco']),
+      celulasIluminadas: [],
+      pecaDoInicioDoTurnoId: 'inicial-1',
+    })
+    // 1. Puxar: em Baixa e sem confirmação, a corrente é puxável.
+    expect(mapearCliqueNaPecaDaBandeja(baseBaixa)).toEqual({ recebidaId: 'r1' })
+    // 2. Vaga: com a puxada vigente, o clique na vaga norte (2,3, escura)
+    // emite SÓ a escolha (sem encaixe imediato, #357).
+    const comPull = { ...baseBaixa, recebidaPuxadaId: 'r1' }
+    expect(mapearEscolhaDeVagaDaRecebida(comPull, 'r1', 'norte')).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r1',
+      borda: 'norte',
+    })
+    // 3. OK: com vaga + alvo + foco (ack do engine), emite POSICIONAR_PECA.
+    const comVaga = estadoBase({
+      ...comPull,
+      recebidasPendentes: [
+        { recebidaId: 'r1', pecaId: 'reta-1', tipoDaPeca: 'reta', orientacao: 0, vaga: 'norte', celulaAlvo: { linha: 2, coluna: 3 } },
+      ],
+      pecaSelecionadaId: 'reta-1',
+    })
+    expect(mapearFinalizarRecebida(comVaga)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+    })
+    // 4. Selecionar: após o encaixe (sem pendências), o peão volta a
+    // selecionar — núcleo do Bug 2.
+    const encaixada = estadoBase({
+      ...comPull,
+      posicionadas: [
+        ...comPull.posicionadas,
+        pecaPosicionada('reta-1', 'reta', 0, 2, 3),
+      ],
+      recebidasPendentes: [],
+      peaoSelecionadoId: null,
+      pecaSelecionadaId: null,
+    })
+    expect(mapearCliqueNoPeao(encaixada, 'peao-1-branco')).toEqual({
+      tipo: 'comando',
+      comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-1-branco' },
+    })
+    // 5. Mover: selecionado, o destino conectado na peça nova emite MOVER_PEAO.
+    const selecionado = { ...encaixada, peaoSelecionadoId: 'peao-1-branco' }
+    expect(mapearMovimentacao(selecionado, { linha: 2, coluna: 3 })).toEqual({
+      tipo: 'comando',
+      comando: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 2, coluna: 3 } },
+    })
+  })
+
   it('puxadaVigenteNaBandeja: só a corrente sem vaga puxada conta como vigente', () => {
     // Sem pull → não vigente.
     const semPull = estadoBase({ recebidasPendentes: [pendSemVaga('r1', 'reta-1')] })
