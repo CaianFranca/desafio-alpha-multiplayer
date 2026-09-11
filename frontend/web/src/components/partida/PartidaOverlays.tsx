@@ -15,6 +15,12 @@ interface PartidaOverlaysProps {
   motivo?: MotivoDeDerrota | null
   onRetry: () => void
   onVoltar: () => void
+  /**
+   * Desistência própria (issue #290): quem desistiu não readmite (o servidor
+   * rejeita com JOGADOR_NAO_NA_PARTIDA) — a falha vira terminal sem retry e
+   * sem voltar-à-sala. Queda/logout mantém retry.
+   */
+  semRetry?: boolean
 }
 
 const baseClasses = 'absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/80'
@@ -37,6 +43,7 @@ export function PartidaOverlays({
   motivo = null,
   onRetry,
   onVoltar,
+  semRetry = false,
 }: PartidaOverlaysProps) {
   if (estado === 'disponivel') {
     return null
@@ -93,6 +100,18 @@ export function PartidaOverlays({
   }
 
   // estado === 'falha'
+  if (semRetry) {
+    return (
+      <div data-testid="overlay-falha" role="alert" className={baseClasses}>
+        <div className="flex flex-col items-center gap-4">
+          <p className="text-white text-lg">Falha ao carregar</p>
+          <p data-testid="partida-desistencia-sem-retorno" className="text-zinc-400 text-sm">
+            Você desistiu desta partida e não pode reassistir.
+          </p>
+        </div>
+      </div>
+    )
+  }
   return (
     <div data-testid="overlay-falha" role="alert" className={baseClasses}>
       <div className="flex flex-col items-center gap-4">

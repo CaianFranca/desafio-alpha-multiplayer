@@ -700,6 +700,23 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     expect(overlay).toHaveTextContent(/Restou só você/i)
   })
 
+  it('desistente que volta à URL vê falha terminal sem retry nem voltar-à-sala', async () => {
+    window.sessionStorage.setItem('partida-desistiu:p', '1')
+    try {
+      renderPartidaParaSaida(null)
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      act(() => {
+        MockWebSocket.last()!.onerror!(new Event('error'))
+      })
+      expect(await screen.findByTestId('overlay-falha')).toBeInTheDocument()
+      expect(screen.getByTestId('partida-desistencia-sem-retorno')).toHaveTextContent(/não pode reassistir/i)
+      expect(screen.queryByTestId('partida-tentar-novamente')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('voltar-a-sala')).not.toBeInTheDocument()
+    } finally {
+      window.sessionStorage.removeItem('partida-desistiu:p')
+    }
+  })
+
   it('overlay de resultado fica legível acima do HUD', async () => {
     const ws = await partidaComSnapshot(criarSnapshotBase())
     act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'vitoria' }))

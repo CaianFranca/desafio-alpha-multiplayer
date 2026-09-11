@@ -477,16 +477,34 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Jogador, vale no próprio turno ou fora dele) e navega à principal (/),
   // mantendo o login (AuthProvider persiste a Sessão). Gate local anti-duplo
   // clique: DESISTIR não tem chave pendente (#249 retorna null).
+  // Quem desistiu não readmite: o servidor rejeita o upgrade com
+  // JOGADOR_NAO_NA_PARTIDA — a volta à URL cai em falha terminal sem retry
+  // nem voltar-à-sala (só queda/logout mantém retry). A flag sobrevive a
+  // F5/voltar pelo histórico na mesma aba via sessionStorage.
   const desistindoRef = useRef(false)
+  const [desistiu, setDesistiu] = useState(() => {
+    if (typeof window === 'undefined' || partidaId === null) return false
+    try {
+      return window.sessionStorage.getItem(`partida-desistiu:${partidaId}`) === '1'
+    } catch {
+      return false
+    }
+  })
   const desistirEIrParaPrincipal = useCallback(() => {
     if (desistindoRef.current) return
     desistindoRef.current = true
     if (jogadorId !== null && !emResultadoRef.current) {
       enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
     }
+    setDesistiu(true)
+    try {
+      if (partidaId !== null) window.sessionStorage.setItem(`partida-desistiu:${partidaId}`, '1')
+    } catch {
+      // sessionStorage indisponível: a flag em memória já bloqueia o retry.
+    }
     desconectar()
     navigate('/')
-  }, [desconectar, enviar, jogadorId, navigate])
+  }, [desconectar, enviar, jogadorId, navigate, partidaId])
 
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
@@ -672,6 +690,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao])
 
   const tentarNovamenteComConexao = useCallback(() => {
+    // Desistente não reconecta (o servidor rejeitaria com
+    // JOGADOR_NAO_NA_PARTIDA) — falha terminal sem retry.
+    if (desistiu) return
     desconectar()
     if (!temAlvo) {
       falhar()
@@ -683,7 +704,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       carregar()
     }
     reconectarSocket()
-  }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader])
+  }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader, desistiu])
 
   // ── Comandos de turno (issue #118) — todos via enviarComJogador ──
   // Permanecer auto-seleciona o peão da vez (bloqueante review #338): no
@@ -777,7 +798,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
       />
-      <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} />
+      <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
       {/*
         Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
         região viva sempre presente; o texto atualiza a cada recusa (som +
