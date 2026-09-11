@@ -669,3 +669,51 @@ describe('lobby - página do lobby', () => {
     expect(heading.closest('.overflow-y-auto')).not.toBeNull()
   })
 })
+
+describe('lobby - saída própria via broadcast (issue #290)', () => {
+  beforeEach(() => {
+    MockWebSocket.clean()
+    MockWebSocket.forceNoAutoOpen = false
+  })
+
+  it('MEMBRO_SAIU próprio zera a sala: home volta a Criar / Entrar na Sala, sem modal de expulsão', async () => {
+    renderWithRouter(['/'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const EU = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
+    const eu = criarMembro({ id: 'm-eu', jogadorId: EU, apelido: 'JogadorTeste', ordemDeEntrada: 0 })
+    const outro = criarMembro({ id: 'm-2', jogadorId: 'jogador-2', apelido: 'Ana', ordemDeEntrada: 1 })
+    act(() => {
+      ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: criarSala({ membros: [eu, outro], anfitriaoId: 'm-eu' }) })
+    })
+    expect(await screen.findAllByText('Retornar para Sala')).not.toHaveLength(0)
+
+    // Lobby desvinculou este jogador (ex.: desistência confirmada pelo
+    // game-server): a sala sai sem ele e o cliente zera o vínculo.
+    const salaSemMim = criarSala({ membros: [outro], anfitriaoId: 'm-2' })
+    act(() => {
+      ws.simulateMessage({ type: 'MEMBRO_SAIU', membroId: 'm-eu', jogadorId: EU, sala: salaSemMim })
+    })
+    expect(await screen.findAllByText('Criar / Entrar na Sala')).not.toHaveLength(0)
+    expect(screen.queryByText('Retornar para Sala')).not.toBeInTheDocument()
+    expect(screen.queryByText(/foi expulso/i)).not.toBeInTheDocument()
+  })
+
+  it('MEMBRO_SAIU de outro membro mantém a sala', async () => {
+    renderWithRouter(['/'], mockAuthenticatedState)
+    const ws = MockWebSocket.last()!
+    const EU = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
+    const eu = criarMembro({ id: 'm-eu', jogadorId: EU, apelido: 'JogadorTeste', ordemDeEntrada: 0 })
+    const outro = criarMembro({ id: 'm-2', jogadorId: 'jogador-2', apelido: 'Ana', ordemDeEntrada: 1 })
+    act(() => {
+      ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: criarSala({ membros: [eu, outro], anfitriaoId: 'm-eu' }) })
+    })
+    expect(await screen.findAllByText('Retornar para Sala')).not.toHaveLength(0)
+
+    const salaSemOutro = criarSala({ membros: [eu], anfitriaoId: 'm-eu' })
+    act(() => {
+      ws.simulateMessage({ type: 'MEMBRO_SAIU', membroId: 'm-2', jogadorId: 'jogador-2', sala: salaSemOutro })
+    })
+    expect(await screen.findAllByText('Retornar para Sala')).not.toHaveLength(0)
+    expect(screen.queryByText('Criar / Entrar na Sala')).not.toBeInTheDocument()
+  })
+})

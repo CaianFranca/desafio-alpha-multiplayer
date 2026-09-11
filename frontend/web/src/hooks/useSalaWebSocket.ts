@@ -411,6 +411,25 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
               expulsoRef.current = true
               return
             }
+            // Saída própria via broadcast (issue #290): o lobby desvinculou
+            // este jogador (ex.: desistência da partida confirmada pelo
+            // game-server) — a sala local zera para voltar a criar/entrar,
+            // sem modal nem lista de bloqueados (não é expulsão). Também
+            // cobre o eco do próprio SAIR_DA_SALA (idempotente com o otimista).
+            if (
+              evento.type === 'MEMBRO_SAIU' &&
+              jogadorId &&
+              evento.jogadorId === jogadorId &&
+              !evento.sala.membros.some((m) => m.jogadorId === jogadorId)
+            ) {
+              setSala(null)
+              setMensagensDeChat([])
+              setJogadoresBloqueados([])
+              setEncaminhamento(estadoInicialDoEncaminhamento())
+              const msgSaida = mensagemDeAviso(evento, salaAnterior)
+              if (msgSaida) adicionarAviso(msgSaida, evento.type)
+              return
+            }
               
               // Snapshot de sala encaminhada (issue #45): quem reconectou recebe SALA_ATUALIZADA com encaminhamento
             if (!(evento.sala.estado === 'encerrada' || evento.sala.estado === 'expirada')) {

@@ -37,7 +37,7 @@ import {
   salvarEstadoDaPartida,
 } from './estado.ts';
 import { obterPartida, type PartidaPreparada } from './partidas.ts';
-import type { AvisoDeRetorno } from '../retorno/cliente.ts';
+import type { AvisoDeRetorno, AvisoDeDesistencia } from '../retorno/cliente.ts';
 import { sleep } from '../utils/sleep.ts';
 
 export interface PartidaHandlersDeps {
@@ -45,6 +45,13 @@ export interface PartidaHandlersDeps {
   readonly broadcaster: PartidaBroadcaster;
   readonly partidaTerminadaTtlSegundos?: number;
   readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
+  /**
+   * Desvinculação imediata do desistente no lobby (issue #290): a cada
+   * `desistencia_registrada` o lobby remove SÓ o desistente da sala
+   * `encaminhada` para que ele possa criar/entrar em outra sala na hora.
+   * Best-effort com retry (nunca falha a desistência).
+   */
+  readonly notificarDesistencia?: (aviso: AvisoDeDesistencia) => Promise<void>;
   /** Stream de debug (issue #340). Opcional: sem o campo, nenhuma linha é espelhada. */
   readonly debug?: DebugStreamDaPartida;
 }
@@ -54,6 +61,7 @@ export class PartidaHandlers {
   private readonly broadcaster: PartidaBroadcaster;
   private readonly partidaTerminadaTtlSegundos: number;
   private readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
+  private readonly notificarDesistencia?: (aviso: AvisoDeDesistencia) => Promise<void>;
   private readonly debug?: DebugStreamDaPartida;
   // Serialização mononodo: uma cadeia de promessas por partidaId.
   private readonly cadeiasPorPartida: Map<string, Promise<unknown>> = new Map();
@@ -65,6 +73,7 @@ export class PartidaHandlers {
     this.broadcaster = deps.broadcaster;
     this.partidaTerminadaTtlSegundos = deps.partidaTerminadaTtlSegundos ?? 3600;
     this.notificarRetorno = deps.notificarRetorno;
+    this.notificarDesistencia = deps.notificarDesistencia;
     this.debug = deps.debug;
   }
 
@@ -140,6 +149,40 @@ export class PartidaHandlers {
       this.broadcaster.enviar(partidaId, ...traduzirEventos(resultado.eventos));
 
       const termino = resultado.eventos.find((evento) => evento.tipo === 'partida_terminada');
+      const desistencias = resultado.eventos.filter((evento) => evento.tipo === 'desistencia_registrada');
+      if (termino?.tipo !== 'partida_terminada' && desistencias.length > 0 && this.notificarDesistencia !== undefined) {
+        // Desistência parcial (sobram ≥2, sem término): desvincula cada
+        // desistente no lobby em fire-and-forget (a partida continua; não há
+        // retorno aqui). O caso com término é tratado abaixo com await para
+        // garantir a ordem detach → retorno.
+        const notificar = this.notificarDesistencia;
+        void (async () => {
+          let partida: PartidaPreparada | null = partidaPrevia;
+          if (partida === null) {
+            try {
+              partida = await obterPartida(this.redis, partidaId);
+            } catch {
+              partida = null;
+            }
+          }
+          if (partida === null) {
+            console.error('[partida] sem metadados para callback de desistência', { partidaId });
+            return;
+          }
+          for (const evento of desistencias) {
+            if (evento.tipo !== 'desistencia_registrada') continue;
+            const promessa = notificar({
+              salaId: partida.salaId,
+              partidaId,
+              serverId: partida.serverId,
+              jogadorId: evento.jogadorId,
+            }).catch((erro: unknown) => {
+              console.error('[partida] callback de desistência terminou com erro', { partidaId, erro });
+            });
+            this.rastrearRetorno(partidaId, promessa);
+          }
+        })().catch(() => undefined);
+      }
       if (termino?.tipo === 'partida_terminada') {
         try {
           await aplicarRetencaoDeTermino(
@@ -157,6 +200,18 @@ export class PartidaHandlers {
 
         let aviso: AvisoDeRetorno | undefined;
         if (this.notificarRetorno !== undefined) {
+          // Término com desistentes (2→1, issue #290): desvincula TODOS os
+          // desistentes (roster − engine) ANTES do retorno — o lobby revalida
+          // `jogadores == membros ativos` com 409 definitivo, então o detach
+          // precisa ter commitado antes do POST /api/retorno. O await só
+          // atrasa esta cadeia pós-término (comandos seguintes já seriam
+          // recusados com PARTIDA_TERMINADA); com o lobby fora do ar, o
+          // sistema já está degradado (o próprio retorno gira em retry).
+          await this.desvincularDesistentes(
+            partidaId,
+            partidaPrevia,
+            resultado.estado.jogadores.map((j) => j.jogadorId),
+          );
           if (this.callbacksEnviados.has(partidaId) || this.retornosPendentes.has(partidaId)) {
             // Já há callback em voo ou enviado — retenção já aplicada acima, apenas evita duplicar aviso
           } else {
@@ -211,7 +266,7 @@ export class PartidaHandlers {
                           console.error('[partida] callback ainda sem metadados após segundo reagendamento', { partidaId });
                           return;
                         }
-                        const avisoReagendado2 = this.montarAviso(partidaReagendada2, termino.desfecho.tipo);
+                        const avisoReagendado2 = await this.montarAviso(partidaReagendada2, termino.desfecho.tipo);
                         this.callbacksEnviados.add(partidaId);
                         const promessa2 = this.notificarRetorno(avisoReagendado2).catch((erro: unknown) => {
                           console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
@@ -222,7 +277,7 @@ export class PartidaHandlers {
                     return;
                   }
                   if (this.notificarRetorno === undefined) return;
-                  const avisoReagendado = this.montarAviso(partidaReagendada, termino.desfecho.tipo);
+                  const avisoReagendado = await this.montarAviso(partidaReagendada, termino.desfecho.tipo);
                   this.callbacksEnviados.add(partidaId);
                   const promessa = this.notificarRetorno(avisoReagendado).catch((erro: unknown) => {
                     console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
@@ -231,7 +286,7 @@ export class PartidaHandlers {
                 }).catch(() => undefined);
               }, atrasoMs).unref?.();
             } else {
-              aviso = this.montarAviso(partida, termino.desfecho.tipo);
+              aviso = await this.montarAviso(partida, termino.desfecho.tipo);
               this.callbacksEnviados.add(partidaId);
             }
           }
@@ -308,27 +363,65 @@ export class PartidaHandlers {
   }
 
   /**
-   * Monta o aviso de Retorno com N (membros da sala), não N−1 (engine).
-   *
-   * O `jogadores` do aviso preserva o vínculo de sala: é o roster da partida
-   * preparada (pré-desistência), porque o lobby revalida
-   * `jogadores == membros ativos` e responde `409 SALA_NAO_ENCAMINHADA` a
-   * qualquer subconjunto (lobby-server/src/routes/retorno.ts:131-141) —
-   * código definitivo, sem retentativa (retorno/cliente.ts:36-42, ADR-0006).
-   * Enviar N−1 deixaria a sala presa em `encaminhada` e quebraria o critério
-   * "volta à Sala" da spec #288, que manda reutilizar o callback de Retorno
-   * existente com "os mesmos Membros" (CONTEXT.md). O N−1 vive no
-   * `estado.jogadores` do engine (participação na partida), não no aviso.
-   * A eventual remoção do desistente do roster da sala é follow-up na issue
-   * #371 (exigiria o lobby aceitar subconjunto N−1 + remoção de membro).
+   * Desvincula no lobby todos os desistentes de uma partida terminada
+   * (roster − participação atual no engine), aguardando cada callback.
+   * Chamado antes do retorno para garantir a ordem detach → retorno.
    */
-  private montarAviso(partida: PartidaPreparada, resultado: 'vitoria' | 'derrota'): AvisoDeRetorno {
+  private async desvincularDesistentes(
+    partidaId: string,
+    partidaPrevia: PartidaPreparada | null,
+    jogadoresNaPartida: readonly string[],
+  ): Promise<void> {
+    const notificar = this.notificarDesistencia;
+    if (notificar === undefined) return;
+    let partida: PartidaPreparada | null = partidaPrevia;
+    if (partida === null) {
+      try {
+        partida = await obterPartida(this.redis, partidaId);
+      } catch {
+        partida = null;
+      }
+    }
+    if (partida === null) {
+      console.error('[partida] sem metadados para desvincular desistentes', { partidaId });
+      return;
+    }
+    const naPartida = new Set(jogadoresNaPartida);
+    const desistentes = partida.roster.map((m) => m.jogadorId).filter((id) => !naPartida.has(id));
+    for (const jogadorId of desistentes) {
+      try {
+        await notificar({ salaId: partida.salaId, partidaId, serverId: partida.serverId, jogadorId });
+      } catch (erro: unknown) {
+        // O cliente só rejeita em erro de programação (rede/HTTP viram
+        // retry infinito); logar e seguir para não travar os demais.
+        console.error('[partida] falha ao desvincular desistente', { partidaId, jogadorId, erro });
+      }
+    }
+  }
+
+  /**
+   * Monta o aviso de Retorno com N−1 (participação atual no engine), não N
+   * (roster pré-desistência) — issue #290, resolve o follow-up #371.
+   *
+   * O lobby desvincula cada desistente no callback de desistência e revalida
+   * `jogadores == membros ativos`, então o aviso precisa refletir os
+   * restantes. Sem estado (não-início) cai no roster, preservando o
+   * comportamento anterior. Vitória sem desistências: engine == roster.
+   */
+  private async montarAviso(partida: PartidaPreparada, resultado: 'vitoria' | 'derrota'): Promise<AvisoDeRetorno> {
+    let jogadores: readonly string[] | null = null;
+    try {
+      const estado = await obterEstadoDaPartida(this.redis, partida.partidaId);
+      if (estado !== null) jogadores = estado.jogadores.map((j) => j.jogadorId);
+    } catch {
+      jogadores = null;
+    }
     return {
       salaId: partida.salaId,
       partidaId: partida.partidaId,
       serverId: partida.serverId,
       resultado,
-      jogadores: partida.roster.map((m) => m.jogadorId),
+      jogadores: jogadores ?? partida.roster.map((m) => m.jogadorId),
     };
   }
 

@@ -16,6 +16,7 @@ export interface Config {
   partidaTerminadaTtlSegundos: number;
   partidaNaoInicioSegundos: number;
   lobbyRetornoCallbackUrl: string;
+  lobbyDesistenciaCallbackUrl: string;
   postgres: {
     host: string;
     port: number;
@@ -159,6 +160,21 @@ function parseLobbyRetornoCallbackUrl(raw: string | undefined, fallback: string)
   }
 }
 
+function parseLobbyDesistenciaCallbackUrl(raw: string | undefined, fallback: string): string {
+  if (raw === undefined || raw.trim().length === 0) {
+    return fallback;
+  }
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('protocolo não suportado');
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    throw new Error('LOBBY_DESISTENCIA_CALLBACK_URL deve ser uma URL HTTP(S) válida');
+  }
+}
+
 function parseSessionAccessTtlSeconds(raw: string | undefined): number {
   const parsed = Number(raw ?? DEFAULT_SESSION_ACCESS_TTL_SECONDS);
   if (Number.isInteger(parsed) && parsed > 0) {
@@ -272,6 +288,10 @@ export function getConfig(): Config {
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
   );
+  const lobbyDesistenciaCallbackUrl = parseLobbyDesistenciaCallbackUrl(
+    process.env.LOBBY_DESISTENCIA_CALLBACK_URL as string | undefined,
+    `http://localhost:${lobbyServerPort}/api/desistencia`,
+  );
 
   const postgres = {
     host: process.env.POSTGRES_HOST ?? 'localhost',
@@ -342,6 +362,7 @@ export function getConfig(): Config {
     partidaTerminadaTtlSegundos,
     partidaNaoInicioSegundos,
     lobbyRetornoCallbackUrl,
+    lobbyDesistenciaCallbackUrl,
     postgres,
     redis,
     gameServerHeartbeatIntervalMs,

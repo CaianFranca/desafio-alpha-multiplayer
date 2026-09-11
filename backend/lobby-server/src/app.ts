@@ -2,6 +2,7 @@ import express, { type Express } from 'express';
 import { authRouter } from './routes/auth.ts';
 import { gameServersRouter } from './routes/gameServers.ts';
 import { criarRetornoRouter } from './routes/retorno.ts';
+import { criarDesistenciaRouter } from './routes/desistencia.ts';
 import { cookieMiddleware } from './middleware/cookie.ts';
 import { pool } from './config/pg.ts';
 import { redisClient } from './config/redis.ts';
@@ -33,6 +34,7 @@ export function createApp(opcoes: CreateAppOpcoes = {}): Express {
 
   if (opcoes.contextoSalas) {
     app.use('/api/retorno', criarRetornoRouter(opcoes.contextoSalas));
+    app.use('/api/desistencia', criarDesistenciaRouter(opcoes.contextoSalas));
   }
 
   // Handler global para erros de body-parser — evita respostas HTML para a API (A6/A8).

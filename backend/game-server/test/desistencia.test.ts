@@ -26,7 +26,7 @@ import {
   type EstadoDaPartida,
 } from '@flicker/engine';
 import type { MembroDaSala } from '@flicker/shared';
-import type { AvisoDeRetorno } from '../src/retorno/cliente.ts';
+import type { AvisoDeRetorno, AvisoDeDesistencia } from '../src/retorno/cliente.ts';
 import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
 import {
   chaveDaPartida,
@@ -126,6 +126,7 @@ interface PartidaMontada {
   readonly broadcaster: PartidaBroadcaster;
   readonly handlers: PartidaHandlers;
   readonly avisos: AvisoDeRetorno[];
+  readonly desistencias: AvisoDeDesistencia[];
   readonly sockets: Map<string, SocketFalso>;
 }
 
@@ -134,11 +135,15 @@ async function montarPartida(jogadores: readonly string[]): Promise<PartidaMonta
   const redis = new RedisEmMemoria();
   const broadcaster = new PartidaBroadcaster();
   const avisos: AvisoDeRetorno[] = [];
+  const desistencias: AvisoDeDesistencia[] = [];
   const handlers = new PartidaHandlers({
     redis: redis.comoRedis(),
     broadcaster,
     notificarRetorno: async (aviso) => {
       avisos.push(aviso);
+    },
+    notificarDesistencia: async (aviso) => {
+      desistencias.push(aviso);
     },
   });
 
@@ -168,7 +173,7 @@ async function montarPartida(jogadores: readonly string[]): Promise<PartidaMonta
     sockets.set(jogadorId, falso);
     broadcaster.registrar(partidaId, falso.comoWebSocket());
   }
-  return { partidaId, redis, broadcaster, handlers, avisos, sockets };
+  return { partidaId, redis, broadcaster, handlers, avisos, desistencias, sockets };
 }
 
 async function lerEstado(montada: PartidaMontada): Promise<EstadoDaPartida> {
@@ -282,6 +287,31 @@ test('desistência fora do turno remove peão e vez sem trocar o Ativo', async (
   );
   assert.equal(snapshot.jogadorAtivoId, 'jogador-1');
   assert.equal(snapshot.estado, 'em_andamento');
+});
+
+// ─── Desvinculação imediata no lobby (issue #290) ───
+
+test('desistência parcial avisa o lobby para desvincular só o desistente, sem Retorno', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
+  const { partidaId, handlers, sockets, avisos, desistencias } = montada;
+
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-4')!.comoWebSocket(),
+    partidaId,
+    'jogador-4',
+    desistir('jogador-4'),
+  );
+  await handlers.drenarRetornosPendentes();
+
+  assert.deepEqual(desistencias, [
+    {
+      salaId: 'sala-1',
+      partidaId,
+      serverId: 'game-server-teste-desistencia',
+      jogadorId: 'jogador-4',
+    },
+  ]);
+  assert.equal(avisos.length, 0, '4→3 continua: sem callback de Retorno');
 });
 
 // ─── No próprio turno: Passagem imediata destrava ───
@@ -405,7 +435,7 @@ test('4→3 continua e vence com N−1', async () => {
 
 test('2→1 declara derrota por desistência e dispara o Retorno uma única vez', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2']);
-  const { partidaId, handlers, sockets, avisos } = montada;
+  const { partidaId, handlers, sockets, avisos, desistencias } = montada;
 
   await handlers.aplicarMensagem(
     sockets.get('jogador-2')!.comoWebSocket(),
@@ -432,17 +462,25 @@ test('2→1 declara derrota por desistência e dispara o Retorno uma única vez'
     motivo: 'desistencia',
   });
 
-  // N × N−1 lado a lado: o aviso carrega N (vínculo de sala preservado — o
-  // lobby revalida `jogadores == membros ativos` e rejeita subconjunto com
-  // 409 definitivo; ver `montarAviso`), enquanto o estado carrega N−1. A
-  // remoção do desistente do roster da sala é follow-up na issue #371.
+  // N−1 no aviso (issue #290, resolve o follow-up #371): o lobby desvincula
+  // cada desistente no callback de desistência e revalida
+  // `jogadores == membros ativos`, então o retorno carrega os restantes.
+  // O detach do desistente acontece ANTES do retorno (ordem garantida).
+  assert.deepEqual(desistencias, [
+    {
+      salaId: 'sala-1',
+      partidaId,
+      serverId: 'game-server-teste-desistencia',
+      jogadorId: 'jogador-2',
+    },
+  ]);
   assert.equal(avisos.length, 1);
   assert.deepEqual(avisos[0], {
     salaId: 'sala-1',
     partidaId,
     serverId: 'game-server-teste-desistencia',
     resultado: 'derrota',
-    jogadores: ['jogador-1', 'jogador-2'],
+    jogadores: ['jogador-1'],
   });
 
   // Comando pós-término é recusado e não duplica o callback.
