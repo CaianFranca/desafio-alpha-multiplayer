@@ -24,7 +24,7 @@ const caixas = new WeakMap<WebSocket, { mensagens: string[]; esperas: Array<{ re
 let contador = 0;
 function sufixo(): string { contador += 1; return `${contador}`; }
 function apelidoUnico(p: string): string { return `${p}-${sufixo()}`; }
-function emailUnico(p: string): string { return `${p}-${sufixo()}@bot.teste`; }
+function emailUnico(p: string): string { return `${p}-${sufixo()}@teste.local`; }
 function extrairCookies(res: Response): Record<string,string> {
   const cookies: Record<string,string> = {};
   for (const raw of res.headers.getSetCookie()) {

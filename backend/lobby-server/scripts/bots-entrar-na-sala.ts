@@ -33,7 +33,7 @@ const CODIGO_REGEX = /^[A-Z0-9]{6}$/;
 // para nunca reutilizar um Jogador ainda associado a outra Sala (evita
 // JOGADOR_JA_ASSOCIADO após Ctrl+C). Contas antigas expiram sozinhas no
 // servidor (janela de reconexão 60s); limpar no banco quando desejado com:
-//   DELETE FROM usuarios WHERE email LIKE 'bot-%@exemplo.local';
+//   DELETE FROM usuarios WHERE email LIKE 'bot-%@teste.local';
 const MAX_TENTATIVAS_REGISTRO = 8;
 
 function log(prefix: string, ...args: unknown[]): void {
@@ -114,7 +114,7 @@ Padrão (sem --emails): gera --quantidade contas efêmeras por execução, com
   email/apelido/senha aleatórios e únicos, e registra direto (sem login).
   Em 409 (apelido/email em uso) gera novas credenciais e repete (até
   ${MAX_TENTATIVAS_REGISTRO}x). Cada execução cria N linhas em usuarios;
-  para limpar: DELETE FROM usuarios WHERE email LIKE 'bot-%@exemplo.local';
+  para limpar: DELETE FROM usuarios WHERE email LIKE 'bot-%@teste.local';
 
 Exemplos:
   npx tsx backend/lobby-server/scripts/bots-entrar-na-sala.ts ABCDEF
@@ -190,7 +190,9 @@ function gerarCredenciaisEfemeras(): JogadorCredenciais {
   // apelido: 3–20 chars, só [a-z0-9-], único.
   // senha: 16 chars base64url (sempre >= 8, sem espaços).
   const uniq = `${Date.now().toString(36)}${randomBytes(6).toString('hex')}`.toLowerCase();
-  const email = `bot-${uniq}@bot.teste`;
+  // CLI cria via registro público: usa domínio de teste NÃO reservado.
+  // (@bot.teste é reservado a Cadastros internos do BotRunner via INSERT direto.)
+  const email = `bot-${uniq}@teste.local`;
   const apelido = `b-${Date.now().toString(36).slice(-4)}-${randomBytes(3).toString('hex')}`.toLowerCase().slice(0, 20);
   const senha = randomBytes(12).toString('base64url');
   return { email, senha, apelido };
@@ -260,7 +262,8 @@ function entrarNaPartida(
   const wsGameUrl =
     baseUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') +
     `/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}&token=${encodeURIComponent(accessToken)}`;
-  log(prefix, `entrando na partida → ${wsGameUrl}`);
+  // Segurança (#365 item 1): CLI dev também não loga Bearer token.
+  log(prefix, `entrando na partida server=${serverId} partida=${partidaId} token=***${accessToken.slice(-4)}`);
   const ws = new WebSocket(wsGameUrl);
   sockets.push(ws);
   // Driver do turno (Random Walk): o espelho é semeado pelo snapshot da

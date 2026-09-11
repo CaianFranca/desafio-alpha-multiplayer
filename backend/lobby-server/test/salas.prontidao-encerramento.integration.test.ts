@@ -75,7 +75,7 @@ async function comServidor<T>(executar: (servidor: ServidorEfemero) => Promise<T
 }
 function sufixo(): string { contador += 1; return `${contador}`; }
 function apelidoUnico(prefixo: string): string { return `${prefixo}-${sufixo()}`; }
-function emailUnico(prefixo: string): string { return `${prefixo}-${sufixo()}@bot.teste`; }
+function emailUnico(prefixo: string): string { return `${prefixo}-${sufixo()}@teste.local`; }
 function extrairCookies(res: Response): Cookies {
   const setCookies = res.headers.getSetCookie();
   const cookies: Cookies = {};

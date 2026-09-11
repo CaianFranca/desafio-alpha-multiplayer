@@ -122,7 +122,7 @@ export type SalaComandoDoCliente =
   | AtivarDebugComando
   | DesativarDebugComando;
 
-// --- Eventos servidor → cliente (9) ---
+// --- Eventos servidor → cliente (10) ---
 
 export interface SalaAtualizadaEvento {
   type: 'SALA_ATUALIZADA';
@@ -214,6 +214,21 @@ export interface ErroDaSalaEvento {
   mensagem: string;
 }
 
+/**
+ * Falha pós-202 da admissão de bot efêmero (#352, review #365 item 3).
+ * Broadcast para a Sala quando o bot não conseguiu entrar (ex.: SALA_CHEIA
+ * em corrida) ou foi rejeitado na partida. Sem campo `sala`: o cliente
+ * exibe como aviso/erro sem trocar o snapshot. O Anfitrião também pode
+ * consultar `GET /api/bots/status/:jogadorId` (polling após o 202).
+ */
+export interface BotFalhouEvento {
+  type: 'BOT_FALHOU';
+  jogadorId: string;
+  apelido: string;
+  codigo: string;
+  mensagem: string;
+}
+
 export type SalaEventoDoServidor =
   | SalaAtualizadaEvento
   | MembroEntrouEvento
@@ -224,4 +239,5 @@ export type SalaEventoDoServidor =
   | AnfitriaoSubstituidoEvento
   | ProntidaoAtualizadaEvento
   | MensagemDeChatEvento
-  | ErroDaSalaEvento;
+  | ErroDaSalaEvento
+  | BotFalhouEvento;

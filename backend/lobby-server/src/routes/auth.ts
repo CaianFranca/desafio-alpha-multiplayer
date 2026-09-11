@@ -179,7 +179,14 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
     erros.push({ campo: 'email', mensagem: 'Informe o email.' });
   } else if (!validarFormatoEmail(emailBruto)) {
     erros.push({ campo: 'email', mensagem: 'Informe um email válido.' });
-  } else if (normalizarEmail(emailBruto).endsWith('@exemplo.local')) {
+  } else if (
+    normalizarEmail(emailBruto).endsWith('@exemplo.local') ||
+    normalizarEmail(emailBruto).endsWith('@bot.teste')
+  ) {
+    // Opção A (#365 item 4): @bot.teste é o domínio canônico de bots — usado
+    // SÓ pelo BotRunner via INSERT direto (bypass intencional desta validação).
+    // CLI e testes usam @teste.local via registro público. @exemplo.local é
+    // legado reservado (linhas antigas). Nenhum dos dois passa no registro público.
     erros.push({ campo: 'email', mensagem: 'Domínio reservado para contas internas.' });
   }
 

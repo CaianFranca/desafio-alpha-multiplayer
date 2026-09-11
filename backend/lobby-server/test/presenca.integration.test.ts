@@ -142,7 +142,7 @@ function apelidoUnico(prefixo: string): string {
   return `${prefixo}-${sufixo()}`;
 }
 function emailUnico(prefixo: string): string {
-  return `${prefixo}-${sufixo()}@bot.teste`;
+  return `${prefixo}-${sufixo()}@teste.local`;
 }
 function extrairCookies(res: Response): Cookies {
   const setCookies = res.headers.getSetCookie();

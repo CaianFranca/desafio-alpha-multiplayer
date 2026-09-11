@@ -366,6 +366,13 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           setErro(evento.mensagem)
           adicionarAviso(evento.mensagem, evento.type)
           return
+        case 'BOT_FALHOU': {
+          // Falha pós-202 do bot (#352): sem snapshot, só aviso + erro visível.
+          const msg = `Bot ${evento.apelido} não entrou: ${evento.mensagem}`
+          setErro(msg)
+          adicionarAviso(msg, evento.type)
+          return
+        }
         case 'MENSAGEM_DE_CHAT': {
           // Expulso: ignora mensagens atrasadas da sala da qual saiu.
           if (expulsoRef.current) return
