@@ -138,7 +138,7 @@ export function textoDoAnuncioDeRecusa(motivo: MotivoDeRecusa): string {
     case 'caixa_esgotada':
       return 'Ação recusada: a caixa está vazia.'
     case 'ataque_com_penalidade':
-      return 'Seu peão sofreu um ataque.'
+      return 'Um peão sofreu um ataque.'
     default:
       return 'Ação recusada.'
   }
