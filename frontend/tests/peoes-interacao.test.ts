@@ -1210,6 +1210,34 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     expect(mapearCliqueNaPecaDaBandeja(estado)).toBeNull()
   })
 
+  it('posição confirmada EM BAIXA trava o pull (review PR #370 Bug 1)', () => {
+    // Moveu → sofreu ataque/Baixa → CONFIRMAR encerra sem sortear no turno;
+    // a Bandeja não puxa após posicaoConfirmadaNoTurno em Baixa (o puxar-1
+    // vem no próximo avancarVez, ADR-0013).
+    const estado = estadoBase({
+      peoes: [peao('peao-branco', INICIAL)],
+      peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
+      posicaoConfirmadaNoTurno: true,
+      peaoIdsEmBaixa: new Set(['peao-branco']),
+    })
+    expect(mapearCliqueNaPecaDaBandeja(estado)).toBeNull()
+  })
+
+  it('posição confirmada SAUDÁVEL mantém o pull (o encaixe vem depois do confirmar, #326)', () => {
+    // No fluxo saudável o CONFIRMAR sorteia e o puxar → vaga → OK acontece
+    // DEPOIS da confirmação, antes do encerramento — travar aqui quebraria
+    // o turno (regressão da #326).
+    const estado = estadoBase({
+      peoes: [peao('peao-branco', INICIAL)],
+      peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [pendSemVaga('r1', 'reta-1')],
+      posicaoConfirmadaNoTurno: true,
+      peaoIdsEmBaixa: new Set(),
+    })
+    expect(mapearCliqueNaPecaDaBandeja(estado)).toEqual({ recebidaId: 'r1' })
+  })
+
   it('puxadaVigenteNaBandeja: só a corrente sem vaga puxada conta como vigente', () => {
     // Sem pull → não vigente.
     const semPull = estadoBase({ recebidasPendentes: [pendSemVaga('r1', 'reta-1')] })

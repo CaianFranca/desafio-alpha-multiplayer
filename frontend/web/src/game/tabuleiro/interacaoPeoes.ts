@@ -474,6 +474,13 @@ export interface PuxadaDaBandeja {
  *   - só a CORRENTE (primeira pendência sem vaga) é puxável;
  *   - espectador (`donoDoCiclo === false`) não puxa — clique silencioso, a
  *     bandeja continua pública (a corrente é exibida a todos);
+ *   - posição confirmada EM BAIXA (`posicaoConfirmadaNoTurno` + peão do ciclo
+ *     em `peaoIdsEmBaixa`, review PR #370 Bug 1) trava o pull — moveu →
+ *     sofreu ataque/Baixa → o turno encerra sem sortear e o puxar-1 vem no
+ *     próximo `avancarVez` (ADR-0013); o mover checa a confirmação, o pull
+ *     também. Fora da Baixa o pull pós-confirmação segue liberado: no fluxo
+ *     saudável o CONFIRMAR sorteia e o encaixe (puxar → vaga → OK) acontece
+ *     DEPOIS da confirmação, antes do encerramento (issue #326);
  *   - re-clique na já puxada é no-op (null), sem reação repetida;
  *   - sem pendências correntes → null.
  * O consumo do pull: com a vaga escolhida o engine move a peça para
@@ -484,6 +491,18 @@ export function mapearCliqueNaPecaDaBandeja(
   puxadaAtual: string | null = estado.recebidaPuxadaId ?? null,
 ): PuxadaDaBandeja | null {
   if (estado.donoDoCiclo === false) return null
+  if (estado.posicaoConfirmadaNoTurno) {
+    // Review PR #370 (Bug 1): só a Baixa trava o pull pós-confirmação — o
+    // peão de referência é o do ciclo (seleção, ou o do turno com pendências,
+    // #326); sem o mapa de Baixa (unidades puras) a trava fica aberta,
+    // espelhando o fail-open de vagasDisponiveisDoPeao.
+    const peaoRef = peaoDeReferenciaDaSequencia(estado)
+    const emBaixa =
+      estado.peaoIdsEmBaixa !== undefined && peaoRef !== null
+        ? estado.peaoIdsEmBaixa.has(peaoRef)
+        : false
+    if (emBaixa) return null
+  }
   const corrente = estado.recebidasPendentes.find((r) => r.vaga === null)
   if (corrente === undefined) return null
   if (puxadaAtual === corrente.recebidaId) return null
