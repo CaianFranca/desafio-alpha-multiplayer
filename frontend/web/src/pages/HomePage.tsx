@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { rolarSecaoParaCentro } from '../utils/rolagemDeSecao'
 import { HeroSection } from '../components/home/HeroSection'
-import { TrailersSection } from '../components/home/TrailersSection'
 import { HistorySection } from '../components/home/HistorySection'
 import { FeaturesSection } from '../components/home/FeaturesSection'
 import { ObjectivesSection } from '../components/home/ObjectivesSection'
@@ -22,10 +21,9 @@ export function HomePage() {
   return (
     <div className="foundation-scope">
       <HeroSection />
-      <TrailersSection />
-      <HistorySection />
       <FeaturesSection />
       <ObjectivesSection />
+      <HistorySection />
       <FinalCtaSection />
       <Footer />
     </div>
