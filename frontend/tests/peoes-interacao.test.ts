@@ -11,12 +11,14 @@ import {
   mapearCliqueNoPeao,
   mapearDesselecaoDePeao,
   mapearEscolhaDeVagaDaRecebida,
+  mapearFinalizarRecebida,
   mapearGirarRecebida,
   mapearMovimentacao,
   mapearPosicionarRecebida,
   peaoDeReferenciaDaSequencia,
   peaoSobreAMesa,
   podeSelecionarPeao,
+  previewsProvisorios,
   puxadaVigenteNaBandeja,
   recebidaConectaNaVaga,
   rotearCliqueDeCelula,
@@ -164,6 +166,28 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(podeSelecionarPeao(estado, 'peao-sintetico')).toBe(false)
     const comSintetico = estadoBase({ peoes: [...estadoBase().peoes, peao('peao-sintetico', null)] })
     expect(mapearCliqueNoPeao(comSintetico, 'peao-sintetico')).toBeNull()
+  })
+
+  it('gate Inicial primeiro só vale para o peão sobre a Mesa: posicionado seleciona mesmo sem a Inicial (limpeza #147)', () => {
+    // Cenário do relato: a Inicial do dono saiu de `posicionadas` pela
+    // Limpeza (ADR-0005 — o Peão se afastou dela e ela caiu fora da
+    // Iluminação). Com o Peão já posicionado, o clique precisa selecionar —
+    // o gate SÓ trava o Primeiro Turno (peão sobre a Mesa).
+    const estado = estadoBase({
+      peoes: [peao('peao-branco', INICIAL), peao('peao-vermelho', null)],
+      // Sem a própria inicial-1 (removida), com inicial-2 ainda presente.
+      posicionadas: [pecaPosicionada('inicial-2', 'inicial', 0, 3, 4)],
+    })
+    expect(mapearCliqueNoPeao(estado, 'peao-branco')).toEqual({
+      tipo: 'comando',
+      comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' },
+    })
+    // Controle: o peão sobre a Mesa continua sob o gate (inicial-1 ausente).
+    const sobreAMesa = estadoBase({
+      peoes: [peao('peao-branco', null), peao('peao-vermelho', null)],
+      posicionadas: [pecaPosicionada('inicial-2', 'inicial', 0, 3, 4)],
+    })
+    expect(mapearCliqueNoPeao(sobreAMesa, 'peao-branco')).toBeNull()
   })
 
   it('clique no próprio peão já selecionado é silencioso (PERMANECER só pelo botão)', () => {
@@ -513,6 +537,32 @@ describe('interação do ciclo do peão — mapeamento puro (issue #92)', () => 
     expect(mapearMovimentacao(comOcupantes(4), { linha: 3, coluna: 4 })).toBeNull()
   })
 
+  // ── Zona da origem (movimento encadeado): só a Peça do início do turno e
+  // suas vizinhas conectadas são destinos — ida-e-volta 1 salto. ──
+
+  it('zona da origem: clique no 2º salto não emite MOVER_PEAO; voltar à origem emite', () => {
+    const estado: EstadoInteracaoPeoes = {
+      ...estadoBase(),
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('reta-1', 'reta', 90, 3, 4),
+        pecaPosicionada('reta-2', 'reta', 90, 3, 5),
+      ],
+      peoes: [peao('peao-1-branco', { linha: 3, coluna: 4 })],
+      peaoSelecionadoId: 'peao-1-branco',
+      // Já deu o 1º salto (sobre a reta-1); a origem do turno é a inicial.
+      pecaDoInicioDoTurnoId: 'inicial-1',
+    }
+    // reta-2 é vizinha conectada da reta-1 (destino válido no legado), mas
+    // está FORA da zona {inicial-1} ∪ vizinhas(inicial-1) → silencioso.
+    expect(mapearMovimentacao(estado, { linha: 3, coluna: 5 })).toBeNull()
+    // Ida-e-volta livre permanece: voltar à Peça do início emite MOVER_PEAO.
+    expect(mapearMovimentacao(estado, { linha: 3, coluna: 3 })).toEqual({
+      tipo: 'comando',
+      comando: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 3 } },
+    })
+  })
+
   it('Monstro posicionado conectado não gera movimentação (exclusão absoluta — partida.ts:583-585)', () => {
     const estado: EstadoInteracaoPeoes = {
       ...estadoBase(),
@@ -783,29 +833,27 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toBeNull()
   })
 
-  it('clique em vaga disponível escolhe E encaixa a peça PUXADA da bandeja no MESMO clique (#261)', () => {
+  it('clique em vaga disponível escolhe a vaga da peça PUXADA — sem encaixe imediato (#357)', () => {
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
-    // Único clique: ESCOLHER_VAGA_DA_PECA_RECEBIDA seguido de POSICIONAR_PECA
-    // (pecaId da pendência puxada; célula da vaga clicada).
+    // Issue #357: o clique SÓ escolhe (o 1-clique da #261 foi removido — ele
+    // suprimia o preview sem conexão). A peça surge em preview provisório e
+    // o OK (`mapearFinalizarRecebida`) emite o POSICIONAR_PECA.
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toEqual({
-      escolhaDeVagaEEncaixe: {
-        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
-        encaixe: { type: 'POSICIONAR_PECA', pecaId: 'reta-1', celula: VAGA_NORTE },
-      },
+      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
     })
   })
 
-  it('reta em vaga não conectada emite SÓ a escolha — o encaixe imediato seria recusado (review PR #338)', () => {
-    // reta@0 (norte/sul) na vaga leste: o engine recusaria o POSICIONAR com
-    // MOVIMENTO_NAO_CONECTADO, mas aceitaria a escolha — o jogador gira
-    // (R/E) e clica a célula-alvo para encaixar (fluxo 2 cliques).
+  it('reta em vaga não conectada emite SÓ a escolha — o encaixe vai no OK do preview (#357)', () => {
+    // reta@0 (norte/sul) na vaga leste: a escolha é aceita, a peça surge em
+    // preview provisório, o jogador gira (R/E/setas) e o OK finaliza com
+    // POSICIONAR_PECA — validado no engine com MOVIMENTO_NAO_CONECTADO.
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
       ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'leste' },
     })
   })
 
-  it('cruz conecta em qualquer vaga — clique único escolhe E encaixa (review PR #338)', () => {
+  it('cruz em qualquer vaga emite SÓ a escolha — o encaixe vai no OK do preview (#357)', () => {
     const estado = estadoComPendencias({
       recebidasPendentes: [
         pendencia('r1', 'cruz-1', 'cruz', null, null),
@@ -813,10 +861,7 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
       recebidaPuxadaId: 'r1',
     })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
-      escolhaDeVagaEEncaixe: {
-        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'leste' },
-        encaixe: { type: 'POSICIONAR_PECA', pecaId: 'cruz-1', celula: VAGA_LESTE },
-      },
+      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'leste' },
     })
   })
 
@@ -839,15 +884,11 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
   it('a vaga segue a puxada, não a ordem da lista (sem "primeira sem vaga" automática)', () => {
     // As duas pendências estão sem vaga; a puxada é r2. O roteador contempla
     // R2 — a regra antiga (primeira da lista) morreria aqui com r1.
-    // VAGA_LESTE: T@0 tem oeste aberto (oposto de leste) — conecta, então o
-    // clique único escolhe E encaixa (vaga norte não conectaria T@0, que não
-    // tem sul aberto — gate de conexão do review PR #338).
+    // VAGA_LESTE: T@0 tem oeste aberto (oposto de leste) — a escolha vai para
+    // r2 e o encaixe fica para o OK do preview (#357).
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r2' })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
-      escolhaDeVagaEEncaixe: {
-        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
-        encaixe: { type: 'POSICIONAR_PECA', pecaId: 't-1', celula: VAGA_LESTE },
-      },
+      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
     })
   })
 
@@ -863,7 +904,7 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toBeNull()
   })
 
-  it('após a primeira vaga, a segunda pendência puxada recebe a próxima escolha + encaixe', () => {
+  it('após a primeira vaga, a segunda pendência puxada recebe a próxima escolha (encaixe no OK)', () => {
     const estado = estadoComPendencias({
       recebidasPendentes: [
         pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE),
@@ -872,17 +913,14 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
       recebidaPuxadaId: 'r2',
     })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_LESTE)).toEqual({
-      escolhaDeVagaEEncaixe: {
-        escolhaDeVaga: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
-        encaixe: { type: 'POSICIONAR_PECA', pecaId: 't-1', celula: VAGA_LESTE },
-      },
+      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r2', borda: 'leste' },
     })
   })
 
-  it('despacho da vaga: ESCOLHER_VAGA via canal de peão e POSICIONAR_PECA via tabuleiro, em ordem (#261)', () => {
+  it('despacho da vaga: SÓ ESCOLHER_VAGA via canal de peão (#357 — sem POSICIONAR imediato)', () => {
     const estado = estadoComPendencias({ recebidaPuxadaId: 'r1' })
-    // Um único clique despacha os 2 comandos em sequência — o array único
-    // torna a ORDEM explícita (primeiro a escolha, depois o encaixe).
+    // Um único clique despacha só a escolha — o encaixe fica para o OK do
+    // preview (`mapearFinalizarRecebida`).
     const emitidos: unknown[] = []
     despacharCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE, {
       onComando: (comando) => emitidos.push(comando),
@@ -890,7 +928,6 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
     })
     expect(emitidos).toEqual([
       { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
-      { type: 'POSICIONAR_PECA', pecaId: 'reta-1', celula: VAGA_NORTE },
     ])
   })
 
@@ -916,6 +953,87 @@ describe('roteador do clique em célula (issue #91; sequência da #143)', () => 
       pecaSelecionadaId: 't-1',
     })
     expect(rotearCliqueDeCelula(estado, estadoTabuleiro(estado), VAGA_NORTE)).toBeNull()
+  })
+
+  // ── Preview provisório + OK da Recebida (issue #357) ──
+
+  it('previewsProvisorios lista pendências com alvo ainda não posicionadas', () => {
+    const estado = estadoComPendencias({
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE),
+        pendencia('r2', 't-1', 'T', null, null),
+      ],
+    })
+    expect(previewsProvisorios(estado)).toEqual([
+      {
+        pecaId: 'reta-1',
+        tipo: 'reta',
+        orientacao: 0,
+        celula: VAGA_NORTE,
+        recebidaId: 'r1',
+      },
+    ])
+  })
+
+  it('previewsProvisorios exclui a peça já posicionada', () => {
+    const estado = estadoComPendencias({
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('reta-1', 'reta', 0, 2, 3),
+      ],
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE),
+      ],
+    })
+    expect(previewsProvisorios(estado)).toEqual([])
+  })
+
+  it('OK do preview emite POSICIONAR_PECA na célula-alvo da pendência em foco', () => {
+    const estado = estadoComPendencias({
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', 'leste', VAGA_LESTE),
+      ],
+      pecaSelecionadaId: 'reta-1',
+    })
+    expect(mapearFinalizarRecebida(estado)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-1',
+      celula: VAGA_LESTE,
+    })
+  })
+
+  it('OK do preview sem peça em foco → null', () => {
+    const estado = estadoComPendencias({
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', 'leste', VAGA_LESTE),
+      ],
+      pecaSelecionadaId: null,
+    })
+    expect(mapearFinalizarRecebida(estado)).toBeNull()
+  })
+
+  it('OK do preview sem vaga escolhida → null', () => {
+    const estado = estadoComPendencias({
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', null, null),
+      ],
+      pecaSelecionadaId: 'reta-1',
+    })
+    expect(mapearFinalizarRecebida(estado)).toBeNull()
+  })
+
+  it('OK do preview com peça já posicionada → null', () => {
+    const estado = estadoComPendencias({
+      posicionadas: [
+        pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+        pecaPosicionada('reta-1', 'reta', 0, 2, 3),
+      ],
+      recebidasPendentes: [
+        pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE),
+      ],
+      pecaSelecionadaId: 'reta-1',
+    })
+    expect(mapearFinalizarRecebida(estado)).toBeNull()
   })
 
   it('célula que não é vaga nem alvo com pendências → null (alvos inválidos não reagem)', () => {

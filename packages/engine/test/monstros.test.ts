@@ -1020,12 +1020,13 @@ test('confirmação sobre a sala médica concede a Proteção após o ataque do 
   estado = comPeca(estado, 'escada-1', 'reta', 90, 0, 4);
   estado = comPeca(estado, 'escada-2', 'reta', 90, 0, 5);
   estado = comPeaoSobre(estado, 'peao-vermelho', 'escada-1');
+  // Ana abre o turno sobre a reta-1, vizinha da Sala Médica (zona da origem:
+  // {reta-1} ∪ conectadas), e confirma SOBRE a Sala em um único salto —
+  // dentro do alcance do espectro: o ataque do gatilho a atinge (a Proteção
+  // ainda não existe) e a Sala Médica concede a Proteção DEPOIS da resolução.
+  estado = comPeaoSobre(estado, 'peao-branco', 'reta-1');
+  estado = { ...estado, pecaDoInicioDoTurnoId: 'reta-1' };
 
-  // Ana passa por reta-1 e confirma SOBRE a Sala Médica — dentro do alcance
-  // do espectro: o ataque do gatilho a atinge (a Proteção ainda não existe)
-  // e a Sala Médica concede a Proteção DEPOIS da resolução.
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -1073,10 +1074,12 @@ test('confirmação sobre a sala médica concede a Proteção após o ataque do 
 test('a Confirmação sobre a Sala Médica emite posicao_confirmada com protegido: true (issue #227)', () => {
   let estado = partidaEmRodada2();
   estado = comPeca(estado, 'sala-x', 'sala_medica', 0, 1, 3);
-  // Ana passa por reta-1 e confirma SOBRE a Sala Médica — sem Monstro no
-  // cenário: a concessão acontece e o evento carrega o estado resultante.
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  // Ana abre o turno sobre a reta-1, vizinha da Sala Médica (zona da origem:
+  // {reta-1} ∪ conectadas), e confirma SOBRE ela em um único salto — sem
+  // Monstro no cenário: a concessão acontece e o evento carrega o estado
+  // resultante.
+  estado = comPeaoSobre(estado, 'peao-branco', 'reta-1');
+  estado = { ...estado, pecaDoInicioDoTurnoId: 'reta-1' };
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -1123,6 +1126,10 @@ test('a Confirmação cujo ataque consumiu a Proteção prévia emite protegido:
   let estado = partidaEmRodada2();
   estado = comPeca(estado, 'espectro-x', 'espectro', 0, 0, 3);
   estado = comPeca(estado, 'reta-nova', 'reta', 0, 1, 3);
+  // Ana abre o turno sobre a reta-1, vizinha da reta-nova (zona da origem:
+  // {reta-1} ∪ conectadas), e entra no alcance do espectro em um único salto.
+  estado = comPeaoSobre(estado, 'peao-branco', 'reta-1');
+  estado = { ...estado, pecaDoInicioDoTurnoId: 'reta-1' };
   // Ana já chegou à Confirmação COM Proteção (concedida por gatilho anterior).
   estado = {
     ...estado,
@@ -1130,8 +1137,6 @@ test('a Confirmação cujo ataque consumiu a Proteção prévia emite protegido:
       jogador.jogadorId === 'ana' ? { ...jogador, protegido: true } : jogador,
     ),
   };
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');

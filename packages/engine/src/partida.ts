@@ -757,6 +757,38 @@ function moverPeaoDaPartida(
     }
   }
 
+  // Zona da origem: o Peão só pousa na Peça do início do turno ou em vizinha
+  // diretamente conectada a ela — ida-e-volta livre até a Confirmação de
+  // Posição, sem viajar pelo tabuleiro dentro do turno. Célula vazia não é
+  // barrada aqui (vaza para CELULA_NAO_ENCONTRADA do Tabuleiro). Pousa depois
+  // das guardas de conexão/ocupação para preservar erros mais específicos
+  // (MOVIMENTO_NAO_CONECTADO, PECA_JA_TEM_PEAO). A Travessia do Escuro (#272)
+  // é isenta: o mover_peao da cadeia nasce de atravessar_o_escuro — Baixa
+  // Iluminação — e sai da zona de propósito.
+  const origemDoTurnoId = estado.pecaDoInicioDoTurnoId;
+  const origemDoTurno = origemDoTurnoId
+    ? estado.tabuleiro.posicionadas.find((peca) => peca.pecaId === origemDoTurnoId)
+    : undefined;
+  if (
+    !(estado.atravessouNoTurno ?? false) &&
+    origemDoTurnoId !== null &&
+    origemDoTurno !== undefined &&
+    destino
+  ) {
+    const zona = [
+      origemDoTurnoId,
+      ...vizinhasConectadas(estado.tabuleiro, origemDoTurnoId).map(
+        (peca) => peca.pecaId,
+      ),
+    ];
+    if (!zona.includes(destino.pecaId)) {
+      return rejeitarDaPartida(
+        'MOVIMENTO_INDISPONIVEL',
+        'O Peão só se move dentro da zona da Peça do início do turno.',
+      );
+    }
+  }
+
   const resultadoTab = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
   let tabuleiroNovo: EstadoDoTabuleiro;
   let eventosTab: readonly EventoDoTabuleiro[];

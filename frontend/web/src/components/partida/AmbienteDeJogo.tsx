@@ -248,6 +248,7 @@ export function AmbienteDeJogo({
           peaoSelecionadoIdLocal,
           estadoInteracaoPeoes?.afetadosPorPeaoId,
           quantidadeDeJogadores,
+          estadoInteracaoPeoes?.pecaDoInicioDoTurnoId,
         )
       : []
   const destinosSet = new Set<string>(destinosDoPeao.map((d) => d.peca.pecaId))

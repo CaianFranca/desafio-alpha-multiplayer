@@ -1216,6 +1216,33 @@ function comPecaFora(
 const temLimpeza = (eventos: readonly { readonly tipo: string }[]) =>
   eventos.some((evento) => evento.tipo === 'limpeza_aplicada');
 
+test('zona da origem: o segundo salto do Peão dentro do turno é barrado (MOVIMENTO_INDISPONIVEL)', () => {
+  let estado = partidaEmRodada2();
+  // Peça além do 1º salto: vizinha da reta-1 e conectada a ela (reta norte-sul
+  // em (1,3)), mas FORA da zona de inicial-1 (3,3).
+  estado = comPecaFora(estado, 'longe-1', 'reta', 1, 3);
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  // 1º salto (3,3) → (2,3): dentro da zona {inicial-1} ∪ suas vizinhas.
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  // 2º salto (2,3) → (1,3): conectado à origem atual, mas fora da zona do
+  // início do turno → barrado antes de qualquer movimento.
+  const segundo = aplicarComandoDePartida(
+    estado,
+    moverPeao('peao-branco', 1, 3),
+    'ana',
+  );
+  assert.equal(segundo.sucesso, false);
+  if (segundo.sucesso) return;
+  assert.equal(segundo.erro.codigo, 'MOVIMENTO_INDISPONIVEL');
+  // Ida-e-volta livre permanece: voltar à Peça do início do turno segue ok.
+  const volta = aplicarComandoDePartida(
+    estado,
+    moverPeao('peao-branco', 3, 3),
+    'ana',
+  );
+  assert.equal(volta.sucesso, true);
+});
+
 test('limpeza: Primeiro Turno remove peça fora da iluminação sem retorno à Caixa', () => {
   let estado = partidaIniciada();
   const caixaAntes = estado.tabuleiro.caixa.length;

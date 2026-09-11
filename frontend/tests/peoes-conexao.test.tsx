@@ -58,15 +58,6 @@ function ultimoComando(ws: MockWebSocket): Record<string, unknown> {
   return JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]!)
 }
 
-/** Os `quantidade` últimos comandos enviados, na ordem (issue #261: um clique pode emitir 2). */
-function ultimosComandos(
-  ws: MockWebSocket,
-  quantidade: number,
-): Record<string, unknown>[] {
-  expect(ws.sentMessages.length).toBeGreaterThanOrEqual(quantidade)
-  return ws.sentMessages.slice(-quantidade).map((m) => JSON.parse(m) as Record<string, unknown>)
-}
-
 function peaoDoEspelho(cor: string): HTMLElement {
   const peao = screen
     .getAllByTestId('peao')
@@ -157,7 +148,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(pecaCorrenteDaBandeja()).toBeNull()
   })
 
-  it('fluxo feliz do ciclo (#138/#143 + pull #199 + #261): puxa, clique único escolhe e encaixa, giro pós-encaixe — cada comando com jogadorId', async () => {
+  it('fluxo feliz do ciclo (#138/#143 + pull #199 + preview/OK #357): puxa, escolhe a vaga, gira no preview e confirma no OK — cada comando com jogadorId', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
@@ -226,34 +217,19 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     // Puxar não emite comando de wire.
     expect(ws.sentMessages).toHaveLength(comandosAntes)
 
-    // ── 3. UM clique na vaga escolhe E encaixa (issue #261) ──
-    // O clique em (2,3) emite 2 comandos em sequência na MESMA conexão:
-    // ESCOLHER_VAGA_DA_PECA_RECEBIDA e depois POSICIONAR_PECA (mesmo pecaId
-    // e a célula da vaga clicada); a cadeia serial do servidor processa em
-    // ordem — a peça encaixa com um único clique.
+    // ── 3. Clique na vaga SÓ escolhe (issue #357: sem encaixe imediato) ──
+    // O clique em (2,3) emite SÓ ESCOLHER_VAGA_DA_PECA_RECEBIDA; a peça surge
+    // em preview provisório na célula-alvo e o OK (segundo clique na
+    // célula-alvo) emite o POSICIONAR_PECA.
     await user.click(celulaDoEspelho(2, 3))
-    expect(ultimosComandos(ws, 2)).toEqual([
-      {
-        type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
-        recebidaId: 'recebida-1',
-        borda: 'norte',
-        jogadorId: JOGADOR_ID,
-      },
-      {
-        type: 'POSICIONAR_PECA',
-        pecaId: 'reta-1',
-        celula: { linha: 2, coluna: 3 },
-        jogadorId: JOGADOR_ID,
-      },
-    ])
     expect(ultimoComando(ws)).toEqual({
-      type: 'POSICIONAR_PECA',
-      pecaId: 'reta-1',
-      celula: { linha: 2, coluna: 3 },
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'recebida-1',
+      borda: 'norte',
       jogadorId: JOGADOR_ID,
     })
 
-    // ── 4. Servidor processa a sequência: fixa a vaga e depois encaixa ──
+    // ── 4. Servidor fixa a vaga: preview provisório aparece, sem encaixe ──
     act(() => {
       ws.simulateMessage({
         type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
@@ -262,13 +238,28 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         celulaAlvo: { linha: 2, coluna: 3 },
       })
     })
-    // A peça saiu da bandeja (vaga definida, aguardando o encaixe): sem corrente.
+    // A peça saiu da bandeja (vaga definida, aguardando o OK): sem corrente,
+    // mas com preview provisório na célula-alvo.
     expect(pecaCorrenteDaBandeja()).toBeNull()
+    const preview = screen.getByTestId('peca-provisoria')
+    expect(preview.getAttribute('data-peca-id')).toBe('reta-1')
+    expect(preview.getAttribute('data-tipo')).toBe('reta')
+    expect(preview.getAttribute('data-linha')).toBe('2')
+    expect(preview.getAttribute('data-coluna')).toBe('3')
     // A célula (2,3) deixou de ser vaga e virou alvo pendente.
     expect(celulaDoEspelho(2, 3).hasAttribute('data-vaga')).toBe(false)
     expect(celulaDoEspelho(2, 3).getAttribute('data-alvo-pendente')).toBe('true')
     expect(pendenciaDoEspelho('recebida-1').getAttribute('data-peca-id')).toBe('reta-1')
     expect(pendenciaDoEspelho('recebida-1').getAttribute('data-vaga')).toBe('norte')
+
+    // ── 4b. OK do preview (clique na célula-alvo) emite o POSICIONAR_PECA ──
+    await user.click(celulaDoEspelho(2, 3))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+      jogadorId: JOGADOR_ID,
+    })
 
     // O encaixe chega na sequência: pendência some, reta-1 entra na mesa.
     act(() => {
@@ -367,7 +358,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(escolhas).toHaveLength(1)
   })
 
-  it('bandeja de slot único: clique único encaixa cada corrente (r1→r2→esvazia) (#143/#261)', async () => {
+  it('bandeja de slot único: escolha + OK encaixa cada corrente (r1→r2→esvazia) (#143/#357)', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
@@ -404,28 +395,20 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(screen.getAllByTestId('caixa-peca-sorteada')).toHaveLength(1)
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('reta-1')
 
-    // Puxa a corrente e UM clique na vaga norte escolhe E encaixa r1 (issue
-    // #261): 2 comandos em sequência na MESMA conexão — ESCOLHER_VAGA da
-    // puxada e POSICIONAR_PECA da peça dela na célula da vaga.
+    // Puxa a corrente e o clique na vaga norte SÓ escolhe a vaga de r1
+    // (issue #357: sem encaixe imediato) — o OK (clique na célula-alvo do
+    // preview) emite o POSICIONAR_PECA.
     await puxarCorrente(user)
     await user.click(celulaDoEspelho(2, 3))
-    expect(ultimosComandos(ws, 2)).toEqual([
-      {
-        type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
-        recebidaId: 'r1',
-        borda: 'norte',
-        jogadorId: JOGADOR_ID,
-      },
-      {
-        type: 'POSICIONAR_PECA',
-        pecaId: 'reta-1',
-        celula: { linha: 2, coluna: 3 },
-        jogadorId: JOGADOR_ID,
-      },
-    ])
+    expect(ultimoComando(ws)).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r1',
+      borda: 'norte',
+      jogadorId: JOGADOR_ID,
+    })
 
-    // Servidor processa em ordem: a resposta da escolha chega antes do
-    // encaixe — com a vaga fixada, a corrente vira r2 e exige novo pull.
+    // Servidor fixa a vaga de r1: preview provisório aparece e a corrente
+    // vira r2, exigindo novo pull.
     act(() => {
       ws.simulateMessage({
         type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
@@ -434,9 +417,19 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
         celulaAlvo: { linha: 2, coluna: 3 },
       })
     })
+    expect(screen.getByTestId('peca-provisoria').getAttribute('data-peca-id')).toBe('reta-1')
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('cruz-1')
     // A corrente nova exige novo pull: o da r1 não contempla a r2 (#199).
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-puxada')).toBe('false')
+
+    // OK do preview de r1: clique na célula-alvo posiciona reta-1.
+    await user.click(celulaDoEspelho(2, 3))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-1',
+      celula: { linha: 2, coluna: 3 },
+      jogadorId: JOGADOR_ID,
+    })
 
     // Encaixe confirmado na sequência: r1 some da lista; r2 permanece corrente.
     act(() => {
@@ -454,23 +447,15 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(screen.getAllByTestId('recebida-pendente')).toHaveLength(1)
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-peca-id')).toBe('cruz-1')
 
-    // Segunda corrente: puxar → clique único na vaga leste encaixa r2.
+    // Segunda corrente: puxar → escolha na vaga leste → OK no preview (r2).
     await puxarCorrente(user)
     await user.click(celulaDoEspelho(3, 4))
-    expect(ultimosComandos(ws, 2)).toEqual([
-      {
-        type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
-        recebidaId: 'r2',
-        borda: 'leste',
-        jogadorId: JOGADOR_ID,
-      },
-      {
-        type: 'POSICIONAR_PECA',
-        pecaId: 'cruz-1',
-        celula: { linha: 3, coluna: 4 },
-        jogadorId: JOGADOR_ID,
-      },
-    ])
+    expect(ultimoComando(ws)).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r2',
+      borda: 'leste',
+      jogadorId: JOGADOR_ID,
+    })
     act(() => {
       ws.simulateMessage({
         type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
@@ -480,6 +465,13 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
       })
     })
     expect(pecaCorrenteDaBandeja()).toBeNull()
+    await user.click(celulaDoEspelho(3, 4))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'cruz-1',
+      celula: { linha: 3, coluna: 4 },
+      jogadorId: JOGADOR_ID,
+    })
     act(() => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
@@ -863,7 +855,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
 // (o funil de regras já é coberto no engine; aqui é o caminho wire → modelo →
 // espelho DOM → comando que a auditoria pediu para blindar).
 describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
-  it('vulto na corrente da bandeja: pull → clique único escolhe e encaixa, sem janela de Manipulação', async () => {
+  it('vulto na corrente da bandeja: pull → escolha → OK no preview, sem janela de Manipulação', async () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
@@ -906,28 +898,19 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
     expect(corrente!.getAttribute('data-tipo')).toBe('vulto')
     expect(corrente!.getAttribute('data-peca-id')).toBe('vulto-1')
 
-    // Pull → UM clique na vaga norte escolhe E encaixa (issue #261): o
-    // Monstro percorre o mesmo fluxo de 2 comandos em sequência (ESCOLHER
-    // + POSICIONAR_PECA) — sem etapa intermediária de clique.
+    // Pull → clique na vaga norte SÓ escolhe (issue #357); o Monstro percorre
+    // o fluxo escolha → preview → OK (POSICIONAR_PECA no segundo clique).
     await puxarCorrente(user)
     expect(celulaDoEspelho(2, 3).getAttribute('data-vaga')).toBe('true')
     await user.click(celulaDoEspelho(2, 3))
-    expect(ultimosComandos(ws, 2)).toEqual([
-      {
-        type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
-        recebidaId: 'r1',
-        borda: 'norte',
-        jogadorId: JOGADOR_ID,
-      },
-      {
-        type: 'POSICIONAR_PECA',
-        pecaId: 'vulto-1',
-        celula: { linha: 2, coluna: 3 },
-        jogadorId: JOGADOR_ID,
-      },
-    ])
+    expect(ultimoComando(ws)).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r1',
+      borda: 'norte',
+      jogadorId: JOGADOR_ID,
+    })
 
-    // Servidor processa em ordem: escolha da vaga e depois o encaixe.
+    // Servidor fixa a vaga: preview provisório do Monstro, sem encaixe.
     act(() => {
       ws.simulateMessage({
         type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
@@ -935,6 +918,20 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
         borda: 'norte',
         celulaAlvo: { linha: 2, coluna: 3 },
       })
+    })
+    expect(screen.getByTestId('peca-provisoria').getAttribute('data-peca-id')).toBe('vulto-1')
+
+    // OK do preview: clique na célula-alvo posiciona o Monstro.
+    await user.click(celulaDoEspelho(2, 3))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'vulto-1',
+      celula: { linha: 2, coluna: 3 },
+      jogadorId: JOGADOR_ID,
+    })
+
+    // Servidor confirma o encaixe.
+    act(() => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
         pecaId: 'vulto-1',
@@ -987,23 +984,15 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
 
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-tipo')).toBe('espectro')
     await puxarCorrente(user)
-    // Clique único na vaga leste (3,4): ESCOLHER_VAGA + POSICIONAR_PECA em
-    // sequência na MESMA conexão (issue #261).
+    // Clique na vaga leste (3,4) SÓ escolhe (issue #357); o OK no preview
+    // (segundo clique na célula-alvo) posiciona o Monstro.
     await user.click(celulaDoEspelho(3, 4))
-    expect(ultimosComandos(ws, 2)).toEqual([
-      {
-        type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
-        recebidaId: 'r1',
-        borda: 'leste',
-        jogadorId: JOGADOR_ID,
-      },
-      {
-        type: 'POSICIONAR_PECA',
-        pecaId: 'espectro-1',
-        celula: { linha: 3, coluna: 4 },
-        jogadorId: JOGADOR_ID,
-      },
-    ])
+    expect(ultimoComando(ws)).toEqual({
+      type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+      recebidaId: 'r1',
+      borda: 'leste',
+      jogadorId: JOGADOR_ID,
+    })
     act(() => {
       ws.simulateMessage({
         type: 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO',
@@ -1011,6 +1000,16 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
         borda: 'leste',
         celulaAlvo: { linha: 3, coluna: 4 },
       })
+    })
+    expect(screen.getByTestId('peca-provisoria').getAttribute('data-peca-id')).toBe('espectro-1')
+    await user.click(celulaDoEspelho(3, 4))
+    expect(ultimoComando(ws)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'espectro-1',
+      celula: { linha: 3, coluna: 4 },
+      jogadorId: JOGADOR_ID,
+    })
+    act(() => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
         pecaId: 'espectro-1',

@@ -211,6 +211,10 @@ export function aplicarSnapshot(
     // contraditório (confirmada sem movimento) na retomada.
     movimentouNoTurno: snapshot.posicaoConfirmada ? true : estado.movimentouNoTurno,
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
+    // Zona da origem: o wire carrega a Peça do início do turno (espelho do
+    // engine); o snapshot é a autoridade e substitui a derivação local do
+    // TURNO_INICIADO (reload no meio do turno precisa da origem real).
+    pecaDoInicioDoTurnoId: snapshot.pecaDoInicioDoTurnoId ?? null,
     peaoPorJogador,
     jogadorPorId,
     // Baseline autoritativa dos objetivos globais (issue #145): o snapshot

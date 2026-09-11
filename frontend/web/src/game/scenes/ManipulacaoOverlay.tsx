@@ -15,7 +15,14 @@
  *   desseleção da cena.
  *
  * Só monta com `pecaEmManipulacaoId` apontando para uma peça posicionada —
- * ou seja, só PÓS-ENCAIXE (rotação pré-encaixe via teclas R/E permanece).
+ * ou seja, só PÓS-ENCAIXE (rotação pré-encaixe via teclas R/E permanece) —
+ * OU com preview provisório pré-encaixe (issue #357): pendência com vaga
+ * escolhida ainda não posicionada ancora os mesmos controles na célula-alvo,
+ * com o OK emitindo POSICIONAR_PECA em vez de FINALIZAR_MANIPULACAO.
+ *
+ * Controles sempre no topo (issue #357, bug secundário): ALTURA alta,
+ * renderOrder 999/1000 e materiais sem depthTest/depthWrite — o clique chega
+ * às setas/OK mesmo com o avatar do peão sobre a célula.
  */
 import { useCallback, useMemo } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
@@ -28,12 +35,21 @@ import {
   mapearFinalizarManipulacao,
   mapearGiro,
 } from '../tabuleiro/interacao'
+import type { EstadoInteracaoPeoes } from '../tabuleiro/interacaoPeoes'
+import {
+  mapearFinalizarRecebida,
+  previewsProvisorios,
+} from '../tabuleiro/interacaoPeoes'
 import { handlersDeCursor } from '../tabuleiro/cursor'
 
 // ── Geometria do overlay ──
 // Botões e setas são planos horizontais (vistos de cima), flutuando acima da
 // peça. O topo da textura vira "norte" (mundo −Z) com a rotação −π/2 em X.
-const ALTURA_OVERLAY = 0.35
+// Issue #357 (bug secundário): os controles precisam renderizar e capturar
+// clique SEMPRE acima dos demais elementos 3D (ex. avatar do peão sobre a
+// peça) — por isso ALTURA alta, renderOrder na faixa 999/1000 e materiais sem
+// depthTest/depthWrite (sempre no topo, mesmo com câmera baixa).
+const ALTURA_OVERLAY = 0.7
 const RAIO_BOTOES = 0.65
 const OFFSET_OK = 1.0
 
@@ -134,12 +150,15 @@ function criarTexturaSeta(espelhada = false): THREE.CanvasTexture | null {
 interface ManipulacaoOverlayProps {
   estadoExibicao?: EstadoExibicaoTabuleiro | null
   estadoInteracao?: EstadoInteracaoTabuleiro | null
+  /** Ciclo do peão: fonte dos previews provisórios pré-encaixe (#357). */
+  estadoPeoes?: EstadoInteracaoPeoes | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
 }
 
 export function ManipulacaoOverlay({
   estadoExibicao,
   estadoInteracao = null,
+  estadoPeoes = null,
   onComando,
 }: ManipulacaoOverlayProps) {
   const pecaEmManipulacaoId = estadoInteracao?.pecaEmManipulacaoId ?? null
@@ -149,6 +168,72 @@ export function ManipulacaoOverlay({
       ) ?? null)
     : null
 
+  // 1. Preview provisório (peça na célula-alvo antes do OK final)
+  if (peca === null && estadoPeoes !== null) {
+    const previews = previewsProvisorios(estadoPeoes)
+    const emFoco = estadoInteracao?.pecaSelecionadaId ?? null
+    const preview =
+      (emFoco !== null
+        ? previews.find((p) => p.pecaId === emFoco)
+        : undefined) ??
+      previews[0] ??
+      null
+
+    if (preview !== null) {
+      return (
+        <OverlayControles
+          posMundo={celulaParaMundo(preview.celula)}
+          pecaId={preview.pecaId}
+          tipo={preview.tipo}
+          onComando={onComando}
+          comandoOK={{
+            type: 'POSICIONAR_PECA',
+            pecaId: preview.pecaId,
+            celula: preview.celula,
+          }}
+        />
+      )
+    }
+    return null
+  }
+
+  // 2. Se há pendências de recebimento em andamento e a peça acabou de ser posicionada,
+  // não renderize a janela de manipulação redundante (evita exigir o 2º OK)
+  if (estadoPeoes !== null && estadoPeoes.recebidasPendentes.length > 0) {
+    return null
+  }
+
+  if (peca === null) return null
+
+  return (
+    <OverlayControles
+      posMundo={celulaParaMundo(peca.celula)}
+      pecaId={peca.pecaId}
+      tipo={peca.tipo}
+      onComando={onComando}
+      comandoOK={mapearFinalizarManipulacao()}
+    />
+  )
+}
+
+/**
+ * Controles 3D (setas + OK) sobre a célula: mesmo JSX para a janela
+ * pós-encaixe e para o preview provisório pré-encaixe (#357) — só o comando
+ * do OK muda (FINALIZAR_MANIPULACAO vs POSICIONAR_PECA na célula-alvo).
+ */
+function OverlayControles({
+  posMundo,
+  pecaId,
+  tipo,
+  onComando,
+  comandoOK,
+}: {
+  posMundo: readonly [number, number, number]
+  pecaId: string
+  tipo: Parameters<typeof giroAlteraConexao>[0]
+  onComando?: (comando: TabuleiroComandoDoCliente | null) => void
+  comandoOK: TabuleiroComandoDoCliente
+}) {
   const texturaOK = useMemo(() => criarTexturaOK(), [])
   // Giro HORÁRIO (LESTE): usa a textura espelhada — a "barriga" da curvatura
   // dessa seta cai para o OESTE, leitura percebida como horária. O LESTE curva
@@ -162,18 +247,15 @@ export function ManipulacaoOverlay({
     e.nativeEvent.stopPropagation()
   }, [])
 
-  if (peca === null) return null
-
-  const pos = celulaParaMundo(peca.celula)
   const comandar = (comando: TabuleiroComandoDoCliente) => onComando?.(comando)
   const cursor = handlersDeCursor('pointer')
   // Peça de 4 caminhos (cruz): as 4 bordas abrem em qualquer orientação —
   // girar é redundante, então as setas não montam (review PR #338). O OK
   // permanece: a janela de Manipulação continua exigindo finalização.
-  const exibirGiro = giroAlteraConexao(peca.tipo)
+  const exibirGiro = giroAlteraConexao(tipo)
 
   return (
-    <group position={[pos[0], pos[1] + ALTURA_OVERLAY, pos[2]]}>
+    <group position={[posMundo[0], posMundo[1] + ALTURA_OVERLAY, posMundo[2]]}>
       {/* Seta da Direita (Leste) */}
       {exibirGiro ? (
       <>
@@ -182,11 +264,11 @@ export function ManipulacaoOverlay({
         rotation={[-Math.PI / 2, 0, 0]}
         castShadow={false}
         receiveShadow={false}
-        renderOrder={51}
+        renderOrder={999}
         onPointerDown={impedirArrasto}
         onClick={(e) => {
           e.stopPropagation()
-          comandar(mapearGiro(peca.pecaId, 'horario'))
+          comandar(mapearGiro(pecaId, 'horario'))
         }}
         {...cursor}
       >
@@ -197,6 +279,8 @@ export function ManipulacaoOverlay({
           transparent
           alphaTest={0.1}
           toneMapped={false}
+          depthTest={false}
+          depthWrite={false}
         />
       </mesh>
 
@@ -206,11 +290,11 @@ export function ManipulacaoOverlay({
         rotation={[-Math.PI / 2, 0, 0]}
         castShadow={false}
         receiveShadow={false}
-        renderOrder={51}
+        renderOrder={999}
         onPointerDown={impedirArrasto}
         onClick={(e) => {
           e.stopPropagation()
-          comandar(mapearGiro(peca.pecaId, 'anti_horario'))
+          comandar(mapearGiro(pecaId, 'anti_horario'))
         }}
         {...cursor}
       >
@@ -221,31 +305,37 @@ export function ManipulacaoOverlay({
           transparent
           alphaTest={0.1}
           toneMapped={false}
+          depthTest={false}
+          depthWrite={false}
         />
       </mesh>
       </>
       ) : null}
 
-      {/* OK: Botão plano visto de cima, posicionado ao sul da peça. */}
+      {/* OK: Botão plano visto de cima, posicionado ao sul da peça.
+          Hitbox reforçada (issue #357): plano maior que a textura para o
+          clique chegar mesmo com câmera baixa ou avatar sobre a célula. */}
       <mesh
         position={[0, 0, -OFFSET_OK]}
         rotation={[-Math.PI / 2, 0, 0]}
         castShadow={false}
         receiveShadow={false}
-        renderOrder={52}
+        renderOrder={1000}
         onPointerDown={impedirArrasto}
         onClick={(e) => {
           e.stopPropagation()
-          comandar(mapearFinalizarManipulacao())
+          comandar(comandoOK)
         }}
         {...cursor}
       >
-        <planeGeometry args={[0.7, 0.35]} />
+        <planeGeometry args={[1.1, 0.55]} />
         <meshBasicMaterial
           map={texturaOK ?? undefined}
           color={texturaOK ? '#ffffff' : COR_DO_OK}
           transparent
           toneMapped={false}
+          depthTest={false}
+          depthWrite={false}
         />
       </mesh>
     </group>

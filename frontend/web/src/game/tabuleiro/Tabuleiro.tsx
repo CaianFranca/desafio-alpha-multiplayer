@@ -17,7 +17,7 @@ import { PeaoVisual } from './PeaoVisual'
 import { cursorParaCelula, cursorParaPecaPosicionada } from './interacao'
 import type { EstadoInteracaoTabuleiro } from './interacao'
 import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from './interacaoPeoes'
-import { despacharCliqueDeCelula } from './interacaoPeoes'
+import { despacharCliqueDeCelula, previewsProvisorios } from './interacaoPeoes'
 import type {
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
@@ -139,6 +139,23 @@ export function Tabuleiro({
     posicionadasPorChave.set(chaveCelula(p.celula), p)
   }
 
+  // Preview provisório da Recebida (issue #357): pendência com vaga escolhida
+  // ainda não posicionada aparece na célula-alvo mesmo sem conexão — fonte
+  // única via `previewsProvisorios`. Só preenche chaves sem posicionada.
+  const provisoriasPorChave = new Map<string, PecaPosicionada>()
+  if (estadoPeoes) {
+    for (const preview of previewsProvisorios(estadoPeoes)) {
+      const chave = chaveCelula(preview.celula)
+      if (posicionadasPorChave.has(chave)) continue
+      provisoriasPorChave.set(chave, {
+        pecaId: preview.pecaId,
+        tipo: preview.tipo,
+        orientacao: preview.orientacao,
+        celula: preview.celula,
+      })
+    }
+  }
+
   // Peões posicionados agrupados por célula da peça que os abriga. A cena
   // renderiza um visual por peão (arranjo de co-ocupação via
   // `layoutDoPeaoNaCelula`); a autoridade da ocupação é o engine (Portão até
@@ -177,15 +194,17 @@ export function Tabuleiro({
       {celulas.map((celula) => {
         const chave = chaveCelula(celula)
         const peca = posicionadasPorChave.get(chave) ?? null
+        const provisoria = peca === null ? (provisoriasPorChave.get(chave) ?? null) : null
+        const pecaExibida = peca ?? provisoria
         const ocupada = Boolean(peca)
         const cursor =
           peca !== null
             ? cursorParaPecaPosicionada(estadoInteracao.pecaEmManipulacaoId, peca.pecaId)
             : cursorParaCelula(ocupada, estadoInteracao.pecaSelecionadaId)
         const destacada =
-          peca !== null &&
-          (estadoInteracao.pecaSelecionadaId === peca.pecaId ||
-            estadoInteracao.pecaEmManipulacaoId === peca.pecaId)
+          pecaExibida !== null &&
+          (estadoInteracao.pecaSelecionadaId === pecaExibida.pecaId ||
+            estadoInteracao.pecaEmManipulacaoId === pecaExibida.pecaId)
         const peoesDaCelula =
           (peoesPorChave.get(chave) ?? [])
             // Voo ativo (#242): suprime o estático de mesmo peaoId confinado a
@@ -218,9 +237,10 @@ export function Tabuleiro({
           <Celula
             key={chave}
             celula={celula}
-            peca={peca}
+            peca={pecaExibida}
             cursor={cursor}
             pecaDestacada={destacada}
+            provisoria={provisoria !== null}
             onClick={() => {
               // Roteador do ciclo (#91): comando do ciclo (peão ou tabuleiro)
               // ou fallback ST-09 (sem ciclo ativo).

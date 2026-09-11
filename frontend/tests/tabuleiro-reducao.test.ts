@@ -673,6 +673,40 @@ describe('redução dos turnos no cliente — fase, rodada e mapa aprendido (iss
     expect(estado.posicaoConfirmadaNoTurno).toBe(false)
   })
 
+  it('TURNO_INICIADO deriva a Peça do início do turno (zona da origem); encerrar zera', () => {
+    // Peão na Mesa (Primeiro Turno): sem peça sob ele, a zona fica inativa.
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1)
+    expect(estado.pecaDoInicioDoTurnoId).toBeNull()
+
+    // Inicial encaixada + peão do ativo posicionado sobre ela (aprende o
+    // mapa jogador→peão e a peça sob o peão).
+    estado = reduzirEvento(estado, {
+      type: 'PECA_POSICIONADA',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+      orientacao: 0,
+    })
+    estado = reduzirEvento(estado, {
+      type: 'PEAO_POSICIONADO',
+      peaoId: 'peao-branco',
+      pecaId: 'inicial-1',
+      celula: { linha: 3, coluna: 3 },
+    })
+
+    // Nova vez do mesmo jogador (rodada 2 — troca real, não replay): deriva
+    // a Peça sob o Peão do novo ativo como zona da origem.
+    estado = reduzirEvento(estado, { type: 'TURNO_INICIADO', jogadorId: 'jogador-1', rodada: 2 })
+    expect(estado.pecaDoInicioDoTurnoId).toBe('inicial-1')
+
+    // Replay do MESMO turno (reload, issue #258) não apaga a zona aprendida.
+    estado = reduzirEvento(estado, { type: 'TURNO_INICIADO', jogadorId: 'jogador-1', rodada: 2 })
+    expect(estado.pecaDoInicioDoTurnoId).toBe('inicial-1')
+
+    // Encerrar o turno zera a zona da origem.
+    estado = reduzirEvento(estado, { type: 'TURNO_ENCERRADO', jogadorId: 'jogador-1' })
+    expect(estado.pecaDoInicioDoTurnoId).toBeNull()
+  })
+
   it('PEAO_MOVIDO dentro do turno marca movimentouNoTurno; fora de turno não marca', () => {
     // Sem vez ativa: movimento de outro contexto não marca a fase.
     const foraDeTurno = reduzirEvento(criarEstadoInicialDoCliente(), {
@@ -888,6 +922,19 @@ describe('snapshot no modelo do cliente — projeção autoritativa (issue #156,
       { pecaId: 'inicial-3', tipo: 'inicial', orientacao: 90 },
     ])
     expect(estado.posicionadas.map((p) => p.pecaId)).toEqual(['inicial-1'])
+  })
+
+  it('aplicarSnapshot projeta a Peça do início do turno (zona da origem autoritativa)', () => {
+    // A wire carrega a peça do início do turno; o snapshot a substitui
+    // (reload no meio do turno precisa da origem REAL, não da derivação).
+    const estado = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      snapshotBase({ pecaDoInicioDoTurnoId: 'inicial-1' }),
+    )
+    expect(estado.pecaDoInicioDoTurnoId).toBe('inicial-1')
+    // Sem valor no snapshot (binário antigo) → null (zona inativa).
+    const semOrigem = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotBase())
+    expect(semOrigem.pecaDoInicioDoTurnoId).toBeNull()
   })
 
   it('aplicarSnapshot preserva movimentouNoTurno (late-join no meio do turno)', () => {
