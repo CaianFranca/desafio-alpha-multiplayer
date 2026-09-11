@@ -129,7 +129,11 @@ describe('lobby - chat e controles do Anfitrião', () => {
     expect(await within(feed).findByText(/zanetti: internet tá ruim/i)).toBeInTheDocument()
   })
 
-  it('campo de mensagem respeita o limite de 500 caracteres', async () => {
+  // 510 teclas via userEvent re-renderizam a página a cada tecla (~5s+ no
+  // jsdom); timeout por-teste em vez do padrão de 5s. Não trocar por
+  // fireEvent.change: o jsdom não aplica maxLength em atribuição direta e o
+  // truncamento sob teste acontece no caminho de digitação nativa.
+  it('campo de mensagem respeita o limite de 500 caracteres', { timeout: 30000 }, async () => {
     const user = userEvent.setup()
     await montarLobbyComoAnfitriao()
 
