@@ -1,17 +1,31 @@
 import type { Redis } from 'ioredis';
 import jwt from 'jsonwebtoken';
+import { verificarBotToken } from '@flicker/config';
 
 export interface SessaoDoJogador {
   readonly jogadorId: string;
   readonly apelido: string;
   readonly sessaoId: string;
+  readonly isBot?: boolean;
 }
 
 /**
- * Valida um JWT de sessão e retorna o payload extraído.
+ * Valida um JWT de sessão (jogador real ou bot service token) e retorna o payload extraído.
  * Retorna null se o token for inválido, expirado ou o payload não contiver os campos esperados.
  */
 export function validarTokenDeSessao(token: string, secret: string): SessaoDoJogador | null {
+  // 1. Tenta validar como Bot Token (Fase 2 da arquitetura)
+  const botToken = verificarBotToken(token, secret);
+  if (botToken) {
+    return {
+      jogadorId: botToken.sub,
+      apelido: botToken.apelido,
+      sessaoId: `bot-session-${botToken.sub}`,
+      isBot: true,
+    };
+  }
+
+  // 2. Valida como token de jogador regular
   try {
     const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] });
     if (typeof decoded === 'string') {

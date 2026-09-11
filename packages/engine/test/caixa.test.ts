@@ -20,12 +20,12 @@ function ordemDaCaixa(estado: EstadoDoTabuleiro): string[] {
   return estado.caixa.map((peca) => peca.pecaId);
 }
 
-test('a composição da caixa soma 83 peças com a proporção fixa do ST-12', () => {
+test('a composição da caixa soma 89 peças com a proporção fixa (ST-12 ampliada)', () => {
   const total = COMPOSICAO_DA_CAIXA.reduce(
     (soma, entrada) => soma + entrada.quantidade,
     0,
   );
-  assert.equal(total, 83);
+  assert.equal(total, 89);
   assert.deepEqual(
     COMPOSICAO_DA_CAIXA.map((entrada) => ({ ...entrada })),
     [
@@ -36,8 +36,8 @@ test('a composição da caixa soma 83 peças com a proporção fixa do ST-12', (
       { tipo: 'sala_do_diretor', quantidade: 3 },
       { tipo: 'sala_medica', quantidade: 4 },
       { tipo: 'portao_de_saida', quantidade: 4 },
-      { tipo: 'vulto', quantidade: 6 },
-      { tipo: 'espectro', quantidade: 6 },
+      { tipo: 'vulto', quantidade: 9 },
+      { tipo: 'espectro', quantidade: 9 },
     ],
   );
 });
@@ -45,7 +45,7 @@ test('a composição da caixa soma 83 peças com a proporção fixa do ST-12', (
 test('a caixa nasce com a composição fixa completa e ids determinísticos', () => {
   const estado = estadoInicial();
 
-  assert.equal(estado.caixa.length, 83);
+  assert.equal(estado.caixa.length, 89);
   const porTipo: Record<string, number> = {};
   for (const peca of estado.caixa) {
     porTipo[peca.tipo] = (porTipo[peca.tipo] ?? 0) + 1;
@@ -58,12 +58,12 @@ test('a caixa nasce com a composição fixa completa e ids determinísticos', ()
     sala_do_diretor: 3,
     sala_medica: 4,
     portao_de_saida: 4,
-    vulto: 6,
-    espectro: 6,
+    vulto: 9,
+    espectro: 9,
   });
 
   const ids = new Set(estado.caixa.map((peca) => peca.pecaId));
-  assert.equal(ids.size, 83);
+  assert.equal(ids.size, 89);
   for (const [tipo, quantidade] of [
     ['reta', 'reta'],
     ['T', 't'],
@@ -141,8 +141,8 @@ test('a mesma seed produz exatamente a mesma ordem da caixa', () => {
     sala_do_diretor: 3,
     sala_medica: 4,
     portao_de_saida: 4,
-    vulto: 6,
-    espectro: 6,
+    vulto: 9,
+    espectro: 9,
   });
 });
 
@@ -212,7 +212,7 @@ test('o sorteio retira exatamente a primeira peça, sem reposição', () => {
       orientacao: segunda.orientacao,
     },
   ]);
-  // Nenhuma peça é reposta: 83 sorteados esvaziam a caixa com peças únicas.
+  // Nenhuma peça é reposta: 89 sorteados esvaziam a caixa com peças únicas.
   const idsSorteados = new Set<string>();
   let atual: EstadoDoTabuleiro = estado;
   while (atual.caixa.length > 0) {
@@ -226,7 +226,7 @@ test('o sorteio retira exatamente a primeira peça, sem reposição', () => {
     }
     atual = resultado.estado;
   }
-  assert.equal(idsSorteados.size, 83);
+  assert.equal(idsSorteados.size, 89);
 });
 
 test('a caixa esgotada rejeita o sorteio com CAIXA_ESGOTADA e preserva o estado', () => {
@@ -251,153 +251,90 @@ test('a caixa esgotada rejeita o sorteio com CAIXA_ESGOTADA e preserva o estado'
   assert.deepEqual(estado.caixa, []);
 });
 
-// Estratificação da Caixa (issue #265, PR #347): invariantes sobre N seeds —
-// sem estes testes o fallback best-effort violava as regras em ~1 a cada 7
-// partidas sem o CI perceber (B1). Uma sondagem local em 500 seeds deu zero
-// violações; a suíte fixa 120 para manter o tempo sob controle.
+// Embaralhamento da Caixa por partes (ST-15): invariantes sobre N seeds. O
+// embaralhamento por 4 blocos (~22 cartas) garante uma abertura protegida
+// (10 primeiras só caminho/portao_de_saida) e cotas determinísticas de
+// especiais/monstros por parte; a suíte fixa 120 para manter o tempo sob
+// controle.
 const SEEDS_DA_ESTRATIFICACAO = Array.from({ length: 120 }, (_, i) => i + 1);
 
 function tiposComSeed(seed: number): TipoDePecaDaCaixa[] {
   return estadoInicialDoTabuleiro({ seed }).caixa.map((peca) => peca.tipo);
 }
 
-test('as 10 primeiras trazem só caminho + exatamente 1 sala_do_diretor', () => {
-  // Issue #265: "apenas peças de caminho + 1 peça de cartão (sala_do_diretor)".
+test('as 10 primeiras trazem só caminho ou portao_de_saida', () => {
+  // ST-15: a abertura da Caixa é protegida — nada de monstro, especial ou
+  // cartão nas 10 primeiras cartas (portao_de_saida é permitido, é de borda).
   for (const seed of SEEDS_DA_ESTRATIFICACAO) {
     const dezPrimeiras = tiposComSeed(seed).slice(0, 10);
-    const cartoes = dezPrimeiras.filter((tipo) => tipo === 'sala_do_diretor');
-    assert.equal(
-      cartoes.length,
-      1,
-      `seed ${seed}: esperado 1 sala_do_diretor nas 10 primeiras, achou ${cartoes.length} (${dezPrimeiras.join(',')})`,
-    );
     for (const tipo of dezPrimeiras) {
       assert.ok(
-        !ehPecaDeMonstro(tipo),
-        `seed ${seed}: monstro nas 10 primeiras (${tipo})`,
-      );
-      assert.notEqual(tipo, 'gerador', `seed ${seed}: gerador nas 10 primeiras`);
-      assert.notEqual(
-        tipo,
-        'sala_medica',
-        `seed ${seed}: sala_medica nas 10 primeiras`,
-      );
-      assert.notEqual(
-        tipo,
-        'portao_de_saida',
-        `seed ${seed}: portao_de_saida nas 10 primeiras`,
-      );
-      assert.ok(
-        tipo === 'sala_do_diretor' ||
+        tipo === 'portao_de_saida' ||
           (!ehPecaEspecial(tipo) && !ehPecaDeMonstro(tipo)),
-        `seed ${seed}: tipo inesperado nas 10 primeiras (${tipo})`,
+        `seed ${seed}: tipo inesperado nas 10 primeiras (${tipo}) — ${dezPrimeiras.join(',')}`,
       );
     }
   }
 });
 
-test('após as 10 primeiras, nunca mais de 5 caminhos seguidos (ritmo espaçado)', () => {
-  // Issue #265: "1 monstro/peça especial a cada 4-5 caminhos".
+test('a caixa embaralha em 4 partes com composição fixa por parte', () => {
+  // ST-15: cada bloco de ~22 cartas recebe uma cota determinística de
+  // especiais/monstros (gerador×6, sala_medica×4, portao×4, vulto×9,
+  // espectro×9 no total); as 3 salas_do_diretor ficam fora da Parte 1. O
+  // restante de cada parte são caminhos: 22/22/22/23 no total.
+  const ehCaminho = (tipo: TipoDePecaDaCaixa): boolean =>
+    !ehPecaEspecial(tipo) && !ehPecaDeMonstro(tipo);
+  const contar = (tipos: TipoDePecaDaCaixa[]): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const tipo of tipos) out[tipo] = (out[tipo] ?? 0) + 1;
+    return out;
+  };
+  const cotasPorParte: readonly Record<string, number>[] = [
+    { gerador: 1, sala_medica: 1, portao_de_saida: 1, vulto: 2, espectro: 2 },
+    { gerador: 2, sala_medica: 1, portao_de_saida: 1, vulto: 3, espectro: 3 },
+    { gerador: 1, sala_medica: 1, portao_de_saida: 1, vulto: 2, espectro: 2 },
+    { gerador: 2, sala_medica: 1, portao_de_saida: 1, vulto: 2, espectro: 2 },
+  ];
+  const tamanhos: readonly number[] = [22, 22, 22, 23];
   for (const seed of SEEDS_DA_ESTRATIFICACAO) {
     const tipos = tiposComSeed(seed);
-    let caminhosSeguidos = 0;
-    for (let i = 10; i < tipos.length; i++) {
-      const tipo = tipos[i];
-      if (!ehPecaEspecial(tipo) && !ehPecaDeMonstro(tipo)) {
-        caminhosSeguidos++;
-        assert.ok(
-          caminhosSeguidos <= 5,
-          `seed ${seed}: ${caminhosSeguidos} caminhos seguidos até ${i}`,
+    assert.equal(tipos.length, 89);
+    let salasDoDiretor = 0;
+    for (let parte = 0; parte < 4; parte++) {
+      const bloco = tipos.slice(
+        parte === 0 ? 0 : [22, 44, 66][parte - 1],
+        [22, 44, 66, 89][parte],
+      );
+      assert.equal(bloco.length, tamanhos[parte], `seed ${seed}: parte ${parte + 1}`);
+      const contagem = contar(bloco);
+      for (const [tipo, cota] of Object.entries(cotasPorParte[parte])) {
+        assert.equal(
+          contagem[tipo],
+          cota,
+          `seed ${seed}: parte ${parte + 1} deveria ter ${cota} ${tipo}`,
         );
-      } else {
-        caminhosSeguidos = 0;
+      }
+      salasDoDiretor += contagem.sala_do_diretor ?? 0;
+      if (parte === 0) {
+        assert.equal(
+          contagem.sala_do_diretor,
+          undefined,
+          `seed ${seed}: parte 1 não recebe sala_do_diretor`,
+        );
       }
     }
+    assert.equal(salasDoDiretor, 3, `seed ${seed}: total de sala_do_diretor`);
   }
 });
 
-test('monstros do mesmo tipo mantêm 4 cartas entre si', () => {
-  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
-    const tipos = tiposComSeed(seed);
-    const ultimaPosicao = new Map<string, number>();
-    for (let i = 0; i < tipos.length; i++) {
-      const tipo = tipos[i];
-      if (!ehPecaDeMonstro(tipo)) continue;
-      const anterior = ultimaPosicao.get(tipo);
-      assert.ok(
-        anterior === undefined || i - anterior >= 5,
-        `seed ${seed}: ${tipo} em ${anterior} e ${i} (4 cartas entre exigidas)`,
-      );
-      ultimaPosicao.set(tipo, i);
-    }
-  }
-});
-
-test('a caixa nunca emenda 3 peças especiais seguidas', () => {
-  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
-    const tipos = tiposComSeed(seed);
-    for (let i = 2; i < tipos.length; i++) {
-      const trio = [tipos[i - 2], tipos[i - 1], tipos[i]].every((tipo) =>
-        ehPecaEspecial(tipo),
-      );
-      assert.ok(!trio, `seed ${seed}: 3 especiais seguidos em ${i - 2}..${i}`);
-    }
-  }
-});
-
-test('especiais do mesmo tipo mantêm 2 cartas entre si (diferença >= 3)', () => {
-  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
-    const tipos = tiposComSeed(seed);
-    const ultimaPosicao = new Map<string, number>();
-    for (let i = 0; i < tipos.length; i++) {
-      const tipo = tipos[i];
-      if (!ehPecaEspecial(tipo)) continue;
-      const anterior = ultimaPosicao.get(tipo);
-      assert.ok(
-        anterior === undefined || i - anterior >= 3,
-        `seed ${seed}: ${tipo} em ${anterior} e ${i} (2 cartas entre exigidas)`,
-      );
-      ultimaPosicao.set(tipo, i);
-    }
-  }
-});
-
-test('a janela de especiais aceita a distância exata de 3 (sem off-by-one)', () => {
-  // Regressão do B3: com a janela `indice - 3` nenhuma seed repetia o mesmo
-  // especial a distância 3; com a janela `indice - 2` isso é rotina
-  // (130/200 seeds na sondagem). Se este teste falhar, a regra voltou a ser
-  // mais restritiva que a issue.
-  let comDistanciaExata3 = 0;
-  for (const seed of SEEDS_DA_ESTRATIFICACAO) {
-    const tipos = tiposComSeed(seed);
-    const ultimaPosicao = new Map<string, number>();
-    for (let i = 0; i < tipos.length; i++) {
-      const tipo = tipos[i];
-      if (!ehPecaEspecial(tipo)) continue;
-      if (ultimaPosicao.get(tipo) === i - 3) {
-        comDistanciaExata3++;
-        break;
-      }
-      ultimaPosicao.set(tipo, i);
-    }
-  }
-  assert.ok(
-    comDistanciaExata3 > 0,
-    'nenhuma seed repetiu o mesmo especial a distância 3: janela restritiva demais?',
-  );
-});
-
-test('a seed 28 estratifica sem colar geradores (caso do review)', () => {
-  // O review mediu `gerador` em 80 e 82 na seed 28 (distância 2, violação);
-  // após a garantia, a mesma seed precisa sair limpa e determinística.
+test('a seed 28 mantém a composição de forma determinística (caso do review)', () => {
+  // O review verificava a estratificação antiga (janelas) na seed 28; com o
+  // embaralhamento por partes o contrato passa a ser: composição preservada,
+  // ordenação determinística e cotas intactas.
   const tipos = tiposComSeed(28);
-  assert.equal(tipos.length, 83);
+  assert.equal(tipos.length, 89);
   assert.deepEqual(tipos, tiposComSeed(28));
-  const posicoes = tipos
-    .map((tipo, i) => (tipo === 'gerador' ? i : -1))
-    .filter((i) => i >= 0);
-  assert.equal(posicoes.length, 6);
-  for (let k = 1; k < posicoes.length; k++) {
-    assert.ok(posicoes[k] - posicoes[k - 1] >= 3);
-  }
+  assert.equal(tipos.filter((tipo) => tipo === 'gerador').length, 6);
+  assert.equal(tipos.filter((tipo) => tipo === 'vulto').length, 9);
+  assert.equal(tipos.filter((tipo) => tipo === 'espectro').length, 9);
 });

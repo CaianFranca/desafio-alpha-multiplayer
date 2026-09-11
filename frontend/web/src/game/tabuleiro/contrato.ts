@@ -602,13 +602,40 @@ export function destinosConectadosDoPeao(
   // puras legadas; a cadeia PartidaPage→AmbienteDeJogo→interacaoPeoes sempre
   // fornece o N clampeado.
   quantidadeDeJogadores?: number,
+  // Zona da origem (espelho de partida.ts:119): a Peça do início do turno.
+  // Com ela presente, o Peão só pousa nela ou numa vizinha diretamente
+  // conectada a ela — a ida-e-volta de 1 salto até a Confirmação. `null`
+  // (Peão na Mesa do Primeiro Turno) desativa a zona; ausente (unidades
+  // puras/testes) mantém o comportamento legado de TODAS as conectadas.
+  pecaDoInicioDoTurnoId?: string | null,
 ): DestinoDoPeao[] {
   const peao = peoes.find((p) => p.peaoId === peaoId)
   if (!peao || peao.celula === null) return []
   const origem = encontrarPecaNaCelula(posicionadas, peao.celula)
   if (!origem) return []
+  // Zona da origem: {Peça do início} ∪ suas vizinhas conectadas — o Peão só
+  // cruza essa fronteira por Confirmação de Posição. Peça de início fora da
+  // mesa (removida pela Limpeza) degrada conservador para TODAS as conectadas
+  // (mesmo fail-open do motor): sem origem conhecida não há zona a impor.
+  const zona =
+    pecaDoInicioDoTurnoId === null || pecaDoInicioDoTurnoId === undefined
+      ? null
+      : (() => {
+          const pecaDoInicio = posicionadas.find(
+            (p) => p.pecaId === pecaDoInicioDoTurnoId,
+          )
+          if (!pecaDoInicio) return null
+          return new Set([
+            pecaDoInicioDoTurnoId,
+            ...vizinhasConectadas(posicionadas, pecaDoInicio).map(
+              (p) => p.pecaId,
+            ),
+          ])
+        })()
   const destinos: DestinoDoPeao[] = []
   for (const peca of vizinhasConectadas(posicionadas, origem)) {
+    // (1) Fora da zona da origem (quando ativa) — antes de qualquer análise.
+    if (zona !== null && !zona.has(peca.pecaId)) continue
     // (2) Monstros fora — antes de qualquer análise de ocupação.
     if (ehPecaDeMonstro(peca.tipo)) continue
     const chave = chaveCelula(peca.celula)

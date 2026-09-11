@@ -97,7 +97,7 @@ export function EntrarPage() {
         </button>
       </form>
 
-      <p className="text-sm text-center text-muted mt-6">
+      <p className="text-base text-center text-muted mt-6">
         Ainda não tem Cadastro?{' '}
         <Link to="/cadastro" state={location.state} className="auth-link">
           Crie seu Cadastro

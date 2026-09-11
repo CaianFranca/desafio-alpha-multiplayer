@@ -14,6 +14,7 @@ import {
   despacharCliqueDeCelula,
   despacharCliqueNaPecaDaBandeja,
   mapearCliqueNaPecaDaMesa,
+  previewsProvisorios,
   puxadaVigenteNaBandeja,
 } from '../../game/tabuleiro/interacaoPeoes'
 import type {
@@ -247,6 +248,23 @@ export function TabuleiroMirrorDOM({
           }}
         />
       ))}
+      {estadoPeoes
+        ? previewsProvisorios(estadoPeoes).map((preview) => (
+            <div
+              key={preview.pecaId}
+              data-testid="peca-provisoria"
+              data-peca-id={preview.pecaId}
+              data-tipo={preview.tipo}
+              data-orientacao={preview.orientacao}
+              data-linha={preview.celula.linha}
+              data-coluna={preview.celula.coluna}
+              data-recebida-id={preview.recebidaId}
+              onClick={(e) => {
+                aoClicarCelula(preview.celula, e)
+              }}
+            />
+          ))
+        : null}
       {estadoPeoes
         ? estadoPeoes.recebidasPendentes.map((r) => (
             <div

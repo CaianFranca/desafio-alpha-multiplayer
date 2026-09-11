@@ -61,6 +61,12 @@ interface CelulaProps {
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
   destinoValido?: boolean
   /**
+   * Peça em preview provisório (issue #357): pendência com vaga escolhida
+   * ainda não posicionada, renderizada na célula-alvo antes do OK. Ganha o
+   * destaque de manipulação para sinalizar o estado provisório.
+   */
+  provisoria?: boolean
+  /**
    * Destino válido que é especificamente de RESGATE (peça com peão AFETADO
    * sob teto elevado, exceção #171). Só muda o tom do destaque emissivo —
    * mesma affordância de clique (problema do `destinoValido`).
@@ -310,6 +316,7 @@ export function Celula({
   destinoResgate = false,
   alvoPendente = false,
   vagaDisponivel = false,
+  provisoria = false,
   iluminada = false,
   peaoSelecionadoId = null,
   peaoAtivoId = null,
@@ -365,7 +372,7 @@ export function Celula({
           tipo={peca.tipo}
           orientacao={peca.orientacao}
           position={[0, PECA_Y, 0]}
-          destacada={pecaDestacada || destinoValido}
+          destacada={pecaDestacada || destinoValido || provisoria}
           corDestaque={destinoResgate ? COR_DESTAQUE_RESGATE : undefined}
           cursor={cursorEfetivo}
           onClick={onClick}
