@@ -201,7 +201,7 @@ export function AmbienteCena({
   // #230: névoa gateada por aspecto — afastada só no largo-baixo (800x360),
   // padrão no desktop/tablet sem regressão de atmosfera.
   const tamanho = useThree((s) => s.size)
-  const nevoa = nevoaParaAspecto(aspectoVisivel(tamanho, bordaPx))
+  const nevoa = useMemo(() => nevoaParaAspecto(aspectoVisivel(tamanho, bordaPx)), [tamanho, bordaPx])
 
   return (
     <>
