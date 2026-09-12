@@ -131,6 +131,10 @@ export interface EncaminharSalaComando {
 export interface AceitarEncaminhamentoComando {
   readonly tipo: 'aceitar_encaminhamento';
   readonly salaId: string;
+  // Roster ofertado no momento da oferta (lista de jogadorId): comparado
+  // como conjunto contra os jogadorId ativos no commit — a ordem de entrada
+  // não participa da igualdade, apenas o conjunto.
+  readonly rosterOfertado: readonly string[];
 }
 
 export interface RecusarEncaminhamentoComando {
@@ -1297,6 +1301,32 @@ export function aceitarEncaminhamento(
   const composicaoInvalida = validarComposicaoParaEncaminhamento(sala);
   if (composicaoInvalida) {
     return composicaoInvalida;
+  }
+
+  // Drift oferta→aceite (#305): a composição ativa no commit precisa
+  // coincidir com o roster da oferta — conjunto de jogadorId (a chave é o
+  // Jogador, não o vínculo: saída + reentrada do mesmo Jogador gera novo
+  // membroId mas preserva o conjunto e não diverge). A comparação é aditiva
+  // à validação por faixa/conexão/prontidão.
+  if (!Array.isArray(comando.rosterOfertado)) {
+    return rejeitar('DADOS_INVALIDOS', 'O roster ofertado é obrigatório para aceitar o encaminhamento.', {
+      salaId: sala.id,
+    });
+  }
+  const ativosOrdenados = sala.membros
+    .filter((membro) => membro.estado === 'ativo')
+    .map((membro) => membro.jogadorId)
+    .sort();
+  const ofertadosOrdenados = [...comando.rosterOfertado].sort();
+  const rosterDivergiu =
+    ativosOrdenados.length !== ofertadosOrdenados.length ||
+    ativosOrdenados.some((jogadorId, indice) => jogadorId !== ofertadosOrdenados[indice]);
+  if (rosterDivergiu) {
+    return rejeitar(
+      'ENCAMINHAMENTO_INVALIDO',
+      'A composição da Sala divergiu do roster ofertado — o aceite exige os mesmos Jogadores da oferta.',
+      { salaId: sala.id },
+    );
   }
 
   const novaSala: Sala = { ...sala, estado: 'encaminhada' };

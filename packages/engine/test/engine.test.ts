@@ -66,8 +66,8 @@ const alternar = (jogadorId: string, salaId = 'sala-1') =>
 const encaminhar = (anfitriaoMembroId = 'membro-1', salaId = 'sala-1') =>
   ({ tipo: 'encaminhar_sala', salaId, anfitriaoMembroId } as const);
 
-const aceitar = (salaId = 'sala-1') =>
-  ({ tipo: 'aceitar_encaminhamento', salaId } as const);
+const aceitar = (salaId = 'sala-1', rosterOfertado: readonly string[] = ['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']) =>
+  ({ tipo: 'aceitar_encaminhamento', salaId, rosterOfertado } as const);
 
 const recusar = (salaId = 'sala-1') =>
   ({ tipo: 'recusar_encaminhamento', salaId } as const);
@@ -1055,10 +1055,16 @@ test('aceitar_encaminhamento revalida a composição entre a oferta e o aceite',
   const base = salaComQuatroProntos();
   encaminharSala(base, encaminhar('membro-1'));
 
-  // saída que deixa 3 ativos (dentro da faixa 2–4): aceite prossegue
+  // drift oferta→aceite (#305): oferta com 4, saída que deixa 3 ativos
+  // (dentro da faixa 2–4) recusa por divergência de roster em vez de
+  // congelar com 3 enquanto a Partida tem roster de 4.
   const aposUmaSaida = aplicar(base, sair('jogador-4'));
   const comTresAtivos = aceitarEncaminhamento(aposUmaSaida, aceitar());
-  assert.equal(comTresAtivos.sucesso, true);
+  assert.equal(comTresAtivos.sucesso, false);
+  if (comTresAtivos.sucesso) return;
+  assert.equal(comTresAtivos.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.match(comTresAtivos.erro.mensagem, /divergiu do roster ofertado/);
+  assert.equal(aposUmaSaida.salas[0].estado, 'aberta');
 
   // saídas que deixam 1 ativo (abaixo do mínimo 2): recusa
   const aposDuasSaidas = aplicar(aposUmaSaida, sair('jogador-3'));
@@ -1087,7 +1093,8 @@ test('aceitar_encaminhamento revalida a composição entre a oferta e o aceite',
 test('aceitar_encaminhamento congela a Sala com 2 e 3 Membros prontos', () => {
   for (const quantidade of [2, 3]) {
     const estado = salaComMembrosProntos(quantidade);
-    const resultado = aceitarEncaminhamento(estado, aceitar());
+    const roster = Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
+    const resultado = aceitarEncaminhamento(estado, aceitar('sala-1', roster));
 
     assert.equal(resultado.sucesso, true);
     if (!resultado.sucesso) return;
@@ -1097,19 +1104,85 @@ test('aceitar_encaminhamento congela a Sala com 2 e 3 Membros prontos', () => {
   }
 });
 
+test('aceitar_encaminhamento congela a Sala com roster idêntico à oferta (2, 3 e 4)', () => {
+  for (const quantidade of [2, 3, 4]) {
+    const estado = salaComMembrosProntos(quantidade);
+    const roster = Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
+    const resultado = aceitarEncaminhamento(estado, aceitar('sala-1', roster));
+
+    assert.equal(resultado.sucesso, true, `roster idêntico com ${quantidade}`);
+    if (!resultado.sucesso) return;
+    assert.equal(resultado.estado.salas[0].estado, 'encaminhada');
+  }
+});
+
+test('aceitar_encaminhamento recusa drift 3→2 com oferta de 3', () => {
+  const base = salaComMembrosProntos(3);
+  encaminharSala(base, encaminhar('membro-1'));
+
+  const aposSaida = aplicar(base, sair('jogador-3'));
+  const resultado = aceitarEncaminhamento(aposSaida, aceitar('sala-1', ['jogador-1', 'jogador-2', 'jogador-3']));
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.match(resultado.erro.mensagem, /divergiu do roster ofertado/);
+  assert.equal(aposSaida.salas[0].estado, 'aberta');
+});
+
+test('aceitar_encaminhamento ignora ordem de entrada: mesma composição em ordem distinta congela', () => {
+  const estado = salaComQuatroProntos();
+  const resultado = aceitarEncaminhamento(
+    estado,
+    aceitar('sala-1', ['jogador-4', 'jogador-3', 'jogador-2', 'jogador-1']),
+  );
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.salas[0].estado, 'encaminhada');
+});
+
+test('aceitar_encaminhamento com saída+retorno do mesmo Jogador mantém o conjunto e congela', () => {
+  const base = salaComQuatroProntos();
+  encaminharSala(base, encaminhar('membro-1'));
+
+  // saída + reentrada do mesmo Jogador gera novo vínculo (membro-5) mas o
+  // conjunto de jogadorId permanece o da oferta.
+  const aposSaida = aplicar(base, sair('jogador-4'));
+  const aposRetorno = aplicar(aposSaida, entrar('jogador-4', 'membro-5'));
+  const prontoDeNovo = aplicar(aposRetorno, alternar('jogador-4'));
+  const resultado = aceitarEncaminhamento(prontoDeNovo, aceitar());
+  assert.equal(resultado.sucesso, true);
+  if (!resultado.sucesso) return;
+  assert.equal(resultado.estado.salas[0].estado, 'encaminhada');
+});
+
+test('aceitar_encaminhamento recusa troca de identidade com mesmo tamanho (4→4 distinto)', () => {
+  const base = salaComQuatroProntos();
+  encaminharSala(base, encaminhar('membro-1'));
+
+  const aposSaida = aplicar(base, sair('jogador-4'));
+  const comOutro = aplicar(aposSaida, entrar('jogador-5', 'membro-5'));
+  const prontoOutro = aplicar(comOutro, alternar('jogador-5'));
+  const resultado = aceitarEncaminhamento(prontoOutro, aceitar());
+  assert.equal(resultado.sucesso, false);
+  if (resultado.sucesso) return;
+  assert.equal(resultado.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
+  assert.match(resultado.erro.mensagem, /divergiu do roster ofertado/);
+  assert.equal(prontoOutro.salas[0].estado, 'aberta');
+});
+
 test('aceitar_encaminhamento com 2 Membros revalida: saída que deixa 1 recusa', () => {
   const base = salaComMembrosProntos(2);
   encaminharSala(base, encaminhar('membro-1'));
 
   const aposSaida = aplicar(base, sair('jogador-2'));
-  const comSaida = aceitarEncaminhamento(aposSaida, aceitar());
+  const comSaida = aceitarEncaminhamento(aposSaida, aceitar('sala-1', ['jogador-1', 'jogador-2']));
   assert.equal(comSaida.sucesso, false);
   if (comSaida.sucesso) return;
   assert.equal(comSaida.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');
   assert.equal(aposSaida.salas[0].estado, 'aberta');
 
   const aposToggle = aplicar(base, alternar('jogador-2'));
-  const semPronto = aceitarEncaminhamento(aposToggle, aceitar());
+  const semPronto = aceitarEncaminhamento(aposToggle, aceitar('sala-1', ['jogador-1', 'jogador-2']));
   assert.equal(semPronto.sucesso, false);
   if (semPronto.sucesso) return;
   assert.equal(semPronto.erro.codigo, 'ENCAMINHAMENTO_INVALIDO');

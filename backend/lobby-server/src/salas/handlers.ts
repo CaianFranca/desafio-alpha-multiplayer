@@ -1295,7 +1295,11 @@ export class SalasHandlers {
         if (aceite) {
           // Espelho do aceite no stream de debug (issue #340).
           this.espelhar(salaId, 'info', `encaminhamento aceito — partida ${aceite.partidaId} no server ${aceite.serverId}`, 'encaminhamento');
-          const resAceite = this.estado.aplicar({ tipo: 'aceitar_encaminhamento', salaId } satisfies Comando);
+          // Drift oferta→aceite (#305): o roster ofertado viaja por closure
+          // (fonte capturada em handleIniciarPartida) e é comparado como
+          // conjunto de jogadorId no commit do engine.
+          const rosterOfertado = oferta.roster.map((membro) => membro.jogadorId);
+          const resAceite = this.estado.aplicar({ tipo: 'aceitar_encaminhamento', salaId, rosterOfertado } satisfies Comando);
           if (resAceite.sucesso) {
             try {
               await this.repo.persistirEncaminhamento(salaId, aceite.serverId, aceite.partidaId);
