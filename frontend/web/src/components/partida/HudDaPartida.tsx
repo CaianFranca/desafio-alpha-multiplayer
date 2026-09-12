@@ -66,6 +66,8 @@ export interface HudDaPartidaProps {
   saindo?: boolean
   /** Escape do "saindo": navega sem a entrega (a pendência será reenviada). */
   onSairMesmoAssim?: () => void
+  /** Cancela a saída durante o "saindo": volta à partida, purga a fila. */
+  onCancelarSaida?: () => void
   /**
    * Força o modo compacto (issue #230): true = compacto, false = integral.
    * null/undefined = deriva do viewport (paisagem-celular 800x360). Seam no
@@ -188,6 +190,7 @@ export function HudDaPartida({
   onSair,
   saindo = false,
   onSairMesmoAssim,
+  onCancelarSaida,
   compacto = null,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
@@ -399,16 +402,33 @@ export function HudDaPartida({
           <p id="hud-confirmacao-saida-descricao">{saindo ? 'Enviando sua desistência ao servidor… Aguarde a confirmação da conexão.' : emResultado ? 'Sair da partida? Você voltará à página principal.' : 'Desistir da partida? Seu peão será removido e a equipe continua sem você.'}</p>
           <div className="flex gap-2">
             {saindo ? (
-              onSairMesmoAssim ? (
-                <button
-                  type="button"
-                  data-testid="hud-sair-mesmo-assim"
-                  onClick={onSairMesmoAssim}
-                  className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
-                >
-                  Sair mesmo assim
-                </button>
-              ) : null
+              <>
+                {onSairMesmoAssim ? (
+                  <button
+                    type="button"
+                    data-testid="hud-sair-mesmo-assim"
+                    onClick={onSairMesmoAssim}
+                    className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+                  >
+                    Sair mesmo assim
+                  </button>
+                ) : null}
+                {onCancelarSaida ? (
+                  <button
+                    type="button"
+                    data-testid="hud-sair-cancelar"
+                    autoFocus
+                    onClick={() => {
+                      // Volta ao confirmar: rearma a trava para a nova tentativa.
+                      setSaidaEnviada(false)
+                      onCancelarSaida()
+                    }}
+                    className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+                  >
+                    Cancelar
+                  </button>
+                ) : null}
+              </>
             ) : (
               <>
             <button

@@ -879,7 +879,6 @@ test('item 4: re-drive completa pendência de crash em comando pós-término', a
   const { partidaId, redis, broadcaster, sockets } = montada;
   // Envio que nunca conclui (simula crash no meio do envio): estado termina,
   // pendência fica gravada, nada é entregue.
-  const travados: AvisoDeRetorno[] = [];
   const lentos = new PartidaHandlers({
     redis: redis.comoRedis(),
     broadcaster,
@@ -892,7 +891,6 @@ test('item 4: re-drive completa pendência de crash em comando pós-término', a
     'jogador-2',
     desistir('jogador-2'),
   );
-  assert.equal(travados.length, 0);
   assert.ok((await redis.get(chaveDoRetornoPendente(partidaId))) !== null);
 
   // Nova instância (pós-restart, guards vazios): comando pós-término é

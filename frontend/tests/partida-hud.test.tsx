@@ -964,6 +964,55 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     }
   }, 15000)
 
+  it('R2: cancelar no saindo aborta a espera e permite confirmar de novo', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      window.sessionStorage.removeItem('partida-desistiu:p')
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      act(() =>
+        ws.simulateMessage({
+          type: 'ADMISSAO_ACEITA',
+          jogadorId: MEU_JOGADOR_ID,
+          apelido: 'JogadorTeste',
+          partidaId: 'partida-1',
+          estado: 'em_andamento',
+        }),
+      )
+      act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+      await screen.findByTestId('hud-da-partida')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/Enviando sua desistência/i)
+      // Cancela: volta à partida, purga a fila e apaga a pendência.
+      await user.click(screen.getByTestId('hud-sair-cancelar'))
+      expect(screen.queryByTestId('principal-pagina')).not.toBeInTheDocument()
+      expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/Desistir da partida/i)
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBeNull()
+      // O open tardio não envia nem navega (espera invalidada).
+      act(() => ws.simulateOpen())
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(screen.queryByTestId('principal-pagina')).not.toBeInTheDocument()
+      // Nova confirmação funciona (socket já OPEN: envia e navega).
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      await waitFor(() =>
+        expect(
+          ws.sentMessages.map((m) => JSON.parse(m)).filter((c) => c.type === 'DESISTIR_DA_PARTIDA'),
+        ).toHaveLength(1),
+      )
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+      expect(window.sessionStorage.getItem('partida-desistiu:p')).toBe('1')
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      window.sessionStorage.removeItem('partida-desistiu:p')
+    }
+  }, 15000)
+
   it('anti-duplo: confirmar desabilita e envia um único DESISTIR', async () => {
     const ws = await partidaComSnapshot(criarSnapshotBase())
     expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)

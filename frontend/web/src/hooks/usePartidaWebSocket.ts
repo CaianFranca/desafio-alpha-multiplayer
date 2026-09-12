@@ -93,6 +93,12 @@ export interface UsePartidaWebSocketReturn {
    * segue enfileirando sem esperar.
    */
   aguardarConexao: (timeoutMs?: number) => Promise<boolean>
+  /**
+   * Remove comandos enfileirados por tipo (issue #290, R2): o "Cancelar" do
+   * "saindo" desiste da desistência antes do open — sem isso, o drain do open
+   * enviaria um DESISTIR já cancelado pelo usuário.
+   */
+  removerPendentesPorTipo: (tipo: PartidaComandoDoCliente['type']) => void
 }
 
 interface UsePartidaWebSocketOptions {
@@ -457,5 +463,11 @@ export function usePartidaWebSocket({
     })
   }, [])
 
-  return { conectar, desconectar, enviar, aguardarConexao }
+  const removerPendentesPorTipo = useCallback((tipo: PartidaComandoDoCliente['type']) => {
+    comandosPendentesRef.current = comandosPendentesRef.current.filter(
+      (comando) => comando.type !== tipo,
+    )
+  }, [])
+
+  return { conectar, desconectar, enviar, aguardarConexao, removerPendentesPorTipo }
 }

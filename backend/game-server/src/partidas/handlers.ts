@@ -584,8 +584,17 @@ export class PartidaHandlers {
     jogadoresEmMemoria: readonly string[] | null,
     teveDesistencia: boolean,
     atrasoMs = 1000,
+    tentativa = 1,
   ): void {
     if (this.notificarRetorno === undefined) return;
+    // Visibilidade operacional: retry sem desistir, então cada reagendamento
+    // é logado (tentativa + atraso) em vez de espiral silenciosa.
+    console.warn('[partida] retorno sem dados confiáveis, reagendando', {
+      partidaId,
+      resultado,
+      tentativa,
+      atrasoMs,
+    });
     setTimeout(() => {
       void this.enfileirarMutacao(partidaId, async () => {
         if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
@@ -603,6 +612,7 @@ export class PartidaHandlers {
             jogadoresEmMemoria,
             teveDesistencia,
             Math.min(atrasoMs * 2, 30000),
+            tentativa + 1,
           );
           return;
         }
@@ -621,6 +631,7 @@ export class PartidaHandlers {
             jogadoresEmMemoria,
             teveDesistencia,
             Math.min(atrasoMs * 2, 30000),
+            tentativa + 1,
           );
           return;
         }
