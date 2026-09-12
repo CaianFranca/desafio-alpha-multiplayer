@@ -131,11 +131,19 @@ export interface EncaminharSalaComando {
 export interface AceitarEncaminhamentoComando {
   readonly tipo: 'aceitar_encaminhamento';
   readonly salaId: string;
-  // Roster ofertado no momento da oferta (lista de jogadorId): comparado
-  // como conjunto contra os jogadorId ativos no commit — a ordem de entrada
-  // não participa da igualdade, apenas o conjunto.
-  readonly rosterOfertado: readonly string[];
+  // Roster (= Composição ofertada no momento da oferta, lista de jogadorId):
+  // comparado como conjunto contra os jogadorId ativos no commit — a ordem
+  // de entrada não participa da igualdade, apenas o conjunto.
+  readonly rosterOfertado: JogadorIdsOfertados;
 }
+
+/**
+ * Conjunto de jogadorId da Composição ofertada no momento da oferta (roster
+ * de transporte, cf. `OfertaDeEncaminhamento.roster` em shared e ADR-0009).
+ * A chave é o Jogador — não o vínculo (membroId) nem a ordem de entrada —
+ * porque a admissão na Partida é por jogadorId.
+ */
+export type JogadorIdsOfertados = readonly string[];
 
 export interface RecusarEncaminhamentoComando {
   readonly tipo: 'recusar_encaminhamento';
@@ -1303,25 +1311,21 @@ export function aceitarEncaminhamento(
     return composicaoInvalida;
   }
 
-  // Drift oferta→aceite (#305): a composição ativa no commit precisa
-  // coincidir com o roster da oferta — conjunto de jogadorId (a chave é o
-  // Jogador, não o vínculo: saída + reentrada do mesmo Jogador gera novo
-  // membroId mas preserva o conjunto e não diverge). A comparação é aditiva
-  // à validação por faixa/conexão/prontidão.
+  // Divergência de composição oferta→aceite (#305): a composição ativa no
+  // commit precisa coincidir com o roster da oferta (= Composição ofertada)
+  // — conjunto de jogadorId (a chave é o Jogador, não o vínculo: a admissão
+  // na Partida é por jogadorId, então saída + reentrada do mesmo Jogador
+  // gera novo membroId mas preserva o conjunto e não diverge). A comparação
+  // é aditiva à validação por faixa/conexão/prontidão.
   if (!Array.isArray(comando.rosterOfertado)) {
     return rejeitar('DADOS_INVALIDOS', 'O roster ofertado é obrigatório para aceitar o encaminhamento.', {
       salaId: sala.id,
     });
   }
-  const ativosOrdenados = sala.membros
+  const ativos = sala.membros
     .filter((membro) => membro.estado === 'ativo')
-    .map((membro) => membro.jogadorId)
-    .sort();
-  const ofertadosOrdenados = [...comando.rosterOfertado].sort();
-  const rosterDivergiu =
-    ativosOrdenados.length !== ofertadosOrdenados.length ||
-    ativosOrdenados.some((jogadorId, indice) => jogadorId !== ofertadosOrdenados[indice]);
-  if (rosterDivergiu) {
+    .map((membro) => membro.jogadorId);
+  if (!conjuntosDeJogadoresIguais(ativos, comando.rosterOfertado)) {
     return rejeitar(
       'ENCAMINHAMENTO_INVALIDO',
       'A composição da Sala divergiu do roster ofertado — o aceite exige os mesmos Jogadores da oferta.',
@@ -1559,6 +1563,25 @@ function exigirSalaAberta(
     );
   }
   return undefined;
+}
+
+// Igualdade de conjuntos de jogadorId (ordem de entrada ignorada): a
+// Composição ativa no commit coincide com a Composição ofertada (roster da
+// oferta) quando têm o mesmo tamanho e os mesmos jogadorId. A chave é o
+// Jogador — saída + retorno do mesmo Jogador preserva o conjunto, pois a
+// admissão na Partida é por jogadorId.
+function conjuntosDeJogadoresIguais(
+  ativos: readonly string[],
+  ofertados: JogadorIdsOfertados,
+): boolean {
+  if (ativos.length !== ofertados.length) {
+    return false;
+  }
+  const ativosOrdenados = [...ativos].sort();
+  const ofertadosOrdenados = [...ofertados].sort();
+  return ativosOrdenados.every(
+    (jogadorId, indice) => jogadorId === ofertadosOrdenados[indice],
+  );
 }
 
 // Condições de encaminhamento (ST-03): de MINIMO_DE_MEMBROS a LIMITE_DE_MEMBROS

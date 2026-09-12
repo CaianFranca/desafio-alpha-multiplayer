@@ -66,7 +66,10 @@ const alternar = (jogadorId: string, salaId = 'sala-1') =>
 const encaminhar = (anfitriaoMembroId = 'membro-1', salaId = 'sala-1') =>
   ({ tipo: 'encaminhar_sala', salaId, anfitriaoMembroId } as const);
 
-const aceitar = (salaId = 'sala-1', rosterOfertado: readonly string[] = ['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']) =>
+const rosterDe = (quantidade: number): readonly string[] =>
+  Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
+
+const aceitar = (salaId = 'sala-1', rosterOfertado: readonly string[] = rosterDe(4)) =>
   ({ tipo: 'aceitar_encaminhamento', salaId, rosterOfertado } as const);
 
 const recusar = (salaId = 'sala-1') =>
@@ -1055,7 +1058,7 @@ test('aceitar_encaminhamento revalida a composição entre a oferta e o aceite',
   const base = salaComQuatroProntos();
   encaminharSala(base, encaminhar('membro-1'));
 
-  // drift oferta→aceite (#305): oferta com 4, saída que deixa 3 ativos
+  // Divergência de composição oferta→aceite (#305): oferta com 4, saída que deixa 3 ativos
   // (dentro da faixa 2–4) recusa por divergência de roster em vez de
   // congelar com 3 enquanto a Partida tem roster de 4.
   const aposUmaSaida = aplicar(base, sair('jogador-4'));
@@ -1093,8 +1096,7 @@ test('aceitar_encaminhamento revalida a composição entre a oferta e o aceite',
 test('aceitar_encaminhamento congela a Sala com 2 e 3 Membros prontos', () => {
   for (const quantidade of [2, 3]) {
     const estado = salaComMembrosProntos(quantidade);
-    const roster = Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
-    const resultado = aceitarEncaminhamento(estado, aceitar('sala-1', roster));
+    const resultado = aceitarEncaminhamento(estado, aceitar('sala-1', rosterDe(quantidade)));
 
     assert.equal(resultado.sucesso, true);
     if (!resultado.sucesso) return;
@@ -1107,8 +1109,7 @@ test('aceitar_encaminhamento congela a Sala com 2 e 3 Membros prontos', () => {
 test('aceitar_encaminhamento congela a Sala com roster idêntico à oferta (2, 3 e 4)', () => {
   for (const quantidade of [2, 3, 4]) {
     const estado = salaComMembrosProntos(quantidade);
-    const roster = Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
-    const resultado = aceitarEncaminhamento(estado, aceitar('sala-1', roster));
+    const resultado = aceitarEncaminhamento(estado, aceitar('sala-1', rosterDe(quantidade)));
 
     assert.equal(resultado.sucesso, true, `roster idêntico com ${quantidade}`);
     if (!resultado.sucesso) return;
@@ -1116,7 +1117,7 @@ test('aceitar_encaminhamento congela a Sala com roster idêntico à oferta (2, 3
   }
 });
 
-test('aceitar_encaminhamento recusa drift 3→2 com oferta de 3', () => {
+test('aceitar_encaminhamento recusa divergência de composição 3→2 com oferta de 3', () => {
   const base = salaComMembrosProntos(3);
   encaminharSala(base, encaminhar('membro-1'));
 
@@ -1145,7 +1146,8 @@ test('aceitar_encaminhamento com saída+retorno do mesmo Jogador mantém o conju
   encaminharSala(base, encaminhar('membro-1'));
 
   // saída + reentrada do mesmo Jogador gera novo vínculo (membro-5) mas o
-  // conjunto de jogadorId permanece o da oferta.
+  // conjunto de jogadorId permanece o da oferta — e a admissão na Partida é
+  // por jogadorId, então não há divergência e o aceite congela.
   const aposSaida = aplicar(base, sair('jogador-4'));
   const aposRetorno = aplicar(aposSaida, entrar('jogador-4', 'membro-5'));
   const prontoDeNovo = aplicar(aposRetorno, alternar('jogador-4'));

@@ -358,7 +358,7 @@ test('revalidação no commit cancela Partida e mantém aberta com PARTIDA_FALHO
   }, {ofertarEncaminhamento: ()=>prom, cancelarPartida: cancelarStub});
 });
 
-test('drift oferta→aceite (#305): saída em-voo cancela Partida e mantém aberta com PARTIDA_FALHOU', async()=>{
+test('divergência de composição oferta→aceite (#305): saída em-voo cancela Partida e mantém aberta com PARTIDA_FALHOU', async()=>{
   let resolveOferta: (v:AceiteDoEncaminhamento)=>void;
   const prom=new Promise<AceiteDoEncaminhamento>((res)=>{resolveOferta=res;});
   let cancelado:{serverId:string;partidaId:string;motivo:string}|null=null;
@@ -381,21 +381,21 @@ test('drift oferta→aceite (#305): saída em-voo cancela Partida e mantém aber
     for(const ws of [wsA,wsB,wsC,wsD]) for(let i=0;i<8;i++) await esperarMensagem(ws);
     enviar(wsA,{type:'INICIAR_PARTIDA'});
     for(const ws of [wsA,wsB,wsC,wsD]){ await esperarMensagem(ws); await esperarMensagem(ws);}
-    // drift: oferta com 4, D sai em-voo (3 restantes seguem prontos/conectados,
+    // Divergência de composição: oferta com 4, D sai em-voo (3 restantes seguem prontos/conectados,
     // dentro da faixa 2–4) — o aceite deve recusar por divergência de roster.
     enviar(wsD,{type:'SAIR_DA_SALA'});
     for(const ws of [wsA,wsB,wsC,wsD]){ await esperarMensagem(ws); await esperarMensagem(ws); }
     // agora liberar aceite (composição 3 válida na faixa, mas diverge da oferta de 4)
-    resolveOferta!({partidaId:'p-drift',serverId:'s-drift'});
+    resolveOferta!({partidaId:'p-divergente',serverId:'s-divergente'});
     const ev = await esperarTipo(wsA, 'PARTIDA_FALHOU', 3000) as PartidaFalhouEvento;
     assert.equal(ev.type,'PARTIDA_FALHOU');
     // sala permanece aberta
     const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE codigo_sala=$1`,[cod]);
     assert.equal(linha.rows[0]?.status,'aberta');
     assert.ok(cancelado, 'deveria ter cancelado a partida');
-    assert.equal(cancelado!.partidaId,'p-drift');
+    assert.equal(cancelado!.partidaId,'p-divergente');
     // ainda pode chat
-    enviar(wsA,{type:'ENVIAR_MENSAGEM_DE_CHAT',conteudo:'ainda aberta apos drift'});
+    enviar(wsA,{type:'ENVIAR_MENSAGEM_DE_CHAT',conteudo:'ainda aberta apos divergencia'});
     const chatOk = await esperarTipo(wsA, 'MENSAGEM_DE_CHAT', 3000) as {type:string};
     assert.equal(chatOk.type,'MENSAGEM_DE_CHAT');
     for(const ws of [wsB,wsC]) await esperarTipo(ws, 'MENSAGEM_DE_CHAT', 3000).catch(async () => { await esperarMensagem(ws, 500).catch(()=>undefined); });

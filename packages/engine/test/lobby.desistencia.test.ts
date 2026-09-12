@@ -30,7 +30,10 @@ const alternar = (jogadorId: string, salaId = 'sala-1') =>
 const encaminhar = (anfitriaoMembroId = 'membro-1', salaId = 'sala-1') =>
   ({ tipo: 'encaminhar_sala', salaId, anfitriaoMembroId } as const);
 
-const aceitar = (salaId = 'sala-1', rosterOfertado: readonly string[] = ['jogador-1', 'jogador-2', 'jogador-3']) =>
+const rosterDe = (quantidade: number): readonly string[] =>
+  Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
+
+const aceitar = (salaId = 'sala-1', rosterOfertado: readonly string[] = rosterDe(3)) =>
   ({ tipo: 'aceitar_encaminhamento', salaId, rosterOfertado } as const);
 
 const remover = (jogadorId: string, salaId = 'sala-1') =>
@@ -53,8 +56,7 @@ function salaEncaminhada(quantidade: number): EstadoDoLobby {
     estado = aplicar(estado, alternar(`jogador-${i}`));
   }
   estado = aplicar(estado, encaminhar());
-  const roster = Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
-  return aplicar(estado, aceitar('sala-1', roster));
+  return aplicar(estado, aceitar('sala-1', rosterDe(quantidade)));
 }
 
 test('desistencia: remove membro ativo de sala encaminhada e preserva a sala', () => {

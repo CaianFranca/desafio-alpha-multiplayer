@@ -23,6 +23,7 @@ export type {
   EventoDeVinculo,
   ExpulsarMembroComando,
   ExpirarReconexaoComando,
+  JogadorIdsOfertados,
   Membro,
   MembroDesconectadoEvento,
   MembroExpulsoEvento,
