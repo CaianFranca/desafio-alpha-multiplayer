@@ -245,6 +245,17 @@ export function criarWebSocketServer(
         return;
       }
 
+      // Desistência (issue #290): quem desistiu saiu do engine (jogadores N−1)
+      // mas segue no roster do Redis (o aviso de Retorno usa o roster
+      // pré-desistência). Sem esta guarda o desistente readmitia e reassistia
+      // como espectador. Estado ausente = preparada sem engine: ninguém
+      // desistiu ainda, mantém o fluxo.
+      const estadoAtual = await obterEstadoDaPartida(contexto.redis, partidaId);
+      if (estadoAtual !== null && !estadoAtual.jogadores.some((j) => j.jogadorId === sessao.jogadorId)) {
+        enviarErroNoSocket(socket, 403, erroRejeitada('JOGADOR_NAO_NA_PARTIDA', 'jogador desistiu ou não está na partida'));
+        return;
+      }
+
       wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
         // Referências fora da IIFE: o `catch` externo precisa delas para
         // aplicar a mesma limpeza do caminho de falha quando algo lançar

@@ -56,7 +56,7 @@ export interface HudDaPartidaProps {
    * Ainda sem fonte no snapshot — prop pronta para quando o servidor expor.
    */
   imagemPorJogador?: Readonly<Record<string, string | null | undefined>>
-  /** Retorno à Sala de origem (SAIR com confirmação). */
+  /** Desistência da Partida (issue #290): envia DESISTIR_DA_PARTIDA e sai à principal. */
   onSair: () => void
   /**
    * Força o modo compacto (issue #230): true = compacto, false = integral.
@@ -371,11 +371,12 @@ export function HudDaPartida({
           data-testid="hud-confirmacao-saida"
           role="alertdialog"
           aria-modal="true"
-          aria-label="Confirmar saída da partida"
+          aria-label="Confirmar desistência da partida"
+          aria-describedby="hud-confirmacao-saida-descricao"
           style={{ right: 'calc(1.5rem + env(safe-area-inset-right))' }}
           className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
         >
-          <p>Sair da partida e voltar à sala?</p>
+          <p id="hud-confirmacao-saida-descricao">Desistir da partida? Seu peão será removido e a equipe continua sem você.</p>
           <div className="flex gap-2">
             <button
               type="button"
@@ -388,6 +389,7 @@ export function HudDaPartida({
             <button
               type="button"
               data-testid="hud-sair-cancelar"
+              autoFocus
               onClick={() => setConfirmandoSaida(false)}
               className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >

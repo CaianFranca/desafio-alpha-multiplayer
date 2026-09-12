@@ -179,6 +179,7 @@ export {
   reconectarJogador,
   registrarFalhaDoEncaminhamento,
   registrarReinicioDaSala,
+  removerDesistenteDaSala,
   removerBotDaSala,
   sairDaSala,
   // @internal (#222): bypass de sala encaminhada não iniciada — só após
