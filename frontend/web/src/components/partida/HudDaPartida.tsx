@@ -59,6 +59,14 @@ export interface HudDaPartidaProps {
   /** Desistência da Partida (issue #290): envia DESISTIR_DA_PARTIDA e sai à principal. */
   onSair: () => void
   /**
+   * Saída com retry visível (R2, issue #290): confirmado sem OPEN, o modal
+   * mostra o progresso da entrega + saída forçada. Omitido = comportamento
+   * atual (confirmar/cancelar).
+   */
+  saindo?: boolean
+  /** Escape do "saindo": navega sem a entrega (a pendência será reenviada). */
+  onSairMesmoAssim?: () => void
+  /**
    * Força o modo compacto (issue #230): true = compacto, false = integral.
    * null/undefined = deriva do viewport (paisagem-celular 800x360). Seam no
    * ponto mais alto para testes com viewport mockado.
@@ -178,6 +186,8 @@ export function HudDaPartida({
   iniciadaEm = null,
   imagemPorJogador = {},
   onSair,
+  saindo = false,
+  onSairMesmoAssim,
   compacto = null,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
@@ -386,8 +396,21 @@ export function HudDaPartida({
           }}
           className="pointer-events-auto absolute right-6 top-20 flex max-w-[min(20rem,calc(100vw-3rem))] flex-col gap-2 overflow-auto rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
         >
-          <p id="hud-confirmacao-saida-descricao">{emResultado ? 'Sair da partida? Você voltará à página principal.' : 'Desistir da partida? Seu peão será removido e a equipe continua sem você.'}</p>
+          <p id="hud-confirmacao-saida-descricao">{saindo ? 'Enviando sua desistência ao servidor… Aguarde a confirmação da conexão.' : emResultado ? 'Sair da partida? Você voltará à página principal.' : 'Desistir da partida? Seu peão será removido e a equipe continua sem você.'}</p>
           <div className="flex gap-2">
+            {saindo ? (
+              onSairMesmoAssim ? (
+                <button
+                  type="button"
+                  data-testid="hud-sair-mesmo-assim"
+                  onClick={onSairMesmoAssim}
+                  className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+                >
+                  Sair mesmo assim
+                </button>
+              ) : null
+            ) : (
+              <>
             <button
               type="button"
               data-testid="hud-sair-confirmar"
@@ -410,6 +433,8 @@ export function HudDaPartida({
             >
               Cancelar
             </button>
+              </>
+            )}
           </div>
         </div>
       ) : null}

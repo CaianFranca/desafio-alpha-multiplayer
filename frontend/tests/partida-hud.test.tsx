@@ -841,9 +841,10 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     )
   })
 
-  it('R2-timeout: sem OPEN em 5s navega best-effort com DESISTIR preservado', async () => {
+  it('R2: sem OPEN, confirmar entra em saindo sem navegar; no open, envia e navega', async () => {
     MockWebSocket.forceNoAutoOpen = true
     try {
+      window.localStorage.removeItem('partida-desistir-pendente:p')
       renderPartidaParaSaida('A3K9M2')
       await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
       const ws = MockWebSocket.last()!
@@ -862,18 +863,104 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
       const user = userEvent.setup()
       await user.click(screen.getByTestId('hud-sair'))
       await user.click(screen.getByTestId('hud-sair-confirmar'))
-      // Enfileirado e ainda sem navegar antes do teto.
+      // Enfileirado: sem navegar, modal em "saindo" com retry visível e
+      // pendência gravada — nada enviado ainda.
       expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
-      // Expira o aguardarConexao(5000): navega mesmo sem OPEN (best-effort).
-      // O DESISTIR segue enfileirado (preservado pelo desconectar) em vez de
-      // descartado — sem OPEN não há envio observável no socket.
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 5200))
-      })
+      expect(screen.queryByTestId('principal-pagina')).not.toBeInTheDocument()
+      expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/Enviando sua desistência/i)
+      expect(screen.getByTestId('hud-sair-mesmo-assim')).toBeInTheDocument()
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBe(MEU_JOGADOR_ID)
+      // O open drena a fila (DESISTIR enviado) e só então navega.
+      act(() => ws.simulateOpen())
+      await waitFor(() =>
+        expect(
+          ws.sentMessages.map((m) => JSON.parse(m)).filter((c) => c.type === 'DESISTIR_DA_PARTIDA'),
+        ).toHaveLength(1),
+      )
       expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
-      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBeNull()
     } finally {
       MockWebSocket.forceNoAutoOpen = false
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+    }
+  }, 15000)
+
+  it('R2: Sair mesmo assim navega com pendente; ao voltar, reenvia no open', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      window.sessionStorage.removeItem('partida-desistiu:p')
+      const { unmount } = renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      act(() =>
+        ws.simulateMessage({
+          type: 'ADMISSAO_ACEITA',
+          jogadorId: MEU_JOGADOR_ID,
+          apelido: 'JogadorTeste',
+          partidaId: 'partida-1',
+          estado: 'em_andamento',
+        }),
+      )
+      act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+      await screen.findByTestId('hud-da-partida')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      await user.click(screen.getByTestId('hud-sair-mesmo-assim'))
+      // Navegou sem entregar; a pendência persiste para a próxima visita.
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBe(MEU_JOGADOR_ID)
+      unmount()
+      MockWebSocket.clean()
+
+      // Volta à URL: no primeiro open, o reenvio automático entrega.
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws2 = MockWebSocket.last()!
+      act(() => ws2.simulateOpen())
+      await waitFor(() =>
+        expect(
+          ws2.sentMessages.map((m) => JSON.parse(m)).filter((c) => c.type === 'DESISTIR_DA_PARTIDA'),
+        ).toHaveLength(1),
+      )
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBeNull()
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      window.sessionStorage.removeItem('partida-desistiu:p')
+    }
+  }, 15000)
+
+  it('R2: reenvio já processado pelo servidor é silencioso (sem recusa)', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      window.localStorage.setItem('partida-desistir-pendente:p', MEU_JOGADOR_ID)
+      window.sessionStorage.removeItem('partida-desistiu:p')
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      act(() => ws.simulateOpen())
+      await waitFor(() =>
+        expect(
+          ws.sentMessages.map((m) => JSON.parse(m)).filter((c) => c.type === 'DESISTIR_DA_PARTIDA'),
+        ).toHaveLength(1),
+      )
+      // Servidor já tinha processado: recusa correlacionada limpa sem som/SR.
+      act(() =>
+        ws.simulateMessage({
+          type: 'ERRO_DO_TABULEIRO',
+          codigo: 'JOGADOR_NAO_NA_PARTIDA',
+          mensagem: 'Jogador não está na partida.',
+        }),
+      )
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBeNull()
+      expect(screen.getByTestId('anuncio-de-recusa')).toBeEmptyDOMElement()
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+      window.localStorage.removeItem('partida-desistir-pendente:p')
     }
   }, 15000)
 

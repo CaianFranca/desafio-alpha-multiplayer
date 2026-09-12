@@ -101,6 +101,43 @@ interface PartidaPageProps {
   loader?: () => Promise<unknown>
 }
 
+/**
+ * Pendência de desistência não entregue (R2, issue #290): "Sair mesmo assim"
+ * ou aba fechada durante o "saindo" gravam aqui (localStorage — sobrevive ao
+ * fechar a aba); a próxima visita reenvia no primeiro open e limpa ao
+ * entregar. Chave escopada por partida; valor = jogadorId autor.
+ */
+function chaveDesistenciaPendente(partidaId: string): string {
+  return `partida-desistir-pendente:${partidaId}`
+}
+
+function lerDesistenciaPendente(partidaId: string | null): string | null {
+  if (typeof window === 'undefined' || partidaId === null) return null
+  try {
+    return window.localStorage.getItem(chaveDesistenciaPendente(partidaId))
+  } catch {
+    return null
+  }
+}
+
+function gravarDesistenciaPendente(partidaId: string | null, jogadorId: string): void {
+  if (typeof window === 'undefined' || partidaId === null) return
+  try {
+    window.localStorage.setItem(chaveDesistenciaPendente(partidaId), jogadorId)
+  } catch {
+    // Armazenamento indisponível: vale o retry em memória da sessão atual.
+  }
+}
+
+function limparDesistenciaPendente(partidaId: string | null): void {
+  if (typeof window === 'undefined' || partidaId === null) return
+  try {
+    window.localStorage.removeItem(chaveDesistenciaPendente(partidaId))
+  } catch {
+    // Sem armazenamento, nada a limpar.
+  }
+}
+
 export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const [searchParams] = useSearchParams()
   const serverId = searchParams.get('serverId')
@@ -360,6 +397,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             loteDeTurnoRef.current = []
             for (const ev of pendente) despacharEvento(ev as Parameters<typeof reduzirEvento>[1])
           }
+          // Fim de jogo: nada a desistir — limpa eventual pendência de reenvio.
+          limparDesistenciaPendente(partidaId)
+          reenvioPendenteRef.current = false
           partidaTerminada(evento.resultado, evento.motivo ?? null)
           return
         }
@@ -369,6 +409,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           pendentesEmVoo.current.clear()
           aplicarSnapshotNoModelo(evento.snapshot)
           if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
+          // Snapshot é a autoridade do roster: encerra a correlação do reenvio
+          // (recusa posterior é nova, não eco da desistência).
+          reenvioPendenteRef.current = false
           // Re-emissão pós-snapshot (review PR #378, AC3/AC4): desistências
           // recebidas no early-join (sem roster) foram projetadas no modelo
           // mas sem toast/SR — re-anuncia agora com ordem/restantes
@@ -396,6 +439,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             }
           }
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
+            limparDesistenciaPendente(partidaId)
+            reenvioPendenteRef.current = false
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
           }
@@ -453,6 +498,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // completam o tabuleiro) + toast visível e anúncio SR. Snapshot
           // reconcilia.
           if (evento.type === 'DESISTENCIA_REGISTRADA') {
+            // Eco da própria desistência (reenvio após "sair mesmo assim"): o
+            // modelo projeta via flush; o toast seria "você desistiu" para si
+            // mesmo — suprime, sem perder a projeção. Corrobora o reenvio.
+            if (evento.jogadorId === jogadorId) {
+              reenvioPendenteRef.current = false
+              return
+            }
             const anterior = modeloRef.current
             const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
             // F4 (#290): sem snapshot ainda não há roster — projeta a remoção
@@ -486,6 +538,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         }
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
         if (emResultadoRef.current) return
+        // Reenvio já processado (R2): o servidor recusou com
+        // JOGADOR_NAO_NA_PARTIDA porque a desistência anterior já valeu — só
+        // limpa a pendência, sem som/anúncio de recusa (ele já sabe).
+        if (
+          evento.type === 'ERRO_DO_TABULEIRO' &&
+          evento.codigo === 'JOGADOR_NAO_NA_PARTIDA' &&
+          reenvioPendenteRef.current
+        ) {
+          reenvioPendenteRef.current = false
+          limparDesistenciaPendente(partidaId)
+          return
+        }
         // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
         // projetados no modelo sem recarregar página. Só o ataque COM
         // penalidade (`estadosAplicados.length > 0`, issue #228) toca a
@@ -586,7 +650,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         const motivo = motivoDeRecusaDoEvento(evento)
         if (motivo !== null) tocarRecusa(motivo)
       },
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote],
+      // `jogadorId` entra em deps (só troca em login/logout — o hook guarda o
+      // callback em ref, sem reabrir o socket).
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote, jogadorId, partidaId],
     ),
     onAdmissao: useCallback(
       (evento) => {
@@ -610,6 +676,43 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     desconectarRef.current = desconectar
   }, [desconectar])
+
+  // Reenvio da desistência pendente (R2): "Sair mesmo assim" ou aba fechada
+  // durante o "saindo" gravaram a pendência; ao (re)abrir a partida com o
+  // mesmo jogador, reenviamos no primeiro open. Sem socket (upgrade recusado,
+  // falha), nada acontece — a pendência segue gravada para a próxima visita.
+  useEffect(() => {
+    if (partidaId === null || jogadorId === null) return
+    if (lerDesistenciaPendente(partidaId) !== jogadorId) return
+    if (emResultadoRef.current || emNaoInicioRef.current) {
+      limparDesistenciaPendente(partidaId)
+      return
+    }
+    let cancelado = false
+    void (async () => {
+      reenvioPendenteRef.current = true
+      const abriu = await aguardarConexao(15000).catch(() => false)
+      if (cancelado || !abriu) {
+        reenvioPendenteRef.current = false
+        return
+      }
+      if (emResultadoRef.current || emNaoInicioRef.current) {
+        reenvioPendenteRef.current = false
+        limparDesistenciaPendente(partidaId)
+        return
+      }
+      const destino = enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
+      // 'enviado' = entregue ao socket, não processado: mantém a correlação
+      // até o servidor corroborar (eco DESISTENCIA, snapshot ou ERRO).
+      if (destino === 'enviado') {
+        limparDesistenciaPendente(partidaId)
+      }
+      // 'enfileirado': mantém pendente + correlação até o ERRO/snapshot.
+    })()
+    return () => {
+      cancelado = true
+    }
+  }, [partidaId, jogadorId, aguardarConexao, enviar])
 
   // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
   const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
@@ -652,6 +755,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // nem voltar-à-sala (só queda/logout mantém retry). A flag sobrevive a
   // F5/voltar pelo histórico na mesma aba via sessionStorage.
   const desistindoRef = useRef(false)
+  // Correlação silenciosa do reenvio (R2): quando o servidor já processou a
+  // desistência, o reenvio é recusado com JOGADOR_NAO_NA_PARTIDA — com a flag,
+  // o ERRO só limpa a pendência, sem som/anúncio de recusa (o servidor já sabe).
+  // Escrita só em callbacks (nunca em efeitos/render — regra react-hooks/refs).
+  const reenvioPendenteRef = useRef(false)
+  // "Saindo" com retry visível (R2): confirmado sem OPEN, aguarda a entrega
+  // em vez de navegar best-effort. O modal mostra o progresso + saída forçada.
+  const [saindo, setSaindo] = useState(false)
   const [desistiu, setDesistiu] = useState(() => {
     if (typeof window === 'undefined' || partidaId === null) return false
     try {
@@ -660,52 +771,75 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       return false
     }
   })
+  const finalizarSaida = useCallback(() => {
+    setSaindo(false)
+    desconectar()
+    navigate('/')
+  }, [desconectar, navigate])
+
+  // Escape hatch do "saindo": navega SEM a entrega, mas a pendência persiste
+  // gravada para reenvio automático na próxima visita (R2).
+  const sairMesmoAssim = useCallback(() => {
+    if (!saindo) return
+    finalizarSaida()
+  }, [saindo, finalizarSaida])
+
+  // Marca a desistência como entregue: bloqueia retry/revisita (sessão) e
+  // limpa a pendência de reenvio — o servidor já sabe.
+  const marcarDesistenciaEntregue = useCallback(() => {
+    setDesistiu(true)
+    try {
+      if (partidaId !== null) window.sessionStorage.setItem(`partida-desistiu:${partidaId}`, '1')
+    } catch {
+      // sessionStorage indisponível: a flag em memória já bloqueia o retry.
+    }
+    limparDesistenciaPendente(partidaId)
+  }, [partidaId])
+
   const desistirEIrParaPrincipal = useCallback(() => {
     if (desistindoRef.current) return
     desistindoRef.current = true
     // B1 (#290): sair da tela de resultado (vitória/derrota normal) não é
-    // desistência — o DESISTIR nem é enviado nesse caso. Só marca `desistiu`
-    // (flag que bloqueia retry e volta à URL com falha terminal) quando a
-    // desistência é real (fora de resultado). Sem isso, sair do resultado
-    // poluía o sessionStorage e a volta futura à URL caía em falha indevida.
-    const vaiDesistir = !emResultadoRef.current
-    if (vaiDesistir) {
-      setDesistiu(true)
-      try {
-        if (partidaId !== null) window.sessionStorage.setItem(`partida-desistiu:${partidaId}`, '1')
-      } catch {
-        // sessionStorage indisponível: a flag em memória já bloqueia o retry.
-      }
-      // F2: zera a sala local na hora (nova aba / lobby fechado não recebem o
-      // broadcast); o MEMBRO_SAIU posterior reconcilia sem ressuscitar.
-      try {
-        marcarSaidaPropria?.()
-      } catch {
-        // Sem provider do lobby: o broadcast continua sendo a fonte.
-      }
+    // desistência — o DESISTIR nem é enviado nesse caso; navega direto.
+    if (emResultadoRef.current) {
+      finalizarSaida()
+      return
     }
-    // R2: entrega o DESISTIR antes de cortar a conexão. Se o socket está
-    // OPEN, o envio é imediato; se está CONNECTING (janela de reconexão), o
-    // comando fica enfileirado e aguardamos o open até o teto — sem a espera,
-    // o desconectar() abaixo limparia a fila e o servidor nunca saberia.
-    // Teto de 5s (review PR #378): a reconexão simples é de 1s, então 2s
-    // cortava cedo com instabilidade; no timeout navegamos mesmo assim
-    // (best-effort; a flag já bloqueia retry) e o warn expõe o degradado.
+    if (jogadorId === null) {
+      finalizarSaida()
+      return
+    }
+    // F2: zera a sala local na hora (nova aba / lobby fechado não recebem o
+    // broadcast); o MEMBRO_SAIU posterior reconcilia sem ressuscitar.
+    try {
+      marcarSaidaPropria?.()
+    } catch {
+      // Sem provider do lobby: o broadcast continua sendo a fonte.
+    }
+    // R2 (issue #290, review PR #378): entrega GARANTIDA do DESISTIR. Sem
+    // OPEN, o comando fica enfileirado e a tela entra em "saindo" com retry
+    // visível — só navegamos após a entrega (o drain do open envia a fila).
+    // A flag `desistiu` (bloqueia retry + terminal na revisita) só é marcada
+    // após a entrega: antes dela, o Jogador segue membro e o retry ajuda.
+    setSaindo(true)
+    gravarDesistenciaPendente(partidaId, jogadorId)
     const entregarESair = async () => {
-      if (jogadorId !== null && vaiDesistir) {
-        const destino = enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
-        if (destino === 'enfileirado') {
-          const abriu = await aguardarConexao(5000).catch(() => false)
-          if (!abriu) {
-            console.warn('[partida] DESISTIR enfileirado sem OPEN até o teto — saindo best-effort', { partidaId })
-          }
-        }
+      const destino = enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
+      if (destino === 'enviado') {
+        marcarDesistenciaEntregue()
+        finalizarSaida()
+        return
       }
-      desconectar()
-      navigate('/')
+      // Sem teto: espera o open (o cleanup no unmount resolve `false` — aí só
+      // retorna; a pendência gravada cobre a próxima visita).
+      const abriu = await aguardarConexao().catch(() => false)
+      if (!abriu) return
+      // O drain do open enviou a fila (inclui o DESISTIR) — entrega garantida.
+      marcarDesistenciaEntregue()
+      finalizarSaida()
     }
     void entregarESair()
-  }, [aguardarConexao, desconectar, enviar, jogadorId, marcarSaidaPropria, navigate, partidaId])
+  }, [aguardarConexao, enviar, finalizarSaida, jogadorId, marcarDesistenciaEntregue, marcarSaidaPropria, partidaId])
 
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
@@ -1106,6 +1240,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           emResultado={emResultado}
           iniciadaEm={modelo.iniciadaEm}
           onSair={desistirEIrParaPrincipal}
+          saindo={saindo}
+          onSairMesmoAssim={sairMesmoAssim}
           compacto={viewportCompacto}
         />
       ) : null}

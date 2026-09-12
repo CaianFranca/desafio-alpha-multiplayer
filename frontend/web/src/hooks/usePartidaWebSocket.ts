@@ -87,8 +87,10 @@ export interface UsePartidaWebSocketReturn {
   enviar: (comando: PartidaComandoDoCliente) => 'enviado' | 'enfileirado'
   /**
    * Aguarda a conexão abrir até o teto (R2). Resolve `true` imediato se já
-   * OPEN, `true` no próximo `open`, `false` no timeout. Usado só pela
-   * desistência — o jogo normal segue enfileirando sem esperar.
+   * OPEN, `true` no próximo `open`, `false` no timeout ou no unmount. Sem
+   * `timeoutMs`, espera até o open/unmount (saída com retry visível da
+   * desistência — issue #290). Usado só pela desistência — o jogo normal
+   * segue enfileirando sem esperar.
    */
   aguardarConexao: (timeoutMs?: number) => Promise<boolean>
 }
@@ -433,19 +435,23 @@ export function usePartidaWebSocket({
     return 'enfileirado'
   }, [])
 
-  const aguardarConexao = useCallback((timeoutMs = 2000): Promise<boolean> => {
+  const aguardarConexao = useCallback((timeoutMs?: number): Promise<boolean> => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(true)
     return new Promise<boolean>((resolver) => {
-      const timer = window.setTimeout(() => {
-        const pendentes = esperasDeConexaoRef.current
-        const indice = pendentes.indexOf(resolverFinal)
-        if (indice >= 0) pendentes.splice(indice, 1)
-        resolver(false)
-      }, timeoutMs)
+      let timer: number | undefined
       const resolverFinal = (abriu: boolean) => {
-        window.clearTimeout(timer)
+        if (timer !== undefined) window.clearTimeout(timer)
         resolver(abriu)
+      }
+      // Sem teto: espera até o open (o cleanup no unmount resolve `false`).
+      if (timeoutMs !== undefined) {
+        timer = window.setTimeout(() => {
+          const pendentes = esperasDeConexaoRef.current
+          const indice = pendentes.indexOf(resolverFinal)
+          if (indice >= 0) pendentes.splice(indice, 1)
+          resolver(false)
+        }, timeoutMs)
       }
       esperasDeConexaoRef.current = [...esperasDeConexaoRef.current, resolverFinal]
     })
