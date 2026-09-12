@@ -299,7 +299,12 @@ export class PartidaHandlers {
                           desistencias.length > 0,
                         );
                         if (avisoReagendado2 === null) {
-                          console.error('[partida] sem N−1 confiável para retorno reagendado, descartando', { partidaId });
+                          this.reagendarRetornoSemN1(
+                            partidaId,
+                            termino.desfecho.tipo,
+                            resultado.estado.jogadores.map((j) => j.jogadorId),
+                            desistencias.length > 0,
+                          );
                           return;
                         }
                         this.callbacksEnviados.add(partidaId);
@@ -325,7 +330,12 @@ export class PartidaHandlers {
                     desistencias.length > 0,
                   );
                   if (avisoReagendado === null) {
-                    console.error('[partida] sem N−1 confiável para retorno reagendado, descartando', { partidaId });
+                    this.reagendarRetornoSemN1(
+                      partidaId,
+                      termino.desfecho.tipo,
+                      resultado.estado.jogadores.map((j) => j.jogadorId),
+                      desistencias.length > 0,
+                    );
                     return;
                   }
                   this.callbacksEnviados.add(partidaId);
@@ -343,7 +353,12 @@ export class PartidaHandlers {
                 desistencias.length > 0,
               );
               if (avisoMontado === null) {
-                console.error('[partida] sem N−1 confiável para retorno, descartando', { partidaId });
+                this.reagendarRetornoSemN1(
+                  partidaId,
+                  termino.desfecho.tipo,
+                  resultado.estado.jogadores.map((j) => j.jogadorId),
+                  desistencias.length > 0,
+                );
               } else {
                 aviso = avisoMontado;
                 this.callbacksEnviados.add(partidaId);
@@ -542,6 +557,58 @@ export class PartidaHandlers {
       jogadores: partida.roster.map((m) => m.jogadorId),
       teveDesistencia,
     };
+  }
+
+  /**
+   * Reagendamento do retorno sem N−1 confiável (review PR #378, item 4):
+   * em vez de descartar a derrota 2→1 no degradado (sem memória e sem estado
+   * no Redis), reagenda com backoff pelo mesmo caminho do retorno retentável
+   * — o Redis pode ter recuperado e o cliente de retorno tem retry próprio
+   * com backoff até o lobby aceitar. Máximo 2 reagendamentos (1s → 2s).
+   */
+  private reagendarRetornoSemN1(
+    partidaId: string,
+    resultado: 'vitoria' | 'derrota',
+    jogadoresEmMemoria: readonly string[] | null,
+    teveDesistencia: boolean,
+    atrasoMs = 1000,
+    tentativa = 1,
+  ): void {
+    if (this.notificarRetorno === undefined) return;
+    setTimeout(() => {
+      void this.enfileirarMutacao(partidaId, async () => {
+        if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
+        if (this.notificarRetorno === undefined) return;
+        let partida: PartidaPreparada | null = null;
+        try {
+          partida = await obterPartida(this.redis, partidaId);
+        } catch {
+          partida = null;
+        }
+        if (partida === null) {
+          if (tentativa < 2) {
+            this.reagendarRetornoSemN1(partidaId, resultado, jogadoresEmMemoria, teveDesistencia, atrasoMs * 2, tentativa + 1);
+          } else {
+            console.error('[partida] retorno ainda sem metadados após reagendamentos, desistindo', { partidaId });
+          }
+          return;
+        }
+        const aviso = await this.montarAviso(partida, resultado, jogadoresEmMemoria, teveDesistencia);
+        if (aviso === null) {
+          if (tentativa < 2) {
+            this.reagendarRetornoSemN1(partidaId, resultado, jogadoresEmMemoria, teveDesistencia, atrasoMs * 2, tentativa + 1);
+          } else {
+            console.error('[partida] retorno ainda sem N−1 após reagendamentos, desistindo', { partidaId });
+          }
+          return;
+        }
+        this.callbacksEnviados.add(partidaId);
+        const promessa = this.notificarRetorno(aviso).catch((erro: unknown) => {
+          console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
+        });
+        this.rastrearRetorno(partidaId, promessa);
+      }).catch(() => undefined);
+    }, atrasoMs).unref?.();
   }
 
   /**
