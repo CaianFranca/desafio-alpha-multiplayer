@@ -116,6 +116,12 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
 /** Tamanho máximo de uma mensagem de chat (issue #34). Sem trim. */
 const TAMANHO_MAXIMO_MENSAGEM = 500;
 
+// JogadorIds da Composição ofertada (roster de transporte da oferta): a chave
+// do commit do aceite no engine é o Jogador — ver `conjuntosDeJogadoresIguais`.
+function extrairJogadorIdsDaOferta(oferta: OfertaDeEncaminhamento): string[] {
+  return oferta.roster.map((membro) => membro.jogadorId);
+}
+
 // Jogador do novo Anfitrião no estado resultante (lookups extraídos — review
 // interna #304): `estado.salas.find(...).membros.find(...)` sem chains.
 function jogadorNovoAnfitriao(
@@ -1295,7 +1301,11 @@ export class SalasHandlers {
         if (aceite) {
           // Espelho do aceite no stream de debug (issue #340).
           this.espelhar(salaId, 'info', `encaminhamento aceito — partida ${aceite.partidaId} no server ${aceite.serverId}`, 'encaminhamento');
-          const resAceite = this.estado.aplicar({ tipo: 'aceitar_encaminhamento', salaId } satisfies Comando);
+          // Divergência de composição oferta→aceite (#305): o roster ofertado
+          // viaja por closure (fonte capturada em handleIniciarPartida) e é
+          // comparado como conjunto de jogadorId no commit do engine.
+          const rosterOfertado = extrairJogadorIdsDaOferta(oferta);
+          const resAceite = this.estado.aplicar({ tipo: 'aceitar_encaminhamento', salaId, rosterOfertado } satisfies Comando);
           if (resAceite.sucesso) {
             try {
               await this.repo.persistirEncaminhamento(salaId, aceite.serverId, aceite.partidaId);

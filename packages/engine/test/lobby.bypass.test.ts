@@ -31,8 +31,11 @@ const alternar = (jogadorId: string, salaId = 'sala-1') =>
 const encaminhar = (anfitriaoMembroId = 'membro-1', salaId = 'sala-1') =>
   ({ tipo: 'encaminhar_sala', salaId, anfitriaoMembroId } as const);
 
-const aceitar = (salaId = 'sala-1') =>
-  ({ tipo: 'aceitar_encaminhamento', salaId } as const);
+const rosterDe = (quantidade: number): readonly string[] =>
+  Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
+
+const aceitar = (salaId = 'sala-1', rosterOfertado: readonly string[] = rosterDe(3)) =>
+  ({ tipo: 'aceitar_encaminhamento', salaId, rosterOfertado } as const);
 
 const sair = (jogadorId: string, salaId = 'sala-1') =>
   ({ tipo: 'sair_da_sala', salaId, jogadorId } as const);
@@ -66,7 +69,7 @@ function salaEncaminhada(quantidade: number): EstadoDoLobby {
   // A oferta não congela; o aceite da game-server é o que fixa o estado em
   // `encaminhada` (CONTEXT.md — Encaminhamento).
   estado = aplicar(estado, encaminhar());
-  return aplicar(estado, aceitar());
+  return aplicar(estado, aceitar('sala-1', rosterDe(quantidade)));
 }
 
 test('bypass: libera membro ativo de sala encaminhada com partida nao iniciada', () => {
