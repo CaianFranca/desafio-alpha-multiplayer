@@ -11,6 +11,7 @@ export function stubAuthFetch(handlers: {
   register?: FetchStub
   login?: FetchStub
   me?: FetchStub
+  refresh?: FetchStub
   fallback?: FetchStub
 }) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -18,6 +19,7 @@ export function stubAuthFetch(handlers: {
     if (url.includes('/api/auth/register') && handlers.register) return handlers.register(input, init)
     if (url.includes('/api/auth/login') && handlers.login) return handlers.login(input, init)
     if (url.includes('/api/auth/me') && handlers.me) return handlers.me(input, init)
+    if (url.includes('/api/auth/refresh') && handlers.refresh) return handlers.refresh(input, init)
     if (handlers.fallback) return handlers.fallback(input, init)
     return new Response(null, { status: 404 })
   })

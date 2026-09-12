@@ -819,30 +819,39 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao, estadoInteracao, estadoInteracaoPeoes])
 
+  const tentandoReconectarRef = useRef(false)
   const tentarNovamenteComConexao = useCallback(() => {
     // Desistente não reconecta (o servidor rejeitaria com
     // JOGADOR_NAO_NA_PARTIDA) — falha terminal sem retry.
     if (desistiu) return
+    // Guard anti-duplo-clique (issue #376): o retry aguarda o refresh, então
+    // cliques em rajada abririam N sockets. A flag cai no `finally`.
+    if (tentandoReconectarRef.current) return
+    tentandoReconectarRef.current = true
     // Retry manual com Sessão renovada (issue #376): o upgrade do WS valida
     // o access token e ele pode ter expirado na Partida longa. Aguarda o
     // refresh (melhor esforço) para reconectar com o cookie já novo.
     void (async () => {
       try {
-        await refreshSession()
-      } catch {
-        // melhor esforço: mesmo com refresh falho, o fluxo de falha se repete.
+        try {
+          await refreshSession()
+        } catch {
+          // melhor esforço: mesmo com refresh falho, o fluxo de falha se repete.
+        }
+        desconectar()
+        if (!temAlvo) {
+          falhar()
+          return
+        }
+        if (loader) {
+          tentarNovamente()
+        } else {
+          carregar()
+        }
+        reconectarSocket()
+      } finally {
+        tentandoReconectarRef.current = false
       }
-      desconectar()
-      if (!temAlvo) {
-        falhar()
-        return
-      }
-      if (loader) {
-        tentarNovamente()
-      } else {
-        carregar()
-      }
-      reconectarSocket()
     })()
   }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader, desistiu])
 

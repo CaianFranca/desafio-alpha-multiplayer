@@ -9,7 +9,7 @@ import {
   register as registerRequest,
 } from '../api/auth'
 import type { AuthActionResult, CadastroPayload, CredenciaisPayload } from '../api/auth'
-import { onSessionExpired } from '../api/client'
+import { onSessionExpired, calcularIntervaloSlide, lerTtlDeAcessoSegundos } from '../api/client'
 import { mockAuthenticatedState } from './mock-auth'
 
 export type { AuthState }
@@ -27,14 +27,18 @@ function resolveInitialState(): AuthState {
 }
 
 /**
- * Slide-session proativo (issue #376): o access token expira em 15 min e uma
+ * Slide-session proativo (issue #376): o access token expira no TTL e uma
  * Partida longa e ociosa não gera tráfego HTTP para renová-lo. O intervalo
- * (10 min, abaixo do TTL) renova os cookies com o app aberto; voltar à aba
- * (visible/focus) renova de imediato (com throttle de 1 min). Falha aqui não
- * desloga — o 401 confirmado pelo `apiFetch` continua sendo o dono do logout.
+ * deriva do TTL (`VITE_SESSION_ACCESS_TTL_SECONDS`, fallback 900s) com 5
+ * min de margem; voltar à aba (visible/focus) renova de imediato (com
+ * throttle de 1 min). Falha aqui não desloga — o 401 confirmado pelo
+ * `apiFetch` continua sendo o dono do logout.
  */
-export const INTERVALO_SLIDE_SESSAO_MS = 10 * 60 * 1000
 export const ATRASO_MINIMO_SLIDE_VISIVEL_MS = 60 * 1000
+/** Tentativas da reidratação ante falha transitória (1 inicial + retries). */
+export const TENTATIVAS_REIDRATACAO = 3
+/** Espera entre tentativas da reidratação. */
+export const ATRASO_REIDRATACAO_MS = 2000
 
 function slideProativoDesligado(): boolean {
   return __MOCK_AUTH__ && import.meta.env.VITE_AUTH_MOCK === 'true'
@@ -48,12 +52,31 @@ export function AuthProvider({ initialState, children }: AuthProviderProps) {
   useEffect(() => {
     if (!rehydrate) return
     let active = true
-    void fetchCurrentPlayer().then((result) => {
-      if (!active) return
-      setState(result.ok ? { status: 'authenticated', jogador: result.jogador } : visitorState)
-    })
+    let tentativas = 0
+    let timer: number | null = null
+    const reidratar = () => {
+      void fetchCurrentPlayer().then((result) => {
+        if (!active) return
+        if (result.ok) {
+          setState({ status: 'authenticated', jogador: result.jogador })
+          return
+        }
+        // Falha transitória marcada (rede/5xx no /me ou no refresh): retenta
+        // com backoff antes de declarar Visitante — evita expulsão por
+        // instabilidade momentânea. Sessão inválida e demais falhas caem
+        // direto a Visitante, sem espera.
+        if (result.reason === 'unknown-failure' && result.transiente === true && tentativas < TENTATIVAS_REIDRATACAO - 1) {
+          tentativas += 1
+          timer = window.setTimeout(reidratar, ATRASO_REIDRATACAO_MS)
+          return
+        }
+        setState(visitorState)
+      })
+    }
+    reidratar()
     return () => {
       active = false
+      if (timer !== null) window.clearTimeout(timer)
     }
   }, [rehydrate])
 
@@ -74,7 +97,7 @@ export function AuthProvider({ initialState, children }: AuthProviderProps) {
       deslizar()
     }
     ultimoSlideRef.current = Date.now()
-    const intervalo = window.setInterval(deslizar, INTERVALO_SLIDE_SESSAO_MS)
+    const intervalo = window.setInterval(deslizar, calcularIntervaloSlide(lerTtlDeAcessoSegundos()))
     document.addEventListener('visibilitychange', deslizarAoVoltar)
     window.addEventListener('focus', deslizarAoVoltar)
     return () => {

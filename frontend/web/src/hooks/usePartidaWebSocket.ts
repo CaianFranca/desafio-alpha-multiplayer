@@ -324,8 +324,8 @@ export function usePartidaWebSocket({
       // renovar a Sessão (issue #376): o access token pode ter expirado nos
       // 15 min de Partida ociosa e o upgrade seguinte cairia em 401 — o
       // refresh é fire-and-forget para não atrasar o timer (o cookie deve
-      // estar novo quando o retry abrir).
-      void refreshSession().catch(() => false)
+      // estar novo quando o retry abrir; refreshSession nunca rejeita).
+      void refreshSession()
       if (reconnectTimerRef.current === null) {
         reconnectTimerRef.current = window.setTimeout(() => {
           reconnectTimerRef.current = null
@@ -340,8 +340,9 @@ export function usePartidaWebSocket({
       // Falha de conexão não deve reconectar sozinha — exibe tela de falha
       // até retry manual (PartidaPage.tentarNovamenteComConexao). Suprime o
       // agendamento do onclose subsequente. Renova a Sessão em melhor esforço
-      // (issue #376): o retry manual abre o upgrade com o cookie já novo.
-      void refreshSession().catch(() => false)
+      // (issue #376): o retry manual abre o upgrade com o cookie já novo
+      // (refreshSession nunca rejeita).
+      void refreshSession()
       ws.onclose = null
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current)

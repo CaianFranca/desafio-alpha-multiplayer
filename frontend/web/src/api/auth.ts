@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { apiFetch, renovarSessao } from './client'
+import { apiFetch, consumirRefreshTransiente, renovarSessao } from './client'
 
 /**
  * POST /api/auth/refresh — slide-session (issue #376): renova os cookies da
@@ -22,7 +22,8 @@ export interface Jogador {
 
 export type PlayerResult =
   | { ok: true; jogador: Jogador }
-  | { ok: false; reason: 'invalid-session' | 'unknown-failure' }
+  | { ok: false; reason: 'invalid-session' }
+  | { ok: false; reason: 'unknown-failure'; transiente?: boolean }
 
 export interface Credenciais {
   email: string
@@ -64,7 +65,12 @@ export async function fetchCurrentPlayer(): Promise<PlayerResult> {
   } catch {
     return { ok: false, reason: 'unknown-failure' }
   }
-  if (response.status === 401) return { ok: false, reason: 'invalid-session' }
+  if (response.status === 401) {
+    // Refresh transitório (rede/5xx, issue #376): a Sessão pode estar viva —
+    // marca `transiente` para a reidratação retentar em vez de deslogar.
+    if (consumirRefreshTransiente()) return { ok: false, reason: 'unknown-failure', transiente: true }
+    return { ok: false, reason: 'invalid-session' }
+  }
   if (!response.ok) return { ok: false, reason: 'unknown-failure' }
   try {
     const jogador = (await response.json()) as Jogador

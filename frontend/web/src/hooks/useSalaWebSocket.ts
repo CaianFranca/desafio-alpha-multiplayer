@@ -8,6 +8,7 @@ import type {
 } from '@flicker/shared'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
+import { refreshSession } from '../api/auth'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -323,7 +324,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     ws.onclose = () => {
       setConectado(false)
       wsRef.current = null
-      // Reconexão simples após 1s se ainda montado
+      // Reconexão simples após 1s se ainda montado. Antes dela, tenta
+      // renovar a Sessão (issue #376): o access token pode ter expirado na
+      // Sala ociosa e o upgrade seguinte cairia em 4401 — fire-and-forget
+      // para não atrasar o timer (simetria com usePartidaWebSocket).
+      void refreshSession()
       if (reconnectTimerRef.current === null) {
         reconnectTimerRef.current = window.setTimeout(() => {
           reconnectTimerRef.current = null

@@ -11,30 +11,40 @@ export function onSessionExpired(listener: SessionExpiredListener): () => void {
 }
 
 /**
+ * Resultado detalhado da renovação (slide-session, issue #376).
+ *
+ * - `renovada`: o servidor reemitiu os cookies — a Sessão segue viva.
+ * - `invalida`: o refresh foi rejeitado com 401 (expirado, revogado ou
+ *   reuso pós-rotação) — a Sessão morreu e o logout é legítimo.
+ * - `transiente`: rede fora ou 5xx — nada se sabe sobre a Sessão, então
+ *   ninguém declara logout por conta própria; o 401 original é devolvido
+ *   sem notificar e o chamador trata como falha desconhecida.
+ */
+export type ResultadoRefresh = 'renovada' | 'invalida' | 'transiente'
+
+/**
  * Renova a Sessão via `POST /api/auth/refresh` (slide-session, issue #376).
  *
  * O refresh token vive em cookie HttpOnly (7 dias) e a rotação acontece no
- * servidor; aqui basta o POST com `credentials: 'include'`. O resultado é
- * booleano: `true` renovou (cookies reemitidos), `false` mantém o estado
- * atual — o 401 original decide o resto do fluxo. Falha de rede também vira
- * `false` (melhor esforço, sem jogar).
+ * servidor; aqui basta o POST com `credentials: 'include'`.
  *
  * Single-flight: 401s concorrentes compartilham a mesma promessa, então N
  * chamadas paralelas geram um único POST (a rotação invalida o refresh
  * anterior, então rajadas sem dedupe se invalidariam entre si).
  */
-let refreshEmVoo: Promise<boolean> | null = null
+let refreshEmVoo: Promise<ResultadoRefresh> | null = null
 
-async function executarRefreshBruto(): Promise<boolean> {
+async function executarRefreshBruto(): Promise<ResultadoRefresh> {
   try {
     const response = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
-    return response.ok
+    if (response.ok) return 'renovada'
+    return response.status === 401 ? 'invalida' : 'transiente'
   } catch {
-    return false
+    return 'transiente'
   }
 }
 
-export function renovarSessao(): Promise<boolean> {
+export function renovarSessaoDetalhada(): Promise<ResultadoRefresh> {
   if (refreshEmVoo !== null) return refreshEmVoo
   const voo = executarRefreshBruto().finally(() => {
     if (refreshEmVoo === voo) refreshEmVoo = null
@@ -43,9 +53,68 @@ export function renovarSessao(): Promise<boolean> {
   return voo
 }
 
-/** Reseta o single-flight (uso exclusivo em testes). */
+/**
+ * Versão booleana da renovação (slide proativo, retries manuais): `true`
+ * só quando renovou de fato. Nunca rejeita — qualquer falha vira `false`.
+ */
+export function renovarSessao(): Promise<boolean> {
+  return renovarSessaoDetalhada().then((resultado) => resultado === 'renovada')
+}
+
+/**
+ * Marca do último refresh transitório: como a flag é global, qualquer 401
+ * observado enquanto ela está armada é ambíguo — o lado seguro é tratá-lo
+ * como falha desconhecida, nunca como morte da Sessão. Consumida por
+ * `fetchCurrentPlayer` (auth.ts) logo após o 401.
+ */
+let refreshTransientePendente = false
+
+function marcarRefreshTransiente(): void {
+  refreshTransientePendente = true
+}
+
+/** Lê e limpa a marca de refresh transitório (uso de auth.ts e testes). */
+export function consumirRefreshTransiente(): boolean {
+  const pendente = refreshTransientePendente
+  refreshTransientePendente = false
+  return pendente
+}
+
+/** Reseta o single-flight e a marca transitória (uso exclusivo em testes). */
 export function __redefinirRefreshEmVooParaTestes(): void {
   refreshEmVoo = null
+  refreshTransientePendente = false
+}
+
+/**
+ * Calibragem do slide proativo (issue #376): o intervalo deriva do TTL do
+ * access token para sobreviver a mudanças em `SESSION_ACCESS_TTL_SECONDS`.
+ * Fonte: `VITE_SESSION_ACCESS_TTL_SECONDS` do build (espelho manual da env
+ * do servidor), com fallback de 900s.
+ */
+export const TTL_ACESSO_PADRAO_SEGUNDOS = 900
+/** Teto do intervalo: desliza pelo menos a cada 10 min. */
+export const INTERVALO_SLIDE_MAXIMO_MS = 10 * 60 * 1000
+/** Piso do intervalo: evita rajadas de refresh com TTLs curtos. */
+export const INTERVALO_SLIDE_MINIMO_MS = 60 * 1000
+/** Margem antes da expiração: o slide renova 5 min antes do TTL. */
+export const MARGEM_SLIDE_SESSAO_MS = 5 * 60 * 1000
+
+/** Lê o TTL do access token do build, com fallback seguro. */
+export function lerTtlDeAcessoSegundos(): number {
+  const bruto = import.meta.env.VITE_SESSION_ACCESS_TTL_SECONDS
+  const parsed = Number(bruto)
+  if (bruto !== undefined && Number.isInteger(parsed) && parsed > 0) return parsed
+  return TTL_ACESSO_PADRAO_SEGUNDOS
+}
+
+/**
+ * Intervalo do slide em ms: `TTL − margem`, limitado ao piso/teto. TTL 900
+ * → 600s; TTL 300 → 60s (piso); TTL 3600 → 600s (teto).
+ */
+export function calcularIntervaloSlide(ttlSegundos: number): number {
+  const alvo = (ttlSegundos - MARGEM_SLIDE_SESSAO_MS / 1000) * 1000
+  return Math.min(INTERVALO_SLIDE_MAXIMO_MS, Math.max(INTERVALO_SLIDE_MINIMO_MS, alvo))
 }
 
 /**
@@ -67,9 +136,10 @@ function notificarSessaoExpirada(): void {
 /**
  * Fetch compartilhado das chamadas de API: inclui o cookie de sessão e, em
  * 401, tenta uma renovação (slide-session, issue #376) antes de declarar a
- * Sessão expirada. O retry acontece uma única vez: se a renovação vingar, a
- * requisição original é repetida; se o retry ainda for 401 — ou a renovação
- * falhar — os assinantes são notificados para que o estado volte a Visitante.
+ * Sessão expirada. O retry acontece uma única vez e só após `renovada`; em
+ * `transiente` (rede/5xx no refresh ou no retry) o 401 original é devolvido
+ * sem notificar — a Sessão pode estar viva. Só `invalida` e retry ainda-401
+ * notificam os assinantes para voltar a Visitante.
  */
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, { credentials: 'include', ...init })
@@ -78,17 +148,28 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     notificarSessaoExpirada()
     return response
   }
-  let renovou: boolean
+  let resultado: ResultadoRefresh
   try {
-    renovou = await renovarSessao()
+    resultado = await renovarSessaoDetalhada()
   } catch {
-    renovou = false
+    resultado = 'transiente'
   }
-  if (!renovou) {
+  if (resultado === 'invalida') {
     notificarSessaoExpirada()
     return response
   }
-  const repetida = await fetch(input, { credentials: 'include', ...init })
+  if (resultado === 'transiente') {
+    marcarRefreshTransiente()
+    return response
+  }
+  let repetida: Response
+  try {
+    repetida = await fetch(input, { credentials: 'include', ...init })
+  } catch {
+    // Rede caiu entre o refresh e o retry: mesma postura transitória.
+    marcarRefreshTransiente()
+    return response
+  }
   if (repetida.status === 401) notificarSessaoExpirada()
   return repetida
 }

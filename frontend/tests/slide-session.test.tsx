@@ -1,13 +1,18 @@
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider } from '../web/src/state/AuthProvider'
+import { mockAuthenticatedState } from '../web/src/state/mock-auth'
+import { PartidaPage } from '../web/src/pages/PartidaPage'
+import { MockWebSocket } from './helpers/mockWebSocket'
 import {
   __redefinirRefreshEmVooParaTestes,
   apiFetch,
+  calcularIntervaloSlide,
+  lerTtlDeAcessoSegundos,
   onSessionExpired,
 } from '../web/src/api/client'
-import { refreshSession } from '../web/src/api/auth'
+import { fetchCurrentPlayer, refreshSession } from '../web/src/api/auth'
 
 const jogador = {
   id: '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
@@ -53,7 +58,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   __redefinirRefreshEmVooParaTestes()
+  MockWebSocket.clean()
 })
 
 describe('slide-session no apiFetch (issue #376)', () => {
@@ -153,7 +160,7 @@ describe('slide-session no apiFetch (issue #376)', () => {
     }
   })
 
-  it('falha de rede no refresh mantém o 401 original e notifica', async () => {
+  it('falha de rede no refresh devolve o 401 original sem notificar (transiente)', async () => {
     const calls = mockApi([{ url: '/api/salas', response: () => jsonResponse({}, 401) }])
     vi.stubGlobal(
       'fetch',
@@ -169,7 +176,51 @@ describe('slide-session no apiFetch (issue #376)', () => {
     try {
       const response = await apiFetch('/api/salas')
       expect(response.status).toBe(401)
-      expect(expirada).toHaveBeenCalledTimes(1)
+      expect(expirada).not.toHaveBeenCalled()
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('refresh com 500 devolve o 401 original sem notificar (transiente)', async () => {
+    const calls = mockApi([
+      { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 500) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const response = await apiFetch('/api/salas')
+      expect(response.status).toBe(401)
+      expect(expirada).not.toHaveBeenCalled()
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+      expect(contarChamadas(calls, 'GET', '/api/salas')).toBe(1)
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('rede cai entre refresh e retry: devolve o 401 original sem notificar', async () => {
+    let salas = 0
+    mockApi([
+      {
+        url: '/api/salas',
+        response: () => {
+          salas += 1
+          // Primeira chamada: 401 com access expirado. Retry (após refresh
+          // válido): a rede cai — o stub rejeita como o fetch real faria.
+          if (salas >= 2) throw new TypeError('rede fora')
+          return jsonResponse({}, 401)
+        },
+      },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse(jogador) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const response = await apiFetch('/api/salas')
+      expect(response.status).toBe(401)
+      expect(expirada).not.toHaveBeenCalled()
     } finally {
       desinscrever()
     }
@@ -228,5 +279,196 @@ describe('reidratação com access expirado e refresh válido (issue #376)', () 
 
     expect(await screen.findByText('Ana')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /^entrar$/i })).not.toBeInTheDocument()
+  })
+
+  it('/me 401 com refresh transitório vira unknown-failure (não invalida)', async () => {
+    mockApi([
+      { url: '/api/auth/me', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 500) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      await expect(fetchCurrentPlayer()).resolves.toEqual({ ok: false, reason: 'unknown-failure', transiente: true })
+      expect(expirada).not.toHaveBeenCalled()
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('reidratação retenta ante transiente e autentica quando a rede volta', async () => {
+    let me = 0
+    const calls = mockApi([
+      {
+        url: '/api/auth/me',
+        response: () => {
+          me += 1
+          // Primeira tentativa cai no refresh 500 (transiente); a segunda,
+          // após o backoff, encontra a Sessão válida.
+          return me === 1 ? jsonResponse({}, 401) : jsonResponse(jogador)
+        },
+      },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 500) },
+    ])
+    vi.useFakeTimers()
+    try {
+      const router = createMemoryRouter(routes, { initialEntries: ['/'] })
+      render(
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>,
+      )
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500)
+      })
+      expect(screen.getByText('Ana')).toBeInTheDocument()
+      expect(contarChamadas(calls, 'GET', '/api/auth/me')).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('calibragem do slide (issue #376)', () => {
+  it('TTL 900 → 600s; TTL 3600 respeita o teto; TTL curto respeita o piso', () => {
+    expect(calcularIntervaloSlide(900)).toBe(600_000)
+    expect(calcularIntervaloSlide(3600)).toBe(600_000)
+    expect(calcularIntervaloSlide(300)).toBe(60_000)
+    expect(calcularIntervaloSlide(120)).toBe(60_000)
+  })
+
+  it('lê VITE_SESSION_ACCESS_TTL_SECONDS com fallback 900', () => {
+    expect(lerTtlDeAcessoSegundos()).toBe(900)
+    vi.stubEnv('VITE_SESSION_ACCESS_TTL_SECONDS', '300')
+    expect(lerTtlDeAcessoSegundos()).toBe(300)
+    vi.stubEnv('VITE_SESSION_ACCESS_TTL_SECONDS', 'banana')
+    expect(lerTtlDeAcessoSegundos()).toBe(900)
+  })
+})
+
+describe('slide proativo (issue #376)', () => {
+  it('dispara POST /refresh a cada intervalo sem deslogar', async () => {
+    const calls = mockApi([
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse(jogador) },
+    ])
+    vi.useFakeTimers()
+    try {
+      const { unmount } = render(
+        <AuthProvider initialState={mockAuthenticatedState}>
+          <div>autenticado</div>
+        </AuthProvider>,
+      )
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(0)
+      act(() => {
+        vi.advanceTimersByTime(600_000)
+      })
+      await act(async () => {})
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+      act(() => {
+        vi.advanceTimersByTime(600_000)
+      })
+      await act(async () => {})
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(2)
+      expect(screen.getByText('autenticado')).toBeInTheDocument()
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('voltar à aba respeita o throttle de 1 min', async () => {
+    const calls = mockApi([
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse(jogador) },
+    ])
+    const descritor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
+    vi.useFakeTimers()
+    try {
+      const { unmount } = render(
+        <AuthProvider initialState={mockAuthenticatedState}>
+          <div>autenticado</div>
+        </AuthProvider>,
+      )
+      act(() => {
+        vi.advanceTimersByTime(61_000)
+      })
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      await act(async () => {})
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+      // Segunda volta imediata: throttle segura.
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      await act(async () => {})
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+      unmount()
+    } finally {
+      if (descritor !== undefined) Object.defineProperty(document, 'visibilityState', descritor)
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('retry manual da Partida (issue #376)', () => {
+  it('duplo clique no Tentar novamente abre um único socket', async () => {
+    let resolverRefresh!: (response: Response) => void
+    const refreshGate = new Promise<Response>((resolve) => {
+      resolverRefresh = resolve
+    })
+    const calls = mockApi([{ url: '/api/auth/refresh', method: 'POST', response: () => refreshGate }])
+    MockWebSocket.clean()
+    const router = createMemoryRouter([{ path: '/partida', element: <PartidaPage /> }], {
+      initialEntries: ['/partida?serverId=server-1&partidaId=partida-1'],
+    })
+    render(
+      <AuthProvider initialState={mockAuthenticatedState}>
+        <RouterProvider router={router} />
+      </AuthProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    act(() => {
+      MockWebSocket.last()!.onerror!(new Event('error'))
+    })
+    const retry = await screen.findByTestId('partida-tentar-novamente')
+    fireEvent.click(retry)
+    fireEvent.click(retry)
+    // Guard anti-duplo: um único refresh em voo apesar dos dois cliques.
+    expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+    await act(async () => {
+      resolverRefresh(jsonResponse(jogador))
+    })
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2))
+    expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+  })
+})
+
+describe('reconexão do lobby (issue #376)', () => {
+  it('fechamento do socket tenta renovar a Sessão antes de reconectar', async () => {
+    const calls = mockApi([
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse(jogador) },
+    ])
+    MockWebSocket.clean()
+    const router = createMemoryRouter(routes, { initialEntries: ['/salas/criar'] })
+    render(
+      <AuthProvider initialState={mockAuthenticatedState}>
+        <RouterProvider router={router} />
+      </AuthProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    vi.useFakeTimers()
+    try {
+      act(() => {
+        MockWebSocket.last()!.simulateClose()
+      })
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(MockWebSocket.instances).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
