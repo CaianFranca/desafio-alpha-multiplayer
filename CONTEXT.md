@@ -57,8 +57,12 @@ Vitória, derrota ou não-início declarados no término ou cancelamento da Part
 _Avoid_: desfecho, fim de jogo
 
 **Desistência**:
-Ato irreversível de um Jogador em Partida em andamento; só o próprio Jogador desiste, no próprio turno ou fora dele. Remove o peão (liberando a célula) e a vez da ordem — com Passagem de Vez imediata se era o Jogador Ativo —, recalcula a Iluminação com os restantes e aplica a Limpeza no ato; a vitória é re-avaliada com os N−1 peões no Portão (+ 3 Geradores + Cartão) e, quando resta 1, a Partida termina em derrota. Queda de conexão sem desistência continua voltável, sem expiração.
+Ato irreversível de um Jogador em Partida em andamento; só o próprio Jogador desiste, no próprio turno ou fora dele. Remove o peão (liberando a célula) e a vez da ordem — com Passagem de Vez imediata se era o Jogador Ativo —, recalcula a Iluminação com os restantes e aplica a Limpeza no ato; a vitória é re-avaliada com os N−1 peões no Portão (+ 3 Geradores + Cartão) e, quando resta 1, a Partida termina em derrota. Queda de conexão sem desistência é voltável dentro da janela de reconexão; ao expirar em Partida em andamento, converte-se automaticamente em desistência com causa `expiracao` e efeito idêntico (causa `desistencia` no ato explícito).
 _Avoid_: abandono, saída da partida
+
+**Reconexão da Partida**:
+Janela por partida e Jogador em Partida em andamento, com TTL configurável (`PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS`, padrão 60s) persistido no Redis e timer em memória que executa a conversão; quem volta dentro reassume sem perda (snapshot + turno, como hoje); quem expira é convertido automaticamente em desistência com causa `expiracao`. Só existe em `em_andamento` — a `preparada` segue apenas com o não-início (10s/90s).
+_Avoid_: reconexão da sala, timeout
 
 **Partida Não Iniciada**:
 Cancelamento de Partida preparada sem completar a admissão dos 2 a 4 Jogadores; com todos desconectados libera em 10s, com admissão parcial libera no teto de 90s; encerra conexões com PARTIDA_NAO_INICIADA e avisa o lobby para reabrir a Sala.

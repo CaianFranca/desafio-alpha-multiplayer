@@ -31,7 +31,7 @@
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #289/ADR-0013, consumida na #288)
-//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez)
+//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId, causa? } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez); causa #295 ('desistencia'|'expiracao', ausente = desistencia implícita)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
 //   motivo da derrota viaja em campo opcional separado (MotivoDeDerrotaWire,
 //   sync com DesfechoDaPartida — engine/src/partida.ts:156-161; 'desistencia'
@@ -479,10 +479,13 @@ export interface ResgateRealizadoWireEvento {
 // do comando e serve de aviso aos restantes (com a nova ordem via
 // TURNO_INICIADO e o tabuleiro via CELULAS_ILUMINADAS/LIMPEZA_APLICADA do
 // mesmo lote). Shape 1:1 com DesistenciaRegistradaEvento do domínio.
+// Causa (issue #295): ausente = 'desistencia' implícita (compat com binários
+// antigos); 'expiracao' = conversão automática da janela de reconexão.
 export interface DesistenciaRegistradaWireEvento {
   readonly type: 'DESISTENCIA_REGISTRADA';
   readonly jogadorId: string;
   readonly peaoId: PeaoId;
+  readonly causa?: 'desistencia' | 'expiracao';
 }
 
 export type PartidaEventoDoServidor =

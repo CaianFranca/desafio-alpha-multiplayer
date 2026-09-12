@@ -22,7 +22,7 @@
 
 import type { Redis } from 'ioredis';
 import type { WebSocket } from 'ws';
-import { aplicarComandoDePartida } from '@flicker/engine';
+import { aplicarComandoDePartida, type EventoDaPartida } from '@flicker/engine';
 import { PartidaBroadcaster } from './broadcast.ts';
 import { traduzirEventos } from './traducao.ts';
 import type { DebugStreamDaPartida } from '../ws/debug-stream.ts';
@@ -392,6 +392,180 @@ export class PartidaHandlers {
       // Espelho do erro interno no stream de debug (issue #340).
       this.debug?.emitirParaSocket(socket, 'error', `erro interno ao processar comando: ${(erro as Error).message}`);
     });
+  }
+
+  /**
+   * Conversão automática da expiração da reconexão em desistência (issue
+   * #295): reaproveita integralmente o caminho de B — despacho interno direto
+   * ao engine com ator = ausente (sem rota wire nova), efeito atômico idêntico
+   * ao explícito, com `causa: 'expiracao'` anexada ao evento de domínio (o
+   * wire a projeta 1:1). Broadcast do lote integral + callbacks
+   * `notificarDesistencia`/`notificarRetorno` e retenção/término idênticos ao
+   * fluxo explícito. Idempotente: partida terminada/ausente, presença já
+   * `conectado` (readmissão venceu a corrida) ou jogador já fora do engine
+   * abortam sem mutar e retornam false; só a conversão efetiva retorna true.
+   * Serializada na cadeia da partida como as demais mutações.
+   */
+  async converterExpiracaoEmDesistencia(partidaId: string, jogadorAusente: string): Promise<boolean> {
+    let converteu = false;
+    await this.enfileirarMutacao(partidaId, async () => {
+      const estado = await obterEstadoDaPartida(this.redis, partidaId);
+      if (estado === null) {
+        return;
+      }
+      if (estado.resultado !== null) {
+        const pendente = await this.lerRetornoPendente(partidaId);
+        if (pendente !== null) {
+          await this.completarRetornoPendenteDentroDaMutacao(partidaId, pendente);
+        }
+        return;
+      }
+      let partidaPrevia: PartidaPreparada | null = null;
+      if (this.notificarRetorno !== undefined || this.notificarDesistencia !== undefined) {
+        try {
+          partidaPrevia = await obterPartida(this.redis, partidaId);
+        } catch {
+          partidaPrevia = null;
+        }
+      }
+      // Guarda de corrida admissão-vs-timer (#295): a presença vigente decide
+      // dentro da mutação — readmissão entre o fire do timer e a cadeia aborta.
+      const partidaAtual = partidaPrevia ?? await obterPartida(this.redis, partidaId).catch(() => null);
+      if (partidaAtual === null || partidaAtual.estado !== 'em_andamento') {
+        return;
+      }
+      const membro = partidaAtual.roster.find((m) => m.jogadorId === jogadorAusente);
+      if (membro === undefined || membro.presenca !== 'em_reconexao') {
+        return;
+      }
+      if (!estado.jogadores.some((j) => j.jogadorId === jogadorAusente)) {
+        return;
+      }
+      const resultado = aplicarComandoDePartida(estado, { tipo: 'desistir_da_partida' }, jogadorAusente);
+      if (!resultado.sucesso) {
+        return;
+      }
+      const eventosComCausa: readonly EventoDaPartida[] = resultado.eventos.map((evento) =>
+        evento.tipo === 'desistencia_registrada'
+          ? { ...evento, causa: 'expiracao' as const }
+          : evento,
+      );
+      await salvarEstadoDaPartida(this.redis, partidaId, resultado.estado);
+      this.broadcaster.enviar(partidaId, ...traduzirEventos(eventosComCausa));
+      this.debug?.emitir(partidaId, 'info', `Expiração de ${jogadorAusente} convertida em desistência`);
+
+      const termino = resultado.eventos.find((evento) => evento.tipo === 'partida_terminada');
+      const desistencias = resultado.eventos.filter((evento) => evento.tipo === 'desistencia_registrada');
+      if (termino?.tipo !== 'partida_terminada' && desistencias.length > 0 && this.notificarDesistencia !== undefined) {
+        const notificar = this.notificarDesistencia;
+        const concluirEspera = this.rastrearEspera(partidaId);
+        void (async () => {
+          try {
+            let partida: PartidaPreparada | null = partidaPrevia;
+            if (partida === null) {
+              try {
+                partida = await obterPartida(this.redis, partidaId);
+              } catch {
+                partida = null;
+              }
+            }
+            if (partida === null) {
+              console.error('[partida] sem metadados para callback de desistência', { partidaId });
+              return;
+            }
+            for (const evento of desistencias) {
+              if (evento.tipo !== 'desistencia_registrada') continue;
+              const promessa = notificar({
+                salaId: partida.salaId,
+                partidaId,
+                serverId: partida.serverId,
+                jogadorId: evento.jogadorId,
+              }).catch((erro: unknown) => {
+                console.error('[partida] callback de desistência terminou com erro', { partidaId, erro });
+              });
+              this.rastrearDesvinculo(partidaId, promessa);
+            }
+          } finally {
+            concluirEspera();
+          }
+        })().catch(() => undefined);
+      }
+      if (termino?.tipo === 'partida_terminada') {
+        try {
+          await aplicarRetencaoDeTermino(
+            this.redis,
+            partidaId,
+            this.partidaTerminadaTtlSegundos,
+          );
+        } catch (erro: unknown) {
+          console.error('[partida] falha ao aplicar retenção do término', {
+            partidaId,
+            ttlSegundos: this.partidaTerminadaTtlSegundos,
+            erro,
+          });
+        }
+        let aviso: AvisoDeRetorno | undefined;
+        if (this.notificarRetorno !== undefined) {
+          await this.desvincularDesistentes(
+            partidaId,
+            partidaPrevia,
+            resultado.estado.jogadores.map((j) => j.jogadorId),
+          );
+          if (this.callbacksEnviados.has(partidaId) || this.retornosPendentes.has(partidaId)) {
+          } else {
+            let partida: PartidaPreparada | null = null;
+            for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+              try {
+                partida = await obterPartida(this.redis, partidaId);
+                if (partida !== null) break;
+              } catch {
+                partida = null;
+              }
+              if (partida === null && tentativa < 2) {
+                await sleep(100 * 2 ** tentativa);
+              }
+            }
+            if (partida === null && partidaPrevia !== null) {
+              console.warn('[partida] usando metadados prévios para callback de retorno', { partidaId });
+              partida = partidaPrevia;
+            }
+            if (partida === null) {
+              console.error('[partida] não foi possível preparar callback de retorno após retries', { partidaId });
+              this.reagendarRetornoSemN1(
+                partidaId,
+                termino.desfecho.tipo,
+                resultado.estado.jogadores.map((j) => j.jogadorId),
+                desistencias.length > 0,
+              );
+            } else {
+              const avisoMontado = await this.montarAviso(
+                partida,
+                termino.desfecho.tipo,
+                resultado.estado.jogadores.map((j) => j.jogadorId),
+                desistencias.length > 0,
+              );
+              if (avisoMontado === null) {
+                this.reagendarRetornoSemN1(
+                  partidaId,
+                  termino.desfecho.tipo,
+                  resultado.estado.jogadores.map((j) => j.jogadorId),
+                  desistencias.length > 0,
+                );
+              } else {
+                aviso = avisoMontado;
+              }
+            }
+          }
+        }
+        if (aviso !== undefined) {
+          this.enviarRetornoComPersistencia(partidaId, aviso);
+        }
+      }
+      converteu = true;
+    }).catch((erro: unknown) => {
+      console.error('[partida] erro inesperado na conversão por expiração:', erro);
+    });
+    return converteu;
   }
 
   /**

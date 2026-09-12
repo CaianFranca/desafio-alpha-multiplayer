@@ -180,11 +180,20 @@ export function traduzirEventos(
       // chega como PARTIDA_TERMINADA no fim do lote. Sem evento wire novo de
       // roster.
       case 'desistencia_registrada':
-        saida.push({
-          type: 'DESISTENCIA_REGISTRADA',
-          jogadorId: evento.jogadorId,
-          peaoId: evento.peaoId,
-        });
+        saida.push(
+          evento.causa === undefined
+            ? {
+                type: 'DESISTENCIA_REGISTRADA',
+                jogadorId: evento.jogadorId,
+                peaoId: evento.peaoId,
+              }
+            : {
+                type: 'DESISTENCIA_REGISTRADA',
+                jogadorId: evento.jogadorId,
+                peaoId: evento.peaoId,
+                causa: evento.causa,
+              },
+        );
         break;
       // Resgate (issue #171): shape 1:1 com o domínio — wire follow-up #173
       // pode refinar feedback, mas o broadcast já expõe o resgate.

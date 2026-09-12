@@ -15,6 +15,7 @@ export interface Config {
   partidaPreparadaTtlSegundos: number;
   partidaTerminadaTtlSegundos: number;
   partidaNaoInicioSegundos: number;
+  partidaReconexaoEmAndamentoSegundos: number;
   lobbyRetornoCallbackUrl: string;
   lobbyDesistenciaCallbackUrl: string;
   postgres: {
@@ -48,6 +49,7 @@ const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
+const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -141,6 +143,18 @@ function parsePartidaNaoInicioSegundos(raw: string | undefined): number {
   }
   if (raw !== undefined) {
     console.warn(`[config] PARTIDA_NAO_INICIO_SEGUNDOS inválido "${raw}" — usando fallback ${fallback} (10..600)`);
+  }
+  return fallback;
+}
+
+function parsePartidaReconexaoEmAndamentoSegundos(raw: string | undefined): number {
+  const fallback = DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS;
+  const parsed = Number(raw ?? fallback);
+  if (Number.isInteger(parsed) && parsed >= 1) {
+    return parsed;
+  }
+  if (raw !== undefined) {
+    console.warn(`[config] PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS inválido "${raw}" — usando fallback ${fallback} (>=1)`);
   }
   return fallback;
 }
@@ -284,6 +298,9 @@ export function getConfig(): Config {
   const partidaNaoInicioSegundos = parsePartidaNaoInicioSegundos(
     process.env.PARTIDA_NAO_INICIO_SEGUNDOS as string | undefined,
   );
+  const partidaReconexaoEmAndamentoSegundos = parsePartidaReconexaoEmAndamentoSegundos(
+    process.env.PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS as string | undefined,
+  );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
@@ -361,6 +378,7 @@ export function getConfig(): Config {
     partidaPreparadaTtlSegundos,
     partidaTerminadaTtlSegundos,
     partidaNaoInicioSegundos,
+    partidaReconexaoEmAndamentoSegundos,
     lobbyRetornoCallbackUrl,
     lobbyDesistenciaCallbackUrl,
     postgres,

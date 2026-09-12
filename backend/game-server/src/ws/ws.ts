@@ -41,6 +41,12 @@ import type {
 import type { ContextoDoGameServer } from '../contexto.ts';
 import { marcarDesconexao, obterPartida, transicionarSeCompletoOuAtualizarPresenca } from '../partidas/partidas.ts';
 import { verificarNaoInicioAposDesconexao } from '../partidas/nao-inicio.ts';
+import {
+  agendarExpiracaoDeReconexao,
+  cancelarExpiracaoDeReconexao,
+  definirJanelaDeReconexao,
+  limparJanelaDeReconexao,
+} from '../partidas/reconexao-em-andamento.ts';
 import { obterEstadoDaPartida } from '../partidas/estado.ts';
 import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
@@ -185,9 +191,33 @@ function limparAdmissaoFalha(
   if (conexaoAnterior !== null && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN) {
     adicionarConexao(conexaoAnterior);
   } else if (eraVigente) {
-    void marcarDesconexao(redis, partidaId, jogadorId).catch((err) =>
-      console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
-    );
+    void marcarDesconexao(redis, partidaId, jogadorId)
+      .then(() => armarJanelaSeEmAndamento(redis, partidaId, jogadorId))
+      .catch((err) =>
+        console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
+      );
+  }
+}
+
+/**
+ * Janela de reconexão da Partida em andamento (issue #295): após marcar
+ * `em_reconexao`, só a Partida `em_andamento` ganha janela TTL + timer que
+ * converte em desistência; a `preparada` segue só com o não-início.
+ */
+async function armarJanelaSeEmAndamento(
+  redis: Redis,
+  partidaId: PartidaId,
+  jogadorId: string,
+): Promise<void> {
+  try {
+    const partida = await obterPartida(redis, partidaId);
+    if (partida === null || partida.estado !== 'em_andamento') {
+      return;
+    }
+    await definirJanelaDeReconexao(redis, partidaId, jogadorId);
+    agendarExpiracaoDeReconexao(partidaId, jogadorId, undefined, redis);
+  } catch (err) {
+    console.error('[ws] falha ao armar janela de reconexão:', (err as Error).message);
   }
 }
 
@@ -294,6 +324,16 @@ export function criarWebSocketServer(
             } catch {}
             ws.close(1011, 'ERRO_INTERNO');
             return;
+          }
+
+          // Re-admissão dentro da janela (#295): só em `em_andamento` a volta
+          // limpa a janela e cancela a conversão; a `preparada` nunca tem
+          // janela (não-início intacto).
+          if (transicao.estado === 'em_andamento') {
+            cancelarExpiracaoDeReconexao(partidaId, sessao.jogadorId);
+            void limparJanelaDeReconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
+              console.error('[ws] falha ao limpar janela de reconexão:', (err as Error).message),
+            );
           }
 
           ws.send(JSON.stringify({
@@ -447,6 +487,7 @@ export function criarWebSocketServer(
             }
             void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId)
               .then(() => verificarNaoInicioAposDesconexao(contexto.redis, partidaId))
+              .then(() => armarJanelaSeEmAndamento(contexto.redis, partidaId, sessao.jogadorId))
               .catch((err) => console.error('[ws] falha ao marcar desconexão:', (err as Error).message));
           });
         })().catch((error) => {
