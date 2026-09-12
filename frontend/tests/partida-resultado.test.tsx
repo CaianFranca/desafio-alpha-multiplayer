@@ -42,6 +42,7 @@ function mockSalaContext(codigo: string | null): UseSalaWebSocketReturn {
     iniciarPartida: () => {},
     expulso: false,
     descartarExpulsao: () => {},
+    marcarSaidaPropria: () => {},
   }
 }
 

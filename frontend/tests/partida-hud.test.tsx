@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, act, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -104,6 +104,7 @@ function mockSalaContext(codigo: string | null): UseSalaWebSocketReturn {
     iniciarPartida: () => {},
     expulso: false,
     descartarExpulsao: () => {},
+    marcarSaidaPropria: () => {},
   }
 }
 
@@ -440,24 +441,25 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
   }
 
-  function renderHudUnitario(props: { emAndamento: boolean; emResultado: boolean }) {
-    return render(
-      <HudDaPartida
-        jogadorPorId={JOGADORES_HUD}
-        jogadorAtivoId={MEU_JOGADOR_ID}
-        jogadorLocalId={MEU_JOGADOR_ID}
-        geradoresLigados={[]}
-        cartaoDeAcessoObtido={false}
-        emAndamento={props.emAndamento}
-        emResultado={props.emResultado}
-        onSair={() => {}}
-      />,
-    )
+  function propsBase(iniciadaEm: number | null = null) {
+    return {
+      jogadorPorId: JOGADORES_HUD,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      iniciadaEm,
+      onSair: () => {},
+    }
   }
 
-  it('cronômetro conta MM:SS em andamento e congela no resultado', () => {
+  // Marco fixo do servidor (epoch ms) para os testes com fake timers (#259).
+  const T0 = new Date('2026-09-11T12:00:00.000Z').getTime()
+
+  it('cronômetro conta a partir do marco do servidor (não do mount local)', () => {
     vi.useFakeTimers()
-    const { rerender } = renderHudUnitario({ emAndamento: true, emResultado: false })
+    vi.setSystemTime(T0)
+    render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:00')
 
     act(() => {
@@ -465,52 +467,40 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
     expect(screen.getByTestId('hud-cronometro')).toHaveAttribute('data-segundos', '65')
-
-    rerender(
-      <HudDaPartida
-        jogadorPorId={JOGADORES_HUD}
-        jogadorAtivoId={MEU_JOGADOR_ID}
-        jogadorLocalId={MEU_JOGADOR_ID}
-        geradoresLigados={[]}
-        cartaoDeAcessoObtido={false}
-        emAndamento
-        emResultado
-        onSair={() => {}}
-      />,
-    )
-    act(() => {
-      vi.advanceTimersByTime(30_000)
-    })
-    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
     vi.useRealTimers()
   })
 
-  it('retoma ao sair e voltar na mesma aba (paliativo sessionStorage por partidaId)', () => {
-    window.sessionStorage.clear()
+  it('a partir de 1h o cronômetro passa a exibir H:MM:SS', () => {
     vi.useFakeTimers()
-    const base = {
-      jogadorPorId: JOGADORES_HUD,
-      jogadorAtivoId: MEU_JOGADOR_ID,
-      jogadorLocalId: MEU_JOGADOR_ID,
-      geradoresLigados: [] as string[],
-      cartaoDeAcessoObtido: false,
-      onSair: () => {},
-    }
-    const { unmount } = render(<HudDaPartida {...base} partidaId="partida-timer-a" emAndamento emResultado={false} />)
+    vi.setSystemTime(T0)
+    render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:00')
+
+    act(() => {
+      vi.advanceTimersByTime(3_600_000)
+    })
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('1:00:00')
+    expect(screen.getByTestId('hud-cronometro')).toHaveAttribute('data-segundos', '3600')
+    vi.useRealTimers()
+  })
+
+  it('retoma ao remontar com o mesmo marco (sair e voltar/recarregar)', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    const { unmount } = render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     act(() => {
       vi.advanceTimersByTime(65_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
 
-    // Sair desmonta; voltar remonta a mesma partida e retoma.
+    // Sair desmonta; voltar remonta a MESMA Partida (mesmo marco) e retoma.
     unmount()
-    render(<HudDaPartida {...base} partidaId="partida-timer-a" emAndamento emResultado={false} />)
+    render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
     act(() => {
       vi.advanceTimersByTime(10_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:15')
-    window.sessionStorage.clear()
     vi.useRealTimers()
   })
 
@@ -569,59 +559,78 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     ).toBeInTheDocument()
   })
 
-  it('resultado congela e limpa o marco persistido', () => {
-    window.sessionStorage.clear()
+  it('resultado congela o tempo do marco e não reinicia', () => {
     vi.useFakeTimers()
-    const base = {
-      jogadorPorId: JOGADORES_HUD,
-      jogadorAtivoId: MEU_JOGADOR_ID,
-      jogadorLocalId: MEU_JOGADOR_ID,
-      geradoresLigados: [] as string[],
-      cartaoDeAcessoObtido: false,
-      onSair: () => {},
-    }
-    const { rerender, unmount } = render(
-      <HudDaPartida {...base} partidaId="partida-timer-d" emAndamento emResultado={false} />,
-    )
+    vi.setSystemTime(T0)
+    const { rerender } = render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     act(() => {
       vi.advanceTimersByTime(65_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
-    expect(window.sessionStorage.getItem('hud-cronometro-inicio:partida-timer-d')).not.toBeNull()
 
-    rerender(<HudDaPartida {...base} partidaId="partida-timer-d" emAndamento emResultado />)
+    rerender(<HudDaPartida {...propsBase(T0)} emAndamento emResultado />)
     act(() => {
       vi.advanceTimersByTime(30_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
-    expect(window.sessionStorage.getItem('hud-cronometro-inicio:partida-timer-d')).toBeNull()
-    unmount()
-    window.sessionStorage.clear()
     vi.useRealTimers()
   })
 
-  it('partida distinta recomeça do zero', () => {
+  it('marcos distintos mostram tempos distintos e nada vai para sessionStorage', () => {
     window.sessionStorage.clear()
     vi.useFakeTimers()
-    const base = {
-      jogadorPorId: JOGADORES_HUD,
-      jogadorAtivoId: MEU_JOGADOR_ID,
-      jogadorLocalId: MEU_JOGADOR_ID,
-      geradoresLigados: [] as string[],
-      cartaoDeAcessoObtido: false,
-      onSair: () => {},
-    }
-    const { unmount } = render(<HudDaPartida {...base} partidaId="partida-timer-b" emAndamento emResultado={false} />)
-    act(() => {
-      vi.advanceTimersByTime(65_000)
-    })
+    vi.setSystemTime(T0 + 65_000)
+    const { unmount } = render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
     unmount()
 
-    render(<HudDaPartida {...base} partidaId="partida-timer-c" emAndamento emResultado={false} />)
-    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:00')
-    window.sessionStorage.clear()
+    // Partida iniciada 30s depois: marco distinto, tempo distinto.
+    render(<HudDaPartida {...propsBase(T0 + 30_000)} emAndamento emResultado={false} />)
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:35')
+    expect(window.sessionStorage.length).toBe(0)
     vi.useRealTimers()
+  })
+
+  it('snapshot em andamento injeta o marco; dois clientes com o mesmo marco mostram o mesmo MM:SS', async () => {
+    // Meio do segundo para os dois renders caírem no mesmo MM:SS (#259).
+    const marco = Date.now() - 65_500
+    await partidaComSnapshot(criarSnapshotBase({ iniciadaEm: marco }))
+    const textoA = screen.getByTestId('hud-cronometro').textContent
+    expect(textoA).toBe('01:05')
+    cleanup()
+
+    // Segundo cliente/aba com o mesmo marco do servidor: mesmo MM:SS.
+    await partidaComSnapshot(criarSnapshotBase({ iniciadaEm: marco }))
+    expect(screen.getByTestId('hud-cronometro').textContent).toBe(textoA)
+  })
+
+  it('PARTIDA_INICIADA injeta o marco quando a admissão chegou preparada', async () => {
+    const marco = Date.now() - 65_500
+    renderPartidaParaSaida(null)
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: MEU_JOGADOR_ID,
+        apelido: 'JogadorTeste',
+        partidaId: 'partida-1',
+        estado: 'preparada',
+      }),
+    )
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({ estado: 'preparada', iniciadaEm: null }),
+      }),
+    )
+    // Snapshot preparada ainda não promove a tela — sem HUD/cronômetro.
+    expect(screen.queryByTestId('hud-cronometro')).not.toBeInTheDocument()
+
+    act(() =>
+      ws.simulateMessage({ type: 'PARTIDA_INICIADA', partidaId: 'partida-1', iniciadaEm: marco }),
+    )
+    expect(await screen.findByTestId('hud-cronometro')).toHaveTextContent('01:05')
   })
 
   it('SAIR pede confirmação de desistência; confirmar desiste e vai à principal com login', async () => {
@@ -662,6 +671,66 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     expect(wsInst.onclose).toBeNull()
   })
 
+  it('B1: SAIR na tela de resultado não marca desistência nem envia DESISTIR', async () => {
+    window.sessionStorage.removeItem('partida-desistiu:p')
+    try {
+      const ws = await partidaComSnapshot(criarSnapshotBase())
+      act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'vitoria' }))
+      await screen.findByTestId('overlay-resultado')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/Sair da partida\?/i)
+      expect(screen.getByTestId('hud-confirmacao-saida')).not.toHaveTextContent(/peão será removido/i)
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+
+      const wsInst = MockWebSocket.last()!
+      expect(wsInst.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(window.sessionStorage.getItem('partida-desistiu:p')).toBeNull()
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+    } finally {
+      window.sessionStorage.removeItem('partida-desistiu:p')
+    }
+  })
+
+  it('F4: desistência 2→1 anuncia o fim por desistência no SR', async () => {
+    const ws = await partidaComSnapshot(
+      criarSnapshotBase({ jogadores: JOGADORES_BASE.slice(0, 2) }),
+    )
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+      }),
+    )
+    await screen.findByTestId('aviso-desistencia')
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Ana desistiu/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/Ana desistiu/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(
+      /Partida terminada em derrota por desistência/i,
+    )
+  })
+
+  it('F4-silencio: DESISTENCIA pré-snapshot projeta sem toast/SR (sem inventar dados)', async () => {
+    const ws = await partidaDisponivel()
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+      }),
+    )
+    // Silêncio intencional: sem roster não há apelido/ordem/restantes verdadeiros.
+    expect(screen.queryByTestId('aviso-desistencia')).not.toBeInTheDocument()
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent('')
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
+    // Snapshot seguinte reconcilia e o HUD volta a montar.
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+    await screen.findByTestId('hud-da-partida')
+  })
+
   it('desistência alheia projeta remoção, avisa e anuncia SR; derrota-quando-sobra-1 com retorno', async () => {
     const ws = await partidaComSnapshot(criarSnapshotBase())
     expect(screen.getAllByTestId('hud-avatar-adversario')).toHaveLength(3)
@@ -698,6 +767,267 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     const overlay = await screen.findByTestId('overlay-resultado')
     expect(overlay).toHaveAttribute('data-motivo', 'desistencia')
     expect(overlay).toHaveTextContent(/Restou só você/i)
+  })
+
+  it('R2: SAIR com socket CONNECTING aguarda o OPEN e entrega o DESISTIR', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      expect(ws.readyState).toBe(MockWebSocket.CONNECTING)
+      act(() =>
+        ws.simulateMessage({
+          type: 'ADMISSAO_ACEITA',
+          jogadorId: MEU_JOGADOR_ID,
+          apelido: 'JogadorTeste',
+          partidaId: 'partida-1',
+          estado: 'em_andamento',
+        }),
+      )
+      act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+      await screen.findByTestId('hud-da-partida')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      // Enfileirado, não enviado — e ainda sem navegar.
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(screen.queryByTestId('principal-pagina')).not.toBeInTheDocument()
+
+      // O open drena a fila (entrega) e só então desconecta e navega.
+      act(() => ws.simulateOpen())
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+      expect(ws.sentMessages.map((m) => JSON.parse(m))).toContainEqual(
+        expect.objectContaining({ type: 'DESISTIR_DA_PARTIDA', jogadorId: MEU_JOGADOR_ID }),
+      )
+      expect(ws.onclose).toBeNull()
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+    }
+  })
+
+  it('R4: aviso de desistência permanece visível no resultado 2→1', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-4',
+        peaoId: 'peao-amarelo',
+      }),
+    )
+    await screen.findByTestId('aviso-desistencia')
+    act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'derrota', motivo: 'desistencia' }))
+    await screen.findByTestId('overlay-resultado')
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Cara desistiu/i)
+  })
+
+  it('SR N>2: desistência 4→3 anuncia ordem exata sem frase de fim', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-4',
+        peaoId: 'peao-amarelo',
+      }),
+    )
+    await screen.findByTestId('aviso-desistencia')
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Cara desistiu/i)
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Nova ordem/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/Cara desistiu/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/3 jogadores restantes/i)
+    expect(screen.getByTestId('anuncio-desistencia')).not.toHaveTextContent(
+      /Partida terminada em derrota/i,
+    )
+  })
+
+  it('R2: sem OPEN, confirmar entra em saindo sem navegar; no open, envia e navega', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      act(() =>
+        ws.simulateMessage({
+          type: 'ADMISSAO_ACEITA',
+          jogadorId: MEU_JOGADOR_ID,
+          apelido: 'JogadorTeste',
+          partidaId: 'partida-1',
+          estado: 'em_andamento',
+        }),
+      )
+      act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+      await screen.findByTestId('hud-da-partida')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      // Enfileirado: sem navegar, modal em "saindo" com retry visível e
+      // pendência gravada — nada enviado ainda.
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(screen.queryByTestId('principal-pagina')).not.toBeInTheDocument()
+      expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/Enviando sua desistência/i)
+      expect(screen.getByTestId('hud-sair-mesmo-assim')).toBeInTheDocument()
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBe(MEU_JOGADOR_ID)
+      // O open drena a fila (DESISTIR enviado) e só então navega.
+      act(() => ws.simulateOpen())
+      await waitFor(() =>
+        expect(
+          ws.sentMessages.map((m) => JSON.parse(m)).filter((c) => c.type === 'DESISTIR_DA_PARTIDA'),
+        ).toHaveLength(1),
+      )
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBeNull()
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+    }
+  }, 15000)
+
+  it('R2: Sair mesmo assim navega com pendente; ao voltar, reenvia no open', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      window.sessionStorage.removeItem('partida-desistiu:p')
+      const { unmount } = renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      act(() =>
+        ws.simulateMessage({
+          type: 'ADMISSAO_ACEITA',
+          jogadorId: MEU_JOGADOR_ID,
+          apelido: 'JogadorTeste',
+          partidaId: 'partida-1',
+          estado: 'em_andamento',
+        }),
+      )
+      act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+      await screen.findByTestId('hud-da-partida')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      await user.click(screen.getByTestId('hud-sair-mesmo-assim'))
+      // Navegou sem entregar; a pendência persiste para a próxima visita.
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBe(MEU_JOGADOR_ID)
+      unmount()
+      MockWebSocket.clean()
+
+      // Volta à URL: no primeiro open, o reenvio automático entrega.
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws2 = MockWebSocket.last()!
+      act(() => ws2.simulateOpen())
+      await waitFor(() =>
+        expect(
+          ws2.sentMessages.map((m) => JSON.parse(m)).filter((c) => c.type === 'DESISTIR_DA_PARTIDA'),
+        ).toHaveLength(1),
+      )
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBeNull()
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      window.sessionStorage.removeItem('partida-desistiu:p')
+    }
+  }, 15000)
+
+  it('R2: reenvio já processado pelo servidor é silencioso (sem recusa)', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      window.localStorage.setItem('partida-desistir-pendente:p', MEU_JOGADOR_ID)
+      window.sessionStorage.removeItem('partida-desistiu:p')
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      act(() => ws.simulateOpen())
+      await waitFor(() =>
+        expect(
+          ws.sentMessages.map((m) => JSON.parse(m)).filter((c) => c.type === 'DESISTIR_DA_PARTIDA'),
+        ).toHaveLength(1),
+      )
+      // Servidor já tinha processado: recusa correlacionada limpa sem som/SR.
+      act(() =>
+        ws.simulateMessage({
+          type: 'ERRO_DO_TABULEIRO',
+          codigo: 'JOGADOR_NAO_NA_PARTIDA',
+          mensagem: 'Jogador não está na partida.',
+        }),
+      )
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBeNull()
+      expect(screen.getByTestId('anuncio-de-recusa')).toBeEmptyDOMElement()
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+    }
+  }, 15000)
+
+  it('R2: cancelar no saindo aborta a espera e permite confirmar de novo', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      window.sessionStorage.removeItem('partida-desistiu:p')
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      act(() =>
+        ws.simulateMessage({
+          type: 'ADMISSAO_ACEITA',
+          jogadorId: MEU_JOGADOR_ID,
+          apelido: 'JogadorTeste',
+          partidaId: 'partida-1',
+          estado: 'em_andamento',
+        }),
+      )
+      act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+      await screen.findByTestId('hud-da-partida')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/Enviando sua desistência/i)
+      // Cancela: volta à partida, purga a fila e apaga a pendência.
+      await user.click(screen.getByTestId('hud-sair-cancelar'))
+      expect(screen.queryByTestId('principal-pagina')).not.toBeInTheDocument()
+      expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/Desistir da partida/i)
+      expect(window.localStorage.getItem('partida-desistir-pendente:p')).toBeNull()
+      // O open tardio não envia nem navega (espera invalidada).
+      act(() => ws.simulateOpen())
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      expect(screen.queryByTestId('principal-pagina')).not.toBeInTheDocument()
+      // Nova confirmação funciona (socket já OPEN: envia e navega).
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      await waitFor(() =>
+        expect(
+          ws.sentMessages.map((m) => JSON.parse(m)).filter((c) => c.type === 'DESISTIR_DA_PARTIDA'),
+        ).toHaveLength(1),
+      )
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+      expect(window.sessionStorage.getItem('partida-desistiu:p')).toBe('1')
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+      window.localStorage.removeItem('partida-desistir-pendente:p')
+      window.sessionStorage.removeItem('partida-desistiu:p')
+    }
+  }, 15000)
+
+  it('anti-duplo: confirmar desabilita e envia um único DESISTIR', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+    const wsInst = MockWebSocket.last()!
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('hud-sair'))
+    const confirmar = screen.getByTestId('hud-sair-confirmar')
+    await user.click(confirmar)
+    // Trava local: segundo clique é no-op mesmo antes do navigate assíncrono.
+    await user.click(confirmar).catch(() => undefined)
+    const desistencias = wsInst.sentMessages
+      .map((m) => JSON.parse(m))
+      .filter((c) => c.type === 'DESISTIR_DA_PARTIDA')
+    expect(desistencias).toHaveLength(1)
+    expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
   })
 
   it('desistente que volta à URL vê falha terminal sem retry nem voltar-à-sala', async () => {

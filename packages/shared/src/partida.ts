@@ -374,11 +374,24 @@ export interface EstadoDaPartidaSnapshot {
   // src/partida.ts); `cartaoDeAcessoObtido` é monotônico: Limpeza não revoga.
   readonly geradoresLigados: readonly string[];
   readonly cartaoDeAcessoObtido: boolean;
+  // Marco autoritativo do início da Partida (epoch ms, issue #259): o HUD
+  // deriva o cronômetro dele, então os Jogadores mostram o mesmo MM:SS e a
+  // retomada não reinicia. Opcional/defensivo: snapshots produzidos por
+  // binário anterior omitem o campo — o cliente normaliza ausente para null
+  // (cronômetro sem origem) e a partida `preparada` traz null.
+  readonly iniciadaEm?: number | null;
 }
 
 export interface PartidaIniciadaEvento {
   readonly type: 'PARTIDA_INICIADA';
   readonly partidaId: string;
+  // Marco autoritativo do início (epoch ms, issue #259): os Jogadores que
+  // receberam snapshot `preparada` (iniciadaEm null) obtêm o marco por este
+  // broadcast no instante atômico da virada para em_andamento.
+  // Opcional/defensivo (review PR #374): espelha `EstadoDaPartidaSnapshot.
+  // iniciadaEm?` — binário legado pode omitir o campo e o reducer do cliente
+  // preserva o marco vigente em vez de gravar `undefined`.
+  readonly iniciadaEm?: number | null;
 }
 
 export interface EstadoDaPartidaEvento {

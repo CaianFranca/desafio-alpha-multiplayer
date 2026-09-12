@@ -1637,3 +1637,157 @@ describe('reload do primeiro turno — peça de volta à mesa e turno destravado
     expect(troca.recebidasPendentes).toEqual([])
   })
 })
+
+describe('PARTIDA_INICIADA no modelo do cliente — marco defensivo (issue #259)', () => {
+  const MARCO = 1_700_000_000_000
+
+  it('atribui o marco válido recebido no broadcast', () => {
+    const estado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PARTIDA_INICIADA',
+      partidaId: 'partida-1',
+      iniciadaEm: MARCO,
+    })
+    expect(estado.iniciadaEm).toBe(MARCO)
+  })
+
+  it('evento legado sem iniciadaEm preserva o marco vigente (não grava undefined)', () => {
+    const comMarco = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PARTIDA_INICIADA',
+      partidaId: 'partida-1',
+      iniciadaEm: MARCO,
+    })
+    // Reproduz o wire de binário anterior ao marco (#4): PARTIDA_INICIADA sem
+    // o campo. O assign cego antigo deixava `iniciadaEm: undefined` no modelo.
+    const legado = reduzirEvento(comMarco, { type: 'PARTIDA_INICIADA', partidaId: 'partida-1' })
+    expect(legado.iniciadaEm).toBe(MARCO)
+    expect(legado.iniciadaEm).not.toBeUndefined()
+  })
+
+  it('marco inválido (zero, negativo ou NaN) é no-op e preserva o marco vigente', () => {
+    const comMarco = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PARTIDA_INICIADA',
+      partidaId: 'partida-1',
+      iniciadaEm: MARCO,
+    })
+    for (const invalido of [0, -1, Number.NaN]) {
+      const resultado = reduzirEvento(comMarco, {
+        type: 'PARTIDA_INICIADA',
+        partidaId: 'partida-1',
+        iniciadaEm: invalido,
+      })
+      expect(resultado.iniciadaEm).toBe(MARCO)
+    }
+  })
+
+  it('sem marco vigente, evento inválido mantém null (nunca undefined)', () => {
+    const resultado = reduzirEvento(criarEstadoInicialDoCliente(), {
+      type: 'PARTIDA_INICIADA',
+      partidaId: 'partida-1',
+    })
+    expect(resultado.iniciadaEm).toBeNull()
+  })
+})
+
+describe('DESISTENCIA_REGISTRADA — queda óbvia otimista (issue #290, review PR #378)', () => {
+  function estadoComHospedeira() {
+    const base = criarEstadoInicialDoCliente(2)
+    return {
+      ...base,
+      posicionadas: [
+        {
+          pecaId: 'p-host',
+          tipo: 'reta' as const,
+          orientacao: 0 as const,
+          celula: { linha: 0, coluna: 0 },
+        },
+        {
+          pecaId: 'p-outra',
+          tipo: 'reta' as const,
+          orientacao: 0 as const,
+          celula: { linha: 3, coluna: 3 },
+        },
+      ],
+      peoes: [
+        { peaoId: 'peao-branco', cor: 'branco' as const, celula: { linha: 0, coluna: 0 } },
+        { peaoId: 'peao-vermelho', cor: 'vermelho' as const, celula: { linha: 3, coluna: 3 } },
+      ],
+      jogadorPorId: {
+        j1: {
+          apelido: 'A',
+          cor: 'branco' as const,
+          sanidade: 3,
+          emBaixaIluminacao: false,
+          amedrontado: false,
+          protegido: false,
+          ordem: 1,
+        },
+        j2: {
+          apelido: 'B',
+          cor: 'vermelho' as const,
+          sanidade: 3,
+          emBaixaIluminacao: false,
+          amedrontado: false,
+          protegido: false,
+          ordem: 2,
+        },
+      },
+      peaoPorJogador: { j1: 'peao-branco', j2: 'peao-vermelho' },
+      pecaSelecionadaId: 'p-host',
+    }
+  }
+
+  it('remove peão + peça hospedeira e limpa seleção órfã (restante preservada)', () => {
+    const antes = estadoComHospedeira()
+    const depois = reduzirEvento(antes, {
+      type: 'DESISTENCIA_REGISTRADA',
+      jogadorId: 'j1',
+      peaoId: 'peao-branco',
+    })
+    expect(depois.peoes.some((p) => p.peaoId === 'peao-branco')).toBe(false)
+    expect(depois.posicionadas.some((p) => p.pecaId === 'p-host')).toBe(false)
+    expect(depois.posicionadas.some((p) => p.pecaId === 'p-outra')).toBe(true)
+    expect(depois.pecaSelecionadaId).toBeNull()
+    expect(depois.jogadorPorId['j1']).toBeUndefined()
+  })
+
+  it('replay do mesmo evento é no-op (idempotente)', () => {
+    const antes = estadoComHospedeira()
+    const uma = reduzirEvento(antes, {
+      type: 'DESISTENCIA_REGISTRADA',
+      jogadorId: 'j1',
+      peaoId: 'peao-branco',
+    })
+    const duas = reduzirEvento(uma, {
+      type: 'DESISTENCIA_REGISTRADA',
+      jogadorId: 'j1',
+      peaoId: 'peao-branco',
+    })
+    expect(duas).toEqual(uma)
+  })
+
+  it('lote integral do engine projeta tabuleiro/ordem/Limpeza resultantes (AC2)', () => {
+    // Ordem do lote atômico no wire (engine partida.ts): a desistência abre,
+    // CELULAS_ILUMINADAS + LIMPEZA_APLICADA trazem o tabuleiro resultante e a
+    // Passagem (TURNO_ENCERRADO + TURNO_INICIADO) entrega a vez ao seguinte.
+    const antes = {
+      ...estadoComHospedeira(),
+      jogadorAtivoId: 'j1',
+      rodada: 1,
+      peaoPorJogador: { j1: 'peao-branco', j2: 'peao-vermelho' },
+    }
+    const depois = reduzirEventos(antes, [
+      { type: 'DESISTENCIA_REGISTRADA', jogadorId: 'j1', peaoId: 'peao-branco' },
+      { type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 3, coluna: 3 }] },
+      { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['p-outra'] },
+      { type: 'TURNO_ENCERRADO', jogadorId: 'j1' },
+      { type: 'TURNO_INICIADO', jogadorId: 'j2', rodada: 1 },
+    ])
+    // Peão e vez do desistente saem da ordem; vez passa ao seguinte.
+    expect(depois.peoes.some((p) => p.peaoId === 'peao-branco')).toBe(false)
+    expect(depois.jogadorPorId['j1']).toBeUndefined()
+    expect(depois.jogadorAtivoId).toBe('j2')
+    // Tabuleiro resultante: hospedeira (otimista) + limpeza do lote aplicadas.
+    expect(depois.posicionadas).toEqual([])
+    expect(depois.celulasIluminadas).toEqual([{ linha: 3, coluna: 3 }])
+  })
+})

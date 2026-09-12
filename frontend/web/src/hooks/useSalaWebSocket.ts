@@ -8,6 +8,7 @@ import type {
 } from '@flicker/shared'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
+import { baseDoApp } from '../api/basePath'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -103,6 +104,14 @@ export interface UseSalaWebSocketReturn {
   entrarNaSala: (codigoDeSala: CodigoDeSala) => void
   alternarProntidao: () => void
   sairDaSala: () => void
+  /**
+   * Saída própria otimista (issue #290, F2): a desistência da partida zera a
+   * sala local na hora, sem depender do `MEMBRO_SAIU` via broadcast (que se
+   * perde com o socket do lobby fechado ou em nova aba). Idempotente com o
+   * broadcast — o gate `saiuRef` descarta o eco trailing. Sem modal nem
+   * bloqueados (não é expulsão).
+   */
+  marcarSaidaPropria: () => void
   enviarMensagemDeChat: (conteudo: string) => void
   expulsarMembro: (membroId: string) => void
   desbloquearJogador: (jogadorId: string) => void
@@ -150,7 +159,8 @@ function resolverWsUrl(): string {
     return `${protocol}//${window.location.hostname}:${DEFAULT_LOBBY_WS_PORT}`
   }
   // Atrás do nginx (infra/nginx/nginx.conf), o upgrade de WS acontece em /ws/lobby.
-  return `${protocol}//${host}/ws/lobby`
+  // Subpath (VITE_BASE_PATH): o WS acompanha o prefixo do app.
+  return `${protocol}//${host}${baseDoApp()}ws/lobby`
 }
 
 function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null): string | null {
@@ -361,6 +371,10 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       // Fonte única é `encaminhamento` → `AvisoEncaminhamento`/`EncaminhamentoOverlay`.
       // Não duplica em `erro` (vermelho) nem em `avisos` — evita mensagem dupla (review PR #127).
       if (isEncaminhamentoEvento(data)) {
+        // Saída/expulsão própria (#290): ignora encaminhamento trailing da sala
+        // antiga até voltar a ser membro — o gate de sala abaixo libera ao
+        // reingressar, e eventos de sala sempre precedem novo encaminhamento.
+        if (expulsoRef.current || saiuRef.current) return
         const next = aplicarEventoDeEncaminhamento(data)
         if (next) setEncaminhamento(next)
         return
@@ -380,8 +394,9 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
           return
         }
         case 'MENSAGEM_DE_CHAT': {
-          // Expulso: ignora mensagens atrasadas da sala da qual saiu.
-          if (expulsoRef.current) return
+          // Expulsão/saída própria: ignora mensagens atrasadas da sala antiga
+          // (mesma janela trailing do SALA_ATUALIZADA, issue #290).
+          if (expulsoRef.current || saiuRef.current) return
           chatContadorRef.current += 1
           const id = `chat-${chatContadorRef.current}-${Date.now()}`
           const mensagem: MensagemDeChatDoLobby = {
@@ -430,6 +445,9 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
               setMensagensDeChat([])
               setJogadoresBloqueados([])
               setExpulso(true)
+              // Simétrico à saída própria (#290): encaminhamento stale da sala
+              // antiga não pode ressuscitar overlay/snapshot.
+              setEncaminhamento(estadoInicialDoEncaminhamento())
               // Ativa o gate que ignora eventos atrasados da sala antiga.
               expulsoRef.current = true
               return
@@ -650,6 +668,16 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     comandosPendentesRef.current = []
   }, [enviar])
 
+  const marcarSaidaPropria = useCallback(() => {
+    // Mesmo efeito do ramo MEMBRO_SAIU-próprio do broadcast, sem o aviso
+    // (a desistência já tem toast/SR próprios na PartidaPage).
+    setSala(null)
+    setMensagensDeChat([])
+    setJogadoresBloqueados([])
+    setEncaminhamento(estadoInicialDoEncaminhamento())
+    saiuRef.current = true
+  }, [])
+
   const enviarMensagemDeChat = useCallback(
     (conteudo: string) => {
       // Espelha a validação do backend (1..500, trim) — o servidor recusaria
@@ -701,6 +729,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     entrarNaSala,
     alternarProntidao,
     sairDaSala,
+    marcarSaidaPropria,
     enviarMensagemDeChat,
     expulsarMembro,
     desbloquearJogador,

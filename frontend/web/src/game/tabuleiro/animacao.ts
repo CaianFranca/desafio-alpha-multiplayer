@@ -11,15 +11,18 @@
  * reservados para os tickets paralelos.
  */
 
+import { comBase } from '../../api/basePath'
+
 export const DURACAO_ENCAIXE_MS = 250
 export const DURACAO_VOO_PEAO_MS = 500
 export const DURACAO_FADE_LIMPEZA_MS = 300
 export const DURACAO_SLIDE_CAIXA_MS = 400
 
-export const CAMINHO_SOM_CARTA = '/media/card-flick.wav'
-export const CAMINHO_TOQUE_ENIGMATICO = '/media/scary-sound.mp3'
-export const CAMINHO_SOM_SOMBRIO_LIMPEZA = '/media/toque-sombrio-limpeza.mp3'
-export const CAMINHO_SOM_SLIDE_CAIXA = '/media/som-slide-caixa.mp3'
+// Subpath (VITE_BASE_PATH): os assets de mídia acompanham o prefixo do app.
+export const CAMINHO_SOM_CARTA = comBase('/media/card-flick.wav')
+export const CAMINHO_TOQUE_ENIGMATICO = comBase('/media/scary-sound.mp3')
+export const CAMINHO_SOM_SOMBRIO_LIMPEZA = comBase('/media/toque-sombrio-limpeza.mp3')
+export const CAMINHO_SOM_SLIDE_CAIXA = comBase('/media/som-slide-caixa.mp3')
 
 export function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3)

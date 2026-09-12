@@ -1,7 +1,14 @@
 /* Tokens globais — única fonte de cores, fontes, imagens e sombras.
    Registrados em `@theme` (Tailwind v4 CSS-first) para gerar utilities
-   como `bg-background`, `text-muted`, `font-display`, `bg-hero`, `bg-auth`.
-   Fundação visual: terror clínico abandonado (refs hero/final_cta/cadastro/login). */
+   como `bg-background`, `text-muted`, `font-display`.
+   Fundação visual: terror clínico abandonado (refs hero/final_cta/cadastro/login).
+
+   Imagens de fundo (hero e auth) NÃO vivem aqui: `url()` dentro de custom
+   property resolve relativo ao documento, não à folha, então não dá para
+   prefixá-las com `var()` de forma confiável sob subpath (VITE_BASE_PATH).
+   Os componentes montam a URL com `comBase(...)` e a injetam como custom
+   property (`--scene-hero-image`/`--scene-auth-image`) no próprio elemento,
+   consumida em scenes.css. */
 
 @theme {
   --color-background: #0c0c0e;
@@ -12,9 +19,6 @@
 
   --font-body: Inter, ui-sans-serif, system-ui, sans-serif;
   --font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
-
-  --background-image-hero: url("/assets/imagem_fundo_hero.webp");
-  --background-image-auth: url("/assets/imagem_fundo_cadastro_login.png");
 
   --shadow-auth-card: 0 24px 64px rgba(0, 0, 0, 0.55);
   --shadow-cta-hero: 0 8px 24px rgba(0, 0, 0, 0.35);

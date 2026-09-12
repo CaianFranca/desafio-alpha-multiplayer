@@ -27,9 +27,9 @@ redis.call('EXPIRE', KEYS[2], ARGV[1])
 return 1
 `.trim();
 
-import { chaveDaPartida, chaveDoEstadoDaPartida } from './chaves.ts';
+import { chaveDaPartida, chaveDoEstadoDaPartida, chaveDoRetornoPendente } from './chaves.ts';
 
-export { chaveDaPartida, chaveDoEstadoDaPartida };
+export { chaveDaPartida, chaveDoEstadoDaPartida, chaveDoRetornoPendente };
 
 /**
  * Grava o estado inicial da partida no Redis com o TTL da partida preparada.

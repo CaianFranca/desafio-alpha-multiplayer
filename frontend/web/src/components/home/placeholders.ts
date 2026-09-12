@@ -1,3 +1,5 @@
+import { comBase } from '../../api/basePath'
+
 export const hero = {
   eyebrow: 'Sanatório Flicker of Sanity',
   title: 'Prepare-se para a partida',
@@ -97,7 +99,7 @@ export const objectives = {
       description:
         'Explore os corredores para encontrar e ligar os 3 Geradores. A energia reestabelecida é indispensável para alimentar o sistema do Portão de Saída.',
       imageAlt: 'Gerador elétrico em sala de utilidade do sanatório',
-      image: '/assets/objetivo-1.jpg',
+      image: comBase('/assets/objetivo-1.jpg'),
       icon: 'geradores',
     },
     {
@@ -105,7 +107,7 @@ export const objectives = {
       description:
         'Infiltre-se na Sala do Diretor para obter o Cartão de Acesso, chave necessária para autorizar a abertura do portão principal.',
       imageAlt: 'Cartão de acesso brilhando sobre uma mesa de metal',
-      image: '/assets/objetivo-2.jpg',
+      image: comBase('/assets/objetivo-2.jpg'),
       icon: 'cartao',
     },
     {
@@ -113,7 +115,7 @@ export const objectives = {
       description:
         'Com os Geradores ligados e o Cartão de Acesso em mãos, reúnam-se todos no portão principal para destravar a tranca e fugir do sanatório.',
       imageAlt: 'Portão de saída metálico com tranca eletrônica',
-      image: '/assets/objetivo-3.jpg',
+      image: comBase('/assets/objetivo-3.jpg'),
       icon: 'portao',
     },
   ],
@@ -132,16 +134,16 @@ export const footer = {
   copyright: `© ${new Date().getFullYear()} Flicker of Sanity. Todos os direitos reservados.`,
   logos: [
     {
-      src: '/assets/Logo_Ginga_Branco.png',
+      src: comBase('/assets/Logo_Ginga_Branco.png'),
       alt: 'Ginga',
     },
     {
-      src: '/assets/alpha_edtech_logo_color_unofficial.svg',
+      src: comBase('/assets/alpha_edtech_logo_color_unofficial.svg'),
       alt: 'Alpha EdTech',
       href: 'https://www.alphaedtech.org.br/',
     },
     {
-      src: '/assets/Logo_Cummis.png',
+      src: comBase('/assets/Logo_Cummis.png'),
       alt: 'Cummins',
       href: 'https://www.cummins.com/pt-br',
     },

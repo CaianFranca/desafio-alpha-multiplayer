@@ -22,8 +22,11 @@ const entrar = (jogadorId: string, membroId: string, salaId = 'sala-1') =>
 const alternar = (jogadorId: string, salaId = 'sala-1') =>
   ({ tipo: 'alternar_prontidao', salaId, jogadorId } as const);
 
-const aceitar = (salaId = 'sala-1') =>
-  ({ tipo: 'aceitar_encaminhamento', salaId } as const);
+const rosterDe = (quantidade: number): readonly string[] =>
+  Array.from({ length: quantidade }, (_, i) => `jogador-${i + 1}`);
+
+const aceitar = (salaId = 'sala-1', rosterOfertado: readonly string[] = rosterDe(4)) =>
+  ({ tipo: 'aceitar_encaminhamento', salaId, rosterOfertado } as const);
 
 const reabrir = (salaId = 'sala-1') =>
   ({ tipo: 'reabrir_sala', salaId } as const);

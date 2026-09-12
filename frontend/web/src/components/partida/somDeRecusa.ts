@@ -22,9 +22,10 @@
  */
 
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
+import { comBase } from '../../api/basePath'
 
-/** Asset de recusa (web/media → servido em /media/). */
-export const CAMINHO_SOM_DE_RECUSA = '/media/bumpintowall.mp3'
+/** Asset de recusa (web/media → servido em /media/), já com o subpath do build. */
+export const CAMINHO_SOM_DE_RECUSA = comBase('/media/bumpintowall.mp3')
 
 /**
  * Volume base do som de recusa (contrato com o futuro botão de volume, ADR-0007:

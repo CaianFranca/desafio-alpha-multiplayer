@@ -17,6 +17,14 @@ export interface AvisoDeRetorno {
   readonly serverId: string;
   readonly resultado: 'vitoria' | 'derrota' | 'nao-inicio';
   readonly jogadores: readonly string[];
+  /**
+   * B2 (issue #290): houve desistência neste término (ex.: 2→1). O lobby
+   * revalida `jogadores == membros ativos` com 409 — com o detach ainda em
+   * voo (teto do desvincularDesistentes estourado), esse 409 é transitório e
+   * deve retentar, não encerrar como definitivo. Não viaja no payload HTTP
+   * (só decisão local de retry).
+   */
+  readonly teveDesistencia: boolean;
 }
 
 /**
@@ -60,10 +68,16 @@ export interface RetornoClienteConfig {
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-function ehRetentavel(status: number, codigo: unknown): boolean {
+function ehRetentavel(status: number, codigo: unknown, teveDesistencia = false): boolean {
   if (status === 408 || status === 429) return true;
   if (status === 503) return true;
   if (status === 409 && codigo === 'SALA_INCONSISTENTE') return true;
+  // B2 (issue #290): o retorno N−1 pode chegar antes do detach (teto do
+  // desvincularDesistentes) — o lobby responde 409 SALA_NAO_ENCAMINHADA com
+  // ativos==N. Como o detach em fundo converge (lobby idempotente), esse 409
+  // é transitório quando houve desistência e deve retentar. Sem desistência,
+  // a divergência é real e continua definitiva.
+  if (status === 409 && codigo === 'SALA_NAO_ENCAMINHADA' && teveDesistencia) return true;
   if (status >= 500) return true;
   return false;
 }
@@ -137,7 +151,7 @@ export function criarClienteDeRetorno(config: RetornoClienteConfig): (aviso: Avi
           codigo = undefined;
         }
 
-        if (ehRetentavel(resposta.status, codigo)) {
+        if (ehRetentavel(resposta.status, codigo, aviso.teveDesistencia)) {
           const retryAfterMs = extrairRetryAfterMs(resposta.headers);
           console.warn('[retorno] falha retentável, reagendando', {
             salaId: aviso.salaId,

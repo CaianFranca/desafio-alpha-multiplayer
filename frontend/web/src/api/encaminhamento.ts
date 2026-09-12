@@ -1,11 +1,14 @@
 // Helpers do Encaminhamento para o frontend (issue #45).
 // Vocabulário canônico: Encaminhamento, Partida, Alvo da Partida.
 
+import { baseDoApp } from './basePath'
+
 export function buildGameWsUrl(serverId: string, partidaId: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   // O lobby faz proxy de /ws/game/* para o upstream game_servers (SETUP.md).
   // Query carrega partida-id kebab-case conforme backend/game-server/src/ws/ws.ts:74.
-  return `${protocol}//${window.location.host}/ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}`
+  // Subpath (VITE_BASE_PATH): o WS acompanha o prefixo do app.
+  return `${protocol}//${window.location.host}${baseDoApp()}ws/game/${encodeURIComponent(serverId)}?partida-id=${encodeURIComponent(partidaId)}`
 }
 
 export function buildGameRedirectHref(serverId: string, partidaId: string, codigoDeSala?: string | null): string {

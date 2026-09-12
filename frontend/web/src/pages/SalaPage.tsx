@@ -12,6 +12,7 @@ import { AuthContext } from '../state/auth-context'
 import { useSalaWebSocketContext } from '../state/sala-web-socket-context'
 import { CODIGO_DE_SALA_TAMANHO, normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { urlsDoAlvo } from '../api/encaminhamento'
+import { comBase } from '../api/basePath'
 
 export function SalaPage() {
   const { codigoDeSala: codigoParam } = useParams<{ codigoDeSala: string }>()
@@ -112,7 +113,7 @@ export function SalaPage() {
         // interno (ou a barra de rolagem entrando/saindo) não desloca nem
         // recalcula o `cover`.
         background:
-          'linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url("/assets/criar-sala-background.jpg") center / cover no-repeat',
+          `linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url("${comBase('/assets/criar-sala-background.jpg')}") center / cover no-repeat`,
         backgroundAttachment: 'fixed',
       }}
     >

@@ -36,6 +36,7 @@ import {
   obterEstadoDaPartida,
   salvarEstadoDaPartida,
 } from './estado.ts';
+import { chaveDoRetornoPendente } from './chaves.ts';
 import { obterPartida, type PartidaPreparada } from './partidas.ts';
 import type { AvisoDeRetorno, AvisoDeDesistencia } from '../retorno/cliente.ts';
 import { sleep } from '../utils/sleep.ts';
@@ -52,6 +53,12 @@ export interface PartidaHandlersDeps {
    * Best-effort com retry (nunca falha a desistência).
    */
   readonly notificarDesistencia?: (aviso: AvisoDeDesistencia) => Promise<void>;
+  /**
+   * Teto por desistente no detach antes do retorno (issue #290, R1): evita a
+   * cadeia travar para sempre com o lobby fora do ar (o cliente de desistência
+   * tem retry infinito). Injetável nos testes.
+   */
+  readonly tetoDesvinculoMs?: number;
   /** Stream de debug (issue #340). Opcional: sem o campo, nenhuma linha é espelhada. */
   readonly debug?: DebugStreamDaPartida;
 }
@@ -62,10 +69,13 @@ export class PartidaHandlers {
   private readonly partidaTerminadaTtlSegundos: number;
   private readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
   private readonly notificarDesistencia?: (aviso: AvisoDeDesistencia) => Promise<void>;
+  private readonly tetoDesvinculoMs: number;
   private readonly debug?: DebugStreamDaPartida;
   // Serialização mononodo: uma cadeia de promessas por partidaId.
   private readonly cadeiasPorPartida: Map<string, Promise<unknown>> = new Map();
   private readonly retornosPendentes: Map<string, Promise<void>> = new Map();
+  // Detaches em voo (nunca contam para o dedup do retorno — só para o drain).
+  private readonly desvinculosPendentes: Map<string, Set<Promise<void>>> = new Map();
   private readonly callbacksEnviados: Set<string> = new Set();
 
   constructor(deps: PartidaHandlersDeps) {
@@ -74,6 +84,7 @@ export class PartidaHandlers {
     this.partidaTerminadaTtlSegundos = deps.partidaTerminadaTtlSegundos ?? 3600;
     this.notificarRetorno = deps.notificarRetorno;
     this.notificarDesistencia = deps.notificarDesistencia;
+    this.tetoDesvinculoMs = deps.tetoDesvinculoMs ?? 5000;
     this.debug = deps.debug;
   }
 
@@ -116,9 +127,20 @@ export class PartidaHandlers {
         return;
       }
 
-      // Captura antecipada dos metadados da partida para fallback do callback (B1).
+      // Re-drive do Retorno (issue #290, item 4): comandos que chegam com a
+      // partida já terminada (ex.: recusa pós-término) completam pendência
+      // deixada por crash-restart ou lote degradado — já dentro da mutação,
+      // sem re-enfileirar (isso travaria a cadeia nela mesma).
+      if (estado.resultado !== null) {
+        const pendente = await this.lerRetornoPendente(partidaId);
+        if (pendente !== null) {
+          await this.completarRetornoPendenteDentroDaMutacao(partidaId, pendente);
+        }
+      }
+
+      // Captura antecipada dos metadados da partida para fallback do callback (B1/B3).
       let partidaPrevia: import('./partidas.ts').PartidaPreparada | null = null;
-      if (this.notificarRetorno !== undefined) {
+      if (this.notificarRetorno !== undefined || this.notificarDesistencia !== undefined) {
         try {
           partidaPrevia = await obterPartida(this.redis, partidaId);
         } catch {
@@ -156,30 +178,38 @@ export class PartidaHandlers {
         // retorno aqui). O caso com término é tratado abaixo com await para
         // garantir a ordem detach → retorno.
         const notificar = this.notificarDesistencia;
+        // R5: placeholder rastreado (mapa de desvinculos, fora do dedup do
+        // retorno) ANTES do await obterPartida para que
+        // drenarRetornosPendentes (SIGTERM) enxergue o detach em voo.
+        const concluirEspera = this.rastrearEspera(partidaId);
         void (async () => {
-          let partida: PartidaPreparada | null = partidaPrevia;
-          if (partida === null) {
-            try {
-              partida = await obterPartida(this.redis, partidaId);
-            } catch {
-              partida = null;
+          try {
+            let partida: PartidaPreparada | null = partidaPrevia;
+            if (partida === null) {
+              try {
+                partida = await obterPartida(this.redis, partidaId);
+              } catch {
+                partida = null;
+              }
             }
-          }
-          if (partida === null) {
-            console.error('[partida] sem metadados para callback de desistência', { partidaId });
-            return;
-          }
-          for (const evento of desistencias) {
-            if (evento.tipo !== 'desistencia_registrada') continue;
-            const promessa = notificar({
-              salaId: partida.salaId,
-              partidaId,
-              serverId: partida.serverId,
-              jogadorId: evento.jogadorId,
-            }).catch((erro: unknown) => {
-              console.error('[partida] callback de desistência terminou com erro', { partidaId, erro });
-            });
-            this.rastrearRetorno(partidaId, promessa);
+            if (partida === null) {
+              console.error('[partida] sem metadados para callback de desistência', { partidaId });
+              return;
+            }
+            for (const evento of desistencias) {
+              if (evento.tipo !== 'desistencia_registrada') continue;
+              const promessa = notificar({
+                salaId: partida.salaId,
+                partidaId,
+                serverId: partida.serverId,
+                jogadorId: evento.jogadorId,
+              }).catch((erro: unknown) => {
+                console.error('[partida] callback de desistência terminou com erro', { partidaId, erro });
+              });
+              this.rastrearDesvinculo(partidaId, promessa);
+            }
+          } finally {
+            concluirEspera();
           }
         })().catch(() => undefined);
       }
@@ -203,10 +233,10 @@ export class PartidaHandlers {
           // Término com desistentes (2→1, issue #290): desvincula TODOS os
           // desistentes (roster − engine) ANTES do retorno — o lobby revalida
           // `jogadores == membros ativos` com 409 definitivo, então o detach
-          // precisa ter commitado antes do POST /api/retorno. O await só
-          // atrasa esta cadeia pós-término (comandos seguintes já seriam
-          // recusados com PARTIDA_TERMINADA); com o lobby fora do ar, o
-          // sistema já está degradado (o próprio retorno gira em retry).
+          // precisa ter commitado antes do POST /api/retorno. Best-effort com
+          // teto por desistente (R1): com o lobby fora do ar, segue para o
+          // retorno (que tem retry próprio) em vez de travar a cadeia; o
+          // detach em fundo continua tentando e o lobby é idempotente.
           await this.desvincularDesistentes(
             partidaId,
             partidaPrevia,
@@ -262,44 +292,94 @@ export class PartidaHandlers {
                         if (partidaReagendada2 === null && partidaPrevia !== null) {
                           partidaReagendada2 = partidaPrevia;
                         }
-                        if (partidaReagendada2 === null || this.notificarRetorno === undefined) {
-                          console.error('[partida] callback ainda sem metadados após segundo reagendamento', { partidaId });
+                        if (partidaReagendada2 === null) {
+                          // Sem metadados mesmo após retries: retry sem
+                          // desistir (converge transientes; crash-restart
+                          // recupera via re-drive da pendência).
+                          this.reagendarRetornoSemN1(
+                            partidaId,
+                            termino.desfecho.tipo,
+                            resultado.estado.jogadores.map((j) => j.jogadorId),
+                            desistencias.length > 0,
+                          );
                           return;
                         }
-                        const avisoReagendado2 = await this.montarAviso(partidaReagendada2, termino.desfecho.tipo);
-                        this.callbacksEnviados.add(partidaId);
-                        const promessa2 = this.notificarRetorno(avisoReagendado2).catch((erro: unknown) => {
-                          console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
-                        });
-                        this.rastrearRetorno(partidaId, promessa2);
+                        // F9 (#290): o detach pode ter sido pulado por falta de
+                        // metadados no término — tenta antes do retorno para
+                        // não esbarrar no 409 do lobby (mesma ordem do feliz).
+                        await this.desvincularDesistentes(
+                          partidaId,
+                          partidaReagendada2,
+                          resultado.estado.jogadores.map((j) => j.jogadorId),
+                        );
+                        const avisoReagendado2 = await this.montarAviso(
+                          partidaReagendada2,
+                          termino.desfecho.tipo,
+                          resultado.estado.jogadores.map((j) => j.jogadorId),
+                          desistencias.length > 0,
+                        );
+                        if (avisoReagendado2 === null) {
+                          this.reagendarRetornoSemN1(
+                            partidaId,
+                            termino.desfecho.tipo,
+                            resultado.estado.jogadores.map((j) => j.jogadorId),
+                            desistencias.length > 0,
+                          );
+                          return;
+                        }
+                        this.enviarRetornoComPersistencia(partidaId, avisoReagendado2);
                       }).catch(() => undefined);
                     }, reatrasoMs).unref?.();
                     return;
                   }
                   if (this.notificarRetorno === undefined) return;
-                  const avisoReagendado = await this.montarAviso(partidaReagendada, termino.desfecho.tipo);
-                  this.callbacksEnviados.add(partidaId);
-                  const promessa = this.notificarRetorno(avisoReagendado).catch((erro: unknown) => {
-                    console.error('[partida] callback de retorno reagendado terminou com erro', { partidaId, erro });
-                  });
-                  this.rastrearRetorno(partidaId, promessa);
+                  // F9 (#290): idem acima — detach antes do retorno reagendado.
+                  await this.desvincularDesistentes(
+                    partidaId,
+                    partidaReagendada,
+                    resultado.estado.jogadores.map((j) => j.jogadorId),
+                  );
+                  const avisoReagendado = await this.montarAviso(
+                    partidaReagendada,
+                    termino.desfecho.tipo,
+                    resultado.estado.jogadores.map((j) => j.jogadorId),
+                    desistencias.length > 0,
+                  );
+                  if (avisoReagendado === null) {
+                    this.reagendarRetornoSemN1(
+                      partidaId,
+                      termino.desfecho.tipo,
+                      resultado.estado.jogadores.map((j) => j.jogadorId),
+                      desistencias.length > 0,
+                    );
+                    return;
+                  }
+                  this.enviarRetornoComPersistencia(partidaId, avisoReagendado);
                 }).catch(() => undefined);
               }, atrasoMs).unref?.();
             } else {
-              aviso = await this.montarAviso(partida, termino.desfecho.tipo);
-              this.callbacksEnviados.add(partidaId);
+              const avisoMontado = await this.montarAviso(
+                partida,
+                termino.desfecho.tipo,
+                resultado.estado.jogadores.map((j) => j.jogadorId),
+                desistencias.length > 0,
+              );
+              if (avisoMontado === null) {
+                this.reagendarRetornoSemN1(
+                  partidaId,
+                  termino.desfecho.tipo,
+                  resultado.estado.jogadores.map((j) => j.jogadorId),
+                  desistencias.length > 0,
+                );
+              } else {
+                aviso = avisoMontado;
+              }
             }
           }
         }
 
-        if (aviso !== undefined && this.notificarRetorno !== undefined) {
-          const promessa = this.notificarRetorno(aviso).catch((erro: unknown) => {
-            console.error('[partida] callback de retorno terminou com erro', {
-              partidaId,
-              erro,
-            });
-          });
-          this.rastrearRetorno(partidaId, promessa);
+        if (aviso !== undefined) {
+          this.enviarRetornoComPersistencia(partidaId, aviso);
         }
       }
     }).catch((erro: unknown) => {
@@ -329,6 +409,12 @@ export class PartidaHandlers {
       const estado = await obterEstadoDaPartida(this.redis, partidaId);
       if (estado === null) {
         return;
+      }
+      // Re-drive do Retorno (issue #290, item 4): toda (re)conexão passa por
+      // aqui — partida terminada com pendência (crash-restart/degradado)
+      // completa a entrega agora. O retorno do lobby é idempotente.
+      if (estado.resultado !== null) {
+        await this.tentarCompletarRetornoPendente(partidaId);
       }
       this.broadcaster.enviarParaSocket(socket, {
         type: 'TURNO_INICIADO',
@@ -364,8 +450,10 @@ export class PartidaHandlers {
 
   /**
    * Desvincula no lobby todos os desistentes de uma partida terminada
-   * (roster − participação atual no engine), aguardando cada callback.
-   * Chamado antes do retorno para garantir a ordem detach → retorno.
+   * (roster − participação atual no engine), aguardando cada callback COM
+   * TETO (R1). Chamado antes do retorno para garantir a ordem detach →
+   * retorno no caminho feliz; no degradado segue para o retorno e deixa o
+   * retry de fundo convergir (lobby idempotente).
    */
   private async desvincularDesistentes(
     partidaId: string,
@@ -388,15 +476,44 @@ export class PartidaHandlers {
     }
     const naPartida = new Set(jogadoresNaPartida);
     const desistentes = partida.roster.map((m) => m.jogadorId).filter((id) => !naPartida.has(id));
-    for (const jogadorId of desistentes) {
+    // Em paralelo com teto individual: jogadorIds distintos, lobby idempotente
+    // e serializado na fila — o tempo total vira max(teto), não soma.
+    await Promise.all(desistentes.map(async (jogadorId) => {
+      const promessa = notificar({ salaId: partida.salaId, partidaId, serverId: partida.serverId, jogadorId });
+      // Rastreia em mapa próprio (nunca no de retornos — o dedup do retorno
+      // abaixo não pode ver detach como "callback em voo").
+      this.rastrearDesvinculo(partidaId, promessa.catch(() => undefined));
       try {
-        await notificar({ salaId: partida.salaId, partidaId, serverId: partida.serverId, jogadorId });
+        const desfecho = await this.correrComTeto(promessa, this.tetoDesvinculoMs);
+        if (desfecho === 'teto') {
+          console.warn('[partida] teto do detach, seguindo para o retorno', {
+            partidaId,
+            jogadorId,
+            tetoMs: this.tetoDesvinculoMs,
+          });
+        }
       } catch (erro: unknown) {
         // O cliente só rejeita em erro de programação (rede/HTTP viram
-        // retry infinito); logar e seguir para não travar os demais.
+        // retry infinito, agora limitado pelo teto acima); logar e seguir
+        // para não travar os demais.
         console.error('[partida] falha ao desvincular desistente', { partidaId, jogadorId, erro });
       }
+    }));
+  }
+
+  /** Corre com teto: 'ok' se resolveu/rejeitou a tempo, 'teto' se estourou. */
+  private async correrComTeto(promessa: Promise<unknown>, tetoMs: number): Promise<'ok' | 'teto'> {
+    if (tetoMs <= 0) {
+      await promessa;
+      return 'ok';
     }
+    let estourou = false;
+    const teto = sleep(tetoMs).then(() => {
+      estourou = true;
+    });
+    void promessa.catch(() => undefined);
+    await Promise.race([promessa.then(() => undefined, () => undefined), teto]);
+    return estourou ? 'teto' : 'ok';
   }
 
   /**
@@ -406,12 +523,28 @@ export class PartidaHandlers {
    * o lobby aceita subconjunto N-1 e remove desistentes atomically, então o
    * aviso reflete os restantes para convergir sem 409 definitivo.
    *
-   * O lobby desvincula cada desistente no callback de desistência e revalida
-   * `jogadores == membros ativos`, então o aviso precisa refletir os
-   * restantes. Sem estado (não-início) cai no roster, preservando o
-   * comportamento anterior. Vitória sem desistências: engine == roster.
+   * Prefere `jogadoresEmMemoria` (estado pós-mutação já em mãos, sempre N−1
+   * correto mesmo com Redis indisponível); sem memória, tenta o Redis; sem
+   * ambos e com desistência no lote, retorna null (não inventa N — o lobby
+   * rejeitaria com 409 definitivo e a sala prenderia). Sem desistência
+   * (não-início/vitória limpa), cai no roster como antes.
    */
-  private async montarAviso(partida: PartidaPreparada, resultado: 'vitoria' | 'derrota'): Promise<AvisoDeRetorno> {
+  private async montarAviso(
+    partida: PartidaPreparada,
+    resultado: 'vitoria' | 'derrota',
+    jogadoresEmMemoria: readonly string[] | null = null,
+    teveDesistencia = false,
+  ): Promise<AvisoDeRetorno | null> {
+    if (jogadoresEmMemoria !== null) {
+      return {
+        salaId: partida.salaId,
+        partidaId: partida.partidaId,
+        serverId: partida.serverId,
+        resultado,
+        jogadores: jogadoresEmMemoria,
+        teveDesistencia,
+      };
+    }
     let jogadores: readonly string[] | null = null;
     try {
       const estado = await obterEstadoDaPartida(this.redis, partida.partidaId);
@@ -419,13 +552,250 @@ export class PartidaHandlers {
     } catch {
       jogadores = null;
     }
+    if (jogadores !== null) {
+      return {
+        salaId: partida.salaId,
+        partidaId: partida.partidaId,
+        serverId: partida.serverId,
+        resultado,
+        jogadores,
+        teveDesistencia,
+      };
+    }
+    if (teveDesistencia) return null;
     return {
       salaId: partida.salaId,
       partidaId: partida.partidaId,
       serverId: partida.serverId,
       resultado,
-      jogadores: jogadores ?? partida.roster.map((m) => m.jogadorId),
+      jogadores: partida.roster.map((m) => m.jogadorId),
+      teveDesistencia,
     };
+  }
+
+  /**
+   * Reagendamento do retorno sem N−1 confiável (review PR #378, item 4): nunca
+   * descarta a derrota 2→1 no degradado — reagenda com backoff exponencial
+   * (cap 30s, mesmo teto do cliente de retorno) até convergir. Transientes de
+   * Redis convergem sozinhos; crash-restart recupera via re-drive da
+   * pendência (`tentarCompletarRetornoPendente`). Timer com `unref` para não
+   * segurar o processo; sem desistência após N tentativas.
+   */
+  private reagendarRetornoSemN1(
+    partidaId: string,
+    resultado: 'vitoria' | 'derrota',
+    jogadoresEmMemoria: readonly string[] | null,
+    teveDesistencia: boolean,
+    atrasoMs = 1000,
+    tentativa = 1,
+  ): void {
+    if (this.notificarRetorno === undefined) return;
+    // Visibilidade operacional: retry sem desistir, então cada reagendamento
+    // é logado (tentativa + atraso) em vez de espiral silenciosa.
+    console.warn('[partida] retorno sem dados confiáveis, reagendando', {
+      partidaId,
+      resultado,
+      tentativa,
+      atrasoMs,
+    });
+    setTimeout(() => {
+      void this.enfileirarMutacao(partidaId, async () => {
+        if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
+        if (this.notificarRetorno === undefined) return;
+        let partida: PartidaPreparada | null = null;
+        try {
+          partida = await obterPartida(this.redis, partidaId);
+        } catch {
+          partida = null;
+        }
+        if (partida === null) {
+          this.reagendarRetornoSemN1(
+            partidaId,
+            resultado,
+            jogadoresEmMemoria,
+            teveDesistencia,
+            Math.min(atrasoMs * 2, 30000),
+            tentativa + 1,
+          );
+          return;
+        }
+        // F9 (#290): detach antes do retorno (mesma ordem do caminho feliz)
+        // para não esbarrar no 409 do lobby; idempotente, converge junto.
+        await this.desvincularDesistentes(
+          partidaId,
+          partida,
+          jogadoresEmMemoria ?? [],
+        );
+        const aviso = await this.montarAviso(partida, resultado, jogadoresEmMemoria, teveDesistencia);
+        if (aviso === null) {
+          this.reagendarRetornoSemN1(
+            partidaId,
+            resultado,
+            jogadoresEmMemoria,
+            teveDesistencia,
+            Math.min(atrasoMs * 2, 30000),
+            tentativa + 1,
+          );
+          return;
+        }
+        this.enviarRetornoComPersistencia(partidaId, aviso);
+      }).catch(() => undefined);
+    }, atrasoMs).unref?.();
+  }
+
+  /**
+   * Envio do Retorno com persistência da pendência (issue #290, item 4): grava
+   * a chave ANTES de enviar e apaga após a conclusão (aceito ou rejeição
+   * definitiva — o cliente de retorno só retorna nesses casos). Marca
+   * `callbacksEnviados` antes do envio (dedup de concorrentes, como antes).
+   */
+  private enviarRetornoComPersistencia(partidaId: string, aviso: AvisoDeRetorno): void {
+    const notificar = this.notificarRetorno;
+    this.callbacksEnviados.add(partidaId);
+    if (notificar === undefined) return;
+    const promessa = (async () => {
+      try {
+        await this.redis.set(
+          chaveDoRetornoPendente(partidaId),
+          JSON.stringify({ resultado: aviso.resultado, teveDesistencia: aviso.teveDesistencia }),
+          'EX',
+          this.partidaTerminadaTtlSegundos,
+        );
+      } catch {
+        // Redis fora do ar: segue para o envio; o retry em memória cobre.
+      }
+      try {
+        await notificar(aviso);
+      } catch (erro: unknown) {
+        console.error('[partida] callback de retorno terminou com erro', {
+          partidaId,
+          erro,
+        });
+      } finally {
+        try {
+          await this.redis.del(chaveDoRetornoPendente(partidaId));
+        } catch {
+          // Sem Redis não há pendência persistida a limpar.
+        }
+      }
+    })();
+    this.rastrearRetorno(partidaId, promessa);
+  }
+
+  /**
+   * Re-drive da pendência de Retorno (issue #290, item 4): se um crash-restart
+   * (ou lote degradado) deixou a chave, completa a entrega com dados vivos —
+   * N−1 do estado atual + metadados da partida. Chamado em
+   * `anunciarTurnoAtual` (fora de mutação — com serialização; toda
+   * (re)conexão passa por lá).
+   * O retorno do lobby é idempotente; guards em memória evitam duplicar um
+   * envio em voo. Sem estado/resultado ou sem metadados, mantém a chave para
+   * a próxima oportunidade — nunca apaga sem entregar.
+   */
+  private async tentarCompletarRetornoPendente(partidaId: string): Promise<void> {
+    const pendente = await this.lerRetornoPendente(partidaId);
+    if (pendente === null) return;
+    await this.enfileirarMutacao(partidaId, async () => {
+      await this.completarRetornoPendenteDentroDaMutacao(partidaId, pendente);
+    }).catch(() => undefined);
+  }
+
+  /**
+   * Lê e valida a pendência sem mutar nada (`null` = sem re-drive): chave
+   * ausente, JSON inválido (limpa) ou resultado desconhecido (limpa).
+   */
+  private async lerRetornoPendente(
+    partidaId: string,
+  ): Promise<{ resultado: 'vitoria' | 'derrota'; teveDesistencia: boolean } | null> {
+    if (this.notificarRetorno === undefined) return null;
+    if (this.callbacksEnviados.has(partidaId) || this.retornosPendentes.has(partidaId)) return null;
+    let bruto: string | null = null;
+    try {
+      bruto = await this.redis.get(chaveDoRetornoPendente(partidaId));
+    } catch {
+      return null;
+    }
+    if (bruto === null) return null;
+    let pendente: { resultado?: unknown; teveDesistencia?: unknown } | null = null;
+    try {
+      pendente = JSON.parse(bruto) as { resultado?: unknown; teveDesistencia?: unknown };
+    } catch {
+      pendente = null;
+    }
+    if (pendente?.resultado !== 'vitoria' && pendente?.resultado !== 'derrota') {
+      try {
+        await this.redis.del(chaveDoRetornoPendente(partidaId));
+      } catch {
+        // Sem Redis, nada a limpar.
+      }
+      return null;
+    }
+    return { resultado: pendente.resultado, teveDesistencia: pendente.teveDesistencia === true };
+  }
+
+  /**
+   * Completa a pendência JÁ dentro de uma mutação (nunca enfileira aqui —
+   * dentro de `aplicarMensagem` isso travaria a cadeia nela mesma).
+   */
+  private async completarRetornoPendenteDentroDaMutacao(
+    partidaId: string,
+    pendente: { resultado: 'vitoria' | 'derrota'; teveDesistencia: boolean },
+  ): Promise<void> {
+    if (this.retornosPendentes.has(partidaId) || this.callbacksEnviados.has(partidaId)) return;
+    if (this.notificarRetorno === undefined) return;
+    let estado: import('@flicker/engine').EstadoDaPartida | null = null;
+    try {
+      estado = await obterEstadoDaPartida(this.redis, partidaId);
+    } catch {
+      estado = null;
+    }
+    if (estado === null || estado.resultado === null) return;
+    let partida: PartidaPreparada | null = null;
+    try {
+      partida = await obterPartida(this.redis, partidaId);
+    } catch {
+      partida = null;
+    }
+    if (partida === null) return;
+    const aviso = await this.montarAviso(
+      partida,
+      pendente.resultado,
+      estado.jogadores.map((j) => j.jogadorId),
+      pendente.teveDesistencia,
+    );
+    if (aviso === null) return;
+    this.enviarRetornoComPersistencia(partidaId, aviso);
+  }
+
+  /**
+   * Rastreia uma espera ainda sem promise real (R5): o placeholder entra no
+   * mapa imediatamente para o drain do SIGTERM enxergar o detach em voo; o
+   * `concluir` devolve a vaga sem apagar um callback real que o substituiu.
+   */
+  private rastrearEspera(partidaId: string): () => void {
+    let concluir!: () => void;
+    const espera = new Promise<void>((resolver) => {
+      concluir = resolver;
+    });
+    this.rastrearDesvinculo(partidaId, espera);
+    return concluir;
+  }
+
+  /** Desvinculos não participam do dedup do retorno; só do drain. */
+  private rastrearDesvinculo(partidaId: string, promessa: Promise<void>): void {
+    let conjunto = this.desvinculosPendentes.get(partidaId);
+    if (conjunto === undefined) {
+      conjunto = new Set();
+      this.desvinculosPendentes.set(partidaId, conjunto);
+    }
+    conjunto.add(promessa);
+    void promessa.finally(() => {
+      const atual = this.desvinculosPendentes.get(partidaId);
+      atual?.delete(promessa);
+      if (atual !== undefined && atual.size === 0) {
+        this.desvinculosPendentes.delete(partidaId);
+      }
+    });
   }
 
   private rastrearRetorno(partidaId: string, promessa: Promise<void>): void {
@@ -438,15 +808,27 @@ export class PartidaHandlers {
   }
 
   async drenarRetornosPendentes(timeoutMs = 5000): Promise<void> {
-    const pendentes = [...this.retornosPendentes.values()];
-    if (pendentes.length === 0) return;
-    await Promise.race([
-      Promise.allSettled(pendentes),
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, timeoutMs);
-        timer.unref?.();
-      }),
-    ]);
+    // B3 (issue #290): loop com re-snapshot até o teto total. Os callbacks
+    // reais nascem após `obterPartida` (o placeholder de `rastrearEspera`
+    // existe antes) — com snapshot único, o drain retornava após o
+    // placeholder sem esperar o payload. Reamostra enquanto houver pendentes.
+    const inicio = Date.now();
+    for (;;) {
+      const pendentes: Promise<unknown>[] = [...this.retornosPendentes.values()];
+      for (const conjunto of this.desvinculosPendentes.values()) {
+        pendentes.push(...conjunto);
+      }
+      if (pendentes.length === 0) return;
+      const restante = timeoutMs - (Date.now() - inicio);
+      if (restante <= 0) return;
+      await Promise.race([
+        Promise.allSettled(pendentes),
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, restante);
+          timer.unref?.();
+        }),
+      ]);
+    }
   }
 
   private limparCadeia(partidaId: string, proxima: Promise<unknown>): void {

@@ -179,6 +179,8 @@ export async function verificarNaoInicioSeNecessario(redis: Redis, partidaId: st
       serverId: partida.serverId,
       resultado: 'nao-inicio',
       jogadores: partida.roster.map((m) => m.jogadorId),
+      // Não-início nunca tem desistência: 409 do lobby continua definitivo.
+      teveDesistencia: false,
     };
     try {
       await notificarRetorno(aviso);

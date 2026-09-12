@@ -37,6 +37,7 @@ function mockSalaContext(codigo: string | null): UseSalaWebSocketReturn {
     entrarNaSala: () => {},
     alternarProntidao: () => {},
     sairDaSala: () => {},
+    marcarSaidaPropria: () => {},
     enviarMensagemDeChat: () => {},
     expulsarMembro: () => {},
     desbloquearJogador: () => {},

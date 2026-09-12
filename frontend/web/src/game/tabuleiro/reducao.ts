@@ -89,6 +89,7 @@ import type {
   PecaSorteadaEvento,
   VagaDaPecaRecebidaEscolhidaEvento,
   PosicaoConfirmadaEvento,
+  PartidaIniciadaEvento,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
 } from '@flicker/shared'
@@ -146,6 +147,7 @@ export type EventoDoJogoNoCliente =
   | VagaDaPecaRecebidaEscolhidaEvento
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
+  | PartidaIniciadaEvento
   | DesistenciaRegistradaWireEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
@@ -173,6 +175,12 @@ export interface EstadoDoTabuleiroNoCliente {
   readonly jogadorAtivoId: string | null
   /** Rodada corrente (TURNO_INICIADO; rodada 1 = Primeiro Turno de todos). */
   readonly rodada: number | null
+  /**
+   * Marco autoritativo do início da Partida (epoch ms, issue #259): baseline
+   * do snapshot ou do broadcast PARTIDA_INICIADA, de onde o HUD deriva o
+   * cronômetro. `null` enquanto a Partida não iniciou/sem snapshot.
+   */
+  readonly iniciadaEm: number | null
   /** O peão do Jogador Ativo já se moveu neste turno (PEAO_MOVIDO). */
   readonly movimentouNoTurno: boolean
   /** A posição do peão do Jogador Ativo já foi confirmada (POSICAO_CONFIRMADA). */
@@ -260,6 +268,8 @@ export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): 
     // Turnos (issue #118): sem vez nem rodada até o primeiro TURNO_INICIADO.
     jogadorAtivoId: null,
     rodada: null,
+    // Sem marco de início até o snapshot/PARTIDA_INICIADA (issue #259).
+    iniciadaEm: null,
     movimentouNoTurno: false,
     posicaoConfirmadaNoTurno: false,
     pecaDoInicioDoTurnoId: null,
@@ -446,6 +456,21 @@ export function reduzirEvento(
     case 'ERRO_DO_TABULEIRO':
       // Rejeição não altera o modelo local (recusa é da PartidaPage: som + anúncio).
       return estado
+    case 'PARTIDA_INICIADA':
+      // Marco de início autoritativo (issue #259): os Jogadores admitidos
+      // antes da virada receberam snapshot `preparada` (iniciadaEm null) — o
+      // broadcast entrega o mesmo marco a todos para o HUD sincronizar.
+      // Guard de runtime (review PR #374): wire de binário anterior pode
+      // omitir o campo — o assign cego deixava `undefined` no modelo e
+      // corrompia a baseline do cronômetro; inválido preserva o marco vigente.
+      if (
+        typeof evento.iniciadaEm !== 'number' ||
+        !Number.isFinite(evento.iniciadaEm) ||
+        evento.iniciadaEm <= 0
+      ) {
+        return estado
+      }
+      return { ...estado, iniciadaEm: evento.iniciadaEm }
 
     // ── Eventos de Peão / Ciclo (ST-10) ──
     case 'PEAO_SELECIONADO':
@@ -771,32 +796,68 @@ export function reduzirEvento(
     case 'DESISTENCIA_REGISTRADA': {
       // Desistência (issue #290, espelho do lote atômico #288): remove o peão
       // do desistente e sua vez da ordem. Iluminação/Limpeza/Passagem chegam
-      // no mesmo lote via CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* — aqui
-      // só a remoção imediata, sem recalcular regra. Snapshot reconcilia.
+      // no mesmo lote via CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* — o
+      // recálculo completo da regra vive no servidor (autoridade); aqui só a
+      // queda óbvia otimista (peça hospedeira do peão removido) + remoção
+      // imediata. Snapshot reconcilia qualquer divergência.
       // Idempotente: evento repetido (replay/reconexão) é no-op.
+      // Seleção/Manipulação: se o desistente era o Jogador Ativo, a vez passa
+      // (Passagem iminente no lote) e a seleção do turno anterior não pode
+      // sobreviver sem TURNO_* — limpa aqui para não deixar peça órfã
+      // selecionada. Demais casos ficam para o TURNO_*/LIMPEZA do lote.
       const jogadorId = evento.jogadorId
       const peaoId = evento.peaoId
       const temJogador = Object.prototype.hasOwnProperty.call(estado.jogadorPorId, jogadorId)
       const temPeao = estado.peoes.some((p) => p.peaoId === peaoId)
       const temMapeamento = Object.prototype.hasOwnProperty.call(estado.peaoPorJogador, jogadorId)
       if (!temJogador && !temPeao && !temMapeamento) return estado
+      const eraAtivo = estado.jogadorAtivoId !== null && estado.jogadorAtivoId === jogadorId
       const jogadorPorId = { ...estado.jogadorPorId }
       delete jogadorPorId[jogadorId]
       const peaoPorJogador = { ...estado.peaoPorJogador }
       delete peaoPorJogador[jogadorId]
       const peoes = estado.peoes.filter((p) => p.peaoId !== peaoId)
+      // Queda óbvia otimista (review PR #378, AC2): a peça sob o peão removido
+      // perde o ocupante e cai pela regra normal no servidor — o lote traz a
+      // LIMPEZA_APLICADA em seguida, mas a projeção imediata evita peça órfã
+      // escura até o lote completar. Peças só-iluminadas-pelo-ausente vêm na
+      // LIMPEZA do lote (servidor é autoridade, cliente nunca recalcula).
+      const peaoRemovido = estado.peoes.find((p) => p.peaoId === peaoId)
+      const celulaDoPeao = peaoRemovido?.celula ?? null
+      const pecaHospedeiraId =
+        celulaDoPeao !== null
+          ? (estado.posicionadas.find(
+              (p) => chaveCelula(p.celula) === chaveCelula(celulaDoPeao),
+            )?.pecaId ?? null)
+          : null
+      const posicionadas =
+        pecaHospedeiraId !== null
+          ? estado.posicionadas.filter((p) => p.pecaId !== pecaHospedeiraId)
+          : estado.posicionadas
+      const chavesHospedeiras =
+        pecaHospedeiraId !== null && celulaDoPeao !== null
+          ? new Set([chaveCelula(celulaDoPeao)])
+          : new Set<string>()
       const ordemDeChegadaPorChave: Record<string, readonly PeaoId[]> = {}
       for (const [chave, fila] of Object.entries(estado.ordemDeChegadaPorChave)) {
+        if (chavesHospedeiras.has(chave)) continue
         const filtrada = fila.filter((id) => id !== peaoId)
         if (filtrada.length > 0) ordemDeChegadaPorChave[chave] = filtrada
       }
+      const selecaoOrfa =
+        pecaHospedeiraId !== null &&
+        (estado.pecaSelecionadaId === pecaHospedeiraId ||
+          estado.pecaEmManipulacaoId === pecaHospedeiraId)
       return {
         ...estado,
         peoes,
+        posicionadas,
         jogadorPorId,
         peaoPorJogador,
         peaoSelecionadoId:
           estado.peaoSelecionadoId === peaoId ? null : estado.peaoSelecionadoId,
+        pecaSelecionadaId: eraAtivo || selecaoOrfa ? null : estado.pecaSelecionadaId,
+        pecaEmManipulacaoId: eraAtivo || selecaoOrfa ? null : estado.pecaEmManipulacaoId,
         ordemDeChegadaPorChave,
       }
     }

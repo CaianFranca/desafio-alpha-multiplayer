@@ -116,6 +116,12 @@ const CODIGOS_DE_ERRO_DA_SALA: ReadonlySet<CodigoDeErroDaSala> = new Set([
 /** Tamanho máximo de uma mensagem de chat (issue #34). Sem trim. */
 const TAMANHO_MAXIMO_MENSAGEM = 500;
 
+// JogadorIds da Composição ofertada (roster de transporte da oferta): a chave
+// do commit do aceite no engine é o Jogador — ver `conjuntosDeJogadoresIguais`.
+function extrairJogadorIdsDaOferta(oferta: OfertaDeEncaminhamento): string[] {
+  return oferta.roster.map((membro) => membro.jogadorId);
+}
+
 // Jogador do novo Anfitrião no estado resultante (lookups extraídos — review
 // interna #304): `estado.salas.find(...).membros.find(...)` sem chains.
 function jogadorNovoAnfitriao(
@@ -1295,7 +1301,11 @@ export class SalasHandlers {
         if (aceite) {
           // Espelho do aceite no stream de debug (issue #340).
           this.espelhar(salaId, 'info', `encaminhamento aceito — partida ${aceite.partidaId} no server ${aceite.serverId}`, 'encaminhamento');
-          const resAceite = this.estado.aplicar({ tipo: 'aceitar_encaminhamento', salaId } satisfies Comando);
+          // Divergência de composição oferta→aceite (#305): o roster ofertado
+          // viaja por closure (fonte capturada em handleIniciarPartida) e é
+          // comparado como conjunto de jogadorId no commit do engine.
+          const rosterOfertado = extrairJogadorIdsDaOferta(oferta);
+          const resAceite = this.estado.aplicar({ tipo: 'aceitar_encaminhamento', salaId, rosterOfertado } satisfies Comando);
           if (resAceite.sucesso) {
             try {
               await this.repo.persistirEncaminhamento(salaId, aceite.serverId, aceite.partidaId);
@@ -1711,11 +1721,17 @@ export class SalasHandlers {
    * Idempotente para re-chamadas: engine sem membro ativo devolve false (o
    * chamador trata como já-desvinculado).
    */
-  async removerDesistente(salaId: string, jogadorId: string): Promise<boolean> {
+  async removerDesistente(salaId: string, jogadorId: string): Promise<{ desvinculado: boolean; codigo?: string }> {
+    // B4 (issue #290): hidrata pós-restart antes do engine — sem isso, salas
+    // `inconsistente` rejeitavam com SALA_INCONSISTENTE e a rota respondia 200
+    // sem convergir o PG (vínculo fantasma, game-server parava o retry).
+    if (!(await this.garantirSalaEncaminhadaNoEngine(salaId))) {
+      return { desvinculado: false, codigo: 'SALA_NAO_ENCAMINHADA' };
+    }
     const res = removerDesistenteDaSala(this.estado.estado, { tipo: 'sair_da_sala', salaId, jogadorId });
     if (!res.sucesso) {
       console.warn('[salas] remoção de desistente rejeitada pelo engine', { salaId, jogadorId, codigo: res.erro.codigo });
-      return false;
+      return { desvinculado: false, codigo: res.erro.codigo };
     }
     const salaEncerrada = res.eventos.some((e) => e.tipo === 'sala_encerrada');
     const sucessao = res.eventos.find(
@@ -1725,7 +1741,12 @@ export class SalasHandlers {
       ? jogadorNovoAnfitriao(res.estado, salaId, sucessao.anfitriaoNovoId)
       : undefined;
     await this.repo.sairMembroAtomico(salaId, jogadorId, 'saida', salaEncerrada, novoAnfitriaoJogadorId);
-    const codigoPre = this.estado.abertas.get(salaId)?.sala.codigo ?? null;
+    // Fallback de código (projeção/repo) para não vazar estado stale no Redis
+    // quando a memória não tem a sala (ex.: hidratação parcial).
+    const codigoPre = this.estado.abertas.get(salaId)?.sala.codigo
+      ?? (await this.projecao.obterEstadoSala(salaId).catch(() => null))?.codigo
+      ?? (await this.repo.obterSalaBruta(salaId).catch(() => null))?.codigo
+      ?? null;
     this.estado.substituirEstado(res.estado);
     if (salaEncerrada) {
       if (codigoPre !== null) {
@@ -1736,6 +1757,13 @@ export class SalasHandlers {
       await this.atualizarProjecaoEstado(res.estado, salaId);
     }
     await this.projecao.limparAssociacaoJogador(jogadorId);
+    // Limpa janela/timer de reconexão do desistente (espelho da expulsão) —
+    // sem isso o timer tardio de handleFechamento vazava até fire.
+    await this.reconexao.limparJanela(salaId, jogadorId).catch(() => undefined);
+    const saida = res.eventos.find((e) => e.tipo === 'membro_saiu');
+    if (saida?.tipo === 'membro_saiu') {
+      this.limparTimer(salaId, saida.membroId);
+    }
     const eventos = traduzirEventos(res.eventos, res.estado, this.estado.apelidoPorJogadorId, this.linkBase, undefined, this.estado.botPorJogadorId);
     this.difundir(eventos, salaId);
     // A vítima recebe o MEMBRO_SAIU acima e depois sai do fan-out da sala —
@@ -1743,7 +1771,7 @@ export class SalasHandlers {
     // a sala local dela.
     this.broadcast.removerSocketPorJogadorId(jogadorId);
     this.espelhar(salaId, 'info', `${this.apelidoDe(jogadorId)} desistiu da partida e saiu da sala`);
-    return true;
+    return { desvinculado: true };
   }
 
   private salaEstaEncaminhada(salaId: string): boolean {
