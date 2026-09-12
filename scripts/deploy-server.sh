@@ -76,9 +76,15 @@ ln -sfn /etc/nginx/sites-available/flicker-edge /etc/nginx/sites-enabled/flicker
 rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "nginx -t falhou; conf não aplicada"
 
-# ── 5. Flip do symlink (atômico) ─────────────────────────────────────────────
+# ── 5. Flip do symlink (atômico) + publicação do docroot ────────────────────
 log "flip: current → $RELEASE_DIR"
 ln -sfn "$RELEASE_DIR" "$CURRENT"
+
+# Docroot do frontend lido pelo nginx do app: /var/www/html -> <release>/frontend/dist.
+# O rm -rf remove o symlink/dir anterior; ln -sfn aponta para a release nova.
+mkdir -p /var/www
+rm -rf /var/www/html
+ln -sfn "$RELEASE_DIR/frontend/dist" /var/www/html
 
 # ── 6. Restart + health check (rollback automático p/ release anterior) ─────
 log "reiniciando flicker-lobby e flicker-game"
