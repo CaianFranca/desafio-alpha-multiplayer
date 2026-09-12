@@ -1450,22 +1450,24 @@ export function reabrirSala(
 }
 
 /**
- * Reabertura com saídas atômicas (follow-up #371, caminho b).
- * Remove 1..N-1 desistentes do roster antes de flipar `encaminhada→aberta`,
+ * Reabertura com saídas atômicas (follow-up #371, caminho b — ADR-0014).
+ * Remove 1..N-1 Desistências do roster antes de flipar `encaminhada→aberta`,
  * com sucessão de Anfitrião e `pronto=false` nos restantes. Validação de
- * subset estrita: sala `encaminhada`+consistente, saídas ∈ membros ativos,
- * sem duplicatas, deixando ao menos 1 membro ativo.
- * Motivo explícito e restrito a `saida` (Desistência do CONTEXT.md); a causa
- * (desistência da partida) vive no game-server — o histórico
- * `membros_historico` registra `saida`.
- * Memória mantém o desistente como `encerrado` (padrão canônico
- * `executarSaidaDeSala`); o PG faz DELETE + histórico via
- * `reabrirSalaComSaidasAtomico` (par de `sairMembroAtomico`) — mesma
- * divergência intencional do fluxo canônico, convergindo em
- * ordem/"mesmos membros" da #287 via roster ativo.
- * Projeção/broadcast: `membro_saiu` + `sala_reaberta` são projetados pelo
- * caller em `retorno.ts` via `definirEstadoSala` + `SALA_ATUALIZADA`
- * (idempotência via marker PG/Redis).
+ * subset estrita: sala `encaminhada`+consistente, saídas ∈ Membros ativos,
+ * sem duplicatas, deixando ao menos 1 Membro ativo.
+ * Motivo explícito e restrito a `saida`: a Desistência da Partida (CONTEXT.md)
+ * mapeia para Saída do vínculo no lobby; a causa vive no game-server e o
+ * histórico `membros_historico` registra `saida`. Sem campo genérico aqui —
+ * outros motivos (expulsao/expiracao/encerramento) usam seus comandos próprios.
+ * Memória mantém o desistente como `encerrado` (par de `executarSaidaDeSala`);
+ * o PG faz DELETE + histórico (par de `sairMembroAtomico`). Convergência
+ * definida pelo roster ativo ordenado por `ordemDeEntrada`: memória filtra
+ * `estado==='ativo'`, PG filtra `bloqueado=false` ordenado por
+ * `ordem_de_entrada` — mesma lista, mesma ordem (regra da #287).
+ * Projeção/broadcast: eventos `membro_saiu` (um por Desistência) +
+ * `sala_reaberta` são emitidos aqui e projetados pelo caller em `retorno.ts`
+ * via snapshot `definirEstadoSala(serializarSala)` + `SALA_ATUALIZADA` +
+ * markers de idempotência (PG `sala_reaberta_markers` + Redis).
  */
 export function reabrirSalaComSaidas(
   estado: EstadoDoLobby,
@@ -1513,13 +1515,8 @@ export function reabrirSalaComSaidas(
     return rejeitar('DADOS_INVALIDOS', 'A reabertura com saídas deve deixar ao menos um membro ativo.');
   }
   if (comando.saidas.length === 0) {
-    // Sem saídas equivale a reabrirSala — reutiliza lógica
-    const novaSalaVazia: Sala = {
-      ...sala,
-      estado: 'aberta',
-      membros: sala.membros.map((m) => (m.estado === 'ativo' ? { ...m, pronto: false } : m)),
-    };
-    return sucesso(substituirSala(estado, novaSalaVazia), [{ tipo: 'sala_reaberta', salaId: sala.id }]);
+    // Sem Desistências o caller usa `reabrir_sala`; delega em vez de duplicar.
+    return reabrirSala(estado, { tipo: 'reabrir_sala', salaId: comando.salaId });
   }
 
   const ativosPorJogador = new Map(ativos.map((m) => [m.jogadorId, m]));
@@ -1529,14 +1526,16 @@ export function reabrirSalaComSaidas(
     }
   }
 
+  // Desistências da Partida → Saídas do vínculo (motivo único `saida`, já validado).
   const saidasSet = new Set(comando.saidas.map((s) => s.jogadorId));
-  const motivoPorJogador = new Map(comando.saidas.map((s) => [s.jogadorId, s.motivo]));
 
-  // Membros: encerrados para saidas, restantes com pronto false
+  // Membros: `encerrado` com motivo `saida` para as Desistências (auditoria e
+  // preservação da ordem de entrada); restantes com `pronto=false`. O roster
+  // ativo resultante converge com o PG (DELETE + histórico) na mesma ordem.
   const membrosNovos: Membro[] = sala.membros.map((m) => {
     if (m.estado !== 'ativo') return m;
     if (saidasSet.has(m.jogadorId)) {
-      return { ...m, estado: 'encerrado' as const, motivoEncerramento: motivoPorJogador.get(m.jogadorId) ?? 'saida' };
+      return { ...m, estado: 'encerrado' as const, motivoEncerramento: 'saida' as const };
     }
     return { ...m, pronto: false };
   });
@@ -1570,7 +1569,7 @@ export function reabrirSalaComSaidas(
       membroId: membro.id,
       jogadorId: membro.jogadorId,
       ordemDeEntrada: membro.ordemDeEntrada,
-      motivo: motivoPorJogador.get(s.jogadorId) ?? 'saida',
+      motivo: 'saida',
     });
   }
   if (anfitriaoSaiu && anfitriaoNovoId !== null && anfitriaoAtual) {

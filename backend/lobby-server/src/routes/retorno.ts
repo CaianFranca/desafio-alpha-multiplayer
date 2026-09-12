@@ -131,14 +131,21 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
         }
 
-        // Revalidação membros: jogadores deve ser subset de membros ativos (follow-up #371, N-1)
-        // Permite N-1 com desistentes: payload ⊆ ativosDb, 1 ≤ |payload| ≤ |ativosDb|, sem duplicatas.
-        // Isso elimina o desistente fantasma: a reabertura remove atomically os que sobraram fora do payload.
+        // Revalidação dos Membros: o Retorno à Sala (CONTEXT.md) aceita os
+        // restantes — Desistências da Partida removidas do roster ativo.
+        // Vocabulário: `saidas` = Desistências, `payload/jogadoresLista` =
+        // Retorno à Sala (restantes), `ativosDb` = Membros ativos no PG.
+        // Regra N-1 (ADR-0014): payload ⊆ ativos, 1 ≤ |payload| ≤ |ativos|,
+        // sem duplicatas. Payload vazio é erro do cliente (400); subset
+        // inválido contra sala encaminhada é estado (409).
         const membrosDb = await contexto.repo.listarMembrosDaSala(salaId);
         const ativosDb = membrosDb.filter((m) => !m.bloqueado).map((m) => m.jogadorId).sort();
         const payloadOrdenado = [...jogadoresLista].sort();
         // Duplicatas no payload são inválidas — o lobby exige conjunto
         if (new Set(payloadOrdenado).size !== payloadOrdenado.length) {
+          return { tipo: 'erro' as const, status: 400, codigo: 'DADOS_INVALIDOS' };
+        }
+        if (payloadOrdenado.length === 0) {
           return { tipo: 'erro' as const, status: 400, codigo: 'DADOS_INVALIDOS' };
         }
         const ativosSet = new Set(ativosDb);
@@ -213,7 +220,11 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 404, codigo: 'SALA_NAO_ENCONTRADA' };
         }
 
-        // Projeção sem encaminhamento + marker Redis (PG já gravado na transação)
+        // Projeção dos eventos `membro_saiu` (um por Desistência) + `sala_reaberta`
+        // via snapshot: o engine emite os eventos e este caller projeta o estado
+        // final com `definirEstadoSala(serializarSala)` + `SALA_ATUALIZADA` +
+        // markers de idempotência (PG `sala_reaberta_markers` na transação +
+        // Redis `marcarReaberta`). Sem encaminhamento no snapshot/broadcast.
         await contexto.projecao.definirEstadoSala(salaId, serializarSala(salaDominio));
         await contexto.projecao.marcarReaberta(salaId);
 

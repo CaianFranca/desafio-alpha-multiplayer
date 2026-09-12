@@ -282,10 +282,13 @@ export class SalasRepo {
   }
 
   /**
-   * Reabre a sala removendo desistentes do roster na mesma transação PG
-   * (follow-up #371, caminho b): DELETE membros + INSERT historico motivo
-   * `saida` (desistência) + UPDATE status/anfitriao + marker atomico.
-   * Elimina corrida entre detach e retorno e garante sucessão de Anfitrião.
+   * Reabre a sala removendo as Desistências do roster na mesma transação PG
+   * (follow-up #371, caminho b — ADR-0014): DELETE Membros + INSERT histórico
+   * motivo `saida` (Desistência) + UPDATE status/anfitrião + marker atômico.
+   * Elimina corrida entre detach e Retorno à Sala e garante sucessão de Anfitrião.
+   * Convergência com a memória: o PG é a fonte dos Membros ativos
+   * (`bloqueado=false` por `ordem_de_entrada`); a memória mantém os mesmos
+   * ativos na mesma ordem e os desistentes como `encerrado` (auditoria).
    * Retorna true quando houve mutação, false quando já não estava encaminhada.
    */
   async reabrirSalaComSaidasAtomico(
@@ -297,25 +300,23 @@ export class SalasRepo {
     try {
       await client.query('BEGIN');
       // Flip status + anfitrião na mesma linha (evita janela entre DELETE e UPDATE)
-      // Convenção: undefined = mantém PG, null = SET NULL explícito, string = novo jogadorId.
-      // PG `anfitriao_id` guarda jogadorId (usuarios.id); null nunca usa COALESCE (fantasma).
-      let upd;
-      if (novoAnfitriaoJogadorId === undefined) {
-        upd = await client.query(
-          `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
-          [salaId],
-        );
-      } else if (novoAnfitriaoJogadorId === null) {
-        upd = await client.query(
-          `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL, anfitriao_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
-          [salaId],
-        );
-      } else {
-        upd = await client.query(
-          `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL, anfitriao_id = $2 WHERE id = $1 AND status = 'encaminhada'`,
-          [salaId, novoAnfitriaoJogadorId],
-        );
-      }
+      // Convenção (Sucessão de Anfitrião): undefined = mantém PG, null = SET NULL
+      // explícito, string = novo jogadorId. PG `anfitriao_id` guarda jogadorId
+      // (usuarios.id); null nunca usa COALESCE (evita Anfitrião fantasma).
+      const setAnfitriao =
+        novoAnfitriaoJogadorId === undefined
+          ? ''
+          : novoAnfitriaoJogadorId === null
+            ? ', anfitriao_id = NULL'
+            : ', anfitriao_id = $2';
+      const params =
+        novoAnfitriaoJogadorId === undefined || novoAnfitriaoJogadorId === null
+          ? [salaId]
+          : [salaId, novoAnfitriaoJogadorId];
+      const upd = await client.query(
+        `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL${setAnfitriao} WHERE id = $1 AND status = 'encaminhada'`,
+        params,
+      );
       if ((upd.rowCount ?? 0) !== 1) {
         await client.query('ROLLBACK');
         return false;
