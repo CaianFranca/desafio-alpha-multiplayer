@@ -52,6 +52,7 @@ import { mapearFinalizarRecebida } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
+import { refreshSession } from '../api/auth'
 import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional } from '../state/sala-web-socket-context'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import type {
@@ -822,17 +823,27 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     // Desistente não reconecta (o servidor rejeitaria com
     // JOGADOR_NAO_NA_PARTIDA) — falha terminal sem retry.
     if (desistiu) return
-    desconectar()
-    if (!temAlvo) {
-      falhar()
-      return
-    }
-    if (loader) {
-      tentarNovamente()
-    } else {
-      carregar()
-    }
-    reconectarSocket()
+    // Retry manual com Sessão renovada (issue #376): o upgrade do WS valida
+    // o access token e ele pode ter expirado na Partida longa. Aguarda o
+    // refresh (melhor esforço) para reconectar com o cookie já novo.
+    void (async () => {
+      try {
+        await refreshSession()
+      } catch {
+        // melhor esforço: mesmo com refresh falho, o fluxo de falha se repete.
+      }
+      desconectar()
+      if (!temAlvo) {
+        falhar()
+        return
+      }
+      if (loader) {
+        tentarNovamente()
+      } else {
+        carregar()
+      }
+      reconectarSocket()
+    })()
   }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader, desistiu])
 
   // ── Comandos de turno (issue #118) — todos via enviarComJogador ──

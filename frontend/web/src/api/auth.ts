@@ -1,5 +1,18 @@
 import { z } from 'zod'
-import { apiFetch } from './client'
+import { apiFetch, renovarSessao } from './client'
+
+/**
+ * POST /api/auth/refresh — slide-session (issue #376): renova os cookies da
+ * Sessão com o refresh token HttpOnly. Melhor esforço (`false` em qualquer
+ * falha); quem decide o logout é o 401 confirmado pelo `apiFetch`.
+ */
+export async function refreshSession(): Promise<boolean> {
+  try {
+    return await renovarSessao()
+  } catch {
+    return false
+  }
+}
 
 export interface Jogador {
   id: string
