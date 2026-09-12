@@ -841,7 +841,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     )
   })
 
-  it('R2-timeout: sem OPEN em 2s navega best-effort com DESISTIR preservado', async () => {
+  it('R2-timeout: sem OPEN em 5s navega best-effort com DESISTIR preservado', async () => {
     MockWebSocket.forceNoAutoOpen = true
     try {
       renderPartidaParaSaida('A3K9M2')
@@ -864,11 +864,11 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
       await user.click(screen.getByTestId('hud-sair-confirmar'))
       // Enfileirado e ainda sem navegar antes do teto.
       expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
-      // Expira o aguardarConexao(2000): navega mesmo sem OPEN (best-effort).
+      // Expira o aguardarConexao(5000): navega mesmo sem OPEN (best-effort).
       // O DESISTIR segue enfileirado (preservado pelo desconectar) em vez de
       // descartado — sem OPEN não há envio observável no socket.
       await act(async () => {
-        await new Promise((r) => setTimeout(r, 2200))
+        await new Promise((r) => setTimeout(r, 5200))
       })
       expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
       expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)

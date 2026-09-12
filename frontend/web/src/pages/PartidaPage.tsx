@@ -656,12 +656,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     // OPEN, o envio é imediato; se está CONNECTING (janela de reconexão), o
     // comando fica enfileirado e aguardamos o open até o teto — sem a espera,
     // o desconectar() abaixo limparia a fila e o servidor nunca saberia.
-    // No timeout navegamos mesmo assim (best-effort; a flag já bloqueia retry).
+    // Teto de 5s (review PR #378): a reconexão simples é de 1s, então 2s
+    // cortava cedo com instabilidade; no timeout navegamos mesmo assim
+    // (best-effort; a flag já bloqueia retry) e o warn expõe o degradado.
     const entregarESair = async () => {
       if (jogadorId !== null && vaiDesistir) {
         const destino = enviar({ type: 'DESISTIR_DA_PARTIDA', jogadorId } as PartidaComandoDoCliente)
         if (destino === 'enfileirado') {
-          await aguardarConexao(2000).catch(() => false)
+          const abriu = await aguardarConexao(5000).catch(() => false)
+          if (!abriu) {
+            console.warn('[partida] DESISTIR enfileirado sem OPEN até o teto — saindo best-effort', { partidaId })
+          }
         }
       }
       desconectar()
