@@ -8,6 +8,7 @@ import type {
 } from '@flicker/shared'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
+import { baseDoApp } from '../api/basePath'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -150,7 +151,8 @@ function resolverWsUrl(): string {
     return `${protocol}//${window.location.hostname}:${DEFAULT_LOBBY_WS_PORT}`
   }
   // Atrás do nginx (infra/nginx/nginx.conf), o upgrade de WS acontece em /ws/lobby.
-  return `${protocol}//${host}/ws/lobby`
+  // Subpath (VITE_BASE_PATH): o WS acompanha o prefixo do app.
+  return `${protocol}//${host}${baseDoApp()}ws/lobby`
 }
 
 function mensagemDeAviso(evento: SalaEventoDoServidor, salaAnterior: Sala | null): string | null {
