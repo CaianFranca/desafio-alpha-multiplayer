@@ -7,7 +7,8 @@
 #   - packages config/shared/engine (fonte TS, exposto via main/exports)
 #   - node_modules de produção (raiz + db)
 #   - db compilado para JS (knexfile.js + migrations em dist/)
-#   - frontend buildado (vite) + media/ (bind-mount no dev; arquivo no prod)
+#   - frontend buildado (vite, base /server01/) com media/ dentro do dist
+#   - infra/nginx: conf do app + vhost de borda (instalados pelo deploy)
 #
 # Uso: scripts/build-release.sh [sha]
 #   sha       — opcional; default = git rev-parse --short HEAD
@@ -70,14 +71,20 @@ mkdir -p "$STAGING/frontend"
 rsync -a --exclude node_modules --exclude dist frontend/ "$STAGING/frontend/"
 ( cd "$STAGING/frontend" \
   && npm ci --no-audit --no-fund \
-  && NODE_ENV=production npm run build )
+  && VITE_BASE_PATH=/server01/ NODE_ENV=production npm run build )
 [ -f "$STAGING/frontend/dist/index.html" ] || die "frontend/dist/index.html não foi gerado"
+
+# Copia a mídia para dentro do dist: o nginx do app serve /media/ como alias
+# para /var/www/html/media/ (docroot = <release>/frontend/dist).
+mkdir -p "$STAGING/frontend/dist/media"
+cp -r frontend/web/media/. "$STAGING/frontend/dist/media/"
 
 # ── 6. infra (units systemd + nginx conf — deploy-server.sh instala daqui) ──
 log "copiando infra"
 mkdir -p "$STAGING/infra/systemd" "$STAGING/infra/nginx"
 cp infra/systemd/*.service "$STAGING/infra/systemd/"
 cp infra/nginx/nginx.prod.conf "$STAGING/infra/nginx/nginx.prod.conf"
+cp infra/nginx/nginx.edge.conf "$STAGING/infra/nginx/nginx.edge.conf"
 
 # ── 7. Empacotar ─────────────────────────────────────────────────────────────
 log "empacotando $TARBALL"
