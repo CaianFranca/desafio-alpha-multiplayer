@@ -17,6 +17,7 @@ export function paraSnapshotWire(
   estado: EstadoDaPartida,
   roster: readonly MembroDaSala[],
   estadoWire: EstadoDaPartidaWire,
+  iniciadaEm: number | null = null,
 ): EstadoDaPartidaSnapshot {
   const rosterPorJogadorId = new Map(roster.map((m) => [m.jogadorId, m] as const));
 
@@ -116,5 +117,9 @@ export function paraSnapshotWire(
     // `?? false`.
     geradoresLigados: estado.geradoresLigados ?? [],
     cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido ?? false,
+    // Marco autoritativo do início (issue #259): vem da PartidaPreparada
+    // (Redis), não do engine — o parâmetro preserva o default null para
+    // chamadas sem o marco (partida preparada / testes).
+    iniciadaEm,
   };
 }

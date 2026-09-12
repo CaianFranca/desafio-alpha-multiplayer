@@ -155,3 +155,20 @@ test('paraSnapshotWire normaliza estados Redis antigos sem protegido (#227)', ()
     assert.equal(jogador.protegido, false);
   }
 });
+
+// Marco autoritativo do início da Partida (issue #259): projeção do
+// parâmetro da PartidaPreparada (Redis), não do estado do engine.
+test('paraSnapshotWire projeta iniciadaEm quando fornecido (#259)', () => {
+  const marco = 1_726_000_000_000;
+  const snapshot = paraSnapshotWire(estadoDaPartida(), roster(), 'em_andamento', marco);
+  assert.equal(snapshot.iniciadaEm, marco);
+});
+
+test('paraSnapshotWire normaliza iniciadaEm ausente para null (#259)', () => {
+  // Chamada sem o marco (partida preparada/testes legados) devolve null.
+  const semMarco = paraSnapshotWire(estadoDaPartida(), roster(), 'em_andamento');
+  assert.equal(semMarco.iniciadaEm, null);
+  // Partida persistida por binário anterior sem o campo também normaliza null.
+  const explicito = paraSnapshotWire(estadoDaPartida(), roster(), 'preparada', null);
+  assert.equal(explicito.iniciadaEm, null);
+});
