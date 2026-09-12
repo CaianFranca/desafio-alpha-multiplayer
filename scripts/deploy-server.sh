@@ -97,6 +97,10 @@ rollback() {
   log "FALHA no health check — rollback para ${PREVIOUS:-<nenhuma>}"
   if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$RELEASE_DIR" ]; then
     ln -sfn "$PREVIOUS" "$CURRENT"
+    # Reaponta o docroot para a release anterior; sem isso o rollback voltaria
+    # o backend mas continuaria servindo o frontend da release que falhou.
+    rm -rf /var/www/html
+    ln -sfn "$PREVIOUS/frontend/dist" /var/www/html
     systemctl restart flicker-lobby.service flicker-game.service
     log "rollback concluído; release $SHA permanece em disco"
   else
