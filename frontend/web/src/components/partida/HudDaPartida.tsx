@@ -340,11 +340,11 @@ export function HudDaPartida({
           data-testid="hud-confirmacao-saida"
           role="alertdialog"
           aria-modal="true"
-          aria-label="Confirmar desistência da partida"
+          aria-label={emResultado ? 'Sair da partida' : 'Confirmar desistência da partida'}
           aria-describedby="hud-confirmacao-saida-descricao"
           className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-zinc-100 shadow-xl"
         >
-          <p id="hud-confirmacao-saida-descricao">Desistir da partida? Seu peão será removido e a equipe continua sem você.</p>
+          <p id="hud-confirmacao-saida-descricao">{emResultado ? 'Sair da partida? Você voltará à página principal.' : 'Desistir da partida? Seu peão será removido e a equipe continua sem você.'}</p>
           <div className="flex gap-2">
             <button
               type="button"

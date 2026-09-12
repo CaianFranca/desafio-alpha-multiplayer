@@ -672,6 +672,8 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
 
       const user = userEvent.setup()
       await user.click(screen.getByTestId('hud-sair'))
+      expect(screen.getByTestId('hud-confirmacao-saida')).toHaveTextContent(/Sair da partida\?/i)
+      expect(screen.getByTestId('hud-confirmacao-saida')).not.toHaveTextContent(/peão será removido/i)
       await user.click(screen.getByTestId('hud-sair-confirmar'))
 
       const wsInst = MockWebSocket.last()!
@@ -700,6 +702,25 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(
       /Partida terminada em derrota por desistência/i,
     )
+  })
+
+  it('F4-silencio: DESISTENCIA pré-snapshot projeta sem toast/SR (sem inventar dados)', async () => {
+    const ws = await partidaDisponivel()
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-2',
+        peaoId: 'peao-vermelho',
+      }),
+    )
+    // Silêncio intencional: sem roster não há apelido/ordem/restantes verdadeiros.
+    expect(screen.queryByTestId('aviso-desistencia')).not.toBeInTheDocument()
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent('')
+    expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
+    // Snapshot seguinte reconcilia e o HUD volta a montar.
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+    await screen.findByTestId('hud-da-partida')
   })
 
   it('desistência alheia projeta remoção, avisa e anuncia SR; derrota-quando-sobra-1 com retorno', async () => {
@@ -791,6 +812,78 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'derrota', motivo: 'desistencia' }))
     await screen.findByTestId('overlay-resultado')
     expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Cara desistiu/i)
+  })
+
+  it('SR N>2: desistência 4→3 anuncia ordem exata sem frase de fim', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-4',
+        peaoId: 'peao-amarelo',
+      }),
+    )
+    await screen.findByTestId('aviso-desistencia')
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Cara desistiu/i)
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/Nova ordem/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/Cara desistiu/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/3 jogadores restantes/i)
+    expect(screen.getByTestId('anuncio-desistencia')).not.toHaveTextContent(
+      /Partida terminada em derrota/i,
+    )
+  })
+
+  it('R2-timeout: sem OPEN em 2s navega best-effort com DESISTIR preservado', async () => {
+    MockWebSocket.forceNoAutoOpen = true
+    try {
+      renderPartidaParaSaida('A3K9M2')
+      await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+      const ws = MockWebSocket.last()!
+      act(() =>
+        ws.simulateMessage({
+          type: 'ADMISSAO_ACEITA',
+          jogadorId: MEU_JOGADOR_ID,
+          apelido: 'JogadorTeste',
+          partidaId: 'partida-1',
+          estado: 'em_andamento',
+        }),
+      )
+      act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
+      await screen.findByTestId('hud-da-partida')
+
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('hud-sair'))
+      await user.click(screen.getByTestId('hud-sair-confirmar'))
+      // Enfileirado e ainda sem navegar antes do teto.
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+      // Expira o aguardarConexao(2000): navega mesmo sem OPEN (best-effort).
+      // O DESISTIR segue enfileirado (preservado pelo desconectar) em vez de
+      // descartado — sem OPEN não há envio observável no socket.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 2200))
+      })
+      expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
+      expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+    } finally {
+      MockWebSocket.forceNoAutoOpen = false
+    }
+  }, 15000)
+
+  it('anti-duplo: confirmar desabilita e envia um único DESISTIR', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    expect(ws.sentMessages.join(' ')).not.toMatch(/DESISTIR_DA_PARTIDA/)
+    const wsInst = MockWebSocket.last()!
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('hud-sair'))
+    const confirmar = screen.getByTestId('hud-sair-confirmar')
+    await user.click(confirmar)
+    // Trava local: segundo clique é no-op mesmo antes do navigate assíncrono.
+    await user.click(confirmar).catch(() => undefined)
+    const desistencias = wsInst.sentMessages
+      .map((m) => JSON.parse(m))
+      .filter((c) => c.type === 'DESISTIR_DA_PARTIDA')
+    expect(desistencias).toHaveLength(1)
+    expect(await screen.findByTestId('principal-pagina')).toBeInTheDocument()
   })
 
   it('desistente que volta à URL vê falha terminal sem retry nem voltar-à-sala', async () => {

@@ -774,15 +774,17 @@ export function reduzirEvento(
       // no mesmo lote via CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* — aqui
       // só a remoção imediata, sem recalcular regra. Snapshot reconcilia.
       // Idempotente: evento repetido (replay/reconexão) é no-op.
-      // pecaSelecionadaId/pecaEmManipulacaoId ficam para o TURNO_* do lote
-      // (que os zera) — sem mapeamento peça→jogador aqui, adivinhar o dono
-      // seria pior que aguardar o próximo evento do lote.
+      // Seleção/Manipulação: se o desistente era o Jogador Ativo, a vez passa
+      // (Passagem iminente no lote) e a seleção do turno anterior não pode
+      // sobreviver sem TURNO_* — limpa aqui para não deixar peça órfã
+      // selecionada. Demais casos ficam para o TURNO_*/LIMPEZA do lote.
       const jogadorId = evento.jogadorId
       const peaoId = evento.peaoId
       const temJogador = Object.prototype.hasOwnProperty.call(estado.jogadorPorId, jogadorId)
       const temPeao = estado.peoes.some((p) => p.peaoId === peaoId)
       const temMapeamento = Object.prototype.hasOwnProperty.call(estado.peaoPorJogador, jogadorId)
       if (!temJogador && !temPeao && !temMapeamento) return estado
+      const eraAtivo = estado.jogadorAtivoId !== null && estado.jogadorAtivoId === jogadorId
       const jogadorPorId = { ...estado.jogadorPorId }
       delete jogadorPorId[jogadorId]
       const peaoPorJogador = { ...estado.peaoPorJogador }
@@ -800,6 +802,8 @@ export function reduzirEvento(
         peaoPorJogador,
         peaoSelecionadoId:
           estado.peaoSelecionadoId === peaoId ? null : estado.peaoSelecionadoId,
+        pecaSelecionadaId: eraAtivo ? null : estado.pecaSelecionadaId,
+        pecaEmManipulacaoId: eraAtivo ? null : estado.pecaEmManipulacaoId,
         ordemDeChegadaPorChave,
       }
     }
