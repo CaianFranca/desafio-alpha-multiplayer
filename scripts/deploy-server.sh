@@ -67,6 +67,13 @@ cp "$RELEASE_DIR/infra/systemd/"*.service /etc/systemd/system/ 2>/dev/null \
 systemctl daemon-reload
 cp "$RELEASE_DIR/infra/nginx/nginx.prod.conf" /etc/nginx/sites-available/flicker
 ln -sfn /etc/nginx/sites-available/flicker /etc/nginx/sites-enabled/flicker
+# Vhost de borda (:80, default_server) que recebe /server01 do proxy do admin e
+# faz strip do prefixo rumo ao nginx do app em 127.0.0.1:8080.
+cp "$RELEASE_DIR/infra/nginx/nginx.edge.conf" /etc/nginx/sites-available/flicker-edge
+ln -sfn /etc/nginx/sites-available/flicker-edge /etc/nginx/sites-enabled/flicker-edge
+# O site default do Debian também é default_server em :80 e conflitaria com a
+# borda; removemos o symlink (o arquivo em sites-available é preservado).
+rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "nginx -t falhou; conf não aplicada"
 
 # ── 5. Flip do symlink (atômico) ─────────────────────────────────────────────
