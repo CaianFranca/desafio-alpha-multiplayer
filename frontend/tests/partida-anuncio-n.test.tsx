@@ -25,6 +25,7 @@ const MOCK_SALA = {
   entrarNaSala: () => {}, alternarProntidao: () => {}, sairDaSala: () => {},
   enviarMensagemDeChat: () => {}, expulsarMembro: () => {}, desbloquearJogador: () => {},
   encerrarSala: () => {}, iniciarPartida: () => {}, expulso: false, descartarExpulsao: () => {},
+  marcarSaidaPropria: () => {},
 } as unknown as UseSalaWebSocketReturn
 
 function criarMembro(id: string, apelido: string, ordemDeEntrada: number) {

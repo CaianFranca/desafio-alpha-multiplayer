@@ -406,6 +406,8 @@ test('Termino: broadcast, retenção e callback acontecem no término real da pa
       serverId: SERVER_ID,
       resultado: 'vitoria',
       jogadores: ['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4'],
+      // Vitória limpa, sem desistência: 409 do lobby continua definitivo.
+      teveDesistencia: false,
     });
   } finally {
     for (const socket of sockets) socket.close();

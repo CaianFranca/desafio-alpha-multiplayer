@@ -127,13 +127,18 @@ server.listen(gameServerPort, () => {
   void iniciarRegistro();
 });
 
-function encerrar(signal: string): void {
+async function encerrar(signal: string): Promise<void> {
   if (encerrando) return;
   encerrando = true;
   console.log(`[game-server] ${signal} recebido, encerrando...`);
-  void handlers.drenarRetornosPendentes(5000).catch((err: unknown) => {
+  try {
+    // B3 (issue #290): aguarda detach/retorno em voo (até 5s) ANTES de
+    // fechar — sem o await, o fallback abaixo matava o processo e o
+    // desistente não ficava livre / o retorno se perdia no deploy.
+    await handlers.drenarRetornosPendentes(5000);
+  } catch (err: unknown) {
     console.warn('[game-server] falha ao drenar retornos pendentes:', (err as Error).message);
-  });
+  }
   if (registroRetry) {
     clearTimeout(registroRetry);
     registroRetry = undefined;
@@ -160,9 +165,10 @@ function encerrar(signal: string): void {
     })
     .finally(finalizar);
 
-  // Fallback: força encerramento se removerRegistro travar
-  setTimeout(finalizar, 2000).unref();
+  // Fallback: força encerramento se removerRegistro travar (acima do teto do
+  // drain para não matar callbacks em voo).
+  setTimeout(finalizar, 6000).unref();
 }
 
-process.on('SIGTERM', () => encerrar('SIGTERM'));
-process.on('SIGINT', () => encerrar('SIGINT'));
+process.on('SIGTERM', () => void encerrar('SIGTERM'));
+process.on('SIGINT', () => void encerrar('SIGINT'));
