@@ -40,6 +40,11 @@ A `preparada` já tem o não-início (ADR-0010, 10s/90s) e permanece inalterada.
 - **Rearme pós-restart** via SCAN com jitter/pipeline (como lobby/não-início);
   **corrida admissão-vs-timer** mitigada com verificação de presença vigente
   dentro da mutação + cancelamento na re-admissão.
+- **TTL autoritativo**: `verificarExpiracaoSeNecessario` consulta o TTL da
+  chave antes dos guards — janela ainda aberta (`ttl > 0`, fire precoce)
+  aborta sem mutar e sem limpar; chave sem EX (`ttl == -1`, misconfig)
+  aborta com warn; só a janela vencida (`0/-2`) prossegue para os guards de
+  presença/engine.
 
 ## Porquê
 

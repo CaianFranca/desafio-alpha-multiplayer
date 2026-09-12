@@ -116,6 +116,50 @@ export async function verificarExpiracaoSeNecessario(
   partidaId: string,
   jogadorId: string,
 ): Promise<boolean> {
+  // TTL autoritativo (#295): o timer dispara no vencimento, logo no fire real
+  // a chave está em `0/-2`. `ttl > 0` = janela ainda aberta (fire
+  // precoce/chamada direta adiantada) aborta sem mutar; `ttl == -1` = chave
+  // sem EX (misconfig) aborta com warn; `0/-2` (vencida/ausente) prossegue
+  // para os guards de presença/engine.
+  let ttl: number;
+  try {
+    ttl = await redis.ttl(chaveReconexaoEmAndamento(partidaId, jogadorId));
+  } catch {
+    return false;
+  }
+  if (ttl > 0) {
+    return false;
+  }
+  if (ttl === -1) {
+    console.warn('[reconexao-em-andamento] janela sem expiração, abortando conversão', { partidaId, jogadorId });
+    return false;
+  }
+  if (!(await janelaExpiradaValida(redis, partidaId, jogadorId))) {
+    return false;
+  }
+  if (conversor === undefined) {
+    console.warn('[reconexao-em-andamento] sem conversor para expiração', { partidaId, jogadorId });
+    return false;
+  }
+  const converteu = await conversor(partidaId, jogadorId);
+  try {
+    await limparJanelaDeReconexao(redis, partidaId, jogadorId);
+  } catch {}
+  return converteu;
+}
+
+/**
+ * Validador único da janela (#295): guards de presença/engine compartilhados
+ * por `verificarExpiracaoSeNecessario` (janela vencida) e pelo rearme
+ * pós-restart (janela viva — o rearme filtra `ttl < 0` antes de chamar).
+ * Retorna false sem mutar o jogo em todos os casos inválidos, limpando a
+ * janela best-effort (inclusive na `preparada`, que nunca tem janela).
+ */
+async function janelaExpiradaValida(
+  redis: Redis,
+  partidaId: string,
+  jogadorId: string,
+): Promise<boolean> {
   const partida = await obterPartida(redis, partidaId as never);
   if (partida === null) {
     try {
@@ -126,6 +170,9 @@ export async function verificarExpiracaoSeNecessario(
   // Guarda da preparada (#295): janela/conversão só em `em_andamento` — o
   // não-início (10s/90s) segue intacto.
   if (partida.estado !== 'em_andamento') {
+    try {
+      await limparJanelaDeReconexao(redis, partidaId, jogadorId);
+    } catch {}
     return false;
   }
   const membro = partida.roster.find((m) => m.jogadorId === jogadorId);
@@ -148,15 +195,7 @@ export async function verificarExpiracaoSeNecessario(
     } catch {}
     return false;
   }
-  if (conversor === undefined) {
-    console.warn('[reconexao-em-andamento] sem conversor para expiração', { partidaId, jogadorId });
-    return false;
-  }
-  const converteu = await conversor(partidaId, jogadorId);
-  try {
-    await limparJanelaDeReconexao(redis, partidaId, jogadorId);
-  } catch {}
-  return converteu;
+  return true;
 }
 
 interface LinhaDoRearme {
@@ -208,31 +247,7 @@ export async function rearmarReconexaoEmAndamentoAposRestart(redis: Redis): Prom
         const jogadorId = resto.slice(sep + 1);
         if (partidaId.length === 0 || jogadorId.length === 0) continue;
         try {
-          const partida = await obterPartida(redis, partidaId as never);
-          if (partida === null || partida.estado !== 'em_andamento') {
-            try {
-              await redis.del(linha.chave);
-            } catch {}
-            continue;
-          }
-          const membro = partida.roster.find((m) => m.jogadorId === jogadorId);
-          if (membro === undefined || membro.presenca !== 'em_reconexao') {
-            try {
-              await redis.del(linha.chave);
-            } catch {}
-            continue;
-          }
-          const estado = await obterEstadoDaPartida(redis, partidaId);
-          if (estado === null || estado.resultado !== null) {
-            try {
-              await redis.del(linha.chave);
-            } catch {}
-            continue;
-          }
-          if (!estado.jogadores.some((j) => j.jogadorId === jogadorId)) {
-            try {
-              await redis.del(linha.chave);
-            } catch {}
+          if (!(await janelaExpiradaValida(redis, partidaId, jogadorId))) {
             continue;
           }
           const delayMs = Math.max(0, linha.ttl * 1000) + jitterAte(JITTER_REARME_MS);

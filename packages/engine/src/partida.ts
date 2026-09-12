@@ -242,11 +242,15 @@ export interface ResgateRealizadoEvento {
 // Causa (issue #295): 'desistencia' = ato explícito do Jogador,
 // 'expiracao' = conversão automática da janela de reconexão em andamento.
 // Ausente = 'desistencia' implícita (compat com payloads/binários antigos).
+// Alias local por pacote: o shared declara o próprio alias com o mesmo shape
+// — sync manual entre os dois (o shared não pode depender do engine).
+export type CausaDesistencia = 'desistencia' | 'expiracao';
+
 export interface DesistenciaRegistradaEvento {
   readonly tipo: 'desistencia_registrada';
   readonly jogadorId: string;
   readonly peaoId: string;
-  readonly causa?: 'desistencia' | 'expiracao';
+  readonly causa?: CausaDesistencia;
 }
 
 // Término (issue #176): emitido no máximo uma vez, sempre como ÚLTIMO evento

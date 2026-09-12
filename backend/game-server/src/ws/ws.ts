@@ -191,11 +191,7 @@ function limparAdmissaoFalha(
   if (conexaoAnterior !== null && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN) {
     adicionarConexao(conexaoAnterior);
   } else if (eraVigente) {
-    void marcarDesconexao(redis, partidaId, jogadorId)
-      .then(() => armarJanelaSeEmAndamento(redis, partidaId, jogadorId))
-      .catch((err) =>
-        console.error('[ws] falha ao marcar desconexão:', (err as Error).message),
-      );
+    marcarDesconexaoEArmarJanela(redis, partidaId, jogadorId);
   }
 }
 
@@ -219,6 +215,25 @@ async function armarJanelaSeEmAndamento(
   } catch (err) {
     console.error('[ws] falha ao armar janela de reconexão:', (err as Error).message);
   }
+}
+
+/**
+ * Helper de desconexão (issue #295): marca `em_reconexao` e arma a janela de
+ * reconexão da Partida em andamento. O `close` real passa o
+ * `verificarNaoInicioAposDesconexao` como etapa intermediária (a `preparada`
+ * segue só com o não-início); a limpeza de admissão falha não tem etapa extra.
+ * Fire-and-forget com log único — a ordem marcar → extra → armar é preservada.
+ */
+function marcarDesconexaoEArmarJanela(
+  redis: Redis,
+  partidaId: PartidaId,
+  jogadorId: string,
+  etapaIntermediaria?: (redis: Redis, partidaId: PartidaId) => Promise<unknown>,
+): void {
+  void marcarDesconexao(redis, partidaId, jogadorId)
+    .then(() => etapaIntermediaria?.(redis, partidaId))
+    .then(() => armarJanelaSeEmAndamento(redis, partidaId, jogadorId))
+    .catch((err) => console.error('[ws] falha ao marcar desconexão:', (err as Error).message));
 }
 
 export function criarWebSocketServer(
@@ -485,10 +500,9 @@ export function criarWebSocketServer(
             if (!eraVigente) {
               return;
             }
-            void marcarDesconexao(contexto.redis, partidaId, sessao.jogadorId)
-              .then(() => verificarNaoInicioAposDesconexao(contexto.redis, partidaId))
-              .then(() => armarJanelaSeEmAndamento(contexto.redis, partidaId, sessao.jogadorId))
-              .catch((err) => console.error('[ws] falha ao marcar desconexão:', (err as Error).message));
+            marcarDesconexaoEArmarJanela(contexto.redis, partidaId, sessao.jogadorId, (r, p) =>
+              verificarNaoInicioAposDesconexao(r, p),
+            );
           });
         })().catch((error) => {
           console.error('[ws] falha na transição pós-upgrade:', (error as Error).message);

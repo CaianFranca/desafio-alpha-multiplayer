@@ -3,10 +3,15 @@
 // Comportamento externo via `PartidaHandlers` + módulo `reconexao-em-andamento`
 // + Redis em memória (get/set/ttl/del/scan/eval/pipeline) + broadcaster real:
 //
-// - volta dentro sem perda (limpar+cancelar impede a conversão; peão/vez intactos)
+// - volta dentro sem perda (presença conectado + chave limpa + timer
+//   cancelado; peão/vez/Sanidade intactos, estado bit a bit)
+// - TTL autoritativo: fire precoce (ttl > 0) e janela sem EX (ttl -1) abortam
+//   sem mutar; só a janela vencida (ttl 0/-2) converte
 // - expiração converte igual a B com causa 'expiracao' (fora do turno e Ativo destrava)
+// - lote da expiração com Iluminação/Limpeza como em B (só peças do ausente)
+// - 3→2 por expiração com objetivos declara vitória N−1 no próprio lote
 // - 2→1 por expiração declara derrota + retorno como em B
-// - causa explícita distinguível (explícito sem causa; expiração com causa)
+// - causa explícita distinguível (ausente = implícita; expiracao; desistencia)
 // - preparada inalterada (verificação aborta sem mutar)
 // - corrida admissão-vs-timer (readmitido aborta; idempotência dupla)
 
@@ -15,6 +20,7 @@ import { test } from 'node:test';
 import type { Redis } from 'ioredis';
 import type { WebSocket } from 'ws';
 import {
+  calcularIluminacao,
   estadoInicialDaPartida,
   type EstadoDaPartida,
 } from '@flicker/engine';
@@ -216,16 +222,29 @@ function limparWiring(): void {
   definirConversorDeExpiracao(undefined);
 }
 
+/**
+ * Simula a janela vencida no fire real do timer: a janela existiu (EX
+ * gravado) e o TTL venceu — a chave sumiu (ttl -2), então a verificação
+ * prossegue para os guards de presença/engine. Janela viva (ttl > 0) é o
+ * caso do fire precoce, coberto em teste próprio.
+ */
+async function simularJanelaVencida(montada: PartidaMontada, jogadorId: string): Promise<void> {
+  await definirJanelaDeReconexao(montada.redis.comoRedis(), montada.partidaId, jogadorId);
+  await montada.redis.del(chaveReconexaoEmAndamento(montada.partidaId, jogadorId));
+}
+
 // ─── Causa compatível ───
 
-test('tradução 1:1 da causa: ausente vira wire sem causa; expiracao viaja', () => {
+test('tradução 1:1 da causa: ausente vira wire sem causa; expiracao e desistencia viajam', () => {
   const saida = traduzirEventos([
     { tipo: 'desistencia_registrada', jogadorId: 'j1', peaoId: 'peao-vermelho' },
     { tipo: 'desistencia_registrada', jogadorId: 'j2', peaoId: 'peao-azul', causa: 'expiracao' },
+    { tipo: 'desistencia_registrada', jogadorId: 'j3', peaoId: 'peao-branco', causa: 'desistencia' },
   ]);
   assert.deepEqual(saida, [
     { type: 'DESISTENCIA_REGISTRADA', jogadorId: 'j1', peaoId: 'peao-vermelho' },
     { type: 'DESISTENCIA_REGISTRADA', jogadorId: 'j2', peaoId: 'peao-azul', causa: 'expiracao' },
+    { type: 'DESISTENCIA_REGISTRADA', jogadorId: 'j3', peaoId: 'peao-branco', causa: 'desistencia' },
   ]);
 });
 
@@ -255,7 +274,7 @@ test('expiração fora do turno remove peão e vez com causa expiracao, sem troc
     emReconexao: ['jogador-4'],
   });
   try {
-    await definirJanelaDeReconexao(montada.redis.comoRedis(), montada.partidaId, 'jogador-4');
+    await simularJanelaVencida(montada, 'jogador-4');
     const converteu = await verificarExpiracaoSeNecessario(
       montada.redis.comoRedis(),
       montada.partidaId,
@@ -337,28 +356,59 @@ test('2→1 por expiração declara derrota + retorno como em B', async () => {
 
 // ─── Volta dentro sem perda ───
 
-test('volta dentro (limpar+cancelar) impede a conversão e preserva peão/vez', async () => {
+test('volta dentro da janela: presença conectado + chave limpa + timer cancelado, sem perda', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
     emReconexao: ['jogador-3'],
   });
   try {
+    // Queda arma janela + timer (espelha ws.ts).
     await definirJanelaDeReconexao(montada.redis.comoRedis(), montada.partidaId, 'jogador-3');
     agendarExpiracaoDeReconexao(montada.partidaId, 'jogador-3', 60_000, montada.redis.comoRedis());
-    // Re-admissão: limpa e cancela antes do fire.
+    const antes = await lerEstado(montada);
+    const sanidadeAntes = antes.jogadores.map((j) => `${j.jogadorId}=${j.sanidade}`);
+
+    // Re-admissão dentro da janela (espelha ws.ts): presença volta a
+    // conectado, janela limpa e timer cancelado antes do fire.
+    const bruto = await montada.redis.comoRedis().get(chaveDaPartida(montada.partidaId));
+    assert.ok(bruto !== null);
+    const partida = JSON.parse(bruto) as { roster: Array<{ jogadorId: string; presenca: string }> };
+    for (const m of partida.roster) {
+      if (m.jogadorId === 'jogador-3') m.presenca = 'conectado';
+    }
+    await montada.redis.set(chaveDaPartida(montada.partidaId), JSON.stringify({
+      partidaId: montada.partidaId,
+      serverId: 'game-server-teste-reconexao',
+      salaId: 'sala-1',
+      codigoDeSala: 'ABC123',
+      roster: partida.roster,
+      estado: 'em_andamento',
+      criadaEm: new Date().toISOString(),
+    }));
     cancelarExpiracaoDeReconexao(montada.partidaId, 'jogador-3');
     await limparJanelaDeReconexao(montada.redis.comoRedis(), montada.partidaId, 'jogador-3');
-    const converteu = await montada.handlers.converterExpiracaoEmDesistencia(
+
+    // Mesmo que a verificação dispare atrasada, aborta sem mutar nada.
+    const converteu = await verificarExpiracaoSeNecessario(
+      montada.redis.comoRedis(),
       montada.partidaId,
       'jogador-3',
     );
-    // O roster do teste segue em_reconexao (sem transição real aqui), então a
-    // conversão ainda aplicaria — o ponto é que a JANELA foi consumida: sem a
-    // limpeza, a verificação encontraria TTL; com limpeza, não há janela.
-    // Re-simula a readmissão gravando presença conectado e confirma idempotência.
+    assert.equal(converteu, false);
+    const depois = await lerEstado(montada);
+    assert.deepEqual(depois, antes);
+    assert.deepEqual(
+      depois.jogadores.map((j) => j.jogadorId),
+      ['jogador-1', 'jogador-2', 'jogador-3'],
+    );
+    assert.ok(depois.tabuleiro.peoes.some((p) => p.peaoId === 'peao-azul'), 'peão de quem voltou intacto');
+    assert.equal(depois.jogadorAtivoId, antes.jogadorAtivoId, 'vez intacta');
+    assert.deepEqual(
+      depois.jogadores.map((j) => `${j.jogadorId}=${j.sanidade}`),
+      sanidadeAntes,
+      'Sanidade intacta',
+    );
     assert.equal(montada.redis.tem(chaveReconexaoEmAndamento(montada.partidaId, 'jogador-3')), false);
-    void converteu;
-    const estado = await lerEstado(montada);
-    void estado;
+    assert.equal(montada.sockets.get('jogador-1')!.mensagens.length, 0);
   } finally {
     cancelarExpiracaoDeReconexao(montada.partidaId, 'jogador-3');
     limparWiring();
@@ -434,7 +484,7 @@ test('preparada nunca converte: verificação aborta sem mutar nem avisar', asyn
     emReconexao: ['jogador-2'],
   });
   try {
-    await definirJanelaDeReconexao(montada.redis.comoRedis(), montada.partidaId, 'jogador-2');
+    await simularJanelaVencida(montada, 'jogador-2');
     const converteu = await verificarExpiracaoSeNecessario(
       montada.redis.comoRedis(),
       montada.partidaId,
@@ -449,6 +499,184 @@ test('preparada nunca converte: verificação aborta sem mutar nem avisar', asyn
     assert.equal(montada.sockets.get('jogador-1')!.mensagens.length, 0);
     assert.equal(montada.avisos.length, 0);
     assert.equal(montada.desistencias.length, 0);
+    assert.equal(montada.redis.tem(chaveReconexaoEmAndamento(montada.partidaId, 'jogador-2')), false);
+  } finally {
+    limparWiring();
+  }
+});
+
+// ─── TTL autoritativo: precoce e sem-EX abortam ───
+
+test('fire precoce (ttl > 0, janela ainda aberta) não converte nem limpa a janela', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
+    emReconexao: ['jogador-3'],
+  });
+  try {
+    await definirJanelaDeReconexao(montada.redis.comoRedis(), montada.partidaId, 'jogador-3', 60);
+    const antes = await lerEstado(montada);
+    const converteu = await verificarExpiracaoSeNecessario(
+      montada.redis.comoRedis(),
+      montada.partidaId,
+      'jogador-3',
+    );
+    assert.equal(converteu, false);
+    assert.deepEqual(await lerEstado(montada), antes);
+    assert.equal(montada.sockets.get('jogador-1')!.mensagens.length, 0);
+    assert.equal(
+      montada.redis.tem(chaveReconexaoEmAndamento(montada.partidaId, 'jogador-3')),
+      true,
+      'janela viva preservada para o fire no vencimento',
+    );
+  } finally {
+    limparWiring();
+  }
+});
+
+test('janela sem EX (ttl -1, misconfig) aborta com warn sem mutar', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
+    emReconexao: ['jogador-3'],
+  });
+  try {
+    // Chave sem EX: o stub devolve -1 como o Redis real sem expiração.
+    await montada.redis.set(chaveReconexaoEmAndamento(montada.partidaId, 'jogador-3'), '1');
+    const antes = await lerEstado(montada);
+    const converteu = await verificarExpiracaoSeNecessario(
+      montada.redis.comoRedis(),
+      montada.partidaId,
+      'jogador-3',
+    );
+    assert.equal(converteu, false);
+    assert.deepEqual(await lerEstado(montada), antes);
+    assert.equal(montada.sockets.get('jogador-1')!.mensagens.length, 0);
+  } finally {
+    limparWiring();
+  }
+});
+
+// ─── Lote da expiração com Iluminação/Limpeza como em B ───
+
+test('expiração recalcula a Iluminação e limpa só as peças do ausente, com causa', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4'], {
+    emReconexao: ['jogador-4'],
+  });
+  try {
+    // Mesmo tabuleiro do teste de B em desistencia.test.ts: peças sob os
+    // restantes + peças só iluminadas pelo ausente (jogador-4 em (0,0)).
+    const posicionadas = [
+      { pecaId: 'p-a', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 3 } },
+      { pecaId: 'p-b', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 5, coluna: 3 } },
+      { pecaId: 'p-d', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 5 } },
+      { pecaId: 'p-c', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 0 } },
+      { pecaId: 'p-extra', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 1 } },
+    ];
+    const base = await lerEstado(montada);
+    const tabuleiro = {
+      ...base.tabuleiro,
+      posicionadas,
+      peoes: [
+        { peaoId: 'peao-branco', cor: 'branco' as const, pecaId: 'p-a' },
+        { peaoId: 'peao-vermelho', cor: 'vermelho' as const, pecaId: 'p-b' },
+        { peaoId: 'peao-azul', cor: 'azul' as const, pecaId: 'p-d' },
+        { peaoId: 'peao-amarelo', cor: 'amarelo' as const, pecaId: 'p-c' },
+      ],
+    };
+    await montada.redis.set(
+      chaveDoEstadoDaPartida(montada.partidaId),
+      JSON.stringify({
+        ...base,
+        tabuleiro,
+        celulasIluminadas: calcularIluminacao(tabuleiro),
+      }),
+    );
+
+    await simularJanelaVencida(montada, 'jogador-4');
+    const converteu = await verificarExpiracaoSeNecessario(
+      montada.redis.comoRedis(),
+      montada.partidaId,
+      'jogador-4',
+    );
+    assert.equal(converteu, true);
+
+    const estado = await lerEstado(montada);
+    assert.deepEqual(estado.tabuleiro.posicionadas.map((peca) => peca.pecaId), ['p-a', 'p-b', 'p-d']);
+
+    const mensagens = montada.sockets.get('jogador-1')!.mensagens;
+    assert.deepEqual(mensagens[0], {
+      type: 'DESISTENCIA_REGISTRADA',
+      jogadorId: 'jogador-4',
+      peaoId: 'peao-amarelo',
+      causa: 'expiracao',
+    });
+    assert.deepEqual(
+      mensagens.find((m) => m.type === 'LIMPEZA_APLICADA'),
+      { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['p-c', 'p-extra'] },
+    );
+    const iluminadas = mensagens.find((m) => m.type === 'CELULAS_ILUMINADAS') as
+      | { celulas: Array<{ linha: number; coluna: number }> }
+      | undefined;
+    assert.ok(iluminadas !== undefined, 'tabuleiro novo viaja no lote da expiração');
+    assert.ok(
+      iluminadas.celulas.every((c) => !(c.linha === 0 && c.coluna <= 1)),
+      'células do ausente apagam',
+    );
+  } finally {
+    limparWiring();
+  }
+});
+
+test('3→2 por expiração com objetivos declara vitória N−1 no próprio lote', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
+    emReconexao: ['jogador-3'],
+  });
+  try {
+    // Objetivos prontos com N=3: portão com os 3 peões, geradores e cartão —
+    // a saída do ausente deixa N−1 vencedor (vitória precede as derrotas).
+    const base = await lerEstado(montada);
+    const portao = {
+      pecaId: 'portao-de-teste',
+      tipo: 'portao_de_saida' as const,
+      orientacao: 0 as const,
+      celula: { linha: 3, coluna: 3 },
+    };
+    await montada.redis.set(
+      chaveDoEstadoDaPartida(montada.partidaId),
+      JSON.stringify({
+        ...base,
+        tabuleiro: {
+          ...base.tabuleiro,
+          posicionadas: [portao],
+          peoes: base.tabuleiro.peoes.map((peao) => ({ ...peao, pecaId: portao.pecaId })),
+        },
+        geradoresLigados: ['gerador-1', 'gerador-2', 'gerador-3'],
+        cartaoDeAcessoObtido: true,
+      }),
+    );
+
+    await simularJanelaVencida(montada, 'jogador-3');
+    const converteu = await verificarExpiracaoSeNecessario(
+      montada.redis.comoRedis(),
+      montada.partidaId,
+      'jogador-3',
+    );
+    assert.equal(converteu, true);
+
+    const estado = await lerEstado(montada);
+    assert.deepEqual(estado.resultado, { tipo: 'vitoria' });
+    const mensagens = montada.sockets.get('jogador-1')!.mensagens;
+    assert.deepEqual(mensagens[mensagens.length - 1], {
+      type: 'PARTIDA_TERMINADA',
+      resultado: 'vitoria',
+    });
+    await montada.handlers.drenarRetornosPendentes(2000);
+    assert.equal(montada.avisos.length, 1);
+    assert.deepEqual(montada.avisos[0], {
+      salaId: 'sala-1',
+      partidaId: montada.partidaId,
+      serverId: 'game-server-teste-reconexao',
+      resultado: 'vitoria',
+      jogadores: ['jogador-1', 'jogador-2'],
+      teveDesistencia: true,
+    });
   } finally {
     limparWiring();
   }

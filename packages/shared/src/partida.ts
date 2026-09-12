@@ -481,11 +481,15 @@ export interface ResgateRealizadoWireEvento {
 // mesmo lote). Shape 1:1 com DesistenciaRegistradaEvento do domínio.
 // Causa (issue #295): ausente = 'desistencia' implícita (compat com binários
 // antigos); 'expiracao' = conversão automática da janela de reconexão.
+// Alias local por pacote: mesmo shape do `CausaDesistencia` do engine — sync
+// manual entre os dois (o shared não pode depender do engine).
+export type CausaDesistencia = 'desistencia' | 'expiracao';
+
 export interface DesistenciaRegistradaWireEvento {
   readonly type: 'DESISTENCIA_REGISTRADA';
   readonly jogadorId: string;
   readonly peaoId: PeaoId;
-  readonly causa?: 'desistencia' | 'expiracao';
+  readonly causa?: CausaDesistencia;
 }
 
 export type PartidaEventoDoServidor =
