@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useLoader } from '@react-three/fiber'
+import { useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import mesaTopoUrl from '../assets/mesa_topo.jpg'
 import {
@@ -9,6 +9,7 @@ import {
   LARGURA_MESA,
   PROFUNDIDADE_MESA,
 } from '../ambiente/contrato'
+import { aspectoVisivel, nevoaParaAspecto } from '../ambiente/cameraLimites'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
 import { ManipulacaoOverlay } from './ManipulacaoOverlay'
@@ -95,6 +96,8 @@ function Mesa() {
 }
 
 interface AmbienteCenaProps {
+  /** Borda da moldura em px (PartidaMoldura): descontada do aspecto visível da névoa. */
+  bordaPx?: number
   estadoExibicao?: EstadoExibicaoTabuleiro | null
   /** Estado de interação (seleção/manipulação) para cursor e destaques. */
   estadoInteracao?: EstadoInteracaoTabuleiro | null
@@ -160,6 +163,7 @@ const estadoInteracaoVazio: EstadoInteracaoTabuleiro = {
 function noop(): void {}
 
 export function AmbienteCena({
+  bordaPx = 0,
   estadoExibicao,
   estadoInteracao = null,
   onComando,
@@ -194,12 +198,16 @@ export function AmbienteCena({
   // renderizado e a TransicaoEncaixe também não anima (mesma leitura do hook).
   const reduce = usePrefersReducedMotion()
   const pecaEmVooId = reduce ? null : (encaixeTrigger?.pecaId ?? null)
+  // #230: névoa gateada por aspecto — afastada só no largo-baixo (800x360),
+  // padrão no desktop/tablet sem regressão de atmosfera.
+  const tamanho = useThree((s) => s.size)
+  const nevoa = useMemo(() => nevoaParaAspecto(aspectoVisivel(tamanho, bordaPx)), [tamanho, bordaPx])
 
   return (
     <>
       {/* Vazio quase-preto delimitando a cena, com fog no mesmo tom para profundidade. */}
       <color attach="background" args={[COR_FUNDO]} />
-      <fog attach="fog" args={[COR_FUNDO, 24, 70]} />
+      <fog attach="fog" args={[COR_FUNDO, nevoa.perto, nevoa.longe]} />
       <Iluminacao />
       {/*
         Wrapper de desseleção (issue #90): clique em qualquer alvo inerte da

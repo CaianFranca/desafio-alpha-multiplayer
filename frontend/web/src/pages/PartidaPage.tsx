@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AmbienteDeJogo } from '../components/partida/AmbienteDeJogo'
 import { HudDaPartida } from '../components/partida/HudDaPartida'
+import { useViewportCompacto } from '../hooks/useViewportCompacto'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
 import { usePartidaTela } from '../components/partida/usePartidaTela'
@@ -858,6 +859,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [enviarComJogador])
   const requerModoPaisagem = useRequerModoPaisagem()
   const [bordaPx, setBordaPx] = useState(0)
+  const viewportCompacto = useViewportCompacto()
 
   // Devolução de foco do overlay bloqueante: rastreia o último foco fora
   // do overlay (via focusin — o auto-focus do filho roda antes do efeito
@@ -993,13 +995,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           emResultado={emResultado}
           iniciadaEm={modelo.iniciadaEm}
           onSair={desistirEIrParaPrincipal}
+          compacto={viewportCompacto}
         />
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (
-        // Botões de turno acima do card de Turno do HUD (inf-dir, #226).
+        // Botões de turno acima do card de Turno do HUD (inf-dir, #226;
+        // contidos no compacto #230 com safe-area, sem sobrepor HUD/alvos).
         <div
           data-testid="controles-de-turno"
-          className="pointer-events-auto absolute bottom-32 right-6 z-30 flex gap-2"
+          data-compacto={viewportCompacto ? 'true' : 'false'}
+          style={
+            viewportCompacto
+              ? {
+                  right: 'calc(1.5rem + env(safe-area-inset-right))',
+                  bottom: 'calc(5.5rem + env(safe-area-inset-bottom))',
+                }
+              : undefined
+          }
+          className={`pointer-events-auto absolute z-30 flex gap-2 ${viewportCompacto ? 'bottom-20 right-4' : 'bottom-32 right-6'}`}
         >
           {faseDoTurno === 'permanecer' ? (
             <button

@@ -38,6 +38,23 @@ export const COR_FUNDO = '#010101'
 /** Cor sólida das laterais/base da Mesa (tom escuro coerente com o vazio). */
 export const COR_LATERAIS_MESA = '#141112'
 
+/**
+ * Névoa padrão (desktop/tablet): valores herdados do baseline (24, 70).
+ */
+export const NEVOA_PERTO_PADRAO = 24
+export const NEVOA_LONGE_PADRAO = 70
+
+/**
+ * Névoa largo-baixo (issue #230, 800x360): início além do canto mais distante
+ * da Mesa no teto do zoom interativo (~22.5 de distância + cantos ~32), para
+ * a Mesa permanecer legível sem esmaecer no aspecto largo-baixo. O fim mantém
+ * profundidade do vazio. Mesa 20×20 — recalibrar se as dimensões mudarem.
+ * Só vale no aspecto largo-baixo (ver `nevoaParaAspecto`); demais aspectos
+ * usam o padrão sem regressão.
+ */
+export const NEVOA_PERTO = 32
+export const NEVOA_LONGE = 95
+
 export interface CameraFixa {
   posicao: [number, number, number]
   alvo: [number, number, number]
