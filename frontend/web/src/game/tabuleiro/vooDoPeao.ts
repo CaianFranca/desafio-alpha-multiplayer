@@ -29,6 +29,7 @@
  */
 
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
+import { comBase } from '../../api/basePath'
 import { celulaParaMundo, chaveCelula, PEAO_Y } from './contrato'
 import type { Celula, CorDoPeao, PeaoDaExibicao } from './contrato'
 import type { EstadoDoTabuleiroNoCliente } from './reducao'
@@ -73,10 +74,10 @@ const VOO_ALTURA_MAX = 1.2
 const VOO_INCLINACAO_RAD = 0.28
 
 /** Asset do clique suave ao selecionar (chega depois; sem arquivo = silêncio). */
-export const SOM_CAMINHO_CLIQUE_PEAO = '/media/clique-peao.mp3'
+export const SOM_CAMINHO_CLIQUE_PEAO = comBase('/media/clique-peao.mp3')
 
 /** Asset do baque ao aterrissar (chega depois; sem arquivo = silêncio). */
-export const SOM_CAMINHO_BAQUE_PEAO = '/media/baque-peao.mp3'
+export const SOM_CAMINHO_BAQUE_PEAO = comBase('/media/baque-peao.mp3')
 
 /**
  * Volumes base (contrato com o futuro botão de volume, ADR-0007:
