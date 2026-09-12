@@ -281,6 +281,67 @@ export class SalasRepo {
     }
   }
 
+  /**
+   * Reabre a sala removendo desistentes do roster na mesma transação PG
+   * (follow-up #371, caminho b): DELETE membros + INSERT historico motivo
+   * `saida` (desistência) + UPDATE status/anfitriao + marker atomico.
+   * Elimina corrida entre detach e retorno e garante sucessão de Anfitrião.
+   * Retorna true quando houve mutação, false quando já não estava encaminhada.
+   */
+  async reabrirSalaComSaidasAtomico(
+    salaId: string,
+    saidas: readonly string[],
+    novoAnfitriaoJogadorId: string | null | undefined,
+  ): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Flip status + anfitrião na mesma linha (evita janela entre DELETE e UPDATE)
+      let upd;
+      if (novoAnfitriaoJogadorId !== undefined) {
+        upd = await client.query(
+          `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL, anfitriao_id = COALESCE($2, anfitriao_id) WHERE id = $1 AND status = 'encaminhada'`,
+          [salaId, novoAnfitriaoJogadorId],
+        );
+      } else {
+        upd = await client.query(
+          `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
+          [salaId],
+        );
+      }
+      if ((upd.rowCount ?? 0) !== 1) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      for (const jogadorId of saidas) {
+        const exclusao = await client.query(
+          `DELETE FROM membros WHERE sala_id = $1 AND usuario_id = $2 AND bloqueado = false`,
+          [salaId, jogadorId],
+        );
+        if (exclusao.rowCount !== 1) {
+          // Saída não encontrada — rollback para manter atomicidade; caller trata como 409
+          await client.query('ROLLBACK');
+          return false;
+        }
+        await client.query(
+          `INSERT INTO membros_historico (sala_id, usuario_id, motivo_de_termino) VALUES ($1, $2, 'saida')`,
+          [salaId, jogadorId],
+        );
+      }
+      await client.query(
+        `INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+        [salaId],
+      );
+      await client.query('COMMIT');
+      return true;
+    } catch (erro) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw erro;
+    } finally {
+      client.release();
+    }
+  }
+
   async marcarReabertaPersistido(salaId: string): Promise<void> {
     await this.pool.query(
       `INSERT INTO sala_reaberta_markers (sala_id) VALUES ($1) ON CONFLICT DO NOTHING`,

@@ -154,6 +154,18 @@ export interface ReabrirSalaComando {
   readonly salaId: string;
 }
 
+export interface ReabrirSalaComSaidasComando {
+  readonly tipo: 'reabrir_sala_com_saidas';
+  readonly salaId: string;
+  /**
+   * Saídas atômicas à reabertura (follow-up #371): remove os desistentes do
+   * roster antes de flipar `encaminhada→aberta`. Cada saída é `saida`
+   * (vocabulário do lobby) e corresponde à desistência da partida no
+   * game-server. Validação de subset (1..N-1, membros ativos).
+   */
+  readonly saidas: readonly { readonly jogadorId: string; readonly motivo: MotivoDeEncerramento }[];
+}
+
 export type Comando =
   | CriarSalaComando
   | EntrarNaSalaComando
@@ -172,7 +184,8 @@ export type Comando =
   | RecusarEncaminhamentoComando
   | RegistrarFalhaDoEncaminhamentoComando
   | EncerrarSalaComando
-  | ReabrirSalaComando;
+  | ReabrirSalaComando
+  | ReabrirSalaComSaidasComando;
 
 export interface SalaCriadaEvento {
   readonly tipo: 'sala_criada';
@@ -407,6 +420,8 @@ export function aplicarComando(
       return encerrarSala(estado, comando);
     case 'reabrir_sala':
       return reabrirSala(estado, comando);
+    case 'reabrir_sala_com_saidas':
+      return reabrirSalaComSaidas(estado, comando);
     default:
       return rejeitar('DADOS_INVALIDOS', 'O comando de domínio é inválido.');
   }
@@ -1430,6 +1445,134 @@ export function reabrirSala(
   return sucesso(substituirSala(estado, novaSala), [
     { tipo: 'sala_reaberta', salaId: sala.id },
   ]);
+}
+
+/**
+ * Reabertura com saídas atômicas (follow-up #371, caminho b).
+ * Remove 0..N-1 desistentes do roster antes de flipar `encaminhada→aberta`,
+ * com sucessão de Anfitrião e `pronto=false` nos restantes. Validação de
+ * subset estrita: sala `encaminhada`+consistente, saídas ∈ membros ativos,
+ * sem duplicatas, deixando ao menos 1 membro ativo.
+ * Motivo é vocabulário do lobby (`saida`); a causa (desistência da partida)
+ * vive no game-server — o historico `membros_historico` registra `saida`.
+ */
+export function reabrirSalaComSaidas(
+  estado: EstadoDoLobby,
+  comando: ReabrirSalaComSaidasComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+  if (!Array.isArray(comando.saidas)) {
+    return rejeitar('DADOS_INVALIDOS', 'As saídas são obrigatórias.');
+  }
+  for (const saida of comando.saidas) {
+    const inv = validarTexto(saida.jogadorId, saida.motivo);
+    if (inv) return inv;
+    if (!MOTIVOS_DE_ENCERRAMENTO.includes(saida.motivo as MotivoDeEncerramento)) {
+      return rejeitar('DADOS_INVALIDOS', 'Motivo de encerramento inválido.');
+    }
+  }
+  const duplicados = new Set<string>();
+  for (const s of comando.saidas) {
+    if (duplicados.has(s.jogadorId)) {
+      return rejeitar('DADOS_INVALIDOS', 'Saída duplicada na reabertura.');
+    }
+    duplicados.add(s.jogadorId);
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  if (sala.estado !== 'encaminhada') {
+    return rejeitar('SALA_NAO_ENCAMINHADA', 'A Sala não está encaminhada.', { salaId: sala.id });
+  }
+
+  const ativos = sala.membros.filter((m) => m.estado === 'ativo');
+  if (comando.saidas.length >= ativos.length) {
+    return rejeitar('DADOS_INVALIDOS', 'A reabertura com saídas deve deixar ao menos um membro ativo.');
+  }
+  if (comando.saidas.length === 0) {
+    // Sem saídas equivale a reabrirSala — reutiliza lógica
+    const novaSalaVazia: Sala = {
+      ...sala,
+      estado: 'aberta',
+      membros: sala.membros.map((m) => (m.estado === 'ativo' ? { ...m, pronto: false } : m)),
+    };
+    return sucesso(substituirSala(estado, novaSalaVazia), [{ tipo: 'sala_reaberta', salaId: sala.id }]);
+  }
+
+  const ativosPorJogador = new Map(ativos.map((m) => [m.jogadorId, m]));
+  for (const s of comando.saidas) {
+    if (!ativosPorJogador.has(s.jogadorId)) {
+      return rejeitar('DADOS_INVALIDOS', 'Saída com jogador não-ativo na sala.');
+    }
+  }
+
+  const saidasSet = new Set(comando.saidas.map((s) => s.jogadorId));
+  const motivoPorJogador = new Map(comando.saidas.map((s) => [s.jogadorId, s.motivo]));
+
+  // Membros: encerrados para saidas, restantes com pronto false
+  const membrosNovos: Membro[] = sala.membros.map((m) => {
+    if (m.estado !== 'ativo') return m;
+    if (saidasSet.has(m.jogadorId)) {
+      return { ...m, estado: 'encerrado' as const, motivoEncerramento: motivoPorJogador.get(m.jogadorId) ?? 'saida' };
+    }
+    return { ...m, pronto: false };
+  });
+
+  // Sucessão de Anfitrião se o anfitrião saiu
+  let anfitriaoNovoId = sala.anfitriaoId;
+  const anfitriaoAtual = sala.membros.find((m) => m.id === sala.anfitriaoId);
+  const anfitriaoSaiu = anfitriaoAtual !== undefined && saidasSet.has(anfitriaoAtual.jogadorId);
+  if (anfitriaoSaiu) {
+    const restantesAtivos = membrosNovos.filter((m) => m.estado === 'ativo');
+    if (restantesAtivos.length > 0) {
+      anfitriaoNovoId = sucederAnfitriao(membrosNovos, anfitriaoAtual);
+    } else {
+      anfitriaoNovoId = null;
+    }
+  }
+
+  const novaSala: Sala = {
+    ...sala,
+    estado: 'aberta',
+    membros: membrosNovos,
+    anfitriaoId: anfitriaoNovoId,
+  };
+
+  const eventos: EventoDeDominio[] = [];
+  for (const s of comando.saidas) {
+    const membro = ativosPorJogador.get(s.jogadorId)!;
+    eventos.push({
+      tipo: 'membro_saiu',
+      salaId: sala.id,
+      membroId: membro.id,
+      jogadorId: membro.jogadorId,
+      ordemDeEntrada: membro.ordemDeEntrada,
+      motivo: 'saida',
+    });
+  }
+  if (anfitriaoSaiu && anfitriaoNovoId !== null && anfitriaoAtual) {
+    eventos.push({
+      tipo: 'anfitriao_sucedido',
+      salaId: sala.id,
+      anfitriaoAnteriorId: anfitriaoAtual.id,
+      anfitriaoNovoId: anfitriaoNovoId!,
+    });
+  }
+  eventos.push({ tipo: 'sala_reaberta', salaId: sala.id });
+
+  return sucesso(substituirSala(estado, novaSala), eventos);
 }
 
 function membroAtivo(id: string, jogadorId: string, ordemDeEntrada: number): Membro {

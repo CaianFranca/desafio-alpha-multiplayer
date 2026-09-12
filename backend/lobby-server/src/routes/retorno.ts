@@ -131,20 +131,37 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
         }
 
-        // Revalidação membros: jogadores deve coincidir com membros ativos
+        // Revalidação membros: jogadores deve ser subset de membros ativos (follow-up #371, N-1)
+        // Permite N-1 com desistentes: payload ⊆ ativosDb, 1 ≤ |payload| ≤ |ativosDb|, sem duplicatas.
+        // Isso elimina o desistente fantasma: a reabertura remove atomically os que sobraram fora do payload.
         const membrosDb = await contexto.repo.listarMembrosDaSala(salaId);
         const ativosDb = membrosDb.filter((m) => !m.bloqueado).map((m) => m.jogadorId).sort();
         const payloadOrdenado = [...jogadoresLista].sort();
-        const membrosCoincidem =
-          ativosDb.length === payloadOrdenado.length &&
-          ativosDb.every((v, i) => v === payloadOrdenado[i]);
-
-        if (!membrosCoincidem) {
+        // Duplicatas no payload são inválidas — o lobby exige conjunto
+        if (new Set(payloadOrdenado).size !== payloadOrdenado.length) {
+          return { tipo: 'erro' as const, status: 400, codigo: 'DADOS_INVALIDOS' };
+        }
+        const ativosSet = new Set(ativosDb);
+        const ehSubset =
+          payloadOrdenado.length >= 1 &&
+          payloadOrdenado.length <= ativosDb.length &&
+          payloadOrdenado.every((id) => ativosSet.has(id));
+        if (!ehSubset) {
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
         }
+        const saidas = ativosDb.filter((id) => !payloadOrdenado.includes(id));
 
-        // Aplicar comando no engine (valida estado consistente e encaminhada)
-        const aplicado = contexto.estado.aplicar({ tipo: 'reabrir_sala', salaId });
+        // Aplicar comando no engine (valida estado consistente e encaminhada + subset)
+        let aplicado: ReturnType<typeof contexto.estado.aplicar>;
+        if (saidas.length === 0) {
+          aplicado = contexto.estado.aplicar({ tipo: 'reabrir_sala', salaId });
+        } else {
+          aplicado = contexto.estado.aplicar({
+            tipo: 'reabrir_sala_com_saidas',
+            salaId,
+            saidas: saidas.map((jogadorId) => ({ jogadorId, motivo: 'saida' as const })),
+          });
+        }
         if (!aplicado.sucesso) {
           const codigo = aplicado.erro.codigo;
           if (codigo === 'SALA_NAO_ENCONTRADA') {
@@ -159,8 +176,24 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 400, codigo: 'DADOS_INVALIDOS' };
         }
 
-        // Persistência PG atômica (UPDATE + INSERT marker na mesma transação) — elimina janela de crash
-        const reabriu = await contexto.repo.reabrirSalaComMarkerAtomico(salaId);
+        // Persistência PG atômica — elimina janela de crash entre DELETE+marker
+        let reabriu: boolean;
+        if (saidas.length === 0) {
+          reabriu = await contexto.repo.reabrirSalaComMarkerAtomico(salaId);
+        } else {
+          const salaReaberta = aplicado.estado.salas.find((s) => s.id === salaId);
+          let novoAnfitriaoJogadorId: string | null | undefined = undefined;
+          if (salaReaberta) {
+            const anfitriaoMembro = salaReaberta.membros.find((m) => m.id === salaReaberta.anfitriaoId);
+            novoAnfitriaoJogadorId = anfitriaoMembro ? anfitriaoMembro.jogadorId : null;
+            // Se anfitrião não mudou, undefined evita UPDATE desnecessário (mantém PG)
+            const anfitriaoOriginal = salaBruta.anfitriaoId;
+            if (novoAnfitriaoJogadorId === anfitriaoOriginal) {
+              novoAnfitriaoJogadorId = undefined;
+            }
+          }
+          reabriu = await contexto.repo.reabrirSalaComSaidasAtomico(salaId, saidas, novoAnfitriaoJogadorId);
+        }
         if (!reabriu) {
           // rowCount 0: PG não flipou (concorrência ou status já não era encaminhada). Não commita memória.
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
