@@ -132,12 +132,12 @@ export function ControlesDoAnfitriao({
   return (
     <div className="flex flex-col gap-4 max-w-sm w-full">
       <div className="flex flex-col gap-3">
-        <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Controles do Anfitrião</p>
+        <p className="text-sm tracking-[0.18em] uppercase text-white/80">Controles do Anfitrião</p>
         <div className="flex gap-3 flex-wrap">
           <button
             type="button"
             onClick={confirmarEncerramento}
-            className="border border-white/20 px-4 py-2 text-xs tracking-wider uppercase text-white/70 hover:text-white hover:border-white/40 transition-colors"
+            className="border border-white/30 px-4 py-2 text-sm tracking-wider uppercase text-white/85 hover:text-white hover:border-white/40 transition-colors"
           >
             Encerrar Sala
           </button>
@@ -146,7 +146,7 @@ export function ControlesDoAnfitriao({
             onClick={aoIniciarPartida}
             disabled={!podeIniciar}
             title={motivoIniciar}
-            className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-xs font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#c9a86a]"
+            className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-sm font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#c9a86a]"
           >
             Iniciar Partida
           </button>
@@ -179,18 +179,18 @@ export function ControlesDoAnfitriao({
 
       {jogadoresBloqueados.length > 0 && (
         <div className="flex flex-col gap-2" aria-label="Jogadores bloqueados">
-          <p className="text-[10px] tracking-[0.18em] uppercase text-white/60">Jogadores bloqueados</p>
+          <p className="text-sm tracking-[0.18em] uppercase text-white/80">Jogadores bloqueados</p>
           <ul className="flex flex-col gap-2 max-h-36 overflow-y-auto pr-1">
             {jogadoresBloqueados.map((jogador) => (
               <li
                 key={jogador.jogadorId}
-                className="flex items-center justify-between gap-3 border border-white/10 bg-[#1e1e1e] px-3 py-2"
+                className="flex items-center justify-between gap-3 border border-white/30 bg-[#1e1e1e] px-3 py-2"
               >
-                <span className="text-sm text-white/70 truncate">{jogador.apelido}</span>
+                <span className="text-base text-white/85 truncate">{jogador.apelido}</span>
                 <button
                   type="button"
                   onClick={() => aoDesbloquearJogador(jogador.jogadorId)}
-                  className="border border-[#c9a86a]/60 text-[#c9a86a] px-3 py-1 text-[10px] font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors"
+                  className="border border-[#c9a86a]/60 text-[#c9a86a] px-3 py-1 text-sm font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors"
                 >
                   Desbloquear
                 </button>

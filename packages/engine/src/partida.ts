@@ -621,7 +621,8 @@ function posicionarPeaoDaPartida(
   // ADR-0013 / issue #354: em Baixa, só vagas escuras geram puxada — sem vaga
   // escura não há peça (evita pendência irresolúvel da #343). Em Baixa a
   // iluminação para o filtro é a fresca pós-posicionamento (inclui o novo peão).
-  const emBaixa = ator.emBaixaIluminacao ?? false;
+  const emBaixaAntes = ator.emBaixaIluminacao ?? false;
+  const emBaixa = emBaixaAntes;
   const celulasParaFiltroPrimeiroTurno = emBaixa
     ? calcularIluminacao(
         resultado.estado,
@@ -679,8 +680,27 @@ function posicionarPeaoDaPartida(
       iluminacao,
       eventos,
     );
+  // Issue #343 (espelha 8063dfe): sorteio usou Baixa pre-ataque — Baixa nova descarta tudo.
+  const atorAposAtaque = ataque.jogadores.find(
+    (jogador) => jogador.jogadorId === ator.jogadorId,
+  );
+  const baixaNovaDoAtor =
+    !emBaixaAntes && ((atorAposAtaque?.emBaixaIluminacao ?? false) === true);
+  const recebidasFinais = baixaNovaDoAtor ? [] : sorteio.recebidas;
+  if (baixaNovaDoAtor && sorteio.recebidas.length > 0) {
+    for (let indice = eventos.length - 1; indice >= 0; indice--) {
+      if (
+        eventos[indice].tipo === 'peca_sorteada' ||
+        eventos[indice].tipo === 'recebimento_gerado'
+      ) {
+        eventos.splice(indice, 1);
+      }
+    }
+  }
   const tabuleiroFinal: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
+    caixa: baixaNovaDoAtor ? resultado.estado.caixa : tabuleiroPosLimpeza.caixa,
+    recebidas: recebidasFinais,
     posicionadas: posicionadasFinais,
   };
   return sucessoDaPartida(
@@ -1463,11 +1483,14 @@ function confirmarPosicaoDoPeao(
       'Invariante da Confirmação: outro Peão está selecionado.',
     );
   }
-  const tabuleiroFinal: EstadoDoTabuleiro = {
+  const tabuleiroPosAtaque: EstadoDoTabuleiro = {
     ...tabuleiroPosLimpeza,
     caixa: baixaNovaDoAtor ? estado.tabuleiro.caixa : tabuleiroPosLimpeza.caixa,
     recebidas: recebidasFinais,
     posicionadas: posicionadasPosAtaque,
+  };
+  const tabuleiroFinal: EstadoDoTabuleiro = {
+    ...tabuleiroPosAtaque,
     peaoSelecionadoId:
       recebidasFinais.length > 0 ? (selecaoVigente ?? peao.peaoId) : selecaoVigente,
   };

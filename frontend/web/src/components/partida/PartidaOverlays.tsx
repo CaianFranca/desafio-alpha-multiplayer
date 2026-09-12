@@ -63,15 +63,15 @@ export function PartidaOverlays({
         className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/80"
       >
         <div className="flex flex-col items-center gap-4">
-          <p className="text-white text-2xl font-bold">{vitoria ? 'Vitória!' : 'Derrota'}</p>
-          <p className="text-zinc-400 text-sm">
+          <p className="text-white text-[length:var(--hud-display,1.5rem)] leading-8 font-bold">{vitoria ? 'Vitória!' : 'Derrota'}</p>
+          <p className="text-zinc-400 text-[length:var(--hud-corpo,0.875rem)] leading-5">
             {vitoria ? 'A equipe escapou do sanatório' : detalhe}
           </p>
           <button
             type="button"
             data-testid="voltar-a-sala"
             onClick={onVoltar}
-            className="pointer-events-auto rounded bg-amber-500 px-6 py-2 text-sm font-medium text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+            className="pointer-events-auto rounded bg-amber-500 px-6 py-2 text-[length:var(--hud-corpo,0.875rem)] leading-5 font-medium text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
           >
             Voltar à sala
           </button>
@@ -108,7 +108,7 @@ export function PartidaOverlays({
   if (estado === 'carregando') {
     return (
       <div data-testid="overlay-carregando" role="status" className={baseClasses}>
-        <p className="text-white text-lg">Carregando...</p>
+        <p className="text-white text-[length:var(--hud-titulo,1.125rem)] leading-7">Carregando...</p>
       </div>
     )
   }
@@ -117,8 +117,8 @@ export function PartidaOverlays({
     return (
       <div data-testid="overlay-aguardando" role="status" className={baseClasses}>
         <div className="flex flex-col items-center gap-2">
-          <p className="text-white text-lg">Aguardando partida</p>
-          <p className="text-zinc-400 text-sm">Partida preparada</p>
+          <p className="text-white text-[length:var(--hud-titulo,1.125rem)] leading-7">Aguardando partida</p>
+          <p className="text-zinc-400 text-[length:var(--hud-corpo,0.875rem)] leading-5">Partida preparada</p>
         </div>
       </div>
     )
@@ -129,8 +129,8 @@ export function PartidaOverlays({
     return (
       <div data-testid="overlay-falha" role="alert" className={baseClasses}>
         <div className="flex flex-col items-center gap-4">
-          <p className="text-white text-lg">Falha ao carregar</p>
-          <p data-testid="partida-desistencia-sem-retorno" className="text-zinc-400 text-sm">
+          <p className="text-white text-[length:var(--hud-titulo,1.125rem)] leading-7">Falha ao carregar</p>
+          <p data-testid="partida-desistencia-sem-retorno" className="text-zinc-400 text-[length:var(--hud-corpo,0.875rem)] leading-5">
             Você desistiu desta partida e não pode reassistir.
           </p>
         </div>
@@ -140,12 +140,12 @@ export function PartidaOverlays({
   return (
     <div data-testid="overlay-falha" role="alert" className={baseClasses}>
       <div className="flex flex-col items-center gap-4">
-        <p className="text-white text-lg">Falha ao carregar</p>
+        <p className="text-white text-[length:var(--hud-titulo,1.125rem)] leading-7">Falha ao carregar</p>
         <button
           type="button"
           data-testid="partida-tentar-novamente"
           onClick={onRetry}
-          className="pointer-events-auto rounded bg-amber-500 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+          className="pointer-events-auto rounded bg-amber-500 px-4 py-2 text-[length:var(--hud-corpo,0.875rem)] leading-5 font-medium text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
         >
           Tentar novamente
         </button>
