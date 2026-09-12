@@ -376,6 +376,7 @@ export function HudDaPartida({
           style={{
             right: 'calc(1.5rem + env(safe-area-inset-right))',
             top: 'calc(5rem + env(safe-area-inset-top))',
+            maxHeight: 'calc(100vh - 7rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
           }}
           className="pointer-events-auto absolute right-6 top-20 flex max-w-[min(20rem,calc(100vw-3rem))] flex-col gap-2 overflow-auto rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
         >
