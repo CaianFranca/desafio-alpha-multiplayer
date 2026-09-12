@@ -168,12 +168,21 @@ export class PartidaHandlers {
       this.debug?.emitir(partidaId, 'info', `Ação ${comando.tipo} de ${sessaoJogadorId} julgada`);
 
       await salvarEstadoDaPartida(this.redis, partidaId, resultado.estado);
-      this.broadcaster.enviar(partidaId, ...traduzirEventos(resultado.eventos));
+      // Causa explícita (issue #295): o ato explícito viaja com
+      // `causa:'desistencia'` — a conversão por expiração já chega com
+      // `causa:'expiracao'` (ver `converterExpiracaoEmDesistencia`) e
+      // payloads antigos sem causa seguem lidos como explícitos.
+      const eventosComCausa: readonly EventoDaPartida[] = resultado.eventos.map((evento) =>
+        evento.tipo === 'desistencia_registrada' && evento.causa === undefined
+          ? { ...evento, causa: 'desistencia' as const }
+          : evento,
+      );
+      this.broadcaster.enviar(partidaId, ...traduzirEventos(eventosComCausa));
 
       await this.processarPosLoteDeDesistencia(
         partidaId,
         partidaPrevia,
-        resultado.eventos,
+        eventosComCausa,
         resultado.estado.jogadores.map((j) => j.jogadorId),
       );
     }).catch((erro: unknown) => {
@@ -238,6 +247,9 @@ export class PartidaHandlers {
               partidaId,
               serverId: partida.serverId,
               jogadorId: evento.jogadorId,
+              // Causa informativa (#295): distingue o ato explícito
+              // (`desistencia`) da conversão (`expiracao`) sem mudar o detach.
+              ...(evento.causa === undefined ? {} : { causa: evento.causa }),
             }).catch((erro: unknown) => {
               console.error('[partida] callback de desistência terminou com erro', { partidaId, erro });
             });
@@ -276,6 +288,7 @@ export class PartidaHandlers {
           partidaId,
           partidaPrevia,
           jogadoresApos,
+          desistencias,
         );
         if (this.callbacksEnviados.has(partidaId) || this.retornosPendentes.has(partidaId)) {
           // Já há callback em voo ou enviado — retenção já aplicada acima, apenas evita duplicar aviso
@@ -346,6 +359,7 @@ export class PartidaHandlers {
                         partidaId,
                         partidaReagendada2,
                         jogadoresApos,
+                        desistencias,
                       );
                       const avisoReagendado2 = await this.montarAviso(
                         partidaReagendada2,
@@ -373,6 +387,7 @@ export class PartidaHandlers {
                   partidaId,
                   partidaReagendada,
                   jogadoresApos,
+                  desistencias,
                 );
                 const avisoReagendado = await this.montarAviso(
                   partidaReagendada,
@@ -557,6 +572,7 @@ export class PartidaHandlers {
     partidaId: string,
     partidaPrevia: PartidaPreparada | null,
     jogadoresNaPartida: readonly string[],
+    desistenciasNoLote: readonly EventoDaPartida[] = [],
   ): Promise<void> {
     const notificar = this.notificarDesistencia;
     if (notificar === undefined) return;
@@ -574,10 +590,26 @@ export class PartidaHandlers {
     }
     const naPartida = new Set(jogadoresNaPartida);
     const desistentes = partida.roster.map((m) => m.jogadorId).filter((id) => !naPartida.has(id));
+    // Causa informativa por desistente (#295): o lote carrega a origem de
+    // cada saída (explícita `desistencia` vs conversão `expiracao`); fora do
+    // lote (reagendamentos degradados) a causa é omitida, sem mudar o detach.
+    const causas = new Map<string, 'desistencia' | 'expiracao'>();
+    for (const evento of desistenciasNoLote) {
+      if (evento.tipo === 'desistencia_registrada' && evento.causa !== undefined) {
+        causas.set(evento.jogadorId, evento.causa);
+      }
+    }
     // Em paralelo com teto individual: jogadorIds distintos, lobby idempotente
     // e serializado na fila — o tempo total vira max(teto), não soma.
     await Promise.all(desistentes.map(async (jogadorId) => {
-      const promessa = notificar({ salaId: partida.salaId, partidaId, serverId: partida.serverId, jogadorId });
+      const causa = causas.get(jogadorId);
+      const promessa = notificar({
+        salaId: partida.salaId,
+        partidaId,
+        serverId: partida.serverId,
+        jogadorId,
+        ...(causa === undefined ? {} : { causa }),
+      });
       // Rastreia em mapa próprio (nunca no de retornos — o dedup do retorno
       // abaixo não pode ver detach como "callback em voo").
       this.rastrearDesvinculo(partidaId, promessa.catch(() => undefined));

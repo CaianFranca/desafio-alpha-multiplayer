@@ -3,8 +3,10 @@ import { test } from 'node:test';
 import jwt from 'jsonwebtoken';
 import { getConfig } from '@flicker/config';
 import {
+  criarClienteDeDesistencia,
   criarClienteDeRetorno,
   extrairRetryAfterMs,
+  type AvisoDeDesistencia,
   type AvisoDeRetorno,
 } from '../src/retorno/cliente.ts';
 
@@ -246,4 +248,58 @@ test('default do callback acompanha LOBBY_SERVER_PORT', () => {
     if (urlAnterior === undefined) delete process.env.LOBBY_RETORNO_CALLBACK_URL;
     else process.env.LOBBY_RETORNO_CALLBACK_URL = urlAnterior;
   }
+});
+
+test('callback de desistência carrega a causa de cada origem no payload', async () => {
+  const corpos: unknown[] = [];
+  const cliente = criarClienteDeDesistencia({
+    lobbyDesistenciaCallbackUrl: 'http://lobby.test/api/desistencia',
+    jwtSecret: JWT_SECRET,
+    buscarHttp: async (_url, init) => {
+      corpos.push(JSON.parse((init?.body ?? '{}') as string));
+      return new Response(JSON.stringify({ desvinculado: true }), { status: 200 });
+    },
+  });
+
+  const base = {
+    salaId: 'sala-1',
+    partidaId: 'partida-1',
+    serverId: 'game-server-1',
+    jogadorId: 'jogador-2',
+  } as const;
+  const explicita: AvisoDeDesistencia = { ...base, causa: 'desistencia' };
+  const expiracao: AvisoDeDesistencia = { ...base, causa: 'expiracao' };
+  await cliente(explicita);
+  await cliente(expiracao);
+
+  assert.deepEqual(corpos, [
+    { ...base, causa: 'desistencia' },
+    { ...base, causa: 'expiracao' },
+  ]);
+});
+
+test('callback de desistência omite a causa ausente (binário anterior)', async () => {
+  let corpo: unknown = null;
+  const cliente = criarClienteDeDesistencia({
+    lobbyDesistenciaCallbackUrl: 'http://lobby.test/api/desistencia',
+    jwtSecret: JWT_SECRET,
+    buscarHttp: async (_url, init) => {
+      corpo = JSON.parse((init?.body ?? '{}') as string);
+      return new Response(JSON.stringify({ desvinculado: true }), { status: 200 });
+    },
+  });
+
+  await cliente({
+    salaId: 'sala-1',
+    partidaId: 'partida-1',
+    serverId: 'game-server-1',
+    jogadorId: 'jogador-2',
+  });
+
+  assert.deepEqual(corpo, {
+    salaId: 'sala-1',
+    partidaId: 'partida-1',
+    serverId: 'game-server-1',
+    jogadorId: 'jogador-2',
+  });
 });

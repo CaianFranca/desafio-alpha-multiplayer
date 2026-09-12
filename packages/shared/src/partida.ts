@@ -32,6 +32,8 @@
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #289/ADR-0013, consumida na #288)
 //   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId, causa? } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez); causa #295 ('desistencia'|'expiracao', ausente = desistencia implícita)
+//   shared type:'JOGADOR_EM_RECONEXAO' { jogadorId } — sem par no engine (#295, spec #292 história 2): anúncio de presença da entrada na janela, broadcast só em `em_andamento` (a `preparada` nunca emite)
+//   shared type:'JOGADOR_RECONECTADO' { jogadorId } — sem par no engine (#295): anúncio de presença da volta dentro da janela, broadcast só na re-admissão em `em_andamento` (exclui as admissões iniciais)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
 //   motivo da derrota viaja em campo opcional separado (MotivoDeDerrotaWire,
 //   sync com DesfechoDaPartida — engine/src/partida.ts:156-161; 'desistencia'
@@ -207,9 +209,9 @@ export type PartidaComandoDoCliente =
   | AtivarDebugDaPartidaComando
   | DesativarDebugDaPartidaComando;
 
-// --- Eventos servidor → cliente (13: Turno/posição/iluminação/limpeza,
+// --- Eventos servidor → cliente (15: Turno/posição/iluminação/limpeza,
 // sorteio+vaga da #138, iniciada+estado, término da #179, ataque #172/#173,
-// resgate #171, desistência #288) ---
+// resgate #171, desistência #288, presença em reconexão #295) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';
@@ -492,6 +494,26 @@ export interface DesistenciaRegistradaWireEvento {
   readonly causa?: CausaDesistencia;
 }
 
+// Presença em reconexão (issue #295, spec #292 história 2): a entrada na
+// janela e a volta dentro dela são anunciadas aos restantes para que o
+// cliente projete o indicador "reconectando" (#294) — sem par no engine (o
+// domínio não conhece presença de conexão) e sem espelho no snapshot (a
+// #294 não deriva o indicador dali). Broadcast só em `em_andamento`: a
+// `preparada` nunca emite (não tem janela, só não-início).
+export interface JogadorEmReconexaoWireEvento {
+  readonly type: 'JOGADOR_EM_RECONEXAO';
+  readonly jogadorId: string;
+}
+
+// Volta dentro da janela (#295): broadcast na re-admissão que encontra a
+// partida em `em_andamento` com presença efetivamente restaurada
+// (`transicao.mudou && !iniciou`) — exclui as N admissões iniciais que viram
+// `em_andamento`, que anunciam PARTIDA_INICIADA em vez disto.
+export interface JogadorReconectadoWireEvento {
+  readonly type: 'JOGADOR_RECONECTADO';
+  readonly jogadorId: string;
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
@@ -505,7 +527,9 @@ export type PartidaEventoDoServidor =
   | PartidaTerminadaWireEvento
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
-  | DesistenciaRegistradaWireEvento;
+  | DesistenciaRegistradaWireEvento
+  | JogadorEmReconexaoWireEvento
+  | JogadorReconectadoWireEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

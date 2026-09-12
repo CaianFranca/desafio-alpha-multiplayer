@@ -248,7 +248,7 @@ test('tradução 1:1 da causa: ausente vira wire sem causa; expiracao e desisten
   ]);
 });
 
-test('desistência explícita não carrega causa; expiração carrega expiracao', async () => {
+test('desistência explícita viaja com causa desistencia; expiração com expiracao', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
   try {
     await montada.handlers.aplicarMensagem(
@@ -261,7 +261,19 @@ test('desistência explícita não carrega causa; expiração carrega expiracao'
       type: 'DESISTENCIA_REGISTRADA',
       jogadorId: 'jogador-3',
       peaoId: 'peao-azul',
+      // Causa explícita (#295): o servidor sempre envia no ato explícito.
+      causa: 'desistencia',
     });
+    await montada.handlers.drenarRetornosPendentes(2000);
+    assert.deepEqual(montada.desistencias, [
+      {
+        salaId: 'sala-1',
+        partidaId: montada.partidaId,
+        serverId: 'game-server-teste-reconexao',
+        jogadorId: 'jogador-3',
+        causa: 'desistencia',
+      },
+    ]);
   } finally {
     limparWiring();
   }
@@ -297,6 +309,8 @@ test('expiração fora do turno remove peão e vez com causa expiracao, sem troc
     });
     assert.equal(montada.desistencias.length, 1);
     assert.equal(montada.desistencias[0].jogadorId, 'jogador-4');
+    // Callback do parcial carrega a causa da conversão (#295).
+    assert.equal(montada.desistencias[0].causa, 'expiracao');
     assert.equal(montada.redis.tem(chaveReconexaoEmAndamento(montada.partidaId, 'jogador-4')), false);
   } finally {
     limparWiring();
@@ -349,6 +363,16 @@ test('2→1 por expiração declara derrota + retorno como em B', async () => {
     assert.equal(montada.avisos.length, 1);
     assert.equal(montada.avisos[0].resultado, 'derrota');
     assert.deepEqual(montada.avisos[0].jogadores, ['jogador-1']);
+    // Detach pré-retorno carrega a causa da conversão (#295).
+    assert.deepEqual(montada.desistencias, [
+      {
+        salaId: 'sala-1',
+        partidaId: montada.partidaId,
+        serverId: 'game-server-teste-reconexao',
+        jogadorId: 'jogador-2',
+        causa: 'expiracao',
+      },
+    ]);
   } finally {
     limparWiring();
   }

@@ -38,6 +38,13 @@ export interface AvisoDeDesistencia {
   readonly partidaId: string;
   readonly serverId: string;
   readonly jogadorId: string;
+  /**
+   * Causa informativa da saída (issue #295): `desistencia` no ato explícito,
+   * `expiracao` na conversão automática da janela de reconexão. Opcional:
+   * avisos de binário anterior omitem o campo e o lobby trata ausente como
+   * explícita. Não viaja decisão — o detach é idêntico nas duas origens.
+   */
+  readonly causa?: 'desistencia' | 'expiracao';
 }
 
 export interface DesistenciaClienteConfig {
@@ -203,6 +210,9 @@ export function criarClienteDeDesistencia(config: DesistenciaClienteConfig): (av
       partidaId: aviso.partidaId,
       serverId: aviso.serverId,
       jogadorId: aviso.jogadorId,
+      // Causa informativa (#295): só viaja quando conhecida — o lobby aceita
+      // e valida sem mudar o detach.
+      ...(aviso.causa === undefined ? {} : { causa: aviso.causa }),
     };
 
     let tentativa = 0;

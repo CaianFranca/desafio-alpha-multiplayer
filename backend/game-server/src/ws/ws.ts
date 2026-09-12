@@ -39,7 +39,7 @@ import type {
   AdmissaoRejeitadaEvento,
 } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
-import { marcarDesconexao, obterPartida, transicionarSeCompletoOuAtualizarPresenca } from '../partidas/partidas.ts';
+import { marcarDesconexao, obterPartida, transicionarSeCompletoOuAtualizarPresenca, type ResultadoTransicaoDePresenca } from '../partidas/partidas.ts';
 import { verificarNaoInicioAposDesconexao } from '../partidas/nao-inicio.ts';
 import {
   agendarExpiracaoDeReconexao,
@@ -186,35 +186,67 @@ function limparAdmissaoFalha(
   jogadorId: string,
   conexao: ConexaoDoJogador,
   conexaoAnterior: ConexaoDoJogador | null,
+  broadcaster?: PartidaBroadcaster,
 ): void {
   const eraVigente = removerConexao(conexao);
   if (conexaoAnterior !== null && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN) {
     adicionarConexao(conexaoAnterior);
   } else if (eraVigente) {
-    marcarDesconexaoEArmarJanela(redis, partidaId, jogadorId);
+    marcarDesconexaoEArmarJanela(redis, partidaId, jogadorId, undefined, broadcaster);
   }
 }
 
 /**
  * Janela de reconexão da Partida em andamento (issue #295): após marcar
  * `em_reconexao`, só a Partida `em_andamento` ganha janela TTL + timer que
- * converte em desistência; a `preparada` segue só com o não-início.
+ * converte em desistência; a `preparada` segue só com o não-início. Na
+ * entrada armada, anuncia `JOGADOR_EM_RECONEXAO` aos restantes (seam de
+ * presença da spec #292 história 2, consumido pela #294). Retorna se armou.
  */
-async function armarJanelaSeEmAndamento(
+export async function armarJanelaSeEmAndamento(
   redis: Redis,
   partidaId: PartidaId,
   jogadorId: string,
-): Promise<void> {
+  broadcaster?: PartidaBroadcaster,
+): Promise<boolean> {
   try {
     const partida = await obterPartida(redis, partidaId);
     if (partida === null || partida.estado !== 'em_andamento') {
-      return;
+      return false;
     }
     await definirJanelaDeReconexao(redis, partidaId, jogadorId);
     agendarExpiracaoDeReconexao(partidaId, jogadorId, undefined, redis);
+    broadcaster?.enviar(partidaId, { type: 'JOGADOR_EM_RECONEXAO', jogadorId });
+    return true;
   } catch (err) {
     console.error('[ws] falha ao armar janela de reconexão:', (err as Error).message);
+    return false;
   }
+}
+
+/**
+ * Volta dentro da janela (issue #295): anuncia `JOGADOR_RECONECTADO` aos
+ * restantes só na re-admissão efetiva em `em_andamento`
+ * (`mudou && !iniciou`) — as N admissões iniciais que viram `em_andamento`
+ * anunciam `PARTIDA_INICIADA` em vez disto, e a `preparada` nunca emite.
+ * Retorna se anunciou.
+ */
+export function anunciarVoltaSeReadmissao(
+  broadcaster: PartidaBroadcaster | undefined,
+  partidaId: PartidaId,
+  jogadorId: string,
+  // Só a guarda interessa (`estado/mudou/iniciou` de
+  // ResultadoTransicaoDePresenca) — o resto da transição não decide o anúncio.
+  transicao: Pick<ResultadoTransicaoDePresenca, 'estado' | 'mudou' | 'iniciou'>,
+): boolean {
+  if (broadcaster === undefined) {
+    return false;
+  }
+  if (transicao.estado !== 'em_andamento' || !transicao.mudou || transicao.iniciou) {
+    return false;
+  }
+  broadcaster.enviar(partidaId, { type: 'JOGADOR_RECONECTADO', jogadorId });
+  return true;
 }
 
 /**
@@ -229,10 +261,11 @@ function marcarDesconexaoEArmarJanela(
   partidaId: PartidaId,
   jogadorId: string,
   etapaIntermediaria?: (redis: Redis, partidaId: PartidaId) => Promise<unknown>,
+  broadcaster?: PartidaBroadcaster,
 ): void {
   void marcarDesconexao(redis, partidaId, jogadorId)
     .then(() => etapaIntermediaria?.(redis, partidaId))
-    .then(() => armarJanelaSeEmAndamento(redis, partidaId, jogadorId))
+    .then(() => armarJanelaSeEmAndamento(redis, partidaId, jogadorId, broadcaster))
     .catch((err) => console.error('[ws] falha ao marcar desconexão:', (err as Error).message));
 }
 
@@ -333,7 +366,7 @@ export function criarWebSocketServer(
           );
 
           if (transicao === null || (transicao.estado !== 'preparada' && transicao.estado !== 'em_andamento')) {
-            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior);
+            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior, depsPartida?.broadcaster);
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
             } catch {}
@@ -343,12 +376,15 @@ export function criarWebSocketServer(
 
           // Re-admissão dentro da janela (#295): só em `em_andamento` a volta
           // limpa a janela e cancela a conversão; a `preparada` nunca tem
-          // janela (não-início intacto).
+          // janela (não-início intacto). A volta efetiva (presença
+          // restaurada, fora da virada inicial) é anunciada aos restantes
+          // com `JOGADOR_RECONECTADO` (seam da #294).
           if (transicao.estado === 'em_andamento') {
             cancelarExpiracaoDeReconexao(partidaId, sessao.jogadorId);
             void limparJanelaDeReconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
               console.error('[ws] falha ao limpar janela de reconexão:', (err as Error).message),
             );
+            anunciarVoltaSeReadmissao(depsPartida?.broadcaster, partidaId, sessao.jogadorId, transicao);
           }
 
           ws.send(JSON.stringify({
@@ -502,6 +538,7 @@ export function criarWebSocketServer(
             }
             marcarDesconexaoEArmarJanela(contexto.redis, partidaId, sessao.jogadorId, (r, p) =>
               verificarNaoInicioAposDesconexao(r, p),
+              depsPartida?.broadcaster,
             );
           });
         })().catch((error) => {
@@ -510,7 +547,7 @@ export function criarWebSocketServer(
           // caminho de falha — sem ela, o socket novo ficaria registrado como
           // vigente (morto) e a conexão antiga desregistrada (review #181).
           if (conexaoRegistrada !== null) {
-            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexaoRegistrada, conexaoAnterior);
+            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexaoRegistrada, conexaoAnterior, depsPartida?.broadcaster);
           }
           try {
             ws.send(erroRejeitada('ERRO_INTERNO', 'falha na admissão da partida'));

@@ -61,7 +61,7 @@ Ato irreversível de um Jogador em Partida em andamento; só o próprio Jogador 
 _Avoid_: abandono, saída da partida
 
 **Reconexão da Partida**:
-Janela por partida e Jogador em Partida em andamento, com TTL configurável (`PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS`, padrão 60s) persistido no Redis e timer em memória que executa a conversão; quem volta dentro reassume sem perda (snapshot + turno, como hoje); quem expira é convertido automaticamente em desistência com causa `expiracao`. Só existe em `em_andamento` — a `preparada` segue apenas com o não-início (10s/90s).
+Janela por partida e Jogador em Partida em andamento, com TTL configurável (`PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS`, padrão 60s) persistido no Redis e timer em memória que executa a conversão; quem volta dentro reassume sem perda (snapshot + turno, como hoje); quem expira é convertido automaticamente em desistência com causa `expiracao`. Só existe em `em_andamento` — a `preparada` segue apenas com o não-início (10s/90s). Entrada e volta são anunciadas aos restantes no canal de Partida (`JOGADOR_EM_RECONEXAO` ao marcar + armar, `JOGADOR_RECONECTADO` na re-admissão efetiva fora da virada inicial); a desistência explícita viaja com causa `desistencia`, e o callback ao lobby carrega a causa de cada origem sem mudar o detach.
 _Avoid_: reconexão da sala, timeout
 
 **Partida Não Iniciada**:

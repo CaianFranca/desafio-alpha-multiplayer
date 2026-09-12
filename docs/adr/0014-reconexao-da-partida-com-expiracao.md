@@ -35,8 +35,22 @@ A `preparada` já tem o não-início (ADR-0010, 10s/90s) e permanece inalterada.
 - **Causa compatível**: `DesistenciaRegistradaEvento` (engine) e
   `DesistenciaRegistradaWireEvento` (shared) ganham `causa?:
   'desistencia' | 'expiracao'` opcional — ausente = `desistencia` implícita
-  para compat com payloads/binários antigos; `traduzirEventos` 1:1;
-  explícito continua sem causa ou com `causa:'desistencia'`.
+  para compat com payloads/binários antigos; `traduzirEventos` 1:1. A
+  partir daqui o servidor sempre envia a causa: o fluxo explícito anexa
+  `causa:'desistencia'` antes de traduzir (a conversão já anexava
+  `causa:'expiracao'`).
+- **Anúncios de presença (spec #292 história 2, seam da #294)**:
+  `JOGADOR_EM_RECONEXAO` / `JOGADOR_RECONECTADO` (`{ jogadorId }`, sem par
+  no engine e sem espelho no snapshot) entram na união
+  `PartidaEventoDoServidor` — broadcast só em `em_andamento`: a entrada ao
+  marcar + armar no `close`, a volta na re-admissão com
+  `mudou && !iniciou` (exclui as N admissões iniciais, que anunciam
+  `PARTIDA_INICIADA`); a `preparada` nunca emite.
+- **Callback informativo ao lobby**: `AvisoDeDesistencia` ganha `causa?`
+  opcional, enviada no payload de cada origem (`desistencia` no explícito,
+  `expiracao` na conversão, inclusive no detach pré-retorno do término
+  2→1); a rota do lobby aceita e valida (`desistencia|expiracao`, resto é
+  400) sem mudar o detach.
 - **Rearme pós-restart** via SCAN com jitter/pipeline (como lobby/não-início);
   **corrida admissão-vs-timer** mitigada com verificação de presença vigente
   dentro da mutação + cancelamento na re-admissão.
@@ -62,4 +76,7 @@ A `preparada` já tem o não-início (ADR-0010, 10s/90s) e permanece inalterada.
 - **Nova semântica de saída (penalidade, bot, AFK)** — fora do escopo (#295):
   só timer + conversão.
 - **Evento wire novo de roster** — rejeitado: `DESISTENCIA_REGISTRADA` com
-  causa já é o anúncio aos restantes, como em B.
+  causa já é o anúncio aos restantes, como em B. (Os anúncios de presença
+  `JOGADOR_EM_RECONEXAO`/`JOGADOR_RECONECTADO` da #295 suprem a história 2
+  da #292 sem evento de roster genérico: só `{ jogadorId }` no canal de
+  Partida.)
