@@ -350,8 +350,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         if (evento.type === 'PARTIDA_TERMINADA') {
           // Snapshot já aplicado via ESTADO_DA_PARTIDA se houver; garante a
           // tela de resultado.
+          // Drena o lote em voo antes da virada (2→1 por desistência fecha o
+          // lote atômico): o modelo congela em resultado com a projeção
+          // completa, não no meio do lote.
           // Motivo da derrota acompanha (#145-exp); payloads antigos sem o
           // campo chegam undefined → null (tela mantém texto genérico).
+          if (loteDeTurnoRef.current.length > 0) {
+            const pendente = [...loteDeTurnoRef.current]
+            loteDeTurnoRef.current = []
+            for (const ev of pendente) despacharEvento(ev as Parameters<typeof reduzirEvento>[1])
+          }
           partidaTerminada(evento.resultado, evento.motivo ?? null)
           return
         }
@@ -402,58 +410,82 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           partidaEmAndamento()
           return
         }
-        // Batch atômico ADR-0013/B8: TURNO_INICIADO + PECA_SORTEADA + RECEBIMENTO_GERADO
-        // do lote de Baixa chegam em 3 WS messages no mesmo tick. Sem batch há
-        // flash de 1 frame com recebidas=[].
+        // Batch atômico ADR-0013/B8 + lote da desistência (#290, AC2):
+        // TURNO_INICIADO + PECA_SORTEADA + RECEBIMENTO_GERADO do lote de Baixa
+        // e DESISTENCIA_REGISTRADA + CELULAS_ILUMINADAS + LIMPEZA_APLICADA +
+        // TURNO_* do lote atômico chegam como WS messages separadas no mesmo
+        // tick. Sem batch há flash de 1 frame com estado parcial (recebidas=[]
+        // ou peça órfã escura). Queue + microtask coalesce em um único render,
+        // na ordem de chegada (= ordem do engine: a desistência abre o lote).
+        // A continuação por LIMPEZA_APLICADA/TURNO_ENCERRADO só vale para lote
+        // aberto pela desistência — fora dele, os caminhos dedicados abaixo
+        // seguem inalterados.
+        const loteAbertoPorDesistencia =
+          loteDeTurnoRef.current.length > 0 &&
+          loteDeTurnoRef.current[0]?.type === 'DESISTENCIA_REGISTRADA'
         if (
           evento.type === 'TURNO_INICIADO' ||
+          evento.type === 'DESISTENCIA_REGISTRADA' ||
           (loteDeTurnoRef.current.length > 0 &&
             (evento.type === 'PECA_SORTEADA' ||
               evento.type === 'RECEBIMENTO_GERADO' ||
-              evento.type === 'CELULAS_ILUMINADAS'))
+              evento.type === 'CELULAS_ILUMINADAS')) ||
+          (loteAbertoPorDesistencia &&
+            (evento.type === 'LIMPEZA_APLICADA' || evento.type === 'TURNO_ENCERRADO'))
         ) {
+          // Pós-término a partida é somente-leitura: o DESISTENCIA caía no
+          // gate abaixo; mantido aqui para não ressuscitar projeção terminal.
+          if (evento.type === 'DESISTENCIA_REGISTRADA' && emResultadoRef.current) return
           loteDeTurnoRef.current.push(evento as Parameters<typeof reduzirEvento>[1])
           agendarFlushLote()
+          // Limpeza no lote (issue #239, B1): o som/animação da
+          // TransicaoLimpeza é evento-driven e dispara na chegada (síncrono);
+          // só o despacho ao modelo vai no flush.
+          if (evento.type === 'LIMPEZA_APLICADA' && evento.pecasRemovidas.length > 0) {
+            limpezaKeyRef.current += 1
+            setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
+            tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
+          }
+          // Toast/SR da desistência é síncrono (não espera o flush): usa o
+          // modelo pré-lote como antes; o despacho vai no flush em ordem.
+          // Desistência (issue #290): projeta remoção do peão/ordem no modelo
+          // (CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* do mesmo lote
+          // completam o tabuleiro) + toast visível e anúncio SR. Snapshot
+          // reconcilia.
+          if (evento.type === 'DESISTENCIA_REGISTRADA') {
+            const anterior = modeloRef.current
+            const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
+            // F4 (#290): sem snapshot ainda não há roster — projeta a remoção
+            // no flush, mas suprime toast/SR imediato (apelido/ordem/restantes
+            // seriam falsos). Enfileira para re-emitir pós-snapshot (review PR
+            // #378, AC3/AC4) com dados autoritativos.
+            if (Object.keys(anterior.jogadorPorId).length === 0) {
+              const fila = desistenciasPreSnapshotRef.current
+              if (!fila.some((p) => p.jogadorId === evento.jogadorId)) {
+                fila.push({ jogadorId: evento.jogadorId, peaoId: evento.peaoId })
+              }
+              return
+            }
+            const restantes = Object.keys(anterior.jogadorPorId).filter((id) => id !== evento.jogadorId)
+            const ordemTexto = Object.entries(anterior.jogadorPorId)
+              .filter(([id]) => id !== evento.jogadorId)
+              .map(([id, d]) => ({ id, ordem: d.ordem }))
+              .sort((a, b) => a.ordem - b.ordem)
+              .map((o) => anterior.jogadorPorId[o.id]?.apelido ?? o.id)
+              .join(', ')
+            avisoDesistenciaIdRef.current += 1
+            setAvisoDesistencia({
+              id: avisoDesistenciaIdRef.current,
+              jogadorId: evento.jogadorId,
+              apelido,
+              restantes: restantes.length,
+              ordemTexto,
+            })
+          }
           return
         }
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
         if (emResultadoRef.current) return
-        // Desistência (issue #290): projeta remoção do peão/ordem no modelo
-        // (CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* do mesmo lote completam
-        // o tabuleiro) + toast visível e anúncio SR. Snapshot reconcilia.
-        if (evento.type === 'DESISTENCIA_REGISTRADA') {
-          const anterior = modeloRef.current
-          const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
-          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
-          // F4 (#290): sem snapshot ainda não há roster — projeta a remoção,
-          // mas suprime toast/SR imediato (apelido/ordem/restantes seriam
-          // falsos: "Um jogador desistiu", "—", "sem jogadores restantes").
-          // Enfileira para re-emitir pós-snapshot (review PR #378, AC3/AC4)
-          // com dados autoritativos; o snapshot posterior não re-anunciaria.
-          if (Object.keys(anterior.jogadorPorId).length === 0) {
-            const fila = desistenciasPreSnapshotRef.current
-            if (!fila.some((p) => p.jogadorId === evento.jogadorId)) {
-              fila.push({ jogadorId: evento.jogadorId, peaoId: evento.peaoId })
-            }
-            return
-          }
-          const restantes = Object.keys(anterior.jogadorPorId).filter((id) => id !== evento.jogadorId)
-          const ordemTexto = Object.entries(anterior.jogadorPorId)
-            .filter(([id]) => id !== evento.jogadorId)
-            .map(([id, d]) => ({ id, ordem: d.ordem }))
-            .sort((a, b) => a.ordem - b.ordem)
-            .map((o) => anterior.jogadorPorId[o.id]?.apelido ?? o.id)
-            .join(', ')
-          avisoDesistenciaIdRef.current += 1
-          setAvisoDesistencia({
-            id: avisoDesistenciaIdRef.current,
-            jogadorId: evento.jogadorId,
-            apelido,
-            restantes: restantes.length,
-            ordemTexto,
-          })
-          return
-        }
         // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
         // projetados no modelo sem recarregar página. Só o ataque COM
         // penalidade (`estadosAplicados.length > 0`, issue #228) toca a

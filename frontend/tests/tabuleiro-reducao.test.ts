@@ -1764,4 +1764,30 @@ describe('DESISTENCIA_REGISTRADA — queda óbvia otimista (issue #290, review P
     })
     expect(duas).toEqual(uma)
   })
+
+  it('lote integral do engine projeta tabuleiro/ordem/Limpeza resultantes (AC2)', () => {
+    // Ordem do lote atômico no wire (engine partida.ts): a desistência abre,
+    // CELULAS_ILUMINADAS + LIMPEZA_APLICADA trazem o tabuleiro resultante e a
+    // Passagem (TURNO_ENCERRADO + TURNO_INICIADO) entrega a vez ao seguinte.
+    const antes = {
+      ...estadoComHospedeira(),
+      jogadorAtivoId: 'j1',
+      rodada: 1,
+      peaoPorJogador: { j1: 'peao-branco', j2: 'peao-vermelho' },
+    }
+    const depois = reduzirEventos(antes, [
+      { type: 'DESISTENCIA_REGISTRADA', jogadorId: 'j1', peaoId: 'peao-branco' },
+      { type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 3, coluna: 3 }] },
+      { type: 'LIMPEZA_APLICADA', pecasRemovidas: ['p-outra'] },
+      { type: 'TURNO_ENCERRADO', jogadorId: 'j1' },
+      { type: 'TURNO_INICIADO', jogadorId: 'j2', rodada: 1 },
+    ])
+    // Peão e vez do desistente saem da ordem; vez passa ao seguinte.
+    expect(depois.peoes.some((p) => p.peaoId === 'peao-branco')).toBe(false)
+    expect(depois.jogadorPorId['j1']).toBeUndefined()
+    expect(depois.jogadorAtivoId).toBe('j2')
+    // Tabuleiro resultante: hospedeira (otimista) + limpeza do lote aplicadas.
+    expect(depois.posicionadas).toEqual([])
+    expect(depois.celulasIluminadas).toEqual([{ linha: 3, coluna: 3 }])
+  })
 })
