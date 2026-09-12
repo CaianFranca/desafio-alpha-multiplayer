@@ -444,7 +444,7 @@ export function HudDaPartida({
                       data-ativo={icone.ativo ? 'true' : 'false'}
                       title={icone.titulo}
                       aria-label={icone.ativo ? `${icone.titulo} ativo` : `${icone.titulo} inativo`}
-                      className={`text-sm leading-none ${icone.ativo ? 'opacity-100' : 'opacity-30 grayscale'}`}
+                      className={`inline-flex h-5 w-5 items-center justify-center rounded-sm text-sm leading-none ${icone.ativo ? 'opacity-100' : 'opacity-30 grayscale'}`}
                     >
                       {icone.simbolo}
                     </span>
@@ -559,13 +559,13 @@ export function HudDaPartida({
                   role="status"
                   aria-label={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1} desligado`}
                   title={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1}`}
-                  className={`flex items-center justify-center rounded-full border-2 text-sm transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
+                  className={`flex items-center justify-center rounded-full border-2 text-sm leading-none transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
                     acesa
                       ? 'border-amber-300 bg-amber-400/15 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.5)]'
                       : 'border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40'
                   }`}
                 >
-                  <span aria-hidden="true" className={acesa ? 'drop-shadow-[0_0_6px_rgba(251,191,36,0.8)]' : ''}>⚡</span>
+                  <span aria-hidden="true" className={`leading-none ${acesa ? 'drop-shadow-[0_0_6px_rgba(251,191,36,0.8)]' : ''}`}>⚡</span>
                 </div>
               )
             })}
@@ -583,13 +583,13 @@ export function HudDaPartida({
             role="status"
             aria-label={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso não obtido'}
             title={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso'}
-            className={`flex items-center justify-center rounded-full border-2 text-sm transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
+            className={`flex items-center justify-center rounded-full border-2 text-sm leading-none transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
               cartaoDeAcessoObtido
                   ? 'border-emerald-300 bg-emerald-400/15 text-emerald-200 shadow-[0_0_16px_rgba(52,211,153,0.5)]'
                   : 'border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40'
             }`}
           >
-            <span aria-hidden="true" className={cartaoDeAcessoObtido ? 'drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]' : ''}>▣</span>
+            <span aria-hidden="true" className={`leading-none ${cartaoDeAcessoObtido ? 'drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]' : ''}`}>▣</span>
           </div>
           {emModoCompacto ? null : (
           <span className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400">
