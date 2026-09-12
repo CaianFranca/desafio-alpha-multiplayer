@@ -889,16 +889,7 @@ test('confirmação com outro peão selecionado é recusada (PEAO_NAO_SELECIONAD
   );
 });
 
-test('confirmar sem mudança de Peça e no Primeiro Turno são ENCERRAMENTO_INVALIDO', () => {
-  let estado = partidaEmRodada2();
-
-  // Sem movimento: o Peão segue na Peça do início do turno.
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  assert.equal(
-    codigoDaRejeicao(estado, confirmarPosicao('peao-branco'), 'ana'),
-    'ENCERRAMENTO_INVALIDO',
-  );
-
+test('confirmar no Primeiro Turno é ENCERRAMENTO_INVALIDO', () => {
   // No Primeiro Turno não existe Confirmação de Posição.
   let primeiro = partidaIniciada();
   primeiro = aplicar(primeiro, selecionarPeca('inicial-1'), 'ana');
@@ -909,6 +900,55 @@ test('confirmar sem mudança de Peça e no Primeiro Turno são ENCERRAMENTO_INVA
     codigoDaRejeicao(primeiro, confirmarPosicao('peao-branco'), 'ana'),
     'ENCERRAMENTO_INVALIDO',
   );
+});
+
+// Issue #375: ida-e-volta livre na zona da origem seguida de Confirmação na
+// Peça do início do turno fecha a posição sem Recebimento — mesma semântica
+// da Permanência quanto ao sorteio — mantendo o funil Iluminação → Limpeza →
+// Ataque e posicaoConfirmada=true, com encerrar_turno válido na sequência.
+// (A guarda ENCERRAMENTO_INVALIDO para confirmar-na-origem foi removida: sem
+// movimento o frontend oferece Permanência via movimentouNoTurno=false, então
+// o confirmar-na-origem sem ida-e-volta segue o mesmo ramo sem sorteio.)
+test('confirmar na Peça do início após ida-e-volta fecha sem Recebimento (#375)', () => {
+  let estado = partidaEmRodada2();
+  assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  // Ida-e-volta: reta-1 (2,3) e volta à inicial-1 (3,3).
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 3), 'ana');
+  const peaoNaOrigem = estado.tabuleiro.peoes.find(
+    (item) => item.peaoId === 'peao-branco',
+  );
+  assert.equal(peaoNaOrigem?.pecaId, 'inicial-1');
+
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  // posicao_confirmada abre o lote, com a Peça de origem.
+  assert.equal(confirmacao.eventos[0]?.tipo, 'posicao_confirmada');
+  const confirmado = confirmacao.eventos[0];
+  assert.ok(confirmado && confirmado.tipo === 'posicao_confirmada');
+  if (confirmado.tipo !== 'posicao_confirmada') return;
+  assert.equal(confirmado.pecaId, 'inicial-1');
+  assert.equal(confirmado.peaoId, 'peao-branco');
+  // Sem sorteio da Caixa: nenhum peca_sorteada/recebimento_gerado no lote,
+  // Caixa intacta e zero pendências.
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(confirmacao.estado.tabuleiro.caixa.length, caixaAntes);
+  assert.deepEqual(confirmacao.estado.tabuleiro.recebidas, []);
+  assert.equal(confirmacao.estado.posicaoConfirmada, true);
+  assert.ok(confirmacao.estado.peoesNoAlcance !== undefined);
+
+  // Turno destravado: encerrar_turno subsequente é válido.
+  const encerramento = aplicarComandoDePartida(confirmacao.estado, encerrarTurno(), 'ana');
+  assert.equal(encerramento.sucesso, true);
+  if (!encerramento.sucesso) return;
+  assert.equal(encerramento.estado.jogadorAtivoId, 'bruno');
+  assert.equal(encerramento.estado.posicaoConfirmada, false);
 });
 
 test('permanecer sem mudança de Peça encerra o turno direto, sem Recebimento', () => {
