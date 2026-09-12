@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { history } from './placeholders'
+import { comBase } from '../../api/basePath'
 
 function useReveal<T extends HTMLElement>() {
   const ref = useRef<T | null>(null)
@@ -53,7 +54,7 @@ export function HistorySection() {
       <div className="max-w-7xl mx-auto grid grid-cols-1 items-center gap-8 md:grid-cols-2 md:gap-12">
         <HistoryRevealItem index={0}>
           <div className="history-media">
-            <img src="/assets/story_image.png" alt={history.imageAlt} className="history-kenburns" />
+            <img src={comBase('/assets/story_image.png')} alt={history.imageAlt} className="history-kenburns" />
           </div>
         </HistoryRevealItem>
         <HistoryRevealItem index={1}>

@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { hero } from './placeholders'
 import { AuthActions } from '../auth/AuthActions'
 import { useSectionParallax } from '../../hooks/useSectionParallax'
+import { comBase } from '../../api/basePath'
+
+/** Fundo da Hero já com o subpath do build (VITE_BASE_PATH). */
+const HERO_IMAGE = `url("${comBase('/assets/imagem_fundo_hero.webp')}")`
 
 /** Amplitude máxima do deslocamento do parallax (px); a camada tem folga de 14%. */
 const PARALLAX_RANGE = 56
@@ -45,7 +50,12 @@ export function HeroSection() {
 
   return (
     <section ref={sectionRef} id="hero" className="relative overflow-hidden" aria-labelledby="home-title">
-      <div ref={bgRef} className="hero-media" aria-hidden="true" />
+      <div
+        ref={bgRef}
+        className="hero-media"
+        aria-hidden="true"
+        style={{ '--scene-hero-image': HERO_IMAGE } as CSSProperties}
+      />
       <div className="relative max-w-4xl text-center mx-auto py-[clamp(4rem,15vh,8rem)] px-8">
         <p className={`hero-reveal ${revealState} delay-0 flex items-center justify-center gap-4 text-accent text-sm font-bold tracking-[.22em] uppercase`}>
           <span className="inline-block h-px w-12 bg-accent/70" aria-hidden="true" />
