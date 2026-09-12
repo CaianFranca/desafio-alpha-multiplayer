@@ -402,6 +402,9 @@ export class PartidaHandlers {
   /**
    * Monta o aviso de Retorno com N−1 (participação atual no engine), não N
    * (roster pré-desistência) — issue #290, resolve o follow-up #371.
+   * Citação #371 (caminho b — reabertura N-1 com saídas atômicas no retorno):
+   * o lobby aceita subconjunto N-1 e remove desistentes atomically, então o
+   * aviso reflete os restantes para convergir sem 409 definitivo.
    *
    * O lobby desvincula cada desistente no callback de desistência e revalida
    * `jogadores == membros ativos`, então o aviso precisa refletir os
