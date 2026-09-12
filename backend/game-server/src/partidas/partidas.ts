@@ -18,6 +18,13 @@ export interface PartidaPreparada {
   readonly roster: readonly MembroDaSala[];
   readonly estado: EstadoDaPartida;
   readonly criadaEm: string;
+  /**
+   * Marco autoritativo do início da Partida (epoch ms, issue #259): gravado
+   * atomicamente na transição de presença que vira `em_andamento`; `null`
+   * enquanto `preparada`. Persistido no Redis junto da PartidaPreparada e
+   * devolvido pela transição para viajar em PARTIDA_INICIADA e no snapshot.
+   */
+  readonly iniciadaEm?: number | null;
 }
 
 export { chaveDaPartida, chaveDoEstadoDaPartida };
@@ -42,6 +49,7 @@ export async function criarPartidaPreparada(
     roster: rosterInicial,
     estado: 'preparada',
     criadaEm: new Date().toISOString(),
+    iniciadaEm: null,
   };
 
   await redis.set(chaveDaPartida(partida.partidaId), JSON.stringify(partida), 'EX', partidaPreparadaTtlSegundos);
@@ -131,6 +139,12 @@ export interface ResultadoTransicaoDePresenca {
   readonly completo: boolean;
   readonly iniciou: boolean;
   readonly estado: EstadoDaPartida;
+  /**
+   * Marco autoritativo do início (epoch ms, issue #259) quando a Partida está
+   * `em_andamento`; `null` em `preparada` e em Partidas persistidas por
+   * binário anterior sem o campo (normalização defensiva).
+   */
+  readonly iniciadaEm: number | null;
 }
 
 const TTL_NAO_EXISTE = -2;
@@ -177,6 +191,9 @@ local completo = (conectados == #partida.roster)
 local iniciou = false
 if completo and partida.estado == 'preparada' and redis.call('EXISTS', KEYS[2]) == 1 then
   partida.estado = 'em_andamento'
+  -- Marco autoritativo do início (epoch ms, issue #259): gravado no mesmo
+  -- ponto atômico da virada para 'em_andamento' (ARGV[2]).
+  partida.iniciadaEm = tonumber(ARGV[2])
   iniciou = true
 end
 local estadoAtual = partida.estado
@@ -193,7 +210,7 @@ if mudou or iniciou then
     salvarPreservandoTtl(KEYS[1], novo)
   end
 end
-return cjson.encode({mudou=mudou, completo=completo, iniciou=iniciou, estado=estadoAtual})
+return cjson.encode({mudou=mudou, completo=completo, iniciou=iniciou, estado=estadoAtual, iniciadaEm=partida.iniciadaEm or 0})
 `.trim();
 
 const SCRIPT_DESCONECTAR_PRESENCA = `
@@ -244,6 +261,7 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
   redis: Redis,
   partidaId: PartidaId,
   jogadorId: string,
+  agora: number = Date.now(),
 ): Promise<ResultadoTransicaoDePresenca | null> {
   const bruto = await redis.eval(
     SCRIPT_TRANSICAO_PRESENCA,
@@ -251,6 +269,7 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
     chaveDaPartida(partidaId),
     chaveDoEstadoDaPartida(partidaId),
     jogadorId,
+    String(agora),
   );
   const json = typeof bruto === 'string' ? bruto : String(bruto ?? '');
   try {
@@ -261,7 +280,13 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
     if (parsed.iniciou) {
       cancelarNaoInicio(partidaId);
     }
-    return parsed;
+    // Normalização defensiva: Partidas persistidas por binário anterior não
+    // trazem o campo e o sentinela Lua é 0 — ambos viram null (#259).
+    const iniciadaEm =
+      typeof parsed.iniciadaEm === 'number' && parsed.iniciadaEm > 0
+        ? parsed.iniciadaEm
+        : null;
+    return { ...parsed, iniciadaEm };
   } catch {
     return null;
   }

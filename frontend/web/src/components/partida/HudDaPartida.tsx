@@ -14,12 +14,22 @@
  * (`scale-90` abaixo de `lg`), sem reorganizar as 6 regiões nem ocultar
  * conteúdo. Breakpoint mínimo suportado: 768px — abaixo disso as regiões são
  * mantidas com escala reduzida (portrait de celular fora do escopo).
+ *
+ * Modo compacto paisagem-celular (issue #230, 800x360): `compacto` ou
+ * viewport paisagem curto/estreito (`deveUsarHudCompacto`) mantém as 6
+ * regiões integrais em versão mínima — título fora, estados locais em ícones
+ * ao lado do nome, avatares e conquistas reduzidos a ícones, com
+ * `env(safe-area-inset-*)` nas bordas para não cobrir alvos de toque.
  */
 
 import { useMemo, useState } from 'react'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS, type CorDoPeao } from '../../game/tabuleiro/contrato'
 import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
 import { useCronometroDaPartida } from './useCronometroDaPartida'
+import { useViewportCompacto } from '../../hooks/useViewportCompacto'
+
+// Re-export para compatibilidade com testes que importam de HudDaPartida
+export { deveUsarHudCompacto } from '../../hooks/useViewportCompacto'
 
 export interface HudDaPartidaProps {
   /** Projeção jogadorId → dados de exibição (snapshot + deltas, somente leitura). */
@@ -37,10 +47,10 @@ export interface HudDaPartidaProps {
   /** Partida em resultado (cronômetro congela). */
   emResultado: boolean
   /**
-   * Identificador da Partida (paliativo do cronômetro: persiste o início em
-   * `sessionStorage` para retomar ao sair e voltar na mesma aba).
+   * Marco autoritativo do início da Partida (epoch ms, issue #259), baseline
+   * do cronômetro. `null`/ausente mantém o tempo em `00:00`.
    */
-  partidaId?: string | null
+  iniciadaEm?: number | null
   /**
    * Foto por jogador (jogadorId → URL); ausente/null mantém as iniciais.
    * Ainda sem fonte no snapshot — prop pronta para quando o servidor expor.
@@ -48,6 +58,12 @@ export interface HudDaPartidaProps {
   imagemPorJogador?: Readonly<Record<string, string | null | undefined>>
   /** Desistência da Partida (issue #290): envia DESISTIR_DA_PARTIDA e sai à principal. */
   onSair: () => void
+  /**
+   * Força o modo compacto (issue #230): true = compacto, false = integral.
+   * null/undefined = deriva do viewport (paisagem-celular 800x360). Seam no
+   * ponto mais alto para testes com viewport mockado.
+   */
+  compacto?: boolean | null
 }
 
 interface JogadorOrdenado {
@@ -117,19 +133,19 @@ function ordenarCircularPorAtivo(
 
 /**
  * Cronômetro isolado do resto do HUD (revisão PR #279): o tick de 1×/s fica
- * confinado a este subcomponente, então re-renderiza só o MM:SS — as 6
- * regiões não reconciliam a cada segundo.
+ * confinado a este subcomponente, então re-renderiza só o texto do cronômetro
+ * — as 6 regiões não reconciliam a cada segundo.
  */
 function CronometroDoHud({
   emAndamento,
   emResultado,
-  partidaId = null,
+  iniciadaEm = null,
 }: {
   emAndamento: boolean
   emResultado: boolean
-  partidaId?: string | null
+  iniciadaEm?: number | null
 }) {
-  const { texto: tempo, segundos } = useCronometroDaPartida({ emAndamento, emResultado, partidaId })
+  const { texto: tempo, segundos } = useCronometroDaPartida({ emAndamento, emResultado, iniciadaEm })
   return (
     <span
       data-testid="hud-cronometro"
@@ -159,14 +175,16 @@ export function HudDaPartida({
   cartaoDeAcessoObtido,
   emAndamento,
   emResultado,
-  partidaId = null,
+  iniciadaEm = null,
   imagemPorJogador = {},
   onSair,
+  compacto = null,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
   // Trava local anti-duplo-clique no Confirmar (#290): o gate de rede vive na
   // página, mas o modal segue aberto até o navigate assíncrono.
   const [saidaEnviada, setSaidaEnviada] = useState(false)
+  const emModoCompacto = useViewportCompacto(compacto)
 
   // Ordenação estável: recomputada apenas quando o modelo muda — o cronômetro
   // vive isolado em <CronometroDoHud>, então o tick de 1×/s não re-renderiza
@@ -193,23 +211,35 @@ export function HudDaPartida({
   // (ex.: snapshot com duplicata) não acende duas conquistas (revisão PR #279).
   const geradoresAcesos = Math.min(new Set(geradoresLigados).size, ALVO_GERADORES_LIGADOS)
 
+  // Ícones de estado local no modo compacto (#230): ao lado do nome, sem cards.
+  const iconesLocaisCompactos: Array<{ chave: string; simbolo: string; titulo: string; ativo: boolean }> = [
+    { chave: 'baixa-iluminacao', simbolo: '◐', titulo: 'Baixa Iluminação', ativo: jogadorLocal.dados.emBaixaIluminacao },
+    { chave: 'amedrontado', simbolo: '⚠', titulo: 'Amedrontado', ativo: jogadorLocal.dados.amedrontado },
+    { chave: 'protecao', simbolo: '🛡', titulo: 'Proteção', ativo: jogadorLocal.dados.protegido ?? false },
+  ]
+
   return (
     <div
       data-testid="hud-da-partida"
       aria-label="HUD da Partida"
+      data-modo-compacto={emModoCompacto ? 'true' : 'false'}
       className="pointer-events-none absolute inset-0 z-30"
     >
       {/* ── sup-esq: adversários em pilha vertical de avatares circulares ── */}
       <div
         data-testid="hud-outros-jogadores"
         aria-label="Outros jogadores"
+        style={{
+          left: 'calc(1.5rem + env(safe-area-inset-left))',
+          top: 'calc(1.5rem + env(safe-area-inset-top))',
+        }}
         className="absolute left-6 top-6 flex origin-top-left scale-90 flex-col gap-2 lg:scale-100"
       >
         {adversarios.map(({ jogadorId, dados }) => {
           const ehAtivo = jogadorId === jogadorAtivoId
           return (
             <div key={jogadorId} className="flex items-center gap-1.5">
-              <div className="relative flex h-14 w-14 items-center justify-center">
+              <div className={`relative flex items-center justify-center ${emModoCompacto ? 'h-10 w-10' : 'h-14 w-14'}`}>
                 <svg
                   viewBox="0 0 56 56"
                   aria-hidden="true"
@@ -253,7 +283,8 @@ export function HudDaPartida({
                   role="img"
                 aria-label={`${dados.apelido}, Sanidade ${dados.sanidade} de 3${dados.emBaixaIluminacao ? ', em Baixa Iluminação' : ''}${dados.amedrontado ? ', Amedrontado' : ''}${dados.protegido ? ', protegido' : ''}`}
                 title={dados.apelido}
-                  className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display text-[length:var(--hud-destaque,1rem)] leading-6 font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${
+                  data-compacto={emModoCompacto ? 'true' : undefined}
+                  className={`flex items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${emModoCompacto ? 'h-8 w-8 text-xs' : 'h-12 w-12 text-base'} ${
                     dados.amedrontado
                       ? 'opacity-70 grayscale'
                       : dados.emBaixaIluminacao
@@ -290,22 +321,28 @@ export function HudDaPartida({
         })}
       </div>
 
-      {/* ── sup-centro: título ── */}
-      <div className="absolute left-1/2 top-6 -translate-x-1/2">
-        <h1
-          data-testid="hud-titulo"
-          className="font-display text-[length:var(--hud-corpo,0.875rem)] leading-5 font-semibold uppercase tracking-[0.28em] text-zinc-100"
-        >
-          Flicker of Sanity
-        </h1>
-      </div>
+      {/* ── sup-centro: título (fora no compacto #230 — mínimo mobile) ── */}
+      {emModoCompacto ? null : (
+        <div className="absolute left-1/2 top-6 -translate-x-1/2">
+          <h1
+            data-testid="hud-titulo"
+            className="font-display text-sm font-semibold uppercase tracking-[0.28em] text-zinc-100"
+          >
+            Flicker of Sanity
+          </h1>
+        </div>
+      )}
 
-      {/* ── sup-dir: cronômetro + volume visual + SAIR ── */}
+      {/* ── sup-dir: cronômetro + volume visual + SAIR (sistema integral no compacto) ── */}
       <div
         data-testid="hud-controles-partida"
-        className="absolute right-6 top-6 flex origin-top-right scale-90 items-center gap-3 rounded bg-zinc-900/80 px-3 py-1.5 lg:scale-100"
+        style={{
+          right: 'calc(1.5rem + env(safe-area-inset-right))',
+          top: 'calc(1.5rem + env(safe-area-inset-top))',
+        }}
+        className={`absolute right-6 top-6 flex origin-top-right items-center gap-3 rounded bg-zinc-900/80 lg:scale-100 ${emModoCompacto ? 'scale-75 px-2 py-1' : 'scale-90 px-3 py-1.5'}`}
       >
-        <CronometroDoHud emAndamento={emAndamento} emResultado={emResultado} partidaId={partidaId} />
+        <CronometroDoHud emAndamento={emAndamento} emResultado={emResultado} iniciadaEm={iniciadaEm} />
         <span
           data-testid="hud-volume"
           role="img"
@@ -342,7 +379,12 @@ export function HudDaPartida({
           aria-modal="true"
           aria-label={emResultado ? 'Sair da partida' : 'Confirmar desistência da partida'}
           aria-describedby="hud-confirmacao-saida-descricao"
-          className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-zinc-100 shadow-xl"
+          style={{
+            right: 'calc(1.5rem + env(safe-area-inset-right))',
+            top: 'calc(5rem + env(safe-area-inset-top))',
+            maxHeight: 'calc(100vh - 7rem - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
+          }}
+          className="pointer-events-auto absolute right-6 top-20 flex max-w-[min(20rem,calc(100vw-3rem))] flex-col gap-2 overflow-auto rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
         >
           <p id="hud-confirmacao-saida-descricao">{emResultado ? 'Sair da partida? Você voltará à página principal.' : 'Desistir da partida? Seu peão será removido e a equipe continua sem você.'}</p>
           <div className="flex gap-2">
@@ -373,9 +415,15 @@ export function HudDaPartida({
       ) : null}
 
       {/* ── inf-esq: jogador local (retrato + Apelido + Sanidade + estados) ── */}
-      <div className="absolute bottom-6 left-6 flex origin-bottom-left scale-90 flex-col gap-3 lg:scale-100">
+      <div
+        style={{
+          left: 'calc(1.5rem + env(safe-area-inset-left))',
+          bottom: 'calc(1.5rem + env(safe-area-inset-bottom))',
+        }}
+        className="absolute bottom-6 left-6 flex origin-bottom-left scale-90 flex-col gap-3 lg:scale-100"
+      >
         <div data-testid="hud-jogador-local" data-jogador-id={jogadorLocal.jogadorId} className="flex items-center gap-3">
-          <div className="relative flex h-20 w-20 items-center justify-center">
+          <div className={`relative flex items-center justify-center ${emModoCompacto ? 'h-12 w-12' : 'h-20 w-20'}`}>
             {ehMinhaVez ? (
               <span
                 data-testid="hud-anel-da-vez"
@@ -386,7 +434,8 @@ export function HudDaPartida({
             <div
               role="img"
               aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMinhaVez ? ', com a vez' : ''}`}
-              className={`flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display text-[length:var(--hud-display,1.5rem)] leading-8 font-semibold transition-colors duration-500 ${
+              data-compacto={emModoCompacto ? 'true' : undefined}
+              className={`flex items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display font-semibold transition-colors duration-500 ${emModoCompacto ? 'h-12 w-12 text-base' : 'h-20 w-20 text-2xl'} ${
                 ehMinhaVez ? 'border-amber-300/40' : 'border-zinc-700'
               }`}
             >
@@ -398,8 +447,25 @@ export function HudDaPartida({
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <span className="text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-[0.18em] text-zinc-100">
+            <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-100">
               {jogadorLocal.dados.apelido}
+              {emModoCompacto ? (
+                <span data-testid="hud-local-estados-icones" aria-label="Estados do jogador local" className="flex items-center gap-1">
+                  {iconesLocaisCompactos.map((icone) => (
+                    <span
+                      key={icone.chave}
+                      data-testid="hud-local-estado-icone"
+                      data-estado={icone.chave}
+                      data-ativo={icone.ativo ? 'true' : 'false'}
+                      title={icone.titulo}
+                      aria-label={icone.ativo ? `${icone.titulo} ativo` : `${icone.titulo} inativo`}
+                      className={`inline-flex h-5 w-5 items-center justify-center rounded-sm text-sm leading-none ${icone.ativo ? 'opacity-100' : 'opacity-30 grayscale'}`}
+                    >
+                      {icone.simbolo}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
             </span>
             <span className="text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-[0.18em] text-amber-300">Sanidade</span>
             <div
@@ -418,12 +484,13 @@ export function HudDaPartida({
                   data-testid="hud-sanidade-segmento"
                   data-preenchido={indice < jogadorLocal.dados.sanidade ? 'true' : 'false'}
                   aria-hidden="true"
-                  className={`h-2 w-8 rounded-sm ${indice < jogadorLocal.dados.sanidade ? 'bg-amber-400' : 'bg-zinc-700'}`}
+                  className={`h-2 rounded-sm ${emModoCompacto ? 'w-5' : 'w-8'} ${indice < jogadorLocal.dados.sanidade ? 'bg-amber-400' : 'bg-zinc-700'}`}
                 />
               ))}
             </div>
           </div>
         </div>
+        {emModoCompacto ? null : (
         <div className="flex gap-2">
           <div
             data-testid="hud-card-baixa-iluminacao"
@@ -483,13 +550,16 @@ export function HudDaPartida({
             Proteção
           </div>
         </div>
+        )}
       </div>
 
-      {/* ── inf-centro: conquistas soltas abaixo do girar (Geradores + Cartão) ── */}
+      {/* ── inf-centro: conquistas soltas abaixo do girar (Geradores + Cartão; só ícones no compacto) ── */}
       <div
         data-testid="hud-conquistas"
         aria-label="Conquistas"
-        className="absolute bottom-4 left-1/2 flex origin-bottom -translate-x-1/2 scale-90 items-start gap-4 lg:scale-100"
+        data-compacto={emModoCompacto ? 'true' : undefined}
+        style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+        className={`absolute bottom-4 left-1/2 flex origin-bottom -translate-x-1/2 items-start lg:scale-100 ${emModoCompacto ? 'scale-75 gap-2' : 'scale-90 gap-4'}`}
       >
         <div className="flex flex-col items-center gap-1">
           <div className="flex items-center gap-2">
@@ -504,20 +574,22 @@ export function HudDaPartida({
                   role="status"
                   aria-label={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1} desligado`}
                   title={acesa ? `Gerador ${indice + 1} ligado` : `Gerador ${indice + 1}`}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-[length:var(--hud-corpo,0.875rem)] leading-5 transition-all duration-500 ${
+                  className={`flex items-center justify-center rounded-full border-2 text-sm leading-none transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
                     acesa
                       ? 'border-amber-300 bg-amber-400/15 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.5)]'
                       : 'border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40'
                   }`}
                 >
-                  <span aria-hidden="true" className={acesa ? 'drop-shadow-[0_0_6px_rgba(251,191,36,0.8)]' : ''}>⚡</span>
+                  <span aria-hidden="true" className={`leading-none ${acesa ? 'drop-shadow-[0_0_6px_rgba(251,191,36,0.8)]' : ''}`}>⚡</span>
                 </div>
               )
             })}
           </div>
-          <span className="font-display text-[length:var(--hud-micro,0.625rem)] font-semibold uppercase tracking-[0.28em] text-zinc-400">
+          {emModoCompacto ? null : (
+          <span className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400">
             Geradores
           </span>
+          )}
         </div>
         <div className="flex flex-col items-center gap-1">
           <div
@@ -526,17 +598,19 @@ export function HudDaPartida({
             role="status"
             aria-label={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso não obtido'}
             title={cartaoDeAcessoObtido ? 'Cartão de Acesso obtido' : 'Cartão de Acesso'}
-            className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-[length:var(--hud-corpo,0.875rem)] leading-5 transition-all duration-500 ${
+            className={`flex items-center justify-center rounded-full border-2 text-sm leading-none transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
               cartaoDeAcessoObtido
                   ? 'border-emerald-300 bg-emerald-400/15 text-emerald-200 shadow-[0_0_16px_rgba(52,211,153,0.5)]'
                   : 'border-dashed border-zinc-700 bg-zinc-900/60 text-zinc-600 opacity-40'
             }`}
           >
-            <span aria-hidden="true" className={cartaoDeAcessoObtido ? 'drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]' : ''}>▣</span>
+            <span aria-hidden="true" className={`leading-none ${cartaoDeAcessoObtido ? 'drop-shadow-[0_0_6px_rgba(52,211,153,0.8)]' : ''}`}>▣</span>
           </div>
-          <span className="font-display text-[length:var(--hud-micro,0.625rem)] font-semibold uppercase tracking-[0.28em] text-zinc-400">
+          {emModoCompacto ? null : (
+          <span className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400">
             Cartão
           </span>
+          )}
         </div>
       </div>
 
@@ -548,7 +622,11 @@ export function HudDaPartida({
         <div
           data-testid="hud-turno"
           aria-label="Turno"
-          className="absolute bottom-6 right-6 flex origin-bottom-right scale-90 flex-col gap-2 bg-transparent px-1 py-1 lg:scale-100"
+          style={{
+            right: 'calc(1.5rem + env(safe-area-inset-right))',
+            bottom: 'calc(1.5rem + env(safe-area-inset-bottom))',
+          }}
+          className={`absolute bottom-6 right-6 flex origin-bottom-right flex-col gap-2 bg-transparent px-1 py-1 lg:scale-100 ${emModoCompacto ? 'scale-75' : 'scale-90'}`}
         >
           <span className="text-right font-display text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-[0.28em] text-amber-200/90">
             Turno
@@ -557,7 +635,7 @@ export function HudDaPartida({
             {ordemDoTurno.map(({ jogadorId, dados }) => {
               const ehAtivo = jogadorId === jogadorAtivoId
               return (
-                <div key={jogadorId} className="relative flex h-10 w-10 items-center justify-center">
+                <div key={jogadorId} className={`relative flex items-center justify-center ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'}`}>
                   {ehAtivo ? (
                     <span
                       data-testid="hud-turno-anel-da-vez"
@@ -571,7 +649,8 @@ export function HudDaPartida({
                     role="img"
                     aria-label={ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}
                     title={dados.apelido}
-                    className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border font-display text-[length:var(--hud-rotulo,0.75rem)] leading-4 transition-all duration-500 ${
+                    data-compacto={emModoCompacto ? 'true' : undefined}
+                    className={`flex items-center justify-center overflow-hidden rounded-lg border font-display text-xs transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
                       ehAtivo
                         ? 'border-amber-300/40 bg-zinc-800'
                         : 'border-zinc-800 bg-zinc-950 opacity-50 grayscale'

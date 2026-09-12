@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, act, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -441,24 +441,25 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
   }
 
-  function renderHudUnitario(props: { emAndamento: boolean; emResultado: boolean }) {
-    return render(
-      <HudDaPartida
-        jogadorPorId={JOGADORES_HUD}
-        jogadorAtivoId={MEU_JOGADOR_ID}
-        jogadorLocalId={MEU_JOGADOR_ID}
-        geradoresLigados={[]}
-        cartaoDeAcessoObtido={false}
-        emAndamento={props.emAndamento}
-        emResultado={props.emResultado}
-        onSair={() => {}}
-      />,
-    )
+  function propsBase(iniciadaEm: number | null = null) {
+    return {
+      jogadorPorId: JOGADORES_HUD,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      iniciadaEm,
+      onSair: () => {},
+    }
   }
 
-  it('cronômetro conta MM:SS em andamento e congela no resultado', () => {
+  // Marco fixo do servidor (epoch ms) para os testes com fake timers (#259).
+  const T0 = new Date('2026-09-11T12:00:00.000Z').getTime()
+
+  it('cronômetro conta a partir do marco do servidor (não do mount local)', () => {
     vi.useFakeTimers()
-    const { rerender } = renderHudUnitario({ emAndamento: true, emResultado: false })
+    vi.setSystemTime(T0)
+    render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:00')
 
     act(() => {
@@ -466,52 +467,40 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
     expect(screen.getByTestId('hud-cronometro')).toHaveAttribute('data-segundos', '65')
-
-    rerender(
-      <HudDaPartida
-        jogadorPorId={JOGADORES_HUD}
-        jogadorAtivoId={MEU_JOGADOR_ID}
-        jogadorLocalId={MEU_JOGADOR_ID}
-        geradoresLigados={[]}
-        cartaoDeAcessoObtido={false}
-        emAndamento
-        emResultado
-        onSair={() => {}}
-      />,
-    )
-    act(() => {
-      vi.advanceTimersByTime(30_000)
-    })
-    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
     vi.useRealTimers()
   })
 
-  it('retoma ao sair e voltar na mesma aba (paliativo sessionStorage por partidaId)', () => {
-    window.sessionStorage.clear()
+  it('a partir de 1h o cronômetro passa a exibir H:MM:SS', () => {
     vi.useFakeTimers()
-    const base = {
-      jogadorPorId: JOGADORES_HUD,
-      jogadorAtivoId: MEU_JOGADOR_ID,
-      jogadorLocalId: MEU_JOGADOR_ID,
-      geradoresLigados: [] as string[],
-      cartaoDeAcessoObtido: false,
-      onSair: () => {},
-    }
-    const { unmount } = render(<HudDaPartida {...base} partidaId="partida-timer-a" emAndamento emResultado={false} />)
+    vi.setSystemTime(T0)
+    render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:00')
+
+    act(() => {
+      vi.advanceTimersByTime(3_600_000)
+    })
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('1:00:00')
+    expect(screen.getByTestId('hud-cronometro')).toHaveAttribute('data-segundos', '3600')
+    vi.useRealTimers()
+  })
+
+  it('retoma ao remontar com o mesmo marco (sair e voltar/recarregar)', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    const { unmount } = render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     act(() => {
       vi.advanceTimersByTime(65_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
 
-    // Sair desmonta; voltar remonta a mesma partida e retoma.
+    // Sair desmonta; voltar remonta a MESMA Partida (mesmo marco) e retoma.
     unmount()
-    render(<HudDaPartida {...base} partidaId="partida-timer-a" emAndamento emResultado={false} />)
+    render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
     act(() => {
       vi.advanceTimersByTime(10_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:15')
-    window.sessionStorage.clear()
     vi.useRealTimers()
   })
 
@@ -570,59 +559,78 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     ).toBeInTheDocument()
   })
 
-  it('resultado congela e limpa o marco persistido', () => {
-    window.sessionStorage.clear()
+  it('resultado congela o tempo do marco e não reinicia', () => {
     vi.useFakeTimers()
-    const base = {
-      jogadorPorId: JOGADORES_HUD,
-      jogadorAtivoId: MEU_JOGADOR_ID,
-      jogadorLocalId: MEU_JOGADOR_ID,
-      geradoresLigados: [] as string[],
-      cartaoDeAcessoObtido: false,
-      onSair: () => {},
-    }
-    const { rerender, unmount } = render(
-      <HudDaPartida {...base} partidaId="partida-timer-d" emAndamento emResultado={false} />,
-    )
+    vi.setSystemTime(T0)
+    const { rerender } = render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     act(() => {
       vi.advanceTimersByTime(65_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
-    expect(window.sessionStorage.getItem('hud-cronometro-inicio:partida-timer-d')).not.toBeNull()
 
-    rerender(<HudDaPartida {...base} partidaId="partida-timer-d" emAndamento emResultado />)
+    rerender(<HudDaPartida {...propsBase(T0)} emAndamento emResultado />)
     act(() => {
       vi.advanceTimersByTime(30_000)
     })
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
-    expect(window.sessionStorage.getItem('hud-cronometro-inicio:partida-timer-d')).toBeNull()
-    unmount()
-    window.sessionStorage.clear()
     vi.useRealTimers()
   })
 
-  it('partida distinta recomeça do zero', () => {
+  it('marcos distintos mostram tempos distintos e nada vai para sessionStorage', () => {
     window.sessionStorage.clear()
     vi.useFakeTimers()
-    const base = {
-      jogadorPorId: JOGADORES_HUD,
-      jogadorAtivoId: MEU_JOGADOR_ID,
-      jogadorLocalId: MEU_JOGADOR_ID,
-      geradoresLigados: [] as string[],
-      cartaoDeAcessoObtido: false,
-      onSair: () => {},
-    }
-    const { unmount } = render(<HudDaPartida {...base} partidaId="partida-timer-b" emAndamento emResultado={false} />)
-    act(() => {
-      vi.advanceTimersByTime(65_000)
-    })
+    vi.setSystemTime(T0 + 65_000)
+    const { unmount } = render(<HudDaPartida {...propsBase(T0)} emAndamento emResultado={false} />)
     expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('01:05')
     unmount()
 
-    render(<HudDaPartida {...base} partidaId="partida-timer-c" emAndamento emResultado={false} />)
-    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:00')
-    window.sessionStorage.clear()
+    // Partida iniciada 30s depois: marco distinto, tempo distinto.
+    render(<HudDaPartida {...propsBase(T0 + 30_000)} emAndamento emResultado={false} />)
+    expect(screen.getByTestId('hud-cronometro')).toHaveTextContent('00:35')
+    expect(window.sessionStorage.length).toBe(0)
     vi.useRealTimers()
+  })
+
+  it('snapshot em andamento injeta o marco; dois clientes com o mesmo marco mostram o mesmo MM:SS', async () => {
+    // Meio do segundo para os dois renders caírem no mesmo MM:SS (#259).
+    const marco = Date.now() - 65_500
+    await partidaComSnapshot(criarSnapshotBase({ iniciadaEm: marco }))
+    const textoA = screen.getByTestId('hud-cronometro').textContent
+    expect(textoA).toBe('01:05')
+    cleanup()
+
+    // Segundo cliente/aba com o mesmo marco do servidor: mesmo MM:SS.
+    await partidaComSnapshot(criarSnapshotBase({ iniciadaEm: marco }))
+    expect(screen.getByTestId('hud-cronometro').textContent).toBe(textoA)
+  })
+
+  it('PARTIDA_INICIADA injeta o marco quando a admissão chegou preparada', async () => {
+    const marco = Date.now() - 65_500
+    renderPartidaParaSaida(null)
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: MEU_JOGADOR_ID,
+        apelido: 'JogadorTeste',
+        partidaId: 'partida-1',
+        estado: 'preparada',
+      }),
+    )
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({ estado: 'preparada', iniciadaEm: null }),
+      }),
+    )
+    // Snapshot preparada ainda não promove a tela — sem HUD/cronômetro.
+    expect(screen.queryByTestId('hud-cronometro')).not.toBeInTheDocument()
+
+    act(() =>
+      ws.simulateMessage({ type: 'PARTIDA_INICIADA', partidaId: 'partida-1', iniciadaEm: marco }),
+    )
+    expect(await screen.findByTestId('hud-cronometro')).toHaveTextContent('01:05')
   })
 
   it('SAIR pede confirmação de desistência; confirmar desiste e vai à principal com login', async () => {

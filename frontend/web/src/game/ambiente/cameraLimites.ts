@@ -1,6 +1,10 @@
 import {
   ESPESSURA_MESA,
   LARGURA_MESA,
+  NEVOA_LONGE,
+  NEVOA_LONGE_PADRAO,
+  NEVOA_PERTO,
+  NEVOA_PERTO_PADRAO,
   PROFUNDIDADE_MESA,
   FOV_CAMERA,
   componenteInclinacao45,
@@ -24,6 +28,34 @@ export const FATOR_SUAVIZACAO_PINCH_CELULAR = 0.5
 
 /** Margem da câmera interativa: >1 para deixar respiro entre borda da Mesa e frustum. */
 export const MARGEM_CAMERA_INTERATIVA = 1.05
+
+/**
+ * Calibragem 800x360 celular-paisagem (issue #230): aspecto largo-baixo
+ * (≥2, ex. 800/360≈2.22) usa margem mais justa para a Mesa não encolher na
+ * altura curta (360px) — ~5% mais próxima, ainda com respiro. Desktop/tablet
+ * (<2, ex. 16/9≈1.78) mantém 1.05 sem regressão.
+ */
+export const LIMIAR_ASPECTO_LARGO_BAIXO = 2
+export const MARGEM_CAMERA_LARGA_BAIXA = 1.0
+
+/** Aspecto largo-baixo (celular em paisagem, ex. 800x360). Puro e testável. */
+export function ehAspectoLargoBaixo(aspect: number): boolean {
+  return aspectoSeguro(aspect) >= LIMIAR_ASPECTO_LARGO_BAIXO
+}
+
+/** Margem efetiva por aspecto visível: justa no largo-baixo, padrão acima. */
+export function margemParaAspecto(aspect?: number): number {
+  if (aspect === undefined) return MARGEM_CAMERA_INTERATIVA
+  return ehAspectoLargoBaixo(aspect) ? MARGEM_CAMERA_LARGA_BAIXA : MARGEM_CAMERA_INTERATIVA
+}
+
+/** Névoa efetiva por aspecto visível: afastada no largo-baixo, padrão acima. */
+export function nevoaParaAspecto(aspect?: number): { perto: number; longe: number } {
+  if (aspect !== undefined && ehAspectoLargoBaixo(aspect)) {
+    return { perto: NEVOA_PERTO, longe: NEVOA_LONGE }
+  }
+  return { perto: NEVOA_PERTO_PADRAO, longe: NEVOA_LONGE_PADRAO }
+}
 
 /**
  * Fator de inclinação 45° (√2): projeção do movimento vertical da tela no
@@ -164,9 +196,10 @@ export function clampAlvo(
  */
 export function calcularDistanciaAfastada(aspectVisivel?: number): number {
   const halfTan = tangenteMeioFov(FOV_CAMERA)
-  const distH = distanciaParaEnquadrar(PROFUNDIDADE_MESA / 2, MARGEM_CAMERA_INTERATIVA, FOV_CAMERA)
   const aspect = aspectoSeguro(aspectVisivel ?? 1)
-  const distW = (LARGURA_MESA / 2 * MARGEM_CAMERA_INTERATIVA) / (halfTan * aspect)
+  const margem = margemParaAspecto(aspect)
+  const distH = distanciaParaEnquadrar(PROFUNDIDADE_MESA / 2, margem, FOV_CAMERA)
+  const distW = (LARGURA_MESA / 2 * margem) / (halfTan * aspect)
   return Math.max(distH, distW)
 }
 

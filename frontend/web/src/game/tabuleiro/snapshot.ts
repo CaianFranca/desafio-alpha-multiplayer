@@ -202,6 +202,9 @@ export function aplicarSnapshot(
     celulasIluminadas,
     jogadorAtivoId: snapshot.jogadorAtivoId,
     rodada: snapshot.rodada,
+    // Marco autoritativo do início (issue #259): baseline do cronômetro do
+    // HUD; `?? null` normaliza snapshots de binário anterior sem o campo.
+    iniciadaEm: snapshot.iniciadaEm ?? null,
     // A wire do snapshot não carrega a fase de movimento do turno: re-
     // sincronizar não pode sobrescrever o que os deltas já aprenderam
     // (late-join no meio do turno perderia a fase 'confirmar'). Exceção
