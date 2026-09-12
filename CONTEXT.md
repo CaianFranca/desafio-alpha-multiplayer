@@ -69,7 +69,7 @@ Sala encaminhada cuja Partida preparada foi cancelada, expirou ou está com todo
 _Avoid_: sala fantasma, sala presa
 
 **Retorno à Sala**:
-Volta dos Jogadores à Sala de origem após o término da Partida — incluindo a derrota por desistência, pelos restantes —; a Sala reabre com os mesmos Membros, mantendo a ordem de entrada e o Anfitrião, com a Prontidão redefinida.
+Volta dos Jogadores à Sala de origem após o término da Partida — incluindo a derrota por desistência, pelos restantes —; a Sala reabre com os Membros restantes (1..N-1 do roster ativo), mantendo a ordem de entrada, com sucessão do Anfitrião quando o vínculo do anfitrião termina e a Prontidão redefinida. Cada Desistência da Partida mapeia para uma Saída do vínculo (`saida`) com histórico; sem Desistências, reabre com os mesmos Membros.
 _Avoid_: retorno ao lobby, volta ao lobby
 
 **Encaminhamento**:
