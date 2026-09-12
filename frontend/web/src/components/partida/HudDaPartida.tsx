@@ -373,8 +373,11 @@ export function HudDaPartida({
           aria-modal="true"
           aria-label="Confirmar desistência da partida"
           aria-describedby="hud-confirmacao-saida-descricao"
-          style={{ right: 'calc(1.5rem + env(safe-area-inset-right))' }}
-          className="pointer-events-auto absolute right-6 top-20 flex flex-col gap-2 rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
+          style={{
+            right: 'calc(1.5rem + env(safe-area-inset-right))',
+            top: 'calc(5rem + env(safe-area-inset-top))',
+          }}
+          className="pointer-events-auto absolute right-6 top-20 flex max-w-[min(20rem,calc(100vw-3rem))] flex-col gap-2 overflow-auto rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
         >
           <p id="hud-confirmacao-saida-descricao">Desistir da partida? Seu peão será removido e a equipe continua sem você.</p>
           <div className="flex gap-2">
