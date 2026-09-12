@@ -297,16 +297,23 @@ export class SalasRepo {
     try {
       await client.query('BEGIN');
       // Flip status + anfitrião na mesma linha (evita janela entre DELETE e UPDATE)
+      // Convenção: undefined = mantém PG, null = SET NULL explícito, string = novo jogadorId.
+      // PG `anfitriao_id` guarda jogadorId (usuarios.id); null nunca usa COALESCE (fantasma).
       let upd;
-      if (novoAnfitriaoJogadorId !== undefined) {
-        upd = await client.query(
-          `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL, anfitriao_id = COALESCE($2, anfitriao_id) WHERE id = $1 AND status = 'encaminhada'`,
-          [salaId, novoAnfitriaoJogadorId],
-        );
-      } else {
+      if (novoAnfitriaoJogadorId === undefined) {
         upd = await client.query(
           `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
           [salaId],
+        );
+      } else if (novoAnfitriaoJogadorId === null) {
+        upd = await client.query(
+          `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL, anfitriao_id = NULL WHERE id = $1 AND status = 'encaminhada'`,
+          [salaId],
+        );
+      } else {
+        upd = await client.query(
+          `UPDATE salas_historico SET status = 'aberta', server_id = NULL, partida_id = NULL, anfitriao_id = $2 WHERE id = $1 AND status = 'encaminhada'`,
+          [salaId, novoAnfitriaoJogadorId],
         );
       }
       if ((upd.rowCount ?? 0) !== 1) {

@@ -152,6 +152,8 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
         const saidas = ativosDb.filter((id) => !payloadOrdenado.includes(id));
 
         // Aplicar comando no engine (valida estado consistente e encaminhada + subset)
+        // Guarda o anfitrião antes (membro-id do engine) para comparar membro-id com membro-id.
+        const anfitriaoAntesMembroId = contexto.estado.estado.salas.find((s) => s.id === salaId)?.anfitriaoId;
         let aplicado: ReturnType<typeof contexto.estado.aplicar>;
         if (saidas.length === 0) {
           aplicado = contexto.estado.aplicar({ tipo: 'reabrir_sala', salaId });
@@ -184,12 +186,17 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           const salaReaberta = aplicado.estado.salas.find((s) => s.id === salaId);
           let novoAnfitriaoJogadorId: string | null | undefined = undefined;
           if (salaReaberta) {
-            const anfitriaoMembro = salaReaberta.membros.find((m) => m.id === salaReaberta.anfitriaoId);
-            novoAnfitriaoJogadorId = anfitriaoMembro ? anfitriaoMembro.jogadorId : null;
-            // Se anfitrião não mudou, undefined evita UPDATE desnecessário (mantém PG)
-            const anfitriaoOriginal = salaBruta.anfitriaoId;
-            if (novoAnfitriaoJogadorId === anfitriaoOriginal) {
+            // Engine `anfitriaoId` é membro.id (sucederAnfitriao retorna membro.id);
+            // PG `anfitriao_id` guarda jogadorId — converte via vínculo do sucessor.
+            // Compara membro-id com membro-id; null = SET NULL explícito (nunca COALESCE).
+            const novoMembroId = salaReaberta.anfitriaoId;
+            if (novoMembroId === anfitriaoAntesMembroId) {
               novoAnfitriaoJogadorId = undefined;
+            } else if (novoMembroId === null) {
+              novoAnfitriaoJogadorId = null;
+            } else {
+              const anfitriaoMembro = salaReaberta.membros.find((m) => m.id === novoMembroId);
+              novoAnfitriaoJogadorId = anfitriaoMembro ? anfitriaoMembro.jogadorId : null;
             }
           }
           reabriu = await contexto.repo.reabrirSalaComSaidasAtomico(salaId, saidas, novoAnfitriaoJogadorId);
