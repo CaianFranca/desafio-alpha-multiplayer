@@ -1003,7 +1003,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           style={
             viewportCompacto
               ? {
-                  right: 'calc(1rem + env(safe-area-inset-right))',
+                  right: 'calc(1.5rem + env(safe-area-inset-right))',
                   bottom: 'calc(5.5rem + env(safe-area-inset-bottom))',
                 }
               : undefined
