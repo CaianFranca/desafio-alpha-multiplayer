@@ -260,6 +260,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
   }, [avisoDesistencia])
 
+  // Desistências pré-snapshot (review PR #378, AC3/AC4): sem roster o toast/SR
+  // seria falso ("Um jogador desistiu") — enfileira e re-emite pós-snapshot
+  // com a ordem/restantes autoritativos. Snapshot reconcilia o modelo; a fila
+  // reconcilia o anúncio. Dedupe por jogadorId (replay/reconexão é no-op).
+  const desistenciasPreSnapshotRef = useRef<Array<{ jogadorId: string; peaoId: string }>>([])
+
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
   const emResultado = estado === 'resultado'
   const emResultadoRef = useRef(emResultado)
@@ -355,6 +361,32 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           pendentesEmVoo.current.clear()
           aplicarSnapshotNoModelo(evento.snapshot)
           if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
+          // Re-emissão pós-snapshot (review PR #378, AC3/AC4): desistências
+          // recebidas no early-join (sem roster) foram projetadas no modelo
+          // mas sem toast/SR — re-anuncia agora com ordem/restantes
+          // autoritativos do snapshot. Desistente já fora do roster = saída
+          // confirmada; ainda presente = ignora (snapshot mais novo que o
+          // evento não confirma a saída).
+          if (desistenciasPreSnapshotRef.current.length > 0) {
+            const pendentes = [...desistenciasPreSnapshotRef.current]
+            desistenciasPreSnapshotRef.current = []
+            const noSnapshot = new Map(
+              evento.snapshot.jogadores.map((j) => [j.jogadorId, j] as const),
+            )
+            const ordenados = [...evento.snapshot.jogadores].sort((a, b) => a.ordem - b.ordem)
+            for (const pendente of pendentes) {
+              if (noSnapshot.has(pendente.jogadorId)) continue
+              const ordemTexto = ordenados.map((j) => j.apelido).join(', ')
+              avisoDesistenciaIdRef.current += 1
+              setAvisoDesistencia({
+                id: avisoDesistenciaIdRef.current,
+                jogadorId: pendente.jogadorId,
+                apelido: 'Um jogador',
+                restantes: ordenados.length,
+                ordemTexto,
+              })
+            }
+          }
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
@@ -394,9 +426,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           // F4 (#290): sem snapshot ainda não há roster — projeta a remoção,
-          // mas suprime toast/SR (apelido/ordem/restantes seriam falsos:
-          // "Um jogador desistiu", "—", "sem jogadores restantes").
-          if (Object.keys(anterior.jogadorPorId).length === 0) return
+          // mas suprime toast/SR imediato (apelido/ordem/restantes seriam
+          // falsos: "Um jogador desistiu", "—", "sem jogadores restantes").
+          // Enfileira para re-emitir pós-snapshot (review PR #378, AC3/AC4)
+          // com dados autoritativos; o snapshot posterior não re-anunciaria.
+          if (Object.keys(anterior.jogadorPorId).length === 0) {
+            const fila = desistenciasPreSnapshotRef.current
+            if (!fila.some((p) => p.jogadorId === evento.jogadorId)) {
+              fila.push({ jogadorId: evento.jogadorId, peaoId: evento.peaoId })
+            }
+            return
+          }
           const restantes = Object.keys(anterior.jogadorPorId).filter((id) => id !== evento.jogadorId)
           const ordemTexto = Object.entries(anterior.jogadorPorId)
             .filter(([id]) => id !== evento.jogadorId)
