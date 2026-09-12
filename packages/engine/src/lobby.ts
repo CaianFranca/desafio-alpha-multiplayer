@@ -158,12 +158,14 @@ export interface ReabrirSalaComSaidasComando {
   readonly tipo: 'reabrir_sala_com_saidas';
   readonly salaId: string;
   /**
-   * Saídas atômicas à reabertura (follow-up #371): remove os desistentes do
-   * roster antes de flipar `encaminhada→aberta`. Cada saída é `saida`
-   * (vocabulário do lobby) e corresponde à desistência da partida no
-   * game-server. Validação de subset (1..N-1, membros ativos).
+   * Saídas atômicas à reabertura (follow-up #371, caminho b): remove os
+   * desistentes do roster antes de flipar `encaminhada→aberta`. Motivo
+   * explícito e restrito a `saida` (vocabulário do lobby, CONTEXT.md —
+   * Desistência); a causa (desistência da partida) vive no game-server e o
+   * histórico `membros_historico` registra `saida`. Validação de subset
+   * (1..N-1, membros ativos).
    */
-  readonly saidas: readonly { readonly jogadorId: string; readonly motivo: MotivoDeEncerramento }[];
+  readonly saidas: readonly { readonly jogadorId: string; readonly motivo: 'saida' }[];
 }
 
 export type Comando =
@@ -1449,12 +1451,21 @@ export function reabrirSala(
 
 /**
  * Reabertura com saídas atômicas (follow-up #371, caminho b).
- * Remove 0..N-1 desistentes do roster antes de flipar `encaminhada→aberta`,
+ * Remove 1..N-1 desistentes do roster antes de flipar `encaminhada→aberta`,
  * com sucessão de Anfitrião e `pronto=false` nos restantes. Validação de
  * subset estrita: sala `encaminhada`+consistente, saídas ∈ membros ativos,
  * sem duplicatas, deixando ao menos 1 membro ativo.
- * Motivo é vocabulário do lobby (`saida`); a causa (desistência da partida)
- * vive no game-server — o historico `membros_historico` registra `saida`.
+ * Motivo explícito e restrito a `saida` (Desistência do CONTEXT.md); a causa
+ * (desistência da partida) vive no game-server — o histórico
+ * `membros_historico` registra `saida`.
+ * Memória mantém o desistente como `encerrado` (padrão canônico
+ * `executarSaidaDeSala`); o PG faz DELETE + histórico via
+ * `reabrirSalaComSaidasAtomico` (par de `sairMembroAtomico`) — mesma
+ * divergência intencional do fluxo canônico, convergindo em
+ * ordem/"mesmos membros" da #287 via roster ativo.
+ * Projeção/broadcast: `membro_saiu` + `sala_reaberta` são projetados pelo
+ * caller em `retorno.ts` via `definirEstadoSala` + `SALA_ATUALIZADA`
+ * (idempotência via marker PG/Redis).
  */
 export function reabrirSalaComSaidas(
   estado: EstadoDoLobby,
@@ -1470,8 +1481,8 @@ export function reabrirSalaComSaidas(
   for (const saida of comando.saidas) {
     const inv = validarTexto(saida.jogadorId, saida.motivo);
     if (inv) return inv;
-    if (!MOTIVOS_DE_ENCERRAMENTO.includes(saida.motivo as MotivoDeEncerramento)) {
-      return rejeitar('DADOS_INVALIDOS', 'Motivo de encerramento inválido.');
+    if (saida.motivo !== 'saida') {
+      return rejeitar('DADOS_INVALIDOS', 'Motivo da reabertura com saídas deve ser saida.');
     }
   }
   const duplicados = new Set<string>();
@@ -1559,7 +1570,7 @@ export function reabrirSalaComSaidas(
       membroId: membro.id,
       jogadorId: membro.jogadorId,
       ordemDeEntrada: membro.ordemDeEntrada,
-      motivo: 'saida',
+      motivo: motivoPorJogador.get(s.jogadorId) ?? 'saida',
     });
   }
   if (anfitriaoSaiu && anfitriaoNovoId !== null && anfitriaoAtual) {
