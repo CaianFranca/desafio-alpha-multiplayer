@@ -1393,11 +1393,13 @@ function confirmarPosicaoDoPeao(
       'A Peça do Peão não foi encontrada.',
     );
   }
-  // Issue #375: confirmar na Peça do início do turno (ida-e-volta livre na
-  // zona da origem) é confirmação sem mudança — fecha a posição sem
-  // Recebimento, mesma semântica da Permanência quanto ao sorteio. O funil
-  // Iluminação → Limpeza (no-op esperado, antes = depois) → Ataque (avalia
-  // como Permanência: dentro dispara, fora→fora silêncio) segue abaixo.
+  // Issue #375 (contrato sem-mudança): confirmar na Peça do início do turno —
+  // com ou sem ida-e-volta — fecha a posição sem Recebimento e exige
+  // encerrar_turno; a Permanência continua distinta (encerra direto, sem
+  // Iluminação/Limpeza por ADR-0005). A escolha Permanência-vs-Confirmação é
+  // do cliente; a engine não distingue ida-e-volta de sem-movimento. O funil
+  // Iluminação → Limpeza → Ataque segue abaixo (dentro dispara, fora→fora
+  // silêncio).
   const semMudancaDePeca = peca.pecaId === estado.pecaDoInicioDoTurnoId;
 
   // O Recebimento sorteia as peças da Caixa (#138): peca_sorteada por peça e

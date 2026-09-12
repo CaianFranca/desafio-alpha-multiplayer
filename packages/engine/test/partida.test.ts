@@ -902,13 +902,11 @@ test('confirmar no Primeiro Turno é ENCERRAMENTO_INVALIDO', () => {
   );
 });
 
-// Issue #375: ida-e-volta livre na zona da origem seguida de Confirmação na
-// Peça do início do turno fecha a posição sem Recebimento — mesma semântica
-// da Permanência quanto ao sorteio — mantendo o funil Iluminação → Limpeza →
-// Ataque e posicaoConfirmada=true, com encerrar_turno válido na sequência.
-// (A guarda ENCERRAMENTO_INVALIDO para confirmar-na-origem foi removida: sem
-// movimento o frontend oferece Permanência via movimentouNoTurno=false, então
-// o confirmar-na-origem sem ida-e-volta segue o mesmo ramo sem sorteio.)
+// Issue #375 (contrato sem-mudança): confirmar na Peça do início do turno —
+// com ou sem ida-e-volta — fecha a posição sem Recebimento, mantendo o funil
+// Iluminação → Limpeza → Ataque e posicaoConfirmada=true, com encerrar_turno
+// válido na sequência. A escolha Permanência-vs-Confirmação é do cliente;
+// a engine não distingue ida-e-volta de sem-movimento (só pecaDoInicioDoTurnoId).
 test('confirmar na Peça do início após ida-e-volta fecha sem Recebimento (#375)', () => {
   let estado = partidaEmRodada2();
   assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
@@ -923,6 +921,9 @@ test('confirmar na Peça do início após ida-e-volta fecha sem Recebimento (#37
     (item) => item.peaoId === 'peao-branco',
   );
   assert.equal(peaoNaOrigem?.pecaId, 'inicial-1');
+  // Funil no ramo sem-mudança: captura o antes para provar o no-op.
+  const iluminadasAntes = estado.celulasIluminadas;
+  const posicionadasAntes = estado.tabuleiro.posicionadas;
 
   const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
   assert.equal(confirmacao.sucesso, true);
@@ -942,8 +943,101 @@ test('confirmar na Peça do início após ida-e-volta fecha sem Recebimento (#37
   assert.deepEqual(confirmacao.estado.tabuleiro.recebidas, []);
   assert.equal(confirmacao.estado.posicaoConfirmada, true);
   assert.ok(confirmacao.estado.peoesNoAlcance !== undefined);
+  // Funil Iluminação → Limpeza → Ataque no ramo sem-mudança (fora→fora):
+  // Limpeza no-op (antes = depois) e silêncio do Ataque. Se o ramo for
+  // desviado do funil compartilhado, o espelho no Alcance abaixo quebra.
+  assert.deepEqual(confirmacao.estado.tabuleiro.posicionadas, posicionadasAntes);
+  assert.deepEqual(confirmacao.estado.celulasIluminadas, iluminadasAntes);
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'limpeza_aplicada'));
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'ataque_resolvido'));
 
   // Turno destravado: encerrar_turno subsequente é válido.
+  const encerramento = aplicarComandoDePartida(confirmacao.estado, encerrarTurno(), 'ana');
+  assert.equal(encerramento.sucesso, true);
+  if (!encerramento.sucesso) return;
+  assert.equal(encerramento.estado.jogadorAtivoId, 'bruno');
+  assert.equal(encerramento.estado.posicaoConfirmada, false);
+});
+
+// Issue #375 (espelho no Alcance): o mesmo ramo sem-mudança passa pelo funil
+// compartilhado — dentro do Alcance o Ataque dispara. Se o ramo for desviado
+// do funil, este teste quebra (ataque ausente).
+test('confirmar na origem após ida-e-volta dentro do Alcance dispara o ataque (#375 espelho)', () => {
+  let estado = partidaEmRodada2();
+  // Vulto ao norte (1,3): o raio sul passa por reta-1 (2,3) e inicial-1
+  // (3,3) — a origem está DENTRO do alcance (raios ilimitados do Vulto; o
+  // Espectro só alcança vizinhas diretas e não chegaria). A reta-y (0,3) com
+  // o peão de bruno ilumina o vulto — sem ela a Limpeza do próprio confirmar
+  // removeria o monstro escuro antes do Ataque.
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const, celula: { linha: 1, coluna: 3 } },
+        { pecaId: 'reta-y', tipo: 'reta' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 3 } },
+      ],
+    },
+  };
+  estado = comPeaoSobre(estado, 'peao-vermelho', 'reta-y');
+  assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  // Ida-e-volta: reta-1 (2,3) e volta à inicial-1 (3,3).
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 3, 3), 'ana');
+
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  // Sem sorteio mesmo dentro do Alcance: o ramo sem-mudança nunca consome a Caixa.
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(confirmacao.estado.tabuleiro.caixa.length, caixaAntes);
+  assert.deepEqual(confirmacao.estado.tabuleiro.recebidas, []);
+  assert.equal(confirmacao.estado.posicaoConfirmada, true);
+  // Funil no ramo sem-mudança dentro do Alcance: o Vulto ataca antes de ser
+  // removido — a Baixa nova reaplica Iluminação/Limpeza no mesmo gatilho
+  // (mesma semântica do permanecer dentro da #236). Se o ramo for desviado
+  // do funil compartilhado, o ataque some e este teste quebra.
+  const ataque = ataqueDoLoteDaPartida(confirmacao.eventos);
+  assert.deepEqual([...ataque.peoesAtingidos].sort(), ['peao-branco', 'peao-vermelho'].sort());
+  const ana = confirmacao.estado.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  assert.equal(ana?.emBaixaIluminacao, true);
+  // Baixa nova remove o Vulto no mesmo gatilho, depois do ataque.
+  const posicionadasDepois = confirmacao.estado.tabuleiro.posicionadas.map((peca) => peca.pecaId);
+  assert.ok(!posicionadasDepois.includes('vulto-x'));
+
+  // Turno destravado: encerrar_turno subsequente é válido.
+  const encerramento = aplicarComandoDePartida(confirmacao.estado, encerrarTurno(), 'ana');
+  assert.equal(encerramento.sucesso, true);
+  if (!encerramento.sucesso) return;
+  assert.equal(encerramento.estado.jogadorAtivoId, 'bruno');
+});
+
+// Issue #375 (contrato sem-mudança): confirmar sem movimento na origem — sem
+// ida-e-volta — fecha sem Recebimento e exige encerrar_turno. A engine não
+// distingue ida-e-volta de sem-movimento (só pecaDoInicioDoTurnoId); a escolha
+// Permanência-vs-Confirmação é do cliente.
+test('confirmar sem movimento na origem fecha sem Recebimento (contrato #375)', () => {
+  let estado = partidaEmRodada2();
+  assert.equal(estado.pecaDoInicioDoTurnoId, 'inicial-1');
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  // Sem movimento: o Peão segue sobre a inicial-1 desde o início do turno.
+  const confirmacao = aplicarComandoDePartida(estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(confirmacao.sucesso, true);
+  if (!confirmacao.sucesso) return;
+  assert.equal(confirmacao.eventos[0]?.tipo, 'posicao_confirmada');
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'peca_sorteada'));
+  assert.ok(!confirmacao.eventos.some((evento) => evento.tipo === 'recebimento_gerado'));
+  assert.equal(confirmacao.estado.tabuleiro.caixa.length, caixaAntes);
+  assert.deepEqual(confirmacao.estado.tabuleiro.recebidas, []);
+  assert.equal(confirmacao.estado.posicaoConfirmada, true);
+
   const encerramento = aplicarComandoDePartida(confirmacao.estado, encerrarTurno(), 'ana');
   assert.equal(encerramento.sucesso, true);
   if (!encerramento.sucesso) return;
