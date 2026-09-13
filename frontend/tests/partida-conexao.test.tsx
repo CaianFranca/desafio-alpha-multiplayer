@@ -1635,4 +1635,26 @@ describe('reload do primeiro turno — peça de volta à mesa e turno concluíve
     // A mesma conexão sobreviveu ao roteiro inteiro (sem reload de verdade).
     expect(MockWebSocket.instances).toHaveLength(1)
   })
+
+  it('MENSAGEM_DE_CHAT_DA_PARTIDA chega ao canal e é ignorada sem crash (tolerância do painel futuro, issue #390)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+    toquesDeAudio.length = 0
+
+    expect(() =>
+      act(() =>
+        ws.simulateMessage({
+          type: 'MENSAGEM_DE_CHAT_DA_PARTIDA',
+          jogadorId: 'jogador-2',
+          apelido: 'Ana',
+          conteudo: 'Bom jogo, todos.',
+          enviadoEm: new Date().toISOString(),
+        }),
+      ),
+    ).not.toThrow()
+
+    // A tela segue viva (painel do chat ainda não existe — issue #389) e
+    // nenhum som de recusa dispara para o evento novo.
+    expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
+    expect(toquesDeAudio).toHaveLength(0)
+  })
 })

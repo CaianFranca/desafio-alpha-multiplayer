@@ -18,6 +18,7 @@
 //   shared type:'CONFIRMAR_POSICAO_DO_PEAO' + jogadorId <-> engine tipo:'confirmar_posicao_do_peao' + ator
 //   shared type:'ENCERRAR_TURNO' + jogadorId <-> engine tipo:'encerrar_turno' + ator
 //   shared type:'DESISTIR_DA_PARTIDA' + jogadorId <-> engine tipo:'desistir_da_partida' + ator — issue #288 (rota própria: vale no próprio turno ou fora dele, só o próprio Jogador; PARTIDA_TERMINADA antes de tudo; JOGADOR_NAO_NA_PARTIDA para fora do roster/já-saído)
+//   shared type:'ENVIAR_MENSAGEM_DE_CHAT' + jogadorId — SEM par no engine (issue #390): o Chat de Partida não é Ação de jogo; o julgamento tem rota própria no game-server (recusas MENSAGEM_VAZIA/MENSAGEM_LONGA_DEMAIS/LIMITE_DE_MENSAGENS, fora das guardas de turno e de término). O literal coincide com o comando do chat da Sala (./sala.ts) — canais são servidores distintos e as sub-uniões narrow separadamente.
 //   Eventos:
 //   shared type:'TURNO_INICIADO' { jogadorId, rodada } <-> engine tipo:'turno_iniciado' { jogadorId, rodada }
 //   shared type:'TURNO_ENCERRADO' { jogadorId } <-> engine tipo:'turno_encerrado' { jogadorId }
@@ -179,6 +180,17 @@ export interface DesistirDaPartidaComando {
   readonly jogadorId: string;
 }
 
+// Chat de Partida (issue #390): comando wire do canal de Partida com rota
+// própria de julgamento no game-server — NÃO é Ação de jogo (sem par no
+// engine, fora de `mapearComandoDaPartida`). O `jogadorId` segue o padrão
+// vestigial (#155): obrigatório pela guarda de forma, o ator é sempre a
+// sessão autenticada do socket.
+export interface EnviarMensagemDeChatDaPartidaComando {
+  readonly type: 'ENVIAR_MENSAGEM_DE_CHAT';
+  readonly jogadorId: string;
+  readonly conteudo: string;
+}
+
 // Controle do stream de debug (issue #340, "Modo Desenvolvedor"): interceptados
 // na camada `ws.ts` do game-server, ANTES de `aplicarMensagem` — a guarda do
 // contrato (`ehComandoDaPartida`) os recusaria como DADOS_INVALIDOS. Sem
@@ -206,12 +218,13 @@ export type PartidaComandoDoCliente =
   | AtravessarOEscuroPartidaComando
   | EncerrarTurnoComando
   | DesistirDaPartidaComando
+  | EnviarMensagemDeChatDaPartidaComando
   | AtivarDebugDaPartidaComando
   | DesativarDebugDaPartidaComando;
 
-// --- Eventos servidor → cliente (15: Turno/posição/iluminação/limpeza,
+// --- Eventos servidor → cliente (16: Turno/posição/iluminação/limpeza,
 // sorteio+vaga da #138, iniciada+estado, término da #179, ataque #172/#173,
-// resgate #171, desistência #288, presença em reconexão #295) ---
+// resgate #171, desistência #288, presença em reconexão #295, chat #390) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';
@@ -520,6 +533,20 @@ export interface JogadorReconectadoWireEvento {
   readonly jogadorId: string;
 }
 
+// Mensagem de chat aprovada (issue #390): broadcast serial ao roster vigente
+// do canal de Partida — o servidor gera `enviadoEm` (ISO 8601, mesma ordem
+// serial dos eventos de jogo, cadeia por Partida). `apelido` é resolvido pelo
+// servidor (Conexão do JWT da admissão, fallback ao roster da PartidaPreparada)
+// e `jogadorId` é a Sessão do ator — bots comentam pelo MESMO evento com a
+// identidade do roster (apelido e cor do peão) e não leem o chat humano.
+export interface MensagemDeChatDaPartidaEvento {
+  readonly type: 'MENSAGEM_DE_CHAT_DA_PARTIDA';
+  readonly jogadorId: string;
+  readonly apelido: string;
+  readonly conteudo: string;
+  readonly enviadoEm: string;
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
@@ -535,7 +562,8 @@ export type PartidaEventoDoServidor =
   | ResgateRealizadoWireEvento
   | DesistenciaRegistradaWireEvento
   | JogadorEmReconexaoWireEvento
-  | JogadorReconectadoWireEvento;
+  | JogadorReconectadoWireEvento
+  | MensagemDeChatDaPartidaEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

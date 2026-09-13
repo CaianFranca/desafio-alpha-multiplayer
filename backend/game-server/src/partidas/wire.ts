@@ -10,6 +10,12 @@
 // DADOS_INVALIDOS }`. A saída de erros é um conjunto fechado de códigos
 // sincronizado com `@flicker/shared`: os códigos do tabuleiro/Peões mais os 5
 // de Turno do ST-11.
+//
+// O Chat de Partida (issue #390) entra no conjunto de forma do wire, mas NÃO
+// no mapeamento de domínio: não é Ação de jogo, tem rota própria no
+// `handlers.ts` (recusas MENSAGEM_VAZIA/MENSAGEM_LONGA_DEMAIS/
+// LIMITE_DE_MENSAGENS, fora das guardas de turno e de término) — o case de
+// `mapearComandoDaPartida` lança como os comandos de debug, inalcançável.
 
 import type {
   CodigoDeErroDoTabuleiro,
@@ -41,6 +47,8 @@ const TIPOS_DE_COMANDO: ReadonlySet<string> = new Set([
   'ATRAVESSAR_O_ESCURO',
   'ENCERRAR_TURNO',
   'DESISTIR_DA_PARTIDA',
+  // Chat de Partida (issue #390): rota própria no handler, fora do domínio.
+  'ENVIAR_MENSAGEM_DE_CHAT',
 ]);
 
 function ehIdNaoVazio(valor: unknown): boolean {
@@ -127,6 +135,12 @@ export function ehComandoDaPartida(value: unknown): value is ComandoDaPartidaAce
     // dispatch, #155); vale no próprio turno ou fora dele, sem FORA_DA_VEZ.
     case 'DESISTIR_DA_PARTIDA':
       return true;
+    // Chat de Partida (issue #390): guarda de FORMA apenas — o `jogadorId` é
+    // vestigial (#155) e o `conteudo` é validado de verdade no handler
+    // (normalização de quebras/trim, vazio, teto de 300), como o lobby faz
+    // com o conteúdo real do chat da Sala.
+    case 'ENVIAR_MENSAGEM_DE_CHAT':
+      return typeof mensagem.conteudo === 'string';
     default:
       return false;
   }
@@ -178,6 +192,12 @@ export function mapearComandoDaPartida(
       return { tipo: 'encerrar_turno' };
     case 'DESISTIR_DA_PARTIDA':
       return { tipo: 'desistir_da_partida' };
+    case 'ENVIAR_MENSAGEM_DE_CHAT':
+      // Inalcançável: o Chat de Partida (issue #390) tem rota própria no
+      // `handlers.ts`, ANTES de enfileirar a mutação do engine — não é Ação de
+      // jogo e não atravessa o mapeamento. O case existe só para a
+      // exaustividade da união wire (mesmo padrão dos comandos de debug).
+      throw new Error('Chat de Partida não atravessa o mapeamento de domínio.');
     case 'ATIVAR_DEBUG':
     case 'DESATIVAR_DEBUG':
       // Inalcançável: `ehComandoDaPartida` recusa os comandos de controle de
@@ -198,7 +218,8 @@ export function mapearComandoDaPartida(
 // e #88, o da Caixa da ST-12 (#144) e os 5 códigos de Turno do ST-11. O
 // PARTIDA_TERMINADA entra pela issue #179 (recusa pós-término) e o
 // JOGADOR_NAO_NA_PARTIDA pela issue #288 (recusa de não-membro/desistente).
-// Qualquer
+// Os 3 códigos do Chat de Partida entram pela issue #390 (recusas do
+// julgamento do chat, só ao autor). Qualquer
 // código fora deste conjunto é normalizado para DADOS_INVALIDOS para nunca
 // vazar um código fora do contrato.
 const CODIGOS_DA_PARTIDA_WIRE: ReadonlySet<string> = new Set([
@@ -229,6 +250,9 @@ const CODIGOS_DA_PARTIDA_WIRE: ReadonlySet<string> = new Set([
   'MOVIMENTO_INDISPONIVEL',
   'PARTIDA_TERMINADA',
   'JOGADOR_NAO_NA_PARTIDA',
+  'MENSAGEM_VAZIA',
+  'MENSAGEM_LONGA_DEMAIS',
+  'LIMITE_DE_MENSAGENS',
 ]);
 
 export function paraCodigoDaPartidaWire(

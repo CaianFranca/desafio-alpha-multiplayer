@@ -19,9 +19,26 @@
 // originador com `ERRO_DO_TABULEIRO`, usando o `codigo` fechado do domínio.
 // As mutações são serializadas por `partidaId` para evitar lost-update no
 // read-modify-write do Redis.
+//
+// O Chat de Partida (issue #390) tem rota própria e NÃO é Ação de jogo:
+// `ENVIAR_MENSAGEM_DE_CHAT` é interceptado ANTES do despacho ao engine (sem
+// FORA_DA_VEZ/PARTIDA_TERMINADA), julgado dentro da cadeia por Partida (a
+// mensagem aprovada entra na MESMA ordem serial dos eventos de jogo), nunca
+// toca o estado nem o Redis de estado e só faz fan-out ao roster vigente
+// (`estado.jogadores` do engine — desistente excluído). Recusas
+// (MENSAGEM_VAZIA/MENSAGEM_LONGA_DEMAIS/LIMITE_DE_MENSAGENS/JOGADOR_NAO_NA_
+// PARTIDA) vão só ao originador. Rate-limit de 1 mensagem a cada 2s por
+// Jogador (bots isentos), em memória mononodo — a entrada da Partida é
+// liberada quando o estado desaparece (chat lê `null`) e quando a última
+// conexão cai (`liberarLimiteDeChat` via close em `ws.ts`).
 
 import type { Redis } from 'ioredis';
 import type { WebSocket } from 'ws';
+import type {
+  CodigoDeErroDoTabuleiro,
+  EnviarMensagemDeChatDaPartidaComando,
+  MensagemDeChatDaPartidaEvento,
+} from '@flicker/shared';
 import { aplicarComandoDePartida, type EventoDaPartida } from '@flicker/engine';
 import { PartidaBroadcaster } from './broadcast.ts';
 import { traduzirEventos } from './traducao.ts';
@@ -40,6 +57,14 @@ import { chaveDoRetornoPendente } from './chaves.ts';
 import { obterPartida, type PartidaPreparada } from './partidas.ts';
 import type { AvisoDeRetorno, AvisoDeDesistencia } from '../retorno/cliente.ts';
 import { sleep } from '../utils/sleep.ts';
+import { obterConexoes } from '../ws/conexao.ts';
+
+// Chat de Partida (issue #390): 1 mensagem a cada 2s por Jogador não-bot e
+// teto de 300 caracteres após a normalização (trim com quebras colapsadas em
+// espaço) — os números vivem aqui como constantes do módulo para os testes
+// espelharem.
+const INTERVALO_MINIMO_ENTRE_MENSAGENS_MS = 2000;
+const LIMITE_DE_CARACTERES_DO_CHAT = 300;
 
 export interface PartidaHandlersDeps {
   readonly redis: Redis;
@@ -77,6 +102,11 @@ export class PartidaHandlers {
   // Detaches em voo (nunca contam para o dedup do retorno — só para o drain).
   private readonly desvinculosPendentes: Map<string, Set<Promise<void>>> = new Map();
   private readonly callbacksEnviados: Set<string> = new Set();
+  // Rate-limit do chat em memória (issue #390, mononodo): Map<partidaId,
+  // Map<jogadorId, timestamp da última mensagem aprovada>>. Sem Redis, sem
+  // tocar o blob de estado; a entrada da Partida é apagada quando o estado
+  // desaparece (expira/cancelamento) — ver `aplicarMensagemDeChat`.
+  private readonly limiteDeChatPorPartida: Map<string, Map<string, number>> = new Map();
 
   constructor(deps: PartidaHandlersDeps) {
     this.redis = deps.redis;
@@ -111,6 +141,17 @@ export class PartidaHandlers {
       });
       // Espelho do erro de guarda no stream de debug (issue #340).
       this.debug?.emitirParaSocket(socket, 'error', 'Comando fora do escopo da partida.');
+      return;
+    }
+
+    // Chat de Partida (issue #390): rota própria ANTES das guardas de turno e
+    // de término do engine — o chat não é Ação de jogo, nunca responde
+    // FORA_DA_VEZ/PARTIDA_TERMINADA e vale em andamento e pós-Resultado (até
+    // a saída individual), nunca na fase preparada. A serialização relativa
+    // aos eventos de jogo fica dentro da cadeia por Partida
+    // (`enfileirarMutacao`, ver método abaixo).
+    if (mensagem.type === 'ENVIAR_MENSAGEM_DE_CHAT') {
+      await this.aplicarMensagemDeChat(socket, partidaId, sessaoJogadorId, mensagem);
       return;
     }
 
@@ -195,6 +236,145 @@ export class PartidaHandlers {
       // Espelho do erro interno no stream de debug (issue #340).
       this.debug?.emitirParaSocket(socket, 'error', `erro interno ao processar comando: ${(erro as Error).message}`);
     });
+  }
+
+  /**
+   * Julgamento do Chat de Partida (issue #390), rodando DENTRO da cadeia por
+   * Partida (`enfileirarMutacao`) — a mensagem aprovada entra na MESMA ordem
+   * serial dos eventos de jogo. Passos: estado no Redis (indisponível → limpa
+   * a entrada do rate-limit da Partida e recusa), fase (`iniciadaEm` nulo →
+   * DADOS_INVALIDOS, chat nunca na preparada), pertença ao roster vigente do
+   * engine (JOGADOR_NAO_NA_PARTIDA — cobre o desistente na hora), conteúdo
+   * normalizado (vazio → MENSAGEM_VAZIA; teto de 300 → MENSAGEM_LONGA_DEMAIS),
+   * rate-limit de 2s por Jogador não-bot (LIMITE_DE_MENSAGENS; bots isentos)
+   * e fan-out socket-a-socket SÓ ao roster vigente, com `apelido` da Conexão
+   * (fallback ao roster da PartidaPreparada) e `enviadoEm` ISO do servidor.
+   * Nenhuma recusa muta estado; nenhum caminho chama o engine ou
+   * `salvarEstadoDaPartida`.
+   */
+  private async aplicarMensagemDeChat(
+    socket: WebSocket,
+    partidaId: string,
+    sessaoJogadorId: string,
+    mensagem: EnviarMensagemDeChatDaPartidaComando,
+  ): Promise<void> {
+    try {
+      await this.enfileirarMutacao(partidaId, async () => {
+        const estado = await obterEstadoDaPartida(this.redis, partidaId);
+        if (estado === null) {
+          // Partida expirada/cancelada: a entrada do rate-limit fica sem dono
+          // — apaga a entrada da Partida inteira (o blob de estado nunca é
+          // tocado pelo chat).
+          this.limiteDeChatPorPartida.delete(partidaId);
+          this.recusarChat(socket, 'ESTADO_INDISPONIVEL', 'Partida indisponível.');
+          return;
+        }
+
+        // Fase (issue #390): a marca de início da PartidaPreparada autoriza —
+        // null na preparada, número na em_andamento e pós-Resultado (retenção).
+        // As chaves de partida e de estado nascem, persistem e expiram
+        // JUNTAS (criação, PERSIST do início, retenção e cancelamento), então
+        // `partida === null` com estado presente é anomalia — fail-closed,
+        // recusando o chat como a fase preparada.
+        const partida = await obterPartida(this.redis, partidaId).catch(() => null);
+        if (partida === null || partida.iniciadaEm === null) {
+          this.recusarChat(socket, 'DADOS_INVALIDOS', 'Chat disponível apenas com a Partida em andamento.');
+          return;
+        }
+
+        // Pertença: o roster vigente do engine decide — Desistência perde o
+        // acesso na hora (mesmo com socket aberto; padrão da guarda do
+        // upgrade em `ws.ts`).
+        if (!estado.jogadores.some((j) => j.jogadorId === sessaoJogadorId)) {
+          this.recusarChat(socket, 'JOGADOR_NAO_NA_PARTIDA', 'Jogador não faz parte da Partida.');
+          return;
+        }
+
+        // Conteúdo (texto puro): quebras colapsadas em espaço + trim.
+        const conteudo = mensagem.conteudo.replace(/\s+/g, ' ').trim();
+        if (conteudo.length === 0) {
+          this.recusarChat(socket, 'MENSAGEM_VAZIA', 'Mensagem de chat vazia.');
+          return;
+        }
+        if (conteudo.length > LIMITE_DE_CARACTERES_DO_CHAT) {
+          this.recusarChat(socket, 'MENSAGEM_LONGA_DEMAIS', `Mensagem de chat excede ${LIMITE_DE_CARACTERES_DO_CHAT} caracteres.`);
+          return;
+        }
+
+        // Rate-limit em memória (mononodo, issue #390): Map por partida com
+        // o timestamp da última mensagem aprovada de cada Jogador.
+        let limiteDaPartida = this.limiteDeChatPorPartida.get(partidaId);
+        if (limiteDaPartida === undefined) {
+          limiteDaPartida = new Map<string, number>();
+          this.limiteDeChatPorPartida.set(partidaId, limiteDaPartida);
+        }
+        const agora = Date.now();
+        const membro = partida?.roster.find((m) => m.jogadorId === sessaoJogadorId);
+        // Bots furam o rate-limit (decisão aprovada da #390): os comentários
+        // pré-feitos obedecem ao teto de 300 por construção e à ordem da
+        // cadeia, sem serem estrangulados pelos 2s.
+        if (membro?.ehBot !== true) {
+          const ultima = limiteDaPartida.get(sessaoJogadorId);
+          if (ultima !== undefined && agora - ultima < INTERVALO_MINIMO_ENTRE_MENSAGENS_MS) {
+            this.recusarChat(socket, 'LIMITE_DE_MENSAGENS', 'Mensagens de chat limitadas a 1 a cada 2 segundos.');
+            return;
+          }
+          limiteDaPartida.set(sessaoJogadorId, agora);
+        }
+
+        // Aprovação: identidade da Sessão, `apelido` da Conexão (JWT da
+        // admissão) com fallback ao roster e marca de tempo do servidor.
+        const evento: MensagemDeChatDaPartidaEvento = {
+          type: 'MENSAGEM_DE_CHAT_DA_PARTIDA',
+          jogadorId: sessaoJogadorId,
+          apelido:
+            obterConexoes(partidaId).get(sessaoJogadorId)?.apelido
+            ?? membro?.apelido
+            ?? sessaoJogadorId,
+          conteudo,
+          enviadoEm: new Date(agora).toISOString(),
+        };
+        // Fan-out socket-a-socket SÓ ao roster vigente — exclui o desistente
+        // mesmo com socket aberto (o `broadcaster.enviar` mandaria a todos).
+        // A iteração do Map de conexões entrega aos clientes na MESMA ordem.
+        const naPartida = new Set(estado.jogadores.map((j) => j.jogadorId));
+        for (const [jogadorId, conexao] of obterConexoes(partidaId)) {
+          if (!naPartida.has(jogadorId)) continue;
+          this.broadcaster.enviarParaSocket(conexao.socket, evento);
+        }
+        // Espelho do julgamento no stream de debug (issue #340).
+        this.debug?.emitir(partidaId, 'info', `Mensagem de chat de ${sessaoJogadorId} aprovada`);
+      });
+    } catch (erro: unknown) {
+      console.error('[partida] erro inesperado ao processar mensagem de chat:', erro);
+      this.broadcaster.enviarParaSocket(socket, {
+        type: 'ERRO_DO_TABULEIRO',
+        codigo: 'DADOS_INVALIDOS',
+        mensagem: 'Erro interno ao processar comando da partida.',
+      });
+      this.debug?.emitirParaSocket(socket, 'error', `erro interno ao processar mensagem de chat: ${(erro as Error).message}`);
+    }
+  }
+
+  /** Recusa do chat (issue #390): só ao originador, espelho no debug, sem mutar estado. */
+  private recusarChat(
+    socket: WebSocket,
+    codigo: CodigoDeErroDoTabuleiro,
+    mensagem: string,
+  ): void {
+    this.broadcaster.enviarParaSocket(socket, { type: 'ERRO_DO_TABULEIRO', codigo, mensagem });
+    this.debug?.emitirParaSocket(socket, 'error', `Mensagem de chat recusada: ${codigo} — ${mensagem}`);
+  }
+
+  /**
+   * Libera a entrada do rate-limit do chat da Partida (issue #390): chamado
+   * quando a última conexão cai (close da admissão em `ws.ts`) — sem conexão
+   * vigente o chat não tem para quem sair e a entrada ficaria sem dono até o
+   * próximo chat lerm estado `null`. Complementa a limpeza por chat que já
+   * roda quando o estado desaparece.
+   */
+  liberarLimiteDeChat(partidaId: string): void {
+    this.limiteDeChatPorPartida.delete(partidaId);
   }
 
   /**
