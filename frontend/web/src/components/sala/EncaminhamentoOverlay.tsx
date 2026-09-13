@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { buildGameRedirectHref } from '../../api/encaminhamento'
+import { buildGameRedirectHref, REDIRECT_DELAY_MS } from '../../api/encaminhamento'
 import type { EstadoDoEncaminhamento } from '../../hooks/useSalaWebSocket'
 
 interface Props {
@@ -25,7 +25,7 @@ export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDe
       const id = window.setTimeout(() => {
         // Redireciona para /partida via assign (reload); cancelável em cleanup ou quando fase sai de disponivel.
         window.location.assign(href)
-      }, 1500)
+      }, REDIRECT_DELAY_MS)
       timeoutRef.current = id
       return () => {
         window.clearTimeout(id)
@@ -46,6 +46,8 @@ export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDe
     <div
       role="dialog"
       aria-modal="true"
+      // Dialog sem nome acessível proposital: o anúncio vai só na região status
+      // "Carregando partida" para não duplicar o live-region (spec #386).
       data-testid="encaminhamento-overlay"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
     >

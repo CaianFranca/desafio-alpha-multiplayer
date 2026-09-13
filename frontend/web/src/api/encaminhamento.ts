@@ -18,12 +18,15 @@ export function buildGameRedirectHref(serverId: string, partidaId: string, codig
   return base
 }
 
-/** URL legível exibida como alvo do redirect (ex.: wss://host/ws/game/...). */
+// Delay do redirect automático da fase disponivel — fonte única para o overlay e os testes.
+export const REDIRECT_DELAY_MS = 1500
+
+/** URL legível exibida como alvo do redirect (ex.: wss://host/ws/game/...). Mantido para Modo Desenvolvedor (ADR-0011). */
 export function alvoDoRedirectLegivel(serverId: string, partidaId: string): string {
   return buildGameWsUrl(serverId, partidaId)
 }
 
-/** Fonte única para URLs do alvo do encaminhamento — evita duplicar buildGame* entre SalaPage e overlay. */
+/** Fonte única para URLs do alvo do encaminhamento — mantido para Modo Desenvolvedor (ADR-0011), mesmo que Sala/Overlay usem só buildGameRedirectHref. */
 export function urlsDoAlvo(serverId: string, partidaId: string, codigoDeSala?: string | null): { wsUrl: string; href: string } {
   return { wsUrl: buildGameWsUrl(serverId, partidaId), href: buildGameRedirectHref(serverId, partidaId, codigoDeSala) }
 }
