@@ -16,6 +16,7 @@ const aviso: AvisoDeRetorno = {
   serverId: 'game-server-1',
   resultado: 'derrota',
   jogadores: ['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4'],
+  teveDesistencia: false,
 };
 
 test('callback de retorno envia payload e service token ao lobby', async () => {
@@ -38,7 +39,14 @@ test('callback de retorno envia payload e service token ao lobby', async () => {
   const headers = chamadas[0].init.headers as Record<string, string>;
   const authorization = headers.Authorization ?? headers.authorization;
   assert.equal(authorization?.startsWith('Bearer '), true);
-  assert.deepEqual(JSON.parse(chamadas[0].init.body as string), aviso);
+  // B2: `teveDesistencia` é decisão local de retry — não viaja no payload HTTP.
+  assert.deepEqual(JSON.parse(chamadas[0].init.body as string), {
+    salaId: aviso.salaId,
+    partidaId: aviso.partidaId,
+    serverId: aviso.serverId,
+    resultado: aviso.resultado,
+    jogadores: [...aviso.jogadores],
+  });
 
   const token = authorization.slice(7);
   const claims = jwt.verify(token, JWT_SECRET, { audience: 'flicker-service' }) as jwt.JwtPayload & { role?: string };
@@ -74,6 +82,45 @@ test('callback de retorno não repete rejeição definitiva', async () => {
     buscarHttp: async () => {
       chamadas += 1;
       return new Response(JSON.stringify({ codigo: 'SALA_NAO_ENCONTRADA' }), { status: 404 });
+    },
+  });
+
+  await cliente(aviso);
+
+  assert.equal(chamadas, 1);
+});
+
+// B2 (issue #290): com desistência, o 409 SALA_NAO_ENCAMINHADA é transitório
+// (retorno N−1 chegou antes do detach em voo) e deve retentar até o lobby
+// convergir; sem desistência, a divergência é real e continua definitiva.
+test('callback de retorno repete 409 SALA_NAO_ENCAMINHADA quando houve desistência', async () => {
+  let chamadas = 0;
+  const cliente = criarClienteDeRetorno({
+    lobbyRetornoCallbackUrl: 'http://lobby.test/api/retorno',
+    jwtSecret: JWT_SECRET,
+    backoffInicialMs: 5,
+    buscarHttp: async () => {
+      chamadas += 1;
+      if (chamadas === 1) {
+        return new Response(JSON.stringify({ codigo: 'SALA_NAO_ENCAMINHADA' }), { status: 409 });
+      }
+      return new Response('{}', { status: 200 });
+    },
+  });
+
+  await cliente({ ...aviso, teveDesistencia: true });
+
+  assert.equal(chamadas, 2);
+});
+
+test('callback de retorno não repete 409 SALA_NAO_ENCAMINHADA sem desistência', async () => {
+  let chamadas = 0;
+  const cliente = criarClienteDeRetorno({
+    lobbyRetornoCallbackUrl: 'http://lobby.test/api/retorno',
+    jwtSecret: JWT_SECRET,
+    buscarHttp: async () => {
+      chamadas += 1;
+      return new Response(JSON.stringify({ codigo: 'SALA_NAO_ENCAMINHADA' }), { status: 409 });
     },
   });
 

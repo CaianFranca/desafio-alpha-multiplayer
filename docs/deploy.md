@@ -5,8 +5,9 @@ Flicker of Sanity em produção nativa (sem Docker). Qualquer dev deve conseguir
 executar a rotina completa a partir daqui, sem contexto externo.
 
 Fontes da verdade: `.github/workflows/deploy.yml`, `scripts/build-release.sh`,
-`scripts/deploy-server.sh`, `packages/config/src/index.ts`, `infra/systemd/`
-e `infra/nginx/nginx.prod.conf`.
+`scripts/deploy-server.sh`, `packages/config/src/index.ts`, `infra/systemd/`,
+`infra/nginx/nginx.prod.conf` (nginx do app, `:8080`) e
+`infra/nginx/nginx.edge.conf` (vhost de borda, `:80`).
 
 ---
 
@@ -44,8 +45,11 @@ selecionando a branch `prod`.
 ## 2. Pré-requisitos do servidor
 
 O bootstrap do servidor **já foi executado** e não faz parte da rotina de
-deploy. O servidor (referência de lab: IP `10.10.0.141`, hostname `c041`) só é
-acessível pela rede privada via **VPN** — nunca exposto à internet.
+deploy. O servidor (referência de lab: IP `10.10.0.141`, hostname `c041`) é
+alcançado pela rede privada via **VPN** para SSH/deploy — a exposição pública é
+feita pelo proxy do admin, que termina o TLS e encaminha
+`https://lab.alphaedtech.org.br/server01` para a porta **80** deste host,
+preservando o prefixo `/server01`.
 
 Estado esperado do servidor:
 
@@ -55,8 +59,12 @@ Estado esperado do servidor:
   de forma idempotente pelo próprio workflow a cada deploy).
 - **Redis** rodando localmente com persistência AOF (`appendonly no`... ou
   seja, AOF **desativado**; o estado efêmero do jogo é reconstruído).
-- **nginx** instalado (conf do app instalada pelo deploy em
-  `sites-available/flicker`).
+- **nginx** instalado. O deploy instala a conf do app (`:8080`) em
+  `sites-available/flicker` e o vhost de borda (`:80`, `default_server`) em
+  `sites-available/flicker-edge`, e remove o site `default` do Debian de
+  `sites-enabled/` (ele também seria `default_server` em `:80`).
+- **Docroot** `/var/www/html` — symlink para `<release>/frontend/dist`,
+  publicado pelo `deploy-server.sh` a cada deploy.
 - Usuário de sistema **`flicker`** (dono das releases; user dos services).
 - Diretórios **`/opt/flicker/releases`** e arquivo **`/opt/flicker/env`**
   (o workflow cria o diretório e sobrescreve o env a cada deploy).
@@ -99,8 +107,11 @@ compila, nunca roda TS nem testes**):
 - packages `config`, `shared`, `engine` (fonte TS, expostos via `main`/`exports`);
 - `node_modules` de produção da raiz (inclui `tsx`) e do `db/`;
 - `db/` compilado para JS (`knexfile.js` + `dist/migrations`);
-- frontend buildado (vite) + `media/` (no dev é bind-mount; no prod vem do tarball);
-- `infra/systemd/*.service` e `infra/nginx/nginx.prod.conf` (instalados pelo script de deploy).
+- frontend buildado (vite) com base **`/server01/`** (`VITE_BASE_PATH=/server01/`)
+  e a mídia de `frontend/web/media/` copiada para dentro do dist
+  (`frontend/dist/media/`);
+- `infra/systemd/*.service` e as confs nginx (`nginx.prod.conf` do app e
+  `nginx.edge.conf` da borda), instaladas pelo script de deploy.
 
 **`deploy`** — sequência de passos:
 
@@ -136,16 +147,19 @@ Ordem exata do script:
 3. **Migrations**: `knex migrate:latest` com o knexfile **compilado em JS**
    (`db/dist/knexfile.js`), usando o env de produção do EnvironmentFile.
 4. **Instalar units systemd + conf nginx**: copia `infra/systemd/*.service`
-   para `/etc/systemd/system/` + `daemon-reload`; copia
-   `nginx.prod.conf` para `/etc/nginx/sites-available/flicker` + symlink em
-   `sites-enabled/flicker`; `nginx -t` valida antes de aplicar.
-5. **Flip do symlink** (atômico): `/opt/flicker/current` → release nova.
+   para `/etc/systemd/system/` + `daemon-reload`; copia `nginx.prod.conf` para
+   `/etc/nginx/sites-available/flicker` + symlink em `sites-enabled/flicker`;
+   copia `nginx.edge.conf` para `sites-available/flicker-edge` + symlink em
+   `sites-enabled/flicker-edge`; remove `sites-enabled/default`; `nginx -t`
+   valida antes de aplicar.
+5. **Flip do symlink** (atômico): `/opt/flicker/current` → release nova e
+   republica o docroot `/var/www/html` → `<release>/frontend/dist`.
 6. **Restart + health check**: `systemctl restart flicker-lobby.service
    flicker-game.service` e, por até **60 s**, `curl` em `http://127.0.0.1:3001/health`
    (lobby) e `http://127.0.0.1:1234/health` (game). **Falhou → rollback
-   automático** para a release anterior (flip de volta + restart; a release
-   problemática permanece em disco) e o script sai com erro, após imprimir as
-   últimas 30 linhas do `journalctl` das duas units.
+   automático** para a release anterior (flip de volta + docroot de volta +
+   restart; a release problemática permanece em disco) e o script sai com erro,
+   após imprimir as últimas 30 linhas do `journalctl` das duas units.
 7. **Reload nginx** (`systemctl reload nginx` — zero downtime).
 8. **Retenção**: mantém as últimas **3 releases** em `/opt/flicker/releases`
    (as releases `current` e a anterior nunca são removidas).
@@ -157,13 +171,17 @@ Ordem exata do script:
 
 ```bash
 readlink /opt/flicker/current            # deve apontar para o SHA novo
+readlink /var/www/html                   # deve ser <release>/frontend/dist
 systemctl status flicker-lobby flicker-game
 curl -fsS http://127.0.0.1:3001/health   # lobby
 curl -fsS http://127.0.0.1:1234/health   # game
+curl -fsS http://127.0.0.1:8080/         # nginx do app
 ```
 
-- No navegador: o app responde via nginx na porta **8080** do servidor
-  (`http://10.10.0.141:8080`, alcançável só pela VPN).
+- No navegador: o app responde publicamente em
+  **`https://lab.alphaedtech.org.br/server01/`** (TLS terminado no proxy do
+  admin). O host interno na porta **8080** é `http` e deve ser tratado como
+  loopback/interno.
 
 ---
 
@@ -216,7 +234,7 @@ issues, PRs ou logs).
 
 | Nome | Propósito |
 | --- | --- |
-| `PROD_LOBBY_PUBLIC_URL` | URL pública usada nos links compartilháveis emitidos pelo lobby. Obrigatória em produção (a config lança erro se `LOBBY_PUBLIC_URL` não estiver definida). Lab: `http://10.10.0.141:8080`. |
+| `PROD_LOBBY_PUBLIC_URL` | URL pública usada nos links compartilháveis emitidos pelo lobby. Obrigatória em produção (a config lança erro se `LOBBY_PUBLIC_URL` não estiver definida). Lab: `https://lab.alphaedtech.org.br/server01`. |
 
 Rotação de qualquer valor: basta editar o secret/variable na UI e rodar um
 novo deploy (o env de produção é regravado a cada deploy em
@@ -235,13 +253,18 @@ novo deploy (o env de produção é regravado a cada deploy em
 │   └── <sha-3>/
 └── env                                       # EnvironmentFile, chmod 600
 
+/var/www/html -> /opt/flicker/current/frontend/dist   # docroot (reapontado por release)
+
 /etc/systemd/system/
 ├── flicker-lobby.service                     # lobby (API + WS de salas), porta 3001
 └── flicker-game.service                      # game server (WS das partidas), porta 1234
 
 /etc/nginx/
-├── sites-available/flicker                   # conf do app (installada pelo deploy)
-└── sites-enabled/flicker -> ../sites-available/flicker
+├── sites-available/flicker                   # conf do app, :8080 (instalada pelo deploy)
+├── sites-enabled/flicker -> ../sites-available/flicker
+├── sites-available/flicker-edge              # vhost de borda, :80 default_server
+├── sites-enabled/flicker-edge -> ../sites-available/flicker-edge
+└── sites-enabled/default                     # removido pelo deploy (conflito em :80)
 ```
 
 Detalhes relevantes:
@@ -251,12 +274,20 @@ Detalhes relevantes:
   `Environment=NODE_ENV=production`, `ExecStart=/usr/local/bin/node --import tsx
   backend/<srv>/src/index.ts`, `Restart=on-failure` (3 s), `MemoryMax=128M`,
   hardening (`NoNewPrivileges`, `ProtectSystem=strict`, `IPAddressDeny=any`
-  com `IPAddressAllow=localhost` — os dois services são loopback-only; o único
-  serviço exposto é o nginx na 8080).
-- **nginx** (`infra/nginx/nginx.prod.conf`): `listen 8080`; serve o frontend
-  de `/opt/flicker/current/frontend/dist` e `media/` de
-  `frontend/web/media/`; proxy de `/api/` e `/ws/lobby` para o lobby
-  (127.0.0.1:3001) e de `/ws/game/` para o game server (127.0.0.1:1234).
+  com `IPAddressAllow=localhost` — os dois services são loopback-only; o
+  nginx do app (`:8080`) é quem fala com eles, e o único serviço exposto é o
+  vhost de borda do nginx na porta 80, atrás do TLS do proxy do admin).
+- **nginx** — duas camadas:
+  - `infra/nginx/nginx.prod.conf` (app, `listen 8080`): serve o frontend de
+    `/var/www/html` (symlink para `<release>/frontend/dist`) e `media/` via
+    `alias /var/www/html/media/`; proxy de `/api/` e `/ws/lobby` para o lobby
+    (127.0.0.1:3001) e de `/ws/game/` para o game server (127.0.0.1:1234).
+  - `infra/nginx/nginx.edge.conf` (borda, `listen 80 default_server`):
+    redireciona `/server01` → `/server01/` e faz `proxy_pass
+    http://127.0.0.1:8080/` para o nginx do app, **removendo o prefixo
+    `/server01/`** (barra final do `proxy_pass`); encaminha Upgrade/Connection
+    (WebSocket) e `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`; responde
+    `404` para qualquer caminho fora de `/server01/`.
 - **Env de produção** (`/opt/flicker/env`) é gerado pelo workflow a cada
   deploy, com:
 
@@ -272,7 +303,7 @@ JWT_SECRET=<secret PROD_JWT_SECRET>
 JWT_REFRESH_SECRET=<secret PROD_JWT_REFRESH_SECRET>
 LOBBY_PUBLIC_URL=<variable PROD_LOBBY_PUBLIC_URL>
 GAME_SERVER_ADVERTISE_HOST=127.0.0.1
-COOKIE_SECURE=false
+COOKIE_SECURE=true
 ```
 
 > **`GAME_SERVER_ADVERTISE_HOST=127.0.0.1`**: em prod nativa o lobby e o
@@ -280,11 +311,11 @@ COOKIE_SECURE=false
 > no registro do Redis; o default (`game-server`, em `packages/config`) só
 > resolve na rede Docker Compose.
 
-> **`COOKIE_SECURE=false` é obrigatório no ambiente atual (sem TLS).** O
-> default em `packages/config` é `Secure=true` quando `NODE_ENV=production`;
-> sem HTTPS, o navegador descartaria os cookies de sessão e o login
-> simplesmente não funcionaria. **Revisitar quando houver HTTPS** no
-> ambiente: removê-lo (ou setar `true`) nesse momento.
+> **`COOKIE_SECURE=true`**: o acesso público é HTTPS (TLS terminado no proxy
+> do admin), então o navegador envia os cookies `Secure` normalmente. O default
+> em `packages/config` já é `Secure=true` quando `NODE_ENV=production`; o env
+> apenas o torna explícito. O nginx do app repassa `X-Forwarded-Proto` recebido
+> da borda para que redirects/cookies sejam gerados como `https`.
 
 ---
 

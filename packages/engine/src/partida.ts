@@ -1384,9 +1384,12 @@ function permanecerNaPartida(
   );
 }
 
-// ST-11: a Confirmação de Posição trava o Peão na Peça em que terminou e gera
-// o Recebimento somente quando houve mudança de Peça; confirmar sem movimento
-// é Encerramento inválido (terminar na Peça de início é via Permanência).
+// ST-11 / issue #375: a Confirmação de Posição trava o Peão na Peça em que
+// terminou e gera o Recebimento somente quando houve mudança de Peça;
+// confirmar na Peça do início do turno (ida-e-volta na zona da origem) fecha
+// a posição sem Recebimento — mesma semântica da Permanência quanto ao
+// sorteio — mantendo Iluminação → Limpeza → Ataque e posicaoConfirmada=true.
+// Só o Primeiro Turno segue Encerramento inválido.
 function confirmarPosicaoDoPeao(
   estado: EstadoDaPartida,
   comando: ConfirmarPosicaoDoPeaoComando,
@@ -1458,12 +1461,14 @@ function confirmarPosicaoDoPeao(
       'A Peça do Peão não foi encontrada.',
     );
   }
-  if (peca.pecaId === estado.pecaDoInicioDoTurnoId) {
-    return rejeitarDaPartida(
-      'ENCERRAMENTO_INVALIDO',
-      'Confirmação sem mudança de Peça é inválida; termine na Peça de início via Permanência.',
-    );
-  }
+  // Issue #375 (contrato sem-mudança): confirmar na Peça do início do turno —
+  // com ou sem ida-e-volta — fecha a posição sem Recebimento e exige
+  // encerrar_turno; a Permanência continua distinta (encerra direto, sem
+  // Iluminação/Limpeza por ADR-0005). A escolha Permanência-vs-Confirmação é
+  // do cliente; a engine não distingue ida-e-volta de sem-movimento. O funil
+  // Iluminação → Limpeza → Ataque segue abaixo (dentro dispara, fora→fora
+  // silêncio).
+  const semMudancaDePeca = peca.pecaId === estado.pecaDoInicioDoTurnoId;
 
   // Resgate (ponto definitivo, ADR-0005): aliados afetados que co-ocupam a peça
   // confirmada são curados AQUI — o mover é etapa não-definitiva e não
@@ -1480,9 +1485,17 @@ function confirmarPosicaoDoPeao(
   // em Baixa NÃO sorteia (recebidas = []), mantendo Limpeza/Ataque do gatilho.
   // Esse "Baixa" é pré-ataque; se o gatilho impõe Baixa NOVA ao ator, o turno
   // segue sem sorteio (só a Travessia do Escuro saca, sob demanda).
+  // Issue #264 / spec #272: em Baixa o Recebimento acontece na Travessia do
+  // Escuro (ou não acontece — célula iluminada consome 0).
+  // Review PR #370 (Bug 1): quem entra saudável e sai em Baixa no MESMO
+  // gatilho também não recebe sorteio nesse CONFIRMAR — o emBaixa acima é
+  // pré-ataque; a Baixa nova do gatilho descarta o sorteio abaixo (0 no turno
+  // atual, 1 no próximo avancarVez, ADR-0013).
+  // Issue #375: sem mudança de Peça também NÃO sorteia (recebidas = [], sem
+  // consumir a Caixa, sem peca_sorteada/recebimento_gerado no lote).
   const emBaixaAntes = ator.emBaixaIluminacao ?? false;
   const emBaixa = emBaixaAntes;
-  const sorteio = emBaixa
+  const sorteio = emBaixa || semMudancaDePeca
     ? { estado: estado.tabuleiro, recebidas: [] as readonly PecaRecebida[], eventos: [] as readonly EventoDoTabuleiro[] }
     : gerarRecebidas(estado.tabuleiro, peca, emBaixa);
   // Issue #227: o posicao_confirmada só entra no lote ao FINAL da computação —

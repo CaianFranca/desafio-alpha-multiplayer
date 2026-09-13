@@ -72,6 +72,10 @@ function servirMediaNoDev(): Plugin {
 }
 
 export default defineConfig(({ mode }) => ({
+  // Subpath de deploy (ex.: VITE_BASE_PATH=/server01/): o Vite injeta o valor
+  // em import.meta.env.BASE_URL e reescreve os assets do bundle no build.
+  // Ausente = '/' — deploy na raiz, comportamento inalterado.
+  base: process.env.VITE_BASE_PATH ?? '/',
   plugins: [react(), tailwindcss(), servirMediaNoDev()],
   // Os assets estáticos vivem em web/public (ex.: /assets/imagem_fundo_hero.webp
   // usado como fundo da Hero/CTA final); o default <root>/public não existe.

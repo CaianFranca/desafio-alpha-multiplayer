@@ -59,6 +59,16 @@ export interface HudDaPartidaProps {
   /** Desistência da Partida (issue #290): envia DESISTIR_DA_PARTIDA e sai à principal. */
   onSair: () => void
   /**
+   * Saída com retry visível (R2, issue #290): confirmado sem OPEN, o modal
+   * mostra o progresso da entrega + saída forçada. Omitido = comportamento
+   * atual (confirmar/cancelar).
+   */
+  saindo?: boolean
+  /** Escape do "saindo": navega sem a entrega (a pendência será reenviada). */
+  onSairMesmoAssim?: () => void
+  /** Cancela a saída durante o "saindo": volta à partida, purga a fila. */
+  onCancelarSaida?: () => void
+  /**
    * Força o modo compacto (issue #230): true = compacto, false = integral.
    * null/undefined = deriva do viewport (paisagem-celular 800x360). Seam no
    * ponto mais alto para testes com viewport mockado.
@@ -178,9 +188,15 @@ export function HudDaPartida({
   iniciadaEm = null,
   imagemPorJogador = {},
   onSair,
+  saindo = false,
+  onSairMesmoAssim,
+  onCancelarSaida,
   compacto = null,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
+  // Trava local anti-duplo-clique no Confirmar (#290): o gate de rede vive na
+  // página, mas o modal segue aberto até o navigate assíncrono.
+  const [saidaEnviada, setSaidaEnviada] = useState(false)
   const emModoCompacto = useViewportCompacto(compacto)
 
   // Ordenação estável: recomputada apenas quando o modelo muda — o cronômetro
@@ -360,7 +376,10 @@ export function HudDaPartida({
         <button
           type="button"
           data-testid="hud-sair"
-          onClick={() => setConfirmandoSaida(true)}
+          onClick={() => {
+            setSaidaEnviada(false)
+            setConfirmandoSaida(true)
+          }}
           className="pointer-events-auto min-h-[44px] min-w-[44px] rounded border border-amber-500/70 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-[0.14em] text-amber-400 hover:border-amber-400 hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-500"
         >
           Sair
@@ -371,7 +390,7 @@ export function HudDaPartida({
           data-testid="hud-confirmacao-saida"
           role="alertdialog"
           aria-modal="true"
-          aria-label="Confirmar desistência da partida"
+          aria-label={emResultado ? 'Sair da partida' : 'Confirmar desistência da partida'}
           aria-describedby="hud-confirmacao-saida-descricao"
           style={{
             right: 'calc(1.5rem + env(safe-area-inset-right))',
@@ -380,12 +399,47 @@ export function HudDaPartida({
           }}
           className="pointer-events-auto absolute right-6 top-20 flex max-w-[min(20rem,calc(100vw-3rem))] flex-col gap-2 overflow-auto rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
         >
-          <p id="hud-confirmacao-saida-descricao">Desistir da partida? Seu peão será removido e a equipe continua sem você.</p>
+          <p id="hud-confirmacao-saida-descricao">{saindo ? 'Enviando sua desistência ao servidor… Aguarde a confirmação da conexão.' : emResultado ? 'Sair da partida? Você voltará à página principal.' : 'Desistir da partida? Seu peão será removido e a equipe continua sem você.'}</p>
           <div className="flex gap-2">
+            {saindo ? (
+              <>
+                {onSairMesmoAssim ? (
+                  <button
+                    type="button"
+                    data-testid="hud-sair-mesmo-assim"
+                    onClick={onSairMesmoAssim}
+                    className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+                  >
+                    Sair mesmo assim
+                  </button>
+                ) : null}
+                {onCancelarSaida ? (
+                  <button
+                    type="button"
+                    data-testid="hud-sair-cancelar"
+                    autoFocus
+                    onClick={() => {
+                      // Volta ao confirmar: rearma a trava para a nova tentativa.
+                      setSaidaEnviada(false)
+                      onCancelarSaida()
+                    }}
+                    className="min-h-[44px] min-w-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+                  >
+                    Cancelar
+                  </button>
+                ) : null}
+              </>
+            ) : (
+              <>
             <button
               type="button"
               data-testid="hud-sair-confirmar"
-              onClick={onSair}
+              disabled={saidaEnviada}
+              onClick={() => {
+                if (saidaEnviada) return
+                setSaidaEnviada(true)
+                onSair()
+              }}
               className="min-h-[44px] min-w-[44px] rounded bg-amber-500 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-wider text-zinc-900 hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-amber-500"
             >
               Confirmar
@@ -399,6 +453,8 @@ export function HudDaPartida({
             >
               Cancelar
             </button>
+              </>
+            )}
           </div>
         </div>
       ) : null}

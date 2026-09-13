@@ -131,20 +131,46 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
         }
 
-        // Revalidação membros: jogadores deve coincidir com membros ativos
+        // Revalidação dos Membros: o Retorno à Sala (CONTEXT.md) aceita os
+        // restantes — Desistências da Partida removidas do roster ativo.
+        // Vocabulário: `saidas` = Desistências, `payload/jogadoresLista` =
+        // Retorno à Sala (restantes), `ativosDb` = Membros ativos no PG.
+        // Regra N-1 (ADR-0014): payload ⊆ ativos, 1 ≤ |payload| ≤ |ativos|,
+        // sem duplicatas. Payload vazio é erro do cliente (400); subset
+        // inválido contra sala encaminhada é estado (409).
         const membrosDb = await contexto.repo.listarMembrosDaSala(salaId);
         const ativosDb = membrosDb.filter((m) => !m.bloqueado).map((m) => m.jogadorId).sort();
         const payloadOrdenado = [...jogadoresLista].sort();
-        const membrosCoincidem =
-          ativosDb.length === payloadOrdenado.length &&
-          ativosDb.every((v, i) => v === payloadOrdenado[i]);
-
-        if (!membrosCoincidem) {
+        // Duplicatas no payload são inválidas — o lobby exige conjunto
+        if (new Set(payloadOrdenado).size !== payloadOrdenado.length) {
+          return { tipo: 'erro' as const, status: 400, codigo: 'DADOS_INVALIDOS' };
+        }
+        if (payloadOrdenado.length === 0) {
+          return { tipo: 'erro' as const, status: 400, codigo: 'DADOS_INVALIDOS' };
+        }
+        const ativosSet = new Set(ativosDb);
+        const ehSubset =
+          payloadOrdenado.length >= 1 &&
+          payloadOrdenado.length <= ativosDb.length &&
+          payloadOrdenado.every((id) => ativosSet.has(id));
+        if (!ehSubset) {
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
         }
+        const saidas = ativosDb.filter((id) => !payloadOrdenado.includes(id));
 
-        // Aplicar comando no engine (valida estado consistente e encaminhada)
-        const aplicado = contexto.estado.aplicar({ tipo: 'reabrir_sala', salaId });
+        // Aplicar comando no engine (valida estado consistente e encaminhada + subset)
+        // Guarda o anfitrião antes (membro-id do engine) para comparar membro-id com membro-id.
+        const anfitriaoAntesMembroId = contexto.estado.estado.salas.find((s) => s.id === salaId)?.anfitriaoId;
+        let aplicado: ReturnType<typeof contexto.estado.aplicar>;
+        if (saidas.length === 0) {
+          aplicado = contexto.estado.aplicar({ tipo: 'reabrir_sala', salaId });
+        } else {
+          aplicado = contexto.estado.aplicar({
+            tipo: 'reabrir_sala_com_saidas',
+            salaId,
+            saidas: saidas.map((jogadorId) => ({ jogadorId, motivo: 'saida' as const })),
+          });
+        }
         if (!aplicado.sucesso) {
           const codigo = aplicado.erro.codigo;
           if (codigo === 'SALA_NAO_ENCONTRADA') {
@@ -159,8 +185,29 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 400, codigo: 'DADOS_INVALIDOS' };
         }
 
-        // Persistência PG atômica (UPDATE + INSERT marker na mesma transação) — elimina janela de crash
-        const reabriu = await contexto.repo.reabrirSalaComMarkerAtomico(salaId);
+        // Persistência PG atômica — elimina janela de crash entre DELETE+marker
+        let reabriu: boolean;
+        if (saidas.length === 0) {
+          reabriu = await contexto.repo.reabrirSalaComMarkerAtomico(salaId);
+        } else {
+          const salaReaberta = aplicado.estado.salas.find((s) => s.id === salaId);
+          let novoAnfitriaoJogadorId: string | null | undefined = undefined;
+          if (salaReaberta) {
+            // Engine `anfitriaoId` é membro.id (sucederAnfitriao retorna membro.id);
+            // PG `anfitriao_id` guarda jogadorId — converte via vínculo do sucessor.
+            // Compara membro-id com membro-id; null = SET NULL explícito (nunca COALESCE).
+            const novoMembroId = salaReaberta.anfitriaoId;
+            if (novoMembroId === anfitriaoAntesMembroId) {
+              novoAnfitriaoJogadorId = undefined;
+            } else if (novoMembroId === null) {
+              novoAnfitriaoJogadorId = null;
+            } else {
+              const anfitriaoMembro = salaReaberta.membros.find((m) => m.id === novoMembroId);
+              novoAnfitriaoJogadorId = anfitriaoMembro ? anfitriaoMembro.jogadorId : null;
+            }
+          }
+          reabriu = await contexto.repo.reabrirSalaComSaidasAtomico(salaId, saidas, novoAnfitriaoJogadorId);
+        }
         if (!reabriu) {
           // rowCount 0: PG não flipou (concorrência ou status já não era encaminhada). Não commita memória.
           return { tipo: 'erro' as const, status: 409, codigo: 'SALA_NAO_ENCAMINHADA' };
@@ -173,7 +220,11 @@ export function criarRetornoRouter(contexto: SalasContexto): Router {
           return { tipo: 'erro' as const, status: 404, codigo: 'SALA_NAO_ENCONTRADA' };
         }
 
-        // Projeção sem encaminhamento + marker Redis (PG já gravado na transação)
+        // Projeção dos eventos `membro_saiu` (um por Desistência) + `sala_reaberta`
+        // via snapshot: o engine emite os eventos e este caller projeta o estado
+        // final com `definirEstadoSala(serializarSala)` + `SALA_ATUALIZADA` +
+        // markers de idempotência (PG `sala_reaberta_markers` na transação +
+        // Redis `marcarReaberta`). Sem encaminhamento no snapshot/broadcast.
         await contexto.projecao.definirEstadoSala(salaId, serializarSala(salaDominio));
         await contexto.projecao.marcarReaberta(salaId);
 

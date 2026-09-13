@@ -1,4 +1,4 @@
-import { render, renderHook, screen, within, waitFor } from '@testing-library/react'
+import { act, render, renderHook, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
@@ -129,7 +129,11 @@ describe('lobby - chat e controles do Anfitrião', () => {
     expect(await within(feed).findByText(/zanetti: internet tá ruim/i)).toBeInTheDocument()
   })
 
-  it('campo de mensagem respeita o limite de 500 caracteres', async () => {
+  // 510 teclas via userEvent re-renderizam a página a cada tecla (~5s+ no
+  // jsdom); timeout por-teste em vez do padrão de 5s. Não trocar por
+  // fireEvent.change: o jsdom não aplica maxLength em atribuição direta e o
+  // truncamento sob teste acontece no caminho de digitação nativa.
+  it('campo de mensagem respeita o limite de 500 caracteres', { timeout: 30000 }, async () => {
     const user = userEvent.setup()
     await montarLobbyComoAnfitriao()
 
@@ -511,5 +515,59 @@ describe('lobby - chat e controles do Anfitrião', () => {
     ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaComRetorno })
 
     await waitFor(() => expect(screen.queryByLabelText('Jogadores bloqueados')).not.toBeInTheDocument())
+  })
+
+  // --- Saída própria otimista (F1/F2, #290) ---
+
+  it('marcarSaidaPropria zera a sala local e o trailing não ressuscita (F2)', async () => {
+    const { result } = renderHook(() => useSalaWebSocket(EU_ID))
+    await waitFor(() => expect(MockWebSocket.last()!.readyState).toBe(MockWebSocket.OPEN))
+    const ws = MockWebSocket.last()!
+    const sala = criarSala({ codigoDeSala: 'A3K9M2', membros: [criarEu()], anfitriaoId: 'm-eu' })
+    ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala })
+    await waitFor(() => expect(result.current.sala?.codigoDeSala).toBe('A3K9M2'))
+
+    act(() => {
+      result.current.marcarSaidaPropria()
+    })
+    expect(result.current.sala).toBeNull()
+
+    // Trailing do mesmo lote (sala já sem o jogador) não ressuscita a sala.
+    act(() => {
+      ws.simulateMessage({
+        type: 'SALA_ATUALIZADA',
+        sala: criarSala({ codigoDeSala: 'A3K9M2', membros: [], anfitriaoId: 'm-eu' }),
+      })
+    })
+    expect(result.current.sala).toBeNull()
+  })
+
+  it('chat e encaminhamento trailing são ignorados após saída própria (F1)', async () => {
+    const { result } = renderHook(() => useSalaWebSocket(EU_ID))
+    await waitFor(() => expect(MockWebSocket.last()!.readyState).toBe(MockWebSocket.OPEN))
+    const ws = MockWebSocket.last()!
+    ws.simulateMessage({
+      type: 'SALA_ATUALIZADA',
+      sala: criarSala({ codigoDeSala: 'A3K9M2', membros: [criarEu()], anfitriaoId: 'm-eu' }),
+    })
+    await waitFor(() => expect(result.current.sala).not.toBeNull())
+    act(() => {
+      result.current.marcarSaidaPropria()
+    })
+
+    act(() => {
+      ws.simulateMessage({
+        type: 'MENSAGEM_DE_CHAT',
+        apelido: 'Ana',
+        conteudo: 'oi?',
+        enviadoEm: new Date().toISOString(),
+      })
+    })
+    expect(result.current.mensagensDeChat).toHaveLength(0)
+
+    act(() => {
+      ws.simulateMessage({ type: 'PARTIDA_DISPONIVEL', partidaId: 'partida-1', serverId: 's-1' })
+    })
+    expect(result.current.encaminhamento.fase).toBe('ocioso')
   })
 })

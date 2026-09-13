@@ -1,4 +1,5 @@
 import { createBrowserRouter } from 'react-router-dom'
+import { baseParaRouter } from '../api/basePath'
 import { App } from './App'
 import { RequireAuth } from './RequireAuth'
 import { HomePage } from '../pages/HomePage'
@@ -59,4 +60,6 @@ export const routes = [
   },
 ]
 
-export const router = createBrowserRouter(routes)
+// Basename acompanha o subpath do build ('' na raiz, '/server01' sob
+// VITE_BASE_PATH=/server01/) para as rotas SPA resolverem sob o prefixo.
+export const router = createBrowserRouter(routes, { basename: baseParaRouter() })

@@ -358,6 +358,52 @@ test('revalidação no commit cancela Partida e mantém aberta com PARTIDA_FALHO
   }, {ofertarEncaminhamento: ()=>prom, cancelarPartida: cancelarStub});
 });
 
+test('divergência de composição oferta→aceite (#305): saída em-voo cancela Partida e mantém aberta com PARTIDA_FALHOU', async()=>{
+  let resolveOferta: (v:AceiteDoEncaminhamento)=>void;
+  const prom=new Promise<AceiteDoEncaminhamento>((res)=>{resolveOferta=res;});
+  let cancelado:{serverId:string;partidaId:string;motivo:string}|null=null;
+  const cancelarStub=async (serverId:string, partidaId:string, motivo:string)=>{ cancelado={serverId,partidaId,motivo}; };
+  await comServidor(async (servidor)=>{
+    const a=await registrarJogador(servidor.baseUrl);
+    const b=await registrarJogador(servidor.baseUrl);
+    const c=await registrarJogador(servidor.baseUrl);
+    const d=await registrarJogador(servidor.baseUrl);
+    const wsA=await conectarWs(servidor.wsUrl,a.cookies);
+    const wsB=await conectarWs(servidor.wsUrl,b.cookies);
+    const wsC=await conectarWs(servidor.wsUrl,c.cookies);
+    const wsD=await conectarWs(servidor.wsUrl,d.cookies);
+    enviar(wsA,{type:'CRIAR_SALA'}); const cri=JSON.parse(await esperarMensagem(wsA)) as SalaAtualizadaEvento; const cod=cri.sala.codigoDeSala;
+    for(const ws of [wsB,wsC,wsD]){ enviar(ws,{type:'ENTRAR_NA_SALA',codigoDeSala:cod}); await esperarMensagem(ws); await esperarMensagem(ws);}
+    for(let i=0;i<6;i++) await esperarMensagem(wsA);
+    for(let i=0;i<4;i++) await esperarMensagem(wsB);
+    for(let i=0;i<2;i++) await esperarMensagem(wsC);
+    for(const ws of [wsA,wsB,wsC,wsD]) enviar(ws,{type:'ALTERNAR_PRONTIDAO'});
+    for(const ws of [wsA,wsB,wsC,wsD]) for(let i=0;i<8;i++) await esperarMensagem(ws);
+    enviar(wsA,{type:'INICIAR_PARTIDA'});
+    for(const ws of [wsA,wsB,wsC,wsD]){ await esperarMensagem(ws); await esperarMensagem(ws);}
+    // Divergência de composição: oferta com 4, D sai em-voo (3 restantes seguem prontos/conectados,
+    // dentro da faixa 2–4) — o aceite deve recusar por divergência de roster.
+    enviar(wsD,{type:'SAIR_DA_SALA'});
+    for(const ws of [wsA,wsB,wsC,wsD]){ await esperarMensagem(ws); await esperarMensagem(ws); }
+    // agora liberar aceite (composição 3 válida na faixa, mas diverge da oferta de 4)
+    resolveOferta!({partidaId:'p-divergente',serverId:'s-divergente'});
+    const ev = await esperarTipo(wsA, 'PARTIDA_FALHOU', 3000) as PartidaFalhouEvento;
+    assert.equal(ev.type,'PARTIDA_FALHOU');
+    // sala permanece aberta
+    const linha=await pool.query<{status:string}>(`SELECT status FROM salas_historico WHERE codigo_sala=$1`,[cod]);
+    assert.equal(linha.rows[0]?.status,'aberta');
+    assert.ok(cancelado, 'deveria ter cancelado a partida');
+    assert.equal(cancelado!.partidaId,'p-divergente');
+    // ainda pode chat
+    enviar(wsA,{type:'ENVIAR_MENSAGEM_DE_CHAT',conteudo:'ainda aberta apos divergencia'});
+    const chatOk = await esperarTipo(wsA, 'MENSAGEM_DE_CHAT', 3000) as {type:string};
+    assert.equal(chatOk.type,'MENSAGEM_DE_CHAT');
+    for(const ws of [wsB,wsC]) await esperarTipo(ws, 'MENSAGEM_DE_CHAT', 3000).catch(async () => { await esperarMensagem(ws, 500).catch(()=>undefined); });
+    wsA.close(); wsB.close(); wsC.close(); wsD.close();
+    await Promise.all([wsA,wsB,wsC,wsD].map(ws=>esperarClose(ws).catch(()=>undefined)));
+  }, {ofertarEncaminhamento: ()=>prom, cancelarPartida: cancelarStub});
+});
+
 test('recusa mantém aberta com PARTIDA_RECUSADA', async()=>{
   const ofertarStub=async ():Promise<AceiteDoEncaminhamento>=> { throw {codigo:'ENCAMINHAMENTO_RECUSADO', motivo:'lotado'}; };
   await comServidor(async (servidor)=>{

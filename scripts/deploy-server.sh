@@ -67,11 +67,24 @@ cp "$RELEASE_DIR/infra/systemd/"*.service /etc/systemd/system/ 2>/dev/null \
 systemctl daemon-reload
 cp "$RELEASE_DIR/infra/nginx/nginx.prod.conf" /etc/nginx/sites-available/flicker
 ln -sfn /etc/nginx/sites-available/flicker /etc/nginx/sites-enabled/flicker
+# Vhost de borda (:80, default_server) que recebe /server01 do proxy do admin e
+# faz strip do prefixo rumo ao nginx do app em 127.0.0.1:8080.
+cp "$RELEASE_DIR/infra/nginx/nginx.edge.conf" /etc/nginx/sites-available/flicker-edge
+ln -sfn /etc/nginx/sites-available/flicker-edge /etc/nginx/sites-enabled/flicker-edge
+# O site default do Debian também é default_server em :80 e conflitaria com a
+# borda; removemos o symlink (o arquivo em sites-available é preservado).
+rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "nginx -t falhou; conf não aplicada"
 
-# ── 5. Flip do symlink (atômico) ─────────────────────────────────────────────
+# ── 5. Flip do symlink (atômico) + publicação do docroot ────────────────────
 log "flip: current → $RELEASE_DIR"
 ln -sfn "$RELEASE_DIR" "$CURRENT"
+
+# Docroot do frontend lido pelo nginx do app: /var/www/html -> <release>/frontend/dist.
+# O rm -rf remove o symlink/dir anterior; ln -sfn aponta para a release nova.
+mkdir -p /var/www
+rm -rf /var/www/html
+ln -sfn "$RELEASE_DIR/frontend/dist" /var/www/html
 
 # ── 6. Restart + health check (rollback automático p/ release anterior) ─────
 log "reiniciando flicker-lobby e flicker-game"
@@ -84,6 +97,10 @@ rollback() {
   log "FALHA no health check — rollback para ${PREVIOUS:-<nenhuma>}"
   if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$RELEASE_DIR" ]; then
     ln -sfn "$PREVIOUS" "$CURRENT"
+    # Reaponta o docroot para a release anterior; sem isso o rollback voltaria
+    # o backend mas continuaria servindo o frontend da release que falhou.
+    rm -rf /var/www/html
+    ln -sfn "$PREVIOUS/frontend/dist" /var/www/html
     systemctl restart flicker-lobby.service flicker-game.service
     log "rollback concluído; release $SHA permanece em disco"
   else

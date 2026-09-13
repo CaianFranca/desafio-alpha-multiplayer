@@ -131,7 +131,19 @@ export interface EncaminharSalaComando {
 export interface AceitarEncaminhamentoComando {
   readonly tipo: 'aceitar_encaminhamento';
   readonly salaId: string;
+  // Roster (= Composição ofertada no momento da oferta, lista de jogadorId):
+  // comparado como conjunto contra os jogadorId ativos no commit — a ordem
+  // de entrada não participa da igualdade, apenas o conjunto.
+  readonly rosterOfertado: JogadorIdsOfertados;
 }
+
+/**
+ * Conjunto de jogadorId da Composição ofertada no momento da oferta (roster
+ * de transporte, cf. `OfertaDeEncaminhamento.roster` em shared e ADR-0009).
+ * A chave é o Jogador — não o vínculo (membroId) nem a ordem de entrada —
+ * porque a admissão na Partida é por jogadorId.
+ */
+export type JogadorIdsOfertados = readonly string[];
 
 export interface RecusarEncaminhamentoComando {
   readonly tipo: 'recusar_encaminhamento';
@@ -154,6 +166,20 @@ export interface ReabrirSalaComando {
   readonly salaId: string;
 }
 
+export interface ReabrirSalaComSaidasComando {
+  readonly tipo: 'reabrir_sala_com_saidas';
+  readonly salaId: string;
+  /**
+   * Saídas atômicas à reabertura (follow-up #371, caminho b): remove os
+   * desistentes do roster antes de flipar `encaminhada→aberta`. Motivo
+   * explícito e restrito a `saida` (vocabulário do lobby, CONTEXT.md —
+   * Desistência); a causa (desistência da partida) vive no game-server e o
+   * histórico `membros_historico` registra `saida`. Validação de subset
+   * (1..N-1, membros ativos).
+   */
+  readonly saidas: readonly { readonly jogadorId: string; readonly motivo: 'saida' }[];
+}
+
 export type Comando =
   | CriarSalaComando
   | EntrarNaSalaComando
@@ -172,7 +198,8 @@ export type Comando =
   | RecusarEncaminhamentoComando
   | RegistrarFalhaDoEncaminhamentoComando
   | EncerrarSalaComando
-  | ReabrirSalaComando;
+  | ReabrirSalaComando
+  | ReabrirSalaComSaidasComando;
 
 export interface SalaCriadaEvento {
   readonly tipo: 'sala_criada';
@@ -407,6 +434,8 @@ export function aplicarComando(
       return encerrarSala(estado, comando);
     case 'reabrir_sala':
       return reabrirSala(estado, comando);
+    case 'reabrir_sala_com_saidas':
+      return reabrirSalaComSaidas(estado, comando);
     default:
       return rejeitar('DADOS_INVALIDOS', 'O comando de domínio é inválido.');
   }
@@ -1299,6 +1328,28 @@ export function aceitarEncaminhamento(
     return composicaoInvalida;
   }
 
+  // Divergência de composição oferta→aceite (#305): a composição ativa no
+  // commit precisa coincidir com o roster da oferta (= Composição ofertada)
+  // — conjunto de jogadorId (a chave é o Jogador, não o vínculo: a admissão
+  // na Partida é por jogadorId, então saída + reentrada do mesmo Jogador
+  // gera novo membroId mas preserva o conjunto e não diverge). A comparação
+  // é aditiva à validação por faixa/conexão/prontidão.
+  if (!Array.isArray(comando.rosterOfertado)) {
+    return rejeitar('DADOS_INVALIDOS', 'O roster ofertado é obrigatório para aceitar o encaminhamento.', {
+      salaId: sala.id,
+    });
+  }
+  const ativos = sala.membros
+    .filter((membro) => membro.estado === 'ativo')
+    .map((membro) => membro.jogadorId);
+  if (!conjuntosDeJogadoresIguais(ativos, comando.rosterOfertado)) {
+    return rejeitar(
+      'ENCAMINHAMENTO_INVALIDO',
+      'A composição da Sala divergiu do roster ofertado — o aceite exige os mesmos Jogadores da oferta.',
+      { salaId: sala.id },
+    );
+  }
+
   const novaSala: Sala = { ...sala, estado: 'encaminhada' };
 
   return sucesso(substituirSala(estado, novaSala), [
@@ -1432,6 +1483,142 @@ export function reabrirSala(
   ]);
 }
 
+/**
+ * Reabertura com saídas atômicas (follow-up #371, caminho b — ADR-0014).
+ * Remove 1..N-1 Desistências do roster antes de flipar `encaminhada→aberta`,
+ * com sucessão de Anfitrião e `pronto=false` nos restantes. Validação de
+ * subset estrita: sala `encaminhada`+consistente, saídas ∈ Membros ativos,
+ * sem duplicatas, deixando ao menos 1 Membro ativo.
+ * Motivo explícito e restrito a `saida`: a Desistência da Partida (CONTEXT.md)
+ * mapeia para Saída do vínculo no lobby; a causa vive no game-server e o
+ * histórico `membros_historico` registra `saida`. Sem campo genérico aqui —
+ * outros motivos (expulsao/expiracao/encerramento) usam seus comandos próprios.
+ * Memória mantém o desistente como `encerrado` (par de `executarSaidaDeSala`);
+ * o PG faz DELETE + histórico (par de `sairMembroAtomico`). Convergência
+ * definida pelo roster ativo ordenado por `ordemDeEntrada`: memória filtra
+ * `estado==='ativo'`, PG filtra `bloqueado=false` ordenado por
+ * `ordem_de_entrada` — mesma lista, mesma ordem (regra da #287).
+ * Projeção/broadcast: eventos `membro_saiu` (um por Desistência) +
+ * `sala_reaberta` são emitidos aqui e projetados pelo caller em `retorno.ts`
+ * via snapshot `definirEstadoSala(serializarSala)` + `SALA_ATUALIZADA` +
+ * markers de idempotência (PG `sala_reaberta_markers` + Redis).
+ */
+export function reabrirSalaComSaidas(
+  estado: EstadoDoLobby,
+  comando: ReabrirSalaComSaidasComando,
+): Resultado {
+  const dadosInvalidos = validarTexto(comando.salaId);
+  if (dadosInvalidos) {
+    return dadosInvalidos;
+  }
+  if (!Array.isArray(comando.saidas)) {
+    return rejeitar('DADOS_INVALIDOS', 'As saídas são obrigatórias.');
+  }
+  for (const saida of comando.saidas) {
+    const inv = validarTexto(saida.jogadorId, saida.motivo);
+    if (inv) return inv;
+    if (saida.motivo !== 'saida') {
+      return rejeitar('DADOS_INVALIDOS', 'Motivo da reabertura com saídas deve ser saida.');
+    }
+  }
+  const duplicados = new Set<string>();
+  for (const s of comando.saidas) {
+    if (duplicados.has(s.jogadorId)) {
+      return rejeitar('DADOS_INVALIDOS', 'Saída duplicada na reabertura.');
+    }
+    duplicados.add(s.jogadorId);
+  }
+
+  const salaOuErro = exigirSala(estado, comando.salaId);
+  if (!('sala' in salaOuErro)) {
+    return salaOuErro;
+  }
+  const { sala } = salaOuErro;
+
+  const salaInconsistente = exigirSalaConsistente(sala);
+  if (salaInconsistente) {
+    return salaInconsistente;
+  }
+
+  if (sala.estado !== 'encaminhada') {
+    return rejeitar('SALA_NAO_ENCAMINHADA', 'A Sala não está encaminhada.', { salaId: sala.id });
+  }
+
+  const ativos = sala.membros.filter((m) => m.estado === 'ativo');
+  if (comando.saidas.length >= ativos.length) {
+    return rejeitar('DADOS_INVALIDOS', 'A reabertura com saídas deve deixar ao menos um membro ativo.');
+  }
+  if (comando.saidas.length === 0) {
+    // Sem Desistências o caller usa `reabrir_sala`; delega em vez de duplicar.
+    return reabrirSala(estado, { tipo: 'reabrir_sala', salaId: comando.salaId });
+  }
+
+  const ativosPorJogador = new Map(ativos.map((m) => [m.jogadorId, m]));
+  for (const s of comando.saidas) {
+    if (!ativosPorJogador.has(s.jogadorId)) {
+      return rejeitar('DADOS_INVALIDOS', 'Saída com jogador não-ativo na sala.');
+    }
+  }
+
+  // Desistências da Partida → Saídas do vínculo (motivo único `saida`, já validado).
+  const saidasSet = new Set(comando.saidas.map((s) => s.jogadorId));
+
+  // Membros: `encerrado` com motivo `saida` para as Desistências (auditoria e
+  // preservação da ordem de entrada); restantes com `pronto=false`. O roster
+  // ativo resultante converge com o PG (DELETE + histórico) na mesma ordem.
+  const membrosNovos: Membro[] = sala.membros.map((m) => {
+    if (m.estado !== 'ativo') return m;
+    if (saidasSet.has(m.jogadorId)) {
+      return { ...m, estado: 'encerrado' as const, motivoEncerramento: 'saida' as const };
+    }
+    return { ...m, pronto: false };
+  });
+
+  // Sucessão de Anfitrião se o anfitrião saiu
+  let anfitriaoNovoId = sala.anfitriaoId;
+  const anfitriaoAtual = sala.membros.find((m) => m.id === sala.anfitriaoId);
+  const anfitriaoSaiu = anfitriaoAtual !== undefined && saidasSet.has(anfitriaoAtual.jogadorId);
+  if (anfitriaoSaiu) {
+    const restantesAtivos = membrosNovos.filter((m) => m.estado === 'ativo');
+    if (restantesAtivos.length > 0) {
+      anfitriaoNovoId = sucederAnfitriao(membrosNovos, anfitriaoAtual);
+    } else {
+      anfitriaoNovoId = null;
+    }
+  }
+
+  const novaSala: Sala = {
+    ...sala,
+    estado: 'aberta',
+    membros: membrosNovos,
+    anfitriaoId: anfitriaoNovoId,
+  };
+
+  const eventos: EventoDeDominio[] = [];
+  for (const s of comando.saidas) {
+    const membro = ativosPorJogador.get(s.jogadorId)!;
+    eventos.push({
+      tipo: 'membro_saiu',
+      salaId: sala.id,
+      membroId: membro.id,
+      jogadorId: membro.jogadorId,
+      ordemDeEntrada: membro.ordemDeEntrada,
+      motivo: 'saida',
+    });
+  }
+  if (anfitriaoSaiu && anfitriaoNovoId !== null && anfitriaoAtual) {
+    eventos.push({
+      tipo: 'anfitriao_sucedido',
+      salaId: sala.id,
+      anfitriaoAnteriorId: anfitriaoAtual.id,
+      anfitriaoNovoId: anfitriaoNovoId!,
+    });
+  }
+  eventos.push({ tipo: 'sala_reaberta', salaId: sala.id });
+
+  return sucesso(substituirSala(estado, novaSala), eventos);
+}
+
 function membroAtivo(id: string, jogadorId: string, ordemDeEntrada: number): Membro {
   return {
     id,
@@ -1529,6 +1716,25 @@ function exigirSalaAberta(
     );
   }
   return undefined;
+}
+
+// Igualdade de conjuntos de jogadorId (ordem de entrada ignorada): a
+// Composição ativa no commit coincide com a Composição ofertada (roster da
+// oferta) quando têm o mesmo tamanho e os mesmos jogadorId. A chave é o
+// Jogador — saída + retorno do mesmo Jogador preserva o conjunto, pois a
+// admissão na Partida é por jogadorId.
+function conjuntosDeJogadoresIguais(
+  ativos: readonly string[],
+  ofertados: JogadorIdsOfertados,
+): boolean {
+  if (ativos.length !== ofertados.length) {
+    return false;
+  }
+  const ativosOrdenados = [...ativos].sort();
+  const ofertadosOrdenados = [...ofertados].sort();
+  return ativosOrdenados.every(
+    (jogadorId, indice) => jogadorId === ofertadosOrdenados[indice],
+  );
 }
 
 // Condições de encaminhamento (ST-03): de MINIMO_DE_MEMBROS a LIMITE_DE_MEMBROS

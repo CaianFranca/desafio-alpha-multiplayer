@@ -31,6 +31,7 @@ import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
 import {
   chaveDaPartida,
   chaveDoEstadoDaPartida,
+  chaveDoRetornoPendente,
   obterEstadoDaPartida,
 } from '../src/partidas/estado.ts';
 import { PartidaHandlers } from '../src/partidas/handlers.ts';
@@ -61,6 +62,14 @@ class RedisEmMemoria {
   async ttl(_chave: string): Promise<number> {
     // Sem expiração: o estado é repersistido sem TTL (partida em_andamento).
     return -1;
+  }
+
+  async del(...chaves: string[]): Promise<number> {
+    let removidas = 0;
+    for (const chave of chaves) {
+      if (this.dados.delete(chave)) removidas += 1;
+    }
+    return removidas;
   }
 
   async eval(_script: string, _nChaves: number, ...args: unknown[]): Promise<number> {
@@ -481,6 +490,9 @@ test('2→1 declara derrota por desistência e dispara o Retorno uma única vez'
     serverId: 'game-server-teste-desistencia',
     resultado: 'derrota',
     jogadores: ['jogador-1'],
+    // B2: o término com desistência marca o aviso para que o 409 transitório
+    // do lobby (detach ainda em voo) retente em vez de encerrar definitivo.
+    teveDesistencia: true,
   });
 
   // Comando pós-término é recusado e não duplica o callback.
@@ -664,6 +676,119 @@ test('presença: desistência anuncia a saída; queda não faz broadcast nenhum'
   assert.equal((await lerEstado(comQueda)).jogadores.length, 3);
 });
 
+// ─── Ressalvas #290 (R1/R3/R5) ───
+
+test('R1: detach travado não bloqueia o retorno (teto por desistente)', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, redis, broadcaster, sockets } = montada;
+  const avisos: AvisoDeRetorno[] = [];
+  const handlers = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    tetoDesvinculoMs: 50,
+    notificarRetorno: async (aviso) => {
+      avisos.push(aviso);
+    },
+    // Lobby fora do ar: retry infinito que nunca resolve.
+    notificarDesistencia: () => new Promise<void>(() => undefined),
+  });
+
+  // Guarda do loop: o detach nunca resolve e o teto usa timer `unref` — sem um
+  // handle referenciado, o loop esvazia e o runner cancela o teste (e os
+  // seguintes em cascata). Não muda a semântica: só mantém o processo vivo.
+  const guardaDoLoop = setTimeout(() => {}, 5000);
+  const inicio = Date.now();
+  await handlers.aplicarMensagem(
+    sockets.get('jogador-2')!.comoWebSocket(),
+    partidaId,
+    'jogador-2',
+    desistir('jogador-2'),
+  );
+  const duracao = Date.now() - inicio;
+
+  assert.ok(duracao < 2000, `teto estourou a cadeia: ${duracao}ms`);
+  assert.equal(avisos.length, 1, 'retorno sai mesmo com detach travado');
+  assert.deepEqual(avisos[0]!.jogadores, ['jogador-1'], 'N−1 em memória, sem depender do detach');
+  await handlers.drenarRetornosPendentes(100);
+  clearTimeout(guardaDoLoop);
+});
+
+test('R3: aviso usa N−1 em memória; sem memória e sem estado não inventa N', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, redis } = montada;
+  const bruto = await redis.get(chaveDaPartida(partidaId));
+  assert.ok(bruto !== null);
+  const partida = JSON.parse(bruto!) as import('../src/partidas/partidas.ts').PartidaPreparada;
+  const qualquer = montada.handlers as unknown as {
+    montarAviso(
+      partida: import('../src/partidas/partidas.ts').PartidaPreparada,
+      resultado: 'vitoria' | 'derrota',
+      emMemoria: readonly string[] | null,
+      teveDesistencia: boolean,
+    ): Promise<AvisoDeRetorno | null>;
+  };
+
+  // Caminho normal: N−1 em memória, sem tocar o Redis.
+  const comMemoria = await qualquer.montarAviso(partida, 'derrota', ['jogador-1'], true);
+  assert.deepEqual(comMemoria!.jogadores, ['jogador-1']);
+
+  // Sem memória, sem estado no Redis e com desistência: null (não inventa N).
+  const redisVazio = {
+    get: async () => null,
+    set: async () => 'OK' as const,
+    ttl: async () => -1,
+    eval: async () => 1,
+  } as unknown as Redis;
+  const handlersVazio = new PartidaHandlers({
+    redis: redisVazio,
+    broadcaster: montada.broadcaster,
+  });
+  const semEstado = (handlersVazio as unknown as typeof qualquer).montarAviso(partida, 'derrota', null, true);
+  assert.equal(await semEstado, null);
+
+  // Sem desistência: fallback ao roster preservado (não-início).
+  const semDesistencia = await (handlersVazio as unknown as typeof qualquer).montarAviso(partida, 'derrota', null, false);
+  assert.deepEqual(semDesistencia!.jogadores, ['jogador-1', 'jogador-2']);
+});
+
+test('R5: drain enxerga o detach parcial em voo (placeholder)', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3', 'jogador-4']);
+  const { partidaId, redis, broadcaster, sockets } = montada;
+  const desistencias: AvisoDeDesistencia[] = [];
+  let liberar!: () => void;
+  const porta = new Promise<void>((resolver) => {
+    liberar = resolver;
+  });
+  const handlers = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarDesistencia: async (aviso) => {
+      await porta;
+      desistencias.push(aviso);
+    },
+  });
+
+  const aplicacao = handlers.aplicarMensagem(
+    sockets.get('jogador-4')!.comoWebSocket(),
+    partidaId,
+    'jogador-4',
+    desistir('jogador-4'),
+  );
+  // Dá um giro para a mutação registrar o placeholder antes do drain.
+  await new Promise((r) => setTimeout(r, 20));
+  let drenou = false;
+  const drenagem = handlers.drenarRetornosPendentes(2000).then(() => {
+    drenou = true;
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(drenou, false, 'drain espera o detach em voo');
+  liberar();
+  await drenagem;
+  await aplicacao;
+  assert.equal(drenou, true);
+  assert.equal(desistencias.length, 1);
+});
+
 // ─── Queda sem desistência continua voltável ───
 
 test('queda sem desistência volta com snapshot N e turno atual, sem expiração', async () => {
@@ -703,4 +828,173 @@ test('queda sem desistência volta com snapshot N e turno atual, sem expiração
     'queda não termina a partida',
   );
   assert.ok(caido !== undefined);
+});
+
+// ─── Item 4 (review PR #378): Retorno sem descarte ───
+
+test('item 4: pendência persiste durante o envio e apaga após concluir', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, redis, broadcaster, sockets } = montada;
+  const avisos: AvisoDeRetorno[] = [];
+  let liberar!: () => void;
+  const porta = new Promise<void>((resolver) => {
+    liberar = resolver;
+  });
+  const handlers = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarRetorno: async (aviso) => {
+      await porta;
+      avisos.push(aviso);
+    },
+    notificarDesistencia: async () => undefined,
+  });
+
+  const aplicacao = handlers.aplicarMensagem(
+    sockets.get('jogador-2')!.comoWebSocket(),
+    partidaId,
+    'jogador-2',
+    desistir('jogador-2'),
+  );
+  const chave = chaveDoRetornoPendente(partidaId);
+  let vista: string | null = null;
+  for (let i = 0; i < 200 && vista === null; i += 1) {
+    vista = await redis.get(chave);
+    if (vista === null) await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.ok(vista !== null, 'pendência gravada antes do envio concluir');
+  const corpo = JSON.parse(vista!) as { resultado: string; teveDesistencia: boolean };
+  assert.equal(corpo.resultado, 'derrota');
+  assert.equal(corpo.teveDesistencia, true);
+  liberar();
+  await aplicacao;
+  await handlers.drenarRetornosPendentes(2000);
+  assert.equal(avisos.length, 1);
+  assert.deepEqual(avisos[0]!.jogadores, ['jogador-1']);
+  assert.equal(await redis.get(chave), null, 'pendência apagada após concluir');
+});
+
+test('item 4: re-drive completa pendência de crash em comando pós-término', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, redis, broadcaster, sockets } = montada;
+  // Envio que nunca conclui (simula crash no meio do envio): estado termina,
+  // pendência fica gravada, nada é entregue.
+  const lentos = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarRetorno: () => new Promise<void>(() => undefined),
+    notificarDesistencia: async () => undefined,
+  });
+  await lentos.aplicarMensagem(
+    sockets.get('jogador-2')!.comoWebSocket(),
+    partidaId,
+    'jogador-2',
+    desistir('jogador-2'),
+  );
+  assert.ok((await redis.get(chaveDoRetornoPendente(partidaId))) !== null);
+
+  // Nova instância (pós-restart, guards vazios): comando pós-término é
+  // recusado, mas o re-drive entrega o retorno pendente.
+  const avisos: AvisoDeRetorno[] = [];
+  const novos = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarRetorno: async (aviso) => {
+      avisos.push(aviso);
+    },
+    notificarDesistencia: async () => undefined,
+  });
+  await novos.aplicarMensagem(
+    sockets.get('jogador-1')!.comoWebSocket(),
+    partidaId,
+    'jogador-1',
+    { type: 'ENCERRAR_TURNO', jogadorId: 'jogador-1' },
+  );
+  await novos.drenarRetornosPendentes(2000);
+  assert.equal(avisos.length, 1, 're-drive entregou o retorno pendente');
+  assert.deepEqual(avisos[0], {
+    salaId: 'sala-1',
+    partidaId,
+    serverId: 'game-server-teste-desistencia',
+    resultado: 'derrota',
+    jogadores: ['jogador-1'],
+    teveDesistencia: true,
+  });
+  assert.equal(await redis.get(chaveDoRetornoPendente(partidaId)), null);
+  const erros = sockets
+    .get('jogador-1')!
+    .mensagens.filter((m) => m.type === 'ERRO_DO_TABULEIRO');
+  assert.equal(erros[erros.length - 1]!.codigo, 'PARTIDA_TERMINADA');
+});
+
+test('item 4: re-drive completa pendência em anunciarTurnoAtual (reconexão)', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, redis, broadcaster, sockets } = montada;
+  const lentos = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarRetorno: () => new Promise<void>(() => undefined),
+    notificarDesistencia: async () => undefined,
+  });
+  await lentos.aplicarMensagem(
+    sockets.get('jogador-2')!.comoWebSocket(),
+    partidaId,
+    'jogador-2',
+    desistir('jogador-2'),
+  );
+  assert.ok((await redis.get(chaveDoRetornoPendente(partidaId))) !== null);
+
+  const avisos: AvisoDeRetorno[] = [];
+  const novos = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarRetorno: async (aviso) => {
+      avisos.push(aviso);
+    },
+    notificarDesistencia: async () => undefined,
+  });
+  const retorno = criarSocketFalso();
+  await novos.anunciarTurnoAtual(partidaId, retorno.comoWebSocket());
+  await novos.drenarRetornosPendentes(2000);
+  assert.equal(avisos.length, 1, 'reconexão completou o retorno pendente');
+  assert.deepEqual(avisos[0]!.jogadores, ['jogador-1']);
+  assert.equal(await redis.get(chaveDoRetornoPendente(partidaId)), null);
+});
+
+test('item 4: retry sem desistir converge quando metadados voltam', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2']);
+  const { partidaId, redis, broadcaster } = montada;
+  const avisos: AvisoDeRetorno[] = [];
+  const handlers = new PartidaHandlers({
+    redis: redis.comoRedis(),
+    broadcaster,
+    notificarRetorno: async (aviso) => {
+      avisos.push(aviso);
+    },
+    notificarDesistencia: async () => undefined,
+  });
+  // Some com os metadados: o retry reagenda em vez de descartar.
+  const bruto = await redis.get(chaveDaPartida(partidaId));
+  assert.ok(bruto !== null);
+  await redis.del(chaveDaPartida(partidaId));
+  const interno = handlers as unknown as {
+    reagendarRetornoSemN1(
+      partidaId: string,
+      resultado: 'vitoria' | 'derrota',
+      emMemoria: readonly string[] | null,
+      teveDesistencia: boolean,
+      atrasoMs?: number,
+    ): void;
+  };
+  interno.reagendarRetornoSemN1(partidaId, 'derrota', ['jogador-1'], true, 10);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(avisos.length, 0, 'sem metadados, nada enviado (mas sem descarte)');
+  // Metadados de volta: a próxima tentativa entrega com N−1 em memória.
+  await redis.set(chaveDaPartida(partidaId), bruto!);
+  for (let i = 0; i < 200 && avisos.length === 0; i += 1) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.equal(avisos.length, 1);
+  assert.deepEqual(avisos[0]!.jogadores, ['jogador-1']);
+  assert.equal(await redis.get(chaveDoRetornoPendente(partidaId)), null);
 });
