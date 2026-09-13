@@ -39,13 +39,12 @@ export function SalaPage() {
     iniciarPartida,
   } = useSalaWebSocketContext()
 
-  const { alvoHref, alvoWs } = useMemo(() => {
-    if (encaminhamento.alvo === null) return { alvoHref: null, alvoWs: null }
-    const { href, wsUrl } = urlsDoAlvo(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId, sala?.codigoDeSala ?? null)
-    return { alvoHref: href, alvoWs: wsUrl }
+  const { alvoHref } = useMemo(() => {
+    if (encaminhamento.alvo === null) return { alvoHref: null }
+    const { href } = urlsDoAlvo(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId, sala?.codigoDeSala ?? null)
+    return { alvoHref: href }
   }, [encaminhamento.alvo, sala?.codigoDeSala])
 
-  const isDisponivel = encaminhamento.fase === 'disponivel'
   const [codigoInput, setCodigoInput] = useState('')
   const conviteEnviadoRef = useRef<string | null>(null)
   const conviteRedirecionadoRef = useRef<string | null>(null)
@@ -259,23 +258,6 @@ export function SalaPage() {
                   onExpulsar={expulsarMembro}
                 />
                 <AvisosDoLobby avisos={avisos} />
-                {/* Snapshot de sala encaminhada para quem reconectou (issue #45) */}
-                {isDisponivel && alvoWs !== null && alvoHref !== null && (sala?.estado === 'encaminhada' || sala?.encaminhamento != null) && (
-                  <div data-testid="snapshot-encaminhada" className="rounded-xl border border-emerald-200 bg-emerald-50 p-6">
-                    <h2 className="text-sm font-bold text-emerald-900">Sala encaminhada</h2>
-                    <p className="mt-2 text-sm text-emerald-800">Alvo do redirect:</p>
-                    <p data-testid="alvo-do-redirect-snapshot" className="mt-1 break-all font-mono text-sm text-emerald-900">
-                      {alvoWs}
-                    </p>
-                    <a
-                      href={alvoHref}
-                      data-testid="ir-para-partida-snapshot"
-                      className="mt-4 inline-flex rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
-                    >
-                      Ir para a partida
-                    </a>
-                  </div>
-                )}
                 <AvisoEncaminhamento encaminhamento={encaminhamento} onFechar={limparAvisoDeEncaminhamento} />
               </>
             ) : (
@@ -299,7 +281,7 @@ export function SalaPage() {
           </div>
         </div>
       </div>
-      <EncaminhamentoOverlay encaminhamento={encaminhamento} wsAlvo={alvoWs} href={alvoHref} codigoDeSala={sala?.codigoDeSala ?? null} />
+      <EncaminhamentoOverlay encaminhamento={encaminhamento} href={alvoHref} codigoDeSala={sala?.codigoDeSala ?? null} />
     </div>
   )
 }

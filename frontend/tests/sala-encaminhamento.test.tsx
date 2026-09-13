@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within, act } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
@@ -102,49 +102,69 @@ function renderSala(codigo = 'ABCDEF') {
   )
 }
 
-describe('Encaminhamento da Sala para a Partida (#45)', () => {
-  it('o estado de preparação é visível para todos os Membros', async () => {
+function stubLocationComAssign(assignSpy: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal(
+    'location',
+    { ...window.location, assign: assignSpy, host: 'localhost:5173', protocol: 'http:' } as unknown as Location,
+  )
+}
+
+function semNavegacaoVisivel(container: HTMLElement) {
+  expect(container.querySelector('[data-testid="alvo-do-redirect"]')).toBeNull()
+  expect(container.querySelector('[data-testid="alvo-do-redirect-snapshot"]')).toBeNull()
+  expect(container.querySelector('[data-testid="ir-para-partida"]')).toBeNull()
+  expect(container.querySelector('[data-testid="ir-para-partida-snapshot"]')).toBeNull()
+  expect(container.querySelector('[data-testid="snapshot-encaminhada"]')).toBeNull()
+  expect(container.querySelector('a[href*="partidaId="]')).toBeNull()
+}
+
+async function abrirSala(instances: MockWsInstance[]) {
+  await screen.findByText('Ana')
+  await waitFor(() => expect(instances.length).toBe(1))
+  const ws = instances[0]!
+  act(() => ws.simulateOpen())
+  act(() => ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaAberta() }))
+  await screen.findByText('ABCDEF')
+  return ws
+}
+
+describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
+  it('a preparação exibe a região de carregamento, sem card, texto, botão ou alvo', async () => {
     mockAuthMe()
     const { MockWebSocket, instances } = createMockWebSocket()
     vi.stubGlobal('WebSocket', MockWebSocket)
 
     renderSala()
-
-    await screen.findByText('Ana')
-    await waitFor(() => expect(instances.length).toBe(1))
-    const ws = instances[0]!
-    act(() => ws.simulateOpen())
-    act(() =>
-      ws.simulateMessage({
-        type: 'SALA_ATUALIZADA',
-        sala: salaAberta(),
-      }),
-    )
-
-    expect(await screen.findByText('ABCDEF')).toBeInTheDocument()
+    const ws = await abrirSala(instances)
     expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
 
     act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
 
-    expect(await screen.findByTestId('encaminhamento-overlay')).toBeInTheDocument()
-    expect(screen.getByText(/preparando partida/i)).toBeInTheDocument()
+    const overlay = await screen.findByTestId('encaminhamento-overlay')
+    expect(overlay).toBeInTheDocument()
+    expect(overlay).toHaveAttribute('aria-modal', 'true')
+    const carregando = screen.getByTestId('encaminhamento-carregando')
+    expect(carregando).toBeInTheDocument()
+    expect(carregando).toHaveAttribute('role', 'status')
+    expect(screen.getByRole('status', { name: /carregando partida/i })).toBeInTheDocument()
+    semNavegacaoVisivel(document.body)
+    expect(screen.queryByText(/preparando partida/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/partida disponível/i)).not.toBeInTheDocument()
   })
 
-  it('a disponibilidade leva ao redirect com o alvo correto', async () => {
+  it('a disponibilidade mantém a mesma região e dispara o redirect com destino correto', async () => {
     mockAuthMe()
     const { MockWebSocket, instances } = createMockWebSocket()
     vi.stubGlobal('WebSocket', MockWebSocket)
     const assignSpy = vi.fn()
-    vi.stubGlobal('location', { ...window.location, assign: assignSpy, host: 'localhost:5173', protocol: 'http:' } as unknown as Location)
+    stubLocationComAssign(assignSpy)
 
     renderSala()
+    const ws = await abrirSala(instances)
 
-    await screen.findByText('Ana')
-    await waitFor(() => expect(instances.length).toBe(1))
-    const ws = instances[0]!
-    act(() => ws.simulateOpen())
-    act(() => ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaAberta() }))
-    await screen.findByText('ABCDEF')
+    act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
+    const regiaoAntes = await screen.findByTestId('encaminhamento-carregando')
+    expect(regiaoAntes).toBeInTheDocument()
 
     act(() =>
       ws.simulateMessage({
@@ -154,21 +174,68 @@ describe('Encaminhamento da Sala para a Partida (#45)', () => {
       }),
     )
 
-    const overlay = await screen.findByTestId('encaminhamento-overlay')
-    expect(overlay).toBeInTheDocument()
-    expect(within(overlay).getByRole('heading', { name: /partida disponível/i })).toBeInTheDocument()
-    const alvo = within(overlay).getByTestId('alvo-do-redirect')
-    expect(alvo.textContent).toContain('server-abc')
-    expect(alvo.textContent).toContain('partida-123')
-    expect(alvo.textContent).toContain('/ws/game/')
-
-    const link = within(overlay).getByTestId('ir-para-partida') as HTMLAnchorElement
-    expect(link.getAttribute('href')).toContain('serverId=server-abc')
-    expect(link.getAttribute('href')).toContain('partidaId=partida-123')
-    expect(alvo.textContent).toContain('partida-id=partida-123')
+    const regiaoDepois = await screen.findByTestId('encaminhamento-carregando')
+    expect(regiaoDepois).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: /carregando partida/i })).toBeInTheDocument()
+    semNavegacaoVisivel(document.body)
+    expect(screen.queryByText(/partida disponível/i)).not.toBeInTheDocument()
 
     await waitFor(() => expect(assignSpy).toHaveBeenCalled(), { timeout: 3000 })
-    expect(assignSpy.mock.calls[0][0]).toContain('server-abc')
+    const destino = String(assignSpy.mock.calls[0]?.[0] ?? '')
+    expect(destino).toContain('serverId=server-abc')
+    expect(destino).toContain('partidaId=partida-123')
+  })
+
+  it('a preparação sozinha nunca agenda redirect (sem alvo, sem navegação)', async () => {
+    mockAuthMe()
+    const { MockWebSocket, instances } = createMockWebSocket()
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const assignSpy = vi.fn()
+    stubLocationComAssign(assignSpy)
+
+    renderSala()
+    const ws = await abrirSala(instances)
+
+    act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
+    expect(await screen.findByTestId('encaminhamento-carregando')).toBeInTheDocument()
+
+    await new Promise((resolve) => setTimeout(resolve, 1700))
+    expect(assignSpy).not.toHaveBeenCalled()
+    semNavegacaoVisivel(document.body)
+  })
+
+  it('recusa tardia cancela o redirect pendente e nunca navega para Partida inexistente', async () => {
+    mockAuthMe()
+    const { MockWebSocket, instances } = createMockWebSocket()
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const assignSpy = vi.fn()
+    stubLocationComAssign(assignSpy)
+
+    renderSala()
+    const ws = await abrirSala(instances)
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'PARTIDA_DISPONIVEL',
+        partidaId: 'partida-123',
+        serverId: 'server-abc',
+      }),
+    )
+    expect(await screen.findByTestId('encaminhamento-carregando')).toBeInTheDocument()
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'PARTIDA_RECUSADA',
+        codigo: 'ENCAMINHAMENTO_RECUSADO',
+        motivo: 'O servidor de jogo recusou a partida. Tente iniciar novamente.',
+      }),
+    )
+
+    expect(await screen.findByTestId('aviso-encaminhamento')).toBeInTheDocument()
+    expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
+
+    await new Promise((resolve) => setTimeout(resolve, 1700))
+    expect(assignSpy).not.toHaveBeenCalled()
   })
 
   it('recusa exibe aviso compreensível e a página volta ao estado normal da Sala', async () => {
@@ -177,13 +244,7 @@ describe('Encaminhamento da Sala para a Partida (#45)', () => {
     vi.stubGlobal('WebSocket', MockWebSocket)
 
     renderSala()
-
-    await screen.findByText('Ana')
-    await waitFor(() => expect(instances.length).toBe(1))
-    const ws = instances[0]!
-    act(() => ws.simulateOpen())
-    act(() => ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaAberta() }))
-    await screen.findByText('ABCDEF')
+    const ws = await abrirSala(instances)
 
     act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
     expect(await screen.findByTestId('encaminhamento-overlay')).toBeInTheDocument()
@@ -214,13 +275,7 @@ describe('Encaminhamento da Sala para a Partida (#45)', () => {
     vi.stubGlobal('WebSocket', MockWebSocket)
 
     renderSala()
-
-    await screen.findByText('Ana')
-    await waitFor(() => expect(instances.length).toBe(1))
-    const ws = instances[0]!
-    act(() => ws.simulateOpen())
-    act(() => ws.simulateMessage({ type: 'SALA_ATUALIZADA', sala: salaAberta() }))
-    await screen.findByText('ABCDEF')
+    const ws = await abrirSala(instances)
 
     act(() => ws.simulateMessage({ type: 'PARTIDA_FALHOU', codigo: 'ENCAMINHAMENTO_FALHOU', motivo: '' }))
 
@@ -231,10 +286,12 @@ describe('Encaminhamento da Sala para a Partida (#45)', () => {
     expect(await screen.findByText('ABCDEF')).toBeInTheDocument()
   })
 
-  it('quem reconecta a uma Sala encaminhada vê o alvo do redirect', async () => {
+  it('quem reconecta a uma Sala encaminhada vê a mesma animação e é redirecionado sozinho, sem card', async () => {
     mockAuthMe()
     const { MockWebSocket, instances } = createMockWebSocket()
     vi.stubGlobal('WebSocket', MockWebSocket)
+    const assignSpy = vi.fn()
+    stubLocationComAssign(assignSpy)
 
     renderSala()
 
@@ -256,12 +313,31 @@ describe('Encaminhamento da Sala para a Partida (#45)', () => {
     )
 
     expect(await screen.findByTestId('encaminhamento-overlay')).toBeInTheDocument()
-    expect(screen.getByTestId('alvo-do-redirect')).toHaveTextContent('server-xyz')
-    expect(screen.getByTestId('alvo-do-redirect')).toHaveTextContent('partida-999')
+    expect(screen.getByTestId('encaminhamento-carregando')).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: /carregando partida/i })).toBeInTheDocument()
+    semNavegacaoVisivel(document.body)
 
-    expect(screen.getByTestId('snapshot-encaminhada')).toBeInTheDocument()
-    expect(screen.getByTestId('alvo-do-redirect-snapshot')).toHaveTextContent('server-xyz')
-    const link = screen.getByTestId('ir-para-partida-snapshot') as HTMLAnchorElement
-    expect(link.getAttribute('href')).toContain('server-xyz')
+    await waitFor(() => expect(assignSpy).toHaveBeenCalled(), { timeout: 3000 })
+    const destino = String(assignSpy.mock.calls[0]?.[0] ?? '')
+    expect(destino).toContain('server-xyz')
+    expect(destino).toContain('partida-999')
+  })
+
+  it('o overlay bloqueia a Sala e expõe a região de estado "Carregando partida"', async () => {
+    mockAuthMe()
+    const { MockWebSocket, instances } = createMockWebSocket()
+    vi.stubGlobal('WebSocket', MockWebSocket)
+
+    renderSala()
+    const ws = await abrirSala(instances)
+
+    act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
+
+    const overlay = await screen.findByTestId('encaminhamento-overlay')
+    expect(overlay).toHaveAttribute('role', 'dialog')
+    expect(overlay).toHaveAttribute('aria-modal', 'true')
+    expect(screen.getByRole('status', { name: /carregando partida/i })).toBeInTheDocument()
+    expect(await screen.findByText('ABCDEF')).toBeInTheDocument()
+    semNavegacaoVisivel(document.body)
   })
 })

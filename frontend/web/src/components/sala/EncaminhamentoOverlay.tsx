@@ -1,21 +1,24 @@
 import { useEffect, useRef } from 'react'
-import { buildGameRedirectHref, buildGameWsUrl } from '../../api/encaminhamento'
+import { buildGameRedirectHref } from '../../api/encaminhamento'
 import type { EstadoDoEncaminhamento } from '../../hooks/useSalaWebSocket'
 
 interface Props {
   encaminhamento: EstadoDoEncaminhamento
-  wsAlvo?: string | null
   href?: string | null
   codigoDeSala?: string | null
 }
 
-export function EncaminhamentoOverlay({ encaminhamento, wsAlvo: wsAlvoProp, href: hrefProp, codigoDeSala }: Props) {
+export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDeSala }: Props) {
   const { fase, alvo } = encaminhamento
   const timeoutRef = useRef<number | null>(null)
 
   const visivel = fase === 'preparando' || (fase === 'disponivel' && alvo !== null)
-  const wsAlvo = wsAlvoProp !== undefined ? wsAlvoProp : alvo !== null ? buildGameWsUrl(alvo.serverId, alvo.partidaId) : null
-  const href = hrefProp !== undefined ? hrefProp : alvo !== null ? buildGameRedirectHref(alvo.serverId, alvo.partidaId, codigoDeSala ?? null) : null
+  const href =
+    hrefProp !== undefined
+      ? hrefProp
+      : alvo !== null
+        ? buildGameRedirectHref(alvo.serverId, alvo.partidaId, codigoDeSala ?? null)
+        : null
 
   useEffect(() => {
     if (fase === 'disponivel' && href !== null) {
@@ -43,47 +46,21 @@ export function EncaminhamentoOverlay({ encaminhamento, wsAlvo: wsAlvoProp, href
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="encaminhamento-titulo"
-      aria-live="polite"
+      aria-label="Carregando partida"
       data-testid="encaminhamento-overlay"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
     >
-      <div className="max-w-lg w-full rounded-2xl bg-white p-8 text-center shadow-xl">
-        {fase === 'preparando' && (
-          <>
-            <p className="text-sm font-bold tracking-[.16em] uppercase text-accent">Encaminhamento</p>
-            <h2 id="encaminhamento-titulo" className="mt-2 text-2xl font-bold">
-              Preparando partida...
-            </h2>
-            <p className="mt-3 text-base text-muted">A sala está sendo encaminhada para o servidor de jogo. Aguarde todos os membros.</p>
-            <div role="status" aria-label="Preparando partida" className="mt-6 flex justify-center">
-              <span className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-accent" />
-            </div>
-          </>
-        )}
-        {fase === 'disponivel' && alvo !== null && wsAlvo !== null && href !== null && (
-          <>
-            <p className="text-sm font-bold tracking-[.16em] uppercase text-emerald-600">Partida disponível</p>
-            <h2 id="encaminhamento-titulo" className="mt-2 text-2xl font-bold">
-              Partida disponível!
-            </h2>
-            <p className="mt-3 text-base text-muted">Redirecionando para o servidor de jogo...</p>
-            <div className="mt-6 rounded-lg bg-gray-50 p-3 text-left">
-              <p className="text-sm font-semibold text-gray-600">Alvo do redirect</p>
-              <p data-testid="alvo-do-redirect" className="mt-1 break-all font-mono text-sm text-gray-800">
-                {wsAlvo}
-              </p>
-            </div>
-            <a
-              href={href}
-              data-testid="ir-para-partida"
-              className="mt-6 inline-flex items-center justify-center rounded-lg bg-accent px-6 py-3 text-sm font-bold text-white hover:opacity-90"
-            >
-              Ir para a partida
-            </a>
-            <p className="mt-3 text-sm text-muted">Você será redirecionado automaticamente em instantes.</p>
-          </>
-        )}
+      <div
+        data-testid="encaminhamento-carregando"
+        role="status"
+        aria-label="Carregando partida"
+        className="flex items-center justify-center"
+      >
+        <span
+          aria-hidden="true"
+          className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-white/20 border-t-white"
+        />
+        <span className="sr-only">Carregando partida</span>
       </div>
     </div>
   )
