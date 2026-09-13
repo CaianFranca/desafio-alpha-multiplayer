@@ -4,12 +4,10 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider } from '../web/src/state/AuthProvider'
 import { EncaminhamentoOverlay } from '../web/src/components/sala/EncaminhamentoOverlay'
-
-// Janela de espera dos casos negativos: redirect do overlay dispara em 1500ms;
-// aguarda 1500ms + 1000ms de margem contra flake do timer em CI.
-const JANELA_DO_REDIRECT_MS = 2500
+import { REDIRECT_DELAY_MS } from '../web/src/api/encaminhamento'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -123,9 +121,9 @@ function semNavegacaoVisivel(container: HTMLElement) {
   expect(container.querySelector('a[href*="partidaId="]')).toBeNull()
 }
 
-async function aguardarJanelaDoRedirect() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, JANELA_DO_REDIRECT_MS))
+function avancarParaDepoisDoRedirect() {
+  act(() => {
+    vi.advanceTimersByTime(REDIRECT_DELAY_MS + 100)
   })
 }
 
@@ -210,12 +208,14 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
     act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
     expect(await screen.findByTestId('encaminhamento-carregando')).toBeInTheDocument()
 
-    await aguardarJanelaDoRedirect()
+    vi.useFakeTimers()
+    avancarParaDepoisDoRedirect()
     expect(assignSpy).not.toHaveBeenCalled()
     semNavegacaoVisivel(document.body)
   })
 
   it('disponibilidade sem alvo não exibe overlay nem agenda redirect (nível de componente)', async () => {
+    vi.useFakeTimers()
     // O wire vigente nunca produz disponivel sem alvo (aplicarEventoDeEncaminhamento
     // sempre anexa o alvo); o caso é fabricado direto no componente, sem mudar o protocolo.
     const assignSpy = vi.fn()
@@ -230,7 +230,7 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
     )
     expect(container.querySelector('[data-testid="encaminhamento-overlay"]')).toBeNull()
 
-    await aguardarJanelaDoRedirect()
+    avancarParaDepoisDoRedirect()
     expect(assignSpy).not.toHaveBeenCalled()
   })
 
@@ -264,7 +264,8 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
     expect(await screen.findByTestId('aviso-encaminhamento')).toBeInTheDocument()
     expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
 
-    await aguardarJanelaDoRedirect()
+    vi.useFakeTimers()
+    avancarParaDepoisDoRedirect()
     expect(assignSpy).not.toHaveBeenCalled()
   })
 
