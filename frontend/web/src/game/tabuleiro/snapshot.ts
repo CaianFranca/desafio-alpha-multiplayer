@@ -143,7 +143,7 @@ export function aplicarSnapshot(
   )
 
   const peaoPorJogador: Record<string, string> = {}
-  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean; protegido: boolean; ordem: number }> = {}
+  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean; protegido: boolean; ordem: number; presenca: 'conectado' | 'em_reconexao' }> = {}
   for (const j of snapshot.jogadores) {
     peaoPorJogador[j.jogadorId] = j.peaoId
     // Snapshot carrega sanidade/estados (issue #173) e a Proteção da Sala
@@ -155,6 +155,7 @@ export function aplicarSnapshot(
     const emBaixaIluminacao = (j as { emBaixaIluminacao?: boolean }).emBaixaIluminacao ?? false
     const amedrontado = (j as { amedrontado?: boolean }).amedrontado ?? sanidade === 0
     const protegido = (j as { protegido?: boolean }).protegido ?? false
+    const presenca = (j as { presenca?: 'conectado' | 'em_reconexao' }).presenca ?? 'conectado'
     jogadorPorId[j.jogadorId] = {
       apelido: j.apelido,
       cor: j.cor,
@@ -165,6 +166,7 @@ export function aplicarSnapshot(
       // Ordem de entrada na Sala (issue #226): alimenta a fila circular do
       // Turno no HUD; o wire sempre carrega (fallback defensivo 0).
       ordem: (j as { ordem?: number }).ordem ?? 0,
+      presenca,
     }
   }
 

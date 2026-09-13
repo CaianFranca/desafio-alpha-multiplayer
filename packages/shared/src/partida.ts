@@ -287,6 +287,8 @@ export type TipoDaPecaWire =
   | 'vulto'
   | 'espectro';
 
+export type PresencaNaPartidaWire = 'conectado' | 'em_reconexao';
+
 export interface JogadorNoSnapshot {
   readonly jogadorId: string;
   readonly apelido: string;
@@ -305,6 +307,10 @@ export interface JogadorNoSnapshot {
   // eventos (a concessão vive na Confirmação de Posição e o consumo em
   // ATAQUE_RESOLVIDO.protegidos).
   readonly protegido: boolean;
+  // Presença na Partida em andamento (issue #294, spec #292): indica se o
+  // jogador está em janela de reconexão (`em_reconexao`) ou conectado.
+  // Opcional com fallback `conectado` (compat com snapshots antigos sem campo).
+  readonly presenca?: PresencaNaPartidaWire;
 }
 
 export interface PecaPosicionadaNoSnapshot {
@@ -514,6 +520,16 @@ export interface JogadorReconectadoWireEvento {
   readonly jogadorId: string;
 }
 
+// Seam genérico de presença (issue #294, spec #292): espelha
+// MEMBRO_DESCONECTADO/RECONECTADO da Sala, compatível com push por evento ou
+// só via snapshot. Mantido ao lado de JOGADOR_EM_RECONEXAO/RECONECTADO para
+// compatibilidade com wire que escolher o nome genérico.
+export interface JogadorPresencaAtualizadaWireEvento {
+  readonly type: 'JOGADOR_PRESENCA_ATUALIZADA';
+  readonly jogadorId: string;
+  readonly presenca: PresencaNaPartidaWire;
+}
+
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
@@ -529,7 +545,8 @@ export type PartidaEventoDoServidor =
   | ResgateRealizadoWireEvento
   | DesistenciaRegistradaWireEvento
   | JogadorEmReconexaoWireEvento
-  | JogadorReconectadoWireEvento;
+  | JogadorReconectadoWireEvento
+  | JogadorPresencaAtualizadaWireEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

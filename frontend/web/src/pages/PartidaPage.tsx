@@ -271,12 +271,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Evento-driven: DESISTENCIA_REGISTRADA projeta no modelo + exibe toast
   // visível e anúncio para leitor de tela (desistência, nova ordem e fim).
   // Snapshot reconcilia; auto-dismiss em 8s como AvisosDoLobby.
+  // Causa (issue #294): `expiracao` vs `desistencia` distingue expirou vs desistiu.
   const [avisoDesistencia, setAvisoDesistencia] = useState<{
     id: number
     jogadorId: string
     apelido: string
     restantes: number
     ordemTexto: string
+    causa: 'desistencia' | 'expiracao'
   } | null>(null)
   const avisoDesistenciaIdRef = useRef(0)
   const avisoDesistenciaTimerRef = useRef<number | null>(null)
@@ -301,7 +303,37 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // seria falso ("Um jogador desistiu") — enfileira e re-emite pós-snapshot
   // com a ordem/restantes autoritativos. Snapshot reconcilia o modelo; a fila
   // reconcilia o anúncio. Dedupe por jogadorId (replay/reconexão é no-op).
-  const desistenciasPreSnapshotRef = useRef<Array<{ jogadorId: string; peaoId: string }>>([])
+  const desistenciasPreSnapshotRef = useRef<Array<{ jogadorId: string; peaoId: string; causa: 'desistencia' | 'expiracao' }>>([])
+
+  // ── Aviso de reconexão (issue #294, spec #292) ──
+  // Evento-driven: JOGADOR_EM_RECONEXAO / JOGADOR_RECONECTADO / JOGADOR_PRESENCA_ATUALIZADA
+  // projetam no modelo + toast visível e anúncio SR. Snapshot reconcilia (autoridade).
+  // Auto-dismiss em 8s como desistência. Sem bloquear tela dos demais.
+  const [avisoReconexao, setAvisoReconexao] = useState<{
+    id: number
+    jogadorId: string
+    apelido: string
+    tipo: 'reconectando' | 'reconectado'
+  } | null>(null)
+  const avisoReconexaoIdRef = useRef(0)
+  const avisoReconexaoTimerRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (avisoReconexao === null) return
+    if (avisoReconexaoTimerRef.current !== null) window.clearTimeout(avisoReconexaoTimerRef.current)
+    avisoReconexaoTimerRef.current = window.setTimeout(() => {
+      setAvisoReconexao(null)
+      avisoReconexaoTimerRef.current = null
+    }, 8000)
+    return () => {
+      if (avisoReconexaoTimerRef.current !== null) {
+        window.clearTimeout(avisoReconexaoTimerRef.current)
+        avisoReconexaoTimerRef.current = null
+      }
+    }
+  }, [avisoReconexao])
+  // Reconexões pré-snapshot: sem roster não há apelido verdadeiro — enfileira
+  // para re-emitir pós-snapshot quando houver autoridade.
+  const reconexoesPreSnapshotRef = useRef<Array<{ jogadorId: string; tipo: 'reconectando' | 'reconectado' }>>([])
 
   // Esquece o reenvio correlacionado (R2): limpa flag + pendência gravada.
   // Declarado antes do `usePartidaWebSocket` (o `onEvento` usa).
@@ -457,6 +489,33 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
                 apelido: 'Um jogador',
                 restantes: ordenados.length,
                 ordemTexto,
+                causa: pendente.causa ?? 'desistencia',
+              })
+            }
+          }
+          // Re-emissão pós-snapshot reconexão (#294): eventos de presença sem
+          // roster foram enfileirados — re-anuncia com apelido autoritativo agora.
+          if (reconexoesPreSnapshotRef.current.length > 0) {
+            const pendentes = [...reconexoesPreSnapshotRef.current]
+            reconexoesPreSnapshotRef.current = []
+            const porId = new Map(evento.snapshot.jogadores.map((j) => [j.jogadorId, j] as const))
+            for (const pendente of pendentes) {
+              const dados = porId.get(pendente.jogadorId)
+              // Sem roster ainda ou já fora (desistência convertida) não re-anuncia reconexão
+              // pendente — o snapshot já reconciliou o roster sem ele.
+              if (!dados) continue
+              // Só re-anuncia se o snapshot refletir a presença esperada (evita
+              // fantasma quando o snapshot já chegou com conectado mas evento
+              // era reconectando).
+              const presencaSnap = (dados as { presenca?: string }).presenca ?? 'conectado'
+              if (pendente.tipo === 'reconectando' && presencaSnap !== 'em_reconexao') continue
+              if (pendente.tipo === 'reconectado' && presencaSnap !== 'conectado') continue
+              avisoReconexaoIdRef.current += 1
+              setAvisoReconexao({
+                id: avisoReconexaoIdRef.current,
+                jogadorId: pendente.jogadorId,
+                apelido: dados.apelido,
+                tipo: pendente.tipo,
               })
             }
           }
@@ -528,6 +587,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             }
             const anterior = modeloRef.current
             const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
+            const causa = (evento as { causa?: 'desistencia' | 'expiracao' }).causa ?? 'desistencia'
+            // Limpa indicador de reconexão residual (se o jogador estava em `em_reconexao`,
+            // a conversão limpa sem resíduo; desistência explícita também limpa).
+            setAvisoReconexao((prev) => (prev?.jogadorId === evento.jogadorId ? null : prev))
             // F4 (#290): sem snapshot ainda não há roster — projeta a remoção
             // no flush, mas suprime toast/SR imediato (apelido/ordem/restantes
             // seriam falsos). Enfileira para re-emitir pós-snapshot (review PR
@@ -535,7 +598,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             if (Object.keys(anterior.jogadorPorId).length === 0) {
               const fila = desistenciasPreSnapshotRef.current
               if (!fila.some((p) => p.jogadorId === evento.jogadorId)) {
-                fila.push({ jogadorId: evento.jogadorId, peaoId: evento.peaoId })
+                fila.push({ jogadorId: evento.jogadorId, peaoId: evento.peaoId, causa })
               }
               return
             }
@@ -553,8 +616,46 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               apelido,
               restantes: restantes.length,
               ordemTexto,
+              causa,
             })
           }
+          return
+        }
+        // Presença em reconexão (issue #294, spec #292): JOGADOR_EM_RECONEXAO /
+        // JOGADOR_RECONECTADO / JOGADOR_PRESENCA_ATUALIZADA atualizam o modelo
+        // (snapshot é autoridade) e anunciam com toast + SR sem bloquear tela.
+        if (
+          evento.type === 'JOGADOR_EM_RECONEXAO' ||
+          evento.type === 'JOGADOR_RECONECTADO' ||
+          evento.type === 'JOGADOR_PRESENCA_ATUALIZADA'
+        ) {
+          // Após término a presença não importa — ignora como demais eventos de jogo.
+          if (emResultadoRef.current) return
+          // Snapshot ainda não chegou: sem roster não há apelido — enfileira para
+          // re-emitir pós-snapshot com autoridade. A projeção no modelo ainda
+          // precisa esperar o roster (no-op).
+          const anterior = modeloRef.current
+          const temRoster = Object.keys(anterior.jogadorPorId).length > 0
+          let tipo: 'reconectando' | 'reconectado' | null = null
+          if (evento.type === 'JOGADOR_EM_RECONEXAO') tipo = 'reconectando'
+          else if (evento.type === 'JOGADOR_RECONECTADO') tipo = 'reconectado'
+          else tipo = evento.presenca === 'em_reconexao' ? 'reconectando' : 'reconectado'
+          if (!temRoster) {
+            const fila = reconexoesPreSnapshotRef.current
+            // Dedupe por jogadorId+tipo para não acumular replay
+            if (!fila.some((p) => p.jogadorId === evento.jogadorId && p.tipo === tipo)) {
+              fila.push({ jogadorId: evento.jogadorId, tipo: tipo! })
+            }
+            // Ainda sem roster o reducer é no-op, mas despacha para manter fluxo
+            despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+            return
+          }
+          const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
+          // Aliado em reconexão aparece sem travar tela dos demais — o modelo só
+          // marca presenca; o HUD reflete e os controles seguem ativos (sem gate).
+          avisoReconexaoIdRef.current += 1
+          setAvisoReconexao({ id: avisoReconexaoIdRef.current, jogadorId: evento.jogadorId, apelido, tipo: tipo! })
+          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           return
         }
         // Após término, ignora eventos de jogo (partida em somente-leitura) — via ref para evitar stale closure
@@ -1229,15 +1330,19 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         (desistência, nova ordem e fim). Permanece em resultado (derrota-
         quando-sobra-1) até o auto-dismiss de 8s — o fim chega também via
         PARTIDA_TERMINADA com motivo desistencia no overlay de resultado.
+        Causa (issue #294): expiracao exibe "expirou e foi removido" vs "desistiu".
       */}
       {avisoDesistencia !== null && (estadoEmAndamento || emResultado) ? (
         <div
           data-testid="aviso-desistencia"
           data-jogador-id={avisoDesistencia.jogadorId}
+          data-causa={avisoDesistencia.causa}
           role="status"
           className="pointer-events-auto absolute left-1/2 top-20 z-50 -translate-x-1/2 rounded bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-xl"
         >
-          {avisoDesistencia.apelido} desistiu. Nova ordem: {avisoDesistencia.ordemTexto || '—'}.
+          {avisoDesistencia.causa === 'expiracao'
+            ? `${avisoDesistencia.apelido} expirou e foi removido. Nova ordem: ${avisoDesistencia.ordemTexto || '—'}.`
+            : `${avisoDesistencia.apelido} desistiu. Nova ordem: ${avisoDesistencia.ordemTexto || '—'}.`}
         </div>
       ) : null}
       <div
@@ -1245,13 +1350,55 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         data-testid="anuncio-desistencia"
         data-jogador-id={avisoDesistencia?.jogadorId ?? undefined}
         data-anuncio-id={avisoDesistencia?.id ?? undefined}
+        data-causa={avisoDesistencia?.causa ?? undefined}
         role="status"
         aria-live="polite"
         aria-atomic="true"
         className="sr-only"
       >
         {avisoDesistencia !== null
-          ? `${avisoDesistencia.apelido} desistiu da partida. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por desistência.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
+          ? avisoDesistencia.causa === 'expiracao'
+            ? `${avisoDesistencia.apelido} expirou e foi removido da partida por expiração. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por desistência.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
+            : `${avisoDesistencia.apelido} desistiu da partida. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por desistência.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
+          : ''}
+      </div>
+      {/*
+        Aviso de reconexão (issue #294, spec #292): aliado em `em_reconexao`
+        aparece como "reconectando" sem travar tela dos demais; ao voltar
+        dentro da janela o indicador some sem resíduo. Conversão por expiração
+        projeta igual à Desistência (mesmo lote), mas com causa `expiracao` visível.
+        O leitor de tela anuncia os 3 momentos: reconectando, reconectado e
+        expiração (esta via causa do aviso acima).
+      */}
+      {avisoReconexao !== null && (estadoEmAndamento || emResultado) ? (
+        <div
+          data-testid="aviso-reconectando"
+          data-jogador-id={avisoReconexao.jogadorId}
+          data-tipo={avisoReconexao.tipo}
+          role="status"
+          aria-live="polite"
+          className="pointer-events-auto absolute left-1/2 top-32 z-50 -translate-x-1/2 rounded bg-amber-900 px-4 py-2 text-sm text-amber-100 shadow-xl"
+        >
+          {avisoReconexao.tipo === 'reconectando'
+            ? `${avisoReconexao.apelido} reconectando…`
+            : `${avisoReconexao.apelido} reconectado.`}
+        </div>
+      ) : null}
+      <div
+        key={avisoReconexao?.id ?? 'sem-reconexao'}
+        data-testid="anuncio-reconexao"
+        data-jogador-id={avisoReconexao?.jogadorId ?? undefined}
+        data-anuncio-id={avisoReconexao?.id ?? undefined}
+        data-tipo={avisoReconexao?.tipo ?? undefined}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {avisoReconexao !== null
+          ? avisoReconexao.tipo === 'reconectando'
+            ? `${avisoReconexao.apelido} reconectando, aguardando reconexão.`
+            : `${avisoReconexao.apelido} reconectado, voltou à partida.`
           : ''}
       </div>
       {/*
