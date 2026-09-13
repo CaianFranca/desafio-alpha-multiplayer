@@ -46,7 +46,6 @@ export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDe
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Carregando partida"
       data-testid="encaminhamento-overlay"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
     >

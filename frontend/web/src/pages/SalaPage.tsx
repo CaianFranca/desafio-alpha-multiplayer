@@ -11,7 +11,7 @@ import { AvisoEncaminhamento } from '../components/sala/AvisoEncaminhamento'
 import { AuthContext } from '../state/auth-context'
 import { useSalaWebSocketContext } from '../state/sala-web-socket-context'
 import { CODIGO_DE_SALA_TAMANHO, normalizarCodigoDeSala } from '../utils/codigoDeSala'
-import { urlsDoAlvo } from '../api/encaminhamento'
+import { buildGameRedirectHref } from '../api/encaminhamento'
 import { comBase } from '../api/basePath'
 
 export function SalaPage() {
@@ -41,7 +41,7 @@ export function SalaPage() {
 
   const { alvoHref } = useMemo(() => {
     if (encaminhamento.alvo === null) return { alvoHref: null }
-    const { href } = urlsDoAlvo(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId, sala?.codigoDeSala ?? null)
+    const href = buildGameRedirectHref(encaminhamento.alvo.serverId, encaminhamento.alvo.partidaId, sala?.codigoDeSala ?? null)
     return { alvoHref: href }
   }, [encaminhamento.alvo, sala?.codigoDeSala])
 

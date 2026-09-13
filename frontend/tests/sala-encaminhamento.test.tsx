@@ -3,6 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { routes } from '../web/src/app/router'
 import { AuthProvider } from '../web/src/state/AuthProvider'
+import { EncaminhamentoOverlay } from '../web/src/components/sala/EncaminhamentoOverlay'
+
+// Janela de espera dos casos negativos: redirect do overlay dispara em 1500ms;
+// aguarda 1500ms + 1000ms de margem contra flake do timer em CI.
+const JANELA_DO_REDIRECT_MS = 2500
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -118,6 +123,12 @@ function semNavegacaoVisivel(container: HTMLElement) {
   expect(container.querySelector('a[href*="partidaId="]')).toBeNull()
 }
 
+async function aguardarJanelaDoRedirect() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, JANELA_DO_REDIRECT_MS))
+  })
+}
+
 async function abrirSala(instances: MockWsInstance[]) {
   await screen.findByText('Ana')
   await waitFor(() => expect(instances.length).toBe(1))
@@ -199,9 +210,28 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
     act(() => ws.simulateMessage({ type: 'PARTIDA_PREPARANDO' }))
     expect(await screen.findByTestId('encaminhamento-carregando')).toBeInTheDocument()
 
-    await new Promise((resolve) => setTimeout(resolve, 1700))
+    await aguardarJanelaDoRedirect()
     expect(assignSpy).not.toHaveBeenCalled()
     semNavegacaoVisivel(document.body)
+  })
+
+  it('disponibilidade sem alvo não exibe overlay nem agenda redirect (nível de componente)', async () => {
+    // O wire vigente nunca produz disponivel sem alvo (aplicarEventoDeEncaminhamento
+    // sempre anexa o alvo); o caso é fabricado direto no componente, sem mudar o protocolo.
+    const assignSpy = vi.fn()
+    stubLocationComAssign(assignSpy)
+
+    const { container } = render(
+      <EncaminhamentoOverlay
+        encaminhamento={{ fase: 'disponivel', alvo: null, codigo: null, motivo: null, mensagem: null }}
+        href={null}
+        codigoDeSala="ABCDEF"
+      />,
+    )
+    expect(container.querySelector('[data-testid="encaminhamento-overlay"]')).toBeNull()
+
+    await aguardarJanelaDoRedirect()
+    expect(assignSpy).not.toHaveBeenCalled()
   })
 
   it('recusa tardia cancela o redirect pendente e nunca navega para Partida inexistente', async () => {
@@ -234,7 +264,7 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
     expect(await screen.findByTestId('aviso-encaminhamento')).toBeInTheDocument()
     expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
 
-    await new Promise((resolve) => setTimeout(resolve, 1700))
+    await aguardarJanelaDoRedirect()
     expect(assignSpy).not.toHaveBeenCalled()
   })
 
@@ -337,6 +367,9 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
     expect(overlay).toHaveAttribute('role', 'dialog')
     expect(overlay).toHaveAttribute('aria-modal', 'true')
     expect(screen.getByRole('status', { name: /carregando partida/i })).toBeInTheDocument()
+    // Nome acessível único: só a região de estado anuncia "Carregando partida",
+    // sem duplicar o anúncio no container dialog.
+    expect(screen.queryByRole('dialog', { name: /carregando partida/i })).toBeNull()
     expect(await screen.findByText('ABCDEF')).toBeInTheDocument()
     semNavegacaoVisivel(document.body)
   })
