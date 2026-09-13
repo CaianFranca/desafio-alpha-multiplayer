@@ -168,8 +168,6 @@ export interface OpcoesDoComentaristaDeBot {
   readonly enviar: (conteudo: string) => void;
   /** Cooldown mínimo entre comentários do mesmo bot (padrão 4s; injetável p/ testes). */
   readonly cooldownMinimoMs?: number;
-  /** Relógio injetável (epoch ms) para testes determinísticos. */
-  readonly agora?: () => number;
   readonly log?: (...args: unknown[]) => void;
 }
 
@@ -182,7 +180,6 @@ export interface OpcoesDoComentaristaDeBot {
 export class ComentaristaDeBot {
   private readonly enviar: (conteudo: string) => void;
   private readonly cooldownMs: number;
-  private readonly agora: () => number;
   private readonly log: (...args: unknown[]) => void;
   private readonly ultimoTextoPorGatilho: Map<GatilhoDeComentarioDeBot, string> = new Map();
   private fila: string[] = [];
@@ -192,7 +189,6 @@ export class ComentaristaDeBot {
   constructor(opcoes: OpcoesDoComentaristaDeBot) {
     this.enviar = opcoes.enviar;
     this.cooldownMs = opcoes.cooldownMinimoMs ?? 4000;
-    this.agora = opcoes.agora ?? (() => Date.now());
     this.log = opcoes.log ?? (() => undefined);
   }
 
@@ -227,7 +223,7 @@ export class ComentaristaDeBot {
   }
 
   private agendarProximo(): void {
-    const agora = this.agora();
+    const agora = Date.now();
     const faltam =
       this.ultimoEnvioEm === null
         ? 0
@@ -238,7 +234,7 @@ export class ComentaristaDeBot {
       if (texto === undefined) {
         return;
       }
-      this.ultimoEnvioEm = this.agora();
+      this.ultimoEnvioEm = Date.now();
       this.enviar(texto);
       this.log(`comentário enviado (${this.fila.length} na fila)`);
       if (this.fila.length > 0) {

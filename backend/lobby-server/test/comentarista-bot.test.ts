@@ -16,7 +16,7 @@ import { adaptarSnapshotParaEspelho } from '../src/bots/jogador-bot.ts';
 import type { EstadoDaPartida } from '@flicker/engine';
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared';
 
-function snapshotFresno(): EstadoDaPartidaSnapshot {
+function snapshotFresco(): EstadoDaPartidaSnapshot {
   return {
     tabuleiro: {
       posicionadas: [],
@@ -72,8 +72,8 @@ function snapshotFresno(): EstadoDaPartidaSnapshot {
   };
 }
 
-function estadoFresno(): EstadoDaPartida {
-  return adaptarSnapshotParaEspelho(snapshotFresno());
+function estadoFresco(): EstadoDaPartida {
+  return adaptarSnapshotParaEspelho(snapshotFresco());
 }
 
 const GATILHOS: readonly GatilhoDeComentarioDeBot[] = [
@@ -114,7 +114,7 @@ test('sorteio não repete o texto imediatamente anterior do mesmo gatilho', () =
 // --- Avaliação de gatilhos (pura) --------------------------------------------
 
 test('cada gatilho disparado sobre o espelho antes/depois do fold', () => {
-  const antes = estadoFresno();
+  const antes = estadoFresco();
 
   // Gerador ligado (por qualquer Jogador, aliados incluídos).
   const depoisGerador = { ...antes, geradoresLigados: ['gerador-1'] };
@@ -167,7 +167,7 @@ test('cada gatilho disparado sobre o espelho antes/depois do fold', () => {
 });
 
 test('evento irrelevante não dispara gatilho', () => {
-  const antes = estadoFresno();
+  const antes = estadoFresco();
   const eventosIrrelevantes = [
     { type: 'TURNO_INICIADO', jogadorId: 'ana', rodada: 1 },
     { type: 'PECA_GIRADA', pecaId: 'p1', orientacao: 90 },
