@@ -362,8 +362,12 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
+    // TURNO à parte (flush do lote) antes dos deltas: PECA/PEAO despacham de
+    // imediato e ultrapassariam o TURNO se no mesmo act (reordena).
+    await act(async () => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
@@ -595,7 +599,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     // O rebate: PECA_GIRADA de pecaId de pendência atualiza a orientação no
     // modelo e a derivação da corrente (bandeja) reflete o giro sem re-sync.
     const ws = await partidaDisponivel()
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
       ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
       ws.simulateMessage({
@@ -628,7 +632,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     // o gesto de puxar (donoDoCiclo) e, por derivação, o destaque de vaga.
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogadora-2', rodada: 2 })
       ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-vermelho' })
       ws.simulateMessage({
@@ -659,7 +663,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     // corrente; nenhum estado de erro local é derivado da contagem (a
     // autoridade dela é o engine: Esgotamento da Caixa).
     const ws = await partidaDisponivel()
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
       ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
       ws.simulateMessage({
@@ -687,8 +691,12 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     }
 
     // Turno meu, rodada 2: peão posicionado na Inicial e movido à reta vizinha.
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
+    // TURNO à parte (flush do lote) antes dos deltas: PECA/PEAO despacham de
+    // imediato e ultrapassariam o TURNO se no mesmo act (reordena).
+    await act(async () => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
@@ -859,8 +867,12 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
+    // TURNO à parte (flush do lote) antes dos deltas: PECA/PEAO despacham de
+    // imediato e ultrapassariam o TURNO se no mesmo act (reordena).
+    await act(async () => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
@@ -951,8 +963,12 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
+    // TURNO à parte (flush do lote) antes dos deltas: PECA/PEAO despacham de
+    // imediato e ultrapassariam o TURNO se no mesmo act (reordena).
+    await act(async () => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
@@ -1023,8 +1039,12 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
+    // TURNO à parte (flush do lote) antes dos deltas: PECA/PEAO despacham de
+    // imediato e ultrapassariam o TURNO se no mesmo act (reordena).
+    await act(async () => {
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',

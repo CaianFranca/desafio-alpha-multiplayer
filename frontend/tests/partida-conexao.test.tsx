@@ -599,7 +599,7 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
     // Minha vez (rodada 2): fase "sem movimento" → Permanecer, desabilitado
     // enquanto o peão próprio não é aprendido. O HUD segue oculto (TURNO não
     // carrega jogadores — só o snapshot projeta jogadorPorId).
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
     })
     expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
@@ -621,7 +621,7 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
     expect(azul?.getAttribute('data-ativo')).toBe('false')
 
     // Vez de outro jogador: nenhum botão de ação; HUD segue oculto sem snapshot.
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 })
     })
     expect(screen.queryByTestId('controles-de-turno')).not.toBeInTheDocument()
@@ -659,7 +659,7 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
     // Minha vez (rodada 2) com o peão próprio aprendido.
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
     })
     act(() => {
@@ -732,7 +732,7 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
 
     // Minha vez (rodada 2), peão próprio aprendido mas DESELECIONADO (o fim
     // do turno anterior deseleciona — PEAO_PERMANECEU limpa a seleção).
-    act(() => {
+    await act(async () => {
       ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
     })
     act(() => {
@@ -1021,7 +1021,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
     // Ana vira a Jogadora Ativa: o destaque do Turno passa a ser o dela.
-    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
+    await act(async () => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
     const ativo = await screen.findByTestId('hud-turno-ativo')
     expect(ativo).toHaveAttribute('data-jogador-id', 'jogador-2')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
