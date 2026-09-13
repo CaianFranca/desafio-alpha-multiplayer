@@ -225,6 +225,36 @@ describe('slide-session no apiFetch (issue #376)', () => {
       desinscrever()
     }
   })
+
+  it('transiente em /salas não contamina o 401 legítimo posterior em /me (review PR #383)', async () => {
+    let refreshes = 0
+    mockApi([
+      { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/me', response: () => jsonResponse({}, 401) },
+      {
+        url: '/api/auth/refresh',
+        method: 'POST',
+        response: () => {
+          refreshes += 1
+          // Primeira chamada (do /salas): rede/5xx — transiente. Segunda (do
+          // /me): refresh rejeitado — Sessão inválida de verdade.
+          return refreshes === 1 ? jsonResponse({}, 500) : jsonResponse({}, 401)
+        },
+      },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const primeira = await apiFetch('/api/salas')
+      expect(primeira.status).toBe(401)
+      expect(expirada).not.toHaveBeenCalled()
+      const resultado = await fetchCurrentPlayer()
+      expect(resultado).toEqual({ ok: false, reason: 'invalid-session' })
+      expect(expirada).toHaveBeenCalledTimes(1)
+    } finally {
+      desinscrever()
+    }
+  })
 })
 
 describe('refreshSession (issue #376)', () => {
@@ -347,7 +377,7 @@ describe('calibragem do slide (issue #376)', () => {
 })
 
 describe('slide proativo (issue #376)', () => {
-  it('dispara POST /refresh a cada intervalo sem deslogar', async () => {
+  it('dispara POST /refresh a cada intervalo sem fazer logout', async () => {
     const calls = mockApi([
       { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse(jogador) },
     ])
@@ -409,10 +439,52 @@ describe('slide proativo (issue #376)', () => {
       vi.useRealTimers()
     }
   })
+
+  it('falha transitória não suprime o próximo visibility (review PR #383)', async () => {
+    let refreshes = 0
+    const calls = mockApi([
+      {
+        url: '/api/auth/refresh',
+        method: 'POST',
+        response: () => {
+          refreshes += 1
+          return refreshes === 1 ? jsonResponse({}, 500) : jsonResponse(jogador)
+        },
+      },
+    ])
+    const descritor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
+    vi.useFakeTimers()
+    try {
+      const { unmount } = render(
+        <AuthProvider initialState={mockAuthenticatedState}>
+          <div>autenticado</div>
+        </AuthProvider>,
+      )
+      act(() => {
+        vi.advanceTimersByTime(61_000)
+      })
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      await act(async () => {})
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+      // Primeira tentativa falhou: a volta imediata tenta de novo.
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      await act(async () => {})
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(2)
+      unmount()
+    } finally {
+      if (descritor !== undefined) Object.defineProperty(document, 'visibilityState', descritor)
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('retry manual da Partida (issue #376)', () => {
-  it('duplo clique no Tentar novamente abre um único socket', async () => {
+  it('duplo clique no Tentar novamente abre uma única Conexão à Partida', async () => {
     let resolverRefresh!: (response: Response) => void
     const refreshGate = new Promise<Response>((resolve) => {
       resolverRefresh = resolve
@@ -442,10 +514,47 @@ describe('retry manual da Partida (issue #376)', () => {
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2))
     expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
   })
+
+  it('reconexão automática da Partida aguarda o refresh lento (review PR #383)', async () => {
+    let resolverRefresh!: (response: Response) => void
+    const refreshGate = new Promise<Response>((resolve) => {
+      resolverRefresh = resolve
+    })
+    mockApi([{ url: '/api/auth/refresh', method: 'POST', response: () => refreshGate }])
+    MockWebSocket.clean()
+    const router = createMemoryRouter([{ path: '/partida', element: <PartidaPage /> }], {
+      initialEntries: ['/partida?serverId=server-1&partidaId=partida-1'],
+    })
+    render(
+      <AuthProvider initialState={mockAuthenticatedState}>
+        <RouterProvider router={router} />
+      </AuthProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    vi.useFakeTimers()
+    try {
+      act(() => {
+        MockWebSocket.last()!.simulateClose()
+      })
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      await act(async () => {})
+      // Refresh ainda pende: sem segunda conexão.
+      expect(MockWebSocket.instances).toHaveLength(1)
+      await act(async () => {
+        resolverRefresh(jsonResponse(jogador))
+      })
+      await act(async () => {})
+      expect(MockWebSocket.instances).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('reconexão do lobby (issue #376)', () => {
-  it('fechamento do socket tenta renovar a Sessão antes de reconectar', async () => {
+  it('fechamento da conexão tenta renovar a Sessão antes de reconectar', async () => {
     const calls = mockApi([
       { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse(jogador) },
     ])
@@ -466,6 +575,42 @@ describe('reconexão do lobby (issue #376)', () => {
       act(() => {
         vi.advanceTimersByTime(1000)
       })
+      await act(async () => {})
+      expect(MockWebSocket.instances).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('refresh lento (>1s) segura a reconexão até assentar (review PR #383)', async () => {
+    let resolverRefresh!: (response: Response) => void
+    const refreshGate = new Promise<Response>((resolve) => {
+      resolverRefresh = resolve
+    })
+    mockApi([{ url: '/api/auth/refresh', method: 'POST', response: () => refreshGate }])
+    MockWebSocket.clean()
+    const router = createMemoryRouter(routes, { initialEntries: ['/salas/criar'] })
+    render(
+      <AuthProvider initialState={mockAuthenticatedState}>
+        <RouterProvider router={router} />
+      </AuthProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    vi.useFakeTimers()
+    try {
+      act(() => {
+        MockWebSocket.last()!.simulateClose()
+      })
+      // Timer de 1s correu, mas o refresh ainda pende: sem segunda conexão.
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      await act(async () => {})
+      expect(MockWebSocket.instances).toHaveLength(1)
+      await act(async () => {
+        resolverRefresh(jsonResponse(jogador))
+      })
+      await act(async () => {})
       expect(MockWebSocket.instances).toHaveLength(2)
     } finally {
       vi.useRealTimers()
