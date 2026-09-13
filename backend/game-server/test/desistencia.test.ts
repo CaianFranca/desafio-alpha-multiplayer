@@ -281,6 +281,8 @@ test('desistência fora do turno remove peão e vez sem trocar o Ativo', async (
     type: 'DESISTENCIA_REGISTRADA',
     jogadorId: 'jogador-4',
     peaoId: 'peao-amarelo',
+    // Causa explícita (#295): o ato explícito sempre viaja com a causa.
+    causa: 'desistencia',
   });
 
   // Snapshot pós-remoção consistente (N−1, com apelidos do roster).
@@ -318,6 +320,8 @@ test('desistência parcial avisa o lobby para desvincular só o desistente, sem 
       partidaId,
       serverId: 'game-server-teste-desistencia',
       jogadorId: 'jogador-4',
+      // Causa informativa do parcial (#295): ato explícito.
+      causa: 'desistencia',
     },
   ]);
   assert.equal(avisos.length, 0, '4→3 continua: sem callback de Retorno');
@@ -481,6 +485,8 @@ test('2→1 declara derrota por desistência e dispara o Retorno uma única vez'
       partidaId,
       serverId: 'game-server-teste-desistencia',
       jogadorId: 'jogador-2',
+      // Causa informativa do detach pré-retorno (#295): ato explícito.
+      causa: 'desistencia',
     },
   ]);
   assert.equal(avisos.length, 1);
@@ -640,6 +646,7 @@ test('ator é a sessão: jogadorId alheio no wire não desiste por outro', async
     type: 'DESISTENCIA_REGISTRADA',
     jogadorId: 'jogador-1',
     peaoId: 'peao-branco',
+    causa: 'desistencia',
   });
 });
 

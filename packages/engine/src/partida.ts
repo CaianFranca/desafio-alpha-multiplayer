@@ -239,10 +239,18 @@ export interface ResgateRealizadoEvento {
 // andamento; o peão indicado foi removido (a célula fica livre) e a vez saiu
 // da ordem. Abre o lote do comando, antes de celulas_iluminadas,
 // limpeza_aplicada e da Passagem de Vez (quando o desistente era o Ativo).
+// Causa (issue #295): 'desistencia' = ato explícito do Jogador,
+// 'expiracao' = conversão automática da janela de reconexão em andamento.
+// Ausente = 'desistencia' implícita (compat com payloads/binários antigos).
+// Alias local por pacote: o shared declara o próprio alias com o mesmo shape
+// — sync manual entre os dois (o shared não pode depender do engine).
+export type CausaDesistencia = 'desistencia' | 'expiracao';
+
 export interface DesistenciaRegistradaEvento {
   readonly tipo: 'desistencia_registrada';
   readonly jogadorId: string;
   readonly peaoId: string;
+  readonly causa?: CausaDesistencia;
 }
 
 // Término (issue #176): emitido no máximo uma vez, sempre como ÚLTIMO evento

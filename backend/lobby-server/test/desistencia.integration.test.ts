@@ -212,6 +212,24 @@ test('desistencia valida payload e sala existente', async()=>{
   }, {ofertarEncaminhamento: ofertarStub});
 });
 
+test('desistencia aceita causa informativa sem mudar o detach; causa inválida é 400', async()=>{
+  const ofertarStub=async ():Promise<AceiteDoEncaminhamento>=> ({partidaId:'partida-des-5', serverId:'server-des-5'});
+  await comServidor(async ({baseUrl,wsUrl})=>{
+    const {b,salaId,serverId,partidaId,wsA,wsB}=await montarSalaEncaminhada(baseUrl, wsUrl);
+    // Causa explícita: detach idêntico ao sem causa.
+    const r1 = await postDesistencia(baseUrl, { salaId, partidaId, serverId, jogadorId: b.id, causa: 'desistencia' }, tokenServico());
+    assert.equal(r1.status, 200, `desistencia com causa falhou: ${r1.texto}`);
+    assert.deepEqual(JSON.parse(r1.texto), { desvinculado: true });
+    const ev = await esperarTipo(wsB,'MEMBRO_SAIU',3000) as {jogadorId:string};
+    assert.equal(ev.jogadorId, b.id);
+    // Causa inválida: 400 sem efeito.
+    const r2 = await postDesistencia(baseUrl, { salaId, partidaId, serverId, jogadorId: b.id, causa: 'abandono' }, tokenServico());
+    assert.equal(r2.status, 400);
+    wsA.close(); wsB.close();
+    await Promise.all([wsA,wsB].map(ws=>esperarClose(ws).catch(()=>undefined)));
+  }, {ofertarEncaminhamento: ofertarStub});
+});
+
 test('guarda 401: sem service token em produção é recusado', async()=>{
   const ofertarStub=async ():Promise<AceiteDoEncaminhamento>=> ({partidaId:'partida-des-4', serverId:'server-des-4'});
   const originalEnv=process.env.NODE_ENV;

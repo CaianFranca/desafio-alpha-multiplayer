@@ -15,6 +15,7 @@ export interface Config {
   partidaPreparadaTtlSegundos: number;
   partidaTerminadaTtlSegundos: number;
   partidaNaoInicioSegundos: number;
+  partidaReconexaoEmAndamentoSegundos: number;
   lobbyRetornoCallbackUrl: string;
   lobbyDesistenciaCallbackUrl: string;
   postgres: {
@@ -48,6 +49,7 @@ const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
+const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -133,16 +135,41 @@ function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
   return parseTtlSegundos(raw, DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS, 'PARTIDA_TERMINADA_TTL_SEGUNDOS');
 }
 
-function parsePartidaNaoInicioSegundos(raw: string | undefined): number {
-  const fallback = DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS;
+/**
+ * Parser inteiro genérico dos TTLs de partida com faixa mínima/máxima:
+ * devolve o valor quando inteiro dentro da faixa, senão o fallback (com warn
+ * só quando a env veio definida mas inválida — ausente cai silenciosamente no
+ * default, como os demais parsers deste módulo).
+ */
+function parseInteiroComLimites(
+  raw: string | undefined,
+  fallback: number,
+  label: string,
+  minimo: number,
+  maximo?: number,
+): number {
   const parsed = Number(raw ?? fallback);
-  if (Number.isInteger(parsed) && parsed >= 10 && parsed <= 600) {
+  if (Number.isInteger(parsed) && parsed >= minimo && (maximo === undefined || parsed <= maximo)) {
     return parsed;
   }
   if (raw !== undefined) {
-    console.warn(`[config] PARTIDA_NAO_INICIO_SEGUNDOS inválido "${raw}" — usando fallback ${fallback} (10..600)`);
+    const faixa = maximo === undefined ? `(>=${minimo})` : `(${minimo}..${maximo})`;
+    console.warn(`[config] ${label} inválido "${raw}" — usando fallback ${fallback} ${faixa}`);
   }
   return fallback;
+}
+
+function parsePartidaNaoInicioSegundos(raw: string | undefined): number {
+  return parseInteiroComLimites(raw, DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS, 'PARTIDA_NAO_INICIO_SEGUNDOS', 10, 600);
+}
+
+function parsePartidaReconexaoEmAndamentoSegundos(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS,
+    'PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS',
+    1,
+  );
 }
 
 function parseLobbyRetornoCallbackUrl(raw: string | undefined, fallback: string): string {
@@ -284,6 +311,9 @@ export function getConfig(): Config {
   const partidaNaoInicioSegundos = parsePartidaNaoInicioSegundos(
     process.env.PARTIDA_NAO_INICIO_SEGUNDOS as string | undefined,
   );
+  const partidaReconexaoEmAndamentoSegundos = parsePartidaReconexaoEmAndamentoSegundos(
+    process.env.PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS as string | undefined,
+  );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
@@ -361,6 +391,7 @@ export function getConfig(): Config {
     partidaPreparadaTtlSegundos,
     partidaTerminadaTtlSegundos,
     partidaNaoInicioSegundos,
+    partidaReconexaoEmAndamentoSegundos,
     lobbyRetornoCallbackUrl,
     lobbyDesistenciaCallbackUrl,
     postgres,
