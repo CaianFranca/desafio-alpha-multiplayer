@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { comBase } from './basePath'
 import { apiFetch, consumirRefreshTransiente, renovarSessao } from './client'
 
 /**
@@ -144,7 +145,9 @@ async function rawAuthPost(
   payload: CadastroPayload | CredenciaisPayload,
 ): Promise<Response | null> {
   try {
-    return await fetch(path, {
+    // Fetch bruto de propósito (não dispara onSessionExpired em 401/409), por
+    // isso o subpath vem daqui e não do apiFetch.
+    return await fetch(comBase(path), {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

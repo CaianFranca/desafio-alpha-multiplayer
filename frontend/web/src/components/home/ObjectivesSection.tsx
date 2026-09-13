@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { objectives } from './placeholders'
+import { comBase } from '../../api/basePath'
 
 function useReveal<T extends HTMLElement>() {
   const ref = useRef<T | null>(null)
@@ -67,7 +68,7 @@ const OBJECTIVE_NODES: Record<ObjectiveIcon, { label: string; className: string;
       'border-solid border-cyan-400/70 bg-cyan-400/10 text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.35)]',
     content: (
       <img
-        src="/assets/door_open_icon.svg"
+        src={comBase('/assets/door_open_icon.svg')}
         alt=""
         aria-hidden="true"
         className="objectives-item-node-icon"

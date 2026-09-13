@@ -1,3 +1,5 @@
+import { comBase } from './basePath'
+
 type SessionExpiredListener = () => void
 
 const sessionExpiredListeners = new Set<SessionExpiredListener>()
@@ -36,7 +38,8 @@ let refreshEmVoo: Promise<ResultadoRefresh> | null = null
 
 async function executarRefreshBruto(): Promise<ResultadoRefresh> {
   try {
-    const response = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+    // Subpath (VITE_BASE_PATH): o refresh acompanha o prefixo do app.
+    const response = await fetch(comBase('/api/auth/refresh'), { method: 'POST', credentials: 'include' })
     if (response.ok) return 'renovada'
     return response.status === 401 ? 'invalida' : 'transiente'
   } catch {
@@ -142,7 +145,11 @@ function notificarSessaoExpirada(): void {
  * notificam os assinantes para voltar a Visitante.
  */
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, { credentials: 'include', ...init })
+  // Subpath (VITE_BASE_PATH): strings relativas (`/api/...`) ganham o base do
+  // build; `Request`/`URL` e URLs absolutas passam intactas (comBase só mexe
+  // no que começa com `/`).
+  const alvo = typeof input === 'string' ? comBase(input) : input
+  const response = await fetch(alvo, { credentials: 'include', ...init })
   if (response.status !== 401) return response
   if (ehRotaDeAuthSemRetry(input)) {
     notificarSessaoExpirada()
@@ -164,7 +171,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   }
   let repetida: Response
   try {
-    repetida = await fetch(input, { credentials: 'include', ...init })
+    repetida = await fetch(alvo, { credentials: 'include', ...init })
   } catch {
     // Rede caiu entre o refresh e o retry: mesma postura transitória.
     marcarRefreshTransiente()

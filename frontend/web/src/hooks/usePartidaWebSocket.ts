@@ -81,8 +81,25 @@ export interface UsePartidaWebSocketReturn {
   /**
    * Envia comando pelo canal (fila até o open). Apenas PartidaComandoDoCliente
    * com jogadorId — legado Tabuleiro/Peao sem jogadorId removido (#156).
+   * Devolve 'enviado' (socket OPEN) ou 'enfileirado' (handshake/reconexão) —
+   * a desistência (issue #290, R2) usa o retorno para aguardar o OPEN antes
+   * de desconectar.
    */
-  enviar: (comando: PartidaComandoDoCliente) => void
+  enviar: (comando: PartidaComandoDoCliente) => 'enviado' | 'enfileirado'
+  /**
+   * Aguarda a conexão abrir até o teto (R2). Resolve `true` imediato se já
+   * OPEN, `true` no próximo `open`, `false` no timeout ou no unmount. Sem
+   * `timeoutMs`, espera até o open/unmount (saída com retry visível da
+   * desistência — issue #290). Usado só pela desistência — o jogo normal
+   * segue enfileirando sem esperar.
+   */
+  aguardarConexao: (timeoutMs?: number) => Promise<boolean>
+  /**
+   * Remove comandos enfileirados por tipo (issue #290, R2): o "Cancelar" do
+   * "saindo" desiste da desistência antes do open — sem isso, o drain do open
+   * enviaria um DESISTIR já cancelado pelo usuário.
+   */
+  removerPendentesPorTipo: (tipo: PartidaComandoDoCliente['type']) => void
 }
 
 interface UsePartidaWebSocketOptions {
@@ -139,6 +156,8 @@ export function usePartidaWebSocket({
   const reconnectTimerRef = useRef<number | null>(null)
   // Comandos enfileirados enquanto o socket ainda não está aberto (handshake).
   const comandosPendentesRef = useRef<PartidaComandoDoCliente[]>([])
+  // Esperas de conexão da desistência (R2): resolvidas com `true` a cada open.
+  const esperasDeConexaoRef = useRef<Array<(abriu: boolean) => void>>([])
   // Booleano de montado para impedir setState/reconexão após unmount.
   const montadoRef = useRef(true)
   // Refs dos callbacks: estáveis por instância, sem recriar o efeito.
@@ -217,6 +236,16 @@ export function usePartidaWebSocket({
       comandosPendentesRef.current = []
       for (const comando of pendentes) {
         ws.send(JSON.stringify(comando))
+      }
+      // Desistência (R2): acorda quem aguarda o OPEN.
+      const esperas = esperasDeConexaoRef.current
+      esperasDeConexaoRef.current = []
+      for (const resolver of esperas) {
+        try {
+          resolver(true)
+        } catch {
+          // ignora
+        }
       }
       // Stream de debug do backend (issue #340): o escopo é a Partida da
       // conexão (o `partida-id` do upgrade); enviado a cada open/reconexão.
@@ -382,28 +411,72 @@ export function usePartidaWebSocket({
       desinscreverAtivacao()
       desinscreverDesativacao()
       montadoRef.current = false
+      const esperas = esperasDeConexaoRef.current
+      esperasDeConexaoRef.current = []
+      for (const resolver of esperas) {
+        try {
+          resolver(false)
+        } catch {
+          // ignora
+        }
+      }
       encerrarConexao()
     }
   }, [conectar, encerrarConexao])
 
   const desconectar = useCallback(() => {
-    comandosPendentesRef.current = []
+    // Preserva DESISTIR_DA_PARTIDA enfileirado (#290, R2): no timeout do
+    // aguardarConexao a página navega mesmo assim, mas o comando continua
+    // válido para a próxima abertura do socket em vez de ser descartado em
+    // silêncio. Demais comandos de contexto anterior são descartados.
+    comandosPendentesRef.current = comandosPendentesRef.current.filter(
+      (comando) => comando.type === 'DESISTIR_DA_PARTIDA',
+    )
     encerrarConexao()
   }, [encerrarConexao])
 
-  const enviar = useCallback((comando: PartidaComandoDoCliente) => {
+  const enviar = useCallback((comando: PartidaComandoDoCliente): 'enviado' | 'enfileirado' => {
     // Captura de saída no stream de depuração (issue #340): fonte `ws→`,
     // contexto `partida`, payload truncado.
     coletar('ws→', 'info', () => resumirPayload(comando), 'partida')
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(comando))
-    } else {
-      // Socket ainda conectando (handshake/reconexão): enfileira para enviar
-      // no próximo open, evitando perder o comando silenciosamente.
-      comandosPendentesRef.current = [...comandosPendentesRef.current, comando]
+      return 'enviado'
     }
+    // Socket ainda conectando (handshake/reconexão): enfileira para enviar
+    // no próximo open, evitando perder o comando silenciosamente.
+    comandosPendentesRef.current = [...comandosPendentesRef.current, comando]
+    return 'enfileirado'
   }, [])
 
-  return { conectar, desconectar, enviar }
+  const aguardarConexao = useCallback((timeoutMs?: number): Promise<boolean> => {
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(true)
+    return new Promise<boolean>((resolver) => {
+      let timer: number | undefined
+      const resolverFinal = (abriu: boolean) => {
+        if (timer !== undefined) window.clearTimeout(timer)
+        resolver(abriu)
+      }
+      // Sem teto: espera até o open (o cleanup no unmount resolve `false`).
+      if (timeoutMs !== undefined) {
+        timer = window.setTimeout(() => {
+          const pendentes = esperasDeConexaoRef.current
+          const indice = pendentes.indexOf(resolverFinal)
+          if (indice >= 0) pendentes.splice(indice, 1)
+          resolver(false)
+        }, timeoutMs)
+      }
+      esperasDeConexaoRef.current = [...esperasDeConexaoRef.current, resolverFinal]
+    })
+  }, [])
+
+  const removerPendentesPorTipo = useCallback((tipo: PartidaComandoDoCliente['type']) => {
+    comandosPendentesRef.current = comandosPendentesRef.current.filter(
+      (comando) => comando.type !== tipo,
+    )
+  }, [])
+
+  return { conectar, desconectar, enviar, aguardarConexao, removerPendentesPorTipo }
 }

@@ -8,7 +8,7 @@
   .hero-media {
     position: absolute;
     inset: -14% 0;
-    background: var(--background-image-hero) center 35% / cover no-repeat, var(--color-background);
+    background: var(--scene-hero-image) center 35% / cover no-repeat, var(--color-background);
     will-change: transform;
   }
 
@@ -413,7 +413,7 @@
   .final-cta-media {
     position: absolute;
     inset: -14% 0;
-    background: var(--background-image-hero) center 60% / cover no-repeat, var(--color-background);
+    background: var(--scene-hero-image) center 60% / cover no-repeat, var(--color-background);
     will-change: transform;
   }
   .final-cta-media::after {
@@ -434,7 +434,7 @@
     position: absolute;
     inset: 0;
     overflow: hidden;
-    background: var(--background-image-auth) center / cover no-repeat, var(--color-background);
+    background: var(--scene-auth-image) center / cover no-repeat, var(--color-background);
   }
   .auth-media::after {
     content: "";

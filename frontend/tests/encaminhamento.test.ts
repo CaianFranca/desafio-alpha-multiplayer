@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { buildGameRedirectHref, urlsDoAlvo } from '../web/src/api/encaminhamento'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildGameRedirectHref, buildGameWsUrl, urlsDoAlvo } from '../web/src/api/encaminhamento'
 
 describe('encaminhamento: redirect para /partida (issue #329)', () => {
   it('sem código mantém o formato anterior (compat com links antigos)', () => {
@@ -19,5 +19,30 @@ describe('encaminhamento: redirect para /partida (issue #329)', () => {
     const { href } = urlsDoAlvo('s', 'p', 'A3K9M2')
     expect(href).toContain('codigoDeSala=A3K9M2')
     expect(urlsDoAlvo('s', 'p').href).not.toContain('codigoDeSala')
+  })
+})
+
+describe('encaminhamento: WS respeita o subpath (VITE_BASE_PATH)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('com base / mantém /ws/game/... na raiz (sem regressão)', () => {
+    const url = buildGameWsUrl('s', 'p')
+    expect(url).toContain('/ws/game/s?partida-id=p')
+    expect(url).not.toContain('/server01/')
+  })
+
+  it('com base /server01/ prefixa o path do WS uma única vez', () => {
+    vi.stubEnv('BASE_URL', '/server01/')
+    const url = buildGameWsUrl('s', 'p')
+    expect(url).toContain('/server01/ws/game/s?partida-id=p')
+    // Sem barra dupla vinda da concatenação host + base.
+    expect(url).not.toContain('//ws/game')
+  })
+
+  it('href da rota SPA fica a cargo do basename do router (não recebe o base)', () => {
+    vi.stubEnv('BASE_URL', '/server01/')
+    expect(buildGameRedirectHref('s', 'p', 'A3K9M2')).toBe(
+      '/partida?serverId=s&partidaId=p&codigoDeSala=A3K9M2',
+    )
   })
 })

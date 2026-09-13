@@ -4,6 +4,7 @@ import { useAuth } from '../../state/useAuth'
 import { useSalaWebSocketContext } from '../../state/sala-web-socket-context'
 import { criarSalaLabel, retornarParaSalaLabel } from '../auth/AuthActions'
 import { rolarSecaoParaCentro } from '../../utils/rolagemDeSecao'
+import { comBase } from '../../api/basePath'
 
 const styleBotaoSair = 'site-header__cta site-header__logout'
 const styleVoltar = 'site-header__cta'
@@ -105,7 +106,7 @@ export function Header() {
               >
                 Sair
                 <img
-                  src="/assets/door_open_icon.svg"
+                  src={comBase('/assets/door_open_icon.svg')}
                   alt=""
                   aria-hidden="true"
                   className="site-header__logout-icon"

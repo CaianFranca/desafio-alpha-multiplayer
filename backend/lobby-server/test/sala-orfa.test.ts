@@ -165,7 +165,7 @@ function estadoEncaminhado(): EstadoDoLobby {
   estado = aplicar(estado, { tipo: 'alternar_prontidao', salaId: 'sala-1', jogadorId: 'jogador-2' });
   estado = aplicar(estado, { tipo: 'encaminhar_sala', salaId: 'sala-1', anfitriaoMembroId: 'membro-1' });
   // A oferta não congela; o aceite fixa o estado em `encaminhada`.
-  return aplicar(estado, { tipo: 'aceitar_encaminhamento', salaId: 'sala-1' });
+  return aplicar(estado, { tipo: 'aceitar_encaminhamento', salaId: 'sala-1', rosterOfertado: ['jogador-1', 'jogador-2'] });
 }
 
 function handlersComOrfa(
