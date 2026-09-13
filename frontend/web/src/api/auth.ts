@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { comBase } from './basePath'
-import { apiFetch, consumirRefreshTransiente, renovarSessao } from './client'
+import { apiFetch, lerResultadoRefresh, renovarSessao } from './client'
 
 /**
  * POST /api/auth/refresh — slide-session (issue #376): renova os cookies da
@@ -68,8 +68,10 @@ export async function fetchCurrentPlayer(): Promise<PlayerResult> {
   }
   if (response.status === 401) {
     // Refresh transitório (rede/5xx, issue #376): a Sessão pode estar viva —
-    // marca `transiente` para a reidratação retentar em vez de deslogar.
-    if (consumirRefreshTransiente()) return { ok: false, reason: 'unknown-failure', transiente: true }
+    // o resultado vem anexado à própria resposta (escopo por request, sem
+    // flag global — review PR #383), para a reidratação retentar em vez de deslogar.
+    if (lerResultadoRefresh(response) === 'transiente')
+      return { ok: false, reason: 'unknown-failure', transiente: true }
     return { ok: false, reason: 'invalid-session' }
   }
   if (!response.ok) return { ok: false, reason: 'unknown-failure' }

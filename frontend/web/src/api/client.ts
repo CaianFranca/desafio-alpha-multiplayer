@@ -65,28 +65,26 @@ export function renovarSessao(): Promise<boolean> {
 }
 
 /**
- * Marca do último refresh transitório: como a flag é global, qualquer 401
- * observado enquanto ela está armada é ambíguo — o lado seguro é tratá-lo
- * como falha desconhecida, nunca como morte da Sessão. Consumida por
- * `fetchCurrentPlayer` (auth.ts) logo após o 401.
+ * Resultado do refresh anexado à resposta 401 que o originou (slide-session,
+ * issue #376, review PR #383): escopo por request — cada `Response`
+ * devolvida carrega o próprio resultado, sem mutável global compartilhado
+ * entre chamadas concorrentes ou sequenciais distintas.
  */
-let refreshTransientePendente = false
+const RESULTADO_REFRESH = Symbol('resultadoRefresh')
 
-function marcarRefreshTransiente(): void {
-  refreshTransientePendente = true
+/** Lê o resultado do refresh anexado a uma resposta do `apiFetch`. */
+export function lerResultadoRefresh(resposta: Response): ResultadoRefresh | undefined {
+  return (resposta as unknown as Record<symbol, ResultadoRefresh | undefined>)[RESULTADO_REFRESH]
 }
 
-/** Lê e limpa a marca de refresh transitório (uso de auth.ts e testes). */
-export function consumirRefreshTransiente(): boolean {
-  const pendente = refreshTransientePendente
-  refreshTransientePendente = false
-  return pendente
+function anexarResultadoRefresh(resposta: Response, resultado: ResultadoRefresh): Response {
+  ;(resposta as unknown as Record<symbol, ResultadoRefresh>)[RESULTADO_REFRESH] = resultado
+  return resposta
 }
 
-/** Reseta o single-flight e a marca transitória (uso exclusivo em testes). */
+/** Reseta o single-flight (uso exclusivo em testes). */
 export function __redefinirRefreshEmVooParaTestes(): void {
   refreshEmVoo = null
-  refreshTransientePendente = false
 }
 
 /**
@@ -166,16 +164,14 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     return response
   }
   if (resultado === 'transiente') {
-    marcarRefreshTransiente()
-    return response
+    return anexarResultadoRefresh(response, resultado)
   }
   let repetida: Response
   try {
     repetida = await fetch(alvo, { credentials: 'include', ...init })
   } catch {
     // Rede caiu entre o refresh e o retry: mesma postura transitória.
-    marcarRefreshTransiente()
-    return response
+    return anexarResultadoRefresh(response, 'transiente')
   }
   if (repetida.status === 401) notificarSessaoExpirada()
   return repetida
