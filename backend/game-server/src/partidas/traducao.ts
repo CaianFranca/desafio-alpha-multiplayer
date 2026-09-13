@@ -163,7 +163,17 @@ export function traduzirEventos(
       case 'ataque_resolvido':
         saida.push({
           type: 'ATAQUE_RESOLVIDO',
-          atacantes: evento.atacantes,
+          atacantes: evento.atacantes.map((atacante) => ({
+            pecaId: atacante.pecaId,
+            tipo: atacante.tipo,
+            peoesNoAlcance: atacante.peoesNoAlcance,
+            // Issue #384: repassa as peças no alcance quando presentes; ??
+            // [] como fallback de binário antigo (mesmo padrão de
+            // `protegido ?? false`).
+            pecasNoAlcance:
+              (atacante as { pecasNoAlcance?: readonly string[] })
+                .pecasNoAlcance ?? [],
+          })),
           peoesAtingidos: evento.peoesAtingidos,
           protegidos: evento.protegidos,
           estadosAplicados: evento.estadosAplicados,

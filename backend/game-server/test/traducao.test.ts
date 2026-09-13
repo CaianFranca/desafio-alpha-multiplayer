@@ -43,8 +43,8 @@ test('traduzirEventos mapeia ataque_resolvido para ATAQUE_RESOLVIDO com estadosA
     {
       tipo: 'ataque_resolvido',
       atacantes: [
-        { pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] },
-        { pecaId: 'espectro-1', tipo: 'espectro', peoesNoAlcance: ['peao-branco'] },
+        { pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['reta-1'] },
+        { pecaId: 'espectro-1', tipo: 'espectro', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['reta-1'] },
       ],
       peoesAtingidos: ['peao-branco'],
       protegidos: [],
@@ -58,8 +58,8 @@ test('traduzirEventos mapeia ataque_resolvido para ATAQUE_RESOLVIDO com estadosA
   assert.deepEqual(saida[0], {
     type: 'ATAQUE_RESOLVIDO',
     atacantes: [
-      { pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] },
-      { pecaId: 'espectro-1', tipo: 'espectro', peoesNoAlcance: ['peao-branco'] },
+      { pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['reta-1'] },
+      { pecaId: 'espectro-1', tipo: 'espectro', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['reta-1'] },
     ],
     peoesAtingidos: ['peao-branco'],
     protegidos: [],
@@ -75,7 +75,7 @@ test('traduzirEventos mapeia ataque_resolvido sem alvos com estadosAplicados vaz
   const eventos = [
     {
       tipo: 'ataque_resolvido',
-      atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [] }],
+      atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [], pecasNoAlcance: ['reta-1'] }],
       peoesAtingidos: [],
       protegidos: [],
       estadosAplicados: [],
@@ -85,8 +85,32 @@ test('traduzirEventos mapeia ataque_resolvido sem alvos com estadosAplicados vaz
   assert.equal(saida.length, 1);
   assert.deepEqual(saida[0], {
     type: 'ATAQUE_RESOLVIDO',
-    atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [] }],
+    atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [], pecasNoAlcance: ['reta-1'] }],
     peoesAtingidos: [],
+    protegidos: [],
+    estadosAplicados: [],
+  });
+});
+
+test('traduzirEventos tolera ataque_resolvido de binário antigo sem pecasNoAlcance', () => {
+  // Compat wire (issue #384): servidor antigo omite o campo — a tradução
+  // emite [] sem quebrar (mesmo padrão de `protegido ?? false`); nenhum
+  // cliente precisa do campo para julgar jogadas.
+  const legado = {
+    tipo: 'ataque_resolvido',
+    atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] }],
+    peoesAtingidos: ['peao-branco'],
+    protegidos: [],
+    estadosAplicados: [],
+  } as unknown as EventoDaPartida;
+  const saida = traduzirEventos([legado]);
+  assert.equal(saida.length, 1);
+  assert.deepEqual(saida[0], {
+    type: 'ATAQUE_RESOLVIDO',
+    atacantes: [
+      { pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: [] },
+    ],
+    peoesAtingidos: ['peao-branco'],
     protegidos: [],
     estadosAplicados: [],
   });

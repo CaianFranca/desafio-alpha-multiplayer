@@ -768,7 +768,7 @@ test('ataque: entrada no alcance atinge todos os peões de jogadores dentro dele
   assert.ok(ataque, 'a confirmação com entrada no alcance deveria disparar o ataque');
   if (!ataque) return;
   assert.deepEqual(ataque.atacantes, [
-    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco', 'peao-vermelho'] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco', 'peao-vermelho'], pecasNoAlcance: ['reta-y', 'reta-1'] },
   ]);
   // Todos os peões de jogadores dentro do alcance são atingidos — não só o
   // que entrou.
@@ -813,7 +813,7 @@ test('ataque: saída do alcance dispara sem atingir quem saiu e atingindo quem p
   assert.ok(ataque2, 'a saída do alcance deveria disparar o ataque');
   if (!ataque2) return;
   assert.deepEqual(ataque2.atacantes, [
-    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-azul'] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-azul'], pecasNoAlcance: ['reta-y', 't-x'] },
   ]);
   assert.deepEqual(ataque2.peoesAtingidos, ['peao-azul']);
   assert.deepEqual(segundo.estado.peoesNoAlcance, { 'espectro-x': ['peao-azul'] });
@@ -854,7 +854,7 @@ test('ataque: saída com ninguém restante ainda dispara o ataque (critério 4 �
   assert.ok(ataque2, 'a saída deveria disparar o ataque mesmo sem atingidos');
   if (!ataque2) return;
   assert.deepEqual(ataque2.atacantes, [
-    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: [] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: [], pecasNoAlcance: ['t-x'] },
   ]);
   assert.deepEqual(ataque2.peoesAtingidos, []);
   assert.deepEqual(segundo.estado.peoesNoAlcance, { 'espectro-x': [] });
@@ -938,7 +938,7 @@ test('posicionamento de peça que estende o alcance não dispara; o ataque ocorr
   assert.ok(ataque, 'o atuante dentro do raio estendido dispara ao agir');
   if (!ataque) return;
   assert.deepEqual(ataque.atacantes, [
-    { pecaId: 'vulto-x', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] },
+    { pecaId: 'vulto-x', tipo: 'vulto', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['reta-7', 'reta-1', 'inicial-1'] },
   ]);
   assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
   assert.deepEqual(gatilho.estado.peoesNoAlcance, { 'vulto-x': ['peao-branco'] });
@@ -968,8 +968,8 @@ test('ataques simultâneos de vulto e espectro resolvem juntos; a Proteção é 
   if (!resolucao.evento) return;
   // Dois atacantes no MESMO evento: Vulto e Espectro resolvem juntos.
   assert.deepEqual(resolucao.evento.atacantes, [
-    { pecaId: 'vulto-x', tipo: 'vulto', peoesNoAlcance: ['peao-vermelho'] },
-    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-azul'] },
+    { pecaId: 'vulto-x', tipo: 'vulto', peoesNoAlcance: ['peao-vermelho'], pecasNoAlcance: ['reta-a'] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-azul'], pecasNoAlcance: ['reta-b'] },
   ]);
   // A Proteção de bruno nega o ataque do Vulto e é consumida UMA única vez;
   // carla (sem Proteção) é atingida normalmente.
@@ -1057,7 +1057,7 @@ test('confirmação sobre a sala médica concede a Proteção após o ataque do 
   assert.ok(ataque2, 'a saída deveria disparar o ataque contra quem permanece');
   if (!ataque2) return;
   assert.deepEqual(ataque2.atacantes, [
-    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['escada-1', 'sala-x'] },
   ]);
   assert.deepEqual(ataque2.peoesAtingidos, []);
   assert.deepEqual(ataque2.protegidos, ['ana']);
@@ -1255,7 +1255,7 @@ test('posicionar monstro não dispara ataque, mesmo com peão no alcance; o ataq
   assert.ok(ataque, 'o atuante dentro do alcance dispara ao agir');
   if (!ataque) return;
   assert.deepEqual(ataque.atacantes, [
-    { pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] },
+    { pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['inicial-1'] },
   ]);
   assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
   assert.deepEqual(gatilho.estado.peoesNoAlcance, { 'vulto-1': ['peao-branco'] });
@@ -1334,7 +1334,7 @@ test('PERMANECER dentro do alcance dispara o ataque antes de turno_encerrado (is
   assert.ok(ataque, 'permanecer dentro deveria disparar');
   if (!ataque) return;
   assert.deepEqual(ataque.atacantes, [
-    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['reta-1'] },
   ]);
   assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
   // Ordem do lote: ataque_resolvido ANTES de turno_encerrado (issue #236).
@@ -1402,7 +1402,7 @@ test('Primeiro Turno: posicionar o peão dentro do alcance é entrada (issue #23
   assert.ok(ataque, 'posicionar o peão dentro do alcance no Primeiro Turno é entrada');
   if (!ataque) return;
   assert.deepEqual(ataque.atacantes, [
-    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['inicial-1'] },
   ]);
   assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
   // Penalidade #170 com eco #173: Espectro drena 3 → 2.
@@ -1436,7 +1436,7 @@ test('PERMANECER dentro do alcance: a Proteção é consumida uma única vez e n
   assert.ok(ataque, 'permanecer dentro deveria disparar');
   if (!ataque) return;
   assert.deepEqual(ataque.atacantes, [
-    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'] },
+    { pecaId: 'espectro-x', tipo: 'espectro', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['reta-1'] },
   ]);
   // Protegida: atingida no ataque (negado), Proteção consumida, sem
   // penalidade — fora do estadosAplicados.
@@ -1468,7 +1468,7 @@ test('PERMANECER dentro do alcance do Vulto: Baixa Iluminação nova reaplica a 
   assert.ok(ataque, 'permanecer dentro do raio do Vulto deveria disparar');
   if (!ataque) return;
   assert.deepEqual(ataque.atacantes, [
-    { pecaId: 'vulto-x', tipo: 'vulto', peoesNoAlcance: ['peao-branco'] },
+    { pecaId: 'vulto-x', tipo: 'vulto', peoesNoAlcance: ['peao-branco'], pecasNoAlcance: ['reta-1', 'inicial-1'] },
   ]);
   assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
   assert.deepEqual(ataque.estadosAplicados, [

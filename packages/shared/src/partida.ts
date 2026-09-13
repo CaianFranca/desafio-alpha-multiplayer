@@ -426,11 +426,15 @@ export interface PartidaTerminadaWireEvento {
 }
 
 // Um Monstro que disparou no gatilho, com os peões dentro do Alcance atual
-// (inclusive os de Jogadores protegidos — o ataque contra eles é negado).
+// (inclusive os de Jogadores protegidos — o ataque contra eles é negado) e
+// as peças do Alcance na ordem canônica do engine (issue #384: campo
+// observacional para a coreografia do ataque; nenhum cliente julga por ele).
+// Opcional para compat: payload de servidor antigo omite o campo.
 export interface AtacanteNoAlcance {
   readonly pecaId: PecaId;
   readonly tipo: 'vulto' | 'espectro';
   readonly peoesNoAlcance: readonly PeaoId[];
+  readonly pecasNoAlcance?: readonly PecaId[];
 }
 
 // Estado resultante das penalidades (issue #173) para um Jogador atingido
@@ -454,7 +458,9 @@ export interface EstadoResultanteNoAtaque {
 // peça nunca disparam. Shape 1:1 com o evento de domínio;
 // estadosAplicados (issue #173) carrega o estado RESULTANTE das penalidades
 // (Baixa Iluminação, sanidade, Amedrontado) por Jogador mudado — o eco do
-// feedback aos clientes, não os efeitos em si.
+// feedback aos clientes, não os efeitos em si. Cada atacante carrega ainda
+// `pecasNoAlcance` (issue #384, opcional para aceitar payload de servidor
+// antigo sem o campo).
 export interface AtaqueResolvidoWireEvento {
   readonly type: 'ATAQUE_RESOLVIDO';
   readonly atacantes: readonly AtacanteNoAlcance[];
