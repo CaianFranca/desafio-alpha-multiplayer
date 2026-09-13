@@ -50,7 +50,7 @@ import {
 import { obterEstadoDaPartida } from '../partidas/estado.ts';
 import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
-import { adicionarConexao, removerConexao, type ConexaoDoJogador } from './conexao.ts';
+import { adicionarConexao, obterConexoes, removerConexao, type ConexaoDoJogador } from './conexao.ts';
 import { tipoDeComandoDeDebug } from './debug-stream.ts';
 import { PartidaBroadcaster } from '../partidas/broadcast.ts';
 import { PartidaHandlers } from '../partidas/handlers.ts';
@@ -532,6 +532,11 @@ export function criarWebSocketServer(
             const eraVigente = removerConexao(conexao);
             if (depsPartida !== undefined) {
               depsPartida.broadcaster.remover(ws);
+              // Chat de Partida (issue #390): sem conexões vigentes na
+              // Partida, a entrada do rate-limit fica sem dono — libera.
+              if (obterConexoes(partidaId).size === 0) {
+                depsPartida.handlers.liberarLimiteDeChat(partidaId);
+              }
             }
             if (!eraVigente) {
               return;
