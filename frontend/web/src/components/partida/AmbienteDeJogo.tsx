@@ -10,7 +10,7 @@ import { AmbienteCena } from '../../game/scenes/AmbienteCena'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import type { EstadoExibicaoTabuleiro, PecaCorrente } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
-import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 import {
   chaveCelula,
   destinosConectadosDoPeao,
@@ -19,13 +19,14 @@ import {
 import type { PeaoId } from '../../game/tabuleiro/contrato'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 import {
+  celulasDaTravessiaDoEscuro,
   mapearCliqueNoPeao,
   mapearDesselecaoDePeao,
   peaoDeReferenciaDaSequencia,
   puxadaVigenteNaBandeja,
   vagasDisponiveisDoPeao,
 } from '../../game/tabuleiro/interacaoPeoes'
-import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 import type { VooDoPeaoPendente } from '../../game/tabuleiro/vooDoPeao'
 import type { LimpezaTrigger } from '../../game/scenes/TransicaoLimpeza'
@@ -57,7 +58,7 @@ interface AmbienteDeJogoProps {
   /** Callback de comando de tabuleiro (null = sem ação) → enviar ao WS. */
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
   /** Callback de comando de peão (com jogadorId já injetado pelo pai). */
-  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  onComandoPeao?: (comando: ComandoDePeaoDoDespacho) => void
   /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
   onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
   /** Peão selecionado vindo do modelo/servidor (null = nenhum). */
@@ -171,6 +172,18 @@ export function AmbienteDeJogo({
   ) {
     setRecebidaPuxadaId(null)
   }
+  // ADR-0014 / issue #377 (Opção B): a recebida da Travessia nasce com a
+  // célula-alvo pré-fixada — sem gesto de pull na bandeja, o clique na vaga
+  // não rotearia (o roteador exige a corrente puxada). O pull é automático
+  // para a corrente travada: o jogador clica direto na vaga escura destacada
+  // (escolha), vê o preview e confirma no OK. Mesmo padrão de update-de-
+  // render do reset acima, sem efeito colateral.
+  const correnteTravada = recebidasPendentes.find(
+    (r) => r.vaga === null && r.celulaAlvo !== null,
+  ) ?? null
+  if (correnteTravada !== null && recebidaPuxadaId !== correnteTravada.recebidaId) {
+    setRecebidaPuxadaId(correnteTravada.recebidaId)
+  }
   // Estado do ciclo com o pull mesclado (issue #249): roteador, cena e
   // espelho veem a mesma fonte — o modelo autoritativo + pull local; a
   // seleção vem do servidor (snapshot/eventos), nunca de espelho divergente.
@@ -215,6 +228,29 @@ export function AmbienteDeJogo({
       ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
       : [],
   )
+  // ADR-0014 / issue #377 (Opção B): sem pendências e com o Peão em Baixa
+  // selecionado, as vagas escuras SÃO o gesto da travessia (clique direto,
+  // sem pull) — destacam junto das vagas da pendência, mesma affordância
+  // nos dois renderizadores sem prop nova. Fora da Baixa, nada muda (as
+  // vagas comuns só são clicáveis com pendência puxada).
+  if (
+    estadoPeoesComPuxada !== null &&
+    estadoPeoesComPuxada.recebidasPendentes.length === 0 &&
+    estadoPeoesComPuxada.peaoSelecionadoId !== null &&
+    !estadoPeoesComPuxada.posicaoConfirmadaNoTurno &&
+    estadoPeoesComPuxada.atravessouNoTurno !== true &&
+    estadoPeoesComPuxada.donoDoCiclo !== false
+  ) {
+    const refPeao = peaoDeReferenciaDaSequencia(estadoPeoesComPuxada)
+    if (
+      refPeao !== null &&
+      (estadoPeoesComPuxada.peaoIdsEmBaixa?.has(refPeao) ?? false)
+    ) {
+      for (const vaga of vagasDisponiveisDoPeao(estadoPeoesComPuxada)) {
+        vagasSet.add(chaveCelula(vaga.celula))
+      }
+    }
+  }
 
   // O mapeador puro decide o pull (gate de espectador incluso); o pai só
   // persiste o resultado como estado local.
@@ -256,6 +292,16 @@ export function AmbienteDeJogo({
   // `data-resgate` (espelho); o clique segue emitindo o mesmo MOVER_PEAO.
   const resgateSet = new Set<string>(
     destinosDoPeao.filter((d) => d.tipo === 'resgate').map((d) => d.peca.pecaId),
+  )
+  // ADR-0014 / issue #377 (defeito 2): destaque branco (anel) nas células
+  // escuras clicáveis da travessia + na célula travada da pendência — mesma
+  // fonte puro, aplicada na cena (anel) e no espelho (data-travessia). O tom
+  // quente de `alvo/vaga` se perde no plano escuro; o anel é a linguagem da
+  // seleção (PeaoAvatar) reaproveitada para o gesto de travessia.
+  const travessiaSet = new Set<string>(
+    estadoPeoesComPuxada !== null
+      ? celulasDaTravessiaDoEscuro(estadoPeoesComPuxada).map(chaveCelula)
+      : [],
   )
 
   return (
@@ -303,6 +349,7 @@ export function AmbienteDeJogo({
           onPuxarPecaDaBandeja={aoPuxarPecaDaBandeja}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
+          travessiaSet={travessiaSet}
           pecaCorrente={pecaCorrenteNaBandeja}
           vooPendente={vooPendente}
           onVooAterrissou={onVooAterrissou}
@@ -335,6 +382,7 @@ export function AmbienteDeJogo({
           onPuxar={aoPuxarPecaDaBandeja}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
+          travessiaSet={travessiaSet}
           sanidadePorPeao={sanidadePorPeao}
           encaixeTrigger={encaixeTrigger}
         />

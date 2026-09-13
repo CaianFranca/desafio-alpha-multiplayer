@@ -9,7 +9,7 @@ import type {
   PecaPosicionada,
 } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
-import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal } from '../../game/tabuleiro/interacaoPeoes'
 import {
   despacharCliqueDeCelula,
   despacharCliqueNaPecaDaBandeja,
@@ -18,7 +18,6 @@ import {
   puxadaVigenteNaBandeja,
 } from '../../game/tabuleiro/interacaoPeoes'
 import type {
-  PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
@@ -54,7 +53,7 @@ interface TabuleiroMirrorDOMProps {
   /** Estado do ciclo do peão: roteia cliques em células/pendências. */
   estadoPeoes?: EstadoInteracaoPeoes | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
-  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  onComandoPeao?: (comando: ComandoDePeaoDoDespacho) => void
   /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
   onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
   /** Pull aceito na bandeja (fluxo #143/revisão #199) → estado local no pai. */
@@ -63,6 +62,9 @@ interface TabuleiroMirrorDOMProps {
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (#143, cena/espelho). */
   vagasSet?: ReadonlySet<string>
+  /** Chaves das células do gesto da travessia (ADR-0014): anel branco — mesma
+   * fonte da cena, exposta como data-travessia para o espelho de teste. */
+  travessiaSet?: ReadonlySet<string>
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
   /** Trigger de encaixe evento-driven (issue #241): espelha o voo mesa→célula. */
@@ -105,6 +107,7 @@ export function TabuleiroMirrorDOM({
   onPuxar,
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
+  travessiaSet = new Set<string>(),
   sanidadePorPeao = {},
   encaixeTrigger = null,
 }: TabuleiroMirrorDOMProps) {
@@ -163,6 +166,7 @@ export function TabuleiroMirrorDOM({
             data-coluna={celula.coluna}
             data-alvo-pendente={alvoPendente ? 'true' : undefined}
             data-vaga={vaga ? 'true' : undefined}
+            data-travessia={travessiaSet.has(chave) ? 'true' : undefined}
             data-iluminada={iluminada ? 'true' : undefined}
             onClick={(e) => {
               aoClicarCelula(celula, e)

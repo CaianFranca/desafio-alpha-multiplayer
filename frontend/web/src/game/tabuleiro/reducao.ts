@@ -186,6 +186,25 @@ export interface EstadoDoTabuleiroNoCliente {
   /** A posição do peão do Jogador Ativo já foi confirmada (POSICAO_CONFIRMADA). */
   readonly posicaoConfirmadaNoTurno: boolean
   /**
+   * Peça colocada pela Travessia do Escuro no turno (ADR-0014 / issue #377,
+   * espelho da engine): o mover pós-travessia é compulsório PARA ELA.
+   * Exceção monstro dispensa a cadeia (ambos nulos). Reseta em
+   * TURNO_INICIADO/TURNO_ENCERRADO; baseline do snapshot: nula.
+   */
+  readonly pecaDaTravessiaId: string | null
+  /**
+   * O Peão do Jogador Ativo já atravessou o Escuro neste turno
+   * (ATRAVESSOU_O_ESCURO — ADR-0014 / issue #377, Opção B). Enquanto vigente,
+   * a Permanência é vedada (o mover para a peça colocada é compulsório) e
+   * nova travessia é rejeitada. Reseta no TURNO_INICIADO/TURNO_ENCERRADO;
+   * baseline do snapshot: o wire não carrega a fase do turno (mesmo padrão
+   * de `movimentouNoTurno`), então a retomada parte de `false` — sem
+   * softlock: a pendência da travessia é restaurada e o mover manual segue
+   * válido; só o auto-encadeamento e o botão Permanecer degradam (o engine
+   * recusa com som).
+   */
+  readonly atravessouNoTurno: boolean
+  /**
    * Peça do início do turno (zona da origem — espelho de partida.ts:119): a
    * Peça sob o Peão do Jogador Ativo quando o turno iniciou. O Peão só pode
    * pousar nela ou numa vizinha diretamente conectada a ela (ida-e-volta de
@@ -272,6 +291,8 @@ export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): 
     iniciadaEm: null,
     movimentouNoTurno: false,
     posicaoConfirmadaNoTurno: false,
+    atravessouNoTurno: false,
+    pecaDaTravessiaId: null,
     pecaDoInicioDoTurnoId: null,
     peaoPorJogador: {},
     jogadorPorId: {},
@@ -426,8 +447,20 @@ export function reduzirEvento(
         orientacao: evento.orientacao,
         celula: evento.celula,
       }
+      // ADR-0014 / issue #377: o encaixe que resolve a pendência da Travessia
+      // registra a peça colocada (mover compulsório PARA ELA — espelho da
+      // engine). Vale também para Monstro: a cadeia não dispensa o turno
+      // travado — o fechamento vira Permanência (permanecerNaPartida).
+      const fechaTravessia =
+        estado.atravessouNoTurno &&
+        encontrada !== undefined &&
+        encontrada.celulaAlvo !== null &&
+        chaveCelula(encontrada.celulaAlvo) === chaveCelula(evento.celula)
       return {
         ...estado,
+        pecaDaTravessiaId: fechaTravessia
+          ? evento.pecaId
+          : estado.pecaDaTravessiaId,
         iniciais: pecaNaMesa
           ? estado.iniciais.filter((p) => p.pecaId !== evento.pecaId)
           : estado.iniciais,
@@ -622,6 +655,8 @@ export function reduzirEvento(
         rodada: evento.rodada,
         movimentouNoTurno: false,
         posicaoConfirmadaNoTurno: false,
+        atravessouNoTurno: false,
+        pecaDaTravessiaId: null,
         pecaDoInicioDoTurnoId,
         peaoSelecionadoId: null,
         pecaSelecionadaId: null,
@@ -635,6 +670,8 @@ export function reduzirEvento(
         jogadorAtivoId: null,
         movimentouNoTurno: false,
         posicaoConfirmadaNoTurno: false,
+        atravessouNoTurno: false,
+        pecaDaTravessiaId: null,
         pecaDoInicioDoTurnoId: null,
         peaoSelecionadoId: null,
         pecaSelecionadaId: null,
@@ -769,11 +806,11 @@ export function reduzirEvento(
         // Sem snapshot ainda — aguarda projeção autoritativa.
         return estado
       }
-      // Resgate remove todos os estados; se amedrontado, restaura sanidade
-      // a 1 ponto (CONTEXT.md: Resgate) — o wire não carrega sanidade, então
-      // o cliente aplica a regra mínima aqui; o snapshot autoritativo corrige
-      // em seguida se houver divergência.
-      const sanidadeRestaurada = anterior.amedrontado ? 1 : anterior.sanidade
+      // A cura pode ser parcial (salvador de vela apagada remove o
+      // Amedrontado mas não acende a Baixa): aplica o estado resultante que
+      // o evento carrega — o snapshot autoritativo corrige em seguida se
+      // houver divergência.
+      const sanidadeRestaurada = evento.sanidade
       return {
         ...estado,
         jogadorPorId: {
@@ -781,16 +818,18 @@ export function reduzirEvento(
           [evento.resgatadoJogadorId]: {
             ...anterior,
             sanidade: sanidadeRestaurada,
-            emBaixaIluminacao: false,
-            amedrontado: false,
+            emBaixaIluminacao: evento.emBaixaIluminacao,
+            amedrontado: sanidadeRestaurada === 0,
           },
         },
       }
     }
 
     case 'ATRAVESSOU_O_ESCURO': {
-      // Sem lógica visual — ticket #268. Marco para exibição futura.
-      return estado
+      // ADR-0014 / issue #377 (Opção B): marca a fase da travessia no turno —
+      // a Permanência fica vedada até o mover compulsório e nova travessia é
+      // rejeitada. A peça sorteada chega no mesmo lote via RECEBIMENTO_GERADO.
+      return { ...estado, atravessouNoTurno: true }
     }
 
     case 'DESISTENCIA_REGISTRADA': {

@@ -1,6 +1,6 @@
 # ADR-0013: Turno em Baixa Iluminação — Puxar Primeiro
 
-Status: Aceito
+Status: Revogado pela ADR-0014 (bug #377: o saque automático no início travava o movimento do peão)
 Data: 2026-09-10
 Revoga (parcialmente): desenho de baixa de #264/#272 (ordem mover-antes-de-puxar e `ATRAVESSAR_O_ESCURO` com célula pré-fixada)
 

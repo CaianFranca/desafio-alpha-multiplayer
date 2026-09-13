@@ -229,7 +229,7 @@ _Avoid_: confirmação, travar
 ## Peões e Conexões
 
 **Peão**:
-Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até N (o número de Jogadores da Partida, de 2 a 4), e a peça com jogador precisando de Resgate, que aceita um peão a mais enquanto o afetado permanecer nela; move-se entre peças conectadas; não é uma Peça.
+Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até N (o número de Jogadores da Partida, de 2 a 4), e a peça com jogador precisando de Resgate, que aceita um peão a mais enquanto houver afetado nela; move-se entre peças conectadas; não é uma Peça.
 _Avoid_: pawn, token, boneco
 
 **Conexão**:
@@ -245,8 +245,12 @@ Ação de deslocar o peão para uma peça vizinha conectada; encerra a sequênci
 _Avoid_: mover, andar
 
 **Permanência**:
-Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento.
+Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento; vedada após atravessar o Escuro no turno (o mover para a peça colocada é compulsório).
 _Avoid_: ficar, pular
+
+**Travessia do Escuro** (ADR-0014):
+Jogada exclusiva de Baixa Iluminação em que o peão alcança uma célula escura vazia vizinha conectada à peça sob ele; saca 1 peça sob demanda (sem sorteio no início do turno) com a célula-alvo pré-fixada, seguida de encaixe e movimento compulsório para a peça colocada, com fechamento automático (mover → confirmar → encerrar, sem clique); uma por turno e somente da Peça do início do turno ("uma casa por turno" — portar a outra peça iluminada não reabre a vaga; voltar à origem mantém a vaga) — inclusive quando a peça sacada é Monstro: o Monstro não aceita peão, o mover compulsório é impossível e o turno travado fecha por Permanência.
+_Avoid_: explorar o escuro, puxar no escuro
 
 **Desseleção**:
 Ato de encerrar a seleção vigente do peão via comando autoritativo ao servidor, que confirma com evento idempotente; sem ela a seleção obsoleta segue suprimindo o posicionamento da Peça Inicial.
@@ -275,7 +279,7 @@ Turno de abertura de cada Jogador, em que ele posiciona a própria Peça Inicial
 _Avoid_: turno inicial, primeira rodada
 
 **Confirmação de Posição**:
-Declaração que trava o peão na peça em que terminou e gera o Recebimento quando houve mudança de peça.
+Declaração que trava o peão na peça em que terminou, gera o Recebimento quando houve mudança de peça e compromete o Resgate quando o confirmador co-ocupa peça com afetado.
 _Avoid_: confirmação de movimento, travar posição
 
 **Encerramento do Turno**:
@@ -289,7 +293,7 @@ Peça de Monstro que ameaça os jogadores durante a partida; tipos: O Vulto e O 
 _Avoid_: criatura, inimigo
 
 **Peça de Monstro**:
-Categoria de peça com quatro bordas abertas e sem janela de Manipulação, que não aceita peão e retransmite o Alcance como qualquer peça; a Composição inclui seis de cada tipo.
+Categoria de peça com quatro bordas abertas e sem janela de Manipulação, que não aceita peão e retransmite o Alcance como qualquer peça; a Composição inclui seis de cada tipo; com modelo 3D sobre a base inalterada (vulto/espectro) — o clique no modelo equivale ao clique na peça.
 _Avoid_: peça de criatura
 
 **Alcance**:
@@ -309,15 +313,15 @@ Monstro cujo Alcance cobre as peças adjacentes conectadas e faz quem é atingid
 _Avoid_: fantasma, espírito
 
 **Baixa Iluminação**:
-Estado de um Jogador imposto pelo ataque do Vulto; seu peão ilumina apenas a própria célula e seu Recebimento fica reduzido a uma peça; encerrado apenas pelo Resgate.
+Estado de um Jogador imposto pelo ataque do Vulto; seu peão ilumina apenas a própria célula e seu Recebimento fica reduzido a uma peça, sacada somente sob demanda na Travessia do Escuro (sem sorteio no início do turno); no turno em Baixa o jogador pode mover por caminho iluminado sem saque (ida-e-volta livre: voltar à Peça do início do turno reabre a Permanência e as vagas escuras), atravessar o escuro (uma casa por turno — só da Peça de início do turno, com mover compulsório e fechamento automático) ou permanecer; a fase viaja no snapshot (atravessouNoTurno/pecaDaTravessiaId) para a re-admissão não órfã a entrega; encerrado apenas pelo Resgate.
 _Avoid_: escuridão, luz baixa
 
 **Amedrontado**:
-Estado de um Jogador com a Sanidade em zero; não realiza ações no seu turno; encerrado pelo Resgate, que restaura a Sanidade a 1 ponto.
+Estado de um Jogador com a Sanidade em zero; não realiza ações no seu turno; encerrado pelo Resgate, que restaura a Sanidade a 2 pontos (teto 3).
 _Avoid_: apavorado, em pânico
 
 **Resgate**:
-Chegada do peão de um aliado, por Conexão, à peça de um jogador em Baixa Iluminação ou Amedrontado; remove os estados do afetado e, no caso do amedrontado, restaura a Sanidade a 1 ponto; a peça tolera um peão a mais enquanto houver afetado e fica com a Permanência bloqueada até um peão sair.
+Chegada do peão de um aliado, por Conexão, à peça de um jogador em Baixa Iluminação ou Amedrontado, seguida de Confirmação de Posição do salvador na mesma peça; só a confirmação remove os estados do afetado — o Amedrontado sai sempre (Sanidade a 2 pontos, teto 3), mas a Baixa Iluminação só apaga com o salvador de vela acesa (fora da Baixa); abandonar sem confirmar não salva; a peça tolera um peão a mais enquanto houver afetado e fica com a Permanência bloqueada até um peão sair.
 _Avoid_: salvamento, cura
 
 ## Objetivos da Partida

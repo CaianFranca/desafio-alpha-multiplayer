@@ -643,10 +643,19 @@ export function converterComandoParaWire(
         jogadorId,
         peaoId: comando.peaoId,
       };
+    case 'atravessar_o_escuro':
+      // ADR-0014 / issue #377 (Opção B): o bot em Baixa atravessa o Escuro —
+      // o saque sob demanda acontece neste gesto.
+      return {
+        type: 'ATRAVESSAR_O_ESCURO',
+        jogadorId,
+        peaoId: comando.peaoId,
+        celula: comando.celula,
+      };
     case 'encerrar_turno':
       return { type: 'ENCERRAR_TURNO', jogadorId };
     default:
-      // O bot Random Walk nunca emite finalizar/desselecionar/atravessar;
+      // O bot Random Walk nunca emite finalizar/desselecionar;
       // falhar alto aqui impede vazar comando fora do plano.
       throw new Error(
         `Comando fora do plano do bot: ${(comando as ComandoDePartida).tipo}.`,

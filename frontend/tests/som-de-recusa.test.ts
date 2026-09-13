@@ -69,6 +69,8 @@ describe('som de recusa — mapeamento evento → motivo (issue #228)', () => {
         resgatadoJogadorId: 'j2',
         resgatadorJogadorId: 'j1',
         resgatadorPeaoId: 'peao-1',
+        emBaixaIluminacao: false,
+        sanidade: 3,
       },
       // Gatilho sem vítimas e proteção que negou: sem penalidade, sem som.
       {

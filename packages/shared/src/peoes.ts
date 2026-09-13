@@ -11,7 +11,8 @@
 //   shared type:'ESCOLHER_VAGA_DA_PECA_RECEBIDA' <-> engine tipo:'escolher_vaga_da_peca_recebida' (recebidaId, borda) — issue #138
 //   shared type:'MOVER_PEAO'                     <-> engine tipo:'mover_peao' (peaoId, celula)
 //   shared type:'PERMANECER'                     <-> engine tipo:'permanecer' (peaoId)
-//   (ATRAVESSAR_O_ESCURO viaja só no canal de Partida — ./partida.ts — issue #264)
+//   (ATRAVESSAR_O_ESCURO viaja no canal de Partida — ./partida.ts — issue #264;
+//   fluxo canônico do saque em Baixa sob demanda, ADR-0014 / issue #377)
 //   Eventos:
 //   shared type:'PEAO_SELECIONADO'                <-> engine tipo:'peao_selecionado' (peaoId)
 //   shared type:'PEAO_DESELECIONADO'              <-> engine tipo:'peao_desselecionado' (peaoId) — issue #249
@@ -108,12 +109,15 @@ export interface PermanecerComando {
   readonly peaoId: PeaoId;
 }
 
-// Atravessar o Escuro (issue #264 / spec #272): jogada exclusiva de Baixa
-// Iluminação — o Peão da vez atravessa para a célula escura conectada (vaga
-// não iluminada) adjacente à peça sob ele no Tabuleiro. NÃO entra neste
-// contrato de Peão: o comando viaja apenas pelo canal de Partida, com o
-// `jogadorId` de forma (AtravessarOEscuroPartidaComando em ./partida.ts) —
-// o tabuleiro só o vê como evento ATRAVESSOU_O_ESCURO na redução do cliente.
+// Atravessar o Escuro (issue #264 / spec #272, fluxo canônico sob demanda em
+// Baixa pela ADR-0014 / issue #377): jogada exclusiva de Baixa Iluminação —
+// o Peão da vez atravessa para a célula escura conectada (vaga não iluminada)
+// adjacente à peça sob ele no Tabuleiro, e o saque de 1 peça acontece nesse
+// gesto (Opção B: atravessar → posicionar → mover compulsório → confirmar).
+// NÃO entra neste contrato de Peão: o comando viaja apenas pelo canal de
+// Partida, com o `jogadorId` de forma (AtravessarOEscuroPartidaComando em
+// ./partida.ts) — o tabuleiro só o vê como evento ATRAVESSOU_O_ESCURO na
+// redução do cliente.
 export type PeaoComandoDoCliente =
   | SelecionarPeaoComando
   | DesselecionarPeaoComando
@@ -177,12 +181,11 @@ export interface PeaoPermaneceuEvento {
   readonly pecaId: PecaId;
 }
 
-// Travessia do Escuro (issue #264 / spec #272): o Peão em Baixa Iluminação
-// alcançou a célula escura conectada. O evento carrega apenas o Peão e a
-// célula de destino — a peça sorteada do Recebimento gerado pela travessia
-// chega pelos eventos RECEBIMENTO_GERADO/PECA_SORTEADA do mesmo lote.
-// @deprecated ADR-0013: fluxo canônico em Baixa é puxar no início do turno
-// (avancarVez). Mantido como legado funcional até remoção em issue futura.
+// Travessia do Escuro (issue #264 / spec #272, fluxo canônico sob demanda em
+// Baixa pela ADR-0014 / issue #377): o Peão em Baixa Iluminação alcançou a
+// célula escura conectada. O evento carrega apenas o Peão e a célula de
+// destino — a peça sorteada do Recebimento gerado pela travessia chega pelos
+// eventos RECEBIMENTO_GERADO/PECA_SORTEADA do mesmo lote.
 export interface AtravessouOEscuroEvento {
   readonly type: 'ATRAVESSOU_O_ESCURO';
   readonly peaoId: PeaoId;

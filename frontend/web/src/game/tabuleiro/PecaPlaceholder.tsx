@@ -10,6 +10,8 @@ import {
 } from './contorno'
 import { handlersDeCursor } from './cursor'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
+import { MonstroAvatar } from './MonstroAvatar'
+import { temModeloDeMonstro } from './monstros'
 import { rotacaoDoMotivo, texturaDaPeca } from './texturasDasPecas'
 
 interface PecaPlaceholderProps {
@@ -64,6 +66,8 @@ export const COR_DESTAQUE_RESGATE = '#7fd1e0'
 export const TAMANHO_PECA = TAMANHO_CELULA * 0.96
 export const ESPESSURA_PECA = 0.12
 const Y_CORPO = 0.08
+/** Topo da base da peça: o modelo do Monstro pousa aqui (base inalterada). */
+const TOPO_DA_BASE = Y_CORPO + ESPESSURA_PECA / 2
 
 /**
  * Fator do relevo do topo (normalScale acima do default 1: ponto de partida
@@ -284,6 +288,24 @@ export function PecaPlaceholder({
           <CorpoTexturizado {...corpo} />
         </Suspense>
       </LimiteDeErroDoModelo>
+      {/* Monstros com modelo 3D (vulto/espectro): a base acima segue
+          inalterada e o modelo aparece sobre ela — o clique no modelo é o
+          mesmo `onClick` da peça (uma coisa só). Falha some só o modelo. */}
+      {temModeloDeMonstro(tipo) ? (
+        <LimiteDeErroDoModelo
+          key={`modelo-${tipo}`}
+          resetKey={`modelo-${tipo}`}
+          fallback={null}
+        >
+          <Suspense fallback={null}>
+            <MonstroAvatar
+              tipo={tipo}
+              position={[0, TOPO_DA_BASE, 0]}
+              aoClicar={onClick}
+            />
+          </Suspense>
+        </LimiteDeErroDoModelo>
+      ) : null}
     </group>
   )
 }

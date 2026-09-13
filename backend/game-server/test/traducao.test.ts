@@ -93,7 +93,8 @@ test('traduzirEventos mapeia ataque_resolvido sem alvos com estadosAplicados vaz
 });
 
 test('traduzirEventos mapeia resgate_realizado para RESGATE_REALIZADO', () => {
-  // Resgate (#171): a tradução 1:1 é o eco do feedback exigido pela #173.
+  // Resgate (#171): a tradução é o eco do feedback exigido pela #173 —
+  // repassa o estado resultante do resgatado (a cura pode ser parcial).
   const eventos = [
     {
       tipo: 'resgate_realizado',
@@ -101,6 +102,8 @@ test('traduzirEventos mapeia resgate_realizado para RESGATE_REALIZADO', () => {
       resgatadoJogadorId: 'jogador-1',
       resgatadorJogadorId: 'jogador-2',
       resgatadorPeaoId: 'peao-vermelho',
+      emBaixaIluminacao: false,
+      sanidade: 2,
     },
   ] as const satisfies readonly EventoDaPartida[];
   const saida = traduzirEventos(eventos);
@@ -111,6 +114,8 @@ test('traduzirEventos mapeia resgate_realizado para RESGATE_REALIZADO', () => {
     resgatadoJogadorId: 'jogador-1',
     resgatadorJogadorId: 'jogador-2',
     resgatadorPeaoId: 'peao-vermelho',
+    emBaixaIluminacao: false,
+    sanidade: 2,
   });
 });
 

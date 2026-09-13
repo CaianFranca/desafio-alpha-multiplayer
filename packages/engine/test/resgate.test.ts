@@ -14,6 +14,7 @@ const JOGADORES = ['ana', 'bruno', 'carla', 'diogo'];
 const selecionarPeao = (peaoId: string) => ({ tipo: 'selecionar_peao', peaoId } as const);
 const moverPeao = (peaoId: string, l: number, c: number) => ({ tipo: 'mover_peao', peaoId, celula: { linha: l, coluna: c } } as const);
 const permanecer = (peaoId: string) => ({ tipo: 'permanecer', peaoId } as const);
+const confirmarPosicao = (peaoId: string) => ({ tipo: 'confirmar_posicao_do_peao', peaoId } as const);
 
 function aplicar(estado: EstadoDaPartida, cmd: any, ator: string): EstadoDaPartida {
   const r = aplicarComandoDePartida(estado, cmd, ator);
@@ -53,6 +54,11 @@ function comSelecionado(s: EstadoDaPartida, peaoId: string): EstadoDaPartida {
 }
 
 const caixaDummy = [{ pecaId: 'reta-dummy', tipo: 'reta' as const, orientacao: 0 as const }];
+const caixaCheia = Array.from({ length: 10 }, (_, i) => ({
+  pecaId: `reta-dummy-${i}`,
+  tipo: 'reta' as const,
+  orientacao: 0 as const,
+}));
 
 // Monta partida minimalista onde ana está em (2,3) sobre cruz, bruno afetado em (3,3) sobre cruz, conectados
 function estadoResgateBase(opts: { tipoAfetado: 'baixa' | 'amedrontado' | 'ambos' }): EstadoDaPartida {
@@ -134,32 +140,56 @@ test('resgate exige Conexão: sem Conexão a movimentação é recusada', () => 
   if (!res.sucesso) assert.equal(res.erro.codigo, 'MOVIMENTO_NAO_CONECTADO');
 });
 
-test('único resgate remove todos os estados do afetado na peça', () => {
+test('único resgate remove todos os estados do afetado na peça (ao confirmar)', () => {
   let s = estadoResgateBase({ tipoAfetado: 'ambos' });
   s = comSelecionado(s, 'peao-branco');
   const r = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
   assert.equal(r.sucesso, true);
   if (!r.sucesso) return;
-  const bruno = r.estado.jogadores.find(j => j.jogadorId === 'bruno')!;
+  // ADR-0005: mover não materializa o resgate — o afetado continua afetado e
+  // nenhum evento/graça é emitido no mover.
+  const brunoAposMover = r.estado.jogadores.find(j => j.jogadorId === 'bruno')!;
+  assert.equal(brunoAposMover.emBaixaIluminacao, true);
+  assert.equal(brunoAposMover.amedrontado, true);
+  assert.equal(brunoAposMover.sanidade, 0);
+  assert.equal(r.eventos.some(e => e.tipo === 'resgate_realizado'), false);
+  assert.equal(r.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), false);
+
+  const estadoSemCaixa = {
+    ...r.estado,
+    tabuleiro: { ...r.estado.tabuleiro, caixa: [] as any },
+  };
+  const c = aplicarComandoDePartida(estadoSemCaixa, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c.sucesso, true);
+  if (!c.sucesso) return;
+  const bruno = c.estado.jogadores.find(j => j.jogadorId === 'bruno')!;
   assert.equal(bruno.emBaixaIluminacao, false);
   assert.equal(bruno.amedrontado, false);
-  assert.equal(bruno.sanidade, 1);
-  const ev = r.eventos.find(e => e.tipo === 'resgate_realizado') as any;
+  assert.equal(bruno.sanidade, 2);
+  const ev = c.eventos.find(e => e.tipo === 'resgate_realizado') as any;
   assert.ok(ev, 'deve emitir resgate_realizado');
   assert.equal(ev.pecaId, 'peca-afetada');
   assert.equal(ev.resgatadoJogadorId, 'bruno');
   assert.equal(ev.resgatadorPeaoId, 'peao-branco');
-  assert.equal(r.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), true);
+  assert.equal(ev.emBaixaIluminacao, false);
+  assert.equal(ev.sanidade, 2);
+  assert.equal(c.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), true);
 });
 
-test('resgate do amedrontado restaura sanidade a 1; baixa mantém sanidade', () => {
+test('resgate do amedrontado restaura sanidade a 2 (teto 3); baixa mantém sanidade (ao confirmar)', () => {
   let s1 = estadoResgateBase({ tipoAfetado: 'amedrontado' });
   s1 = comSelecionado(s1, 'peao-branco');
   const r1 = aplicarComandoDePartida(s1, moverPeao('peao-branco', 3, 3), 'ana');
   assert.equal(r1.sucesso, true);
   if (!r1.sucesso) return;
-  assert.equal(r1.estado.jogadores.find(j => j.jogadorId === 'bruno')!.sanidade, 1);
-  assert.equal(r1.estado.jogadores.find(j => j.jogadorId === 'bruno')!.amedrontado, false);
+  assert.equal(r1.estado.jogadores.find(j => j.jogadorId === 'bruno')!.sanidade, 0);
+  assert.equal(r1.estado.jogadores.find(j => j.jogadorId === 'bruno')!.amedrontado, true);
+  const s1c = { ...r1.estado, tabuleiro: { ...r1.estado.tabuleiro, caixa: [] as any } };
+  const c1 = aplicarComandoDePartida(s1c, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c1.sucesso, true);
+  if (!c1.sucesso) return;
+  assert.equal(c1.estado.jogadores.find(j => j.jogadorId === 'bruno')!.sanidade, 2);
+  assert.equal(c1.estado.jogadores.find(j => j.jogadorId === 'bruno')!.amedrontado, false);
 
   let s2 = estadoResgateBase({ tipoAfetado: 'baixa' });
   s2 = comJogador(s2, 'bruno', { sanidade: 2 });
@@ -168,16 +198,84 @@ test('resgate do amedrontado restaura sanidade a 1; baixa mantém sanidade', () 
   assert.equal(r2.sucesso, true);
   if (!r2.sucesso) return;
   assert.equal(r2.estado.jogadores.find(j => j.jogadorId === 'bruno')!.sanidade, 2);
-  assert.equal(r2.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, false);
+  assert.equal(r2.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, true);
+  const s2c = { ...r2.estado, tabuleiro: { ...r2.estado.tabuleiro, caixa: [] as any } };
+  const c2 = aplicarComandoDePartida(s2c, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c2.sucesso, true);
+  if (!c2.sucesso) return;
+  assert.equal(c2.estado.jogadores.find(j => j.jogadorId === 'bruno')!.sanidade, 2);
+  assert.equal(c2.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, false);
 });
 
-test('exceção de ocupação: peça comum 1→2 com afetado, e rejeita após cura', () => {
+test('salvador de vela apagada não acende a vela do afetado em Baixa', () => {
+  let s = estadoResgateBase({ tipoAfetado: 'baixa' });
+  s = comJogador(s, 'ana', { emBaixaIluminacao: true });
+  s = comSelecionado(s, 'peao-branco');
+  const r = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  const c = aplicarComandoDePartida(r.estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c.sucesso, true);
+  if (!c.sucesso) return;
+  const bruno = c.estado.jogadores.find(j => j.jogadorId === 'bruno')!;
+  assert.equal(bruno.emBaixaIluminacao, true);
+  assert.equal(bruno.sanidade, 3);
+  assert.equal(c.eventos.some(e => e.tipo === 'resgate_realizado'), false);
+  assert.equal(c.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), false);
+});
+
+test('salvador de vela apagada remove o amedrontado do co-ocupante', () => {
+  let s = estadoResgateBase({ tipoAfetado: 'amedrontado' });
+  s = comJogador(s, 'ana', { emBaixaIluminacao: true });
+  s = comSelecionado(s, 'peao-branco');
+  const r = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  const c = aplicarComandoDePartida(r.estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c.sucesso, true);
+  if (!c.sucesso) return;
+  const bruno = c.estado.jogadores.find(j => j.jogadorId === 'bruno')!;
+  assert.equal(bruno.amedrontado, false);
+  assert.equal(bruno.sanidade, 2);
+  const ev = c.eventos.find(e => e.tipo === 'resgate_realizado') as any;
+  assert.ok(ev, 'deve emitir resgate_realizado');
+  assert.equal(ev.resgatadoJogadorId, 'bruno');
+  assert.equal(ev.emBaixaIluminacao, false);
+  assert.equal(ev.sanidade, 2);
+  assert.equal(c.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), true);
+});
+
+test('salvador de vela apagada com afetado em ambos: cura parcial (amedrontado sai, Baixa fica)', () => {
+  let s = estadoResgateBase({ tipoAfetado: 'ambos' });
+  s = comJogador(s, 'ana', { emBaixaIluminacao: true });
+  s = comSelecionado(s, 'peao-branco');
+  const r = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  const c = aplicarComandoDePartida(r.estado, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c.sucesso, true);
+  if (!c.sucesso) return;
+  const bruno = c.estado.jogadores.find(j => j.jogadorId === 'bruno')!;
+  assert.equal(bruno.amedrontado, false);
+  assert.equal(bruno.sanidade, 2);
+  assert.equal(bruno.emBaixaIluminacao, true);
+  const evParcial = c.eventos.find(e => e.tipo === 'resgate_realizado') as any;
+  assert.ok(evParcial, 'cura parcial também emite resgate_realizado');
+  assert.equal(evParcial.emBaixaIluminacao, true);
+  assert.equal(evParcial.sanidade, 2);
+  assert.equal(c.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), true);
+});
+
+test('exceção de ocupação: peça comum 1→2 com afetado; terceiro é rejeitado (cura agora é na confirmação)', () => {
   let s = estadoResgateBase({ tipoAfetado: 'baixa' });
   s = comSelecionado(s, 'peao-branco');
   const r = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
   assert.equal(r.sucesso, true);
   if (!r.sucesso) return;
   assert.equal(r.estado.tabuleiro.peoes.filter(p => p.pecaId === 'peca-afetada').length, 2);
+  // Mover não cura: o afetado continua afetado até a confirmação.
+  assert.equal(r.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, true);
+  assert.equal(r.eventos.some(e => e.tipo === 'resgate_realizado'), false);
   let s2 = forcarAtiva(r.estado, 'carla');
   s2 = {
     ...s2,
@@ -207,6 +305,9 @@ test('exceção de ocupação: peça comum 1→2 com afetado, e rejeita após cu
   s3 = comSelecionado(s3, 'peao-azul');
   const r3 = aplicarComandoDePartida(s3, moverPeao('peao-azul', 3, 3), 'carla');
   assert.equal(r3.sucesso, true);
+  if (!r3.sucesso) return;
+  assert.equal(r3.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, true);
+  assert.equal(r3.eventos.some(e => e.tipo === 'resgate_realizado'), false);
 });
 
 test('exceção ocupação portão permite 4º peão com afetado', () => {
@@ -245,8 +346,44 @@ test('exceção ocupação portão permite 4º peão com afetado', () => {
   assert.equal(r.sucesso, true);
   if (!r.sucesso) return;
   assert.equal(r.estado.tabuleiro.peoes.filter(p => p.pecaId === 'portao').length, 4);
+  // Mover não cura nem abre graça: diogo continua afetado até a confirmação.
+  assert.equal(r.estado.jogadores.find(j => j.jogadorId === 'diogo')!.emBaixaIluminacao, true);
+  assert.equal(r.eventos.some(e => e.tipo === 'resgate_realizado'), false);
+  assert.equal(r.estado.pecasEmPeriodoDeGraca.includes('portao'), false);
+
+  const estadoSemCaixa = {
+    ...r.estado,
+    tabuleiro: { ...r.estado.tabuleiro, caixa: [] as any },
+  };
+  const c = aplicarComandoDePartida(estadoSemCaixa, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c.sucesso, true);
+  if (!c.sucesso) return;
   // após resgate diogo curado, diogo não mais afetado, mas graça ativa
-  assert.equal(r.estado.pecasEmPeriodoDeGraca.includes('portao'), true);
+  assert.equal(c.estado.jogadores.find(j => j.jogadorId === 'diogo')!.emBaixaIluminacao, false);
+  assert.ok(c.eventos.some(e => e.tipo === 'resgate_realizado'), 'deve emitir resgate_realizado');
+  assert.equal(c.estado.pecasEmPeriodoDeGraca.includes('portao'), true);
+});
+
+test('mover sem confirmar não resgata (abandono): o afetado continua afetado', () => {
+  let s = estadoResgateBase({ tipoAfetado: 'baixa' });
+  s = comSelecionado(s, 'peao-branco');
+  const r = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
+  assert.equal(r.sucesso, true);
+  if (!r.sucesso) return;
+  assert.equal(r.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, true);
+  assert.equal(r.eventos.some(e => e.tipo === 'resgate_realizado'), false);
+
+  // O salvador sai da peça sem confirmar: nenhum resgate é comprometido.
+  let s2 = forcarAtiva(r.estado, 'ana');
+  s2 = comPeca(s2, 'peca-saida', 'cruz', 0, 4, 3);
+  s2 = { ...s2, tabuleiro: { ...s2.tabuleiro, caixa: [...caixaDummy] as any } };
+  s2 = comSelecionado(s2, 'peao-branco');
+  const movFora = aplicarComandoDePartida(s2, moverPeao('peao-branco', 4, 3), 'ana');
+  assert.equal(movFora.sucesso, true);
+  if (!movFora.sucesso) return;
+  assert.equal(movFora.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, true);
+  assert.equal(movFora.eventos.some(e => e.tipo === 'resgate_realizado'), false);
+  assert.equal(movFora.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), false);
 });
 
 test('período de graça bloqueia Permanência até saída de um peão, sem remoção forçada', () => {
@@ -255,18 +392,32 @@ test('período de graça bloqueia Permanência até saída de um peão, sem remo
   const r = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
   assert.equal(r.sucesso, true);
   if (!r.sucesso) return;
-  let s2 = forcarAtiva(r.estado, 'ana');
+  // Sem confirmação não há graça: o afetado continua afetado.
+  assert.equal(r.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, true);
+  assert.equal(r.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), false);
+
+  const estadoComCaixa = {
+    ...r.estado,
+    tabuleiro: { ...r.estado.tabuleiro, caixa: [...caixaCheia] as any },
+  };
+  const c = aplicarComandoDePartida(estadoComCaixa, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c.sucesso, true);
+  if (!c.sucesso) return;
+  assert.equal(c.estado.resultado, null);
+  assert.equal(c.estado.pecasEmPeriodoDeGraca.includes('peca-afetada'), true);
+
+  let s2 = forcarAtiva(c.estado, 'ana');
   s2 = comSelecionado(s2, 'peao-branco');
   const permBloq = aplicarComandoDePartida(s2, permanecer('peao-branco'), 'ana');
   assert.equal(permBloq.sucesso, false);
   if (!permBloq.sucesso) assert.equal(permBloq.erro.codigo, 'ENCERRAMENTO_INVALIDO');
 
-  let s3 = forcarAtiva(r.estado, 'bruno');
+  let s3 = forcarAtiva(c.estado, 'bruno');
   s3 = comSelecionado(s3, 'peao-vermelho');
   const permBloq2 = aplicarComandoDePartida(s3, permanecer('peao-vermelho'), 'bruno');
   assert.equal(permBloq2.sucesso, false);
 
-  let s4 = forcarAtiva(r.estado, 'ana');
+  let s4 = forcarAtiva(c.estado, 'ana');
   s4 = comPeca(s4, 'peca-saida', 'cruz', 0, 4, 3);
   s4 = { ...s4, tabuleiro: { ...s4.tabuleiro, caixa: [...caixaDummy] as any } };
   s4 = comSelecionado(s4, 'peao-branco');
@@ -343,7 +494,19 @@ test('múltiplos afetados na mesma peça são resgatados juntos (portão)', () =
   const r = aplicarComandoDePartida(s, moverPeao('peao-branco', 3, 3), 'ana');
   assert.equal(r.sucesso, true);
   if (!r.sucesso) return;
-  assert.equal(r.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, false);
-  assert.equal(r.estado.jogadores.find(j => j.jogadorId === 'carla')!.emBaixaIluminacao, false);
-  assert.equal(r.eventos.filter(e => e.tipo === 'resgate_realizado').length, 2);
+  // Mover não cura: os dois afetados continuam afetados até a confirmação.
+  assert.equal(r.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, true);
+  assert.equal(r.estado.jogadores.find(j => j.jogadorId === 'carla')!.emBaixaIluminacao, true);
+  assert.equal(r.eventos.filter(e => e.tipo === 'resgate_realizado').length, 0);
+
+  const estadoSemCaixa = {
+    ...r.estado,
+    tabuleiro: { ...r.estado.tabuleiro, caixa: [] as any },
+  };
+  const c = aplicarComandoDePartida(estadoSemCaixa, confirmarPosicao('peao-branco'), 'ana');
+  assert.equal(c.sucesso, true);
+  if (!c.sucesso) return;
+  assert.equal(c.estado.jogadores.find(j => j.jogadorId === 'bruno')!.emBaixaIluminacao, false);
+  assert.equal(c.estado.jogadores.find(j => j.jogadorId === 'carla')!.emBaixaIluminacao, false);
+  assert.equal(c.eventos.filter(e => e.tipo === 'resgate_realizado').length, 2);
 });

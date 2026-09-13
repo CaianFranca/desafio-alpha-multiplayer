@@ -1139,6 +1139,8 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
         resgatadoJogadorId: 'jogador-2',
         resgatadorJogadorId: JOGADOR_ID,
         resgatadorPeaoId: 'peao-branco',
+        emBaixaIluminacao: false,
+        sanidade: 3,
       })
     })
     await waitFor(() =>

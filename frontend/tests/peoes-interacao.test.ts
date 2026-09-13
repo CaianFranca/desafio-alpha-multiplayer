@@ -1,4 +1,6 @@
 import {
+  bordaDaTravessiaPendente,
+  celulasDaTravessiaDoEscuro,
   deveSuprimirCliquePorArrasto,
   cicloAtivo,
   despacharCliqueDeCelula,
@@ -15,6 +17,7 @@ import {
   mapearGirarRecebida,
   mapearMovimentacao,
   mapearPosicionarRecebida,
+  mapearTravessiaDoEscuro,
   peaoDeReferenciaDaSequencia,
   peaoSobreAMesa,
   podeSelecionarPeao,
@@ -1212,8 +1215,8 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
 
   it('posição confirmada EM BAIXA trava o pull (review PR #370 Bug 1)', () => {
     // Moveu → sofreu ataque/Baixa → CONFIRMAR encerra sem sortear no turno;
-    // a Bandeja não puxa após posicaoConfirmadaNoTurno em Baixa (o puxar-1
-    // vem no próximo avancarVez, ADR-0013).
+    // a Bandeja não puxa após posicaoConfirmadaNoTurno em Baixa (ADR-0014:
+    // sem puxar-1 no turno seguinte — só a Travessia do Escuro saca).
     const estado = estadoBase({
       peoes: [peao('peao-branco', INICIAL)],
       peaoSelecionadoId: 'peao-branco',
@@ -1239,9 +1242,10 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
   })
 
   it('fluxo Baixa completo no cliente: puxar → vaga → OK → selecionar → mover (review PR #370 Bug 2)', () => {
-    // Turno em Baixa (puxar-1 do avancarVez já na Bandeja): cada etapa da
-    // cadeia emite o comando esperado; confirmar/encerrar são botões de fase
-    // (engine, cobertos em packages/engine/test/partida.test.ts).
+    // Turno em Baixa com recebida na Bandeja (na ADR-0014 ela chega via
+    // ATRAVESSAR_O_ESCURO sob demanda, não mais no turno_iniciado): cada
+    // etapa da cadeia emite o comando esperado; confirmar/encerrar são
+    // botões de fase (engine, cobertos em packages/engine/test/partida.test.ts).
     const baseBaixa = estadoBase({
       posicionadas: [
         pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
@@ -1303,6 +1307,283 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     expect(mapearMovimentacao(selecionado, { linha: 2, coluna: 3 })).toEqual({
       tipo: 'comando',
       comando: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 2, coluna: 3 } },
+    })
+  })
+
+  describe('travessia do Escuro no cliente (ADR-0014 / issue #377, Opção B)', () => {
+    const VAGA_ESCURA = { linha: 2, coluna: 3 } // norte de inicial-1@0
+
+    function estadoTravessia(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPeoes {
+      return estadoBase({
+        posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+        peoes: [peao('peao-1-branco', INICIAL)],
+        recebidasPendentes: [],
+        peaoSelecionadoId: 'peao-1-branco',
+        peaoDoTurnoId: 'peao-1-branco',
+        pecaSelecionadaId: null,
+        posicaoConfirmadaNoTurno: false,
+        movimentouNoTurno: false,
+        peaoIdsEmBaixa: new Set(['peao-1-branco']),
+        celulasIluminadas: [],
+        donoDoCiclo: true,
+        pecaDoInicioDoTurnoId: 'inicial-1',
+        ...opts,
+      })
+    }
+
+    function tabuleiroDe(estado: EstadoInteracaoPeoes): EstadoInteracaoTabuleiro {
+      return {
+        iniciais: [],
+        posicionadas: estado.posicionadas,
+        pecaSelecionadaId: estado.pecaSelecionadaId,
+        pecaEmManipulacaoId: null,
+      }
+    }
+
+    it('clique em vaga escura emite ATRAVESSAR_O_ESCURO (jogadorId injetado na página)', () => {
+      const estado = estadoTravessia()
+      expect(mapearTravessiaDoEscuro(estado, VAGA_ESCURA)).toEqual({
+        tipo: 'comando',
+        comando: { type: 'ATRAVESSAR_O_ESCURO', peaoId: 'peao-1-branco', celula: VAGA_ESCURA },
+      })
+      expect(rotearCliqueDeCelula(estado, tabuleiroDe(estado), VAGA_ESCURA)).toEqual({
+        ciclo: { type: 'ATRAVESSAR_O_ESCURO', peaoId: 'peao-1-branco', celula: VAGA_ESCURA },
+      })
+      expect(
+        ehComandoDePeao({ type: 'ATRAVESSAR_O_ESCURO', peaoId: 'peao-1-branco', celula: VAGA_ESCURA }),
+      ).toBe(true)
+    })
+
+    it('guards: fora de Baixa, iluminada, ocupada, fora de vaga, pendência, já atravessou, sem seleção, sem mapa e espectador → null', () => {
+      const base = estadoTravessia()
+      // Fora de Baixa: mover normal, sem travessia.
+      expect(mapearTravessiaDoEscuro({ ...base, peaoIdsEmBaixa: new Set() }, VAGA_ESCURA)).toBeNull()
+      // Célula iluminada: é mover normal, não travessia.
+      expect(mapearTravessiaDoEscuro({ ...base, celulasIluminadas: [VAGA_ESCURA] }, VAGA_ESCURA)).toBeNull()
+      // Célula ocupada: nem vaga é.
+      expect(
+        mapearTravessiaDoEscuro(
+          { ...base, posicionadas: [...base.posicionadas, pecaPosicionada('reta-9', 'reta', 0, 2, 3)] },
+          VAGA_ESCURA,
+        ),
+      ).toBeNull()
+      // Célula vazia mas fora das vagas do peão.
+      expect(mapearTravessiaDoEscuro(base, { linha: 0, coluna: 0 })).toBeNull()
+      // Com pendências: a sequência de encaixe governa.
+      expect(
+        mapearTravessiaDoEscuro(
+          { ...base, recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', null, null)] },
+          VAGA_ESCURA,
+        ),
+      ).toBeNull()
+      // Já atravessou no turno: uma por turno.
+      expect(mapearTravessiaDoEscuro({ ...base, atravessouNoTurno: true }, VAGA_ESCURA)).toBeNull()
+      // Sem peão de referência.
+      expect(
+        mapearTravessiaDoEscuro({ ...base, peaoSelecionadoId: null, peaoDoTurnoId: null }, VAGA_ESCURA),
+      ).toBeNull()
+      // Sem mapa de iluminadas: fail-closed, nada é escuro.
+      expect(mapearTravessiaDoEscuro({ ...base, celulasIluminadas: undefined }, VAGA_ESCURA)).toBeNull()
+      // Espectador não atravessa.
+      expect(mapearTravessiaDoEscuro({ ...base, donoDoCiclo: false }, VAGA_ESCURA)).toBeNull()
+    })
+
+    it('gates da origem ("uma casa por turno"): fora da Peça do início → sem gesto', () => {
+      const base = estadoTravessia()
+      // Moveu e voltou à origem NÃO revoga o gesto (defeito #377): a restrição
+      // é por localização, não por `movimentouNoTurno` — o ida-e-volta mantém
+      // a travessia disponível (cruzar dessa posição continua sendo o primeiro
+      // "passo" escuro do turno).
+      expect(
+        mapearTravessiaDoEscuro({ ...base, movimentouNoTurno: true }, VAGA_ESCURA),
+      ).toEqual({
+        tipo: 'comando',
+        comando: {
+          type: 'ATRAVESSAR_O_ESCURO',
+          peaoId: 'peao-1-branco',
+          celula: VAGA_ESCURA,
+        },
+      })
+      expect(celulasDaTravessiaDoEscuro({ ...base, movimentouNoTurno: true })).toContainEqual(VAGA_ESCURA)
+      // Peão fora da Peça do início (mudou para reta-9 — o caso "mover para a
+      // peça iluminada de outro jogador e cruzar de lá"): a vaga escura dela
+      // (1,3) não roteia travessia nem destaca.
+      const foraDaOrigem: EstadoInteracaoPeoes = {
+        ...base,
+        posicionadas: [
+          pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+          pecaPosicionada('reta-9', 'reta', 0, 2, 3),
+        ],
+        peoes: [peao('peao-1-branco', { linha: 2, coluna: 3 })],
+      }
+      expect(mapearTravessiaDoEscuro(foraDaOrigem, { linha: 1, coluna: 3 })).toBeNull()
+      expect(celulasDaTravessiaDoEscuro(foraDaOrigem)).toEqual([])
+      // Voltar à origem devolve o gesto (moveu e voltou reabre travessia:
+      // em cima da Peça do início de novo → gesto disponível, mesmo com
+      // movimentouNoTurno true).
+      expect(
+        mapearTravessiaDoEscuro(
+          {
+            ...foraDaOrigem,
+            posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+            peoes: [peao('peao-1-branco', INICIAL)],
+            movimentouNoTurno: true,
+          },
+          VAGA_ESCURA,
+        ),
+      ).toEqual({
+        tipo: 'comando',
+        comando: {
+          type: 'ATRAVESSAR_O_ESCURO',
+          peaoId: 'peao-1-branco',
+          celula: VAGA_ESCURA,
+        },
+      })
+      // Sem mover E na origem → gesto disponível (controle).
+      expect(celulasDaTravessiaDoEscuro(base)).toContainEqual(VAGA_ESCURA)
+    })
+
+    it('pós-confirmação em Baixa: vaga escura vira rejeição âmbar (AC3)', () => {
+      const estado = estadoTravessia({ posicaoConfirmadaNoTurno: true })
+      expect(mapearTravessiaDoEscuro(estado, VAGA_ESCURA)).toEqual({
+        tipo: 'rejeicao',
+        rejeicao: { motivo: 'posicao_confirmada' },
+      })
+    })
+
+    it('vagasDisponiveisDoPeao com pendência travada retorna só a célula fixa', () => {
+      const estado = estadoTravessia({
+        recebidasPendentes: [pendencia('rt', 'reta-9', 'reta', null, VAGA_ESCURA)],
+      })
+      expect(vagasDisponiveisDoPeao(estado)).toEqual([{ borda: 'norte', celula: VAGA_ESCURA }])
+      // A escolha só aceita a borda travada (espelho da guarda do engine).
+      expect(mapearEscolhaDeVagaDaRecebida(estado, 'rt', 'norte')).toEqual({
+        type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
+        recebidaId: 'rt',
+        borda: 'norte',
+      })
+      expect(mapearEscolhaDeVagaDaRecebida(estado, 'rt', 'leste')).toBeNull()
+    })
+
+    it('fluxo completo: travessia → escolha travada → OK → mover compulsório', () => {
+      // 1. Clique na vaga escura → ATRAVESSAR_O_ESCURO.
+      const clicado = estadoTravessia()
+      expect(rotearCliqueDeCelula(clicado, tabuleiroDe(clicado), VAGA_ESCURA)).toEqual({
+        ciclo: { type: 'ATRAVESSAR_O_ESCURO', peaoId: 'peao-1-branco', celula: VAGA_ESCURA },
+      })
+      // 2. Recebida travada no ar (auto-pull da cena) → o clique na vaga fixa
+      // SÓ escolhe (preview provisório + OK, como no fluxo comum).
+      const travada = estadoTravessia({
+        recebidasPendentes: [pendencia('rt', 'reta-9', 'reta', null, VAGA_ESCURA)],
+        recebidaPuxadaId: 'rt',
+      })
+      expect(rotearCliqueDeCelula(travada, tabuleiroDe(travada), VAGA_ESCURA)).toEqual({
+        ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'rt', borda: 'norte' },
+      })
+      // 3. OK com vaga + alvo + foco → POSICIONAR_PECA.
+      const comVaga = estadoTravessia({
+        recebidasPendentes: [
+          { recebidaId: 'rt', pecaId: 'reta-9', tipoDaPeca: 'reta', orientacao: 0, vaga: 'norte', celulaAlvo: VAGA_ESCURA },
+        ],
+        pecaSelecionadaId: 'reta-9',
+      })
+      expect(mapearFinalizarRecebida(comVaga)).toEqual({
+        type: 'POSICIONAR_PECA',
+        pecaId: 'reta-9',
+        celula: VAGA_ESCURA,
+      })
+      // 4. Encaixada + atravessouNoTurno: mover para a peça colocada emite
+      // MOVER_PEAO (o auto-encadeamento da página faz isso sozinho; o clique
+      // manual segue válido) e a travessia não roteia mais.
+      const encaixada = estadoTravessia({
+        posicionadas: [
+          pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+          pecaPosicionada('reta-9', 'reta', 0, 2, 3),
+        ],
+        atravessouNoTurno: true,
+      })
+      expect(mapearMovimentacao(encaixada, VAGA_ESCURA)).toEqual({
+        tipo: 'comando',
+        comando: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: VAGA_ESCURA },
+      })
+      expect(mapearTravessiaDoEscuro(encaixada, VAGA_ESCURA)).toBeNull()
+    })
+
+    // ADR-0014 / issue #377 (defeito 3): mover pós-travessia é compulsório
+    // PARA a peça colocada.
+    it('pós-travessia: destinos restritos à peça colocada — origem e vizinha conectada não reagem', () => {
+      const base = estadoTravessia({
+        posicionadas: [
+          pecaPosicionada('inicial-1', 'inicial', 0, 3, 3),
+          pecaPosicionada('reta-9', 'reta', 0, 2, 3),
+        ],
+        atravessouNoTurno: true,
+        pecaDaTravessiaId: 'reta-9',
+      })
+      // Peça colocada (2,3): MOVE.
+      expect(mapearMovimentacao(base, VAGA_ESCURA)).toEqual({
+        tipo: 'comando',
+        comando: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: VAGA_ESCURA },
+      })
+      // Origem (3,3): não reage (o movimento não é desfazível — espelha a
+      // guarda MOVIMENTO_INDISPONIVEL da engine).
+      expect(mapearMovimentacao(base, { linha: 3, coluna: 3 })).toBeNull()
+      // Monstro registrado como alvo — nova invariante (ADR-0014): o alvo da
+      // travessia NUNCA fica vago, mesmo com Monstro (fica registrado no
+      // posicionar) — a restrição do fervoroso se mantém: sem volta à origem
+      // e sem vizinha conectada; o pouso no Monstro é rejeitado pela engine
+      // (PECA_JA_TEM_PEAO) e o turno travado fecha por Permanência.
+      const comMonstro = estadoTravessia({
+        atravessouNoTurno: true,
+        pecaDaTravessiaId: 'vulto-x',
+      })
+      expect(mapearMovimentacao(comMonstro, { linha: 3, coluna: 3 })).toBeNull()
+      expect(mapearMovimentacao(comMonstro, { linha: 3, coluna: 6 })).toBeNull()
+    })
+
+    it('bordaDaTravessiaPendente: só a recebida travada, com a borda que mapeia à célula', () => {
+      // Travessia em curso (celulaAlvo fixada, vaga nula) → recebida+borda.
+      expect(
+        bordaDaTravessiaPendente(
+          estadoTravessia({
+            recebidasPendentes: [pendencia('rt', 'reta-9', 'reta', null, VAGA_ESCURA)],
+          }),
+        ),
+      ).toEqual({ recebidaId: 'rt', borda: 'norte' })
+      // Sem pendência travada → null.
+      expect(bordaDaTravessiaPendente(estadoTravessia())).toBeNull()
+      // Vaga já escolhida (já encaminhada) → null.
+      expect(bordaDaTravessiaPendente(estadoTravessia({
+        recebidasPendentes: [pendencia('rt', 'reta-9', 'reta', 'norte', VAGA_ESCURA)],
+      }))).toBeNull()
+      // Espectador → null.
+      expect(bordaDaTravessiaPendente(estadoTravessia({
+        recebidasPendentes: [pendencia('rt', 'reta-9', 'reta', null, VAGA_ESCURA)],
+        donoDoCiclo: false,
+      }))).toBeNull()
+    })
+
+    it('celulasDaTravessiaDoEscuro: vagas escuras do gesto e alvo travado', () => {
+      // Sem pendências, travessia disponível: as vagas escuras do peão (a
+      // célula norte E as outras abertas na grade mínima — todas escuras).
+      const vagas = celulasDaTravessiaDoEscuro(estadoTravessia())
+      expect(vagas).toContainEqual(VAGA_ESCURA)
+      // Ordem canônica por borda (norte/leste) — na grade mínima as vagas
+      // leste/oem se resolvem por wrap toroidal ao par ocupado (3,4/3,6).
+      expect(vagas).toHaveLength(2)
+      // Já atravessou: sem gesto (sem destaque).
+      expect(celulasDaTravessiaDoEscuro(estadoTravessia({ atravessouNoTurno: true }))).toEqual([])
+      // Pendência travada em curso: a célula travada.
+      expect(celulasDaTravessiaDoEscuro(estadoTravessia({
+        recebidasPendentes: [pendencia('rt', 'reta-9', 'reta', null, VAGA_ESCURA)],
+      }))).toEqual([VAGA_ESCURA])
+      // Outra pendência (não travada, vaga já encaminhada) com alvo: []. (a
+      // travessa comum não é gesto de travessia)
+      expect(celulasDaTravessiaDoEscuro(estadoBase({
+        posicionadas: [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+        peoes: [peao('peao-1-branco', INICIAL)],
+        recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', 'norte', { linha: 3, coluna: 4 })],
+      }))).toEqual([])
     })
   })
 
@@ -1663,6 +1944,25 @@ describe('pendentes otimistas anti-duplo-place (issue #249)', () => {
     const outros = new Set<string>(['POSICIONAR_PEAO:peao-branco:3:3'])
     expect(consumirAck(outros, { type: 'PEAO_POSICIONADO', peaoId: 'peao-vermelho' })).toBe(false)
     expect(outros.size).toBe(1)
+  })
+
+  it('ATRAVESSAR_O_ESCURO chaveia por peão+célula e o ack consome (ADR-0014)', () => {
+    // Sem o gate, o duplo clique na vaga escura reenviava a travessia até o
+    // ack e o segundo caía em MOVIMENTO_INDISPONIVEL com som de erro.
+    expect(
+      chaveDeComandoPendente({ type: 'ATRAVESSAR_O_ESCURO', peaoId: 'peao-branco', celula: { linha: 2, coluna: 3 } }),
+    ).toBe('ATRAVESSAR:peao-branco:2:3')
+    const voo = new Set<string>(['ATRAVESSAR:peao-branco:2:3'])
+    expect(
+      consumirAck(voo, { type: 'ATRAVESSOU_O_ESCURO', peaoId: 'peao-branco', celula: { linha: 2, coluna: 3 } }),
+    ).toBe(true)
+    expect(voo.size).toBe(0)
+    // Ack de outra célula não consome.
+    const outra = new Set<string>(['ATRAVESSAR:peao-branco:2:3'])
+    expect(
+      consumirAck(outra, { type: 'ATRAVESSOU_O_ESCURO', peaoId: 'peao-branco', celula: { linha: 3, coluna: 4 } }),
+    ).toBe(false)
+    expect(outra.size).toBe(1)
   })
 
   it('ack com célula consome só a chave exata: pendente da mesma peça em outra célula permanece', () => {
