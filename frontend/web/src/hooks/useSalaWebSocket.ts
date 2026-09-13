@@ -334,16 +334,24 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     ws.onclose = () => {
       setConectado(false)
       wsRef.current = null
-      // Reconexão simples após 1s se ainda montado. Antes dela, tenta
-      // renovar a Sessão (issue #376): o access token pode ter expirado na
-      // Sala ociosa e o upgrade seguinte cairia em 4401 — fire-and-forget
-      // para não atrasar o timer (simetria com usePartidaWebSocket).
-      void refreshSession()
+      // Reconexão simples após 1s se ainda montado. Antes de reconectar,
+      // renova a Sessão (issue #376, review PR #383): o access token pode ter
+      // expirado na Sala ociosa e o upgrade seguinte cairia em 4401. O
+      // refresh começa já, mas a reconexão aguarda o assentamento (simetria
+      // com usePartidaWebSocket) — transitório nunca trava a reconexão.
+      const slide = refreshSession()
       if (reconnectTimerRef.current === null) {
         reconnectTimerRef.current = window.setTimeout(() => {
           reconnectTimerRef.current = null
-          // eslint-disable-next-line react-hooks/immutability -- chamada recursiva após declaração, segura em runtime
-          conectar()
+          void (async () => {
+            try {
+              await slide
+            } catch {
+              // melhor esforço: mesmo com refresh falho, tenta reconectar.
+            }
+            // eslint-disable-next-line react-hooks/immutability -- chamada recursiva após declaração, segura em runtime
+            conectar()
+          })()
         }, 1000)
       }
     }

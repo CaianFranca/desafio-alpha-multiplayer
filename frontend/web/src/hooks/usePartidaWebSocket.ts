@@ -349,17 +349,26 @@ export function usePartidaWebSocket({
         onPartidaNaoIniciadaRef.current?.()
         return
       }
-      // Reconexão simples após 1s se ainda montado. Antes dela, tenta
-      // renovar a Sessão (issue #376): o access token pode ter expirado nos
-      // 15 min de Partida ociosa e o upgrade seguinte cairia em 401 — o
-      // refresh é fire-and-forget para não atrasar o timer (o cookie deve
-      // estar novo quando o retry abrir; refreshSession nunca rejeita).
-      void refreshSession()
+      // Reconexão simples após 1s se ainda montado. Antes de reconectar,
+      // renova a Sessão (issue #376, review PR #383): o access token pode ter
+      // expirado nos 15 min de Partida ociosa e o upgrade seguinte cairia em
+      // 401. O refresh começa já (aproveita a janela de 1s), mas a reconexão
+      // aguarda o assentamento — sem isso, refresh lento >1s corre contra o
+      // timer. Transitório nunca trava a reconexão (melhor esforço).
+      const slide = refreshSession()
       if (reconnectTimerRef.current === null) {
         reconnectTimerRef.current = window.setTimeout(() => {
           reconnectTimerRef.current = null
-          // eslint-disable-next-line react-hooks/immutability -- reconexão recursiva segura em runtime
-          conectar()
+          void (async () => {
+            try {
+              await slide
+            } catch {
+              // melhor esforço: mesmo com refresh falho, tenta reconectar.
+            }
+            if (!montadoRef.current) return
+            // eslint-disable-next-line react-hooks/immutability -- reconexão recursiva segura em runtime
+            conectar()
+          })()
         }, 1000)
       }
     }
@@ -367,11 +376,9 @@ export function usePartidaWebSocket({
     ws.onerror = () => {
       if (!montadoRef.current) return
       // Falha de conexão não deve reconectar sozinha — exibe tela de falha
-      // até retry manual (PartidaPage.tentarNovamenteComConexao). Suprime o
-      // agendamento do onclose subsequente. Renova a Sessão em melhor esforço
-      // (issue #376): o retry manual abre o upgrade com o cookie já novo
-      // (refreshSession nunca rejeita).
-      void refreshSession()
+      // até retry manual (PartidaPage.tentarNovamenteComConexao, que já renova
+      // a Sessão com `await` antes de reconectar). Suprime o agendamento do
+      // onclose subsequente.
       ws.onclose = null
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current)
