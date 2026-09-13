@@ -497,10 +497,26 @@ test('broadcast: ATAQUE_RESOLVIDO com estadosAplicados e LIMPEZA_APLICADA chegam
       const ataques = await Promise.all(ataquesEsperas);
       const limpezas = await Promise.all(limpezasEsperas);
 
+      // Issue #384: o lote do ataque é idêntico nos 4 sockets, inclusive as
+      // peças no alcance por atacante.
+      for (const outro of ataques.slice(1)) {
+        assert.deepEqual(outro.atacantes, ataques[0]!.atacantes);
+      }
       for (const ataque of ataques) {
         assert.equal(ataque.type, 'ATAQUE_RESOLVIDO');
         const atacantes = ataque.atacantes as Array<Record<string, unknown>>;
         assert.deepEqual(atacantes.map((a) => a.pecaId), ['vulto-1', 'espectro-1']);
+        // Peças no alcance (issue #384): o Vulto (2,3) alcança só a
+        // inicial-1 — o raio sul encerra na borda sul fechada dela; o
+        // Espectro (3,4) alcança ao menos a inicial-1 a oeste (o sul em
+        // (4,4) é peça sorteada, fora do controle do cenário).
+        const pecasPorAtacante = new Map(
+          atacantes.map((a) => [a.pecaId, a.pecasNoAlcance] as const),
+        );
+        assert.deepEqual(pecasPorAtacante.get('vulto-1'), ['inicial-1']);
+        const espectroPecas = pecasPorAtacante.get('espectro-1') as unknown[];
+        assert.ok(Array.isArray(espectroPecas), 'espectro carrega pecasNoAlcance');
+        assert.ok(espectroPecas.includes('inicial-1'));
         assert.deepEqual(ataque.peoesAtingidos, ['peao-branco']);
         assert.deepEqual(ataque.protegidos, []);
         // Estado RESULTANTE das penalidades, idêntico nos 4 sockets.
