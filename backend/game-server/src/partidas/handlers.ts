@@ -28,7 +28,9 @@
 // (`estado.jogadores` do engine — desistente excluído). Recusas
 // (MENSAGEM_VAZIA/MENSAGEM_LONGA_DEMAIS/LIMITE_DE_MENSAGENS/JOGADOR_NAO_NA_
 // PARTIDA) vão só ao originador. Rate-limit de 1 mensagem a cada 2s por
-// Jogador (bots isentos), em memória mononodo.
+// Jogador (bots isentos), em memória mononodo — a entrada da Partida é
+// liberada quando o estado desaparece (chat lê `null`) e quando a última
+// conexão cai (`liberarLimiteDeChat` via close em `ws.ts`).
 
 import type { Redis } from 'ioredis';
 import type { WebSocket } from 'ws';
@@ -270,8 +272,12 @@ export class PartidaHandlers {
 
         // Fase (issue #390): a marca de início da PartidaPreparada autoriza —
         // null na preparada, número na em_andamento e pós-Resultado (retenção).
+        // As chaves de partida e de estado nascem, persistem e expiram
+        // JUNTAS (criação, PERSIST do início, retenção e cancelamento), então
+        // `partida === null` com estado presente é anomalia — fail-closed,
+        // recusando o chat como a fase preparada.
         const partida = await obterPartida(this.redis, partidaId).catch(() => null);
-        if (partida !== null && partida.iniciadaEm === null) {
+        if (partida === null || partida.iniciadaEm === null) {
           this.recusarChat(socket, 'DADOS_INVALIDOS', 'Chat disponível apenas com a Partida em andamento.');
           return;
         }
@@ -358,6 +364,17 @@ export class PartidaHandlers {
   ): void {
     this.broadcaster.enviarParaSocket(socket, { type: 'ERRO_DO_TABULEIRO', codigo, mensagem });
     this.debug?.emitirParaSocket(socket, 'error', `Mensagem de chat recusada: ${codigo} — ${mensagem}`);
+  }
+
+  /**
+   * Libera a entrada do rate-limit do chat da Partida (issue #390): chamado
+   * quando a última conexão cai (close da admissão em `ws.ts`) — sem conexão
+   * vigente o chat não tem para quem sair e a entrada ficaria sem dono até o
+   * próximo chat lerm estado `null`. Complementa a limpeza por chat que já
+   * roda quando o estado desaparece.
+   */
+  liberarLimiteDeChat(partidaId: string): void {
+    this.limiteDeChatPorPartida.delete(partidaId);
   }
 
   /**
