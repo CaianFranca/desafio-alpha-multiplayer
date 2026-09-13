@@ -85,6 +85,11 @@ describe('som de recusa — mapeamento evento → motivo (issue #228)', () => {
         protegidos: ['j1'],
         estadosAplicados: [],
       },
+      // Recusas do Chat de Partida (issue #390): vão só ao autor e SEM SOM —
+      // o painel do chat (#389) dará o retorno visual próprio.
+      { type: 'ERRO_DO_TABULEIRO', codigo: 'MENSAGEM_VAZIA', mensagem: 'x' },
+      { type: 'ERRO_DO_TABULEIRO', codigo: 'MENSAGEM_LONGA_DEMAIS', mensagem: 'x' },
+      { type: 'ERRO_DO_TABULEIRO', codigo: 'LIMITE_DE_MENSAGENS', mensagem: 'x' },
     ]
     for (const evento of silenciosos) {
       expect(motivoDeRecusaDoEvento(evento)).toBeNull()
