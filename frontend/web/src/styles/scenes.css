@@ -447,6 +447,30 @@
       rgba(5, 5, 7, 0.74)
     );
   }
+
+  /* Ataque dos monstros (issue #385): tremor do atingido e brilho do escudo
+     do protegido — sem equivalente 1:1 em utilities, ficam no CSS. O pulo da
+     peça sem peão usa `animate-bounce` no TSX; o stagger da onda do Vulto
+     vive no `animationDelay` inline (`atrasoMs` do coreógrafo). */
+  .ataque-tremor {
+    animation: ataque-tremor 320ms linear infinite;
+  }
+  .ataque-escudo {
+    animation: ataque-escudo 900ms ease-in-out infinite;
+  }
+}
+
+@keyframes ataque-tremor {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  20% { transform: translate3d(-3px, 1px, 0); }
+  40% { transform: translate3d(3px, -1px, 0); }
+  60% { transform: translate3d(-2px, -1px, 0); }
+  80% { transform: translate3d(2px, 1px, 0); }
+}
+
+@keyframes ataque-escudo {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(125, 211, 252, 0.55); }
+  50% { box-shadow: 0 0 12px 3px rgba(125, 211, 252, 0.55); }
 }
 
 @keyframes history-kenburns {
@@ -469,6 +493,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ataque-tremor,
+  .ataque-escudo {
+    animation: none;
+  }
   .site-header__nav-link,
   .site-header__login,
   .site-header__cta {

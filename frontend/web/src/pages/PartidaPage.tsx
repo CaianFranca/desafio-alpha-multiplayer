@@ -12,6 +12,8 @@ import {
   textoDoAnuncioDeRecusa,
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
+import { TransicaoAtaque } from '../components/partida/TransicaoAtaque'
+import { useFilaDeAtaque } from '../components/partida/useFilaDeAtaque'
 import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
 import {
   origemDoEncaixe,
@@ -62,6 +64,7 @@ import type {
   PartidaComandoDoCliente,
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
+  TurnoIniciadoEvento,
 } from '@flicker/shared'
 
 /** Comandos do canal: tabuleiro (ST-09), peões (ST-10), turnos (ST-11, #118)
@@ -234,11 +237,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     motivo: MotivoDeRecusa
   } | null>(null)
   const proximoIdDeAnuncio = useRef(0)
-  const tocarRecusa = useCallback((motivo: MotivoDeRecusa) => {
-    tocarSomDeRecusa(motivo)
+  // Anúncio sem som (issue #385): o ataque com penalidade mantém o anúncio
+  // ao leitor ("Um peão sofreu um ataque.") mas usa os sons dos monstros —
+  // nunca o THUD genérico, que segue só nas recusas de jogada.
+  const anunciarRecusa = useCallback((motivo: MotivoDeRecusa) => {
     proximoIdDeAnuncio.current += 1
     setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
   }, [])
+  const tocarRecusa = useCallback(
+    (motivo: MotivoDeRecusa) => {
+      tocarSomDeRecusa(motivo)
+      anunciarRecusa(motivo)
+    },
+    [anunciarRecusa],
+  )
 
   // ── Voo do peão com sons (issue #242) ──
   // Único dono dos disparos: reage aos mesmos eventos do canal que atualizam
@@ -358,6 +370,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
   }, [despacharEvento])
 
+  // ── Fila do ataque com bloqueio da entrada do turno (issue #385) ──
+  // Turno segurado volta pelo mesmo lote atômico (ordem preservada); o hook
+  // guarda o callback em ref — estável sem re-subscrever o socket.
+  const liberarTurnoSegurado = useCallback(
+    (evento: TurnoIniciadoEvento) => {
+      loteDeTurnoRef.current.push(evento as Parameters<typeof reduzirEvento>[1])
+      agendarFlushLote()
+    },
+    [agendarFlushLote],
+  )
+  const {
+    ataqueExibido,
+    enfileirarAtaque,
+    segurarTurnoSeEmAtaque,
+    notificarSnapshot,
+    cancelarAtaque,
+  } = useFilaDeAtaque(liberarTurnoSegurado)
+
   // Ref do ponto único de injeção do jogadorId (#91): o `onEvento` do canal
   // é declarado antes do `enviarComJogador` (useCallback abaixo), então usa a
   // ref para quebrar o TDZ e manter o callback do socket estável (mesmo
@@ -414,6 +444,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           }
           // Fim de jogo: nada a desistir — limpa eventual pendência de reenvio.
           esquecerReenvio()
+          // Fim de jogo: a coreografia do ataque é descartada (tela congela).
+          cancelarAtaque()
           partidaTerminada(evento.resultado, evento.motivo ?? null)
           return
         }
@@ -421,6 +453,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // Snapshot é autoridade total da seleção (#249): reconcilia
           // pendentes em voo contraditórios (limpa o conjunto).
           pendentesEmVoo.current.clear()
+          // Snapshot mais novo invalida turnos segurados pela fila do ataque
+          // (issue #385: a autoridade já projetou a vez — sem regressão).
+          notificarSnapshot()
           aplicarSnapshotNoModelo(evento.snapshot)
           if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
           // Snapshot é a autoridade do roster: se ele já me excluiu E não há
@@ -462,6 +497,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           }
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             esquecerReenvio()
+            // Fim de jogo via snapshot: descarta a coreografia do ataque.
+            cancelarAtaque()
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
           }
@@ -486,6 +523,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // A continuação por LIMPEZA_APLICADA/TURNO_ENCERRADO só vale para lote
         // aberto pela desistência — fora dele, os caminhos dedicados abaixo
         // seguem inalterados.
+        // Fila do ataque (issue #385): com a coreografia ativa, a ENTRADA do
+        // turno é segurada até drenar (lag deliberado); o resto do lote
+        // (incluindo TURNO_ENCERRADO) passa direto.
+        if (evento.type === 'TURNO_INICIADO' && segurarTurnoSeEmAtaque(evento)) {
+          return
+        }
         const loteAbertoPorDesistencia =
           loteDeTurnoRef.current.length > 0 &&
           loteDeTurnoRef.current[0]?.type === 'DESISTENCIA_REGISTRADA'
@@ -571,15 +614,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           return
         }
         // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
-        // projetados no modelo sem recarregar página. Só o ataque COM
-        // penalidade (`estadosAplicados.length > 0`, issue #228) toca a
-        // recusa — proteção que negou, gatilho sem vítimas e resgate ficam
-        // em silêncio.
+        // projetados no modelo sem recarregar página. O estado aplica na hora
+        // (reducer acima); a coreografia do ataque (issue #385) só revela —
+        // fila por atacante com bloqueio da entrada do turno e sons próprios
+        // (monstro sempre, tremida/defesa só com alvo na chegada). A
+        // penalidade usa os sons dos monstros, nunca o THUD genérico; recusas
+        // de jogada mantêm o genérico. O anúncio ao leitor é mantido sem som.
         if (evento.type === 'ATAQUE_RESOLVIDO' || evento.type === 'RESGATE_REALIZADO') {
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           if (evento.type === 'ATAQUE_RESOLVIDO') {
+            enfileirarAtaque(evento, modeloRef.current)
             const motivo = motivoDeRecusaDoEvento(evento)
-            if (motivo !== null) tocarRecusa(motivo)
+            if (motivo !== null) anunciarRecusa(motivo)
           }
           return
         }
@@ -672,7 +718,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       },
       // `jogadorId` entra em deps (só troca em login/logout — o hook guarda o
       // callback em ref, sem reabrir o socket).
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote, jogadorId, partidaId, esquecerReenvio],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, anunciarRecusa, agendarFlushLote, enfileirarAtaque, segurarTurnoSeEmAtaque, notificarSnapshot, cancelarAtaque, jogadorId, partidaId, esquecerReenvio],
     ),
     onAdmissao: useCallback(
       (evento) => {
@@ -1204,6 +1250,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
       />
+      {/*
+        Coreografia do ataque (issue #385): overlay evento-driven da fila —
+        só revela (o estado já aplicou na hora); desmonta ao drenar, sem
+        marcas. Com movimento reduzido, sem visual (sons e bloqueio seguem).
+      */}
+      <TransicaoAtaque ataque={ataqueExibido} />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
       {/*
         Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
