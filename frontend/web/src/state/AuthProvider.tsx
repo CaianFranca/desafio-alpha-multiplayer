@@ -88,8 +88,17 @@ export function AuthProvider({ initialState, children }: AuthProviderProps) {
     if (!autenticado || slideProativoDesligado()) return
     if (typeof window === 'undefined') return
     const deslizar = () => {
-      ultimoSlideRef.current = Date.now()
-      void refreshSession()
+      // Review PR #383: só marca o throttle em sucesso. Falha transitória não
+      // pode suprimir o próximo visibility/focus — senão a Sessão fica sem
+      // renovar por 1 min sob rede instável.
+      void (async () => {
+        try {
+          const renovou = await refreshSession()
+          if (renovou) ultimoSlideRef.current = Date.now()
+        } catch {
+          // melhor esforço: o próximo visibility/focus tenta de novo.
+        }
+      })()
     }
     const deslizarAoVoltar = () => {
       if (document.visibilityState !== 'visible') return

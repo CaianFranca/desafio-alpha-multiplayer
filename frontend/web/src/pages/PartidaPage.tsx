@@ -1101,7 +1101,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     // JOGADOR_NAO_NA_PARTIDA) — falha terminal sem retry.
     if (desistiu) return
     // Guard anti-duplo-clique (issue #376): o retry aguarda o refresh, então
-    // cliques em rajada abririam N sockets. A flag cai no `finally`.
+    // cliques em rajada abririam N Conexões à Partida. A flag cai no `finally`.
     if (tentandoReconectarRef.current) return
     tentandoReconectarRef.current = true
     // Retry manual com Sessão renovada (issue #376): o upgrade do WS valida
