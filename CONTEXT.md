@@ -248,7 +248,7 @@ _Avoid_: mover, andar
 Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento; vedada após atravessar o Escuro no turno (o mover para a peça colocada é compulsório).
 _Avoid_: ficar, pular
 
-**Travessia do Escuro** (ADR-0014):
+**Travessia do Escuro** (ADR-0017):
 Jogada exclusiva de Baixa Iluminação em que o peão alcança uma célula escura vazia vizinha conectada à peça sob ele; saca 1 peça sob demanda (sem sorteio no início do turno) com a célula-alvo pré-fixada, seguida de encaixe e movimento compulsório para a peça colocada, com fechamento automático (mover → confirmar → encerrar, sem clique); uma por turno e somente da Peça do início do turno ("uma casa por turno" — portar a outra peça iluminada não reabre a vaga; voltar à origem mantém a vaga) — inclusive quando a peça sacada é Monstro: o Monstro não aceita peão, o mover compulsório é impossível e o turno travado fecha por Permanência.
 _Avoid_: explorar o escuro, puxar no escuro
 
@@ -360,5 +360,5 @@ _Avoid_: tile, bloco
 ## Depuração
 
 **Modo Desenvolvedor**:
-Ferramenta escondida de diagnóstico do frontend, ativada por 5 cliques em até 3s no logo Ginga do footer; sobre um painel (PainelDeDepuração) que exibe em tempo real os logs capturados desde o boot (console, erros, boundaries, tráfego WS e linhas espelhadas do lobby-server/game-server quando o stream de debug está ligado), com marcadores de fase (login, registro, sala, turno por jogador) como fundo histórico das linhas. O modo sobrevive a reload e pode ser desligado pelo botão Desligar; esconder o painel não interrompe a captura nem o stream. Qualquer Jogador autenticado pode ativar o stream e recebe apenas linhas do próprio escopo (própria Sala no lobby, própria Partida no game-server) — risco aceito (ADR-0011).
+Ferramenta escondida de diagnóstico do frontend, ativada por 5 cliques em até 3s no logo Ginga do footer; sobre um painel (PainelDeDepuração) que exibe em tempo real os logs capturados desde o boot (console, erros, boundaries, tráfego WS e linhas espelhadas do lobby-server/game-server quando o stream de debug está ligado), com marcadores de fase (login, registro, sala, turno por jogador) como fundo histórico das linhas. O modo sobrevive a reload e pode ser desligado pelo botão Desligar; esconder o painel não interrompe a captura nem o stream. Qualquer Jogador autenticado pode ativar o stream e recebe apenas linhas do próprio escopo (própria Sala no lobby, própria Partida no game-server) — risco aceito (ADR-0015).
 _Avoid_: modo debug, console escondido, painel de logs

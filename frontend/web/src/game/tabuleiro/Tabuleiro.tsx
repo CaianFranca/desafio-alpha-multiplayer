@@ -82,7 +82,7 @@ interface TabuleiroProps {
    * indicação visual de onde a peça pode ser colocada.
    */
   vagasPontilhadasSet?: ReadonlySet<string>
-  /** Chaves das células do gesto da travessia (ADR-0014): anel branco nas
+  /** Chaves das células do gesto da travessia (ADR-0017): anel branco nas
    * vagas escuras clicáveis + célula travada da pendência em curso. */
   travessiaSet?: ReadonlySet<string>
   /**
@@ -240,7 +240,7 @@ export function Tabuleiro({
         const alvoPendente = alvosPendentesSet.has(chave)
         const vagaDisponivel = vagasSet.has(chave)
         const vagaPontilhada = vagasPontilhadasSet.has(chave)
-        // Anel da travessia (ADR-0014): vagas escuras clicáveis + célula
+        // Anel da travessia (ADR-0017): vagas escuras clicáveis + célula
         // travada da pendência em curso — destaque branco legível no escuro.
         const anelTravessia = travessiaSet.has(chave)
         // Iluminada (issue #151): espelho do estado compartilhado; os destaques

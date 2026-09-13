@@ -1588,7 +1588,7 @@ function comJogadorEmBaixa(
 }
 
 function estadoDaTravessia(): EstadoDaPartida {
-  // ADR-0014 (regra "uma casa por turno"): a Travessia só parte da Peça do
+  // ADR-0017 (regra "uma casa por turno"): a Travessia só parte da Peça do
   // início do turno. A peça branca em rodada 2 aqui é a que repousa na
   // vizinha (2,3) do inicial-1 — o turno "começa" nela (estado válido de
   // rodada avançada: o peão está onde parou no turno anterior).
@@ -2201,7 +2201,7 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
     'ENCERRAMENTO_INVALIDO',
   );
   // Permanência: o mover re-seleciona o Peão (semântica única, issue #334),
-  // então o guarda do Tabuleiro não barra por seleção — ADR-0014 / issue #377
+  // então o guarda do Tabuleiro não barra por seleção — ADR-0017 / issue #377
   // (Opção B): após a Travessia, a Permanência é vedada até o mover
   // compulsório (MOVIMENTO_INDISPONIVEL, mesmo após mover — a flag só cai na
   // Confirmação). Nenhum caminho fecha o turno sem o confirmar.
@@ -2233,8 +2233,8 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
   );
 });
 
-// ADR-0014 / issue #377 — mover compulsório PARA a peça colocada.
-test('ADR-0014: mover pós-travessia só para a peça colocada — voltar à origem é rejeitado', () => {
+// ADR-0017 / issue #377 — mover compulsório PARA a peça colocada.
+test('ADR-0017: mover pós-travessia só para a peça colocada — voltar à origem é rejeitado', () => {
   let estado = estadoDaTravessia();
   estado = {
     ...estado,
@@ -2266,11 +2266,11 @@ test('ADR-0014: mover pós-travessia só para a peça colocada — voltar à ori
   );
 });
 
-// ADR-0014 / issue #377 — exceção monstro: a peça sacada é Monstro (não
+// ADR-0017 / issue #377 — exceção monstro: a peça sacada é Monstro (não
 // aceita peão), então o mover compulsório é impossível e o turno travado
 // fecha via Permanência — uma travessia por turno, mesmo com Monstro (a
 // flag não cai no posicionar).
-test('ADR-0014: travessia que coloca Monstro mantém o turno travado — Permanência fecha', () => {
+test('ADR-0017: travessia que coloca Monstro mantém o turno travado — Permanência fecha', () => {
   let estado = estadoDaTravessia();
   estado = {
     ...estado,
@@ -2319,10 +2319,10 @@ test('ADR-0014: travessia que coloca Monstro mantém o turno travado — Perman�
   assert.equal(permanencia.estado.atravessouNoTurno, false);
 });
 
-// ADR-0014 / issue #377 — Opção B (revoga ADR-0013): sem sorteio no início do
+// ADR-0017 / issue #377 — Opção B (revoga ADR-0016): sem sorteio no início do
 // turno em Baixa; o saque é só sob demanda, na Travessia do Escuro.
 
-test('ADR-0014: permanecer com seleção nula adota o peão do ator (bloqueante 1)', () => {
+test('ADR-0017: permanecer com seleção nula adota o peão do ator (bloqueante 1)', () => {
   let estado = partidaEmRodada2();
   // Ana em turno normal, peça do início = inicial-1 (3,3), sem pendências
   assert.equal(estado.jogadorAtivoId, 'ana');
@@ -2348,7 +2348,7 @@ test('ADR-0014: permanecer com seleção nula adota o peão do ator (bloqueante 
   );
 });
 
-test('ADR-0014: avancarVez em Baixa nunca puxa no turno_iniciado (0 peças) — permanecer sem seleção sucede', () => {
+test('ADR-0017: avancarVez em Baixa nunca puxa no turno_iniciado (0 peças) — permanecer sem seleção sucede', () => {
   // Usa N=2 para controlar o wrap ana→bruno→ana
   let estado = partidaIniciadaCom(['ana', 'bruno']);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
@@ -2380,7 +2380,7 @@ test('ADR-0014: avancarVez em Baixa nunca puxa no turno_iniciado (0 peças) — 
   assert.equal(permanecerAna.estado.jogadorAtivoId, 'bruno');
 });
 
-test('ADR-0014: avancarVez em Baixa com caixa vazia não puxa (0 peças)', () => {
+test('ADR-0017: avancarVez em Baixa com caixa vazia não puxa (0 peças)', () => {
   let estado = partidaIniciadaCom(['ana', 'bruno']);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
@@ -2412,8 +2412,8 @@ test('ADR-0014: avancarVez em Baixa com caixa vazia não puxa (0 peças)', () =>
   assert.ok(!retorno.eventos.some((e) => e.tipo === 'peca_sorteada'));
 });
 
-test('ADR-0014 / issue #377: avancarVez em Baixa COM vaga escura e caixa cheia não puxa (0 peças)', () => {
-  // Regressão do bug: o código antigo (ADR-0013) sacava 1 peça no
+test('ADR-0017 / issue #377: avancarVez em Baixa COM vaga escura e caixa cheia não puxa (0 peças)', () => {
+  // Regressão do bug: o código antigo (ADR-0016) sacava 1 peça no
   // turno_iniciado quando havia vaga escura — travando o movimento do peão.
   // O fluxo canônico agora é a Travessia do Escuro sob demanda (Opção B).
   // Cena controlada: ana em Baixa com o peão sobre uma cruz livre em (5,5)
@@ -2464,7 +2464,7 @@ test('ADR-0014 / issue #377: avancarVez em Baixa COM vaga escura e caixa cheia n
   assert.equal(permanecerAna.sucesso, true);
 });
 
-test('ADR-0014: confirmar_posicao em Baixa mantém recebidas [] (sem sorteio no confirmar)', () => {
+test('ADR-0017: confirmar_posicao em Baixa mantém recebidas [] (sem sorteio no confirmar)', () => {
   let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
   // Move para peça vizinha conectada e confirma — em Baixa o confirmar não sorteia
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -2487,7 +2487,7 @@ test('ADR-0014: confirmar_posicao em Baixa mantém recebidas [] (sem sorteio no 
   assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
 });
 
-test('ADR-0014: travessia usa iluminação fresca (unificada com posicionarPeao)', () => {
+test('ADR-0017: travessia usa iluminação fresca (unificada com posicionarPeao)', () => {
   let estado = estadoDaTravessia();
   // Injeta iluminação stale divergente: adiciona célula iluminada que cobre a vaga norte (1,3)
   // Se a travessia usasse stale, consideraria (1,3) iluminada e falharia; com fresca deve suceder
@@ -2503,7 +2503,7 @@ test('ADR-0014: travessia usa iluminação fresca (unificada com posicionarPeao)
 });
 
 // Issue #343 — Baixa nova no mesmo gatilho descarta o sorteio: 0 no turno e
-// 0 no avancarVez seguinte (ADR-0014 — sem puxar-1; só a Travessia saca, sob
+// 0 no avancarVez seguinte (ADR-0017 — sem puxar-1; só a Travessia saca, sob
 // demanda). Sem o descarte, a pendencia comum fica irresoluvel e o turno
 // trava com PENDENCIA_NAO_RESOLVIDA. Aqui o Primeiro Turno prova 0 + encerrar.
 
@@ -2618,7 +2618,7 @@ test('issue #343: Primeiro Turno com Baixa nova e vaga escura descarta a 0 (sem 
   assert.equal(encerrado.estado.jogadorAtivoId, 'bruno');
 });
 
-test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no turno, 0 no avancarVez — ADR-0014)', () => {
+test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no turno, 0 no avancarVez — ADR-0017)', () => {
   let estado = partidaIniciadaCom(['ana', 'bruno']);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
@@ -2648,7 +2648,7 @@ test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no
   assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
   assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
   assert.deepEqual(confirmacao.estado.tabuleiro.caixa, caixaAntes);
-  // 0 também no próximo avancarVez (ADR-0014 / issue #377: sem puxar-1 no
+  // 0 também no próximo avancarVez (ADR-0017 / issue #377: sem puxar-1 no
   // turno_iniciado — o saque em Baixa é só sob demanda, na Travessia do
   // Escuro): encerra o turno de ana, bruno permanece (o permanecer já avança
   // a vez) e ana reabre em Baixa SEM recebida na Bandeja, com a Caixa intacta.
@@ -2668,7 +2668,7 @@ test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no
 test('review PR #370 (Bug 2): fluxo Baixa completo — colocar, OK, selecionar, mover, confirmar e encerrar', () => {
   // O "puxar" é gesto local do cliente (sem comando wire — coberto no
   // frontend); aqui a cadeia começa na recebida com a forma da travessia
-  // (ADR-0014: o saque em Baixa nasce no ATRAVESSAR_O_ESCURO, não mais no
+  // (ADR-0017: o saque em Baixa nasce no ATRAVESSAR_O_ESCURO, não mais no
   // avancarVez), injetada com peça determinística (cruz conecta sempre,
   // 0 giros).
   let estado = partidaIniciadaCom(['ana', 'bruno']);

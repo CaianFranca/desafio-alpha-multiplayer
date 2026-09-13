@@ -151,7 +151,7 @@ export interface ConfirmarPosicaoDoPeaoComando {
 }
 
 // Atravessar o Escuro (issue #264 / spec #272, fluxo canônico sob demanda em
-// Baixa pela ADR-0014 / issue #377 — Opção B): o comando wire do canal de
+// Baixa pela ADR-0017 / issue #377 — Opção B): o comando wire do canal de
 // Partida — o `jogadorId` viaja aqui (forma do ST-11). O saque de 1 peça
 // acontece neste gesto (após a escolha da célula escura), seguido de
 // posicionar → mover compulsório → confirmar.
@@ -357,7 +357,7 @@ export interface EstadoDaPartidaSnapshot {
   readonly rodada: number;
   readonly pecaDoInicioDoTurnoId: PecaId | null;
   readonly posicaoConfirmada: boolean;
-  // Fase da Travessia do Escuro (ADR-0014 / issue #377): pelo contrário da
+  // Fase da Travessia do Escuro (ADR-0017 / issue #377): pelo contrário da
   // posição confirmada, a readmissão NÃO re-aprende por deltas (o servidor só
   // re-entrega ESTADO_DA_PARTIDA) — sem os campos, recarregar/reconectar no
   // meio do turno órfã a fase (marcadores voltam e o auto-mover não dispara).

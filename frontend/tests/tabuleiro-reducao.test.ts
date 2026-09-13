@@ -676,7 +676,7 @@ describe('redução dos turnos no cliente — fase, rodada e mapa aprendido (iss
     expect(estado.atravessouNoTurno).toBe(false)
   })
 
-  it('ATRAVESSOU_O_ESCURO marca a fase da travessia; TURNO_INICIADO/ENCERRADO resetam (ADR-0014)', () => {
+  it('ATRAVESSOU_O_ESCURO marca a fase da travessia; TURNO_INICIADO/ENCERRADO resetam (ADR-0017)', () => {
     let estado = reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1)
     expect(estado.atravessouNoTurno).toBe(false)
     estado = reduzirEvento(estado, {

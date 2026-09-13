@@ -1215,7 +1215,7 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
 
   it('posição confirmada EM BAIXA trava o pull (review PR #370 Bug 1)', () => {
     // Moveu → sofreu ataque/Baixa → CONFIRMAR encerra sem sortear no turno;
-    // a Bandeja não puxa após posicaoConfirmadaNoTurno em Baixa (ADR-0014:
+    // a Bandeja não puxa após posicaoConfirmadaNoTurno em Baixa (ADR-0017:
     // sem puxar-1 no turno seguinte — só a Travessia do Escuro saca).
     const estado = estadoBase({
       peoes: [peao('peao-branco', INICIAL)],
@@ -1242,7 +1242,7 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
   })
 
   it('fluxo Baixa completo no cliente: puxar → vaga → OK → selecionar → mover (review PR #370 Bug 2)', () => {
-    // Turno em Baixa com recebida na Bandeja (na ADR-0014 ela chega via
+    // Turno em Baixa com recebida na Bandeja (na ADR-0017 ela chega via
     // ATRAVESSAR_O_ESCURO sob demanda, não mais no turno_iniciado): cada
     // etapa da cadeia emite o comando esperado; confirmar/encerrar são
     // botões de fase (engine, cobertos em packages/engine/test/partida.test.ts).
@@ -1310,7 +1310,7 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
     })
   })
 
-  describe('travessia do Escuro no cliente (ADR-0014 / issue #377, Opção B)', () => {
+  describe('travessia do Escuro no cliente (ADR-0017 / issue #377, Opção B)', () => {
     const VAGA_ESCURA = { linha: 2, coluna: 3 } // norte de inicial-1@0
 
     function estadoTravessia(opts: Partial<EstadoInteracaoPeoes> = {}): EstadoInteracaoPeoes {
@@ -1509,7 +1509,7 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
       expect(mapearTravessiaDoEscuro(encaixada, VAGA_ESCURA)).toBeNull()
     })
 
-    // ADR-0014 / issue #377 (defeito 3): mover pós-travessia é compulsório
+    // ADR-0017 / issue #377 (defeito 3): mover pós-travessia é compulsório
     // PARA a peça colocada.
     it('pós-travessia: destinos restritos à peça colocada — origem e vizinha conectada não reagem', () => {
       const base = estadoTravessia({
@@ -1528,7 +1528,7 @@ describe('pull da peça na bandeja (fluxo #143/revisão #199)', () => {
       // Origem (3,3): não reage (o movimento não é desfazível — espelha a
       // guarda MOVIMENTO_INDISPONIVEL da engine).
       expect(mapearMovimentacao(base, { linha: 3, coluna: 3 })).toBeNull()
-      // Monstro registrado como alvo — nova invariante (ADR-0014): o alvo da
+      // Monstro registrado como alvo — nova invariante (ADR-0017): o alvo da
       // travessia NUNCA fica vago, mesmo com Monstro (fica registrado no
       // posicionar) — a restrição do fervoroso se mantém: sem volta à origem
       // e sem vizinha conectada; o pouso no Monstro é rejeitado pela engine
@@ -1946,7 +1946,7 @@ describe('pendentes otimistas anti-duplo-place (issue #249)', () => {
     expect(outros.size).toBe(1)
   })
 
-  it('ATRAVESSAR_O_ESCURO chaveia por peão+célula e o ack consome (ADR-0014)', () => {
+  it('ATRAVESSAR_O_ESCURO chaveia por peão+célula e o ack consome (ADR-0017)', () => {
     // Sem o gate, o duplo clique na vaga escura reenviava a travessia até o
     // ack e o segundo caía em MOVIMENTO_INDISPONIVEL com som de erro.
     expect(

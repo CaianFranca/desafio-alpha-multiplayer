@@ -18,7 +18,7 @@ interface PendenciaTravada {
   readonly celulaAlvo: Celula
 }
 
-// Auto-cadeia da Travessia do Escuro (ADR-0014 / issue #377): o FE encadeia
+// Auto-cadeia da Travessia do Escuro (ADR-0017 / issue #377): o FE encadeia
 // MOVER + CONFIRMAR (e SELECIONAR+PERMANECER no Monstro) sozinho — sem teste
 // de integração até aqui. Cenário central = RE-ADMISSÃO no meio da travessia:
 // o ESTADO_DA_PARTIDA (readmissão/reconexão/HMR) agora CARREGA a fase
@@ -231,7 +231,7 @@ afterEach(() => {
   MockWebSocket.clean()
 })
 
-describe('auto-cadeia da Travessia re-admitida (ADR-0014 / issue #377, Bug 2)', () => {
+describe('auto-cadeia da Travessia re-admitida (ADR-0017 / issue #377, Bug 2)', () => {
   it('peça comum: auto-ESCOLHA → OK → auto-MOVER → PEAO_MOVIDO → auto-CONFIRMAR; marcadores somem', async () => {
     const pendencia: PendenciaTravada = {
       recebidaId: 'recebida-travessia',

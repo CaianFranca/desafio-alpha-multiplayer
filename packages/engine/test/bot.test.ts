@@ -776,11 +776,11 @@ test('regressão do travamento da semente 7: a rodada dos 4 bots progrediu sem d
   assert.equal(foraDaVez, 0, 'bot nunca perde a vez agindo nela');
 });
 
-test('prova dinâmica da Travessia: o bot atravessa em Baixa e conclui a cadeia sem rejeição (ADR-0014)', () => {
+test('prova dinâmica da Travessia: o bot atravessa em Baixa e conclui a cadeia sem rejeição (ADR-0017)', () => {
   // Par dinâmico do ramo (d) em bot.ts: a pendência com celulaAlvo fixado
   // nasce em atravessarOEscuroDaPartida (partida.ts) — gerarRecebidas nasce
   // com celulaAlvo nulo (peoes.ts) e o escolher de vaga fixa vaga e
-  // célula-alvo JUNTAS (peoes.ts). Pela ADR-0014 / issue #377 (Opção B) esta
+  // célula-alvo JUNTAS (peoes.ts). Pela ADR-0017 / issue #377 (Opção B) esta
   // FSM EMITE atravessar_o_escuro em Baixa (uma ação por vaga escura) — aqui,
   // a prova dinâmica: percorrendo jogos de bots, toda ação enumerada segue
   // aceita pela engine (exatidão — nenhuma desistência DADOS_INVALIDOS) e a
@@ -930,7 +930,7 @@ test('via da permanência: ficar na peça de início encerra o turno direto', ()
   assert.equal(turno.estado.jogadorAtivoId, 'bruno');
 });
 
-// ADR-0014 / issue #377 (Opção B) — o bot em Baixa atravessa o Escuro.
+// ADR-0017 / issue #377 (Opção B) — o bot em Baixa atravessa o Escuro.
 // Fixture: ana em Baixa com o peão sobre a cruz em (3,0), escuridão total e
 // sem pendências — o turno abre na seleção do peão (ramo d).
 
@@ -944,7 +944,7 @@ function estadoDaBaixaSemPendencias(): EstadoDaPartida {
   };
 }
 
-test('bot em Baixa enumera atravessar_o_escuro, uma ação por vaga escura (ADR-0014)', () => {
+test('bot em Baixa enumera atravessar_o_escuro, uma ação por vaga escura (ADR-0017)', () => {
   let estado = estadoDaBaixaSemPendencias();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   const acoes = acoesValidasDaSubfase(estado, 'ana');
@@ -974,7 +974,7 @@ test('bot em Baixa enumera atravessar_o_escuro, uma ação por vaga escura (ADR-
   }
 });
 
-test('bot após atravessar não enumera nova travessia nem permanência (mover compulsório, ADR-0014)', () => {
+test('bot após atravessar não enumera nova travessia nem permanência (mover compulsório, ADR-0017)', () => {
   let estado = estadoDaBaixaSemPendencias();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   const acoes = acoesValidasDaSubfase(estado, 'ana');
@@ -1013,7 +1013,7 @@ test('bot após atravessar não enumera nova travessia nem permanência (mover c
   );
 });
 
-test('bot em Baixa atravessa para Monstro e fecha o turno por Permanência (ADR-0014)', () => {
+test('bot em Baixa atravessa para Monstro e fecha o turno por Permanência (ADR-0017)', () => {
   let estado = estadoDaBaixaSemPendencias();
   estado = {
     ...estado,
@@ -1060,7 +1060,7 @@ test('bot em Baixa atravessa para Monstro e fecha o turno por Permanência (ADR-
   assert.equal(permanencia.estado.atravessouNoTurno, false);
 });
 
-test('bot conclui a cadeia da travessia até o encerramento (ADR-0014)', () => {
+test('bot conclui a cadeia da travessia até o encerramento (ADR-0017)', () => {
   const estado = estadoDaBaixaSemPendencias();
   const turno = executarTurnoDoBot(estado, 'ana', {
     maxActionsPerTurn: 20,

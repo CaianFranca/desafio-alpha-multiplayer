@@ -492,7 +492,7 @@ test('converterComandoParaWire usa sempre o jogadorId do bot', () => {
       sentido: 'horario',
     },
   );
-  // ADR-0014 / issue #377 (Opção B): o bot em Baixa atravessa o Escuro.
+  // ADR-0017 / issue #377 (Opção B): o bot em Baixa atravessa o Escuro.
   assert.deepEqual(
     converterComandoParaWire(
       { tipo: 'atravessar_o_escuro', peaoId: 'peao-branco', celula: { linha: 1, coluna: 3 } },

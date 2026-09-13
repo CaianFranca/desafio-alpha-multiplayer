@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import {
   FOV_CAMERA,
@@ -161,29 +161,35 @@ export function AmbienteDeJogo({
   // Estado visual LOCAL, fora do modelo autoritativo: clicar a corrente
   // "puxa" a peça, e só então o clique em vaga escolhe a vaga para ela. O
   // pull é consumido quando a pendência sai da lista (encaixe, troca de
-  // turno) — a próxima corrente exige novo pull. O reset é um update-de-
-  // render na mesma fase, sem efeito colateral. A seleção do peão, ao
+  // turno) — a próxima corrente exige novo pull. O reset roda em efeito após
+  // o commit, sem efeito colateral no render. A seleção do peão, ao
   // contrário do pull, é autoritativa do servidor (#249) e nunca é mesclada
   // aqui — o roteador usa o estado do modelo + pull.
   const [recebidaPuxadaId, setRecebidaPuxadaId] = useState<string | null>(null)
-  if (
-    recebidaPuxadaId !== null &&
-    !recebidasPendentes.some((r) => r.recebidaId === recebidaPuxadaId)
-  ) {
-    setRecebidaPuxadaId(null)
-  }
-  // ADR-0014 / issue #377 (Opção B): a recebida da Travessia nasce com a
-  // célula-alvo pré-fixada — sem gesto de pull na bandeja, o clique na vaga
-  // não rotearia (o roteador exige a corrente puxada). O pull é automático
-  // para a corrente travada: o jogador clica direto na vaga escura destacada
-  // (escolha), vê o preview e confirma no OK. Mesmo padrão de update-de-
-  // render do reset acima, sem efeito colateral.
-  const correnteTravada = recebidasPendentes.find(
-    (r) => r.vaga === null && r.celulaAlvo !== null,
-  ) ?? null
-  if (correnteTravada !== null && recebidaPuxadaId !== correnteTravada.recebidaId) {
-    setRecebidaPuxadaId(correnteTravada.recebidaId)
-  }
+  // Sincroniza o pull LOCAL com a lista autoritativa fora do render (F5 da
+  // revisão da #391: setState durante o render): o reset quando a pendência
+  // sai da lista e o pull automático da corrente travada da Travessia rodam
+  // em efeito, após o commit — mesmo comportamento, sem update-de-render.
+  useEffect(() => {
+    if (
+      recebidaPuxadaId !== null &&
+      !recebidasPendentes.some((r) => r.recebidaId === recebidaPuxadaId)
+    ) {
+      setRecebidaPuxadaId(null)
+      return
+    }
+    // ADR-0017 / issue #377 (Opção B): a recebida da Travessia nasce com a
+    // célula-alvo pré-fixada — sem gesto de pull na bandeja, o clique na vaga
+    // não rotearia (o roteador exige a corrente puxada). O pull é automático
+    // para a corrente travada: o jogador clica direto na vaga escura destacada
+    // (escolha), vê o preview e confirma no OK.
+    const correnteTravada = recebidasPendentes.find(
+      (r) => r.vaga === null && r.celulaAlvo !== null,
+    ) ?? null
+    if (correnteTravada !== null && recebidaPuxadaId !== correnteTravada.recebidaId) {
+      setRecebidaPuxadaId(correnteTravada.recebidaId)
+    }
+  }, [recebidasPendentes, recebidaPuxadaId])
   // Estado do ciclo com o pull mesclado (issue #249): roteador, cena e
   // espelho veem a mesma fonte — o modelo autoritativo + pull local; a
   // seleção vem do servidor (snapshot/eventos), nunca de espelho divergente.
@@ -239,7 +245,7 @@ export function AmbienteDeJogo({
       ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
       : [],
   )
-  // ADR-0014 / issue #377 (Opção B): sem pendências e com o Peão em Baixa
+  // ADR-0017 / issue #377 (Opção B): sem pendências e com o Peão em Baixa
   // selecionado, as vagas escuras SÃO o gesto da travessia (clique direto,
   // sem pull) — destacam junto das vagas da pendência, mesma affordância
   // nos dois renderizadores sem prop nova. Fora da Baixa, nada muda (as
@@ -304,7 +310,7 @@ export function AmbienteDeJogo({
   const resgateSet = new Set<string>(
     destinosDoPeao.filter((d) => d.tipo === 'resgate').map((d) => d.peca.pecaId),
   )
-  // ADR-0014 / issue #377 (defeito 2): destaque branco (anel) nas células
+  // ADR-0017 / issue #377 (defeito 2): destaque branco (anel) nas células
   // escuras clicáveis da travessia + na célula travada da pendência — mesma
   // fonte puro, aplicada na cena (anel) e no espelho (data-travessia). O tom
   // quente de `alvo/vaga` se perde no plano escuro; o anel é a linguagem da

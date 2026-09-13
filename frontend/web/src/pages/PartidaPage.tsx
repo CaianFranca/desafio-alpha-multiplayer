@@ -66,7 +66,7 @@ import type {
 } from '@flicker/shared'
 
 /** Comandos do canal: tabuleiro (ST-09), peões (ST-10), turnos (ST-11, #118),
- * travessia do escuro (ADR-0014 / issue #377 — viaja no canal de Partida com
+ * travessia do escuro (ADR-0017 / issue #377 — viaja no canal de Partida com
  * jogadorId, mas nasce do ciclo do Peão) e desistência (#290), sem o
  * jogadorId — injetado uma única vez em enviarComJogador. */
 type ComandoDoCanal =
@@ -207,33 +207,33 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     modeloRef.current = modelo
   }, [modelo])
-  // Ref do jogador local para o auto-encadeamento da travessia (ADR-0014):
+  // Ref do jogador local para o auto-encadeamento da travessia (ADR-0017):
   // o callback do canal não pode depender de `jogadorId` (re-subscreveria o
   // socket a cada render) — leitura tardia via ref, mesmo padrão acima.
   const jogadorIdRef = useRef(jogadorId)
   useEffect(() => {
     jogadorIdRef.current = jogadorId
   }, [jogadorId])
-  // Guarda do auto-encadeamento (ADR-0014, Opção B): o MOVER compulsório
+  // Guarda do auto-encadeamento (ADR-0017, Opção B): o MOVER compulsório
   // pós-travessia é enviado uma única vez por peça posicionada (pecaId) —
   // duas abas do mesmo jogador ou duplo ack não movem duas vezes. Reseta na
   // virada de turno junto dos pendentes em voo.
   const moverTravessiaEncadeadoRef = useRef<string | null>(null)
-  // Guarda do auto-encadeamento da ESCOLHA (ADR-0014, defeito 1): a vaga da
+  // Guarda do auto-encadeamento da ESCOLHA (ADR-0017, defeito 1): a vaga da
   // pendência travada é escolhida sozinha (1 clique: escuro → preview →
   // girar → OK) — uma vez por recebida. Reseta na virada de turno.
   const escolhaTravessiaEncadeadaRef = useRef<string | null>(null)
-  // Guarda do auto-encadeamento da CONFIRMAÇÃO (ADR-0014, Opção B): após o
+  // Guarda do auto-encadeamento da CONFIRMAÇÃO (ADR-0017, Opção B): após o
   // auto-MOVER da travessia ack (PEAO_MOVIDO pousando na peça colocada), o
   // FE confirma a posição sozinho — o jogador cai direto no botão Encerrar
   // Turno. Uma vez por turno; reseta na virada.
   const confirmarTravessiaEncadeadoRef = useRef(false)
-  // Guarda do auto-encadeamento do ENCERRAMENTO (ADR-0014, Opção B): após a
+  // Guarda do auto-encadeamento do ENCERRAMENTO (ADR-0017, Opção B): após a
   // auto-confirmação da travessia ack (POSICAO_CONFIRMADA), o FE encerra o
   // turno sozinho — fechamento de zero cliques (o jogador não precisa nem do
   // botão Encerrar). Uma vez por turno; reseta na virada.
   const encerrarTravessiaEncadeadoRef = useRef(false)
-  // Guarda do auto-encadeamento da PERMANÊNCIA (ADR-0014, exceção monstro):
+  // Guarda do auto-encadeamento da PERMANÊNCIA (ADR-0017, exceção monstro):
   // Monstro não aceita peão, o mover compulsório é impossível e o turno
   // travado fecha via Permanência — o FE auto-permanece no PECA_POSICIONADA,
   // uma vez por peça posicionada. Reseta na virada de turno.
@@ -377,7 +377,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
   // ── Batch atômico de lote de turno (B8): eventos do mesmo lote do engine
   // (TURNO_INICIADO do avanço; ATRAVESSOU_O_ESCURO + PECA_SORTEADA +
-  // RECEBIMENTO_GERADO da travessia — ADR-0014) chegam como WS messages
+  // RECEBIMENTO_GERADO da travessia — ADR-0017) chegam como WS messages
   // separadas no mesmo tick. Sem batch, despacharEvento por mensagem causa
   // flash de 1 frame com estado intermediário (faseDoTurno mostraria
   // permanecer indevido). Queue + microtask coalesce em um único render.
@@ -520,7 +520,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           partidaEmAndamento()
           return
         }
-        // Batch atômico B8 / ADR-0013 / ADR-0014 + lote da desistência (#290, AC2):
+        // Batch atômico B8 / ADR-0013 / ADR-0017 + lote da desistência (#290, AC2):
         // TURNO_INICIADO, ATRAVESSOU_O_ESCURO (+ PECA_SORTEADA +
         // RECEBIMENTO_GERADO da travessia) e DESISTENCIA_REGISTRADA +
         // CELULAS_ILUMINADAS + LIMPEZA_APLICADA + TURNO_* do lote atômico
@@ -680,7 +680,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           const eraRecebida = modeloRef.current.recebidasPendentes.some(
             (r) => r.pecaId === evento.pecaId,
           )
-          // ADR-0014 (exceção monstro): a pendência resolvida carrega o tipo
+          // ADR-0017 (exceção monstro): a pendência resolvida carrega o tipo
           // sorteado — Monstro dispensa o mover compulsório (o peão fica na
           // origem e o turno fecha via Permanência).
           const encaixouMonstro =
@@ -696,7 +696,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           if (eraRecebida) {
             enviarComJogadorRef.current(mapearFinalizarManipulacao())
           }
-          // ADR-0014 / issue #377 (Opção B): o encaixe que fecha a pendência
+          // ADR-0017 / issue #377 (Opção B): o encaixe que fecha a pendência
           // da Travessia dispara o mover compulsório para a peça colocada —
           // o FE encadeia o MOVER automaticamente (decisão aprovada: FE
           // auto-encadeia + guarda na engine). Só no turno local, sem
@@ -724,7 +724,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               enviarComJogadorRef.current({ type: 'MOVER_PEAO', peaoId: peaoDoAtivoId, celula: evento.celula })
             }
           }
-          // ADR-0014 (exceção monstro): Monstro não aceita peão — o mover
+          // ADR-0017 (exceção monstro): Monstro não aceita peão — o mover
           // compulsório é impossível e o turno travado fecha via Permanência
           // (permanecerNaPartida reabre a via só para a peça da travessia).
           // O FE auto-permanece com a cadeia serial SELECIONAR+PERMANECER, só
@@ -771,7 +771,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           setVooPendente({ nonce: proximoNonceVoo.current, ...vooBase })
         }
         despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
-        // ADR-0014 (Opção B): quando o auto-MOVER da travessia ack
+        // ADR-0017 (Opção B): quando o auto-MOVER da travessia ack
         // (PEAO_MOVIDO pousando na peça colocada), o FE auto-confirma a
         // posição uma vez — o jogador cai direto no botão Encerrar Turno
         // (decisão aprovada: fechamento sem clique intermediário). Guardas:
@@ -796,7 +796,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             })
           }
         }
-        // ADR-0014 (Opção B): quando a auto-confirmação da travessia ack
+        // ADR-0017 (Opção B): quando a auto-confirmação da travessia ack
         // (POSICAO_CONFIRMADA originado do auto-CONFIRMAR), o FE encerra o
         // turno sozinho — fechamento de zero cliques (o jogador deixa a mesa
         // sem apertar o botão Encerrar). Guardas: só o ack da auto-confirmação
@@ -1136,7 +1136,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       // Gate do PERMANECER pós-movimento (revisão PR #309): após mover no
       // turno o clique no próprio Peão fica silencioso — encerrar depois de
       // mover é confirmar → encerrar; a Permanência (botão) volta a valer
-      // quando o peão retorna à Peça do início do turno (ADR-0014,
+      // quando o peão retorna à Peça do início do turno (ADR-0017,
       // arrependimento — ida-e-volta livre, ver faseDoTurno).
       movimentouNoTurno: modelo.movimentouNoTurno,
       // Gate do pull na bandeja (revisão #199): só o dono do ciclo puxa; a
@@ -1146,20 +1146,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       afetadosPorPeaoId: afetadosEstavel,
       // N do roster para o teto do Portão (#284): nunca peoes.length.
       quantidadeDeJogadores: quantidadeParaTeto,
-      // ADR-0014: espelho de vagas escuras em Baixa — filtra vagas iluminadas
+      // ADR-0017: espelho de vagas escuras em Baixa — filtra vagas iluminadas
       celulasIluminadas: modelo.celulasIluminadas,
       peaoIdsEmBaixa: emBaixaEstavel,
-      // ADR-0014 / issue #377 (Opção B): fase da travessia no turno — veda
+      // ADR-0017 / issue #377 (Opção B): fase da travessia no turno — veda
       // nova travessia no roteador e esconde o botão Permanecer (o mover
       // pós-posicionamento é compulsório e auto-encadeado).
       atravessouNoTurno: modelo.atravessouNoTurno,
-      // ADR-0014 (mover compulsório PARA a colocada): o roteador silencia os
+      // ADR-0017 (mover compulsório PARA a colocada): o roteador silencia os
       // demais destinos pós-travessia (espelho da guarda da engine).
       pecaDaTravessiaId: modelo.pecaDaTravessiaId,
     }
   }, [temAlvo, estadoEmAndamento, modelo, minhaVez, afetadosEstavel, emResultado, emNaoInicio, quantidadeParaTeto, peaoDoTurnoId, emBaixaEstavel])
 
-  // ADR-0014 (defeito 1): auto-encadeia a ESCOLHA da vaga travada — a
+  // ADR-0017 (defeito 1): auto-encadeia a ESCOLHA da vaga travada — a
   // recebida da Travessia nasce com a célula-alvo pré-fixada, então a página
   // escolhe a vaga sozinha (1 clique: escuro → preview → girar → OK, sem o
   // segundo clique na célula). Só no turno local e sem confirmação; uma vez
@@ -1193,7 +1193,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const peaoProprioPosicionado =
     peaoProprioId !== null &&
     modelo.peoes.some((p) => p.peaoId === peaoProprioId && p.celula !== null)
-  // ADR-0014 (arrependimento na Baixa): o peão do Jogador Ativo está sobre a
+  // ADR-0017 (arrependimento na Baixa): o peão do Jogador Ativo está sobre a
   // Peça do início do turno — caso da ida-e-volta (mover para peça iluminada
   // e voltar). A Permanência volta a valer (a engine só exige o peão na Peça
   // do início; não há guarda de movimentouNoTurno) e as vagas escuras seguem
@@ -1210,7 +1210,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     )
     return pecaAcomodando?.pecaId === modelo.pecaDoInicioDoTurnoId
   })()
-  // ADR-0014 (exceção monstro): a peça da travessia é Monstro — o mover
+  // ADR-0017 (exceção monstro): a peça da travessia é Monstro — o mover
   // compulsório é impossível (Monstro não aceita peão) e o fechamento do
   // turno travado vira Permanência.
   const pecaDaTravessiaEhMonstro = ((): boolean => {
@@ -1231,7 +1231,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         : modelo.recebidasPendentes.length > 0
           ? null
           : modelo.atravessouNoTurno
-            // ADR-0014 / issue #377 (Opção B): pós-travessia o mover para a
+            // ADR-0017 / issue #377 (Opção B): pós-travessia o mover para a
             // peça colocada é compulsório (auto-encadeado) — sem botão
             // Permanecer (o engine rejeitaria), exceto quando a peça
             // atravessada é Monstro (fechamento via Permanência).
@@ -1239,7 +1239,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               ? 'permanecer'
               : null
             : peaoAtivoSobrePecaDeOrigem
-              // ADR-0014 (arrependimento): peão de volta na Peça do início
+              // ADR-0017 (arrependimento): peão de volta na Peça do início
               // do turno (ida-e-volta livre) — a Permanência volta a valer;
               // as vagas escuras da travessia seguem disponíveis. Cobre
               // também o caso de nunca ter movido (default).

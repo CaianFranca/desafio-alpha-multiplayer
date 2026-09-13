@@ -52,7 +52,7 @@
  * PEAO_MOVIDO mantém o Peão selecionado (#263), o clique no próprio Peão
  * após mover rotearia para PERMANECER — que o engine rejeita com
  * ENCERRAMENTO_INVALIDO (mover já consumiu a decisão do turno) salvo quando
- * o peão retorna à Peça do início do turno (ADR-0014, arrependimento: ida-e-
+ * o peão retorna à Peça do início do turno (ADR-0017, arrependimento: ida-e-
  * volta livre — a validade é só "peão na Peça do início", sem guarda de
  * movimentouNoTurno no engine). Com `movimentouNoTurno` o clique no próprio
  * Peão fica silencioso; o caminho canônico de encerrar após mover é
@@ -159,20 +159,20 @@ export interface EstadoInteracaoPeoes {
    * sempre fornece o N clampeado.
    */
   readonly quantidadeDeJogadores?: number
-  /** Células iluminadas do snapshot (ADR-0014): filtra vagas escuras em Baixa. */
+  /** Células iluminadas do snapshot (ADR-0017): filtra vagas escuras em Baixa. */
   readonly celulasIluminadas?: readonly Celula[]
   /** Peões em Baixa Iluminação (per-player) — para filtrar vagas iluminadas. */
   readonly peaoIdsEmBaixa?: ReadonlySet<PeaoId>
   /**
    * O Peão do Jogador Ativo já atravessou o Escuro neste turno
-   * (ATRAVESSOU_O_ESCURO — ADR-0014 / issue #377, Opção B). Enquanto vigente,
+   * (ATRAVESSOU_O_ESCURO — ADR-0017 / issue #377, Opção B). Enquanto vigente,
    * nova travessia não roteia (o engine rejeitaria) e a Permanência é vedada
    * (mover compulsório — guarda do engine). Ausente (unidades puras/testes)
    * = sem travessia no turno (comportamento legado).
    */
   readonly atravessouNoTurno?: boolean
   /**
-   * Peça colocada pela Travessia do Escuro no turno (ADR-0014 / issue #377,
+   * Peça colocada pela Travessia do Escuro no turno (ADR-0017 / issue #377,
    * espelho da engine): o mover pós-travessia é compulsório PARA ELA (o
    * roteador silencia as demais — movimento não desfazível). Ausente = sem
    * restrição (comportamento legado).
@@ -209,7 +209,7 @@ export type ResultadoDeInteracaoDePeao =
 
 /**
  * Comando aceito no callback do ciclo do Peão (cena/espelho → PartidaPage):
- * os comandos do contrato do Peão mais a travessia (ADR-0014 — viaja no
+ * os comandos do contrato do Peão mais a travessia (ADR-0017 — viaja no
  * canal de Partida com `jogadorId` injetado, mas nasce do ciclo).
  */
 export type ComandoDePeaoDoDespacho =
@@ -424,7 +424,7 @@ export function vagasDisponiveisDoPeao(
   if (!peao || peao.celula === null) return []
   const origem = encontrarPecaNaCelula(estado.posicionadas, peao.celula)
   if (!origem) return []
-  // ADR-0014 / issue #377 (Opção B): pendência da Travessia (célula-alvo
+  // ADR-0017 / issue #377 (Opção B): pendência da Travessia (célula-alvo
   // pré-fixada, vaga ainda nula) só aceita a borda que mapeia à célula
   // travada — espelho exato da guarda da engine (DADOS_INVALIDOS fora dela).
   // Sem isso o clique na vaga certa não rotearia e o turno strandaria.
@@ -456,7 +456,7 @@ export function vagasDisponiveisDoPeao(
     if (jaEscolhidas.has(borda)) continue
     const celula = celulaVizinhaNaBorda(origem.celula, borda)
     if (encontrarPecaNaCelula(estado.posicionadas, celula)) continue
-    // ADR-0014: em Baixa, só vagas escuras são disponíveis no espelho — fail-closed:
+    // ADR-0017: em Baixa, só vagas escuras são disponíveis no espelho — fail-closed:
     // se emBaixa e iluminadas === undefined, nenhuma vaga é considerada escura.
     if (emBaixa) {
       if (iluminadas === undefined) continue
@@ -520,7 +520,7 @@ export interface PuxadaDaBandeja {
  *     bandeja continua pública (a corrente é exibida a todos);
  *   - posição confirmada EM BAIXA (`posicaoConfirmadaNoTurno` + peão do ciclo
  *     em `peaoIdsEmBaixa`, review PR #370 Bug 1) trava o pull — moveu →
- *     sofreu ataque/Baixa → o turno encerra sem sortear (ADR-0014: sem
+ *     sofreu ataque/Baixa → o turno encerra sem sortear (ADR-0017: sem
  *     puxar-1 no turno seguinte; só a Travessia do Escuro saca, sob
  *     demanda); o mover checa a confirmação, o pull também. Fora da Baixa o pull pós-confirmação segue liberado: no fluxo
  *     saudável o CONFIRMAR sorteia e o encaixe (puxar → vaga → OK) acontece
@@ -750,7 +750,7 @@ export function mapearMovimentacao(
     (d) => chaveCelula(d.peca.celula) === chaveCelula(celula),
   )
   if (!destino) return null
-  // ADR-0014 / issue #377: mover pós-travessia é compulsório PARA a peça
+  // ADR-0017 / issue #377: mover pós-travessia é compulsório PARA a peça
   // colocada — voltar à origem (ou a qualquer outra) não reage; o movimento
   // da travessia não é desfazível (espelho da guarda da engine). Vale também
   // para Monstro (o alvo é registrado no posicionar): mover para o Monstro é
@@ -770,7 +770,7 @@ export function mapearMovimentacao(
 
 /**
  * Borda da pendência travada para o auto-encadeamento da escolha
- * (ADR-0014 / issue #377, defeito 1): a travessia nasce com a célula-alvo
+ * (ADR-0017 / issue #377, defeito 1): a travessia nasce com a célula-alvo
  * pré-fixada e vaga nula — a página escolhe a vaga sozinha (1 clique:
  * escuro → preview → girar → OK), sem o segundo clique na célula. Retorna a
  * recebida + borda que mapeia à célula travada (espelho da guarda da
@@ -804,7 +804,7 @@ export function bordaDaTravessiaPendente(
 }
 
 /**
- * ADR-0014 (regra "uma casa por turno"): a Travessia só é gesto disponível na
+ * ADR-0017 (regra "uma casa por turno"): a Travessia só é gesto disponível na
  * Peça do início do turno, antes de cruzar — mover para a peça iluminada de
  * outro jogador e atravessar dali contaria como dois movimentos.
  * Gate por localização (espelho da guarda da engine): o movimento de ida-e-
@@ -825,14 +825,14 @@ function travessiaDoEscuroDisponivel(
 }
 
 /**
- * Células destacáveis da travessia (ADR-0014 / issue #377, defeito 2): as
+ * Células destacáveis da travessia (ADR-0017 / issue #377, defeito 2): as
  * vagas escuras clicáveis do gesto de travessia + a célula travada da
  * pendência da travessia sequência em curso — única fonte para o marcador
  * na cena e o atributo do espelho DOM. Fora disso, conjunto vazio (sem
  * reação visual). As vagas escuras só reagem com o Peão de referência em
  * Baixa Iluminação — fora da Baixa o gesto não existe (o defeito 2 do #377
  * pintava a movimentação normal de turnos comuns; fora da Baixa, vazio).
- * ADR-0014 ("uma casa por turno"): também só valem na Peça do início do
+ * ADR-0017 ("uma casa por turno"): também só valem na Peça do início do
  * turno, antes de qualquer movimento (travessiaDoEscuroDisponivel).
  */
 export function celulasDaTravessiaDoEscuro(
@@ -870,7 +870,7 @@ export type TravessiaDoEscuroSemJogador = Omit<
 
 /**
  * Clique em vaga escura vazia com o Peão em Baixa selecionado →
- * ATRAVESSAR_O_ESCURO (ADR-0014 / issue #377, Opção B: o saque de 1 peça
+ * ATRAVESSAR_O_ESCURO (ADR-0017 / issue #377, Opção B: o saque de 1 peça
  * acontece neste gesto, sob demanda — sem sorteio no início do turno).
  * (espelho de `vagasDisponiveisDoPeao`). Só na Peça do início do turno e
  * antes de qualquer movimento (travessiaDoEscuroDisponivel — "uma casa por
@@ -1070,7 +1070,7 @@ export function rotearCliqueDeCelula(
     // roteia por clique (só pelo botão da fase).
     const posicionamento = mapearCliqueNaPecaInicial(estadoPeoes, celula)
     if (posicionamento) return { ciclo: posicionamento }
-    // ADR-0014 / issue #377 (Opção B): vaga escura vazia com o Peão em Baixa
+    // ADR-0017 / issue #377 (Opção B): vaga escura vazia com o Peão em Baixa
     // → ATRAVESSAR_O_ESCURO (saque sob demanda). Disjunto do mover (destino
     // com peça) e do posicionamento (Inicial), então vem por último.
     const travessia = mapearTravessiaDoEscuro(estadoPeoes, celula)
@@ -1108,7 +1108,7 @@ const TIPOS_DE_COMANDO_DE_PEAO: ReadonlySet<string> = new Set([
   'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
   'PERMANECER',
-  // ADR-0014: a travessia viaja no canal de Partida (com jogadorId injetado
+  // ADR-0017: a travessia viaja no canal de Partida (com jogadorId injetado
   // pela PartidaPage), mas nasce do ciclo do Peão — roteia por onComandoPeao.
   'ATRAVESSAR_O_ESCURO',
 ])

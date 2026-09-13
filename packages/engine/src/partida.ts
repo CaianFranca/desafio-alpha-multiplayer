@@ -123,7 +123,7 @@ export interface EstadoDaPartida {
   // uma única vez; a flag é zerada no avanço da vez. Retrocompatível: estados
   // antigos persistem sem o campo (acesso via ?? false).
   readonly atravessouNoTurno: boolean;
-  // Peça colocada pela Travessia do Escuro no turno (ADR-0014 / issue #377):
+  // Peça colocada pela Travessia do Escuro no turno (ADR-0017 / issue #377):
   // o mover pós-travessia é compulsório PARA ELA — voltar à origem (ou a
   // qualquer outra) é rejeitado. Vale também para Monstro (não aceita peão):
   // o turno segue travado e o fechamento vira Permanência
@@ -597,7 +597,7 @@ function posicionarPecaDaPartida(
   if (ehRecebida) {
     estado = adotarSelecaoDoAtor(estado, ator);
   }
-  // ADR-0014 / issue #377 (Opção B): o encaixe que resolve a pendência da
+  // ADR-0017 / issue #377 (Opção B): o encaixe que resolve a pendência da
   // Travessia (vaga + célula-alvo travadas casando o comando) registra a peça
   // colocada — o mover pós-travessia é compulsório PARA ELA. Vale também para
   // Monstro: a cadeia não dispensa o turno travado — Monstro não aceita peão
@@ -657,7 +657,7 @@ function posicionarPeaoDaPartida(
   // uma Peça; sem Peça, o Recebimento simplesmente não é gerado. O Recebimento
   // sorteia as peças da Caixa (#138) — peca_sorteada por peça — e cria as
   // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
-  // ADR-0014 / issue #377: em Baixa, só vagas escuras geram puxada — sem vaga
+  // ADR-0017 / issue #377: em Baixa, só vagas escuras geram puxada — sem vaga
   // escura não há peça (evita pendência irresolúvel da #343). Em Baixa a
   // iluminação para o filtro é a fresca pós-posicionamento (inclui o novo peão).
   const emBaixaAntes = ator.emBaixaIluminacao ?? false;
@@ -824,7 +824,7 @@ function moverPeaoDaPartida(
   // (MOVIMENTO_NAO_CONECTADO, PECA_JA_TEM_PEAO). A Travessia do Escuro (#272)
   // é isenta: o mover_peao da cadeia nasce de atravessar_o_escuro — Baixa
   // Iluminação — e sai da zona de propósito.
-  // ADR-0014 / issue #377: com a peça da travessia registrada, o mover
+  // ADR-0017 / issue #377: com a peça da travessia registrada, o mover
   // pós-travessia é compulsório PARA ELA — voltar à origem (ou a qualquer
   // outra peça) é rejeitado; o movimento da travessia não é desfazível. A
   // peça-alvo pode ser Monstro (neste caso o Tabuleiro barra o pouso, PEPEJA
@@ -1067,7 +1067,7 @@ function atravessarOEscuroDaPartida(
       'A Peça do Peão não foi encontrada.',
     );
   }
-  // ADR-0014 (regra "uma casa por turno"): a Travessia só vale na Peça em que
+  // ADR-0017 (regra "uma casa por turno"): a Travessia só vale na Peça em que
   // o Peão iniciou o turno — mover antes (para peça iluminada de outro
   // jogador) e atravessar dali ainda contaria como dois movimentos. Espelho
   // da zona da origem (linha 844): guarda por localização, sem trackear
@@ -1112,7 +1112,7 @@ function atravessarOEscuroDaPartida(
       'A célula de destino não é uma vaga escura conectada à Peça sob o Peão.',
     );
   }
-  // ADR-0014 bloqueante 3: iluminação fresca unificada — mesmo preamble de
+  // ADR-0017 bloqueante 3: iluminação fresca unificada — mesmo preamble de
   // posicionarPeao, não o snapshot stale do turno anterior.
   const celulasParaFiltroTravessia = calcularIluminacao(
     estado.tabuleiro,
@@ -1135,7 +1135,7 @@ function atravessarOEscuroDaPartida(
   // Peão é preservada para a sequência (escolher vaga → encaixar → mover) —
   // e, quando nula (AC-3 do #272), adotada a partir do Peão do ator: nenhum
   // passo intermediário exige re-seleção.
-  // ADR-0014 / issue #377 (Opção B): fluxo canônico do saque em Baixa é a
+  // ADR-0017 / issue #377 (Opção B): fluxo canônico do saque em Baixa é a
   // Travessia do Escuro sob demanda — o sorteio respeita vagas escuras (sem
   // vaga escura → 0) com iluminação fresca.
   const sorteio = gerarRecebidas(estado.tabuleiro, pecaSobOPeao, true, celulasParaFiltroTravessia);
@@ -1277,7 +1277,7 @@ function permanecerNaPartida(
     );
   }
 
-  // ADR-0014 / issue #377 (Opção B): depois de atravessar o Escuro, o Peão
+  // ADR-0017 / issue #377 (Opção B): depois de atravessar o Escuro, o Peão
   // deve mover para a peça colocada — a Permanência fica vedada até esse
   // movimento (o mover pós-posicionamento é compulsório). Exceção Monstro: o
   // Monstro não acomoda peão, o mover é impossível e o turno travado fecha
@@ -1304,7 +1304,7 @@ function permanecerNaPartida(
     );
   }
 
-  // ADR-0014 / issue #377: Permanência com seleção nula adota o peão do ator
+  // ADR-0017 / issue #377: Permanência com seleção nula adota o peão do ator
   // (mesmo AC-3 de mover/confirmar) — evita PEAO_NAO_SELECIONADO quando o turno
   // em Baixa não tem seleção vigente mas tem pecaDoInicio válida.
   // NB2: adoção só para null; seleção alheia permanece rejeitada (PEAO_NAO_SELECIONADO)
@@ -1324,7 +1324,7 @@ function permanecerNaPartida(
   const peao = resultado.estado.peoes.find(
     (item) => item.peaoId === comando.peaoId,
   );
-  // Exceção monstro (ADR-0014): a Permanência que fecha o turno travado da
+  // Exceção monstro (ADR-0017): a Permanência que fecha o turno travado da
   // travessia-monstro vale com o peão fora da Peça do início (ele permanece
   // onde estava ao atravessar). Nas demais vias o resultado do Tabuleiro é
   // descartado e o estado da Partida permanece inalterado.
@@ -1480,7 +1480,7 @@ function confirmarPosicaoDoPeao(
 
   // O Recebimento sorteia as peças da Caixa (#138): peca_sorteada por peça e
   // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
-  // ADR-0014 / issue #377 (Opção B): o fluxo canônico do saque em Baixa é a
+  // ADR-0017 / issue #377 (Opção B): o fluxo canônico do saque em Baixa é a
   // Travessia do Escuro sob demanda (atravessarOEscuroDaPartida) — a Confirmação
   // em Baixa NÃO sorteia (recebidas = []), mantendo Limpeza/Ataque do gatilho.
   // Esse "Baixa" é pré-ataque; se o gatilho impõe Baixa NOVA ao ator, o turno
@@ -1490,7 +1490,7 @@ function confirmarPosicaoDoPeao(
   // Review PR #370 (Bug 1): quem entra saudável e sai em Baixa no MESMO
   // gatilho também não recebe sorteio nesse CONFIRMAR — o emBaixa acima é
   // pré-ataque; a Baixa nova do gatilho descarta o sorteio abaixo (0 no turno
-  // atual, 1 no próximo avancarVez, ADR-0013).
+  // atual, 1 no próximo avancarVez, ADR-0016).
   // Issue #375: sem mudança de Peça também NÃO sorteia (recebidas = [], sem
   // consumir a Caixa, sem peca_sorteada/recebimento_gerado no lote).
   const emBaixaAntes = ator.emBaixaIluminacao ?? false;
@@ -1541,7 +1541,7 @@ function confirmarPosicaoDoPeao(
   // Review PR #370 (Bug 1): o sorteio acima usou a Baixa pré-ataque — se o
   // gatilho impôs Baixa nova ao ator, o turno encerra sem sortear: remove
   // peca_sorteada/recebimento_gerado do lote e restaura a Caixa consumida. O
-  // puxar-1 vem no próximo avancarVez (ADR-0013).
+  // puxar-1 vem no próximo avancarVez (ADR-0016).
   const atorAposAtaque = ataque.jogadores.find(
     (jogador) => jogador.jogadorId === ator.jogadorId,
   );
@@ -1609,7 +1609,7 @@ function confirmarPosicaoDoPeao(
           : jogador,
       )
     : ataque.jogadores;
-  const pecasEmPeriodoDeGraca = resgate.pecaEmGraça
+  const pecasEmPeriodoDeGraca = resgate.pecaEmGraca
     ? (estado.pecasEmPeriodoDeGraca ?? []).includes(peca.pecaId)
       ? (estado.pecasEmPeriodoDeGraca ?? [])
       : [...(estado.pecasEmPeriodoDeGraca ?? []), peca.pecaId]
@@ -2007,7 +2007,7 @@ function avancarVez(
   const peaoDoAlvo = tabuleiroLimpo.peoes.find(
     (item) => item.peaoId === alvo.peaoId,
   );
-  // ADR-0014 / issue #377: o turno em Baixa NÃO saca peça no início. As três
+  // ADR-0017 / issue #377: o turno em Baixa NÃO saca peça no início. As três
   // opções são (A) mover para caminho iluminado sem saque, (B) atravessar o
   // escuro (ATRAVESSAR_O_ESCURO saca 1 peça sob demanda, após a escolha da
   // célula escura) e (C) permanecer — nenhum sorteio no turno_iniciado.
@@ -2488,7 +2488,7 @@ function velaAcesa(jogador: JogadorDaPartida): boolean {
 // respeitando o teto); Baixa Iluminação só sai com o salvador de vela acesa.
 // Um evento resgate_realizado por resgatado com ao menos um estado removido.
 // O próprio ator é excluído (movimento próprio não se resgata). O período de
-// graça é adicionado pela chamada (pecaEmGraça). Salvadordesconhecido no
+// graça é adicionado pela chamada (pecaEmGraca). Salvador desconhecido no
 // roster: fail-closed, sem resgate.
 function resgatarNaPeca(
   estado: EstadoDaPartida,
@@ -2498,7 +2498,7 @@ function resgatarNaPeca(
 ): {
   jogadores: readonly JogadorDaPartida[];
   eventos: EventoDaPartida[];
-  pecaEmGraça: boolean;
+  pecaEmGraca: boolean;
 } {
   const resgatador = estado.jogadores.find(
     (jogador) => jogador.jogadorId === resgatadorJogadorId,
@@ -2553,7 +2553,7 @@ function resgatarNaPeca(
     }
   }
 
-  return { jogadores, eventos, pecaEmGraça: eventos.length > 0 };
+  return { jogadores, eventos, pecaEmGraca: eventos.length > 0 };
 }
 
 function tetoOcupacao(peca: PecaPosicionada, estado: EstadoDaPartida): number {

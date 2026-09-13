@@ -644,7 +644,7 @@ export function converterComandoParaWire(
         peaoId: comando.peaoId,
       };
     case 'atravessar_o_escuro':
-      // ADR-0014 / issue #377 (Opção B): o bot em Baixa atravessa o Escuro —
+      // ADR-0017 / issue #377 (Opção B): o bot em Baixa atravessa o Escuro —
       // o saque sob demanda acontece neste gesto.
       return {
         type: 'ATRAVESSAR_O_ESCURO',

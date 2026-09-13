@@ -135,7 +135,7 @@ interface AmbienteCenaProps {
    * da travessia (sem pull) não pontilha — mantém só o anel branco.
    */
   vagasPontilhadasSet?: ReadonlySet<string>
-  /** Chaves das células do gesto da travessia (ADR-0014): anel branco — vagas
+  /** Chaves das células do gesto da travessia (ADR-0017): anel branco — vagas
    * escuras clicáveis + célula travada da pendência em curso. */
   travessiaSet?: ReadonlySet<string>
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */

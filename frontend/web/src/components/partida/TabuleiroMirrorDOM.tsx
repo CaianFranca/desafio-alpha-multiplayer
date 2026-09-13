@@ -67,7 +67,7 @@ interface TabuleiroMirrorDOMProps {
    * da cena — exposto como data-vaga-pontilhada para o espelho de teste.
    */
   vagasPontilhadasSet?: ReadonlySet<string>
-  /** Chaves das células do gesto da travessia (ADR-0014): anel branco — mesma
+  /** Chaves das células do gesto da travessia (ADR-0017): anel branco — mesma
    * fonte da cena, exposta como data-travessia para o espelho de teste. */
   travessiaSet?: ReadonlySet<string>
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */

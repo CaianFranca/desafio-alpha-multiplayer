@@ -24,7 +24,7 @@
 //       posicionar o Peão e, sem pendências, encerrar;
 //   (d) turno normal sem Confirmação → selecionar o Peão e, sobre a Peça do
 //       início, mover (uma vez), atravessar o Escuro (em Baixa, uma vez por
-//       turno — ADR-0014 / issue #377, Opção B) ou permanecer; fora dela, só
+//       turno — ADR-0017 / issue #377, Opção B) ou permanecer; fora dela, só
 //       confirmar a posição — o bot nunca encadeia 2 movers no mesmo turno;
 //       após atravessar, o mover é compulsório (sem nova travessia nem
 //       permanência — a engine rejeitaria);
@@ -47,7 +47,7 @@
 // pós-encaixe — o bot não manipula após posicionar) e desselecionar_peao
 // (sem efeito útil no turno). O girar_peca pré-encaixe FAZ parte do plano,
 // via expandirPosicionamentoDoBot, e o atravessar_o_escuro FAZ parte do plano
-// em Baixa (Opção B da ADR-0014 — ramo (d) abaixo). A pendência da Travessia
+// em Baixa (Opção B da ADR-0017 — ramo (d) abaixo). A pendência da Travessia
 // (Baixa, com célula travada) segue enumerada em (b).
 
 import {
@@ -547,7 +547,7 @@ export function acoesValidasDaSubfase(
     return [];
   }
   const acoes: ComandoDePartida[] = [];
-  // ADR-0014 / issue #377: mover pós-travessia é compulsório PARA a peça
+  // ADR-0017 / issue #377: mover pós-travessia é compulsório PARA a peça
   // colocada — a FSM espelha a guarda da engine (só ela é enumerada; as
   // demais seriam rejeitadas com MOVIMENTO_INDISPONIVEL).
   const pecaDaTravessiaId = estado.pecaDaTravessiaId ?? null;
@@ -575,7 +575,7 @@ export function acoesValidasDaSubfase(
   }
   const emBaixa = jogador.emBaixaIluminacao ?? false;
   const jaAtravessou = estado.atravessouNoTurno ?? false;
-  // ADR-0014 / issue #377 (Opção B): em Baixa, o bot pode atravessar o Escuro —
+  // ADR-0017 / issue #377 (Opção B): em Baixa, o bot pode atravessar o Escuro —
   // uma ação por vaga escura conectada (borda aberta com célula vizinha vazia
   // e não-iluminada). A iluminação é a fresca unificada com a engine
   // (calcularIluminacao sobre os peões em Baixa, mesmo preamble de

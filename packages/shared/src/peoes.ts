@@ -12,7 +12,7 @@
 //   shared type:'MOVER_PEAO'                     <-> engine tipo:'mover_peao' (peaoId, celula)
 //   shared type:'PERMANECER'                     <-> engine tipo:'permanecer' (peaoId)
 //   (ATRAVESSAR_O_ESCURO viaja no canal de Partida — ./partida.ts — issue #264;
-//   fluxo canônico do saque em Baixa sob demanda, ADR-0014 / issue #377)
+//   fluxo canônico do saque em Baixa sob demanda, ADR-0017 / issue #377)
 //   Eventos:
 //   shared type:'PEAO_SELECIONADO'                <-> engine tipo:'peao_selecionado' (peaoId)
 //   shared type:'PEAO_DESELECIONADO'              <-> engine tipo:'peao_desselecionado' (peaoId) — issue #249
@@ -110,7 +110,7 @@ export interface PermanecerComando {
 }
 
 // Atravessar o Escuro (issue #264 / spec #272, fluxo canônico sob demanda em
-// Baixa pela ADR-0014 / issue #377): jogada exclusiva de Baixa Iluminação —
+// Baixa pela ADR-0017 / issue #377): jogada exclusiva de Baixa Iluminação —
 // o Peão da vez atravessa para a célula escura conectada (vaga não iluminada)
 // adjacente à peça sob ele no Tabuleiro, e o saque de 1 peça acontece nesse
 // gesto (Opção B: atravessar → posicionar → mover compulsório → confirmar).
@@ -182,7 +182,7 @@ export interface PeaoPermaneceuEvento {
 }
 
 // Travessia do Escuro (issue #264 / spec #272, fluxo canônico sob demanda em
-// Baixa pela ADR-0014 / issue #377): o Peão em Baixa Iluminação alcançou a
+// Baixa pela ADR-0017 / issue #377): o Peão em Baixa Iluminação alcançou a
 // célula escura conectada. O evento carrega apenas o Peão e a célula de
 // destino — a peça sorteada do Recebimento gerado pela travessia chega pelos
 // eventos RECEBIMENTO_GERADO/PECA_SORTEADA do mesmo lote.

@@ -10,7 +10,7 @@
  * ESCOLHER_VAGA_DA_PECA_RECEBIDA (por recebidaId — review #338: sem ele,
  * cliques rápidos na vaga reenviavam a escolha no intervalo até o ack de
  * PECA_POSICIONADA, e o ERRO_DO_TABULEIRO soava junto ao som de sucesso) /
- * ATRAVESSAR_O_ESCURO (por peão+célula — ADR-0014: sem ele, o duplo clique
+ * ATRAVESSAR_O_ESCURO (por peão+célula — ADR-0017: sem ele, o duplo clique
  * na vaga escura reenviava a travessia até o ack e o segundo caía em
  * MOVIMENTO_INDISPONIVEL com som de erro junto ao sucesso).
  * Demais comandos (seleção, giro, mover/permanecer) seguem sem gate —
@@ -113,7 +113,7 @@ export function consumirAck(pendentes: Set<string>, evento: FormaDeAck): boolean
   if (evento.type === 'PEAO_DESELECIONADO' && typeof evento.peaoId === 'string') {
     return pendentes.delete(`DESELECIONAR_PEAO:${evento.peaoId}`)
   }
-  // ADR-0014: ack da travessia confirma o alvo em voo (peão + célula escura).
+  // ADR-0017: ack da travessia confirma o alvo em voo (peão + célula escura).
   if (evento.type === 'ATRAVESSOU_O_ESCURO' && typeof evento.peaoId === 'string' && evento.celula) {
     return pendentes.delete(`ATRAVESSAR:${evento.peaoId}:${evento.celula.linha}:${evento.celula.coluna}`)
   }

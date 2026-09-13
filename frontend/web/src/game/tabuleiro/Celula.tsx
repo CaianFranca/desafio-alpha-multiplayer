@@ -39,7 +39,7 @@ interface CelulaProps {
   pecaDestacada?: boolean
   onClick?: (event: ThreeEvent<MouseEvent>) => void
   /**
-   * Travessia do Escuro (ADR-0014 / issue #377): a célula é uma vaga ESCURA
+   * Travessia do Escuro (ADR-0017 / issue #377): a célula é uma vaga ESCURA
    * clicável — destaque por anel branco VAZADO no chão (quadrado com furo
    * interno ≈ 82% do lado, borda fina), mesma linguagem do peão selecionado
    * (`PeaoAvatar`), legível sobre o plano escuro onde o tom quente de
@@ -262,7 +262,7 @@ function PlanoDeFundoDaCelula(props: PlanoDeFundoProps) {
 const RELEVO_PAREDE_NORMAL_SCALE: readonly [number, number] = [1.1, 1.1]
 const TINT_PAREDE = '#b5b5b5'
 
-// Marcador da travessia do escuro (ADR-0014): quadrado chapado no chão,
+// Marcador da travessia do escuro (ADR-0017): quadrado chapado no chão,
 // um pouco menor que a célula (CELULA_INSET = 1.568) — sinaliza a vaga escura
 // clicável sem confundir com a peça vazia/peão.
 const LADO_MARCADOR_TRAVESSIA = CELULA_INSET * 0.85
@@ -421,7 +421,7 @@ export function Celula({
         : '#1b1915'
   const opacidadePlano = ocupada ? 0.82 : 0.7
 
-  // Marcador da travessia (ADR-0014 / issue #377): anel branco no chão sobre
+  // Marcador da travessia (ADR-0017 / issue #377): anel branco no chão sobre
   // a célula escura clicável — quadrado VAZADO no meio (borda fina, furo
   // interno ≈ 82% do lado), mesma linguagem do peão selecionado (PeaoAvatar),
   // legível sem ocultar a peça que encaixa dentro. Nunca rouba clique.

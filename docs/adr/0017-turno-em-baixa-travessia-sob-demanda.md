@@ -1,12 +1,12 @@
-# ADR-0014: Turno em Baixa Iluminação — Travessia Sob Demanda
+# ADR-0017: Turno em Baixa Iluminação — Travessia Sob Demanda
 
 Status: Aceito
-Data: 2026-09-12
-Revoga: ADR-0013 (puxar-1 no `turno_iniciado`) — motivado pelo bug #377
+Data: 2026-09-13
+Revoga: ADR-0016 (puxar-1 no `turno_iniciado`) — motivado pelo bug #377
 
 ## Contexto
 
-A ADR-0013 ("Puxar Primeiro") resolveu o travamento da #354 sorteando 1 peça
+A ADR-0016 ("Puxar Primeiro") resolveu o travamento da #354 sorteando 1 peça
 automaticamente no `turno_iniciado` de quem está em Baixa Iluminação. O bug
 #377 mostrou o efeito colateral: o turno em Baixa **saca peça
 automaticamente no início e trava o movimento do peão** — a pendência
@@ -27,7 +27,7 @@ no início:
 1. **Sem sorteio no `turno_iniciado`:** `avancarVez` nunca gera Recebimento —
    o turno em Baixa abre com zero pendências (`partida.ts: avancarVez`).
 2. **Travessia canônica sob demanda:** `ATRAVESSAR_O_ESCURO` volta a ser o
-   fluxo canônico do saque em Baixa (desfaz o `@deprecated` da ADR-0013 em
+   fluxo canônico do saque em Baixa (desfaz o `@deprecated` da ADR-0016 em
    `shared/partida.ts` e `shared/peoes.ts`) — sorteio de 1 peça com a
    célula-alvo pré-fixada na célula escura escolhida, iluminação fresca
    unificada com `posicionarPeao`.
@@ -102,7 +102,7 @@ no início:
 Consequências:
 
 - `CONFIRMAR_POSICAO` em Baixa segue sem sortear (`recebidas: []`) — como na
-  ADR-0013; o que muda é só a origem do saque (travessia sob demanda).
+  ADR-0016; o que muda é só a origem do saque (travessia sob demanda).
 - A regra "sem vaga escura, sem puxada" (#343) segue valendo dentro da
   travessia (sorteio com 0 vagas → 0 peças, sem pendência irresolúvel).
 - `gerarRecebidas` com filtro de vagas escuras segue inalterado (usado pela
@@ -125,7 +125,7 @@ Consequências:
 
 ## Referências
 
-- Issues #377 (bug), #354 (ADR-0013), #343, #264, #272
+- Issues #377 (bug), #354 (ADR-0016), #343, #264, #272
 - `packages/engine/src/partida.ts`: `avancarVez` (sem sorteio),
   `atravessarOEscuroDaPartida` (canônica, gate da Peça do início do turno),
   `permanecerNaPartida` (guarda `atravessouNoTurno`), `resgatarNaPeca` +

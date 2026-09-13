@@ -186,7 +186,7 @@ export interface EstadoDoTabuleiroNoCliente {
   /** A posição do peão do Jogador Ativo já foi confirmada (POSICAO_CONFIRMADA). */
   readonly posicaoConfirmadaNoTurno: boolean
   /**
-   * Peça colocada pela Travessia do Escuro no turno (ADR-0014 / issue #377,
+   * Peça colocada pela Travessia do Escuro no turno (ADR-0017 / issue #377,
    * espelho da engine): o mover pós-travessia é compulsório PARA ELA.
    * Exceção monstro dispensa a cadeia (ambos nulos). Reseta em
    * TURNO_INICIADO/TURNO_ENCERRADO; baseline do snapshot: nula.
@@ -194,7 +194,7 @@ export interface EstadoDoTabuleiroNoCliente {
   readonly pecaDaTravessiaId: string | null
   /**
    * O Peão do Jogador Ativo já atravessou o Escuro neste turno
-   * (ATRAVESSOU_O_ESCURO — ADR-0014 / issue #377, Opção B). Enquanto vigente,
+   * (ATRAVESSOU_O_ESCURO — ADR-0017 / issue #377, Opção B). Enquanto vigente,
    * a Permanência é vedada (o mover para a peça colocada é compulsório) e
    * nova travessia é rejeitada. Reseta no TURNO_INICIADO/TURNO_ENCERRADO;
    * baseline do snapshot: o wire não carrega a fase do turno (mesmo padrão
@@ -447,7 +447,7 @@ export function reduzirEvento(
         orientacao: evento.orientacao,
         celula: evento.celula,
       }
-      // ADR-0014 / issue #377: o encaixe que resolve a pendência da Travessia
+      // ADR-0017 / issue #377: o encaixe que resolve a pendência da Travessia
       // registra a peça colocada (mover compulsório PARA ELA — espelho da
       // engine). Vale também para Monstro: a cadeia não dispensa o turno
       // travado — o fechamento vira Permanência (permanecerNaPartida).
@@ -826,7 +826,7 @@ export function reduzirEvento(
     }
 
     case 'ATRAVESSOU_O_ESCURO': {
-      // ADR-0014 / issue #377 (Opção B): marca a fase da travessia no turno —
+      // ADR-0017 / issue #377 (Opção B): marca a fase da travessia no turno —
       // a Permanência fica vedada até o mover compulsório e nova travessia é
       // rejeitada. A peça sorteada chega no mesmo lote via RECEBIMENTO_GERADO.
       return { ...estado, atravessouNoTurno: true }

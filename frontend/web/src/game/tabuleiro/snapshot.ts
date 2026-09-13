@@ -214,7 +214,7 @@ export function aplicarSnapshot(
     // contraditório (confirmada sem movimento) na retomada.
     movimentouNoTurno: snapshot.posicaoConfirmada ? true : estado.movimentouNoTurno,
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
-    // ADR-0014: a fase da travessia é carregada no wire do snapshot (a
+    // ADR-0017: a fase da travessia é carregada no wire do snapshot (a
     // readmissão não re-aprende por deltas — ESTADO_DA_PARTIDA é a única
     // mensagem da retomada). Sem isso, recarregar/reconectar/HMR no meio do
     // turno órfã a fase: marcadores reaparecem e o auto-mover (guarda
