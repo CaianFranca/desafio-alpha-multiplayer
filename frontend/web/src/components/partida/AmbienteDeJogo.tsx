@@ -228,6 +228,17 @@ export function AmbienteDeJogo({
       ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
       : [],
   )
+  // Pontinhos de vaga (peça puxada na bandeja): mesmo conteúdo do vagasSet,
+  // mas SÓ com pull vigente — o gesto da travessia em Baixa (sem pull) mantém
+  // só o anel branco. Some sozinho ao posicionar: a pendência sai da lista e
+  // o pull reseta (linhas acima).
+  const vagasPontilhadasSet = new Set<string>(
+    estadoPeoesComPuxada !== null &&
+      peaoDeReferenciaDaSequencia(estadoPeoesComPuxada) !== null &&
+      puxadaVigenteNaBandeja(estadoPeoesComPuxada)
+      ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
+      : [],
+  )
   // ADR-0014 / issue #377 (Opção B): sem pendências e com o Peão em Baixa
   // selecionado, as vagas escuras SÃO o gesto da travessia (clique direto,
   // sem pull) — destacam junto das vagas da pendência, mesma affordância
@@ -349,6 +360,7 @@ export function AmbienteDeJogo({
           onPuxarPecaDaBandeja={aoPuxarPecaDaBandeja}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
+          vagasPontilhadasSet={vagasPontilhadasSet}
           travessiaSet={travessiaSet}
           pecaCorrente={pecaCorrenteNaBandeja}
           vooPendente={vooPendente}
@@ -382,6 +394,7 @@ export function AmbienteDeJogo({
           onPuxar={aoPuxarPecaDaBandeja}
           alvosPendentesSet={alvosPendentesSet}
           vagasSet={vagasSet}
+          vagasPontilhadasSet={vagasPontilhadasSet}
           travessiaSet={travessiaSet}
           sanidadePorPeao={sanidadePorPeao}
           encaixeTrigger={encaixeTrigger}

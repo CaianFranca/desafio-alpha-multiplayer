@@ -237,7 +237,7 @@ Relação entre duas peças vizinhas cujas bordas abertas estão voltadas uma pa
 _Avoid_: ligação, elo
 
 **Recebimento**:
-Peças sorteadas da Caixa que o Jogador recebe, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; o Jogador escolhe a vaga de cada peça sorteada e a encaixa conectada à peça sob o peão, uma por uma; quando a Caixa não tem peças suficientes, recebe as restantes; ocorre no início da sequência do peão.
+Peças sorteadas da Caixa que o Jogador recebe, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; o Jogador escolhe a vaga de cada peça sorteada e a encaixa conectada à peça sob o peão, uma por uma; quando a Caixa não tem peças suficientes, recebe as restantes; ocorre no início da sequência do peão; com a peça puxada na bandeja, pontinhos brancos indicam as vagas onde ela pode ser colocada (somem ao posicionar).
 _Avoid_: ganho
 
 **Movimentação**:

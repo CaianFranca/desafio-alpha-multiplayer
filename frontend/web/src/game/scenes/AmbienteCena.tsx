@@ -129,6 +129,12 @@ interface AmbienteCenaProps {
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (destaque, #143). */
   vagasSet?: ReadonlySet<string>
+  /**
+   * Subconjunto de vagas com pontinhos (peça puxada na bandeja): indica
+   * visualmente onde a peça pode ser colocada; some ao posicionar. O gesto
+   * da travessia (sem pull) não pontilha — mantém só o anel branco.
+   */
+  vagasPontilhadasSet?: ReadonlySet<string>
   /** Chaves das células do gesto da travessia (ADR-0014): anel branco — vagas
    * escuras clicáveis + célula travada da pendência em curso. */
   travessiaSet?: ReadonlySet<string>
@@ -184,6 +190,7 @@ export function AmbienteCena({
   onPuxarPecaDaBandeja,
   alvosPendentesSet,
   vagasSet,
+  vagasPontilhadasSet = new Set<string>(),
   travessiaSet = new Set<string>(),
   pecaCorrente = null,
   vooPendente = null,
@@ -240,6 +247,7 @@ export function AmbienteCena({
               onRejeicaoPeao={onRejeicaoPeao}
               alvosPendentesSet={alvosPendentesSet}
               vagasSet={vagasSet}
+              vagasPontilhadasSet={vagasPontilhadasSet}
               travessiaSet={travessiaSet}
               vooPendente={vooPendente}
               onVooAterrissou={onVooAterrissou}

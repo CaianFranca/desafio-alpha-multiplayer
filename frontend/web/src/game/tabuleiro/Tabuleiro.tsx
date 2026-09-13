@@ -77,6 +77,11 @@ interface TabuleiroProps {
    * mesma fonte do espelho DOM.
    */
   vagasSet?: ReadonlySet<string>
+  /**
+   * Subconjunto de vagas com pontinhos brancos (peça puxada na bandeja):
+   * indicação visual de onde a peça pode ser colocada.
+   */
+  vagasPontilhadasSet?: ReadonlySet<string>
   /** Chaves das células do gesto da travessia (ADR-0014): anel branco nas
    * vagas escuras clicáveis + célula travada da pendência em curso. */
   travessiaSet?: ReadonlySet<string>
@@ -126,6 +131,7 @@ export function Tabuleiro({
   onRejeicaoPeao,
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
+  vagasPontilhadasSet = new Set<string>(),
   travessiaSet = new Set<string>(),
   vooPendente = null,
   onVooAterrissou,
@@ -233,6 +239,7 @@ export function Tabuleiro({
         // vagas disponíveis para a escolha sequencial (#143) aquecem o plano.
         const alvoPendente = alvosPendentesSet.has(chave)
         const vagaDisponivel = vagasSet.has(chave)
+        const vagaPontilhada = vagasPontilhadasSet.has(chave)
         // Anel da travessia (ADR-0014): vagas escuras clicáveis + célula
         // travada da pendência em curso — destaque branco legível no escuro.
         const anelTravessia = travessiaSet.has(chave)
@@ -265,6 +272,7 @@ export function Tabuleiro({
             destinoResgate={peca !== null && resgateSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}
             vagaDisponivel={vagaDisponivel}
+            vagaPontilhada={vagaPontilhada}
             anelTravessia={anelTravessia}
             iluminada={iluminada}
             peaoSelecionadoId={peaoSelecionadoId}

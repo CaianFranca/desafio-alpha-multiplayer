@@ -91,6 +91,13 @@ interface CelulaProps {
    */
   vagaDisponivel?: boolean
   /**
+   * Vaga com pontinhos (peça puxada na bandeja): grade 3×3 de pontos brancos
+   * semi-transparentes em linhas norte→sul — indicação visual de onde a peça
+   * pode ser colocada. Puramente indicativo: sem raycast (o clique passa à
+   * célula) e sem cursor próprio.
+   */
+  vagaPontilhada?: boolean
+  /**
    * Célula iluminada no estado compartilhado (issue #151). Tom sutil sobre a
    * base; os destaques de seleção/pendência/ocupação têm prioridade maior.
    */
@@ -113,6 +120,46 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
   { pos: [TAMANHO_CELULA / 2 - BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
   { pos: [-TAMANHO_CELULA / 2 + BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
 ]
+
+/** Pontinhos de vaga (peça puxada na bandeja): 3×3, brancos semi-transparentes. */
+const PASSO_DOS_PONTOS = CELULA_INSET / 4
+const RAIO_DO_PONTO = 0.055
+const OPACIDADE_DO_PONTO = 0.55
+
+/**
+ * Grade de pontos chapada no plano da célula (linhas norte→sul, espaçados
+ * dentro da célula): indica onde a peça puxada pode ser colocada. Sem
+ * raycast — o clique atravessa para a célula/peca (sem double-fire) — e sem
+ * cursor próprio: puramente indicativo.
+ */
+function PontosDaVaga() {
+  const pontos: Array<[number, number]> = []
+  for (let linha = -1; linha <= 1; linha++) {
+    for (let coluna = -1; coluna <= 1; coluna++) {
+      pontos.push([coluna * PASSO_DOS_PONTOS, linha * PASSO_DOS_PONTOS])
+    }
+  }
+  return (
+    <group position={[0, CELULA_Y_BASE + 0.006, 0]}>
+      {pontos.map(([x, z], indice) => (
+        <mesh
+          key={indice}
+          position={[x, 0, z]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          raycast={() => null}
+        >
+          <circleGeometry args={[RAIO_DO_PONTO, 20]} />
+          <meshBasicMaterial
+            color="#ffffff"
+            transparent
+            opacity={OPACIDADE_DO_PONTO}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
+}
 
 interface PlanoDeFundoProps {
   celula: CelulaTipo
@@ -331,6 +378,7 @@ export function Celula({
   destinoResgate = false,
   alvoPendente = false,
   vagaDisponivel = false,
+  vagaPontilhada = false,
   anelTravessia = false,
   provisoria = false,
   iluminada = false,
@@ -421,6 +469,7 @@ export function Celula({
       />
       <ParedesDaCelula />
       {anelDaTravessia !== null ? <primitive object={anelDaTravessia} /> : null}
+      {vagaPontilhada ? <PontosDaVaga /> : null}
       {peca ? (
         <PecaPlaceholder
           tipo={peca.tipo}
