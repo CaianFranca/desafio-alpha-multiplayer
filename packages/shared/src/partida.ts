@@ -395,6 +395,11 @@ export interface EstadoDaPartidaSnapshot {
   // binário anterior omitem o campo — o cliente normaliza ausente para null
   // (cronômetro sem origem) e a partida `preparada` traz null.
   readonly iniciadaEm?: number | null;
+  // Histórico do chat de Partida (issue #388): as ~50 últimas mensagens
+  // aprovadas (humanas + bot) em ordem oldest→newest, fora do blob de estado.
+  // Opcional/defensivo como `iniciadaEm?`/`motivo?`: snapshots de binário
+  // anterior omitem o campo e o cliente normaliza ausente para [].
+  readonly historicoDeChat?: readonly MensagemDeChatDaPartidaEvento[];
 }
 
 export interface PartidaIniciadaEvento {

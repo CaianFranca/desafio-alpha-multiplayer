@@ -6,7 +6,7 @@
 
 import type { EstadoDaPartida } from '@flicker/engine';
 import type { Celula } from '@flicker/shared';
-import type { EstadoDaPartidaSnapshot, EstadoDaPartidaWire } from '@flicker/shared';
+import type { EstadoDaPartidaSnapshot, EstadoDaPartidaWire, MensagemDeChatDaPartidaEvento } from '@flicker/shared';
 import type { MembroDaSala } from '@flicker/shared';
 
 function copiarCelula(celula: { linha: number; coluna: number }): Celula {
@@ -18,6 +18,7 @@ export function paraSnapshotWire(
   roster: readonly MembroDaSala[],
   estadoWire: EstadoDaPartidaWire,
   iniciadaEm: number | null = null,
+  historicoDeChat?: readonly MensagemDeChatDaPartidaEvento[],
 ): EstadoDaPartidaSnapshot {
   const rosterPorJogadorId = new Map(roster.map((m) => [m.jogadorId, m] as const));
 
@@ -121,5 +122,10 @@ export function paraSnapshotWire(
     // (Redis), não do engine — o parâmetro preserva o default null para
     // chamadas sem o marco (partida preparada / testes).
     iniciadaEm,
+    // Histórico do chat (issue #388): tabuleiro + chat do mesmo instante no
+    // snapshot de Reconexão, sem replay separado. Opcional/defensivo como
+    // `iniciadaEm?`: ausente quando o chamador não carrega o histórico
+    // (binário anterior / testes legados).
+    ...(historicoDeChat !== undefined ? { historicoDeChat: [...historicoDeChat] } : {}),
   };
 }

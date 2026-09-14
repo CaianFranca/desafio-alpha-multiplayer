@@ -16,6 +16,7 @@ export interface Config {
   partidaTerminadaTtlSegundos: number;
   partidaNaoInicioSegundos: number;
   partidaReconexaoEmAndamentoSegundos: number;
+  partidaChatHistoricoMaximo: number;
   lobbyRetornoCallbackUrl: string;
   lobbyDesistenciaCallbackUrl: string;
   postgres: {
@@ -50,6 +51,7 @@ const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
 const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
+const DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO = 50;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -65,6 +67,11 @@ export const GAME_SERVERS_PREFIX = 'game-servers:disponiveis:';
 // Partida Órfã e o game-server registra/escaneia as mesmas chaves.
 export const GAME_SERVERS_PARTIDA_PREFIXO = 'game-server:partida:';
 export const GAME_SERVERS_PARTIDA_ESTADO_PREFIXO = 'game-server:partida-estado:';
+// Histórico do chat de Partida (issue #388): lista Redis própria por Partida,
+// fora do blob de estado, com mesmo ciclo/TTL das chaves da Partida. Prefixo
+// com hífen (não com ':') para não poluir o SCAN `game-server:partida:*` do
+// rearme do não-início — mesmo padrão do prefixo de estado.
+export const GAME_SERVERS_PARTIDA_CHAT_PREFIXO = 'game-server:partida-chat:';
 
 export function chaveGameServer(serverId: string): string {
   return `${GAME_SERVERS_PREFIX}${serverId}`;
@@ -168,6 +175,15 @@ function parsePartidaReconexaoEmAndamentoSegundos(raw: string | undefined): numb
     raw,
     DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS,
     'PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS',
+    1,
+  );
+}
+
+function parsePartidaChatHistoricoMaximo(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO,
+    'PARTIDA_CHAT_HISTORICO_MAXIMO',
     1,
   );
 }
@@ -314,6 +330,9 @@ export function getConfig(): Config {
   const partidaReconexaoEmAndamentoSegundos = parsePartidaReconexaoEmAndamentoSegundos(
     process.env.PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS as string | undefined,
   );
+  const partidaChatHistoricoMaximo = parsePartidaChatHistoricoMaximo(
+    process.env.PARTIDA_CHAT_HISTORICO_MAXIMO as string | undefined,
+  );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
@@ -392,6 +411,7 @@ export function getConfig(): Config {
     partidaTerminadaTtlSegundos,
     partidaNaoInicioSegundos,
     partidaReconexaoEmAndamentoSegundos,
+    partidaChatHistoricoMaximo,
     lobbyRetornoCallbackUrl,
     lobbyDesistenciaCallbackUrl,
     postgres,

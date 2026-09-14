@@ -417,16 +417,18 @@ export function criarWebSocketServer(
                 });
               }
               try {
-                const [estadoEngine, partidaAtual] = await Promise.all([
-                  obterEstadoDaPartida(contexto.redis, partidaId),
-                  obterPartida(contexto.redis, partidaId),
-                ]);
-                if (estadoEngine !== null && partidaAtual !== null) {
+                // Snapshot atômico da Reconexão (issue #388): tabuleiro + chat
+                // do mesmo instante via cadeia serial da Partida — a rajada de
+                // bot nunca intercala entre o GET do estado e o LRANGE do chat.
+                // Entregue em único ESTADO_DA_PARTIDA, sem replay separado.
+                const atomico = await depsPartida.handlers.lerSnapshotAtomico(partidaId);
+                if (atomico !== null) {
                   const snapshot = paraSnapshotWire(
-                    estadoEngine,
-                    partidaAtual.roster,
+                    atomico.estado,
+                    atomico.partida.roster,
                     transicao.estado,
                     transicao.iniciadaEm,
+                    atomico.historico,
                   );
                   depsPartida.broadcaster.enviarParaSocket(ws, {
                     type: 'ESTADO_DA_PARTIDA',
@@ -435,8 +437,8 @@ export function criarWebSocketServer(
                 } else {
                   console.error('[ws] estado indisponível para snapshot', {
                     partidaId,
-                    temEstado: estadoEngine !== null,
-                    temPartida: partidaAtual !== null,
+                    temEstado: false,
+                    temPartida: false,
                   });
                   depsPartida.broadcaster.enviarParaSocket(ws, {
                     type: 'ERRO_DO_TABULEIRO',

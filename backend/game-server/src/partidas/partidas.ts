@@ -1,11 +1,12 @@
 import type { Redis } from 'ioredis';
 import type { MembroDaSala, OfertaDeEncaminhamento, PartidaId, ServerId } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
-import { chaveDaPartida, chaveDoEstadoDaPartida } from './chaves.ts';
+import { chaveDaPartida, chaveDoChatDaPartida, chaveDoEstadoDaPartida } from './chaves.ts';
 import {
   inicializarEstadoDaPartida,
   removerEstadoDaPartida,
 } from './estado.ts';
+import { removerHistoricoDoChat } from './historico-chat.ts';
 import { agendarNaoInicio, cancelarNaoInicio, obterNaoInicioSegundos } from './nao-inicio.ts';
 
 export type EstadoDaPartida = 'preparada' | 'em_andamento';
@@ -27,7 +28,7 @@ export interface PartidaPreparada {
   readonly iniciadaEm?: number | null;
 }
 
-export { chaveDaPartida, chaveDoEstadoDaPartida };
+export { chaveDaPartida, chaveDoChatDaPartida, chaveDoEstadoDaPartida };
 
 export async function criarPartidaPreparada(
   contexto: ContextoDoGameServer,
@@ -96,8 +97,9 @@ export async function existePartida(redis: Redis, partidaId: PartidaId): Promise
 export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promise<boolean> {
   cancelarNaoInicio(partidaId);
   const removida = (await redis.del(chaveDaPartida(partidaId))) === 1;
-  // Remove também o estado da partida associado (issue #117).
+  // Remove também o estado e o histórico de chat da partida (issues #117/#388).
   await removerEstadoDaPartida(redis, partidaId);
+  await removerHistoricoDoChat(redis, partidaId);
   return removida;
 }
 
@@ -105,7 +107,7 @@ export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promi
 // a leitura do estado e o DEL, o Lua de admissão pode ter virado a partida para
 // `em_andamento` (com PERSIST). O script só remove se a partida ainda está em
 // `preparada`; retorna 0 quando a condição falha, e o chamador reagenda sem
-// chutar sockets.
+// chutar sockets. A chave de chat da #388 vai junto (DEL condicional).
 const SCRIPT_CANCELAR_SE_NAO_INICIADA = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then
@@ -117,6 +119,7 @@ if not ok or not partida or partida.estado ~= 'preparada' then
 end
 redis.call('DEL', KEYS[1])
 redis.call('DEL', KEYS[2])
+redis.call('DEL', KEYS[3])
 return 1
 `.trim();
 
@@ -124,9 +127,10 @@ export async function cancelarPartidaSeNaoIniciada(redis: Redis, partidaId: stri
   const removida =
     (await redis.eval(
       SCRIPT_CANCELAR_SE_NAO_INICIADA,
-      2,
+      3,
       chaveDaPartida(partidaId),
       chaveDoEstadoDaPartida(partidaId),
+      chaveDoChatDaPartida(partidaId),
     )) === 1;
   if (removida) {
     cancelarNaoInicio(partidaId);
@@ -201,10 +205,15 @@ if mudou or iniciou then
   local novo = cjson.encode(partida)
   if iniciou then
     -- ST-14: partida em_andamento persiste sem TTL (sem expiração) + cancela não-início 90s
+    -- Histórico de chat da #388 vai junto quando existir (lista só nasce no
+    -- primeiro RPUSH, então a ausência é o caso comum na virada).
     redis.call('SET', KEYS[1], novo)
     redis.call('PERSIST', KEYS[1])
     if redis.call('EXISTS', KEYS[2]) == 1 then
       redis.call('PERSIST', KEYS[2])
+    end
+    if redis.call('EXISTS', KEYS[3]) == 1 then
+      redis.call('PERSIST', KEYS[3])
     end
   else
     salvarPreservandoTtl(KEYS[1], novo)
@@ -265,9 +274,10 @@ export async function transicionarSeCompletoOuAtualizarPresenca(
 ): Promise<ResultadoTransicaoDePresenca | null> {
   const bruto = await redis.eval(
     SCRIPT_TRANSICAO_PRESENCA,
-    2,
+    3,
     chaveDaPartida(partidaId),
     chaveDoEstadoDaPartida(partidaId),
+    chaveDoChatDaPartida(partidaId),
     jogadorId,
     String(agora),
   );
