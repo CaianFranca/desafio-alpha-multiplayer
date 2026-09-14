@@ -1,9 +1,16 @@
 import { BackLink } from '../ui/BackLink'
+import { DotsDeCarregamento } from '../loading/DotsDeCarregamento'
 
 export function LoadingPage() {
   return (
-    <div className="flex items-center justify-center min-h-[50vh]" role="status" aria-label="Carregando">
-      <p className="text-muted text-lg">Carregando...</p>
+    <div
+      role="status"
+      aria-label="Carregando"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background"
+    >
+      <div className="encaminhamento-carregando">
+        <DotsDeCarregamento rotuloVisivel="Carregando..." nomeAcessivel="Carregando" />
+      </div>
     </div>
   )
 }

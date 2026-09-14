@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import {
   FOV_CAMERA,
@@ -332,6 +332,10 @@ export function AmbienteDeJogo({
       className="absolute inset-0 h-full w-full"
       style={{ touchAction: 'none' }}
     >
+      {/* Boundary do loading 3D: suspende só o Canvas (fallback nulo);
+          a página e o overlay de dots seguem montados sem reiniciar —
+          a suspensão nunca mais vaza até o Suspense do App. */}
+      <Suspense fallback={null}>
       <Canvas
         camera={{ fov: FOV_CAMERA, position: cameraFixa.posicao }}
         frameloop="demand"
@@ -380,6 +384,7 @@ export function AmbienteDeJogo({
           emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
         />
       </Canvas>
+      </Suspense>
       {estadoExibicao ? (
         <TabuleiroMirrorDOM
           todasCelulas={todasCelulas}
