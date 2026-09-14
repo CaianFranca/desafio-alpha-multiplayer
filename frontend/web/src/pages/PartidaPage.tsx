@@ -970,7 +970,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     mensagens: mensagensDoChat,
     naoLidas: chatNaoLidas,
     aberto: chatAberto,
-    cooldownAte: chatCooldownAte,
+    emCooldown: chatEmCooldown,
     recusa: chatRecusa,
     anuncio: anuncioDoChat,
     abrir: abrirOChat,
@@ -1682,7 +1682,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           mensagens={mensagensDoChat}
           naoLidas={chatNaoLidas}
           aberto={chatAberto}
-          cooldownAte={chatCooldownAte}
+          emCooldown={chatEmCooldown}
           recusa={chatRecusa}
           anuncio={anuncioDoChat}
           jogadorPorId={modelo.jogadorPorId}

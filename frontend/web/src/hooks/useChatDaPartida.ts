@@ -101,6 +101,9 @@ export function useChatDaPartida({
   const [naoLidas, setNaoLidas] = useState(0)
   const [aberto, setAberto] = useState(false)
   const [cooldownAte, setCooldownAte] = useState<number | null>(null)
+  // Relógio do cooldown (lint: o painel não pode chamar Date.now no render —
+  // ele lê `emCooldown`, derivado aqui com tique só durante a janela).
+  const [agora, setAgora] = useState(() => Date.now())
   const [recusa, setRecusa] = useState<string | null>(null)
   // Anúncio SR só do live (R2): a semente do histórico alimenta o feed sem
   // tocar aqui, então reconexão não anuncia conversa velha como nova.
@@ -149,6 +152,7 @@ export function useChatDaPartida({
     ultimoBlipEmRef.current = 0
     historicoHidratadoRef.current = false
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAgora(Date.now())
     setMensagens([])
     setNaoLidas(0)
     setAberto(false)
@@ -258,6 +262,16 @@ export function useChatDaPartida({
     [agendarLimpezaDaRecusa],
   )
 
+  // Tique da janela do cooldown: re-renderiza o painel 4×/s só enquanto o
+  // input está congelado, para o `disabled` cair sozinho ao expirar.
+  useEffect(() => {
+    if (cooldownAte === null) return
+    const id = window.setInterval(() => setAgora(Date.now()), 250)
+    return () => window.clearInterval(id)
+  }, [cooldownAte])
+
+  const emCooldown = cooldownAte !== null && cooldownAte > agora
+
   const abrir = useCallback(() => {
     setAberto(true)
     setNaoLidas(0)
@@ -318,7 +332,7 @@ export function useChatDaPartida({
     mensagens,
     naoLidas,
     aberto,
-    cooldownAte,
+    emCooldown,
     recusa,
     anuncio,
     abrir,

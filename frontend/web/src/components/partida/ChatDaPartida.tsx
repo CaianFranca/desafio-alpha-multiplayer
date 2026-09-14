@@ -37,8 +37,8 @@ interface ChatDaPartidaProps {
   /** Não lidas acumuladas com o painel fechado (zera ao abrir). */
   naoLidas: number
   aberto: boolean
-  /** Instante (epoch ms) até o qual o input fica congelado (recusa do servidor). */
-  cooldownAte: number | null
+  /** Input congelado na janela pós-rate-limit (derivado no hook, sem Date no render). */
+  emCooldown: boolean
   /** Feedback enxuto de recusa (vazia/longa/rate-limit/sem conexão). */
   recusa: string | null
   /**
@@ -69,7 +69,7 @@ export function ChatDaPartida({
   mensagens,
   naoLidas,
   aberto,
-  cooldownAte,
+  emCooldown,
   recusa,
   anuncio,
   jogadorPorId,
@@ -88,8 +88,6 @@ export function ChatDaPartida({
   // não é puxado para baixo a cada mensagem nova.
   const seguirFeedRef = useRef(true)
   const emModoCompacto = useViewportCompacto(compacto)
-  // Janela do cooldown (re-renderiza ao expirar via timer do hook).
-  const emCooldown = cooldownAte !== null && cooldownAte > Date.now()
   const podeEnviar = rascunho.trim().length > 0 && !emCooldown
 
   // Abertura move o foco ao input (autoFocus é frágil em React/jsdom) e arma
