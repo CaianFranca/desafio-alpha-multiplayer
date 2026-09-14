@@ -9,10 +9,13 @@ import {
   __redefinirRefreshEmVooParaTestes,
   apiFetch,
   calcularIntervaloSlide,
+  confirmarSessaoViva,
+  criarSinalComTimeout,
   lerResultadoRefresh,
   lerTtlDeAcessoSegundos,
   onSessionExpired,
   TEMPO_LIMITE_REFRESH_MS,
+  TEMPO_LIMITE_SONDA_SESSAO_MS,
 } from '../web/src/api/client'
 import { fetchCurrentPlayer, refreshSession } from '../web/src/api/auth'
 
@@ -99,6 +102,8 @@ describe('slide-session no apiFetch (issue #376)', () => {
         method: 'POST',
         response: () => jsonResponse({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] }, 401),
       },
+      // Ressalva 2: sonda confirma a morte (401/403 explícito mantém invalida).
+      { url: '/api/auth/me', response: () => jsonResponse({}, 401) },
     ])
     const expirada = vi.fn()
     const desinscrever = onSessionExpired(expirada)
@@ -108,6 +113,7 @@ describe('slide-session no apiFetch (issue #376)', () => {
       expect(expirada).toHaveBeenCalledTimes(1)
       expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
       expect(contarChamadas(calls, 'GET', '/api/salas')).toBe(1)
+      expect(contarChamadas(calls, 'GET', '/api/auth/me')).toBe(1)
     } finally {
       desinscrever()
     }
@@ -350,6 +356,140 @@ describe('slide-session no apiFetch (issue #376)', () => {
     } finally {
       desinscrever()
     }
+  })
+
+  it('sonda 5xx vira transiente sem notificar (ressalva PR #383)', async () => {
+    mockApi([
+      { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 401) },
+      // Sonda responde 500: nada se sabe — não pode derrubar a aba.
+      { url: '/api/auth/me', response: () => jsonResponse({}, 500) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const response = await apiFetch('/api/salas')
+      expect(response.status).toBe(401)
+      expect(expirada).not.toHaveBeenCalled()
+      expect(lerResultadoRefresh(response)).toBe('transiente')
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('sonda com falha de rede vira transiente sem notificar (ressalva PR #383)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/auth/me') && (init?.method ?? 'GET').toUpperCase() === 'GET') {
+          throw new TypeError('rede fora')
+        }
+        if (url.includes('/api/auth/refresh')) return jsonResponse({}, 401)
+        if (url.includes('/api/salas')) return jsonResponse({}, 401)
+        return jsonResponse({}, 404)
+      }),
+    )
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const response = await apiFetch('/api/salas')
+      expect(response.status).toBe(401)
+      expect(expirada).not.toHaveBeenCalled()
+      expect(lerResultadoRefresh(response)).toBe('transiente')
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('sonda 403 mantém invalida e notifica (ressalva PR #383)', async () => {
+    mockApi([
+      { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/me', response: () => jsonResponse({}, 403) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const response = await apiFetch('/api/salas')
+      expect(response.status).toBe(401)
+      expect(expirada).toHaveBeenCalledTimes(1)
+      expect(lerResultadoRefresh(response)).toBeUndefined()
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('sondas concorrentes dividem um único GET /me (ressalva PR #383)', async () => {
+    const calls = mockApi([
+      { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/me', response: () => jsonResponse(jogador) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const [primeira, segunda] = await Promise.all([apiFetch('/api/salas'), apiFetch('/api/salas')])
+      expect(primeira.status).toBe(401)
+      expect(segunda.status).toBe(401)
+      expect(expirada).not.toHaveBeenCalled()
+      expect(lerResultadoRefresh(primeira)).toBe('transiente')
+      expect(lerResultadoRefresh(segunda)).toBe('transiente')
+      expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
+      expect(contarChamadas(calls, 'GET', '/api/auth/me')).toBe(1)
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('fallback sem AbortSignal.timeout ainda entrega AbortSignal (ressalva PR #383)', async () => {
+    expect(TEMPO_LIMITE_SONDA_SESSAO_MS).toBeGreaterThanOrEqual(1000)
+    expect(TEMPO_LIMITE_SONDA_SESSAO_MS).toBeLessThanOrEqual(10000)
+    const original = AbortSignal.timeout
+    // @ts-expect-error — força o caminho de fallback em ambiente antigo
+    AbortSignal.timeout = undefined
+    try {
+      const { sinal, limpar } = criarSinalComTimeout(8000)
+      try {
+        expect(sinal).toBeInstanceOf(AbortSignal)
+      } finally {
+        limpar()
+      }
+      // Sonda também usa o fallback: sem teto nativo, sem logout falso.
+      mockApi([
+        { url: '/api/salas', response: () => jsonResponse({}, 401) },
+        { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 401) },
+        { url: '/api/auth/me', response: () => jsonResponse(jogador) },
+      ])
+      const expirada = vi.fn()
+      const desinscrever = onSessionExpired(expirada)
+      try {
+        const response = await apiFetch('/api/salas')
+        expect(expirada).not.toHaveBeenCalled()
+        expect(lerResultadoRefresh(response)).toBe('transiente')
+      } finally {
+        desinscrever()
+      }
+    } finally {
+      AbortSignal.timeout = original
+    }
+  })
+
+  it('confirmarSessaoViva dedupe chamadas concorrentes (ressalva PR #383)', async () => {
+    let sondas = 0
+    mockApi([
+      {
+        url: '/api/auth/me',
+        response: () => {
+          sondas += 1
+          return jsonResponse(jogador)
+        },
+      },
+    ])
+    const [a, b] = await Promise.all([confirmarSessaoViva(), confirmarSessaoViva()])
+    expect(a).toBe('viva')
+    expect(b).toBe('viva')
+    expect(sondas).toBe(1)
   })
 })
 

@@ -319,6 +319,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     wsRef.current = ws
 
     ws.onopen = () => {
+      if (!montadoRef.current) return
       setConectado(true)
       setErro(null)
       // Drena comandos enfileirados enquanto o socket estava conectando.
@@ -337,6 +338,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     }
 
     ws.onclose = () => {
+      if (!montadoRef.current) return
       setConectado(false)
       wsRef.current = null
       // Reconexão simples após 1s se ainda montado. Antes de reconectar,
@@ -363,6 +365,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     }
 
     ws.onerror = () => {
+      if (!montadoRef.current) return
       setErro('Erro de conexão')
     }
 
