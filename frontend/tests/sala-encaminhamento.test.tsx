@@ -119,6 +119,12 @@ function semNavegacaoVisivel(container: HTMLElement) {
   expect(container.querySelector('[data-testid="ir-para-partida-snapshot"]')).toBeNull()
   expect(container.querySelector('[data-testid="snapshot-encaminhada"]')).toBeNull()
   expect(container.querySelector('a[href*="partidaId="]')).toBeNull()
+  // Regressão do card antigo: nenhum heading/link visível do snapshot
+  expect(container.querySelector('[data-testid="snapshot-encaminhada"] h2')).toBeNull()
+  expect(screen.queryByRole('link', { name: /ir para a partida/i })).toBeNull()
+  // O overlay não tem heading visível — só a região status nomeada
+  expect(screen.queryByRole('heading', { name: /partida disponível/i })).toBeNull()
+  expect(screen.queryByRole('heading', { name: /preparando partida/i })).toBeNull()
 }
 
 function avancarParaDepoisDoRedirect() {
@@ -258,6 +264,41 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
         type: 'PARTIDA_RECUSADA',
         codigo: 'ENCAMINHAMENTO_RECUSADO',
         motivo: 'O servidor de jogo recusou a partida. Tente iniciar novamente.',
+      }),
+    )
+
+    expect(await screen.findByTestId('aviso-encaminhamento')).toBeInTheDocument()
+    expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
+
+    vi.useFakeTimers()
+    avancarParaDepoisDoRedirect()
+    expect(assignSpy).not.toHaveBeenCalled()
+  })
+
+  it('falha tardia cancela o redirect pendente e nunca navega para Partida inexistente', async () => {
+    mockAuthMe()
+    const { MockWebSocket, instances } = createMockWebSocket()
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const assignSpy = vi.fn()
+    stubLocationComAssign(assignSpy)
+
+    renderSala()
+    const ws = await abrirSala(instances)
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'PARTIDA_DISPONIVEL',
+        partidaId: 'partida-123',
+        serverId: 'server-abc',
+      }),
+    )
+    expect(await screen.findByTestId('encaminhamento-carregando')).toBeInTheDocument()
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'PARTIDA_FALHOU',
+        codigo: 'ENCAMINHAMENTO_FALHOU',
+        motivo: 'Falha ao preparar a partida. Verifique a conexão e tente novamente.',
       }),
     )
 
