@@ -288,9 +288,11 @@ Detalhes relevantes:
     três locations: (`1`) redireciona `/server01` → `/server01/` (301);
     (`2`) `/server01/` faz `proxy_pass http://127.0.0.1:8080/` para o nginx do
     app, **removendo o prefixo `/server01/`** (barra final do `proxy_pass`),
-    usado quando o admin preserva o prefixo; (`3`) `/` faz pass-through
-    (`proxy_pass http://127.0.0.1:8080`, **sem** barra final) preservando o URI,
-    usado quando o admin remove o prefixo e entrega a raiz. Em todos os casos
+    usado quando o admin preserva o prefixo; (`3`) `/` faz pass-through com
+    `proxy_pass http://127.0.0.1:8080/` (barra final), que usa o URI
+    **normalizado** (colapsa barras repetidas: `//api/...` → `/api/...`) antes
+    de entregar ao nginx do app, usado quando o admin remove o prefixo e
+    entrega a raiz. Em todos os casos
     encaminha Upgrade/Connection (WebSocket) e
     `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`.
 - **Env de produção** (`/opt/flicker/env`) é gerado pelo workflow a cada
