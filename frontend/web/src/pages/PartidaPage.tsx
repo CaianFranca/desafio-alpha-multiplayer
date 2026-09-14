@@ -355,17 +355,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [partidaId])
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
-  // Gate da revelação: os dots seguem até a cena 3D estar 100% carregada
-  // (sem pop-in progressivo) — mão única, só vale para a primeira revelação.
-  // Todo o resto (HUD, modelo, cena) segue o `estado` cru: a cena precisa
-  // montar para carregar; só o overlay espera.
-  const cenaPronta = useCenaPronta()
-  const [cenaRevelada, setCenaRevelada] = useState(false)
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- latch mão-única da revelação, dispara uma vez
-    if (estado === 'disponivel' && cenaPronta && !cenaRevelada) setCenaRevelada(true)
-  }, [estado, cenaPronta, cenaRevelada])
-  const estadoEfetivo = estado === 'disponivel' && !cenaRevelada ? 'carregando' : estado
   const emResultado = estado === 'resultado'
   const emResultadoRef = useRef(emResultado)
   useEffect(() => {
@@ -964,6 +953,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
   // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
   const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
+  // Gate da revelação: os dots seguem até a cena 3D estar 100% carregada
+  // (sem pop-in progressivo) — mão única, só vale para a primeira revelação.
+  // Todo o resto (HUD, modelo, cena) segue o `estado` cru: a cena precisa
+  // montar para carregar; só o overlay espera. O re-arme acontece na chegada
+  // do conteúdo (snapshot), quando os loads das peças de fato começam.
+  const cenaPronta = useCenaPronta(estadoExibicao !== null)
+  const [cenaRevelada, setCenaRevelada] = useState(false)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- latch mão-única da revelação, dispara uma vez
+    if (estado === 'disponivel' && cenaPronta && !cenaRevelada) setCenaRevelada(true)
+  }, [estado, cenaPronta, cenaRevelada])
+  const estadoEfetivo = estado === 'disponivel' && !cenaRevelada ? 'carregando' : estado
   const estadoInteracao: EstadoDoTabuleiroNoCliente | null =
     estadoEmAndamento ? modelo : null
 

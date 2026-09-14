@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DefaultLoadingManager } from 'three'
 
 /** Silêncio sem novos loads para considerar a cena pronta (cobre loads encadeados). */
@@ -16,29 +16,41 @@ export const CENA_PRONTA_TETO_MS = 15000
  *   do `disponivel` — fechando o gate a tempo.
  * - `onLoad` + silêncio de `CENA_PRONTA_QUIET_MS` libera; erro de asset não
  *   trava (segue para o quiet); o teto garante a liberação.
+ * - Re-arme (`temConteudo`): os loads das peças só começam quando o snapshot
+ *   chega — se o quiet da Mesa já esvaziou antes, a chegada do conteúdo
+ *   fecha o gate de novo. Sem isso o latch liberaria antes das peças
+ *   baixarem (pop-in progressivo). Com tudo em cache, o quiet libera em
+ *   400ms sem travar.
+ *
+ * @param temConteudo `estadoExibicao !== null` — a cena tem o que carregar.
  */
-export function useCenaPronta(): boolean {
+export function useCenaPronta(temConteudo: boolean): boolean {
   const [pronta, setPronta] = useState(true)
+  // Pendentes na fila do manager (o three não expõe `isLoading()`).
+  const pendentesRef = useRef(0)
+  const quietTimerRef = useRef<number | null>(null)
+  const viuConteudoRef = useRef(false)
 
+  // Assinatura do manager (montagem).
   useEffect(() => {
     const manager = DefaultLoadingManager
     const prevOnStart = manager.onStart
     const prevOnLoad = manager.onLoad
+    const prevOnProgress = manager.onProgress
     const prevOnError = manager.onError
-    let quietTimer: number | null = null
     let tetoTimer: number | null = null
     let cancelado = false
 
     const limparQuiet = () => {
-      if (quietTimer !== null) {
-        window.clearTimeout(quietTimer)
-        quietTimer = null
+      if (quietTimerRef.current !== null) {
+        window.clearTimeout(quietTimerRef.current)
+        quietTimerRef.current = null
       }
     }
     const agendarQuiet = () => {
       limparQuiet()
-      quietTimer = window.setTimeout(() => {
-        quietTimer = null
+      quietTimerRef.current = window.setTimeout(() => {
+        quietTimerRef.current = null
         if (!cancelado) setPronta((anterior) => (anterior ? anterior : true))
       }, CENA_PRONTA_QUIET_MS)
     }
@@ -46,12 +58,20 @@ export function useCenaPronta(): boolean {
     manager.onStart = (url, loaded, total) => {
       prevOnStart?.(url, loaded, total)
       if (cancelado) return
+      pendentesRef.current = total - loaded
       limparQuiet()
       setPronta((anterior) => (anterior ? false : anterior))
     }
+    manager.onProgress = (url, loaded, total) => {
+      prevOnProgress?.(url, loaded, total)
+      if (cancelado) return
+      pendentesRef.current = total - loaded
+    }
     manager.onLoad = () => {
       prevOnLoad?.()
-      if (!cancelado) agendarQuiet()
+      if (cancelado) return
+      pendentesRef.current = 0
+      agendarQuiet()
     }
     manager.onError = (url) => {
       prevOnError?.(url)
@@ -68,9 +88,26 @@ export function useCenaPronta(): boolean {
       if (tetoTimer !== null) window.clearTimeout(tetoTimer)
       manager.onStart = prevOnStart
       manager.onLoad = prevOnLoad
+      manager.onProgress = prevOnProgress
       manager.onError = prevOnError
     }
   }, [])
+
+  // Re-arme na chegada do conteúdo (mão única).
+  useEffect(() => {
+    if (!temConteudo || viuConteudoRef.current) return
+    viuConteudoRef.current = true
+    setPronta((anterior) => (anterior ? false : anterior))
+    if (pendentesRef.current === 0) {
+      // Nada em voo (tudo em cache): o quiet libera rápido sem travar.
+      // Com loads em voo, o `onLoad` agenda o quiet.
+      if (quietTimerRef.current !== null) window.clearTimeout(quietTimerRef.current)
+      quietTimerRef.current = window.setTimeout(() => {
+        quietTimerRef.current = null
+        setPronta((anterior) => (anterior ? anterior : true))
+      }, CENA_PRONTA_QUIET_MS)
+    }
+  }, [temConteudo])
 
   return pronta
 }
