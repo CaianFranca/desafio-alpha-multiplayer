@@ -122,10 +122,10 @@ export function paraSnapshotWire(
     // (Redis), não do engine — o parâmetro preserva o default null para
     // chamadas sem o marco (partida preparada / testes).
     iniciadaEm,
-    // Histórico do chat (issue #388): tabuleiro + chat do mesmo instante no
-    // snapshot de Reconexão, sem replay separado. Opcional/defensivo como
-    // `iniciadaEm?`: ausente quando o chamador não carrega o histórico
-    // (binário anterior / testes legados).
+    // Histórico do chat (issue #388): tabuleiro + chat do mesmo instante
+    // intra-processo no snapshot de Reconexão, sem replay separado.
+    // Opcional/defensivo como `iniciadaEm?`: ausente quando o chamador sem
+    // histórico não o fornece — ausente ≡ [] no cliente.
     ...(historicoDeChat !== undefined ? { historicoDeChat: [...historicoDeChat] } : {}),
   };
 }

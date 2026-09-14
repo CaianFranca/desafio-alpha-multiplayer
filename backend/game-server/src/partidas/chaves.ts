@@ -16,10 +16,10 @@ export function chaveDoEstadoDaPartida(partidaId: string): string {
 
 /**
  * Histórico do chat de Partida (issue #388): lista Redis própria por Partida,
- * fora do blob de estado, capped em ~50 (humanas + bot). Nasce no primeiro
- * `RPUSH` (lista vazia não existe no Redis) com `EXPIRE` da preparada,
- * `PERSIST` em `em_andamento`, `EXPIRE` com retenção de término e `DEL` em
- * cancelamento/não-início.
+ * fora do blob de estado, limitado com aparo no topo (default 50, faixa
+ * 1..200; humanas + bot somadas). Nasce no primeiro `RPUSH` (lista vazia não
+ * existe no Redis) com `EXPIRE` da preparada, `PERSIST` em `em_andamento`,
+ * `EXPIRE` com retenção de término e `DEL` em cancelamento/não-início.
  */
 export function chaveDoChatDaPartida(partidaId: string): string {
   return `${GAME_SERVERS_PARTIDA_CHAT_PREFIXO}${partidaId}`;

@@ -2,11 +2,7 @@ import type { Redis } from 'ioredis';
 import type { MembroDaSala, OfertaDeEncaminhamento, PartidaId, ServerId } from '@flicker/shared';
 import type { ContextoDoGameServer } from '../contexto.ts';
 import { chaveDaPartida, chaveDoChatDaPartida, chaveDoEstadoDaPartida } from './chaves.ts';
-import {
-  inicializarEstadoDaPartida,
-  removerEstadoDaPartida,
-} from './estado.ts';
-import { removerHistoricoDoChat } from './historico-chat.ts';
+import { inicializarEstadoDaPartida } from './estado.ts';
 import { agendarNaoInicio, cancelarNaoInicio, obterNaoInicioSegundos } from './nao-inicio.ts';
 
 export type EstadoDaPartida = 'preparada' | 'em_andamento';
@@ -94,12 +90,26 @@ export async function existePartida(redis: Redis, partidaId: PartidaId): Promise
   return (await redis.exists(chaveDaPartida(partidaId))) === 1;
 }
 
+// Cancelamento incondicional (R3): partida + estado + chat do histórico da
+// #388 num único EVAL — sem janela entre os 3 DEL onde o chat ficaria órfão
+// ou a partida ressuscitaria sem estado.
+const SCRIPT_CANCELAR_PARTIDA = `
+local removida = redis.call('DEL', KEYS[1])
+redis.call('DEL', KEYS[2])
+redis.call('DEL', KEYS[3])
+return removida
+`.trim();
+
 export async function cancelarPartida(redis: Redis, partidaId: PartidaId): Promise<boolean> {
   cancelarNaoInicio(partidaId);
-  const removida = (await redis.del(chaveDaPartida(partidaId))) === 1;
-  // Remove também o estado e o histórico de chat da partida (issues #117/#388).
-  await removerEstadoDaPartida(redis, partidaId);
-  await removerHistoricoDoChat(redis, partidaId);
+  const removida =
+    (await redis.eval(
+      SCRIPT_CANCELAR_PARTIDA,
+      3,
+      chaveDaPartida(partidaId),
+      chaveDoEstadoDaPartida(partidaId),
+      chaveDoChatDaPartida(partidaId),
+    )) === 1;
   return removida;
 }
 

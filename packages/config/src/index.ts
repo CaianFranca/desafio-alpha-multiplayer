@@ -51,7 +51,14 @@ const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
 const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
-const DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO = 50;
+/**
+ * Teto do histórico de chat por Partida (issue #388): fonte única do default
+ * 50 (faixa 1..200). `historico-chat.ts` importa este default em vez de
+ * triplicar o literal — mudar aqui propaga para parse + domínio.
+ */
+export const DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO = 50;
+export const MINIMO_PARTIDA_CHAT_HISTORICO_MAXIMO = 1;
+export const MAXIMO_PARTIDA_CHAT_HISTORICO_MAXIMO = 200;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -70,7 +77,8 @@ export const GAME_SERVERS_PARTIDA_ESTADO_PREFIXO = 'game-server:partida-estado:'
 // Histórico do chat de Partida (issue #388): lista Redis própria por Partida,
 // fora do blob de estado, com mesmo ciclo/TTL das chaves da Partida. Prefixo
 // com hífen (não com ':') para não poluir o SCAN `game-server:partida:*` do
-// rearme do não-início — mesmo padrão do prefixo de estado.
+// rearme do não-início (ver `nao-inicio.ts:212`) — mesmo padrão do prefixo
+// de estado.
 export const GAME_SERVERS_PARTIDA_CHAT_PREFIXO = 'game-server:partida-chat:';
 
 export function chaveGameServer(serverId: string): string {
@@ -184,7 +192,8 @@ function parsePartidaChatHistoricoMaximo(raw: string | undefined): number {
     raw,
     DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO,
     'PARTIDA_CHAT_HISTORICO_MAXIMO',
-    1,
+    MINIMO_PARTIDA_CHAT_HISTORICO_MAXIMO,
+    MAXIMO_PARTIDA_CHAT_HISTORICO_MAXIMO,
   );
 }
 

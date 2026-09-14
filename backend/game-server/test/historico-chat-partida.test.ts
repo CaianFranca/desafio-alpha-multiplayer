@@ -30,9 +30,10 @@ import { criarWebSocketServer } from '../src/ws/ws.ts';
 import { PartidaBroadcaster } from '../src/partidas/broadcast.ts';
 import { PartidaHandlers } from '../src/partidas/handlers.ts';
 import { obterEstadoDaPartida } from '../src/partidas/estado.ts';
-import { chaveDoChatDaPartida } from '../src/partidas/chaves.ts';
+import { chaveDaPartida, chaveDoChatDaPartida, chaveDoEstadoDaPartida } from '../src/partidas/chaves.ts';
 import {
   adicionarMensagemAoHistorico,
+  normalizarTetoDoHistorico,
   obterHistoricoDoChat,
 } from '../src/partidas/historico-chat.ts';
 import { cancelarPartidaSeNaoIniciada } from '../src/partidas/partidas.ts';
@@ -615,6 +616,268 @@ test('reconexão recebe tabuleiro+chat do mesmo instante sob rajada de bot, sem 
     }
 
     await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('normalizarTetoDoHistorico valida 1..200 com warn no fallback', async () => {
+  assert.equal(normalizarTetoDoHistorico(undefined), 50);
+  assert.equal(normalizarTetoDoHistorico(1), 1);
+  assert.equal(normalizarTetoDoHistorico(2), 2);
+  assert.equal(normalizarTetoDoHistorico(200), 200);
+  const warns: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => { warns.push(args); };
+  try {
+    assert.equal(normalizarTetoDoHistorico(0), 50);
+    assert.equal(normalizarTetoDoHistorico(201), 50);
+    assert.equal(normalizarTetoDoHistorico(Number.NaN), 50);
+    assert.ok(warns.length >= 3, `esperado warn no fallback, viram ${warns.length}`);
+  } finally {
+    console.warn = original;
+  }
+});
+
+test('teto custom 1/2 respeitado com aparo no topo', async () => {
+  const partidaId = `teto-custom-${crypto.randomUUID()}`;
+  const chavePartida = chaveDaPartida(partidaId);
+  const chaveChat = chaveDoChatDaPartida(partidaId);
+  try {
+    await redis.set(chavePartida, JSON.stringify({ partidaId, estado: 'em_andamento' }), 'EX', 600);
+    // Teto 2: 3 escritas → ficam as 2 mais novas.
+    await adicionarMensagemAoHistorico(redis, partidaId, mensagemFake(1), 2);
+    await adicionarMensagemAoHistorico(redis, partidaId, mensagemFake(2), 2);
+    await adicionarMensagemAoHistorico(redis, partidaId, mensagemFake(3), 2);
+    assert.equal(await redis.llen(chaveChat), 2);
+    const historico2 = await obterHistoricoDoChat(redis, partidaId);
+    assert.deepEqual(historico2.map((m) => m.conteudo), ['msg-2', 'msg-3']);
+    // Teto 1: próxima escrita apara para 1.
+    await adicionarMensagemAoHistorico(redis, partidaId, mensagemFake(4), 1);
+    assert.equal(await redis.llen(chaveChat), 1);
+    const historico1 = await obterHistoricoDoChat(redis, partidaId);
+    assert.deepEqual(historico1.map((m) => m.conteudo), ['msg-4']);
+  } finally {
+    await redis.del(chaveChat);
+    await redis.del(chavePartida);
+  }
+});
+
+test('TTL espelhado: EXPIRE na preparada e PERSIST em andamento', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaDeDois());
+    try {
+      // Preparada tem EXPIRE: escrita espelha TTL>0.
+      await adicionarMensagemAoHistorico(redis, aceite.partidaId, mensagemFake(1));
+      const ttlPreparada = await redis.ttl(chaveDaPartida(aceite.partidaId));
+      const ttlChatPreparada = await redis.ttl(chaveDoChatDaPartida(aceite.partidaId));
+      assert.ok(ttlPreparada > 0, `TTL da preparada inválido: ${ttlPreparada}`);
+      assert.ok(ttlChatPreparada > 0 && ttlChatPreparada <= ttlPreparada + 1, `TTL do chat na preparada inválido: ${ttlChatPreparada} vs ${ttlPreparada}`);
+
+      // Vira em_andamento (PERSIST, TTL -1): escrita espelha PERSIST.
+      const j1 = await conectarPartida(servidor, aceite.partidaId, 'jogador-1', 'Jogador 1');
+      const j2 = await conectarPartida(servidor, aceite.partidaId, 'jogador-2', 'Jogador 2', [
+        (ws) => esperarEvento(ws, 'PARTIDA_INICIADA'),
+      ]);
+      await j2.esperas[0];
+      try {
+        assert.equal(await redis.ttl(chaveDaPartida(aceite.partidaId)), -1);
+        await adicionarMensagemAoHistorico(redis, aceite.partidaId, mensagemFake(2));
+        assert.equal(await redis.ttl(chaveDoChatDaPartida(aceite.partidaId)), -1);
+      } finally {
+        j1.ws.close();
+        j2.ws.close();
+      }
+    } finally {
+      await deletePartida(servidor.baseUrl, aceite.partidaId);
+    }
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('ttl==0 vira DEL, nunca PERSIST', async () => {
+  const partidaId = `ttl-zero-${crypto.randomUUID()}`;
+  const chavePartida = chaveDaPartida(partidaId);
+  const chaveChat = chaveDoChatDaPartida(partidaId);
+  try {
+    await redis.set(chavePartida, JSON.stringify({ partidaId, estado: 'preparada' }));
+    // PTTL <1s faz TTL (em segundos) retornar 0 — partida expirando.
+    await redis.pexpire(chavePartida, 500);
+    const ttlAntes = await redis.ttl(chavePartida);
+    assert.ok(ttlAntes === 0 || ttlAntes === 1, `pré-condição TTL 0/1, veio ${ttlAntes}`);
+    await adicionarMensagemAoHistorico(redis, partidaId, mensagemFake(1));
+    // Nunca órfão sem TTL: ou DEL imediato (ttl 0) ou EXPIRE espelhado (ttl 1).
+    // Nos dois casos, jamais PERSIST (-1).
+    const ttlChat = await redis.ttl(chaveChat);
+    assert.notEqual(ttlChat, -1, 'chat jamais persiste com partida expirando');
+    if (ttlAntes === 0) {
+      assert.equal(await redis.exists(chaveChat), 0, 'ttl==0 deve dar DEL no chat');
+    }
+  } finally {
+    await redis.del(chaveChat);
+    await redis.del(chavePartida);
+  }
+});
+
+test('frame corrompido ignorado com warn e contador', async () => {
+  const partidaId = `corrompido-${crypto.randomUUID()}`;
+  const chavePartida = chaveDaPartida(partidaId);
+  const chaveChat = chaveDoChatDaPartida(partidaId);
+  try {
+    await redis.set(chavePartida, JSON.stringify({ partidaId, estado: 'em_andamento' }), 'EX', 600);
+    await adicionarMensagemAoHistorico(redis, partidaId, mensagemFake(1));
+    await redis.rpush(chaveChat, 'não-é-json{{{');
+    await adicionarMensagemAoHistorico(redis, partidaId, mensagemFake(2));
+    // Reordena para o corrompido ficar no meio: reescreve a lista com 3
+    // entradas onde a do meio é inválida.
+    await redis.del(chaveChat);
+    await redis.rpush(chaveChat, JSON.stringify(mensagemFake(1)), 'não-é-json{{{', JSON.stringify(mensagemFake(2)));
+    await redis.expire(chaveChat, 600);
+    const warns: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => { warns.push(args); };
+    let historico;
+    try {
+      historico = await obterHistoricoDoChat(redis, partidaId);
+    } finally {
+      console.warn = original;
+    }
+    assert.equal(historico.length, 2);
+    assert.deepEqual(historico.map((m) => m.conteudo), ['msg-1', 'msg-2']);
+    assert.equal(warns.length, 1, 'esperado 1 warn com contador');
+    const detalhe = warns[0]?.[1] as { corrompidas?: number; total?: number } | undefined;
+    assert.equal(detalhe?.corrompidas, 1);
+    assert.equal(detalhe?.total, 3);
+  } finally {
+    await redis.del(chaveChat);
+    await redis.del(chavePartida);
+  }
+});
+
+test('falha de persistência não recusa o live; falha de leitura degrada snapshot para []', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaDeDois());
+    const humano = await conectarPartida(servidor, aceite.partidaId, 'jogador-1', 'Jogador 1');
+    const outro = await conectarPartida(servidor, aceite.partidaId, 'jogador-2', 'Jogador 2', [
+      (ws) => esperarEvento(ws, 'PARTIDA_INICIADA'),
+    ]);
+    await outro.esperas[0];
+    try {
+      // Falha só no EVAL do histórico (contém RPUSH): live deve seguir.
+      const redisQualquer = redis as unknown as Record<string, unknown>;
+      const evalOriginal = redis.eval.bind(redis);
+      redisQualquer['eval'] = async (...args: unknown[]) => {
+        const script = String(args[0] ?? '');
+        if (script.includes('RPUSH') && script.includes('LTRIM')) {
+          throw new Error('boom no histórico');
+        }
+        return (evalOriginal as (...a: unknown[]) => Promise<unknown>)(...args);
+      };
+      try {
+        // Duas rápidas: com consumo só após persistir, nenhuma consome
+        // crédito — ambas chegam live (sem LIMITE_DE_MENSAGENS).
+        const live1 = esperarEvento(outro.ws, 'MENSAGEM_DE_CHAT_DA_PARTIDA');
+        enviar(humano.ws, comandoDeChat('jogador-1', 'live-apesar-do-boom-1'));
+        const recebida1 = await live1;
+        assert.equal(recebida1.conteudo, 'live-apesar-do-boom-1');
+        const live2 = esperarEvento(outro.ws, 'MENSAGEM_DE_CHAT_DA_PARTIDA');
+        enviar(humano.ws, comandoDeChat('jogador-1', 'live-apesar-do-boom-2'));
+        const recebida2 = await live2;
+        assert.equal(recebida2.conteudo, 'live-apesar-do-boom-2');
+      } finally {
+        redisQualquer['eval'] = evalOriginal;
+      }
+
+      // Falha só no LRANGE do chat: snapshot degrada para [] sem negar.
+      const lrangeOriginal = redis.lrange.bind(redis);
+      redisQualquer['lrange'] = async () => {
+        throw new Error('boom no lrange');
+      };
+      try {
+        const { PartidaBroadcaster: BroadcasterLocal } = await import('../src/partidas/broadcast.ts');
+        const { PartidaHandlers: HandlersLocal } = await import('../src/partidas/handlers.ts');
+        const handlers = new HandlersLocal({ redis, broadcaster: new BroadcasterLocal() });
+        const snapshot = await handlers.lerSnapshotAtomico(aceite.partidaId);
+        assert.ok(snapshot !== null);
+        assert.deepEqual(snapshot?.historico, []);
+      } finally {
+        redisQualquer['lrange'] = lrangeOriginal;
+      }
+    } finally {
+      humano.ws.close();
+      outro.ws.close();
+    }
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('rajada durante snapshot atômico: prefixo ordenado sem duplicadas e sem replay extra', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaComBot());
+    const humano = await conectarPartida(servidor, aceite.partidaId, 'jogador-1', 'Jogador 1');
+    const bot = await conectarBotPartida(servidor, aceite.partidaId, 'bot-1', 'Bot Camareiro');
+    await esperarEvento(humano.ws, 'PARTIDA_INICIADA');
+    try {
+      enviar(humano.ws, comandoDeChat('jogador-1', 'base-humana'));
+      await esperarEvento(humano.ws, 'MENSAGEM_DE_CHAT_DA_PARTIDA');
+
+      // Volta com rajada DURANTE o snapshot: abre ws2 e dispara 20 do bot
+      // sem esperar o ESTADO_DA_PARTIDA — a cadeia serial ordena snapshot e
+      // escritas no mesmo instante intra-processo.
+      humano.ws.close();
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+      const token = await tokenParaJogador('jogador-1', 'Jogador 1');
+      const ws2 = new WebSocket(servidor.wsUrl(aceite.partidaId, token));
+      // Listeners ANTES do open (padrão dos testes do canal): evita perder
+      // ADMISSAO_ACEITA/ESTADO_DA_PARTIDA quando a admissão é rápida.
+      const aceitaPromise = esperarEvento(ws2, 'ADMISSAO_ACEITA');
+      const snapshotPromise = esperarEvento(ws2, 'ESTADO_DA_PARTIDA');
+      await new Promise<void>((resolve, reject) => {
+        ws2.once('open', () => resolve());
+        ws2.once('error', reject);
+      });
+      const rajada = 20;
+      for (let i = 1; i <= rajada; i += 1) {
+        enviar(bot, comandoDeChat('bot-1', `durante-${i}`));
+      }
+      const aceita = await aceitaPromise;
+      assert.equal(aceita.jogadorId, 'jogador-1');
+      const envelope = await snapshotPromise;
+      const snapshot = envelope.snapshot as { historicoDeChat?: MensagemDeChatDaPartidaEvento[] };
+      assert.ok(Array.isArray(snapshot.historicoDeChat));
+      const conteudos = snapshot.historicoDeChat?.map((m) => m.conteudo) ?? [];
+      // Sem duplicadas e ordenado como prefixo do final.
+      assert.deepEqual([...new Set(conteudos)].length, conteudos.length, 'snapshot sem duplicadas');
+      assert.ok(conteudos.length >= 1 && conteudos.length <= 1 + rajada, `snapshot é prefixo atômico, veio ${conteudos.length}`);
+      assert.equal(conteudos[0], 'base-humana');
+      // Espera a rajada assentar por poll (robusto sob carga) e confere que
+      // o snapshot é prefixo do final.
+      let final: MensagemDeChatDaPartidaEvento[] = [];
+      for (let tentativa = 0; tentativa < 50; tentativa += 1) {
+        final = await obterHistoricoDoChat(redis, aceite.partidaId);
+        if (final.length === 1 + rajada) break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      }
+      const finais = final.map((m) => m.conteudo);
+      assert.equal(finais.length, 1 + rajada);
+      assert.deepEqual(finais.slice(0, conteudos.length), conteudos, 'snapshot é prefixo ordenado do LRANGE final');
+      // Sem replay separado após o snapshot.
+      await esperarSilencioDeTipo(ws2, 'MENSAGEM_DE_CHAT_DA_PARTIDA', 500);
+      ws2.close();
+    } finally {
+      try { humano.ws.close(); } catch {}
+      try { bot.close(); } catch {}
+    }
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+    assert.equal(await redis.exists(chaveDoChatDaPartida(aceite.partidaId)), 0);
+    assert.equal(await redis.exists(chaveDaPartida(aceite.partidaId)), 0);
+    assert.equal(await redis.exists(chaveDoEstadoDaPartida(aceite.partidaId)), 0);
   } finally {
     await servidor.fechar();
   }
