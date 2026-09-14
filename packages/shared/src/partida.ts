@@ -401,6 +401,11 @@ export interface EstadoDaPartidaSnapshot {
   // binário anterior omitem o campo — o cliente normaliza ausente para null
   // (cronômetro sem origem) e a partida `preparada` traz null.
   readonly iniciadaEm?: number | null;
+  // Histórico do chat (issue #388, consumido pelo painel #389): últimas
+  // mensagens oldest→newest, fora do blob de estado. Opcional/defensivo:
+  // binário anterior ao #388 omite o campo — o cliente normaliza ausente
+  // para [] e hidrata o feed uma única vez, sem replay separado.
+  readonly historicoDeChat?: readonly MensagemDeChatDaPartidaEvento[];
 }
 
 export interface PartidaIniciadaEvento {

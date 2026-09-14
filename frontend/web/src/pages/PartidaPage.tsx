@@ -423,6 +423,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // estável (sem re-subscrição) e só lê o destinatário na chegada do evento.
   const aoEventoDeChatRef = useRef<(evento: MensagemDeChatDaPartidaEvento) => void>(() => {})
   const aoErroDeChatRef = useRef<(evento: ErroDoTabuleiroEvento) => void>(() => {})
+  const hidratarHistoricoDoChatRef = useRef<
+    (historico: readonly MensagemDeChatDaPartidaEvento[] | undefined | null) => void
+  >(() => {})
 
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, estaConectado, conectar: reconectarSocket, desconectar, aguardarConexao, removerPendentesPorTipo } = usePartidaWebSocket({
@@ -432,11 +435,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       (evento) => {
         // Após o não-início, ignora eventos tardios (terminal) — via ref para evitar stale closure
         if (emNaoInicioRef.current) return
-        // Chat (issue #389): mensagens não tocam o modelo — rota direta ao
-        // painel. Após o término (somente-leitura) o feed congela: nada de
-        // mensagens tardias reabre o menu do jogo.
+        // Chat (issue #389, contrato #390): mensagens não tocam o modelo —
+        // rota direta ao painel. Vale em andamento E após o Resultado até a
+        // saída individual; nunca na preparada (o servidor recusa lá).
         if (evento.type === 'MENSAGEM_DE_CHAT_DA_PARTIDA') {
-          if (!emResultadoRef.current) aoEventoDeChatRef.current(evento)
+          aoEventoDeChatRef.current(evento)
           return
         }
         // Consumo dos pendentes otimistas (#249): ack remove o alvo em voo;
@@ -496,6 +499,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // pendentes em voo contraditórios (limpa o conjunto).
           pendentesEmVoo.current.clear()
           aplicarSnapshotNoModelo(evento.snapshot)
+          // Semente do histórico do chat (#388, fronteira do #389): tabuleiro
+          // + chat do mesmo instante, sem replay separado. Ausente (binário
+          // anterior ao #388) ≡ [] — no-op dentro do hook.
+          hidratarHistoricoDoChatRef.current(evento.snapshot.historicoDeChat)
           if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
           // Snapshot é a autoridade do roster: se ele já me excluiu E não há
           // pendência gravada, a saída está corroborada — encerra a correlação
@@ -959,6 +966,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     enviar: enviarMensagemDoChat,
     aoEventoDeChat,
     aoErroDeChat,
+    hidratarHistorico,
   } = useChatDaPartida({ jogadorId, estaConectado, enviar })
   useEffect(() => {
     aoEventoDeChatRef.current = aoEventoDeChat
@@ -966,6 +974,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     aoErroDeChatRef.current = aoErroDeChat
   }, [aoErroDeChat])
+  useEffect(() => {
+    hidratarHistoricoDoChatRef.current = hidratarHistorico
+  }, [hidratarHistorico])
 
   // Reenvio da desistência pendente (R2): "Sair mesmo assim" ou aba fechada
   // durante o "saindo" gravaram a pendência; ao (re)abrir a partida com o
@@ -1643,11 +1654,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         />
       ) : null}
       {/*
-        Chat da partida (issue #389): irmão do HUD só durante a partida —
-        com o fim, o painel não faz mais sentido (a tela vira resultado).
+        Chat da partida (issue #389, contrato #390): irmão do HUD em andamento
+        E após o Resultado até a saída individual — bot de vitória/derrota e
+        conversa pós-jogo vivem aqui. Desmonta só em preparada/não-início.
         `data-*` dos testes vivem no componente.
       */}
-      {estadoEmAndamento ? (
+      {(estadoEmAndamento || emResultado) ? (
         <ChatDaPartida
           mensagens={mensagensDoChat}
           naoLidas={chatNaoLidas}

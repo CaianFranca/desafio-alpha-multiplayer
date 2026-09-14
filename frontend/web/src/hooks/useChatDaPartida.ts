@@ -98,6 +98,7 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
   }, [cooldownAte])
   const proximoIdRef = useRef(0)
   const ultimoBlipEmRef = useRef(0)
+  const historicoHidratadoRef = useRef(false)
   const timerDoCooldownRef = useRef<number | null>(null)
   const timerDaRecusaRef = useRef<number | null>(null)
 
@@ -117,6 +118,34 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
       setRecusa((atual) => (atual !== null ? null : atual))
     }, TEMPO_DE_EXIBICAO_DA_RECUSA_MS)
   }, [])
+
+  // Semente do histórico (issue #388, fronteira do #389): snapshot de
+  // Reconexão carrega tabuleiro + chat do mesmo instante, sem replay
+  // separado. Hidrata uma única vez; live posterior só acrescenta.
+  // Ausente (binário anterior ao #388) ≡ [] — no-op.
+  const hidratarHistorico = useCallback(
+    (historico: readonly MensagemDeChatDaPartidaEvento[] | undefined | null) => {
+      if (historicoHidratadoRef.current) return
+      if (!historico || historico.length === 0) return
+      historicoHidratadoRef.current = true
+      const semente: MensagemDoChatDaPartida[] = historico.map((evento) => {
+        proximoIdRef.current += 1
+        return {
+          id: proximoIdRef.current,
+          jogadorId: evento.jogadorId,
+          apelido: evento.apelido,
+          conteudo: evento.conteudo,
+          enviadoEm: evento.enviadoEm,
+        }
+      })
+      setMensagens((atual) =>
+        atual.length === 0
+          ? semente.slice(-TETO_DE_MENSAGENS_DO_FEED)
+          : [...atual, ...semente].slice(-TETO_DE_MENSAGENS_DO_FEED),
+      )
+    },
+    [],
+  )
 
   const aoEventoDeChat = useCallback(
     (evento: MensagemDeChatDaPartidaEvento) => {
@@ -208,7 +237,15 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
         agendarLimpezaDaRecusa()
         return false
       }
-      enviarComando({ type: 'ENVIAR_MENSAGEM_DE_CHAT', jogadorId, conteudo: texto })
+      // Corrida OPEN→close: `enviar` pode enfileirar em vez de entregar —
+      // o chat nunca pega carona no drain do handshake, então enfileirado
+      // vira a mesma recusa local enxuta do sem-conexão.
+      const destino = enviarComando({ type: 'ENVIAR_MENSAGEM_DE_CHAT', jogadorId, conteudo: texto })
+      if (destino === 'enfileirado') {
+        setRecusa('Sem conexão com o servidor: sua mensagem não foi enviada.')
+        agendarLimpezaDaRecusa()
+        return false
+      }
       if (timerDaRecusaRef.current !== null) window.clearTimeout(timerDaRecusaRef.current)
       setRecusa(null)
       return true
@@ -227,6 +264,7 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
     enviar,
     aoEventoDeChat,
     aoErroDeChat,
+    hidratarHistorico,
   }
 }
 

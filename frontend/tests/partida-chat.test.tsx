@@ -210,10 +210,11 @@ describe('Chat da Partida — badge e blip (issue #389 [2])', () => {
 
 describe('Chat da Partida — block da cena (issue #389 [3])', () => {
   it('com o painel aberto, clique cai no backdrop e teclas não operam a cena; ao fechar o controle volta; o jogo segue rolando', async () => {
-    const snapshot = criarSnapshotBase({
-      tabuleiro: { ...criarSnapshotBase().tabuleiro, pecaEmManipulacaoId: 'peca-em-manipulacao' },
-    })
-    const ws = await partidaComSnapshot(snapshot)
+    const snapshotComManipulacao = () =>
+      criarSnapshotBase({
+        tabuleiro: { ...criarSnapshotBase().tabuleiro, pecaEmManipulacaoId: 'peca-em-manipulacao' },
+      })
+    const ws = await partidaComSnapshot(snapshotComManipulacao())
 
     // Painel fechado: o teclado opera a cena (R gira a peça em manipulação).
     const antes = ws.sentMessages.length
@@ -232,13 +233,9 @@ describe('Chat da Partida — block da cena (issue #389 [3])', () => {
     fireEvent.keyDown(window, { key: 'Enter' })
     expect(ws.sentMessages.length).toBe(comAberto)
 
-    // O jogo segue rolando: turno alheio atualiza o HUD com o painel aberto.
-    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
-    await waitFor(() =>
-      expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-2'),
-    )
-
-    // Escape fecha e devolve o controle à cena.
+    // Escape fecha e devolve o controle à cena (antes da virada de turno,
+    // que limpa a manipulação no reducer — TURNO_INICIADO zera
+    // pecaEmManipulacaoId e o R pós-turno não teria alvo).
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByTestId('chat-painel')).not.toBeInTheDocument()
     expect(screen.queryByTestId('chat-backdrop')).not.toBeInTheDocument()
@@ -251,6 +248,14 @@ describe('Chat da Partida — block da cena (issue #389 [3])', () => {
     expect(screen.queryByTestId('chat-painel')).not.toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'r' })
     expect(ws.sentMessages.length).toBe(comAberto + 2)
+
+    // O jogo segue rolando: turno alheio atualiza o HUD com o painel aberto.
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
+    await waitFor(() =>
+      expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-2'),
+    )
+    expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
   })
 })
 
@@ -290,17 +295,20 @@ describe('Chat da Partida — cooldown local e envio sem conexão (issue #389 [4
     await userEvent.type(input, 'opa')
 
     // Queda do canal: `estaConectado()` passa a false (reconexão agendada).
+    // fireEvent (não userEvent) sob fake timers — userEvent trava com o
+    // relógio mockado.
     vi.useFakeTimers()
     act(() => ws.simulateClose(1005))
-    await userEvent.click(screen.getByRole('button', { name: 'Enviar mensagem' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar mensagem' }))
     expect(screen.getByTestId('chat-recusa')).toHaveTextContent(/Sem conexão com o servidor/i)
     expect(ws.sentMessages.join(' ')).not.toMatch(/ENVIAR_MENSAGEM_DE_CHAT/)
 
     // Reconexão após 1s: o drain do open NÃO carrega o comando do chat.
     act(() => vi.advanceTimersByTime(1100))
+    vi.useRealTimers()
     await waitFor(() => expect(MockWebSocket.last()).not.toBe(ws))
     const novoWs = MockWebSocket.last()!
-    await waitFor(() => expect(novoWs.sentMessages.join(' ')).not.toMatch(/ENVIAR_MENSAGEM_DE_CHAT/))
+    expect(novoWs.sentMessages.join(' ')).not.toMatch(/ENVIAR_MENSAGEM_DE_CHAT/)
   })
 })
 
@@ -341,5 +349,86 @@ describe('Chat da Partida — acessibilidade e drawer (issue #389 [5])', () => {
     } finally {
       restaurarViewport()
     }
+  })
+})
+
+describe('Chat da Partida — pós-Resultado e histórico (issues #389/#390/#388)', () => {
+  it('chat segue vivo após o Resultado: painel montado, recebe humana e de bot', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByTestId('chat-botao'))
+
+    // Termina a Partida — o painel NÃO desmonta (contrato #390).
+    act(() =>
+      ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'vitoria' }),
+    )
+    expect(screen.getByTestId('chat-da-partida')).toBeInTheDocument()
+    expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
+
+    // Humana + bot de vitória chegam ao feed pós-Resultado.
+    act(() => {
+      ws.simulateMessage(mensagemDeChat('jogador-2', 'Ana', 'vencemos', '2026-09-14T14:10:00Z'))
+      ws.simulateMessage(mensagemDeChat('jogador-3', 'Beto', 'o portão!', '2026-09-14T14:10:05Z'))
+    })
+    const mensagens = screen.getAllByTestId('chat-mensagem')
+    expect(mensagens).toHaveLength(2)
+    expect(screen.getByTestId('chat-feed')).toHaveAttribute('role', 'log')
+  })
+
+  it('snapshot com historicoDeChat hidrata o feed uma vez, sem duplicar o live', async () => {
+    const historico = [
+      { type: 'MENSAGEM_DE_CHAT_DA_PARTIDA', jogadorId: 'jogador-2', apelido: 'Ana', conteudo: 'oi', enviadoEm: '2026-09-14T14:00:00Z' },
+      { type: 'MENSAGEM_DE_CHAT_DA_PARTIDA', jogadorId: 'jogador-3', apelido: 'Beto', conteudo: 'bora', enviadoEm: '2026-09-14T14:01:00Z' },
+    ]
+    const ws = await partidaComSnapshot(
+      criarSnapshotBase({ historicoDeChat: historico } as Partial<EstadoDaPartidaSnapshot>),
+    )
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    expect(screen.getAllByTestId('chat-mensagem')).toHaveLength(2)
+
+    // Live posterior acrescenta, sem replay nem duplicada.
+    act(() => ws.simulateMessage(mensagemDeChat('jogador-4', 'Cara', 'cheguei', '2026-09-14T14:02:00Z')))
+    expect(screen.getAllByTestId('chat-mensagem')).toHaveLength(3)
+
+    // Segundo snapshot com o mesmo histórico não duplica.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ESTADO_DA_PARTIDA',
+        snapshot: criarSnapshotBase({ historicoDeChat: historico } as Partial<EstadoDaPartidaSnapshot>),
+      }),
+    )
+    expect(screen.getAllByTestId('chat-mensagem')).toHaveLength(3)
+  })
+
+  it('snapshot sem historicoDeChat (binário anterior ao #388) abre feed vazio', async () => {
+    await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    expect(screen.getByText('Sem mensagens ainda')).toBeInTheDocument()
+  })
+})
+
+describe('Chat da Partida — validação local e foco (issue #389 ajustes)', () => {
+  it('envio vazio e longo falham localmente sem ir ao socket', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    const enviadosAntes = ws.sentMessages.length
+
+    // Rascunho vazio: botão desabilitado, nada vai ao socket.
+    expect(screen.getByRole('button', { name: 'Enviar mensagem' })).toBeDisabled()
+    expect(ws.sentMessages.length).toBe(enviadosAntes)
+
+    const input = screen.getByTestId('chat-input')
+    fireEvent.change(input, { target: { value: 'x'.repeat(301) } })
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar mensagem' }))
+    expect(screen.getByTestId('chat-recusa')).toHaveTextContent(/longa demais/i)
+    expect(ws.sentMessages.length).toBe(enviadosAntes)
+  })
+
+  it('abrir move o foco ao input; fechar devolve ao botão', async () => {
+    await partidaComSnapshot(criarSnapshotBase())
+    const botao = screen.getByTestId('chat-botao')
+    await userEvent.click(botao)
+    expect(screen.getByTestId('chat-input')).toHaveFocus()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(botao).toHaveFocus()
   })
 })

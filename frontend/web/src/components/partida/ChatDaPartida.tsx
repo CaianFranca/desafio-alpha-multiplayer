@@ -1,8 +1,7 @@
 /**
  * Painel de chat da Partida (issue #389).
  *
- * Botão discreto no HUD (estilo cabeçalho de acordeão, refs de design
- * css-accordion.txt) com badge de não lidas (`role="status"`) e painel
+ * Botão discreto no HUD com badge de não lidas (`role="status"`) e painel
  * expansível ancorado à direita sob o sistema do HUD: histórico rolável com
  * hora HH:MM e apelido na cor do peão por mensagem (humanas e de bot
  * renderizadas igual — a cor vem do roster `jogadorPorId`, a identidade do
@@ -15,9 +14,10 @@
  * Notícias de novas mensagens (e recusas) saem por região aria-live; o
  * badge zera ao abrir.
  *
- * Em viewport compacto de paisagem (#230) o painel vira drawer que não cobre
- * o HUD essencial (sistema sup-dir e Turno inf-dir) — mesma moldura do modal
- * de saída. Visual do corpo e input: refs de design css-chat.txt.
+ * Em viewport compacto de paisagem (#230) o painel vira drawer ancorado na
+ * faixa entre o sistema sup-dir e o Turno inf-dir — mesma moldura do modal
+ * de saída. O backdrop bloqueia cena + HUD (decisão: painel aberto é modal),
+ * o jogo segue rolando por baixo.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -74,16 +74,20 @@ export function ChatDaPartida({
 }: ChatDaPartidaProps) {
   const [rascunho, setRascunho] = useState('')
   const botaoRef = useRef<HTMLButtonElement | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const feedRef = useRef<HTMLDivElement | null>(null)
   const emModoCompacto = useViewportCompacto(compacto)
   // Janela do cooldown (re-renderiza ao expirar via timer do hook).
   const emCooldown = cooldownAte !== null && cooldownAte > Date.now()
   const ultimaMensagem = mensagens.length > 0 ? mensagens[mensagens.length - 1]! : null
   const podeEnviar = rascunho.trim().length > 0 && !emCooldown
 
-  // Escape fecha o painel (block da cena): devolve o foco ao botão para o
+  // Abertura move o foco ao input (autoFocus é frágil em React/jsdom);
+  // Escape fecha o painel (block da cena) e devolve o foco ao botão para o
   // teclado da cena voltar a operar (o gate da página lê o estado aberto).
   useEffect(() => {
     if (!aberto) return
+    inputRef.current?.focus()
     const aoTeclar = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       aoFechar()
@@ -92,6 +96,20 @@ export function ChatDaPartida({
     window.addEventListener('keydown', aoTeclar)
     return () => window.removeEventListener('keydown', aoTeclar)
   }, [aberto, aoFechar])
+
+  // Auto-scroll: nova mensagem com o painel aberto desce o feed até o fim.
+  // jsdom não implementa scrollTo — guarda defensiva com fallback a scrollTop.
+  useEffect(() => {
+    if (!aberto) return
+    const feed = feedRef.current
+    if (!feed) return
+    try {
+      if (typeof feed.scrollTo === 'function') feed.scrollTo({ top: feed.scrollHeight })
+      else feed.scrollTop = feed.scrollHeight
+    } catch {
+      // Feed rolável é progressivo: sem scroll o chat segue legível.
+    }
+  }, [aberto, mensagens.length])
 
   const aoSubmeter = (e: FormEvent) => {
     e.preventDefault()
@@ -125,7 +143,16 @@ export function ChatDaPartida({
           ref={botaoRef}
           type="button"
           data-testid="chat-botao"
-          onClick={aberto ? aoFechar : aoAbrir}
+          onClick={() => {
+            if (aberto) {
+              aoFechar()
+              // Backdrop e botão não devolviam o foco — centraliza aqui para
+              // o teclado da cena voltar sem depender do caminho de saída.
+              botaoRef.current?.focus()
+            } else {
+              aoAbrir()
+            }
+          }}
           aria-expanded={aberto}
           aria-controls={aberto ? 'chat-painel' : undefined}
           className="flex h-9 w-full min-h-[44px] items-center justify-between gap-2 border border-[#504533] bg-[#1C140E] px-3 font-chat-rotulo text-[11px] uppercase tracking-[0.18em] text-zinc-100 shadow-[0_4px_16px_rgba(0,0,0,0.5)] focus-visible:outline-2 focus-visible:outline-amber-500"
@@ -167,7 +194,9 @@ export function ChatDaPartida({
             }`}
           >
             <div
+              ref={feedRef}
               data-testid="chat-feed"
+              role="log"
               aria-label="Histórico do chat"
               className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 py-1.5"
             >
@@ -221,13 +250,13 @@ export function ChatDaPartida({
               onSubmit={aoSubmeter}
             >
               <input
+                ref={inputRef}
                 data-testid="chat-input"
                 value={rascunho}
                 onChange={(e) => setRascunho(e.target.value)}
                 placeholder="ENVIAR MENSAGEM..."
                 maxLength={LIMITE_DE_CARACTERES_DO_CHAT}
                 disabled={emCooldown}
-                autoFocus
                 aria-label="Nova mensagem"
                 aria-describedby={recusa !== null ? 'chat-recusa' : undefined}
                 className="min-w-0 flex-1 bg-transparent font-chat-mensagem text-[15px] text-zinc-100 placeholder:text-zinc-500 focus:outline-none disabled:opacity-50"
@@ -266,6 +295,8 @@ export function ChatDaPartida({
                 id="chat-recusa"
                 data-testid="chat-recusa"
                 role="status"
+                aria-live="polite"
+                aria-atomic="true"
                 className="px-2 pt-1 font-chat-rotulo text-[11px] leading-snug text-amber-300/90"
               >
                 {recusa}
@@ -277,7 +308,10 @@ export function ChatDaPartida({
       {aberto ? (
         <div
           data-testid="chat-backdrop"
-          onClick={aoFechar}
+          onClick={() => {
+            aoFechar()
+            botaoRef.current?.focus()
+          }}
           aria-hidden="true"
           className="absolute inset-0 z-40 bg-zinc-950/30"
         />
