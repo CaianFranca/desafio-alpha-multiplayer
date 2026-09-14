@@ -58,6 +58,7 @@ import { bordaDaTravessiaPendente, mapearFinalizarRecebida } from '../game/tabul
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores, ehPecaDeMonstro } from '../game/tabuleiro/contrato'
 import { useAuth } from '../state/useAuth'
+import { refreshSession } from '../api/auth'
 import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional, useMarcarSaidaPropriaOptional } from '../state/sala-web-socket-context'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import type {
@@ -736,6 +737,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // fila ativa (segunda onda pós-Baixa, virada).
           return
         }
+        // PECA_POSICIONADA/PEAO_* ficam fora do gate de propósito: no mesmo
+        // act despacham de imediato e ultrapassam o TURNO ainda na fila —
+        // por isso os testes isolam o TURNO num flush antes dos deltas
+        // (split intencional, não reordenação do wire).
         const loteAbertoPorDesistencia =
           loteDeTurnoRef.current.length > 0 &&
           loteDeTurnoRef.current[0]?.type === 'DESISTENCIA_REGISTRADA'
@@ -1580,21 +1585,40 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao, estadoInteracao, estadoInteracaoPeoes])
 
+  const tentandoReconectarRef = useRef(false)
   const tentarNovamenteComConexao = useCallback(() => {
     // Desistente não reconecta (o servidor rejeitaria com
     // JOGADOR_NAO_NA_PARTIDA) — falha terminal sem retry.
     if (desistiu) return
-    desconectar()
-    if (!temAlvo) {
-      falhar()
-      return
-    }
-    if (loader) {
-      tentarNovamente()
-    } else {
-      carregar()
-    }
-    reconectarSocket()
+    // Guard anti-duplo-clique (issue #376): o retry aguarda o refresh, então
+    // cliques em rajada abririam N Conexões à Partida. A flag cai no `finally`.
+    if (tentandoReconectarRef.current) return
+    tentandoReconectarRef.current = true
+    // Retry manual com Sessão renovada (issue #376): o upgrade do WS valida
+    // o access token e ele pode ter expirado na Partida longa. Aguarda o
+    // refresh (melhor esforço) para reconectar com o cookie já novo.
+    void (async () => {
+      try {
+        try {
+          await refreshSession()
+        } catch {
+          // melhor esforço: mesmo com refresh falho, o fluxo de falha se repete.
+        }
+        desconectar()
+        if (!temAlvo) {
+          falhar()
+          return
+        }
+        if (loader) {
+          tentarNovamente()
+        } else {
+          carregar()
+        }
+        reconectarSocket()
+      } finally {
+        tentandoReconectarRef.current = false
+      }
+    })()
   }, [carregar, tentarNovamente, desconectar, reconectarSocket, falhar, temAlvo, loader, desistiu])
 
   // ── Comandos de turno (issue #118) — todos via enviarComJogador ──

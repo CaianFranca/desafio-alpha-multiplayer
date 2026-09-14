@@ -1,6 +1,19 @@
 import { z } from 'zod'
 import { comBase } from './basePath'
-import { apiFetch } from './client'
+import { apiFetch, lerResultadoRefresh, renovarSessao } from './client'
+
+/**
+ * POST /api/auth/refresh — slide-session (issue #376): renova os cookies da
+ * Sessão com o refresh token HttpOnly. Melhor esforço (`false` em qualquer
+ * falha); quem decide o logout é o 401 confirmado pelo `apiFetch`.
+ */
+export async function refreshSession(): Promise<boolean> {
+  try {
+    return await renovarSessao()
+  } catch {
+    return false
+  }
+}
 
 export interface Jogador {
   id: string
@@ -10,7 +23,8 @@ export interface Jogador {
 
 export type PlayerResult =
   | { ok: true; jogador: Jogador }
-  | { ok: false; reason: 'invalid-session' | 'unknown-failure' }
+  | { ok: false; reason: 'invalid-session' }
+  | { ok: false; reason: 'unknown-failure'; transiente?: boolean }
 
 export interface Credenciais {
   email: string
@@ -52,7 +66,14 @@ export async function fetchCurrentPlayer(): Promise<PlayerResult> {
   } catch {
     return { ok: false, reason: 'unknown-failure' }
   }
-  if (response.status === 401) return { ok: false, reason: 'invalid-session' }
+  if (response.status === 401) {
+    // Refresh transitório (rede/5xx, issue #376): a Sessão pode estar viva —
+    // o resultado vem anexado à própria resposta (escopo por request, sem
+    // flag global — review PR #383), para a reidratação retentar em vez de fazer logout.
+    if (lerResultadoRefresh(response) === 'transiente')
+      return { ok: false, reason: 'unknown-failure', transiente: true }
+    return { ok: false, reason: 'invalid-session' }
+  }
   if (!response.ok) return { ok: false, reason: 'unknown-failure' }
   try {
     const jogador = (await response.json()) as Jogador

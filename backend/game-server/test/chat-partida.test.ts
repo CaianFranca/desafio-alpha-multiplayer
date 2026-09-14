@@ -577,3 +577,40 @@ test('bot no roster envia duas mensagens rápidas e ambas são entregues (fura o
     await servidor.fechar();
   }
 });
+
+test('histórico persiste a mensagem aprovada fora do blob (issue #388)', async () => {
+  const servidor = await subirServidor(600);
+  try {
+    const aceite = await criarPartidaViaPost(servidor.baseUrl, ofertaDeDois());
+
+    const jogador1 = await conectarPartida(servidor, aceite.partidaId, 'jogador-1', 'Jogador 1');
+    const jogador2 = await conectarPartida(servidor, aceite.partidaId, 'jogador-2', 'Jogador 2', [
+      (ws) => esperarEvento(ws, 'PARTIDA_INICIADA'),
+    ]);
+    await jogador2.esperas[0];
+
+    const estadoAntes = await obterEstadoDaPartida(redis, aceite.partidaId);
+
+    try {
+      enviar(jogador1.ws, comandoDeChat('jogador-1', 'Histórico vivo.'));
+      const aoVivo = await esperarEvento(jogador2.ws, 'MENSAGEM_DE_CHAT_DA_PARTIDA');
+      assert.equal(aoVivo.conteudo, 'Histórico vivo.');
+
+      const { obterHistoricoDoChat } = await import('../src/partidas/historico-chat.ts');
+      const historico = await obterHistoricoDoChat(redis, aceite.partidaId);
+      assert.equal(historico.length, 1);
+      assert.deepEqual(historico[0], aoVivo);
+
+      // Fora do blob: o estado do engine segue bit a bit.
+      const estadoDepois = await obterEstadoDaPartida(redis, aceite.partidaId);
+      assert.deepEqual(estadoDepois, estadoAntes);
+    } finally {
+      jogador1.ws.close();
+      jogador2.ws.close();
+    }
+
+    await deletePartida(servidor.baseUrl, aceite.partidaId);
+  } finally {
+    await servidor.fechar();
+  }
+});
