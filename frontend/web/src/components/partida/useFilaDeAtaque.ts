@@ -250,7 +250,15 @@ export function useFilaDeAtaque({
           }
           if (atual.item.temAtingido) tocarTremorDoAtaque()
           if (atual.item.temProtegido) tocarDefesaDoAtaque()
-          if (atual.item.tipo === 'vulto') liberarLimpezasSeguradas()
+          // Último Vulto libera (review PR #399, item 3): com [Vulto, Vulto]
+          // a limpeza segura até a chegada do 2º — o 1º ainda tem Vulto
+          // restante em `filaRef`; o dreno segue como rede de segurança.
+          if (
+            atual.item.tipo === 'vulto' &&
+            !filaRef.current.some((pendente) => pendente.item.tipo === 'vulto')
+          ) {
+            liberarLimpezasSeguradas()
+          }
         })
         // Custo base só no primeiro da fila (~2,3s com 1 monstro, ~3,9s com
         // 2, telegraph incluso); os seguintes ocupam só o slot. O contorno

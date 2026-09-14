@@ -1147,6 +1147,71 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
   })
 
+  it('teclado silencia durante a fila do ataque e volta a enviar ao drenar (review PR #399, Bloqueante 2)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+
+    // Posiciona inicial-1 → abre janela de manipulação (atalhos R/E/Espaço/Enter vivos).
+    act(() =>
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      }),
+    )
+    await screen.findByTestId('peca-posicionada')
+
+    const user = userEvent.setup()
+    // Baseline fora da fila: R envia GIRAR_PECA.
+    await user.keyboard('r')
+    await waitFor(() => {
+      expect(JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]!)).toMatchObject({
+        type: 'GIRAR_PECA',
+        pecaId: 'inicial-1',
+      })
+    })
+
+    // Fila ativa: R/E/Espaço/Enter silenciam (sem GIRAR nem FINALIZAR).
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [] }],
+        peoesAtingidos: [],
+        protegidos: [],
+        estadosAplicados: [],
+      }),
+    )
+    expect(screen.getByTestId('ataque-coreografia')).toBeInTheDocument()
+    const base = ws.sentMessages.length
+    await user.keyboard('r')
+    await user.keyboard('e')
+    await user.keyboard(' ')
+    await user.keyboard('{Enter}')
+    expect(ws.sentMessages).toHaveLength(base)
+
+    // Drenou (~2,3s reais): o teclado volta a enviar.
+    await waitFor(
+      () => expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument(),
+      { timeout: 5000 },
+    )
+    await user.keyboard('r')
+    await waitFor(() => {
+      expect(ws.sentMessages.length).toBeGreaterThan(base)
+      expect(JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]!)).toMatchObject({
+        type: 'GIRAR_PECA',
+        pecaId: 'inicial-1',
+      })
+    })
+    const aposGiro = ws.sentMessages.length
+    await user.keyboard(' ')
+    await waitFor(() => {
+      expect(ws.sentMessages.length).toBeGreaterThan(aposGiro)
+      expect(JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]!)).toMatchObject({
+        type: 'FINALIZAR_MANIPULACAO',
+      })
+    })
+  })
+
   it('RESGATE_REALIZADO limpa os estados no avatar e restaura a Sanidade, em silêncio', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     // Ana Amedrontada (sanidade 0) no snapshot autoritativo.

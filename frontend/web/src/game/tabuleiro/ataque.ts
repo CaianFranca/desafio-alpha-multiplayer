@@ -232,7 +232,9 @@ export function coreografarAtaque(
     // Fallback legado (rolling deploy / replay sem #384): sem o campo não há
     // onda — o item ainda soa (monstro) e ocupa seu slot na fila.
     const pecasNoAlcance = atacante.pecasNoAlcance ?? []
-    const peoesNoAlcance = new Set(atacante.peoesNoAlcance)
+    // Nit defensivo de runtime (review PR #399): `peoesNoAlcance` é
+    // obrigatório no contrato, mas JS malformado não quebraria a fila.
+    const peoesNoAlcance = new Set(atacante.peoesNoAlcance ?? [])
     const peoesAtingidos: string[] = []
     const peoesProtegidosDoAtacante: string[] = []
     for (const peaoId of peoesNoAlcance) {
@@ -297,7 +299,7 @@ export function coreografarAtaque(
   //   todos os alcances, cai no primeiro item (nunca se perde consumo).
   const peaoPorJogador = contexto.peaoPorJogador
   const alcances = itens.map(
-    (item, indice) => new Set(ordemEstavel[indice]!.atacante.peoesNoAlcance),
+    (item, indice) => new Set(ordemEstavel[indice]!.atacante.peoesNoAlcance ?? []),
   )
   const protegidosPorSlot: string[][] = itens.map(() => [])
   evento.protegidos.forEach((jogadorId) => {

@@ -796,6 +796,71 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(temPecaNoEspelho('curva-1')).toBe(false)
   })
 
+  it('[Vulto, Vulto] segura a limpeza até a chegada do último Vulto (review PR #399, item 3)', async () => {
+    const VULTO_2: PecaPosicionadaNoSnapshot = {
+      pecaId: 'vulto-2',
+      tipo: 'vulto',
+      orientacao: 0,
+      celula: { linha: 5, coluna: 4 },
+    }
+    const ws = await partidaComTabuleiro([VULTO_1, VULTO_2, RETA_1, CURVA_1])
+    ativarTimersDoAtaque()
+
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [
+          {
+            pecaId: 'vulto-1',
+            tipo: 'vulto',
+            peoesNoAlcance: ['peao-vermelho'],
+            pecasNoAlcance: ['reta-1'],
+          },
+          {
+            pecaId: 'vulto-2',
+            tipo: 'vulto',
+            peoesNoAlcance: [],
+            pecasNoAlcance: ['curva-1'],
+          },
+        ],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 3, amedrontado: false },
+        ],
+      }),
+    )
+    // Limpeza chega com a fila ativa (2 Vultos): segura até o último Vulto.
+    act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['curva-1'] }))
+    expect(temPecaNoEspelho('curva-1')).toBe(true)
+    expect(toquesDeAudio).toHaveLength(0)
+
+    // Chegada do 1º Vulto: a fatia dele aplica (Baixa), mas a limpeza segue
+    // segurada — ainda há Vulto restante na fila.
+    avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
+    avancar(DURACAO_DISPARO_ATAQUE_MS)
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(temPecaNoEspelho('curva-1')).toBe(true)
+    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(0)
+
+    // Passagem ao slot 2 (último Vulto): telegraph do vulto-2.
+    avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
+    await act(async () => {})
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-2')
+
+    // Chegada do último Vulto: a limpeza libera (peça some + som sombrio).
+    avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
+    avancar(DURACAO_DISPARO_ATAQUE_MS)
+    expect(temPecaNoEspelho('curva-1')).toBe(false)
+    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1)
+
+    // Drenou sem marcas.
+    avancar(DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
+    await act(async () => {})
+    expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
+    expect(temPecaNoEspelho('curva-1')).toBe(false)
+  })
+
   it('lote real sem ataque libera iluminação e limpeza em ordem no fechamento', async () => {
     const ws = await partidaComTabuleiro([VULTO_1, RETA_1, CURVA_1], PEOES_BASE, {
       celulasIluminadas: [
@@ -1466,6 +1531,27 @@ describe('coreografia pura do ataque — ordem, dono por alcance e fatias (issue
       ],
       protegidos: [],
     })
+  })
+
+  it('fallback defensivo sem peoesNoAlcance não quebra e rende alcance vazio (review PR #399, nit 1)', () => {
+    // Payload malformado em runtime (`peoesNoAlcance` é obrigatório no
+    // contrato, mas JS não garante): a fila não interrompe, sem vítimas.
+    const eventoSemPeoes = {
+      atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', pecasNoAlcance: ['reta-1'] }],
+      peoesAtingidos: [],
+      protegidos: [],
+      estadosAplicados: [],
+    } as unknown as Parameters<typeof coreografarAtaque>[0]
+
+    let itens: ReturnType<typeof coreografarAtaque> = []
+    expect(() => {
+      itens = coreografarAtaque(eventoSemPeoes, contexto)
+    }).not.toThrow()
+
+    expect(itens).toHaveLength(1)
+    expect(itens[0]!.temAtingido).toBe(false)
+    expect(itens[0]!.peoesAtingidos).toEqual([])
+    expect(itens[0]!.fatia.estadosAplicados).toEqual([])
   })
 
   it('duração da fila soma telegraph por atacante (~2,3s/1, ~3,9s/2)', () => {

@@ -1529,6 +1529,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
   const girar = useCallback(
     (sentido: 'horario' | 'anti_horario') => {
+      if (entradaBloqueadaPeloAtaque) return
       if (pecaAlvoDeGiro === null) return
       // Peça de 4 caminhos (cruz): giro redundante, sem setas no overlay e
       // sem R/E (review PR #338). O tipo vem da posicionada em manipulação
@@ -1541,7 +1542,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       if (tipoAlvo !== null && !giroAlteraConexao(tipoAlvo)) return
       enviarComJogador(mapearGiro(pecaAlvoDeGiro, sentido))
     },
-    [enviarComJogador, pecaAlvoDeGiro, estadoInteracao, estadoExibicao, modelo.recebidasPendentes],
+    [enviarComJogador, entradaBloqueadaPeloAtaque, pecaAlvoDeGiro, estadoInteracao, estadoExibicao, modelo.recebidasPendentes],
   )
 
   // ── Acessibilidade do overlay 3D (review #338 + issue #357): o botão "OK"
@@ -1551,6 +1552,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Espaço/Enter equivale ao OK do preview (POSICIONAR_PECA na célula-alvo).
   const pecaEmManipulacaoId = estadoInteracao?.pecaEmManipulacaoId ?? null
   const finalizarManipulacao = useCallback(() => {
+    if (entradaBloqueadaPeloAtaque) return
     if (pecaEmManipulacaoId !== null) {
       enviarComJogador(mapearFinalizarManipulacao())
       return
@@ -1559,7 +1561,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       const posicionar = mapearFinalizarRecebida(estadoInteracaoPeoes)
       if (posicionar !== null) enviarComJogador(posicionar)
     }
-  }, [enviarComJogador, pecaEmManipulacaoId, estadoInteracaoPeoes])
+  }, [enviarComJogador, entradaBloqueadaPeloAtaque, pecaEmManipulacaoId, estadoInteracaoPeoes])
 
   useEffect(() => {
     if (!estadoEmAndamento) return
