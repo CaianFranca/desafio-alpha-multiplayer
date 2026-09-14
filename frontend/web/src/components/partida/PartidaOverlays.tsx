@@ -1,3 +1,4 @@
+import { DotsDeCarregamento } from '../loading/DotsDeCarregamento'
 import type {
   EstadoDaTela,
   MotivoDeDerrota,
@@ -107,8 +108,10 @@ export function PartidaOverlays({
 
   if (estado === 'carregando') {
     return (
-      <div data-testid="overlay-carregando" role="status" className={baseClasses}>
-        <p className="text-white text-[length:var(--hud-titulo,1.125rem)] leading-7">Carregando...</p>
+      <div data-testid="overlay-carregando" role="status" aria-label="Carregando" className={baseClasses}>
+        <div className="encaminhamento-carregando">
+          <DotsDeCarregamento rotuloVisivel="Carregando..." nomeAcessivel="Carregando" />
+        </div>
       </div>
     )
   }
@@ -117,6 +120,7 @@ export function PartidaOverlays({
     return (
       <div data-testid="overlay-aguardando" role="status" className={baseClasses}>
         <div className="flex flex-col items-center gap-2">
+          <DotsDeCarregamento tamanho="mini" />
           <p className="text-white text-[length:var(--hud-titulo,1.125rem)] leading-7">Aguardando partida</p>
           <p className="text-zinc-400 text-[length:var(--hud-corpo,0.875rem)] leading-5">Partida preparada</p>
         </div>
