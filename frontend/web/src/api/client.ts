@@ -36,10 +36,35 @@ export type ResultadoRefresh = 'renovada' | 'invalida' | 'transiente'
  */
 let refreshEmVoo: Promise<ResultadoRefresh> | null = null
 
+/**
+ * Teto do POST /refresh (review PR #383, bloqueante 2): sem timeout, um
+ * refresh pendurado seguraria o `await slide` do `onclose` e travaria a
+ * reconexão até o timeout do navegador. O aborto cai no `catch` abaixo e
+ * vira `transiente` — nunca declara logout por conta própria.
+ */
+export const TEMPO_LIMITE_REFRESH_MS = 8000
+
+/** Teto da sonda de confirmação multi-aba (não pode pendurar o `invalida`). */
+const TEMPO_LIMITE_SONDA_SESSAO_MS = 5000
+
+/** Sinal de timeout com fallback: ambientes sem `AbortSignal.timeout`. */
+function sinalComTimeout(ms: number): AbortSignal | undefined {
+  try {
+    if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms)
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
 async function executarRefreshBruto(): Promise<ResultadoRefresh> {
   try {
     // Subpath (VITE_BASE_PATH): o refresh acompanha o prefixo do app.
-    const response = await fetch(comBase('/api/auth/refresh'), { method: 'POST', credentials: 'include' })
+    const response = await fetch(comBase('/api/auth/refresh'), {
+      method: 'POST',
+      credentials: 'include',
+      signal: sinalComTimeout(TEMPO_LIMITE_REFRESH_MS),
+    })
     if (response.ok) return 'renovada'
     return response.status === 401 ? 'invalida' : 'transiente'
   } catch {
@@ -135,12 +160,34 @@ function notificarSessaoExpirada(): void {
 }
 
 /**
+ * Confirmação multi-aba (review PR #383, bloqueante 1): o single-flight é
+ * por aba, então duas abas renovando quase juntas fazem a segunda receber
+ * 401 de reuso (rotação em `sessoes.ts`) com a Sessão viva e cookies já
+ * renovados pela outra aba. Fetch cru de propósito — nunca `apiFetch`,
+ * senão o 401 da sonda reentraria no refresh em loop.
+ */
+async function confirmarSessaoViva(): Promise<boolean> {
+  try {
+    const resposta = await fetch(comBase('/api/auth/me'), {
+      credentials: 'include',
+      signal: sinalComTimeout(TEMPO_LIMITE_SONDA_SESSAO_MS),
+    })
+    return resposta.status === 200
+  } catch {
+    return false
+  }
+}
+
+/**
  * Fetch compartilhado das chamadas de API: inclui o cookie de sessão e, em
  * 401, tenta uma renovação (slide-session, issue #376) antes de declarar a
  * Sessão expirada. O retry acontece uma única vez e só após `renovada`; em
  * `transiente` (rede/5xx no refresh ou no retry) o 401 original é devolvido
- * sem notificar — a Sessão pode estar viva. Só `invalida` e retry ainda-401
- * notificam os assinantes para voltar a Visitante.
+ * sem notificar — a Sessão pode estar viva. Antes de declarar `invalida`,
+ * um `GET /me` cru confirma que a Sessão morreu de fato (race multi-aba:
+ * 401 de reuso com cookies já renovados pela outra aba vira `transiente`).
+ * Só `invalida` confirmada e retry ainda-401 notificam os assinantes para
+ * voltar a Visitante.
  */
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   // Subpath (VITE_BASE_PATH): strings relativas (`/api/...`) ganham o base do
@@ -160,6 +207,10 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     resultado = 'transiente'
   }
   if (resultado === 'invalida') {
+    // Só rebaixa para `transiente` no 200 explícito; qualquer outro status
+    // ou falha de rede da sonda mantém o `invalida` legítimo.
+    const viva = await confirmarSessaoViva().catch(() => false)
+    if (viva) return anexarResultadoRefresh(response, 'transiente')
     notificarSessaoExpirada()
     return response
   }

@@ -9,8 +9,10 @@ import {
   __redefinirRefreshEmVooParaTestes,
   apiFetch,
   calcularIntervaloSlide,
+  lerResultadoRefresh,
   lerTtlDeAcessoSegundos,
   onSessionExpired,
+  TEMPO_LIMITE_REFRESH_MS,
 } from '../web/src/api/client'
 import { fetchCurrentPlayer, refreshSession } from '../web/src/api/auth'
 
@@ -230,6 +232,8 @@ describe('slide-session no apiFetch (issue #376)', () => {
     let refreshes = 0
     mockApi([
       { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      // A sonda crua do caminho `invalida` também bate aqui e recebe 401 —
+      // Sessão morta de verdade, sem interferência do transiente anterior.
       { url: '/api/auth/me', response: () => jsonResponse({}, 401) },
       {
         url: '/api/auth/refresh',
@@ -251,6 +255,98 @@ describe('slide-session no apiFetch (issue #376)', () => {
       const resultado = await fetchCurrentPlayer()
       expect(resultado).toEqual({ ok: false, reason: 'invalid-session' })
       expect(expirada).toHaveBeenCalledTimes(1)
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('refresh 401 com Sessão viva (multi-aba) não notifica (review PR #383)', async () => {
+    mockApi([
+      { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 401) },
+      // Sonda crua GET /me: a outra aba já rotacionou e a Sessão segue viva.
+      { url: '/api/auth/me', response: () => jsonResponse(jogador) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const response = await apiFetch('/api/salas')
+      expect(response.status).toBe(401)
+      expect(expirada).not.toHaveBeenCalled()
+      expect(lerResultadoRefresh(response)).toBe('transiente')
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('fetchCurrentPlayer com refresh 401 + /me 200 não invalida (review PR #383)', async () => {
+    let me = 0
+    mockApi([
+      {
+        url: '/api/auth/me',
+        response: () => {
+          me += 1
+          // 1ª: 401 do apiFetch original. 2ª: sonda crua — Sessão viva.
+          return me === 1 ? jsonResponse({}, 401) : jsonResponse(jogador)
+        },
+      },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 401) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      await expect(fetchCurrentPlayer()).resolves.toEqual({
+        ok: false,
+        reason: 'unknown-failure',
+        transiente: true,
+      })
+      expect(expirada).not.toHaveBeenCalled()
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('refresh 401 com sonda 401 mantém invalida e notifica (review PR #383)', async () => {
+    const calls = mockApi([
+      { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/refresh', method: 'POST', response: () => jsonResponse({}, 401) },
+      { url: '/api/auth/me', response: () => jsonResponse({}, 401) },
+    ])
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const response = await apiFetch('/api/salas')
+      expect(response.status).toBe(401)
+      expect(expirada).toHaveBeenCalledTimes(1)
+      expect(lerResultadoRefresh(response)).toBeUndefined()
+      expect(contarChamadas(calls, 'GET', '/api/auth/me')).toBe(1)
+    } finally {
+      desinscrever()
+    }
+  })
+
+  it('refresh envia sinal com timeout e aborto vira transiente (review PR #383)', async () => {
+    expect(TEMPO_LIMITE_REFRESH_MS).toBeGreaterThanOrEqual(5000)
+    expect(TEMPO_LIMITE_REFRESH_MS).toBeLessThanOrEqual(10000)
+    let sinal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/auth/refresh')) {
+          sinal = init?.signal as AbortSignal | undefined
+          throw new DOMException('Timeout', 'TimeoutError')
+        }
+        return jsonResponse({}, 401)
+      }),
+    )
+    const expirada = vi.fn()
+    const desinscrever = onSessionExpired(expirada)
+    try {
+      const response = await apiFetch('/api/salas')
+      expect(response.status).toBe(401)
+      expect(expirada).not.toHaveBeenCalled()
+      expect(sinal).toBeDefined()
     } finally {
       desinscrever()
     }
@@ -612,6 +708,43 @@ describe('reconexão do lobby (issue #376)', () => {
       })
       await act(async () => {})
       expect(MockWebSocket.instances).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('desmonte durante o slide não abre conexão órfã (review PR #383)', async () => {
+    let resolverRefresh!: (response: Response) => void
+    const refreshGate = new Promise<Response>((resolve) => {
+      resolverRefresh = resolve
+    })
+    mockApi([{ url: '/api/auth/refresh', method: 'POST', response: () => refreshGate }])
+    MockWebSocket.clean()
+    const router = createMemoryRouter(routes, { initialEntries: ['/salas/criar'] })
+    const { unmount } = render(
+      <AuthProvider initialState={mockAuthenticatedState}>
+        <RouterProvider router={router} />
+      </AuthProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    vi.useFakeTimers()
+    try {
+      act(() => {
+        MockWebSocket.last()!.simulateClose()
+      })
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      await act(async () => {})
+      // Timer correu, mas o slide pende: sem segunda conexão.
+      expect(MockWebSocket.instances).toHaveLength(1)
+      // Desmonta com o slide em voo; só então o refresh assenta.
+      unmount()
+      await act(async () => {
+        resolverRefresh(jsonResponse(jogador))
+      })
+      await act(async () => {})
+      expect(MockWebSocket.instances).toHaveLength(1)
     } finally {
       vi.useRealTimers()
     }

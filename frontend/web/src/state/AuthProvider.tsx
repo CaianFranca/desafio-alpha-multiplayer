@@ -33,6 +33,14 @@ function resolveInitialState(): AuthState {
  * min de margem; voltar à aba (visible/focus) renova de imediato (com
  * throttle de 1 min). Falha aqui não desloga — o 401 confirmado pelo
  * `apiFetch` continua sendo o dono do logout.
+ *
+ * Recorte além do mínimo da #376 (review PR #383, não-bloqueante): a
+ * calibragem por TTL (teto/piso/margem em `client.ts`) e a reidratação com
+ * retry 3×2s abaixo são intencionais — sobrevivem a mudanças em
+ * `SESSION_ACCESS_TTL_SECONDS` e a instabilidade momentânea — mas não são
+ * necessárias ao funcionamento básico do slide (o `apiFetch` com
+ * 401 → refresh → retry já corrige a expulsão). Sem ADR: decisão de baixo
+ * impacto aparente.
  */
 export const ATRASO_MINIMO_SLIDE_VISIVEL_MS = 60 * 1000
 /** Tentativas da reidratação ante falha transitória (1 inicial + retries). */
