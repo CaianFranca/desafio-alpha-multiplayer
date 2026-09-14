@@ -110,7 +110,7 @@ export function PartidaOverlays({
     return (
       <div data-testid="overlay-carregando" role="status" aria-label="Carregando" className={baseClasses}>
         <div className="encaminhamento-carregando">
-          <DotsDeCarregamento nomeAcessivel="Carregando" />
+          <DotsDeCarregamento rotuloVisivel="Carregando..." nomeAcessivel="Carregando" />
         </div>
       </div>
     )
