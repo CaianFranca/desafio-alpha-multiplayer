@@ -22,7 +22,7 @@ import {
 import { quantidadeValidaDeJogadores } from './contrato'
 import type { EstadoDoTabuleiroNoCliente } from './reducao'
 import type { PendenciaNoCliente } from './interacaoPeoes'
-import type { Celula, EstadoDaPartidaSnapshot } from '@flicker/shared'
+import type { Celula, EstadoDaPartidaSnapshot, PresencaNaPartidaWire } from '@flicker/shared'
 
 /**
  * Reparo defensivo de reload (issue #258) — ver comentário no corpo de
@@ -143,7 +143,7 @@ export function aplicarSnapshot(
   )
 
   const peaoPorJogador: Record<string, string> = {}
-  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean; protegido: boolean; ordem: number; presenca: 'conectado' | 'em_reconexao' }> = {}
+  const jogadorPorId: Record<string, { apelido: string; cor: CorDoPeao; sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean; protegido: boolean; ordem: number; presenca: PresencaNaPartidaWire }> = {}
   for (const j of snapshot.jogadores) {
     peaoPorJogador[j.jogadorId] = j.peaoId
     // Snapshot carrega sanidade/estados (issue #173) e a Proteção da Sala
@@ -155,7 +155,8 @@ export function aplicarSnapshot(
     const emBaixaIluminacao = (j as { emBaixaIluminacao?: boolean }).emBaixaIluminacao ?? false
     const amedrontado = (j as { amedrontado?: boolean }).amedrontado ?? sanidade === 0
     const protegido = (j as { protegido?: boolean }).protegido ?? false
-    const presenca = (j as { presenca?: 'conectado' | 'em_reconexao' }).presenca ?? 'conectado'
+    const presencaRaw = (j as { presenca?: PresencaNaPartidaWire }).presenca
+    const presenca: PresencaNaPartidaWire = presencaRaw ?? estado.jogadorPorId[j.jogadorId]?.presenca ?? 'conectado'
     jogadorPorId[j.jogadorId] = {
       apelido: j.apelido,
       cor: j.cor,

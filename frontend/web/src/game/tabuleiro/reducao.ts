@@ -95,6 +95,7 @@ import type {
   JogadorEmReconexaoWireEvento,
   JogadorReconectadoWireEvento,
   JogadorPresencaAtualizadaWireEvento,
+  PresencaNaPartidaWire,
 } from '@flicker/shared'
 
 export type PercepcaoDeJogador = {
@@ -117,7 +118,7 @@ export type PercepcaoDeJogador = {
    * autoridade (como `protegido`/`sanidade`): deltas de presença reconciliam
    * em `ESTADO_DA_PARTIDA`.
    */
-  readonly presenca?: 'conectado' | 'em_reconexao'
+  readonly presenca?: PresencaNaPartidaWire
 }
 
 export type SanidadePorPeao = Readonly<

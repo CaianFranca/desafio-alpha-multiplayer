@@ -455,6 +455,44 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           pendentesEmVoo.current.clear()
           aplicarSnapshotNoModelo(evento.snapshot)
           if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
+          // Reconciliação do indicador de reconexão (#294): o snapshot é autoridade.
+          // Se o snapshot não contém ninguém em `em_reconexao` ou o jogador do
+          // aviso atual não está mais em `em_reconexao` (voltou para `conectado`
+          // ou saiu do roster), limpa o aviso sem resíduo e cancela o timer.
+          // Só afeta avisos de `reconectando` — `reconectado` é toast transitório
+          // com presença `conectado` e segue seu próprio auto-dismiss.
+          setAvisoReconexao((prev) => {
+            if (prev === null) return null
+            if (prev.tipo !== 'reconectando') return prev
+            const snapshotJogadores = evento.snapshot.jogadores
+            const temEmReconexao = snapshotJogadores.some(
+              (j) => (j as { presenca?: string }).presenca === 'em_reconexao',
+            )
+            if (!temEmReconexao) {
+              if (avisoReconexaoTimerRef.current !== null) {
+                window.clearTimeout(avisoReconexaoTimerRef.current)
+                avisoReconexaoTimerRef.current = null
+              }
+              return null
+            }
+            const alvo = snapshotJogadores.find((j) => j.jogadorId === prev.jogadorId) as
+              | { presenca?: string }
+              | undefined
+            const presencaAlvo = alvo?.presenca ?? 'conectado'
+            const foraDoRoster = !alvo
+            if (foraDoRoster || presencaAlvo !== 'em_reconexao') {
+              if (avisoReconexaoTimerRef.current !== null) {
+                window.clearTimeout(avisoReconexaoTimerRef.current)
+                avisoReconexaoTimerRef.current = null
+              }
+              return null
+            }
+            return prev
+          })
+          // Supressão de fantasma quando snapshot chega sem em_reconexao mas ainda
+          // há evento enfileirado de reconectando — a re-emissão abaixo já filtra,
+          // mas se nenhum jogador está em_reconexao, o aviso residual anterior já
+          // foi limpo acima.
           // Snapshot é a autoridade do roster: se ele já me excluiu E não há
           // pendência gravada, a saída está corroborada — encerra a correlação
           // (recusa posterior é nova, não eco). Com pendência gravada ou ainda
@@ -1358,7 +1396,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       >
         {avisoDesistencia !== null
           ? avisoDesistencia.causa === 'expiracao'
-            ? `${avisoDesistencia.apelido} expirou e foi removido da partida por expiração. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por desistência.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
+            ? `${avisoDesistencia.apelido} expirou e foi removido da partida por expiração. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por expiração.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
             : `${avisoDesistencia.apelido} desistiu da partida. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por desistência.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
           : ''}
       </div>

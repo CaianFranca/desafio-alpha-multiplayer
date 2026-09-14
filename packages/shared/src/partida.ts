@@ -547,7 +547,7 @@ export interface JogadorPresencaAtualizadaWireEvento {
   readonly type: 'JOGADOR_PRESENCA_ATUALIZADA';
   readonly jogadorId: string;
   readonly presenca: PresencaNaPartidaWire;
-  
+}
 // Mensagem de chat aprovada (issue #390): broadcast serial ao roster vigente
 // do canal de Partida — o servidor gera `enviadoEm` (ISO 8601, mesma ordem
 // serial dos eventos de jogo, cadeia por Partida). `apelido` é resolvido pelo
@@ -578,7 +578,7 @@ export type PartidaEventoDoServidor =
   | DesistenciaRegistradaWireEvento
   | JogadorEmReconexaoWireEvento
   | JogadorReconectadoWireEvento
-  | JogadorPresencaAtualizadaWireEvento;
+  | JogadorPresencaAtualizadaWireEvento
   | MensagemDeChatDaPartidaEvento;
 
 // --- Erro ---
