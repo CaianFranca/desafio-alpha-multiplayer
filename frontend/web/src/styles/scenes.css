@@ -451,12 +451,22 @@
   /* Ataque dos monstros (issue #385): tremor do atingido e brilho do escudo
      do protegido — sem equivalente 1:1 em utilities, ficam no CSS. O pulo da
      peça sem peão usa `animate-bounce` no TSX; o stagger da onda do Vulto
-     vive no `animationDelay` inline (`atrasoMs` do coreógrafo). */
+     vive no `animationDelay` inline (`atrasoMs` do coreógrafo). O telegraph
+     marca a peça do monstro no espelho DOM com contorno vermelho pulsante
+     (espelho do 3D, `aria-hidden` — sem informação nova ao leitor). */
   .ataque-tremor {
     animation: ataque-tremor 320ms linear infinite;
   }
   .ataque-escudo {
     animation: ataque-escudo 900ms ease-in-out infinite;
+  }
+  /* Espelho do token `COR_TELEGRAPH_ATAQUE` (#ef4444, `animacao.ts`): o CSS
+     não importa TS — o hex vive duplicado aqui por limite da plataforma;
+     mudou o token, atualize os `rgba(239, 68, 68, …)` abaixo e nos keyframes. */
+  .ataque-telegraph {
+    outline: 2px solid rgba(239, 68, 68, 0.9);
+    outline-offset: 2px;
+    animation: ataque-telegraph 600ms ease-in-out infinite;
   }
 }
 
@@ -471,6 +481,11 @@
 @keyframes ataque-escudo {
   0%, 100% { box-shadow: 0 0 0 0 rgba(125, 211, 252, 0.55); }
   50% { box-shadow: 0 0 12px 3px rgba(125, 211, 252, 0.55); }
+}
+
+@keyframes ataque-telegraph {
+  0%, 100% { outline-color: rgba(239, 68, 68, 0.45); }
+  50% { outline-color: rgba(239, 68, 68, 1); }
 }
 
 @keyframes history-kenburns {
@@ -494,7 +509,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ataque-tremor,
-  .ataque-escudo {
+  .ataque-escudo,
+  .ataque-telegraph {
     animation: none;
   }
   .site-header__nav-link,

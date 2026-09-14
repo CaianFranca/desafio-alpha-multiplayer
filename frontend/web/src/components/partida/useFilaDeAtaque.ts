@@ -1,76 +1,163 @@
 /**
- * Fila de animação do ataque dos monstros (issue #385).
+ * Fila de animação do ataque dos monstros (issue #385 + follow-up da ordem
+ * Espectro→Vulto, decisão do usuário).
  *
- * Evento-driven como a limpeza/encaixe: o `ATAQUE_RESOLVIDO` despacha o
- * estado na hora (reducer, na PartidaPage) e enfileira aqui só a revelação —
- * um item por atacante, na ordem de `atacantes`, drenando sequencialmente.
- * O monstro soa no gesto de disparo (sempre, mesmo sem vítimas); tremida e
- * defesa soam na chegada (`DURACAO_DISPARO_ATAQUE_MS`) só com alvo.
+ * Evento-driven como a limpeza/encaixe: o `ATAQUE_RESOLVIDO` NÃO despacha o
+ * estado na hora — a PartidaPage entrega evento+contexto aqui e o driver
+ * aplica cada fatia (`reduzirFatiaDoAtaque`, via `aplicarFatiaDoAtaque`) no
+ * instante da chegada do próprio slot (`DURACAO_DISPARO_ATAQUE_MS` após o
+ * disparo), com guarda de snapshot-seq (pula se `seqSnapshot` mudou — mesmo
+ * padrão dos turnos segurados). Sem vítimas/protegidos na fatia, nada a
+ * aplicar. O Espectro resolve por completo primeiro (animação, som,
+ * consequências) e só após seu fim o Vulto entra em telegraph.
  *
- * Bloqueio da entrada do turno: `TURNO_INICIADO` com a fila ativa é segurado
- * e liberado ao drenar (lag deliberado ~1,3s/1,9s) — só a entrada do turno é
- * atingida; limpeza/encaixe/encerramento passam direto. Snapshot mais novo
- * invalida turnos segurados (a autoridade já projetou a vez — sem regressão).
- * A peça do monstro volta ao normal ao fim: o overlay desmonta sem marcas.
+ * Cada item abre com o telegraph silencioso de 1s (contorno vermelho pulsante
+ * na peça do monstro, sem som nem consequência) e só depois o monstro soa no
+ * gesto de disparo (sempre, mesmo sem vítimas); tremor e defesa soam na
+ * chegada (`DURACAO_DISPARO_ATAQUE_MS`) só com alvo do próprio alcance; o
+ * anúncio ao leitor (`ataque_com_penalidade`) sai na chegada somente se a
+ * fatia tem vítimas — sem vítimas, silêncio.
+ *
+ * Cegueira e sumiço antes da vez (follow-up): `CELULAS_ILUMINADAS` e
+ * `LIMPEZA_APLICADA` (modelo + trigger `TransicaoLimpeza` + som) que chegarem
+ * com a fila ativa são segurados e liberados na chegada do Vulto (junto da
+ * fatia dele); se a fila não tem Vulto, o restante libera ao drenar — na
+ * ordem de chegada. Snapshot (`ESTADO_DA_PARTIDA`) e `PARTIDA_TERMINADA`
+ * aplicam na hora pela PartidaPage e cancelam a fila + descartam os segurados
+ * (snapshot é autoridade).
+ *
+ * Bloqueio da entrada do turno: `TURNO_INICIADO` e `TURNO_ENCERRADO` com a
+ * fila ativa são segurados e liberados ao drenar, na ordem de chegada (lag
+ * deliberado por decisão do usuário de ~2,3s/3,9s, telegraph incluso — pacing
+ * do jogo) — só a virada de turno é atingida; fora da fila, tudo passa direto.
+ * Snapshot mais novo invalida turnos segurados (a autoridade já projetou a
+ * vez — sem regressão); o unmount descarta fila e segurados explicitamente
+ * (o snapshot reconcilia ao remontar). A peça do monstro volta ao normal ao
+ * fim de cada slot e ao drenar: o overlay desmonta sem marcas.
+ *
+ * Ataque tardio (edge documentado, sem re-seguro): o `ATAQUE_RESOLVIDO` que
+ * chega com o turno já iniciado anima sobre o turno vivo — os segurados só
+ * valem para a virada que chega com a fila ativa; re-segurar o turno em
+ * curso mentiria sobre o estado (a vez projetada já é a autoridade).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AtaqueResolvidoWireEvento, TurnoIniciadoEvento } from '@flicker/shared'
+import type {
+  AtaqueResolvidoWireEvento,
+  CelulasIluminadasWireEvento,
+  LimpezaAplicadaWireEvento,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
+} from '@flicker/shared'
 import {
   DURACAO_ATAQUE_POR_ATACANTE_MS,
   DURACAO_BASE_ATAQUE_MS,
   DURACAO_DISPARO_ATAQUE_MS,
+  DURACAO_TELEGRAPH_ATAQUE_MS,
 } from '../../game/tabuleiro/animacao'
 import {
   coreografarAtaque,
   type ContextoDaCoreografiaDoAtaque,
+  type FatiaDoAtaque,
   type ItemCoreografadoDoAtaque,
 } from '../../game/tabuleiro/ataque'
-import { tocarDefesaDoAtaque, tocarSomDoMonstro, tocarTremidaDoAtaque } from './somDoAtaque'
+import { tocarDefesaDoAtaque, tocarSomDoMonstro, tocarTremorDoAtaque } from './somDoAtaque'
+import type { MotivoDeRecusa } from './somDeRecusa'
+
+/** Estágio do item corrente: telegraph silencioso ou disparo com consequência. */
+export type EstagioDoAtaqueExibido = 'telegraph' | 'ataque'
 
 export interface AtaqueExibido {
   readonly item: ItemCoreografadoDoAtaque
   readonly key: number
+  readonly estagio: EstagioDoAtaqueExibido
 }
 
 interface TurnoSegurado {
-  readonly evento: TurnoIniciadoEvento
+  readonly evento: TurnoIniciadoEvento | TurnoEncerradoEvento
   readonly seqSnapshot: number
 }
 
-export function useFilaDeAtaque(
-  liberarTurnoSegurado: (evento: TurnoIniciadoEvento) => void,
-): {
+/** Iluminação/limpeza chegada com a fila ativa, à espera da chegada do Vulto. */
+interface LimpezaSegurada {
+  readonly evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento
+  readonly seqSnapshot: number
+}
+
+interface ItemNaFila {
+  readonly item: ItemCoreografadoDoAtaque
+  readonly seqSnapshot: number
+}
+
+export interface OpcoesDaFilaDeAtaque {
+  readonly liberarTurnoSegurado: (evento: TurnoIniciadoEvento | TurnoEncerradoEvento) => void
+  /** Aplica a fatia do slot no modelo (PartidaPage despacha `FATIA_DE_ATAQUE`). */
+  readonly aplicarFatiaDoAtaque: (fatia: FatiaDoAtaque) => void
+  /** Anúncio ao leitor no slot (só com vítimas na fatia). */
+  readonly anunciarRecusa: (motivo: MotivoDeRecusa) => void
+  /** Libera iluminação/limpeza segurada (modelo + trigger + som, na PartidaPage). */
+  readonly liberarLimpezaSegurada: (
+    evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento,
+  ) => void
+}
+
+export function useFilaDeAtaque({
+  liberarTurnoSegurado,
+  aplicarFatiaDoAtaque,
+  anunciarRecusa,
+  liberarLimpezaSegurada,
+}: OpcoesDaFilaDeAtaque): {
   readonly ataqueExibido: AtaqueExibido | null
+  /** Peça do monstro em telegraph (contorno 3D + espelho DOM); null fora do pulso. */
+  readonly pecaIdEmTelegraph: string | null
   readonly enfileirarAtaque: (
     evento: AtaqueResolvidoWireEvento,
     contexto: ContextoDaCoreografiaDoAtaque,
   ) => void
-  readonly segurarTurnoSeEmAtaque: (evento: TurnoIniciadoEvento) => boolean
+  /** Segura a virada de turno (início ou encerramento) com a fila ativa. */
+  readonly segurarTurnoSeEmAtaque: (
+    evento: TurnoIniciadoEvento | TurnoEncerradoEvento,
+  ) => boolean
+  /** Segura iluminação/limpeza com a fila ativa (libera na chegada do Vulto). */
+  readonly segurarLimpezaSeEmAtaque: (
+    evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento,
+  ) => boolean
   readonly notificarSnapshot: () => void
   readonly cancelarAtaque: () => void
 } {
   const [ataqueExibido, setAtaqueExibido] = useState<AtaqueExibido | null>(null)
-  const filaRef = useRef<ItemCoreografadoDoAtaque[]>([])
+  const filaRef = useRef<ItemNaFila[]>([])
   const emAndamentoRef = useRef(false)
   const timersRef = useRef<number[]>([])
   const turnosSeguradosRef = useRef<TurnoSegurado[]>([])
+  const limpezasSeguradasRef = useRef<LimpezaSegurada[]>([])
   const seqSnapshotRef = useRef(0)
   const keyRef = useRef(0)
   // Recursão do driver via ref (mesmo padrão de `desconectarRef` na
   // PartidaPage): o timer sempre chama a versão mais recente, sem
   // recriar callbacks nem re-subscrever o socket.
-  const exibirProximoRef = useRef<(primeiro: boolean) => void>(() => undefined)
-  // `liberarTurnoSegurado` troca por render sem recriar o driver: ref estável.
-  const liberarRef = useRef(liberarTurnoSegurado)
+  const exibirProximoRef = useRef<(ePrimeiroDaFila: boolean) => void>(() => undefined)
+  // Callbacks da PartidaPage trocam por render sem recriar o driver: refs estáveis.
+  const liberarTurnoRef = useRef(liberarTurnoSegurado)
+  const aplicarFatiaRef = useRef(aplicarFatiaDoAtaque)
+  const anunciarRef = useRef(anunciarRecusa)
+  const liberarLimpezaRef = useRef(liberarLimpezaSegurada)
   useEffect(() => {
-    liberarRef.current = liberarTurnoSegurado
-  }, [liberarTurnoSegurado])
-  // Unmount limpa os timers (sem vazamento entre testes/páginas).
+    liberarTurnoRef.current = liberarTurnoSegurado
+    aplicarFatiaRef.current = aplicarFatiaDoAtaque
+    anunciarRef.current = anunciarRecusa
+    liberarLimpezaRef.current = liberarLimpezaSegurada
+  }, [liberarTurnoSegurado, aplicarFatiaDoAtaque, anunciarRecusa, liberarLimpezaSegurada])
+  // Unmount descarta tudo explicitamente (timers, fila e segurados —
+  // sem vazamento entre testes/páginas; o snapshot reconcilia ao remontar).
   useEffect(
     () => () => {
       for (const id of timersRef.current) window.clearTimeout(id)
       timersRef.current = []
+      filaRef.current = []
+      turnosSeguradosRef.current = []
+      limpezasSeguradasRef.current = []
+      emAndamentoRef.current = false
     },
     [],
   )
@@ -83,8 +170,17 @@ export function useFilaDeAtaque(
     timersRef.current.push(id)
   }, [])
 
+  const liberarLimpezasSeguradas = useCallback((): void => {
+    const seguradas = limpezasSeguradasRef.current
+    limpezasSeguradasRef.current = []
+    for (const segurada of seguradas) {
+      if (segurada.seqSnapshot !== seqSnapshotRef.current) continue
+      liberarLimpezaRef.current(segurada.evento)
+    }
+  }, [])
+
   const exibirProximo = useCallback(
-    (primeiro: boolean): void => {
+    (ePrimeiroDaFila: boolean): void => {
       const atual = filaRef.current.shift()
       if (atual === undefined) {
         emAndamentoRef.current = false
@@ -95,29 +191,51 @@ export function useFilaDeAtaque(
         turnosSeguradosRef.current = []
         for (const segurado of segurados) {
           if (segurado.seqSnapshot !== seqSnapshotRef.current) continue
-          liberarRef.current(segurado.evento)
+          liberarTurnoRef.current(segurado.evento)
         }
+        // Sem Vulto na fila (ou sobras pós-Vulto): o restante da
+        // iluminação/limpeza segurada libera ao drenar, em ordem.
+        liberarLimpezasSeguradas()
         return
       }
       keyRef.current += 1
-      setAtaqueExibido({ item: atual, key: keyRef.current })
-      // Gesto de disparo soa na hora — sempre, mesmo sem vítimas (só monstro).
-      tocarSomDoMonstro(atual.tipo)
-      // Feedback no alvo no instante da chegada: tremida só com atingido,
-      // defesa só com protegido.
-      agendar(DURACAO_DISPARO_ATAQUE_MS, () => {
-        if (atual.temAtingido) tocarTremidaDoAtaque()
-        if (atual.temProtegido) tocarDefesaDoAtaque()
+      const key = keyRef.current
+      // Telegraph silencioso de 1s: contorno vermelho na peça, sem som nem
+      // consequência — a revelação (sons + overlay de ataque) só após o pulso.
+      setAtaqueExibido({ item: atual.item, key, estagio: 'telegraph' })
+      agendar(DURACAO_TELEGRAPH_ATAQUE_MS, () => {
+        setAtaqueExibido({ item: atual.item, key, estagio: 'ataque' })
+        // Gesto de disparo soa após o pulso — sempre, mesmo sem vítimas.
+        tocarSomDoMonstro(atual.item.tipo)
+        // Chegada ao alvo: a fatia do slot aplica no modelo (guarda de
+        // snapshot-seq — snapshot mais novo invalida a fatia, a autoridade já
+        // projetou), o anúncio sai só com vítimas na fatia, e a
+        // iluminação/limpeza segurada libera junto na chegada do Vulto.
+        agendar(DURACAO_DISPARO_ATAQUE_MS, () => {
+          if (atual.seqSnapshot !== seqSnapshotRef.current) return
+          const fatia = atual.item.fatia
+          if (fatia.estadosAplicados.length > 0 || fatia.protegidos.length > 0) {
+            aplicarFatiaRef.current(fatia)
+          }
+          if (fatia.estadosAplicados.length > 0) {
+            anunciarRef.current('ataque_com_penalidade')
+          }
+          if (atual.item.temAtingido) tocarTremorDoAtaque()
+          if (atual.item.temProtegido) tocarDefesaDoAtaque()
+          if (atual.item.tipo === 'vulto') liberarLimpezasSeguradas()
+        })
+        // Custo base só no primeiro da fila (~2,3s com 1 monstro, ~3,9s com
+        // 2, telegraph incluso); os seguintes ocupam só o slot. O contorno
+        // apaga ao entrar no disparo.
+        agendar(
+          ePrimeiroDaFila
+            ? DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS
+            : DURACAO_ATAQUE_POR_ATACANTE_MS,
+          () => exibirProximoRef.current(false),
+        )
       })
-      // Primeiro item carrega a base (~1,3s com 1 monstro, ~1,9s com 2).
-      agendar(
-        primeiro
-          ? DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS
-          : DURACAO_ATAQUE_POR_ATACANTE_MS,
-        () => exibirProximoRef.current(false),
-      )
     },
-    [agendar],
+    [agendar, liberarLimpezasSeguradas],
   )
   useEffect(() => {
     exibirProximoRef.current = exibirProximo
@@ -127,8 +245,9 @@ export function useFilaDeAtaque(
     (evento: AtaqueResolvidoWireEvento, contexto: ContextoDaCoreografiaDoAtaque): void => {
       const itens = coreografarAtaque(evento, contexto)
       if (itens.length === 0) return
+      const seqSnapshot = seqSnapshotRef.current
       const ocioso = !emAndamentoRef.current
-      filaRef.current.push(...itens)
+      filaRef.current.push(...itens.map((item) => ({ item, seqSnapshot })))
       if (ocioso) {
         emAndamentoRef.current = true
         exibirProximo(true)
@@ -137,11 +256,23 @@ export function useFilaDeAtaque(
     [exibirProximo],
   )
 
-  const segurarTurnoSeEmAtaque = useCallback((evento: TurnoIniciadoEvento): boolean => {
-    if (!emAndamentoRef.current) return false
-    turnosSeguradosRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current })
-    return true
-  }, [])
+  const segurarTurnoSeEmAtaque = useCallback(
+    (evento: TurnoIniciadoEvento | TurnoEncerradoEvento): boolean => {
+      if (!emAndamentoRef.current) return false
+      turnosSeguradosRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current })
+      return true
+    },
+    [],
+  )
+
+  const segurarLimpezaSeEmAtaque = useCallback(
+    (evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento): boolean => {
+      if (!emAndamentoRef.current) return false
+      limpezasSeguradasRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current })
+      return true
+    },
+    [],
+  )
 
   const notificarSnapshot = useCallback((): void => {
     seqSnapshotRef.current += 1
@@ -152,9 +283,22 @@ export function useFilaDeAtaque(
     timersRef.current = []
     filaRef.current = []
     turnosSeguradosRef.current = []
+    limpezasSeguradasRef.current = []
     emAndamentoRef.current = false
     setAtaqueExibido(null)
   }, [])
 
-  return { ataqueExibido, enfileirarAtaque, segurarTurnoSeEmAtaque, notificarSnapshot, cancelarAtaque }
+  const pecaIdEmTelegraph = ataqueExibido !== null && ataqueExibido.estagio === 'telegraph'
+    ? ataqueExibido.item.pecaId
+    : null
+
+  return {
+    ataqueExibido,
+    pecaIdEmTelegraph,
+    enfileirarAtaque,
+    segurarTurnoSeEmAtaque,
+    segurarLimpezaSeEmAtaque,
+    notificarSnapshot,
+    cancelarAtaque,
+  }
 }

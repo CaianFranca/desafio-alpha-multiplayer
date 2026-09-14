@@ -33,6 +33,7 @@ import {
 } from './vooDoPeao'
 import { peaoMesaParaMundo } from './contrato'
 import type { VooDoPeaoPendente } from './vooDoPeao'
+import type { EstadoVisualDoAtaque } from './ataque'
 
 interface TabuleiroProps {
   posicionadas: readonly PecaPosicionada[]
@@ -104,6 +105,13 @@ interface TabuleiroProps {
    * peça assume pixel-igual. Null = sem voo.
    */
   ocultarPecaId?: PecaId | null
+  /**
+   * Estado visual do ataque (issue #385, follow-up): prop única (peça em
+   * telegraph + reações do alcance + peça em disparo) — tudo null fora do
+   * slot ativo. O `Tabuleiro` deriva as props por célula para a `Celula`
+   * (que segue granular: só a fatia da própria célula).
+   */
+  estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
   /** Quantidade de peões N=2..4 para posicionar fila da Mesa e voos mesa→peça. */
   quantidadeDePeoes?: number
 }
@@ -127,6 +135,7 @@ export function Tabuleiro({
   vooPendente = null,
   onVooAterrissou,
   ocultarPecaId = null,
+  estadoVisualDoAtaque = null,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   ordemDeChegadaPorChave = {},
   quantidadeDePeoes = peoes.length || 4,
@@ -233,6 +242,14 @@ export function Tabuleiro({
         // Iluminada (issue #151): espelho do estado compartilhado; os destaques
         // de interação acima têm prioridade maior no plano da célula.
         const iluminada = iluminadasSet.has(chave)
+        // Reação do ataque (issue #385, follow-up): só no estágio de disparo
+        // (o mapa já vem nulo no telegraph); a peça do atacante não reage.
+        // A `Celula` recebe a fatia por célula (granular); o trio viaja junto
+        // em `estadoVisualDoAtaque`.
+        const pecaIdEmTelegraph = estadoVisualDoAtaque?.pecaIdEmTelegraph ?? null
+        const reacoesDoAtaque = estadoVisualDoAtaque?.reacoesDoAtaque ?? null
+        const pecaIdEmDisparo = estadoVisualDoAtaque?.pecaIdEmDisparo ?? null
+        const reacao = pecaExibida !== null ? (reacoesDoAtaque?.get(pecaExibida.pecaId) ?? null) : null
         return (
           <Celula
             key={chave}
@@ -255,6 +272,10 @@ export function Tabuleiro({
             peoes={peoesDaCelula}
             filaDeChegada={ordemDeChegadaPorChave[chave]}
             emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
+            emTelegraph={pecaExibida !== null && pecaExibida.pecaId === pecaIdEmTelegraph}
+            reacaoDoAtaque={reacao?.reacao ?? null}
+            atrasoDoAtaqueMs={reacao?.atrasoMs ?? 0}
+            emDisparo={pecaExibida !== null && pecaExibida.pecaId === pecaIdEmDisparo}
             destinoValido={peca !== null && destinosSet.has(peca.pecaId)}
             destinoResgate={peca !== null && resgateSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}

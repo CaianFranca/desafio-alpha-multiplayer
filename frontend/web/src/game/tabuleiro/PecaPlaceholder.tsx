@@ -1,13 +1,24 @@
-import { Suspense, useEffect, useMemo } from 'react'
-import { useLoader, type ThreeEvent } from '@react-three/fiber'
+import { Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useFrame, useLoader, useThree, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { TAMANHO_CELULA } from './contrato'
 import type { TipoDaPeca, Orientacao } from './contrato'
 import {
+  COR_CONTORNO_ESCUDO_ATAQUE,
+  COR_CONTORNO_PULO_ATAQUE,
+  COR_CONTORNO_TREMOR_ATAQUE,
   EXPANSAO_CONTORNO_PECA_XZ,
   corDoContornoDaPeca,
   propsDoMaterialDeContorno,
 } from './contorno'
+import {
+  COR_FLASH_DISPARO_ATAQUE,
+  COR_TELEGRAPH_ATAQUE,
+  DURACAO_DISPARO_ATAQUE_MS,
+} from './animacao'
+import type { ReacaoDePecaNoAtaque } from './ataque'
+import { poseDoTremorXZ } from './ataque'
+import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion'
 import { handlersDeCursor } from './cursor'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { rotacaoDoMotivo, texturaDaPeca } from './texturasDasPecas'
@@ -25,6 +36,30 @@ interface PecaPlaceholderProps {
   corDestaque?: string
   /** Cursor do ponteiro ao pairar (peça da mesa selecionável). */
   cursor?: 'default' | 'pointer'
+  /**
+   * Telegraph do ataque (issue #385): contorno vermelho pulsante na peça do
+   * monstro durante o pulso silencioso de 1s — apaga ao entrar no disparo e
+   * ao drenar (sem marcas). Sobrepõe o destaque de seleção no tom.
+   */
+  emTelegraph?: boolean
+  /**
+   * Reação da peça no alcance do ataque (issue #385, follow-up): duplo
+   * feedback com os chips do overlay (mantidos como legenda) — `pulo` (sem
+   * peão, sem sair da célula), `tremor` (com peão, o peão treme junto via
+   * `PeaoVisual`) e `escudo` (protegido: só a casca azul, sem tremor). Null =
+   * sem reação. Com movimento reduzido, sem deslocamento (só o escudo
+   * estático); ao drenar, volta a null sem marcas.
+   */
+  reacaoDoAtaque?: ReacaoDePecaNoAtaque | null
+  /** Atraso da onda até esta peça (`atrasoMs` do coreógrafo; Vulto por camadas). */
+  atrasoDoAtaqueMs?: number
+  /**
+   * Gesto de disparo do atacante (issue #385, follow-up): pulso de escala +
+   * flash emissivo com o ciclo do token `DURACAO_DISPARO_ATAQUE_MS` (~250ms)
+   * enquanto o slot está no estágio de ataque. Com movimento reduzido, sem
+   * gesto (peça normal — o pulso é transitório, sem equivalente estático).
+   */
+  emDisparo?: boolean
   onClick?: (event: ThreeEvent<MouseEvent>) => void
 }
 
@@ -86,11 +121,143 @@ interface CorpoProps extends PecaPlaceholderProps {
 }
 
 /**
- * Contorno da peça por casca invertida: caixa ligeiramente maior em XZ,
- * mesma altura/centro, `BackSide`, sem handlers e com `raycast` nulo para
- * nunca roubar clique. Extraído para uso único nos dois corpos (texturizado
- * e fallback do `Suspense`) — a cor vem da semântica de `corDestaque`.
+ * Contorno do telegraph (issue #385): mesma casca invertida do destaque, no
+ * vermelho do ataque, com pulso de escala XZ (~0,6s por ciclo) via `useFrame`
+ * + `invalidate()` (Canvas em `frameloop="demand"`). Com movimento reduzido,
+ * vira contorno estático — sem animação, sem informação nova.
  */
+function ContornoTelegraphPulsante({ corDestaque }: { corDestaque: string }) {
+  const malhaRef = useRef<THREE.Mesh | null>(null)
+  const invalidate = useThree((estado) => estado.invalidate)
+  const reduce = usePrefersReducedMotion()
+  useEffect(() => {
+    if (!reduce) invalidate()
+  }, [reduce, invalidate])
+  useFrame(({ clock }) => {
+    if (reduce) return
+    const pulso = 1 + 0.035 * Math.sin((clock.getElapsedTime() * Math.PI * 2) / 0.6)
+    malhaRef.current?.scale.set(pulso, 1, pulso)
+    invalidate()
+  })
+  if (reduce) {
+    return <ContornoDaPeca visivel corDestaque={corDestaque} />
+  }
+  const contorno = propsDoMaterialDeContorno(corDoContornoDaPeca(corDestaque))
+  return (
+    <mesh
+      ref={malhaRef}
+      position={[0, Y_CORPO, 0]}
+      raycast={() => null}
+    >
+      <boxGeometry
+        args={[
+          TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+          ESPESSURA_PECA,
+          TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+        ]}
+      />
+      <meshBasicMaterial {...contorno} side={THREE.BackSide} />
+    </mesh>
+  )
+}
+
+/**
+ * Deslocamento da reação da peça no alcance (issue #385, follow-up): `pulo`
+ * quica no Y sem sair da célula; `tremor` balança no XZ junto do peão;
+ * `escudo` não desloca (só a casca azul do chamador). O atraso da onda
+ * (`atrasoMs` do coreógrafo) segura o início por peça; antes dele, sem
+ * deslocamento. Com movimento reduzido, sempre estático; ao drenar (null),
+ * a posição volta a zero sem marcas.
+ */
+function GrupoDaReacao({
+  reacao,
+  atrasoMs,
+  children,
+}: {
+  reacao: ReacaoDePecaNoAtaque | null
+  atrasoMs: number
+  children: ReactNode
+}) {
+  const grupoRef = useRef<THREE.Group | null>(null)
+  const inicioRef = useRef<number>(-1)
+  const invalidate = useThree((estado) => estado.invalidate)
+  const reduce = usePrefersReducedMotion()
+  useEffect(() => {
+    inicioRef.current = -1
+    if (reacao === null) grupoRef.current?.position.set(0, 0, 0)
+    else if (!reduce) invalidate()
+  }, [reacao, atrasoMs, reduce, invalidate])
+  useFrame(({ clock }) => {
+    const grupo = grupoRef.current
+    if (reduce || reacao === null || reacao === 'escudo' || grupo === null) return
+    const agora = clock.getElapsedTime() * 1000
+    if (inicioRef.current < 0) inicioRef.current = agora
+    const t = agora - inicioRef.current - atrasoMs
+    if (t < 0) {
+      grupo.position.set(0, 0, 0)
+      invalidate()
+      return
+    }
+    if (reacao === 'pulo') {
+      const ciclo = (t % 450) / 450
+      grupo.position.set(0, 0.14 * Math.abs(Math.sin(ciclo * Math.PI * 2)), 0)
+    } else {
+      const [x, z] = poseDoTremorXZ(t)
+      grupo.position.set(x, 0, z)
+    }
+    invalidate()
+  })
+  return <group ref={grupoRef}>{children}</group>
+}
+
+/**
+ * Gesto de disparo do atacante (issue #385, follow-up): pulso de escala XZ +
+ * flash emissivo (casca lilás que desvanece) com o ciclo do token
+ * `DURACAO_DISPARO_ATAQUE_MS` (~250ms). Com movimento reduzido, sem gesto
+ * (peça normal); inativo, só as crianças sem wrapper animado.
+ */
+function GestoDoDisparo({ ativo, children }: { ativo: boolean; children: ReactNode }) {
+  const grupoRef = useRef<THREE.Group | null>(null)
+  const flashRef = useRef<THREE.MeshBasicMaterial | null>(null)
+  const invalidate = useThree((estado) => estado.invalidate)
+  const reduce = usePrefersReducedMotion()
+  useEffect(() => {
+    if (ativo && !reduce) invalidate()
+  }, [ativo, reduce, invalidate])
+  useFrame(({ clock }) => {
+    const grupo = grupoRef.current
+    if (reduce || !ativo || grupo === null) return
+    const fase = ((clock.getElapsedTime() * 1000) % DURACAO_DISPARO_ATAQUE_MS) / DURACAO_DISPARO_ATAQUE_MS
+    const pulso = 1 + 0.05 * Math.sin(fase * Math.PI * 2)
+    grupo.scale.set(pulso, 1, pulso)
+    if (flashRef.current) flashRef.current.opacity = 0.35 * (1 - fase)
+    invalidate()
+  })
+  if (!ativo || reduce) return <group>{children}</group>
+  return (
+    <group ref={grupoRef}>
+      {children}
+      <mesh position={[0, Y_CORPO, 0]} raycast={() => null}>
+        <boxGeometry
+          args={[
+            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+            ESPESSURA_PECA,
+            TAMANHO_PECA + EXPANSAO_CONTORNO_PECA_XZ,
+          ]}
+        />
+        <meshBasicMaterial
+          ref={flashRef}
+          color={COR_FLASH_DISPARO_ATAQUE}
+          transparent
+          opacity={0.35}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+    </group>
+  )
+}
+
 function ContornoDaPeca({
   visivel,
   corDestaque,
@@ -117,6 +284,28 @@ function ContornoDaPeca({
   )
 }
 
+/**
+ * Contorno de estado da peça (issue #385, follow-up): ponto único do
+ * telegraph vs. destaque nos dois corpos (texturizado e fallback do
+ * `Suspense`) — casca invertida, sem handlers e com `raycast` nulo para
+ * nunca roubar clique. O telegraph sobrepõe o destaque no tom vermelho
+ * (`COR_TELEGRAPH_ATAQUE`, token único do ataque).
+ */
+function ContornoDeEstado({
+  emTelegraph,
+  destacada,
+  corDestaque,
+}: {
+  emTelegraph: boolean
+  destacada: boolean
+  corDestaque: string
+}) {
+  if (emTelegraph) {
+    return <ContornoTelegraphPulsante corDestaque={COR_TELEGRAPH_ATAQUE} />
+  }
+  return <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
+}
+
 function usarClique(
   onClick: PecaPlaceholderProps['onClick'],
 ): ((e: ThreeEvent<MouseEvent>) => void) | undefined {
@@ -140,6 +329,7 @@ function CorpoTexturizado({
   orientacao,
   destacada,
   corDestaque,
+  emTelegraph = false,
   cursor,
   onClick,
 }: CorpoProps) {
@@ -212,7 +402,7 @@ function CorpoTexturizado({
         <boxGeometry args={[TAMANHO_CELULA, ESPESSURA_PECA, TAMANHO_CELULA]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
+      <ContornoDeEstado emTelegraph={emTelegraph} destacada={destacada} corDestaque={corDestaque} />
     </>
   )
 }
@@ -222,6 +412,7 @@ function CorpoFallback({
   tipo,
   destacada,
   corDestaque,
+  emTelegraph = false,
   cursor,
   onClick,
 }: CorpoProps) {
@@ -246,7 +437,7 @@ function CorpoFallback({
         <boxGeometry args={[TAMANHO_CELULA, ESPESSURA_PECA, TAMANHO_CELULA]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
+      <ContornoDeEstado emTelegraph={emTelegraph} destacada={destacada} corDestaque={corDestaque} />
     </>
   )
 }
@@ -257,6 +448,10 @@ export function PecaPlaceholder({
   position,
   destacada = false,
   corDestaque = COR_DESTAQUE,
+  emTelegraph = false,
+  reacaoDoAtaque = null,
+  atrasoDoAtaqueMs = 0,
+  emDisparo = false,
   cursor = 'default',
   onClick,
 }: PecaPlaceholderProps) {
@@ -265,25 +460,43 @@ export function PecaPlaceholder({
     orientacao,
     destacada,
     corDestaque,
+    emTelegraph,
     cursor,
     onClick,
   }
   const fallback = <CorpoFallback {...corpo} />
+  // Movimento reduzido: pulo/tremor não deslocam (`GrupoDaReacao` estático) —
+  // a peça ganha a casca fixa na cor da reação em vez de nada (o escudo já é
+  // estático nos dois modos; o telegraph já é estático, sem mudança).
+  const reduce = usePrefersReducedMotion()
 
   return (
     <group position={position}>
-      {/* B4: falha da textura (404) cai no fallback chapado em vez de
-          derrubar o Canvas inteiro; o reset segue a troca de tipo (as URLs
-          derivam do tipo). */}
-      <LimiteDeErroDoModelo
-        key={tipo}
-        resetKey={tipo}
-        fallback={fallback}
-      >
-        <Suspense fallback={fallback}>
-          <CorpoTexturizado {...corpo} />
-        </Suspense>
-      </LimiteDeErroDoModelo>
+      <GestoDoDisparo ativo={emDisparo}>
+        <GrupoDaReacao reacao={reacaoDoAtaque} atrasoMs={atrasoDoAtaqueMs}>
+          {/* B4: falha da textura (404) cai no fallback chapado em vez de
+              derrubar o Canvas inteiro; o reset segue a troca de tipo (as URLs
+              derivam do tipo). */}
+          <LimiteDeErroDoModelo
+            key={tipo}
+            resetKey={tipo}
+            fallback={fallback}
+          >
+            <Suspense fallback={fallback}>
+              <CorpoTexturizado {...corpo} />
+            </Suspense>
+          </LimiteDeErroDoModelo>
+        </GrupoDaReacao>
+      </GestoDoDisparo>
+      {reacaoDoAtaque === 'escudo' ? (
+        <ContornoDaPeca visivel corDestaque={COR_CONTORNO_ESCUDO_ATAQUE} />
+      ) : null}
+      {reduce && reacaoDoAtaque === 'pulo' ? (
+        <ContornoDaPeca visivel corDestaque={COR_CONTORNO_PULO_ATAQUE} />
+      ) : null}
+      {reduce && reacaoDoAtaque === 'tremor' ? (
+        <ContornoDaPeca visivel corDestaque={COR_CONTORNO_TREMOR_ATAQUE} />
+      ) : null}
     </group>
   )
 }

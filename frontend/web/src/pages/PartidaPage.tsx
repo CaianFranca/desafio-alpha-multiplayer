@@ -12,8 +12,11 @@ import {
   textoDoAnuncioDeRecusa,
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
+import { tocarConquistasDaConfirmacao } from '../components/partida/somDaConquista'
 import { TransicaoAtaque } from '../components/partida/TransicaoAtaque'
 import { useFilaDeAtaque } from '../components/partida/useFilaDeAtaque'
+import type { FatiaDoAtaque } from '../game/tabuleiro/ataque'
+import type { EstadoVisualDoAtaque } from '../game/tabuleiro/ataque'
 import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
 import {
   origemDoEncaixe,
@@ -44,6 +47,7 @@ import {
 import {
   criarEstadoInicialDoCliente,
   reduzirEvento,
+  reduzirFatiaDoAtaque,
   estadoDeExibicaoDoModelo,
   peoesEmBaixaIluminacaoDe,
 } from '../game/tabuleiro/reducao'
@@ -57,16 +61,18 @@ import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional, useMarcarSaidaPropriaOptional } from '../state/sala-web-socket-context'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import type {
+  CelulasIluminadasWireEvento,
   ConfirmarPosicaoDoPeaoComando,
   DesistirDaPartidaComando,
   EncerrarTurnoComando,
   EstadoDaPartidaSnapshot,
+  LimpezaAplicadaWireEvento,
   PartidaComandoDoCliente,
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
+  TurnoEncerradoEvento,
   TurnoIniciadoEvento,
 } from '@flicker/shared'
-
 /** Comandos do canal: tabuleiro (ST-09), peões (ST-10), turnos (ST-11, #118)
  * e desistência (#290), sem o jogadorId — injetado uma única vez em enviarComJogador. */
 type ComandoDoCanal =
@@ -78,6 +84,7 @@ type ComandoDoCanal =
 
 type AcaoDoModelo =
   | { type: 'EVENTO'; evento: Parameters<typeof reduzirEvento>[1] }
+  | { type: 'FATIA_DE_ATAQUE'; fatia: FatiaDoAtaque }
   | { type: 'APLICAR_SNAPSHOT'; snapshot: EstadoDaPartidaSnapshot }
   | { type: 'SYNC_QUANTIDADE'; quantidade: number }
 
@@ -87,6 +94,9 @@ function reduzirModelo(
 ): EstadoDoTabuleiroNoCliente {
   if (acao.type === 'APLICAR_SNAPSHOT') {
     return aplicarSnapshot(estado, acao.snapshot)
+  }
+  if (acao.type === 'FATIA_DE_ATAQUE') {
+    return reduzirFatiaDoAtaque(estado, acao.fatia)
   }
   if (acao.type === 'SYNC_QUANTIDADE') {
     // Sincroniza seed pré-snapshot (risco 3): se ainda sem snapshot de roster,
@@ -370,23 +380,74 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
   }, [despacharEvento])
 
-  // ── Fila do ataque com bloqueio da entrada do turno (issue #385) ──
+  // ── Fila do ataque com bloqueio da entrada do turno (issue #385 + follow-up
+  // da ordem Espectro→Vulto) ──
   // Turno segurado volta pelo mesmo lote atômico (ordem preservada); o hook
-  // guarda o callback em ref — estável sem re-subscrever o socket.
+  // guarda os callbacks em refs — estáveis sem re-subscrever o socket.
   const liberarTurnoSegurado = useCallback(
-    (evento: TurnoIniciadoEvento) => {
+    (evento: TurnoIniciadoEvento | TurnoEncerradoEvento) => {
       loteDeTurnoRef.current.push(evento as Parameters<typeof reduzirEvento>[1])
       agendarFlushLote()
     },
     [agendarFlushLote],
   )
+  // Fatia do slot na chegada (o ATAQUE_RESOLVIDO não despacha mais na hora:
+  // cada slot aplica a sua via este dispatch, com guarda de snapshot-seq no
+  // driver; sem vítimas/protegidos na fatia, nada a aplicar).
+  const aplicarFatiaDoAtaque = useCallback((fatia: FatiaDoAtaque) => {
+    despachar({ type: 'FATIA_DE_ATAQUE', fatia })
+  }, [])
+  // Iluminação/limpeza segurada libera pelo mesmo caminho do direto abaixo
+  // (modelo + trigger TransicaoLimpeza + som) — extraído para reutilizar nos
+  // dois pontos sem divergir.
+  const liberarLimpezaSegurada = useCallback(
+    (evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento) => {
+      if (evento.type === 'CELULAS_ILUMINADAS') {
+        despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+        return
+      }
+      if (evento.pecasRemovidas.length > 0) {
+        limpezaKeyRef.current += 1
+        setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
+        tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
+      }
+      despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+    },
+    [despacharEvento],
+  )
   const {
     ataqueExibido,
+    pecaIdEmTelegraph,
     enfileirarAtaque,
     segurarTurnoSeEmAtaque,
+    segurarLimpezaSeEmAtaque,
     notificarSnapshot,
     cancelarAtaque,
-  } = useFilaDeAtaque(liberarTurnoSegurado)
+  } = useFilaDeAtaque({
+    liberarTurnoSegurado,
+    aplicarFatiaDoAtaque,
+    anunciarRecusa,
+    liberarLimpezaSegurada,
+  })
+
+  // Estado visual do ataque (issue #385, follow-up): prop única (telegraph +
+  // reação por peça + gesto do atacante) derivada do item corrente SÓ no
+  // estágio de ataque — tudo null no telegraph e ao drenar (3D e espelho DOM
+  // apagam sem marcas; os chips do overlay seguem como legenda).
+  const estadoVisualDoAtaque: EstadoVisualDoAtaque = useMemo(
+    () => ({
+      pecaIdEmTelegraph,
+      reacoesDoAtaque:
+        ataqueExibido !== null && ataqueExibido.estagio === 'ataque'
+          ? new Map(ataqueExibido.item.reacoes.map((reacao) => [reacao.pecaId, reacao] as const))
+          : null,
+      pecaIdEmDisparo:
+        ataqueExibido !== null && ataqueExibido.estagio === 'ataque'
+          ? ataqueExibido.item.pecaId
+          : null,
+    }),
+    [ataqueExibido, pecaIdEmTelegraph],
+  )
 
   // Ref do ponto único de injeção do jogadorId (#91): o `onEvento` do canal
   // é declarado antes do `enviarComJogador` (useCallback abaixo), então usa a
@@ -454,8 +515,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // pendentes em voo contraditórios (limpa o conjunto).
           pendentesEmVoo.current.clear()
           // Snapshot mais novo invalida turnos segurados pela fila do ataque
-          // (issue #385: a autoridade já projetou a vez — sem regressão).
+          // (issue #385: a autoridade já projetou a vez — sem regressão) e
+          // cancela a fila + descarta fatias e iluminação/limpeza seguradas
+          // (follow-up da ordem: snapshot é autoridade).
           notificarSnapshot()
+          cancelarAtaque()
           aplicarSnapshotNoModelo(evento.snapshot)
           if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
           // Snapshot é a autoridade do roster: se ele já me excluiu E não há
@@ -523,10 +587,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // A continuação por LIMPEZA_APLICADA/TURNO_ENCERRADO só vale para lote
         // aberto pela desistência — fora dele, os caminhos dedicados abaixo
         // seguem inalterados.
-        // Fila do ataque (issue #385): com a coreografia ativa, a ENTRADA do
-        // turno é segurada até drenar (lag deliberado); o resto do lote
-        // (incluindo TURNO_ENCERRADO) passa direto.
-        if (evento.type === 'TURNO_INICIADO' && segurarTurnoSeEmAtaque(evento)) {
+        // Fila do ataque (issue #385 + follow-up da ordem, com a coreografia
+        // ativa, a VIRADA do turno (início e encerramento) é segurada até
+        // drenar (lag deliberado por decisão do usuário); a iluminação e a
+        // limpeza que chegarem com a fila ativa seguram junto e liberam na
+        // chegada do Vulto (ou ao drenar, sem Vulto) — cegueira e sumiço não
+        // aparecem antes da vez deles. O resto do lote passa direto.
+        // Snapshot mais novo invalida os segurados (a autoridade já projetou
+        // a vez — sem regressão).
+        if (
+          (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') &&
+          segurarTurnoSeEmAtaque(evento)
+        ) {
+          return
+        }
+        if (
+          (evento.type === 'CELULAS_ILUMINADAS' || evento.type === 'LIMPEZA_APLICADA') &&
+          segurarLimpezaSeEmAtaque(evento)
+        ) {
           return
         }
         const loteAbertoPorDesistencia =
@@ -613,31 +691,40 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           esquecerReenvio()
           return
         }
-        // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
-        // projetados no modelo sem recarregar página. O estado aplica na hora
-        // (reducer acima); a coreografia do ataque (issue #385) só revela —
-        // fila por atacante com bloqueio da entrada do turno e sons próprios
-        // (monstro sempre, tremida/defesa só com alvo na chegada). A
-        // penalidade usa os sons dos monstros, nunca o THUD genérico; recusas
-        // de jogada mantêm o genérico. O anúncio ao leitor é mantido sem som.
+        // Monstros e estados (ST-15, issue #174 + follow-up da ordem #385):
+        // ATAQUE e RESGATE sem recarregar página. O ATAQUE_RESOLVIDO não
+        // despacha mais na hora — evento+contexto vão ao driver, que aplica
+        // cada fatia na chegada do próprio slot (Espectro resolve por completo
+        // primeiro; Vulto depois) e anuncia ao leitor só com vítimas na
+        // fatia. A penalidade usa os sons dos monstros, nunca o THUD
+        // genérico; recusas de jogada mantêm o genérico.
         if (evento.type === 'ATAQUE_RESOLVIDO' || evento.type === 'RESGATE_REALIZADO') {
-          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           if (evento.type === 'ATAQUE_RESOLVIDO') {
             enfileirarAtaque(evento, modeloRef.current)
-            const motivo = motivoDeRecusaDoEvento(evento)
-            if (motivo !== null) anunciarRecusa(motivo)
+          } else {
+            despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           }
           return
         }
-        // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
-        // LIMPEZA_APLICADA dispara som/animação, snapshots não.
-        if (evento.type === 'LIMPEZA_APLICADA') {
-          if (evento.pecasRemovidas.length > 0) {
-            limpezaKeyRef.current += 1
-            setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
-            tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
-          }
+        // Conquistas da Confirmação de Posição (issue #385, follow-up):
+        // evento-driven por aquisição — gerador (dedupe por id novo), cartão
+        // (false→true) e proteção (!antes && resultante) soam uma vez;
+        // snapshots nunca soam. O pós-estado deriva da redução pura sobre o
+        // modelo pré-despacho (a ref só atualiza no próximo render).
+        if (evento.type === 'POSICAO_CONFIRMADA') {
+          const antes = modeloRef.current
+          const depois = reduzirEvento(antes, evento as Parameters<typeof reduzirEvento>[1])
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          tocarConquistasDaConfirmacao(antes, depois, evento.jogadorId)
+          return
+        }
+        // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
+        // LIMPEZA_APLICADA dispara som/animação, snapshots não. Com a fila do
+        // ataque ativa, o evento já foi segurado acima e libera na chegada do
+        // Vulto; aqui, só o caminho direto (mesmo corpo de
+        // `liberarLimpezaSegurada`, sem divergir).
+        if (evento.type === 'LIMPEZA_APLICADA') {
+          liberarLimpezaSegurada(evento)
           return
         }
         // Giro (issue #241, mudança de spec verbal): evento-driven para o
@@ -718,7 +805,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       },
       // `jogadorId` entra em deps (só troca em login/logout — o hook guarda o
       // callback em ref, sem reabrir o socket).
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, anunciarRecusa, agendarFlushLote, enfileirarAtaque, segurarTurnoSeEmAtaque, notificarSnapshot, cancelarAtaque, jogadorId, partidaId, esquecerReenvio],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote, enfileirarAtaque, segurarTurnoSeEmAtaque, segurarLimpezaSeEmAtaque, liberarLimpezaSegurada, notificarSnapshot, cancelarAtaque, jogadorId, partidaId, esquecerReenvio],
     ),
     onAdmissao: useCallback(
       (evento) => {
@@ -1249,11 +1336,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         encaixeTrigger={encaixeTrigger}
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
+        estadoVisualDoAtaque={estadoVisualDoAtaque}
       />
       {/*
         Coreografia do ataque (issue #385): overlay evento-driven da fila —
         só revela (o estado já aplicou na hora); desmonta ao drenar, sem
-        marcas. Com movimento reduzido, sem visual (sons e bloqueio seguem).
+        marcas. Com movimento reduzido, legenda estática (sons e bloqueio seguem).
       */}
       <TransicaoAtaque ataque={ataqueExibido} />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
