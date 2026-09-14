@@ -249,6 +249,7 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
 
     renderSala()
     const ws = await abrirSala(instances)
+    vi.useFakeTimers()
 
     act(() =>
       ws.simulateMessage({
@@ -257,7 +258,7 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
         serverId: 'server-abc',
       }),
     )
-    expect(await screen.findByTestId('encaminhamento-carregando')).toBeInTheDocument()
+    expect(screen.getByTestId('encaminhamento-carregando')).toBeInTheDocument()
 
     act(() =>
       ws.simulateMessage({
@@ -267,10 +268,9 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
       }),
     )
 
-    expect(await screen.findByTestId('aviso-encaminhamento')).toBeInTheDocument()
+    expect(screen.getByTestId('aviso-encaminhamento')).toBeInTheDocument()
     expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
 
-    vi.useFakeTimers()
     avancarParaDepoisDoRedirect()
     expect(assignSpy).not.toHaveBeenCalled()
   })
@@ -284,6 +284,7 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
 
     renderSala()
     const ws = await abrirSala(instances)
+    vi.useFakeTimers()
 
     act(() =>
       ws.simulateMessage({
@@ -292,7 +293,7 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
         serverId: 'server-abc',
       }),
     )
-    expect(await screen.findByTestId('encaminhamento-carregando')).toBeInTheDocument()
+    expect(screen.getByTestId('encaminhamento-carregando')).toBeInTheDocument()
 
     act(() =>
       ws.simulateMessage({
@@ -302,10 +303,9 @@ describe('Encaminhamento da Sala para a Partida (#45, #386)', () => {
       }),
     )
 
-    expect(await screen.findByTestId('aviso-encaminhamento')).toBeInTheDocument()
+    expect(screen.getByTestId('aviso-encaminhamento')).toBeInTheDocument()
     expect(screen.queryByTestId('encaminhamento-overlay')).not.toBeInTheDocument()
 
-    vi.useFakeTimers()
     avancarParaDepoisDoRedirect()
     expect(assignSpy).not.toHaveBeenCalled()
   })
