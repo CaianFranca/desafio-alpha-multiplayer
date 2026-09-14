@@ -24,9 +24,64 @@ export let playLancaExcecao = false
 
 export function limparToquesDeAudio(): void {
   toquesDeAudio.length = 0
+  registrosDeBlipDoChat.length = 0
   falhaDoProximoPlay = false
   playLancaExcecao = false
 }
+
+// Blip do chat da Partida (issue #389): `tocarBlipDoChat` sintetiza via
+// WebAudio (`new AudioContext()` + oscilador + GainNode) — jsdom não tem
+// AudioContext. O stub abaixo grava cada blip (ganho do GainNode no instante
+// do start + frequência) para asserções do contrato de volume (ADR-0007:
+// ganho = master * VOLUME_BASE, master padrão 1) e da coalescência de rajada.
+
+export interface BlipDeChatGravado {
+  readonly ganho: number
+  readonly frequencia: number
+}
+
+export const registrosDeBlipDoChat: BlipDeChatGravado[] = []
+
+class OsciladorDoAudioMock {
+  type = 'sine'
+  frequency = { value: 0 }
+  private ganhoConectado: GainNodeDoAudioMock | null = null
+
+  connect(alvo: GainNodeDoAudioMock): void {
+    this.ganhoConectado = alvo
+  }
+
+  start(): void {
+    registrosDeBlipDoChat.push({
+      ganho: this.ganhoConectado?.gain.value ?? 0,
+      frequencia: this.frequency.value,
+    })
+  }
+
+  stop(): void {}
+}
+
+class GainNodeDoAudioMock {
+  gain = { value: 0 }
+  connect(): void {}
+}
+
+class AudioContextMock {
+  currentTime = 0
+  destination = {}
+
+  createOscillator(): OsciladorDoAudioMock {
+    return new OsciladorDoAudioMock()
+  }
+
+  createGain(): GainNodeDoAudioMock {
+    return new GainNodeDoAudioMock()
+  }
+}
+
+// Sobrescreve o construtor global (jsdom não define AudioContext); o ponto
+// de som captura falhas e segue sem áudio se o stub não existir.
+globalThis.AudioContext = AudioContextMock as unknown as typeof AudioContext
 
 class AudioMock {
   src: string
