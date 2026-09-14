@@ -36,7 +36,7 @@ export class DebugStreamDaPartida {
    * reenvia o ack (o cliente reenvia o comando a cada reconexão do socket).
    *
    * Qualquer Jogador autenticado pode ativar (sem allowlist): risco aceito
-   * documentado no ADR-0011 — a entrega fica restrita à própria Partida.
+   * documentado no ADR-0015 — a entrega fica restrita à própria Partida.
    */
   receberComando(socket: WebSocket, partidaId: string, tipo: TipoDeComandoDeDebug): void {
     if (tipo === 'DESATIVAR_DEBUG') {

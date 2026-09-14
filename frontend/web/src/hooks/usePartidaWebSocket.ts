@@ -317,6 +317,7 @@ export function usePartidaWebSocket({
         case 'LIMPEZA_APLICADA':
         case 'PECA_SORTEADA':
         case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO':
+        case 'ATRAVESSOU_O_ESCURO':
         case 'TURNO_INICIADO':
         case 'TURNO_ENCERRADO':
         case 'POSICAO_CONFIRMADA':

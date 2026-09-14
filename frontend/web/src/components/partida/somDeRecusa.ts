@@ -87,6 +87,13 @@ export function motivoDeRecusaDoEvento(
           // Caixa chega via PARTIDA_TERMINADA com motivo. Mantida para
           // rejeições explícitas de um servidor autoritativo; não remover.
           return 'caixa_esgotada'
+        // Recusas do Chat de Partida (issue #390): a recusa vai só ao autor e
+        // SEM SOM — o painel do chat da Partida (#389) dará o retorno visual
+        // próprio.
+        case 'MENSAGEM_VAZIA':
+        case 'MENSAGEM_LONGA_DEMAIS':
+        case 'LIMITE_DE_MENSAGENS':
+          return null
         default:
           return 'rejeicao_do_servico'
       }

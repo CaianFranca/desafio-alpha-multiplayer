@@ -140,7 +140,13 @@ export type CodigoDeErroDoTabuleiro =
   | 'PARTIDA_TERMINADA'
   // Desistência (issue #288): recusa de quem não está no roster (fora do
   // roster ou já removido pela desistência); viaja pelo ERRO_DO_TABULEIRO.
-  | 'JOGADOR_NAO_NA_PARTIDA';
+  | 'JOGADOR_NAO_NA_PARTIDA'
+  // Chat de Partida (issue #390): recusas do julgamento do chat — viajam pelo
+  // ERRO_DO_TABULEIRO e vão SÓ ao autor, sem som no cliente (o painel do chat
+  // da Partida é a issue #389).
+  | 'MENSAGEM_VAZIA'
+  | 'MENSAGEM_LONGA_DEMAIS'
+  | 'LIMITE_DE_MENSAGENS';
 
 export interface ErroDoTabuleiroEvento {
   readonly type: 'ERRO_DO_TABULEIRO';

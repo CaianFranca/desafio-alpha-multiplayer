@@ -15,6 +15,8 @@ export interface Config {
   partidaPreparadaTtlSegundos: number;
   partidaTerminadaTtlSegundos: number;
   partidaNaoInicioSegundos: number;
+  partidaReconexaoEmAndamentoSegundos: number;
+  partidaChatHistoricoMaximo: number;
   lobbyRetornoCallbackUrl: string;
   lobbyDesistenciaCallbackUrl: string;
   postgres: {
@@ -48,6 +50,15 @@ const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
+const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
+/**
+ * Teto do histórico de chat por Partida (issue #388): fonte única do default
+ * 50 (faixa 1..200). `historico-chat.ts` importa este default em vez de
+ * triplicar o literal — mudar aqui propaga para parse + domínio.
+ */
+export const DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO = 50;
+export const MINIMO_PARTIDA_CHAT_HISTORICO_MAXIMO = 1;
+export const MAXIMO_PARTIDA_CHAT_HISTORICO_MAXIMO = 200;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -63,6 +74,12 @@ export const GAME_SERVERS_PREFIX = 'game-servers:disponiveis:';
 // Partida Órfã e o game-server registra/escaneia as mesmas chaves.
 export const GAME_SERVERS_PARTIDA_PREFIXO = 'game-server:partida:';
 export const GAME_SERVERS_PARTIDA_ESTADO_PREFIXO = 'game-server:partida-estado:';
+// Histórico do chat de Partida (issue #388): lista Redis própria por Partida,
+// fora do blob de estado, com mesmo ciclo/TTL das chaves da Partida. Prefixo
+// com hífen (não com ':') para não poluir o SCAN `game-server:partida:*` do
+// rearme do não-início (ver `nao-inicio.ts:212`) — mesmo padrão do prefixo
+// de estado.
+export const GAME_SERVERS_PARTIDA_CHAT_PREFIXO = 'game-server:partida-chat:';
 
 export function chaveGameServer(serverId: string): string {
   return `${GAME_SERVERS_PREFIX}${serverId}`;
@@ -133,16 +150,51 @@ function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
   return parseTtlSegundos(raw, DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS, 'PARTIDA_TERMINADA_TTL_SEGUNDOS');
 }
 
-function parsePartidaNaoInicioSegundos(raw: string | undefined): number {
-  const fallback = DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS;
+/**
+ * Parser inteiro genérico dos TTLs de partida com faixa mínima/máxima:
+ * devolve o valor quando inteiro dentro da faixa, senão o fallback (com warn
+ * só quando a env veio definida mas inválida — ausente cai silenciosamente no
+ * default, como os demais parsers deste módulo).
+ */
+function parseInteiroComLimites(
+  raw: string | undefined,
+  fallback: number,
+  label: string,
+  minimo: number,
+  maximo?: number,
+): number {
   const parsed = Number(raw ?? fallback);
-  if (Number.isInteger(parsed) && parsed >= 10 && parsed <= 600) {
+  if (Number.isInteger(parsed) && parsed >= minimo && (maximo === undefined || parsed <= maximo)) {
     return parsed;
   }
   if (raw !== undefined) {
-    console.warn(`[config] PARTIDA_NAO_INICIO_SEGUNDOS inválido "${raw}" — usando fallback ${fallback} (10..600)`);
+    const faixa = maximo === undefined ? `(>=${minimo})` : `(${minimo}..${maximo})`;
+    console.warn(`[config] ${label} inválido "${raw}" — usando fallback ${fallback} ${faixa}`);
   }
   return fallback;
+}
+
+function parsePartidaNaoInicioSegundos(raw: string | undefined): number {
+  return parseInteiroComLimites(raw, DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS, 'PARTIDA_NAO_INICIO_SEGUNDOS', 10, 600);
+}
+
+function parsePartidaReconexaoEmAndamentoSegundos(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS,
+    'PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS',
+    1,
+  );
+}
+
+function parsePartidaChatHistoricoMaximo(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO,
+    'PARTIDA_CHAT_HISTORICO_MAXIMO',
+    MINIMO_PARTIDA_CHAT_HISTORICO_MAXIMO,
+    MAXIMO_PARTIDA_CHAT_HISTORICO_MAXIMO,
+  );
 }
 
 function parseLobbyRetornoCallbackUrl(raw: string | undefined, fallback: string): string {
@@ -284,6 +336,12 @@ export function getConfig(): Config {
   const partidaNaoInicioSegundos = parsePartidaNaoInicioSegundos(
     process.env.PARTIDA_NAO_INICIO_SEGUNDOS as string | undefined,
   );
+  const partidaReconexaoEmAndamentoSegundos = parsePartidaReconexaoEmAndamentoSegundos(
+    process.env.PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS as string | undefined,
+  );
+  const partidaChatHistoricoMaximo = parsePartidaChatHistoricoMaximo(
+    process.env.PARTIDA_CHAT_HISTORICO_MAXIMO as string | undefined,
+  );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
@@ -361,6 +419,8 @@ export function getConfig(): Config {
     partidaPreparadaTtlSegundos,
     partidaTerminadaTtlSegundos,
     partidaNaoInicioSegundos,
+    partidaReconexaoEmAndamentoSegundos,
+    partidaChatHistoricoMaximo,
     lobbyRetornoCallbackUrl,
     lobbyDesistenciaCallbackUrl,
     postgres,

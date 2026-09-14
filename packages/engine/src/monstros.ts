@@ -136,11 +136,14 @@ export interface JogadorAlvoDoAtaque {
 
 // Um Monstro que disparou no gatilho, com os peões dentro do Alcance ATUAL —
 // inclusive os de Jogadores protegidos (o ataque contra eles é negado, não
-// deixa de existir).
+// deixa de existir) — e as peças do Alcance na ordem canônica de
+// calcularAlcance (issue #384: campo observacional para a coreografia do
+// ataque; sem efeito em regra, Proteção ou penalidade).
 export interface AtacanteDoAlcance {
   readonly pecaId: string;
   readonly tipo: TipoDePecaDeMonstro;
   readonly peoesNoAlcance: readonly string[];
+  readonly pecasNoAlcance: readonly string[];
 }
 
 // Estado resultante das penalidades (issue #173) para um Jogador atingido
@@ -206,12 +209,16 @@ export function resolverAtaquesCentradoNoAtuante(
   const monstros = tabuleiro.posicionadas.filter(ehPecaDeMonstroPosicionada);
   const atuaisPorMonstro = new Map<string, readonly string[]>();
   const alcancePorMonstro = new Map<string, ReadonlySet<string>>();
+  const pecasPorMonstro = new Map<string, readonly string[]>();
   const peoesNoAlcance: Record<string, readonly string[]> = {};
   for (const monstro of monstros) {
-    const alcanceSet = new Set(
-      calcularAlcance(tabuleiro, monstro.pecaId).map((peca) => peca.pecaId),
-    );
+    // Fonte única da ordem (issue #384): o calcularAlcance já computado —
+    // mapeia para pecaId sem recalcular nem reordenar.
+    const alcance = calcularAlcance(tabuleiro, monstro.pecaId);
+    const pecasDoAlcance = alcance.map((peca) => peca.pecaId);
+    const alcanceSet = new Set(pecasDoAlcance);
     alcancePorMonstro.set(monstro.pecaId, alcanceSet);
+    pecasPorMonstro.set(monstro.pecaId, pecasDoAlcance);
     const atuais = tabuleiro.peoes
       .filter((peao) => peao.pecaId !== null && alcanceSet.has(peao.pecaId))
       .map((peao) => peao.peaoId);
@@ -234,6 +241,7 @@ export function resolverAtaquesCentradoNoAtuante(
       pecaId: monstro.pecaId,
       tipo: monstro.tipo,
       peoesNoAlcance: atuais,
+      pecasNoAlcance: pecasPorMonstro.get(monstro.pecaId) ?? [],
     });
   }
 
@@ -287,11 +295,16 @@ export function resolverAtaques(
 ): ResolucaoDeAtaques {
   const monstros = tabuleiro.posicionadas.filter(ehPecaDeMonstroPosicionada);
   const atuaisPorMonstro = new Map<string, readonly string[]>();
+  const pecasPorMonstro = new Map<string, readonly string[]>();
   const peoesNoAlcance: Record<string, readonly string[]> = {};
   for (const monstro of monstros) {
-    const celulasDoAlcance = new Set(
-      calcularAlcance(tabuleiro, monstro.pecaId).map((peca) => peca.pecaId),
+    // Forma mínima da issue #384: o mesmo calcularAlcance já computado,
+    // mapeado para pecaId sem recalcular ordem.
+    const pecasDoAlcance = calcularAlcance(tabuleiro, monstro.pecaId).map(
+      (peca) => peca.pecaId,
     );
+    const celulasDoAlcance = new Set(pecasDoAlcance);
+    pecasPorMonstro.set(monstro.pecaId, pecasDoAlcance);
     // Peões na ordem canônica do roster do Tabuleiro, sem duplicatas (um
     // Peão ocupa no máximo uma Peça).
     const atuais = tabuleiro.peoes
@@ -313,6 +326,7 @@ export function resolverAtaques(
         pecaId: monstro.pecaId,
         tipo: monstro.tipo,
         peoesNoAlcance: atuais,
+        pecasNoAlcance: pecasPorMonstro.get(monstro.pecaId) ?? [],
       });
     }
   }

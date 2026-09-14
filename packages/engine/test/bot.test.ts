@@ -776,22 +776,23 @@ test('regressão do travamento da semente 7: a rodada dos 4 bots progrediu sem d
   assert.equal(foraDaVez, 0, 'bot nunca perde a vez agindo nela');
 });
 
-test('prova dinâmica da Travessia: ações de bot jamais criam pendência travada (review #350)', () => {
-  // Par dinâmico da prova do ramo travada em bot.ts: a pendência com
-  // celulaAlvo fixado nasce EXCLUSIVAMENTE em atravessarOEscuroDaPartida
-  // (partida.ts) — gerarRecebidas nasce com celulaAlvo nulo (peoes.ts) e o
-  // escolher de vaga fixa vaga e célula-alvo JUNTAS (peoes.ts) — e esta FSM
-  // nunca emite atravessar_o_escuro. Aqui, a prova dinâmica: percorrendo
-  // jogos de bots, nenhum estado alcançado contém pendência travada (vaga
-  // nula com célula-alvo fixada) e nenhuma ação enumerada é
-  // atravessar_o_escuro.
+test('prova dinâmica da Travessia: o bot atravessa em Baixa e conclui a cadeia sem rejeição (ADR-0017)', () => {
+  // Par dinâmico do ramo (d) em bot.ts: a pendência com celulaAlvo fixado
+  // nasce em atravessarOEscuroDaPartida (partida.ts) — gerarRecebidas nasce
+  // com celulaAlvo nulo (peoes.ts) e o escolher de vaga fixa vaga e
+  // célula-alvo JUNTAS (peoes.ts). Pela ADR-0017 / issue #377 (Opção B) esta
+  // FSM EMITE atravessar_o_escuro em Baixa (uma ação por vaga escura) — aqui,
+  // a prova dinâmica: percorrendo jogos de bots, toda ação enumerada segue
+  // aceita pela engine (exatidão — nenhuma desistência DADOS_INVALIDOS) e a
+  // cadeia da travessia (escolher → encaixar → mover → confirmar → encerrar)
+  // conclui sem travar.
   //
   // A mesma varredura prova, por invariante de estados alcançados, os ramos
   // `[]` do review 2 #350 que não têm teste artesanal próprio:
   // (i) com Recebimento pendente, o Peão do ator está sobre uma Peça
   //     posicionada — o 4º ramo (pecaSobOPeao === undefined) não ocorre: o
   //     Recebimento só nasce com o Peão sobre Peça (Confirmação/Primeiro
-  //     Turno), mover/permanecer são rejeitados com recebidas pendentes
+  //     Turno/Travessia), mover/permanecer são rejeitados com recebidas pendentes
   //     (peoes.ts) e o encerrar com pendências também — as recebidas nunca
   //     sobrevivem ao fim do turno;
   // (ii) com Recebida fixada, o pecaSelecionadaId é o dela — o 1º ramo (guard
@@ -805,14 +806,14 @@ test('prova dinâmica da Travessia: ações de bot jamais criam pendência trava
     while (estado.resultado === null && tentativas < 400) {
       tentativas++;
       const ator = estado.jogadorAtivoId;
-      assert.ok(
-        !estado.tabuleiro.recebidas.some(
-          (recebida) => recebida.vaga === null && recebida.celulaAlvo !== null,
-        ),
-        `pendência travada alcançada por ações de bot (semente ${semente})`,
-      );
       for (const acao of acoesValidasDaSubfase(estado, ator)) {
-        assert.notEqual(acao.tipo, 'atravessar_o_escuro');
+        // Exatidão da FSM: toda ação enumerada é aceita pela engine.
+        const tentativa = aplicarComandoDePartida(estado, acao, ator);
+        assert.equal(
+          tentativa.sucesso,
+          true,
+          `ação enumerada rejeitada: ${acao.tipo} (${tentativa.sucesso ? '' : tentativa.erro.codigo}, semente ${semente})`,
+        );
       }
       const jogador = estado.jogadores.find(
         (item) => item.jogadorId === ator,
@@ -926,6 +927,184 @@ test('via da permanência: ficar na peça de início encerra o turno direto', ()
     },
   });
   assert.equal(turno.motivo, 'encerramento');
+  assert.equal(turno.estado.jogadorAtivoId, 'bruno');
+});
+
+// ADR-0017 / issue #377 (Opção B) — o bot em Baixa atravessa o Escuro.
+// Fixture: ana em Baixa com o peão sobre a cruz em (3,0), escuridão total e
+// sem pendências — o turno abre na seleção do peão (ramo d).
+
+function estadoDaBaixaSemPendencias(): EstadoDaPartida {
+  const base = estadoDaBaixa(recebidaBaixa, []);
+  assert.equal(base.jogadorAtivoId, 'ana');
+  return {
+    ...base,
+    pecaDoInicioDoTurnoId: 'peca-controle',
+    tabuleiro: { ...base.tabuleiro, recebidas: [] },
+  };
+}
+
+test('bot em Baixa enumera atravessar_o_escuro, uma ação por vaga escura (ADR-0017)', () => {
+  let estado = estadoDaBaixaSemPendencias();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  const travessias = acoes.filter((a) => a.tipo === 'atravessar_o_escuro');
+  // Cruz em (3,0) com escuridão total no snapshot, mas a iluminação FRESCA
+  // (mesmo preamble da engine) ilumina o norte (2,0) pela abertura da
+  // própria cruz — restam 3 vagas escuras: leste (3,1), sul (4,0) e oeste
+  // toroidal (3,6). A enumeração é exata com a engine.
+  assert.equal(travessias.length, 3);
+  assert.deepEqual(
+    travessias
+      .map((a) =>
+        a.tipo === 'atravessar_o_escuro'
+          ? `${a.celula.linha},${a.celula.coluna}`
+          : null,
+      )
+      .sort(),
+    ['3,1', '3,6', '4,0'],
+  );
+  assert.ok(
+    acoes.some((a) => a.tipo === 'permanecer' && a.peaoId === 'peao-branco'),
+  );
+  // Exatidão: toda travessia enumerada é aceita pela engine.
+  for (const acao of travessias) {
+    const tentativa = aplicarComandoDePartida(estado, acao, 'ana');
+    assert.equal(tentativa.sucesso, true);
+  }
+});
+
+test('bot em Baixa com Caixa vazia não enumera atravessar_o_escuro (ADR-0018, M4)', () => {
+  let estado = estadoDaBaixaSemPendencias();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [],
+      // Evita a derrota caixa_esgotada: objetivos atingíveis posicionados
+      // (mesmo padrão de partida.test.ts "avancarVez em Baixa com caixa vazia").
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId: 'gerador-1', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 2, coluna: 3 } },
+        { pecaId: 'gerador-2', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 2 } },
+        { pecaId: 'gerador-3', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 4, coluna: 3 } },
+        { pecaId: 'sala-1', tipo: 'sala_do_diretor' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 4 } },
+        { pecaId: 'portao-1', tipo: 'portao_de_saida' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 1 } },
+      ],
+    },
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  // Caixa vazia não é erro na engine (travessia fantasma = no-op), mas o bot
+  // não desperdiça passos: sem travessia enumerada, segue por permanência.
+  assert.ok(acoes.every((a) => a.tipo !== 'atravessar_o_escuro'));
+  assert.ok(
+    acoes.some((a) => a.tipo === 'permanecer' && a.peaoId === 'peao-branco'),
+  );
+});
+
+test('bot após atravessar não enumera nova travessia nem permanência (mover compulsório, ADR-0017)', () => {
+  let estado = estadoDaBaixaSemPendencias();
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  const travessia = acoes.find((a) => a.tipo === 'atravessar_o_escuro');
+  assert.ok(travessia);
+  estado = aplicar(estado, travessia, 'ana');
+  assert.equal(estado.atravessouNoTurno, true);
+  const alvoTravessia = estado.tabuleiro.recebidas[0].celulaAlvo;
+  assert.ok(alvoTravessia !== null);
+  // Resolve a pendência travada seguindo a FSM como o driver (ramo b:
+  // escolher a borda travada → girar até conectar → encaixar).
+  let guard = 0;
+  while (estado.tabuleiro.recebidas.length > 0 && guard++ < 10) {
+    const sub = acoesValidasDaSubfase(estado, 'ana');
+    assert.ok(sub.length > 0);
+    const cmd =
+      sub.find((a) => a.tipo === 'escolher_vaga_da_peca_recebida') ??
+      sub.find((a) => a.tipo === 'posicionar_peca') ??
+      sub[0];
+    estado = aplicar(estado, cmd, 'ana');
+  }
+  assert.equal(estado.tabuleiro.recebidas.length, 0);
+  // Ramo (d) pós-travessia: mover (inclui a peça colocada na célula da
+  // travessia) e confirmar depois; sem nova travessia e sem permanência
+  // (a engine rejeitaria ambas).
+  const depois = acoesValidasDaSubfase(estado, 'ana');
+  assert.ok(depois.length >= 1);
+  assert.ok(depois.every((a) => a.tipo === 'mover_peao'));
+  assert.ok(
+    depois.some(
+      (a) =>
+        a.tipo === 'mover_peao' &&
+        a.celula.linha === alvoTravessia.linha &&
+        a.celula.coluna === alvoTravessia.coluna,
+    ),
+  );
+});
+
+test('bot em Baixa atravessa para Monstro e fecha o turno por Permanência (ADR-0017)', () => {
+  let estado = estadoDaBaixaSemPendencias();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const pre = acoesValidasDaSubfase(estado, 'ana');
+  const travessia = pre.find((a) => a.tipo === 'atravessar_o_escuro');
+  assert.ok(travessia);
+  estado = aplicar(estado, travessia, 'ana');
+  assert.equal(estado.atravessouNoTurno, true);
+  // Resolve a pendência travada (a recebida é o Monstro do topo da Caixa).
+  let guard = 0;
+  while (estado.tabuleiro.recebidas.length > 0 && guard++ < 10) {
+    const sub = acoesValidasDaSubfase(estado, 'ana');
+    assert.ok(sub.length > 0);
+    const cmd =
+      sub.find((a) => a.tipo === 'escolher_vaga_da_peca_recebida') ??
+      sub.find((a) => a.tipo === 'posicionar_peca') ??
+      sub[0];
+    estado = aplicar(estado, cmd, 'ana');
+  }
+  assert.equal(estado.tabuleiro.recebidas.length, 0);
+  assert.equal(estado.pecaDaTravessiaId ?? null, 'vulto-x');
+  // Peão segue na Peça de início (cruz em (3,0)): sem mover (o vizinho é
+  // Monstro) e sem nova travessia — a FSM enumera apenas a Permanência, que
+  // a engine aceita (exceção monstro) e fecha o turno.
+  const depois = acoesValidasDaSubfase(estado, 'ana');
+  assert.deepEqual(depois, [{ tipo: 'permanecer', peaoId: 'peao-branco' }]);
+  const permanencia = aplicarComandoDePartida(
+    estado,
+    { tipo: 'permanecer', peaoId: 'peao-branco' },
+    'ana',
+  );
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  assert.equal(permanencia.estado.jogadorAtivoId, 'bruno');
+  assert.equal(permanencia.estado.atravessouNoTurno, false);
+});
+
+test('bot conclui a cadeia da travessia até o encerramento (ADR-0017)', () => {
+  const estado = estadoDaBaixaSemPendencias();
+  const turno = executarTurnoDoBot(estado, 'ana', {
+    maxActionsPerTurn: 20,
+    sortear: <T>(opcoes: readonly T[]): T => {
+      const atravessar = opcoes.find(
+        (acao) => (acao as unknown as ComandoDePartida).tipo === 'atravessar_o_escuro',
+      );
+      return (atravessar ?? opcoes[0]) as T;
+    },
+  });
+  assert.equal(turno.motivo, 'encerramento');
+  const tipos = turno.acoesExecutadas.map((a) => a.tipo);
+  assert.ok(tipos.includes('atravessar_o_escuro'));
+  assert.ok(tipos.includes('mover_peao'));
+  assert.ok(tipos.includes('confirmar_posicao_do_peao'));
   assert.equal(turno.estado.jogadorAtivoId, 'bruno');
 });
 

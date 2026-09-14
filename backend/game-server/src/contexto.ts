@@ -7,7 +7,9 @@ export interface ContextoDoGameServer {
   readonly jwtSecret: string;
   readonly partidaPreparadaTtlSegundos: number;
   readonly partidaNaoInicioSegundos?: number;
+  readonly partidaReconexaoEmAndamentoSegundos?: number;
   readonly partidaTerminadaTtlSegundos?: number;
+  readonly partidaChatHistoricoMaximo?: number;
   readonly lobbyRetornoCallbackUrl?: string;
   readonly lobbyDesistenciaCallbackUrl?: string;
 }

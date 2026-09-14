@@ -11,6 +11,12 @@ import type { ContextoDoGameServer } from './contexto.ts';
 import { criarClienteDeRetorno, criarClienteDeDesistencia } from './retorno/cliente.ts';
 import { configurarNaoInicio, definirBroadcasterParaNaoInicio, definirRedisParaNaoInicio, rearmarNaoInicioAposRestart } from './partidas/nao-inicio.ts';
 import {
+  configurarReconexaoEmAndamento,
+  definirConversorDeExpiracao,
+  definirRedisParaReconexaoEmAndamento,
+  rearmarReconexaoEmAndamentoAposRestart,
+} from './partidas/reconexao-em-andamento.ts';
+import {
   iniciarHeartbeat,
   pararHeartbeat,
   removerRegistro,
@@ -24,6 +30,8 @@ const {
   partidaPreparadaTtlSegundos,
   partidaTerminadaTtlSegundos,
   partidaNaoInicioSegundos,
+  partidaReconexaoEmAndamentoSegundos,
+  partidaChatHistoricoMaximo,
   lobbyRetornoCallbackUrl,
   lobbyDesistenciaCallbackUrl,
   gameServerHeartbeatIntervalMs,
@@ -39,7 +47,9 @@ const contexto: ContextoDoGameServer = {
   jwtSecret,
   partidaPreparadaTtlSegundos,
   partidaNaoInicioSegundos,
+  partidaReconexaoEmAndamentoSegundos,
   partidaTerminadaTtlSegundos,
+  partidaChatHistoricoMaximo,
   lobbyRetornoCallbackUrl,
   lobbyDesistenciaCallbackUrl,
 };
@@ -61,6 +71,7 @@ const handlers = new PartidaHandlers({
   redis: redisClient,
   broadcaster,
   partidaTerminadaTtlSegundos,
+  chatHistoricoMaximo: partidaChatHistoricoMaximo,
   notificarRetorno,
   notificarDesistencia,
   debug: streamDeDebug,
@@ -68,6 +79,11 @@ const handlers = new PartidaHandlers({
 configurarNaoInicio(notificarRetorno, partidaNaoInicioSegundos);
 definirRedisParaNaoInicio(redisClient);
 definirBroadcasterParaNaoInicio(broadcaster);
+configurarReconexaoEmAndamento(partidaReconexaoEmAndamentoSegundos);
+definirRedisParaReconexaoEmAndamento(redisClient);
+definirConversorDeExpiracao((partidaId, jogadorId) =>
+  handlers.converterExpiracaoEmDesistencia(partidaId, jogadorId),
+);
 
 criarWebSocketServer(server, contexto, {
   partida: { broadcaster, handlers, debug: streamDeDebug },
@@ -118,6 +134,9 @@ async function iniciarRegistro(): Promise<void> {
   console.log(`[game-server] heartbeat iniciado interval=${gameServerHeartbeatIntervalMs}ms`);
   void rearmarNaoInicioAposRestart(redisClient).catch((err: unknown) =>
     console.warn('[game-server] falha ao rearmar não-início:', (err as Error).message),
+  );
+  void rearmarReconexaoEmAndamentoAposRestart(redisClient).catch((err: unknown) =>
+    console.warn('[game-server] falha ao rearmar reconexão em andamento:', (err as Error).message),
   );
 }
 

@@ -1,4 +1,4 @@
-# ADR-0011: Ativação Livre do Stream de Debug
+# ADR-0015: Ativação Livre do Stream de Debug
 
 Status: Aceito
 Data: 2026-09-10

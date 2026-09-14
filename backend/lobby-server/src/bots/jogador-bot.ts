@@ -42,6 +42,10 @@ import type {
   EstadoDaPartidaSnapshot,
   PartidaComandoDoCliente,
 } from '@flicker/shared';
+import {
+  avaliarGatilhoDeComentario,
+  ComentaristaDeBot,
+} from './comentarista-de-bot.ts';
 
 // --- Semente: snapshot wire → domínio da engine ---------------------------
 
@@ -643,10 +647,19 @@ export function converterComandoParaWire(
         jogadorId,
         peaoId: comando.peaoId,
       };
+    case 'atravessar_o_escuro':
+      // ADR-0017 / issue #377 (Opção B): o bot em Baixa atravessa o Escuro —
+      // o saque sob demanda acontece neste gesto.
+      return {
+        type: 'ATRAVESSAR_O_ESCURO',
+        jogadorId,
+        peaoId: comando.peaoId,
+        celula: comando.celula,
+      };
     case 'encerrar_turno':
       return { type: 'ENCERRAR_TURNO', jogadorId };
     default:
-      // O bot Random Walk nunca emite finalizar/desselecionar/atravessar;
+      // O bot Random Walk nunca emite finalizar/desselecionar;
       // falhar alto aqui impede vazar comando fora do plano.
       throw new Error(
         `Comando fora do plano do bot: ${(comando as ComandoDePartida).tipo}.`,
@@ -663,6 +676,13 @@ export interface OpcoesDoJogadorBot {
   readonly maxActionsPerTurn?: number;
   readonly intervaloDeQuiescenciaMs?: number;
   readonly timeoutDeRespostaMs?: number;
+  /**
+   * Comentários de bot no Chat de Partida (issue #390): opcional — sem ele o
+   * bot é mudo. O comentarista próprio cuida da tabela de textos, dos
+   * gatilhos e da fila; o envio sai direto no socket (wiring do
+   * `bot-runner.ts`), fora desta FSM (o chat não é Ação de jogo).
+   */
+  readonly comentarista?: ComentaristaDeBot;
 }
 
 type EsperaPelaMutacao =
@@ -680,6 +700,7 @@ export class JogadorBot {
   private readonly tetoDeAcoes: number;
   private readonly quiescenciaMs: number;
   private readonly timeoutMs: number;
+  private readonly comentarista?: ComentaristaDeBot;
   private espelho: EspelhoDoBot | null = null;
   private turnoEmAndamento = false;
   private espera:
@@ -698,6 +719,7 @@ export class JogadorBot {
       opcoes.maxActionsPerTurn ?? MAX_ACOES_POR_TURNO_DO_BOT;
     this.quiescenciaMs = opcoes.intervaloDeQuiescenciaMs ?? 250;
     this.timeoutMs = opcoes.timeoutDeRespostaMs ?? 8000;
+    this.comentarista = opcoes.comentarista;
   }
 
   // Snapshot da admissão (ou re-semeadura em reconexão): substitui o espelho
@@ -709,10 +731,18 @@ export class JogadorBot {
   }
 
   // Um evento do broadcast: dobra no espelho; TURNO_INICIADO próprio com o
-  // bot ocioso abre o turno.
+  // bot ocioso abre o turno. O Chat de Partida (issue #390) é avaliado sobre
+  // o espelho antes/depois do fold — puro, sem I/O — e o comentarista
+  // (opcional) enfileira o texto pré-feito no gatilho.
   aoReceberEvento(evento: unknown): void {
     if (this.espelho !== null) {
+      const antes = this.espelho.estado;
       this.espelho = aplicarEventoNoEspelho(this.espelho, evento);
+      if (this.comentarista !== undefined) {
+        this.comentarista.observarGatilho(
+          avaliarGatilhoDeComentario(antes, this.espelho.estado, evento, this.jogadorId),
+        );
+      }
     }
     const tipo =
       typeof evento === 'object' && evento !== null

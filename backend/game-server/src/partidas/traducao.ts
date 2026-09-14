@@ -163,7 +163,17 @@ export function traduzirEventos(
       case 'ataque_resolvido':
         saida.push({
           type: 'ATAQUE_RESOLVIDO',
-          atacantes: evento.atacantes,
+          atacantes: evento.atacantes.map((atacante) => ({
+            pecaId: atacante.pecaId,
+            tipo: atacante.tipo,
+            peoesNoAlcance: atacante.peoesNoAlcance,
+            // Issue #384: repassa as peças no alcance quando presentes; ??
+            // [] como fallback de binário antigo (mesmo padrão de
+            // `protegido ?? false`).
+            pecasNoAlcance:
+              (atacante as { pecasNoAlcance?: readonly string[] })
+                .pecasNoAlcance ?? [],
+          })),
           peoesAtingidos: evento.peoesAtingidos,
           protegidos: evento.protegidos,
           estadosAplicados: evento.estadosAplicados,
@@ -171,11 +181,11 @@ export function traduzirEventos(
         break;
       // Desistência (issues #288/#289, ADR-0013): shape 1:1 com o domínio —
       // abre o lote do comando e é o anúncio de presença da saída definitiva:
-      // a partida nunca fez broadcast de `em_reconexao` (a queda é silenciosa
-      // — só marca presença via `marcarDesconexao`, sem mensagem aos
-      // restantes), então este evento é a novidade que avisa os restantes
-      // antes da nova ordem (TURNO_INICIADO, com Passagem de Vez quando o
-      // desistente era o Jogador Ativo) e do tabuleiro (CELULAS_ILUMINADAS/
+      // a entrada na janela viaja em `JOGADOR_EM_RECONEXAO` (#295, broadcast
+      // em `em_andamento` no `close`), então este evento é a novidade que
+      // avisa os restantes da saída irreversível antes da nova ordem
+      // (TURNO_INICIADO, com Passagem de Vez quando o desistente era o
+      // Jogador Ativo) e do tabuleiro (CELULAS_ILUMINADAS/
       // LIMPEZA_APLICADA) do mesmo lote; o término por quórum mínimo (N−1)
       // chega como PARTIDA_TERMINADA no fim do lote. Sem evento wire novo de
       // roster.
@@ -184,6 +194,9 @@ export function traduzirEventos(
           type: 'DESISTENCIA_REGISTRADA',
           jogadorId: evento.jogadorId,
           peaoId: evento.peaoId,
+          // `causa` ausente = desistência implícita (compat com binários
+          // antigos): a chave só viaja quando o domínio a marca (#295).
+          ...(evento.causa === undefined ? {} : { causa: evento.causa }),
         });
         break;
       // Resgate (issue #171): shape 1:1 com o domínio — wire follow-up #173
@@ -195,6 +208,8 @@ export function traduzirEventos(
           resgatadoJogadorId: evento.resgatadoJogadorId,
           resgatadorJogadorId: evento.resgatadorJogadorId,
           resgatadorPeaoId: evento.resgatadorPeaoId,
+          emBaixaIluminacao: evento.emBaixaIluminacao,
+          sanidade: evento.sanidade,
         });
         break;
       default: {

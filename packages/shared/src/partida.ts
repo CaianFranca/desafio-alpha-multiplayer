@@ -18,6 +18,7 @@
 //   shared type:'CONFIRMAR_POSICAO_DO_PEAO' + jogadorId <-> engine tipo:'confirmar_posicao_do_peao' + ator
 //   shared type:'ENCERRAR_TURNO' + jogadorId <-> engine tipo:'encerrar_turno' + ator
 //   shared type:'DESISTIR_DA_PARTIDA' + jogadorId <-> engine tipo:'desistir_da_partida' + ator — issue #288 (rota própria: vale no próprio turno ou fora dele, só o próprio Jogador; PARTIDA_TERMINADA antes de tudo; JOGADOR_NAO_NA_PARTIDA para fora do roster/já-saído)
+//   shared type:'ENVIAR_MENSAGEM_DE_CHAT' + jogadorId — SEM par no engine (issue #390): o Chat de Partida não é Ação de jogo; o julgamento tem rota própria no game-server (recusas MENSAGEM_VAZIA/MENSAGEM_LONGA_DEMAIS/LIMITE_DE_MENSAGENS, fora das guardas de turno e de término). O literal coincide com o comando do chat da Sala (./sala.ts) — canais são servidores distintos e as sub-uniões narrow separadamente.
 //   Eventos:
 //   shared type:'TURNO_INICIADO' { jogadorId, rodada } <-> engine tipo:'turno_iniciado' { jogadorId, rodada }
 //   shared type:'TURNO_ENCERRADO' { jogadorId } <-> engine tipo:'turno_encerrado' { jogadorId }
@@ -31,7 +32,9 @@
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #289/ADR-0013, consumida na #288)
-//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez)
+//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId, causa? } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez); causa #295 ('desistencia'|'expiracao', ausente = desistencia implícita)
+//   shared type:'JOGADOR_EM_RECONEXAO' { jogadorId } — sem par no engine (#295, spec #292 história 2): anúncio de presença da entrada na janela, broadcast só em `em_andamento` (a `preparada` nunca emite)
+//   shared type:'JOGADOR_RECONECTADO' { jogadorId } — sem par no engine (#295): anúncio de presença da volta dentro da janela, broadcast só na re-admissão em `em_andamento` (exclui as admissões iniciais)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
 //   motivo da derrota viaja em campo opcional separado (MotivoDeDerrotaWire,
 //   sync com DesfechoDaPartida — engine/src/partida.ts:156-161; 'desistencia'
@@ -150,12 +153,11 @@ export interface ConfirmarPosicaoDoPeaoComando {
   readonly peaoId: PeaoId;
 }
 
-// Atravessar o Escuro (issue #264 / spec #272): o comando wire do canal de
-// Partida — o `jogadorId` viaja aqui (forma do ST-11); o contrato do Peão em
-// si (sem `jogadorId`) vive em ./peoes.ts (AtravessarOEscuroComando).
-// @deprecated ADR-0013: fluxo canônico em Baixa é puxar no início do turno
-// (avancarVez com gerarRecebidas filtrando vagas escuras). Mantido como legado
-// funcional até remoção em issue futura.
+// Atravessar o Escuro (issue #264 / spec #272, fluxo canônico sob demanda em
+// Baixa pela ADR-0017 / issue #377 — Opção B): o comando wire do canal de
+// Partida — o `jogadorId` viaja aqui (forma do ST-11). O saque de 1 peça
+// acontece neste gesto (após a escolha da célula escura), seguido de
+// posicionar → mover compulsório → confirmar.
 export interface AtravessarOEscuroPartidaComando {
   readonly type: 'ATRAVESSAR_O_ESCURO';
   readonly jogadorId: string;
@@ -175,6 +177,17 @@ export interface EncerrarTurnoComando {
 export interface DesistirDaPartidaComando {
   readonly type: 'DESISTIR_DA_PARTIDA';
   readonly jogadorId: string;
+}
+
+// Chat de Partida (issue #390): comando wire do canal de Partida com rota
+// própria de julgamento no game-server — NÃO é Ação de jogo (sem par no
+// engine, fora de `mapearComandoDaPartida`). O `jogadorId` segue o padrão
+// vestigial (#155): obrigatório pela guarda de forma, o ator é sempre a
+// sessão autenticada do socket.
+export interface EnviarMensagemDeChatDaPartidaComando {
+  readonly type: 'ENVIAR_MENSAGEM_DE_CHAT';
+  readonly jogadorId: string;
+  readonly conteudo: string;
 }
 
 // Controle do stream de debug (issue #340, "Modo Desenvolvedor"): interceptados
@@ -204,12 +217,13 @@ export type PartidaComandoDoCliente =
   | AtravessarOEscuroPartidaComando
   | EncerrarTurnoComando
   | DesistirDaPartidaComando
+  | EnviarMensagemDeChatDaPartidaComando
   | AtivarDebugDaPartidaComando
   | DesativarDebugDaPartidaComando;
 
-// --- Eventos servidor → cliente (13: Turno/posição/iluminação/limpeza,
+// --- Eventos servidor → cliente (16: Turno/posição/iluminação/limpeza,
 // sorteio+vaga da #138, iniciada+estado, término da #179, ataque #172/#173,
-// resgate #171, desistência #288) ---
+// resgate #171, desistência #288, presença em reconexão #295, chat #390) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';
@@ -358,6 +372,13 @@ export interface EstadoDaPartidaSnapshot {
   readonly rodada: number;
   readonly pecaDoInicioDoTurnoId: PecaId | null;
   readonly posicaoConfirmada: boolean;
+  // Fase da Travessia do Escuro (ADR-0017 / issue #377): pelo contrário da
+  // posição confirmada, a readmissão NÃO re-aprende por deltas (o servidor só
+  // re-entrega ESTADO_DA_PARTIDA) — sem os campos, recarregar/reconectar no
+  // meio do turno órfã a fase (marcadores voltam e o auto-mover não dispara).
+  // Opcional/defensivo: snapshots persistidos por binário anterior omitem.
+  readonly atravessouNoTurno?: boolean;
+  readonly pecaDaTravessiaId?: string | null;
   readonly celulasIluminadas: readonly Celula[];
   readonly estado: EstadoDaPartidaWire;
   // Término (issue #179): não nulo quando e somente quando estado === 'terminada' —
@@ -380,6 +401,12 @@ export interface EstadoDaPartidaSnapshot {
   // binário anterior omitem o campo — o cliente normaliza ausente para null
   // (cronômetro sem origem) e a partida `preparada` traz null.
   readonly iniciadaEm?: number | null;
+  // Histórico do chat de Partida (issue #388): as últimas mensagens aprovadas
+  // (humanas + bot, limitado com aparo no topo — default 50) em ordem
+  // oldest→newest, fora do blob de estado. Opcional/defensivo como
+  // `iniciadaEm?`/`motivo?`: ausente quando o chamador sem histórico não o
+  // fornece e o cliente normaliza ausente para [].
+  readonly historicoDeChat?: readonly MensagemDeChatDaPartidaEvento[];
 }
 
 export interface PartidaIniciadaEvento {
@@ -424,11 +451,15 @@ export interface PartidaTerminadaWireEvento {
 }
 
 // Um Monstro que disparou no gatilho, com os peões dentro do Alcance atual
-// (inclusive os de Jogadores protegidos — o ataque contra eles é negado).
+// (inclusive os de Jogadores protegidos — o ataque contra eles é negado) e
+// as peças do Alcance na ordem canônica do engine (issue #384: campo
+// observacional para a coreografia do ataque; nenhum cliente julga por ele).
+// Opcional para compat: payload de servidor antigo omite o campo.
 export interface AtacanteNoAlcance {
   readonly pecaId: PecaId;
   readonly tipo: 'vulto' | 'espectro';
   readonly peoesNoAlcance: readonly PeaoId[];
+  readonly pecasNoAlcance?: readonly PecaId[];
 }
 
 // Estado resultante das penalidades (issue #173) para um Jogador atingido
@@ -452,7 +483,9 @@ export interface EstadoResultanteNoAtaque {
 // peça nunca disparam. Shape 1:1 com o evento de domínio;
 // estadosAplicados (issue #173) carrega o estado RESULTANTE das penalidades
 // (Baixa Iluminação, sanidade, Amedrontado) por Jogador mudado — o eco do
-// feedback aos clientes, não os efeitos em si.
+// feedback aos clientes, não os efeitos em si. Cada atacante carrega ainda
+// `pecasNoAlcance` (issue #384, opcional para aceitar payload de servidor
+// antigo sem o campo).
 export interface AtaqueResolvidoWireEvento {
   readonly type: 'ATAQUE_RESOLVIDO';
   readonly atacantes: readonly AtacanteNoAlcance[];
@@ -465,13 +498,16 @@ export interface AtaqueResolvidoWireEvento {
 }
 
 // Resgate (issue #171): chegada do aliado por conexão à peça do afetado.
-// Shape 1:1 com ResgateRealizadoEvento do domínio.
+// Carrega o estado resultante do resgatado (emBaixaIluminacao/sanidade), pois
+// a cura pode ser parcial — o cliente aplica exatamente, sem adivinhar.
 export interface ResgateRealizadoWireEvento {
   readonly type: 'RESGATE_REALIZADO';
   readonly pecaId: PecaId;
   readonly resgatadoJogadorId: string;
   readonly resgatadorJogadorId: string;
   readonly resgatadorPeaoId: PeaoId;
+  readonly emBaixaIluminacao: boolean;
+  readonly sanidade: number;
 }
 
 // Desistência (issue #288): eco do domínio — o Jogador saiu da Partida em
@@ -479,10 +515,51 @@ export interface ResgateRealizadoWireEvento {
 // do comando e serve de aviso aos restantes (com a nova ordem via
 // TURNO_INICIADO e o tabuleiro via CELULAS_ILUMINADAS/LIMPEZA_APLICADA do
 // mesmo lote). Shape 1:1 com DesistenciaRegistradaEvento do domínio.
+// Causa (issue #295): ausente = 'desistencia' implícita (compat com binários
+// antigos); 'expiracao' = conversão automática da janela de reconexão.
+// Alias local por pacote: mesmo shape do `CausaDesistencia` do engine — sync
+// manual entre os dois (o shared não pode depender do engine).
+export type CausaDesistencia = 'desistencia' | 'expiracao';
+
 export interface DesistenciaRegistradaWireEvento {
   readonly type: 'DESISTENCIA_REGISTRADA';
   readonly jogadorId: string;
   readonly peaoId: PeaoId;
+  readonly causa?: CausaDesistencia;
+}
+
+// Presença em reconexão (issue #295, spec #292 história 2): a entrada na
+// janela e a volta dentro dela são anunciadas aos restantes para que o
+// cliente projete o indicador "reconectando" (#294) — sem par no engine (o
+// domínio não conhece presença de conexão) e sem espelho no snapshot (a
+// #294 não deriva o indicador dali). Broadcast só em `em_andamento`: a
+// `preparada` nunca emite (não tem janela, só não-início).
+export interface JogadorEmReconexaoWireEvento {
+  readonly type: 'JOGADOR_EM_RECONEXAO';
+  readonly jogadorId: string;
+}
+
+// Volta dentro da janela (#295): broadcast na re-admissão que encontra a
+// partida em `em_andamento` com presença efetivamente restaurada
+// (`transicao.mudou && !iniciou`) — exclui as N admissões iniciais que viram
+// `em_andamento`, que anunciam PARTIDA_INICIADA em vez disto.
+export interface JogadorReconectadoWireEvento {
+  readonly type: 'JOGADOR_RECONECTADO';
+  readonly jogadorId: string;
+}
+
+// Mensagem de chat aprovada (issue #390): broadcast serial ao roster vigente
+// do canal de Partida — o servidor gera `enviadoEm` (ISO 8601, mesma ordem
+// serial dos eventos de jogo, cadeia por Partida). `apelido` é resolvido pelo
+// servidor (Conexão do JWT da admissão, fallback ao roster da PartidaPreparada)
+// e `jogadorId` é a Sessão do ator — bots comentam pelo MESMO evento com a
+// identidade do roster (apelido e cor do peão) e não leem o chat humano.
+export interface MensagemDeChatDaPartidaEvento {
+  readonly type: 'MENSAGEM_DE_CHAT_DA_PARTIDA';
+  readonly jogadorId: string;
+  readonly apelido: string;
+  readonly conteudo: string;
+  readonly enviadoEm: string;
 }
 
 export type PartidaEventoDoServidor =
@@ -498,7 +575,10 @@ export type PartidaEventoDoServidor =
   | PartidaTerminadaWireEvento
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
-  | DesistenciaRegistradaWireEvento;
+  | DesistenciaRegistradaWireEvento
+  | JogadorEmReconexaoWireEvento
+  | JogadorReconectadoWireEvento
+  | MensagemDeChatDaPartidaEvento;
 
 // --- Erro ---
 // Alias documentativo — os 5 códigos de turno vivem em CodigoDeErroDoTabuleiro (./tabuleiro.ts:116-120)

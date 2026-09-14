@@ -57,8 +57,12 @@ Vitória, derrota ou não-início declarados no término ou cancelamento da Part
 _Avoid_: desfecho, fim de jogo
 
 **Desistência**:
-Ato irreversível de um Jogador em Partida em andamento; só o próprio Jogador desiste, no próprio turno ou fora dele. Remove o peão (liberando a célula) e a vez da ordem — com Passagem de Vez imediata se era o Jogador Ativo —, recalcula a Iluminação com os restantes e aplica a Limpeza no ato; a vitória é re-avaliada com os N−1 peões no Portão (+ 3 Geradores + Cartão) e, quando resta 1, a Partida termina em derrota. Queda de conexão sem desistência continua voltável, sem expiração.
+Ato irreversível de um Jogador em Partida em andamento; só o próprio Jogador desiste, no próprio turno ou fora dele. Remove o peão (liberando a célula) e a vez da ordem — com Passagem de Vez imediata se era o Jogador Ativo —, recalcula a Iluminação com os restantes e aplica a Limpeza no ato; a vitória é re-avaliada com os N−1 peões no Portão (+ 3 Geradores + Cartão) e, quando resta 1, a Partida termina em derrota. Queda de conexão sem desistência é voltável dentro da janela de reconexão; ao expirar em Partida em andamento, converte-se automaticamente em desistência com causa `expiracao` e efeito idêntico (causa `desistencia` no ato explícito).
 _Avoid_: abandono, saída da partida
+
+**Reconexão da Partida**:
+Janela por partida e Jogador em Partida em andamento, com TTL configurável (`PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS`, padrão 60s) persistido no Redis e timer em memória que executa a conversão; quem volta dentro reassume sem perda (snapshot + turno, como hoje); quem expira é convertido automaticamente em desistência com causa `expiracao`. Só existe em `em_andamento` — a `preparada` segue apenas com o não-início (10s/90s). Entrada e volta são anunciadas aos restantes no canal de Partida (`JOGADOR_EM_RECONEXAO` ao marcar + armar, `JOGADOR_RECONECTADO` na re-admissão efetiva fora da virada inicial); a desistência explícita viaja com causa `desistencia`, e o callback ao lobby carrega a causa de cada origem sem mudar o detach.
+_Avoid_: reconexão da sala, timeout
 
 **Partida Não Iniciada**:
 Cancelamento de Partida preparada sem completar a admissão dos 2 a 4 Jogadores; com todos desconectados libera em 10s, com admissão parcial libera no teto de 90s; encerra conexões com PARTIDA_NAO_INICIADA e avisa o lobby para reabrir a Sala.
@@ -229,7 +233,7 @@ _Avoid_: confirmação, travar
 ## Peões e Conexões
 
 **Peão**:
-Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até N (o número de Jogadores da Partida, de 2 a 4), e a peça com jogador precisando de Resgate, que aceita um peão a mais enquanto o afetado permanecer nela; move-se entre peças conectadas; não é uma Peça.
+Elemento simbólico com cor que marca a posição de um participante sobre uma peça; uma peça aceita no máximo um peão, exceto o Portão de Saída, que aceita até N (o número de Jogadores da Partida, de 2 a 4), e a peça com jogador precisando de Resgate, que aceita um peão a mais enquanto houver afetado nela; move-se entre peças conectadas; não é uma Peça.
 _Avoid_: pawn, token, boneco
 
 **Conexão**:
@@ -237,7 +241,7 @@ Relação entre duas peças vizinhas cujas bordas abertas estão voltadas uma pa
 _Avoid_: ligação, elo
 
 **Recebimento**:
-Peças sorteadas da Caixa que o Jogador recebe, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; o Jogador escolhe a vaga de cada peça sorteada e a encaixa conectada à peça sob o peão, uma por uma; quando a Caixa não tem peças suficientes, recebe as restantes; ocorre no início da sequência do peão.
+Peças sorteadas da Caixa que o Jogador recebe, uma para cada borda aberta da peça sob o peão cuja célula vizinha correspondente está vazia; o Jogador escolhe a vaga de cada peça sorteada e a encaixa conectada à peça sob o peão, uma por uma; quando a Caixa não tem peças suficientes, recebe as restantes; ocorre no início da sequência do peão; com a peça puxada na bandeja, pontinhos brancos indicam as vagas onde ela pode ser colocada (somem ao posicionar).
 _Avoid_: ganho
 
 **Movimentação**:
@@ -245,8 +249,12 @@ Ação de deslocar o peão para uma peça vizinha conectada; encerra a sequênci
 _Avoid_: mover, andar
 
 **Permanência**:
-Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento.
+Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento; vedada após atravessar o Escuro no turno (o mover para a peça colocada é compulsório).
 _Avoid_: ficar, pular
+
+**Travessia do Escuro** (ADR-0017, ADR-0018):
+Jogada exclusiva de Baixa Iluminação em que o peão alcança uma célula escura vazia vizinha conectada à peça sob ele; saca 1 peça sob demanda (sem sorteio no início do turno) com a célula-alvo pré-fixada, seguida de encaixe e movimento compulsório para a peça colocada, com fechamento automático (mover → confirmar → encerrar, sem clique); uma por turno e somente da Peça do início do turno ("uma casa por turno" — portar a outra peça iluminada não reabre a vaga; voltar à origem mantém a vaga) — inclusive quando a peça sacada é Monstro: o Monstro não aceita peão, o mover compulsório é impossível e o turno travado fecha por Permanência. Aposta às cegas (a célula é escolhida antes de conhecer a peça); pouso obrigatório guardado na Confirmação (confirmar sem pisar na peça é rejeitado; com Monstro, só Permanência fecha); o Monstro da aposta ataca antes de ser varrido pela Limpeza do próprio fechamento; cadeia retomada sozinha pós-readmissão, com botão Confirmar de segurança se o auto falhar.
+_Avoid_: explorar o escuro, puxar no escuro
 
 **Desseleção**:
 Ato de encerrar a seleção vigente do peão via comando autoritativo ao servidor, que confirma com evento idempotente; sem ela a seleção obsoleta segue suprimindo o posicionamento da Peça Inicial.
@@ -275,7 +283,7 @@ Turno de abertura de cada Jogador, em que ele posiciona a própria Peça Inicial
 _Avoid_: turno inicial, primeira rodada
 
 **Confirmação de Posição**:
-Declaração que trava o peão na peça em que terminou e gera o Recebimento quando houve mudança de peça.
+Declaração que trava o peão na peça em que terminou, gera o Recebimento quando houve mudança de peça e compromete o Resgate quando o confirmador co-ocupa peça com afetado.
 _Avoid_: confirmação de movimento, travar posição
 
 **Encerramento do Turno**:
@@ -289,7 +297,7 @@ Peça de Monstro que ameaça os jogadores durante a partida; tipos: O Vulto e O 
 _Avoid_: criatura, inimigo
 
 **Peça de Monstro**:
-Categoria de peça com quatro bordas abertas e sem janela de Manipulação, que não aceita peão e retransmite o Alcance como qualquer peça; a Composição inclui seis de cada tipo.
+Categoria de peça com quatro bordas abertas e sem janela de Manipulação, que não aceita peão e retransmite o Alcance como qualquer peça; a Composição inclui seis de cada tipo; com modelo 3D sobre a base inalterada (vulto/espectro) — o clique no modelo equivale ao clique na peça.
 _Avoid_: peça de criatura
 
 **Alcance**:
@@ -309,15 +317,15 @@ Monstro cujo Alcance cobre as peças adjacentes conectadas e faz quem é atingid
 _Avoid_: fantasma, espírito
 
 **Baixa Iluminação**:
-Estado de um Jogador imposto pelo ataque do Vulto; seu peão ilumina apenas a própria célula e seu Recebimento fica reduzido a uma peça; encerrado apenas pelo Resgate.
+Estado de um Jogador imposto pelo ataque do Vulto; seu peão ilumina apenas a própria célula e seu Recebimento fica reduzido a uma peça, sacada somente sob demanda na Travessia do Escuro (sem sorteio no início do turno); no turno em Baixa o jogador pode mover por caminho iluminado sem saque (ida-e-volta livre: voltar à Peça do início do turno reabre a Permanência e as vagas escuras), atravessar o escuro (uma casa por turno — só da Peça de início do turno, com mover compulsório e fechamento automático) ou permanecer; a fase viaja no snapshot (atravessouNoTurno/pecaDaTravessiaId) para a re-admissão não órfã a entrega; encerrado apenas pelo Resgate.
 _Avoid_: escuridão, luz baixa
 
 **Amedrontado**:
-Estado de um Jogador com a Sanidade em zero; não realiza ações no seu turno; encerrado pelo Resgate, que restaura a Sanidade a 1 ponto.
+Estado de um Jogador com a Sanidade em zero; não realiza ações no seu turno; encerrado pelo Resgate, que restaura a Sanidade a 2 pontos (teto 3).
 _Avoid_: apavorado, em pânico
 
 **Resgate**:
-Chegada do peão de um aliado, por Conexão, à peça de um jogador em Baixa Iluminação ou Amedrontado; remove os estados do afetado e, no caso do amedrontado, restaura a Sanidade a 1 ponto; a peça tolera um peão a mais enquanto houver afetado e fica com a Permanência bloqueada até um peão sair.
+Chegada do peão de um aliado, por Conexão, à peça de um jogador em Baixa Iluminação ou Amedrontado, seguida de Confirmação de Posição do salvador na mesma peça; só a confirmação remove os estados do afetado — o Amedrontado sai sempre (Sanidade a 2 pontos, teto 3), mas a Baixa Iluminação só apaga com o salvador de vela acesa (fora da Baixa); abandonar sem confirmar não salva; a peça tolera um peão a mais enquanto houver afetado e fica com a Permanência bloqueada até um peão sair.
 _Avoid_: salvamento, cura
 
 ## Objetivos da Partida
@@ -356,5 +364,5 @@ _Avoid_: tile, bloco
 ## Depuração
 
 **Modo Desenvolvedor**:
-Ferramenta escondida de diagnóstico do frontend, ativada por 5 cliques em até 3s no logo Ginga do footer; sobre um painel (PainelDeDepuração) que exibe em tempo real os logs capturados desde o boot (console, erros, boundaries, tráfego WS e linhas espelhadas do lobby-server/game-server quando o stream de debug está ligado), com marcadores de fase (login, registro, sala, turno por jogador) como fundo histórico das linhas. O modo sobrevive a reload e pode ser desligado pelo botão Desligar; esconder o painel não interrompe a captura nem o stream. Qualquer Jogador autenticado pode ativar o stream e recebe apenas linhas do próprio escopo (própria Sala no lobby, própria Partida no game-server) — risco aceito (ADR-0011).
+Ferramenta escondida de diagnóstico do frontend, ativada por 5 cliques em até 3s no logo Ginga do footer; sobre um painel (PainelDeDepuração) que exibe em tempo real os logs capturados desde o boot (console, erros, boundaries, tráfego WS e linhas espelhadas do lobby-server/game-server quando o stream de debug está ligado), com marcadores de fase (login, registro, sala, turno por jogador) como fundo histórico das linhas. O modo sobrevive a reload e pode ser desligado pelo botão Desligar; esconder o painel não interrompe a captura nem o stream. Qualquer Jogador autenticado pode ativar o stream e recebe apenas linhas do próprio escopo (própria Sala no lobby, própria Partida no game-server) — risco aceito (ADR-0015).
 _Avoid_: modo debug, console escondido, painel de logs

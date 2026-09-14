@@ -18,8 +18,9 @@
 
 import { randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
-import type { EstadoDaPartidaSnapshot } from '@flicker/shared';
+import type { EstadoDaPartidaSnapshot, PartidaComandoDoCliente } from '@flicker/shared';
 import { JogadorBot } from './jogador-bot.ts';
+import { ComentaristaDeBot } from './comentarista-de-bot.ts';
 import { escolherApelidoDeBot } from './nomes-de-bots.ts';
 
 const MAX_TENTATIVAS_REGISTRO = 6;
@@ -454,11 +455,32 @@ function conectarPartida(args: {
   log(`conectando ao game-server host=${wsBase} server=${serverId} partida=${partidaId} token=${mascararToken(accessToken)}`);
   const ws = new WebSocket(wsUrl);
 
+  // Comentários de bot no Chat de Partida (issue #390): o bot SÓ envia —
+  // reutiliza o comando ENVIAR_MENSAGEM_DE_CHAT do canal da Partida com a
+  // identidade do bot no roster (o servidor anexa apelido/cor do peão), SEM
+  // converterComandoParaWire (o chat não é Ação de jogo) e fora da FSM do
+  // JogadorBot. O comentarista observa os gatilhos via fold do espelho
+  // (jogador-bot.ts) e fila os textos pré-feitos com cooldown próprio.
+  const comentarista = new ComentaristaDeBot({
+    enviar: (conteudo) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        const comando = {
+          type: 'ENVIAR_MENSAGEM_DE_CHAT',
+          jogadorId,
+          conteudo,
+        } satisfies PartidaComandoDoCliente;
+        ws.send(JSON.stringify(comando));
+      }
+    },
+    log: (...a) => log('[chat-bot]', ...a),
+  });
+
   const bot = new JogadorBot({
     jogadorId,
     enviar: (cmd) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd));
     },
+    comentarista,
     log: (...a) => log('[jogo]', ...a),
   });
 
@@ -503,6 +525,13 @@ function conectarPartida(args: {
       }
       return;
     }
+    // Chat de Partida (issue #390): o bot NÃO lê o chat humano — o evento é
+    // ignorado antes do espelho e da FSM (o fold atual já o ignora, mas a
+    // guarda aqui torna o "bot não lê" explícito e pula a sinalização de
+    // atividade).
+    if (t === 'MENSAGEM_DE_CHAT_DA_PARTIDA') {
+      return;
+    }
     bot.aoReceberEvento(msg);
     if (t === 'TURNO_INICIADO') log(`TURNO_INICIADO`);
     if (t === 'PARTIDA_TERMINADA') log(`PARTIDA_TERMINADA`);
@@ -511,6 +540,9 @@ function conectarPartida(args: {
   ws.on('error', (err) => { log(`WS game error: ${err.message}`); });
   ws.on('close', (code, reason) => {
     log(`WS game close code=${code} reason=${reason.toString().slice(0, 80)}`);
+    // Sem fila pendente após o close (issue #390): o comentarista para de
+    // drenar — o socket já não entrega comentários.
+    comentarista.encerrar();
     onClose();
   });
 
