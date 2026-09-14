@@ -50,7 +50,7 @@ export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDe
       // Dialog sem nome acessível proposital: o anúncio vai só na região status
       // "Carregando partida" para não duplicar o live-region (spec #386).
       data-testid="encaminhamento-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background p-6"
     >
       <div
         data-testid="encaminhamento-carregando"
