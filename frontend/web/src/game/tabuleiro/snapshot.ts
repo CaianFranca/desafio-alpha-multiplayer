@@ -155,8 +155,7 @@ export function aplicarSnapshot(
     const emBaixaIluminacao = (j as { emBaixaIluminacao?: boolean }).emBaixaIluminacao ?? false
     const amedrontado = (j as { amedrontado?: boolean }).amedrontado ?? sanidade === 0
     const protegido = (j as { protegido?: boolean }).protegido ?? false
-    const presencaRaw = (j as { presenca?: PresencaNaPartidaWire }).presenca
-    const presenca: PresencaNaPartidaWire = presencaRaw ?? estado.jogadorPorId[j.jogadorId]?.presenca ?? 'conectado'
+    const presenca: PresencaNaPartidaWire = (j as { presenca?: PresencaNaPartidaWire }).presenca ?? 'conectado'
     jogadorPorId[j.jogadorId] = {
       apelido: j.apelido,
       cor: j.cor,

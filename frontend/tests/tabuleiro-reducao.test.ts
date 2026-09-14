@@ -17,7 +17,7 @@ import type {
   PecaPosicionadaNoSnapshot,
   TabuleiroEventoDoServidor,
 } from '@flicker/shared'
-import { jogador } from './helpers/rosterN'
+import { jogador, snapshotComJogadores } from './helpers/rosterN'
 
 // Pendência sorteada (#138) compartilhada nos cenários do ciclo.
 function pendenciaSorteada(
@@ -1789,5 +1789,31 @@ describe('DESISTENCIA_REGISTRADA — queda óbvia otimista (issue #290, review P
     // Tabuleiro resultante: hospedeira (otimista) + limpeza do lote aplicadas.
     expect(depois.posicionadas).toEqual([])
     expect(depois.celulasIluminadas).toEqual([{ linha: 3, coluna: 3 }])
+  })
+})
+
+describe('presença em reconexão — snapshot é autoridade (issue #294, review PR #395)', () => {
+  it('snapshot sem presenca reseta em_reconexao para conectado (volta-na-janela sem resíduo)', () => {
+    const base = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      snapshotComJogadores([
+        jogador('j1', 'A', 'branco', 1),
+        jogador('j2', 'B', 'vermelho', 2),
+      ]),
+    )
+    const emReconexao = reduzirEvento(base, {
+      type: 'JOGADOR_EM_RECONEXAO',
+      jogadorId: 'j2',
+    })
+    expect(emReconexao.jogadorPorId['j2']?.presenca).toBe('em_reconexao')
+    // Servidor omite presenca no snapshot: autoridade reseta, sem fantasma.
+    const reconciliado = aplicarSnapshot(
+      emReconexao,
+      snapshotComJogadores([
+        jogador('j1', 'A', 'branco', 1),
+        jogador('j2', 'B', 'vermelho', 2),
+      ]),
+    )
+    expect(reconciliado.jogadorPorId['j2']?.presenca).toBe('conectado')
   })
 })
