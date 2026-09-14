@@ -42,6 +42,7 @@ import type {
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 import { refreshSession } from '../api/auth'
+import { agendarReconexaoComSlide } from './agendarReconexaoComSlide'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -349,28 +350,12 @@ export function usePartidaWebSocket({
         onPartidaNaoIniciadaRef.current?.()
         return
       }
-      // Reconexão simples após 1s se ainda montado. Antes de reconectar,
-      // renova a Sessão (issue #376, review PR #383): o access token pode ter
-      // expirado nos 15 min de Partida ociosa e o upgrade seguinte cairia em
-      // 401. O refresh começa já (aproveita a janela de 1s), mas a reconexão
-      // aguarda o assentamento — sem isso, refresh lento >1s corre contra o
-      // timer. Transitório nunca trava a reconexão (melhor esforço).
-      const slide = refreshSession()
-      if (reconnectTimerRef.current === null) {
-        reconnectTimerRef.current = window.setTimeout(() => {
-          reconnectTimerRef.current = null
-          void (async () => {
-            try {
-              await slide
-            } catch {
-              // melhor esforço: mesmo com refresh falho, tenta reconectar.
-            }
-            if (!montadoRef.current) return
-            // eslint-disable-next-line react-hooks/immutability -- reconexão recursiva segura em runtime
-            conectar()
-          })()
-        }, 1000)
-      }
+      // Reconexão simples após 1s se ainda montado, com a Sessão renovada
+      // antes (issue #376, review PR #383): gate compartilhado em
+      // `agendarReconexaoComSlide` — o refresh começa já (aproveita a janela
+      // de 1s) e a reconexão aguarda o assentamento.
+      // eslint-disable-next-line react-hooks/immutability -- reconexão recursiva segura em runtime
+      agendarReconexaoComSlide(reconnectTimerRef, montadoRef, refreshSession(), conectar)
     }
 
     ws.onerror = () => {

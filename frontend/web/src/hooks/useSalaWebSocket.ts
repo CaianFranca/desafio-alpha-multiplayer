@@ -10,6 +10,7 @@ import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
 import { baseDoApp } from '../api/basePath'
 import { refreshSession } from '../api/auth'
+import { agendarReconexaoComSlide } from './agendarReconexaoComSlide'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -341,27 +342,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       if (!montadoRef.current) return
       setConectado(false)
       wsRef.current = null
-      // Reconexão simples após 1s se ainda montado. Antes de reconectar,
-      // renova a Sessão (issue #376, review PR #383): o access token pode ter
-      // expirado na Sala ociosa e o upgrade seguinte cairia em 4401. O
-      // refresh começa já, mas a reconexão aguarda o assentamento (simetria
-      // com usePartidaWebSocket) — transitório nunca trava a reconexão.
-      const slide = refreshSession()
-      if (reconnectTimerRef.current === null) {
-        reconnectTimerRef.current = window.setTimeout(() => {
-          reconnectTimerRef.current = null
-          void (async () => {
-            try {
-              await slide
-            } catch {
-              // melhor esforço: mesmo com refresh falho, tenta reconectar.
-            }
-            if (!montadoRef.current) return
-            // eslint-disable-next-line react-hooks/immutability -- chamada recursiva após declaração, segura em runtime
-            conectar()
-          })()
-        }, 1000)
-      }
+      // Reconexão simples após 1s se ainda montado, com a Sessão renovada
+      // antes (issue #376, review PR #383): gate compartilhado em
+      // `agendarReconexaoComSlide` (simetria com usePartidaWebSocket).
+      // eslint-disable-next-line react-hooks/immutability -- chamada recursiva após declaração, segura em runtime
+      agendarReconexaoComSlide(reconnectTimerRef, montadoRef, refreshSession(), conectar)
     }
 
     ws.onerror = () => {

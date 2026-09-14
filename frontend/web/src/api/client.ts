@@ -60,12 +60,13 @@ export const TEMPO_LIMITE_REFRESH_MS = 8000
 export const TEMPO_LIMITE_SONDA_SESSAO_MS = 5000
 
 /**
- * Sinal com teto (ressalva PR #383): usa `AbortSignal.timeout` quando
- * disponível; em ambientes antigos, cai para `AbortController` + `setTimeout`
- * manual — nunca retorna `undefined` em silêncio deixando o fetch sem teto.
- * O chamador deve invocar `limpar` em `finally` para não deixar timer órfão.
+ * Timeout abortável (follow-up PR #383, F3): expira o `sinal` após `ms` via
+ * `AbortSignal.timeout` quando disponível, senão via `AbortController` +
+ * `setTimeout` manual — nunca retorna `undefined` em silêncio deixando o
+ * fetch sem teto. O chamador deve invocar `limpar` em `finally` para
+ * liberar o timer e não deixar timeout órfão.
  */
-export function criarSinalComTimeout(ms: number): { sinal: AbortSignal | undefined; limpar: () => void } {
+export function criarTimeoutAbortavel(ms: number): { sinal: AbortSignal | undefined; limpar: () => void } {
   try {
     if (typeof AbortSignal.timeout === 'function') return { sinal: AbortSignal.timeout(ms), limpar: () => {} }
   } catch {
@@ -99,7 +100,7 @@ export function criarSinalComTimeout(ms: number): { sinal: AbortSignal | undefin
 }
 
 async function executarRefreshBruto(): Promise<ResultadoRefresh> {
-  const { sinal, limpar } = criarSinalComTimeout(TEMPO_LIMITE_REFRESH_MS)
+  const { sinal, limpar } = criarTimeoutAbortavel(TEMPO_LIMITE_REFRESH_MS)
   try {
     // Subpath (VITE_BASE_PATH): o refresh acompanha o prefixo do app.
     const response = await fetch(comBase('/api/auth/refresh'), {
@@ -158,14 +159,19 @@ export function __redefinirRefreshEmVooParaTestes(): void {
 }
 
 /**
- * Calibragem do slide proativo (issue #376): o intervalo deriva do TTL do
- * access token para sobreviver a mudanças em `SESSION_ACCESS_TTL_SECONDS`.
- * Fonte: `VITE_SESSION_ACCESS_TTL_SECONDS` do build (espelho manual da env
- * do servidor), com fallback de 900s.
+ * Calibragem do slide proativo (issue #376, follow-up PR #383 F2): o
+ * intervalo deriva do TTL do access token, mas com teto resiliente de 1
+ * min — `VITE_SESSION_ACCESS_TTL_SECONDS` é espelho de build de
+ * `SESSION_ACCESS_TTL_SECONDS` e dessincroniza se o backend baixar o TTL
+ * sem rebuild. Deslizar a cada 60s cobre TTLs >= ~2min; TTLs menores são
+ * operacionalmente inválidos e, de todo modo, o `apiFetch` com
+ * 401 → refresh → retry continua sendo o dono da correção. Cadeia
+ * `lerTtl → calcular` preservada para futura fonte server-driven (F2-B).
+ * Fonte atual: env do build, com fallback de 900s.
  */
 export const TTL_ACESSO_PADRAO_SEGUNDOS = 900
-/** Teto do intervalo: desliza pelo menos a cada 10 min. */
-export const INTERVALO_SLIDE_MAXIMO_MS = 10 * 60 * 1000
+/** Teto resiliente do intervalo: desliza pelo menos a cada 1 min (anti-dessync, F2). */
+export const INTERVALO_SLIDE_MAXIMO_MS = 60 * 1000
 /** Piso do intervalo: evita rajadas de refresh com TTLs curtos. */
 export const INTERVALO_SLIDE_MINIMO_MS = 60 * 1000
 /** Margem antes da expiração: o slide renova 5 min antes do TTL. */
@@ -180,8 +186,10 @@ export function lerTtlDeAcessoSegundos(): number {
 }
 
 /**
- * Intervalo do slide em ms: `TTL − margem`, limitado ao piso/teto. TTL 900
- * → 600s; TTL 300 → 60s (piso); TTL 3600 → 600s (teto).
+ * Intervalo do slide em ms: `TTL − margem`, limitado ao piso/teto
+ * resiliente (F2). Com o teto de 1 min, qualquer TTL >= ~6min resulta em
+ * 60s — o env do build vira apenas override reservado para o futuro
+ * server-driven, sem poder descalibrar o slide para além de 60s.
  */
 export function calcularIntervaloSlide(ttlSegundos: number): number {
   const alvo = (ttlSegundos - MARGEM_SLIDE_SESSAO_MS / 1000) * 1000
@@ -206,7 +214,7 @@ function notificarSessaoExpirada(): void {
 
 /** Single-flight da sonda: 401s concorrentes no mesmo `invalida` dividem um `GET /me`. */
 async function executarSondaBruta(): Promise<EstadoSondaSessao> {
-  const { sinal, limpar } = criarSinalComTimeout(TEMPO_LIMITE_SONDA_SESSAO_MS)
+  const { sinal, limpar } = criarTimeoutAbortavel(TEMPO_LIMITE_SONDA_SESSAO_MS)
   try {
     const resposta = await fetch(comBase('/api/auth/me'), {
       credentials: 'include',

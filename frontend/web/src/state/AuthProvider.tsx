@@ -27,12 +27,14 @@ function resolveInitialState(): AuthState {
 }
 
 /**
- * Slide-session proativo (issue #376): o access token expira no TTL e uma
- * Partida longa e ociosa não gera tráfego HTTP para renová-lo. O intervalo
- * deriva do TTL (`VITE_SESSION_ACCESS_TTL_SECONDS`, fallback 900s) com 5
- * min de margem; voltar à aba (visible/focus) renova de imediato (com
- * throttle de 1 min). Falha aqui não desloga — o 401 confirmado pelo
- * `apiFetch` continua sendo o dono do logout.
+ * Slide-session proativo (issue #376, follow-up PR #383 F2): o access token
+ * expira no TTL e uma Partida longa e ociosa não gera tráfego HTTP para
+ * renová-lo. O intervalo deriva do TTL com teto resiliente de 1 min
+ * (`INTERVALO_SLIDE_MAXIMO_MS` em `client.ts`) — mesmo que o backend baixe
+ * `SESSION_ACCESS_TTL_SECONDS` sem rebuild do `VITE_...`, o slide segue a
+ * cada 60s; voltar à aba (visible/focus) renova de imediato (com throttle
+ * de 1 min). Falha aqui não desloga — o 401 confirmado pelo `apiFetch`
+ * continua sendo o dono do logout.
  *
  * Recorte além do mínimo da #376 (review PR #383, não-bloqueante): a
  * calibragem por TTL (teto/piso/margem em `client.ts`) e a reidratação com

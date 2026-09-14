@@ -10,7 +10,7 @@ import {
   apiFetch,
   calcularIntervaloSlide,
   confirmarSessaoViva,
-  criarSinalComTimeout,
+  criarTimeoutAbortavel,
   lerResultadoRefresh,
   lerTtlDeAcessoSegundos,
   onSessionExpired,
@@ -449,7 +449,7 @@ describe('slide-session no apiFetch (issue #376)', () => {
     // @ts-expect-error — força o caminho de fallback em ambiente antigo
     AbortSignal.timeout = undefined
     try {
-      const { sinal, limpar } = criarSinalComTimeout(8000)
+      const { sinal, limpar } = criarTimeoutAbortavel(8000)
       try {
         expect(sinal).toBeInstanceOf(AbortSignal)
       } finally {
@@ -596,9 +596,9 @@ describe('reidratação com access expirado e refresh válido (issue #376)', () 
 })
 
 describe('calibragem do slide (issue #376)', () => {
-  it('TTL 900 → 600s; TTL 3600 respeita o teto; TTL curto respeita o piso', () => {
-    expect(calcularIntervaloSlide(900)).toBe(600_000)
-    expect(calcularIntervaloSlide(3600)).toBe(600_000)
+  it('teto resiliente F2: qualquer TTL >= ~6min resulta em 60s (anti-dessync)', () => {
+    expect(calcularIntervaloSlide(900)).toBe(60_000)
+    expect(calcularIntervaloSlide(3600)).toBe(60_000)
     expect(calcularIntervaloSlide(300)).toBe(60_000)
     expect(calcularIntervaloSlide(120)).toBe(60_000)
   })
@@ -626,12 +626,12 @@ describe('slide proativo (issue #376)', () => {
       )
       expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(0)
       act(() => {
-        vi.advanceTimersByTime(600_000)
+        vi.advanceTimersByTime(60_000)
       })
       await act(async () => {})
       expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(1)
       act(() => {
-        vi.advanceTimersByTime(600_000)
+        vi.advanceTimersByTime(60_000)
       })
       await act(async () => {})
       expect(contarChamadas(calls, 'POST', '/api/auth/refresh')).toBe(2)
