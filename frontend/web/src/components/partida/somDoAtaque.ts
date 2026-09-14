@@ -28,19 +28,15 @@ import { tocarAsset } from '../../game/audio/sons'
 /** Tipo do monstro atacante — decide entre uivo (Vulto) e trovão (Espectro). */
 export type TipoDeMonstroAtacante = 'vulto' | 'espectro'
 
-function tocarAssetDoAtaque(caminho: string, volumeBase: number, mestre: number): void {
-  tocarAsset(caminho, volumeBase, mestre)
-}
-
 /**
  * Toca o som do monstro no gesto de disparo — sempre, mesmo sem vítimas
  * (só monstro). Habilitado por padrão, no-op silencioso se falhar.
  */
 export function tocarSomDoMonstro(tipo: TipoDeMonstroAtacante, mestre = 1): void {
   if (tipo === 'vulto') {
-    tocarAssetDoAtaque(CAMINHO_SOM_VULTO, VOLUME_BASE_SOM_VULTO, mestre)
+    tocarAsset(CAMINHO_SOM_VULTO, VOLUME_BASE_SOM_VULTO, mestre)
   } else {
-    tocarAssetDoAtaque(CAMINHO_SOM_ESPECTRO, VOLUME_BASE_SOM_ESPECTRO, mestre)
+    tocarAsset(CAMINHO_SOM_ESPECTRO, VOLUME_BASE_SOM_ESPECTRO, mestre)
   }
 }
 
@@ -49,7 +45,7 @@ export function tocarSomDoMonstro(tipo: TipoDeMonstroAtacante, mestre = 1): void
  * nunca no protegido). Habilitado por padrão, no-op silencioso se falhar.
  */
 export function tocarTremorDoAtaque(mestre = 1): void {
-  tocarAssetDoAtaque(CAMINHO_SOM_TREMOR_ATAQUE, VOLUME_BASE_SOM_TREMOR_ATAQUE, mestre)
+  tocarAsset(CAMINHO_SOM_TREMOR_ATAQUE, VOLUME_BASE_SOM_TREMOR_ATAQUE, mestre)
 }
 
 /**
@@ -58,5 +54,5 @@ export function tocarTremorDoAtaque(mestre = 1): void {
  * no-op silencioso se falhar.
  */
 export function tocarDefesaDoAtaque(mestre = 1): void {
-  tocarAssetDoAtaque(CAMINHO_SOM_DEFESA_ATAQUE, VOLUME_BASE_SOM_DEFESA_ATAQUE, mestre)
+  tocarAsset(CAMINHO_SOM_DEFESA_ATAQUE, VOLUME_BASE_SOM_DEFESA_ATAQUE, mestre)
 }

@@ -27,6 +27,12 @@
  * `pecasNoAlcance` é observacional/opcional (issue #384): payload legado sem
  * o campo ativa o fallback (sem onda, sem quebra) — sons, fila e bloqueio
  * funcionam igual. Nenhum julgamento de regra no cliente.
+ *
+ * Limitação conhecida (review PR #399, só documentada): `pecasNoAlcance` é
+ * computado pós-limpeza no engine — as peças removidas no próprio gatilho
+ * não entram no payload, então a onda não as varre (só revela as
+ * sobreviventes). Não é bug do cliente: a fila segura a limpeza até a
+ * chegada do Vulto, mas o alcance listado já nasceu sem as removidas.
  */
 
 import type { AtaqueResolvidoWireEvento, EstadoResultanteNoAtaque } from '@flicker/shared'

@@ -53,7 +53,7 @@ import {
 } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearFinalizarManipulacao, mapearGiro } from '../game/tabuleiro/interacao'
-import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
+import type { ComandoDePeaoDoDespacho, EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import { bordaDaTravessiaPendente, mapearFinalizarRecebida } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores, ehPecaDeMonstro } from '../game/tabuleiro/contrato'
@@ -458,6 +458,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     enfileirarAtaque,
     segurarTurnoSeEmAtaque,
     segurarLimpezaSeEmAtaque,
+    abrirJanelaDeGatilho,
+    segurarNaJanelaSeAberta,
+    entregarJanelaAoAtaque,
+    fecharJanelaDeGatilho,
     notificarSnapshot,
     cancelarAtaque,
   } = useFilaDeAtaque({
@@ -707,19 +711,29 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // drenar (lag deliberado por decisão do usuário); a iluminação e a
         // limpeza que chegarem com a fila ativa seguram junto e liberam na
         // chegada do Vulto (ou ao drenar, sem Vulto) — cegueira e sumiço não
-        // aparecem antes da vez deles. O resto do lote passa direto.
+        // aparecem antes da vez deles. Com a janela de gatilho aberta (lote
+        // real Iluminação → Limpeza → Ataque, review PR #399), o buffer da
+        // janela tem precedência — o fechamento compõe com a fila. O resto
+        // do lote passa direto.
         // Snapshot mais novo invalida os segurados (a autoridade já projetou
         // a vez — sem regressão).
-        if (
-          (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') &&
-          segurarTurnoSeEmAtaque(evento)
-        ) {
-          return
-        }
-        if (
+        // A virada de turno fecha a janela de gatilho (review PR #399,
+        // Bloqueante 1): sem ataque no lote, o buffer libera em ordem antes
+        // de a vez cair no seguro da fila (ou passar direto, sem fila); com
+        // ataque já entregue, a janela está fechada e vale só o seguro.
+        if (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') {
+          fecharJanelaDeGatilho()
+          if (segurarTurnoSeEmAtaque(evento)) {
+            return
+          }
+        } else if (
           (evento.type === 'CELULAS_ILUMINADAS' || evento.type === 'LIMPEZA_APLICADA') &&
-          segurarLimpezaSeEmAtaque(evento)
+          (segurarNaJanelaSeAberta(evento) || segurarLimpezaSeEmAtaque(evento))
         ) {
+          // Janela de gatilho antes do seguro da fila: com a janela aberta,
+          // o buffer do gatilho segura sem som/trigger (o fechamento compõe
+          // com fila ativa anterior); sem janela, vale o seguro direto da
+          // fila ativa (segunda onda pós-Baixa, virada).
           return
         }
         const loteAbertoPorDesistencia =
@@ -816,6 +830,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // genérico; recusas de jogada mantêm o genérico.
         if (evento.type === 'ATAQUE_RESOLVIDO' || evento.type === 'RESGATE_REALIZADO') {
           if (evento.type === 'ATAQUE_RESOLVIDO') {
+            // Fecha a janela do gatilho entregando o buffer à fila (review
+            // PR #399): a iluminação/limpeza do mesmo lote libera na chegada
+            // do Vulto (ou ao drenar, sem Vulto), nunca antes da vez.
+            entregarJanelaAoAtaque()
             enfileirarAtaque(evento, modeloRef.current)
           } else {
             despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
@@ -832,6 +850,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // mesmo branch para não despachar 2x nem tornar o check tardio
         // inalcançável (o `return` acima estreita o tipo e calaria o TS2367).
         if (evento.type === 'POSICAO_CONFIRMADA') {
+          // Janela anterior ainda aberta (dupla confirmação sem fechar — não
+          // esperada no wire): libera em ordem antes de reabrir.
+          fecharJanelaDeGatilho()
           const antes = modeloRef.current
           const depois = reduzirEvento(antes, evento as Parameters<typeof reduzirEvento>[1])
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
@@ -845,12 +866,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             encerrarTravessiaEncadeadoRef.current = true
             enviarComJogadorRef.current({ type: 'ENCERRAR_TURNO' })
           }
+          // Abre a janela de gatilho (review PR #399, Bloqueante 1): a
+          // iluminação/limpeza do mesmo lote chega a seguir, antes do ataque
+          // — segura sem som/trigger até o lote fechar (ataque entrega à
+          // fila; virada de turno libera em ordem).
+          abrirJanelaDeGatilho()
           return
         }
         // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
-        // LIMPEZA_APLICADA dispara som/animação, snapshots não. Com a fila do
-        // ataque ativa, o evento já foi segurado acima e libera na chegada do
-        // Vulto; aqui, só o caminho direto (mesmo corpo de
+        // LIMPEZA_APLICADA dispara som/animação, snapshots não. Com a janela
+        // de gatilho aberta ou a fila do ataque ativa, o evento já foi
+        // segurado acima e libera na chegada do Vulto (ou ao fechar/drenar);
+        // aqui, só o caminho direto (mesmo corpo de
         // `liberarLimpezaSegurada`, sem divergir).
         if (evento.type === 'LIMPEZA_APLICADA') {
           liberarLimpezaSegurada(evento)
@@ -1019,7 +1046,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       },
       // `jogadorId` entra em deps (só troca em login/logout — o hook guarda o
       // callback em ref, sem reabrir o socket).
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote, enfileirarAtaque, segurarTurnoSeEmAtaque, segurarLimpezaSeEmAtaque, liberarLimpezaSegurada, notificarSnapshot, cancelarAtaque, jogadorId, partidaId, esquecerReenvio],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote, enfileirarAtaque, segurarTurnoSeEmAtaque, segurarLimpezaSeEmAtaque, abrirJanelaDeGatilho, segurarNaJanelaSeAberta, entregarJanelaAoAtaque, fecharJanelaDeGatilho, liberarLimpezaSegurada, notificarSnapshot, cancelarAtaque, jogadorId, partidaId, esquecerReenvio],
     ),
     onAdmissao: useCallback(
       (evento) => {
@@ -1220,16 +1247,30 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     void entregarESair()
   }, [aguardarConexao, enviar, finalizarSaida, jogadorId, marcarDesistenciaEntregue, marcarSaidaPropria, partidaId])
 
+  // Bloqueio de entrada durante a fila do ataque (review PR #399, Bloqueante
+  // 2): com slot em exibição, os botões de turno desabilitam e os cliques do
+  // tabuleiro (cena 3D + espelho DOM, ambos via `onComando`/`onComandoPeao`)
+  // silenciam até drenar — o clique viraria comando recusado (ida-e-volta
+  // inútil + som de recusa confuso), exatamente o que o bloqueio evita.
+  const entradaBloqueadaPeloAtaque = ataqueExibido !== null
+
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
-      if (comando === null) return
+      if (comando === null || entradaBloqueadaPeloAtaque) return
       enviarComJogador(comando)
     },
-    [enviarComJogador],
+    [enviarComJogador, entradaBloqueadaPeloAtaque],
   )
 
   // ── Comandos de Peão passam pelo mesmo ponto de injeção ──
-  const onComandoPeao = enviarComJogador
+  // Com o mesmo gate da fila do ataque: silencia até drenar.
+  const onComandoPeao = useCallback(
+    (comando: ComandoDePeaoDoDespacho) => {
+      if (entradaBloqueadaPeloAtaque) return
+      enviarComJogador(comando)
+    },
+    [enviarComJogador, entradaBloqueadaPeloAtaque],
+  )
 
   // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
   const minhaVez = !emResultado && !emNaoInicio && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
@@ -1379,7 +1420,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [estadoEmAndamento, minhaVez, emResultado, emNaoInicio, estadoInteracaoPeoes, enviarComJogador])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
-  const onRejeicaoPeao = tocarRecusa
+  // Com a fila do ataque em exibição, silencia junto (review PR #399,
+  // Bloqueante 2): clique na interação não dá feedback até drenar.
+  const onRejeicaoPeao = useCallback(
+    (motivo: MotivoDeRecusa) => {
+      if (entradaBloqueadaPeloAtaque) return
+      tocarRecusa(motivo)
+    },
+    [tocarRecusa, entradaBloqueadaPeloAtaque],
+  )
 
   // ── Turnos (issue #118): rodada, fase e peão do Jogador Ativo (minhaVez
   // derivada acima) — nulo em resultado ──
@@ -1554,22 +1603,25 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // recusado com PEAO_NAO_SELECIONADO — a cadeia SELECIONAR+PERMANECER segue
   // o padrão serial da #261, na mesma conexão e em ordem.
   const permanecerNoTurno = useCallback(() => {
+    if (entradaBloqueadaPeloAtaque) return
     if (peaoProprioId === null || !minhaVez) return
     if (peaoDoTurnoId !== null && peaoProprioId !== peaoDoTurnoId) return
     if (modelo.peaoSelecionadoId !== peaoProprioId) {
       enviarComJogador({ type: 'SELECIONAR_PEAO', peaoId: peaoProprioId })
     }
     enviarComJogador({ type: 'PERMANECER', peaoId: peaoProprioId })
-  }, [enviarComJogador, peaoProprioId, minhaVez, peaoDoTurnoId, modelo.peaoSelecionadoId])
+  }, [enviarComJogador, peaoProprioId, minhaVez, peaoDoTurnoId, modelo.peaoSelecionadoId, entradaBloqueadaPeloAtaque])
 
   const confirmarPosicaoNoTurno = useCallback(() => {
+    if (entradaBloqueadaPeloAtaque) return
     if (peaoProprioId === null) return
     enviarComJogador({ type: 'CONFIRMAR_POSICAO_DO_PEAO', peaoId: peaoProprioId })
-  }, [enviarComJogador, peaoProprioId])
+  }, [enviarComJogador, peaoProprioId, entradaBloqueadaPeloAtaque])
 
   const encerrarTurno = useCallback(() => {
+    if (entradaBloqueadaPeloAtaque) return
     enviarComJogador({ type: 'ENCERRAR_TURNO' })
-  }, [enviarComJogador])
+  }, [enviarComJogador, entradaBloqueadaPeloAtaque])
   const requerModoPaisagem = useRequerModoPaisagem()
   const [bordaPx, setBordaPx] = useState(0)
   const viewportCompacto = useViewportCompacto()
@@ -1644,8 +1696,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       />
       {/*
         Coreografia do ataque (issue #385): overlay evento-driven da fila —
-        só revela (o estado já aplicou na hora); desmonta ao drenar, sem
-        marcas. Com movimento reduzido, legenda estática (sons e bloqueio seguem).
+        só revela (cada fatia aplica na chegada do próprio slot); desmonta
+        ao drenar, sem marcas. Com movimento reduzido, legenda estática (sons
+        e bloqueio seguem).
       */}
       <TransicaoAtaque ataque={ataqueExibido} />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
@@ -1743,7 +1796,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-permanecer"
               onClick={permanecerNoTurno}
-              disabled={peaoProprioId === null}
+              disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
               className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Permanecer
@@ -1754,7 +1807,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-confirmar-posicao"
               onClick={confirmarPosicaoNoTurno}
-              disabled={peaoProprioId === null}
+              disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
               className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Confirmar Posição
@@ -1765,7 +1818,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-encerrar-turno"
               onClick={encerrarTurno}
-              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700"
+              disabled={entradaBloqueadaPeloAtaque}
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Encerrar Turno
             </button>

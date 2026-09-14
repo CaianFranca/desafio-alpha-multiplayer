@@ -33,16 +33,12 @@ export type ModeloParaConquista = Pick<
   'geradoresLigados' | 'cartaoDeAcessoObtido' | 'jogadorPorId'
 >
 
-function tocarAssetDaConquista(caminho: string, volumeBase: number, mestre: number): void {
-  tocarAsset(caminho, volumeBase, mestre)
-}
-
 /**
  * Toca o gerador ao ligar — só na aquisição (id novo em `geradoresLigados`).
  * Habilitado por padrão, no-op silencioso se falhar.
  */
 export function tocarGeradorLigado(mestre = 1): void {
-  tocarAssetDaConquista(CAMINHO_SOM_GERADOR_LIGADO, VOLUME_BASE_SOM_GERADOR_LIGADO, mestre)
+  tocarAsset(CAMINHO_SOM_GERADOR_LIGADO, VOLUME_BASE_SOM_GERADOR_LIGADO, mestre)
 }
 
 /**
@@ -50,7 +46,7 @@ export function tocarGeradorLigado(mestre = 1): void {
  * Habilitado por padrão, no-op silencioso se falhar.
  */
 export function tocarCartaoDeAcesso(mestre = 1): void {
-  tocarAssetDaConquista(CAMINHO_SOM_CARTAO_ACESSO, VOLUME_BASE_SOM_CARTAO_ACESSO, mestre)
+  tocarAsset(CAMINHO_SOM_CARTAO_ACESSO, VOLUME_BASE_SOM_CARTAO_ACESSO, mestre)
 }
 
 /**
@@ -58,7 +54,7 @@ export function tocarCartaoDeAcesso(mestre = 1): void {
  * resultante). Habilitado por padrão, no-op silencioso se falhar.
  */
 export function tocarProtecaoAdquirida(mestre = 1): void {
-  tocarAssetDaConquista(
+  tocarAsset(
     CAMINHO_SOM_PROTECAO_ADQUIRIDA,
     VOLUME_BASE_SOM_PROTECAO_ADQUIRIDA,
     mestre,

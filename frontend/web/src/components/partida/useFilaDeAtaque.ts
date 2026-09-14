@@ -18,12 +18,19 @@
  * anúncio ao leitor (`ataque_com_penalidade`) sai na chegada somente se a
  * fatia tem vítimas — sem vítimas, silêncio.
  *
- * Cegueira e sumiço antes da vez (follow-up): `CELULAS_ILUMINADAS` e
- * `LIMPEZA_APLICADA` (modelo + trigger `TransicaoLimpeza` + som) que chegarem
- * com a fila ativa são segurados e liberados na chegada do Vulto (junto da
- * fatia dele); se a fila não tem Vulto, o restante libera ao drenar — na
- * ordem de chegada. Snapshot (`ESTADO_DA_PARTIDA`) e `PARTIDA_TERMINADA`
- * aplicam na hora pela PartidaPage e cancelam a fila + descartam os segurados
+ * Cegueira e sumiço antes da vez (follow-up + review PR #399): o lote real
+ * do engine chega Iluminação → Limpeza → Ataque — ou seja, a limpeza do
+ * mesmo gatilho chega ANTES de a fila existir. Por isso `POSICAO_CONFIRMADA`
+ * abre uma "janela de gatilho" (marcador explícito — `queueMicrotask` não
+ * atravessa mensagens WS, cada `onmessage` é um macrotask próprio):
+ * `CELULAS_ILUMINADAS`/`LIMPEZA_APLICADA` seguintes vão ao buffer da janela
+ * (sem som/trigger); se `ATAQUE_RESOLVIDO` chegar antes do fechamento, o
+ * buffer entra na fila (libera na chegada do Vulto, ou ao drenar sem Vulto);
+ * senão, libera em ordem no fechamento (a virada de turno fecha), compondo
+ * com fila ativa de ataque anterior. Com a fila ativa (segunda onda
+ * pós-Baixa, virada), o seguro direto abaixo segue valendo, na ordem de
+ * chegada. Snapshot (`ESTADO_DA_PARTIDA`) e `PARTIDA_TERMINADA` aplicam na
+ * hora pela PartidaPage e cancelam a fila + descartam janela e segurados
  * (snapshot é autoridade).
  *
  * Bloqueio da entrada do turno: `TURNO_INICIADO` e `TURNO_ENCERRADO` com a
@@ -122,6 +129,19 @@ export function useFilaDeAtaque({
   readonly segurarLimpezaSeEmAtaque: (
     evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento,
   ) => boolean
+  /** Abre a janela de gatilho da confirmação (o lote real chega antes do ataque). */
+  readonly abrirJanelaDeGatilho: () => void
+  /**
+   * Segura iluminação/limpeza na janela aberta do gatilho (sem som/trigger).
+   * Tem precedência sobre o seguro da fila — o fechamento compõe com ele.
+   */
+  readonly segurarNaJanelaSeAberta: (
+    evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento,
+  ) => boolean
+  /** Fecha a janela entregando o buffer à fila (libera na chegada do Vulto). */
+  readonly entregarJanelaAoAtaque: () => void
+  /** Fecha a janela sem ataque: libera o buffer em ordem (compõe com fila ativa). */
+  readonly fecharJanelaDeGatilho: () => void
   readonly notificarSnapshot: () => void
   readonly cancelarAtaque: () => void
 } {
@@ -131,6 +151,12 @@ export function useFilaDeAtaque({
   const timersRef = useRef<number[]>([])
   const turnosSeguradosRef = useRef<TurnoSegurado[]>([])
   const limpezasSeguradasRef = useRef<LimpezaSegurada[]>([])
+  // Janela de gatilho da confirmação (review PR #399, Bloqueante 1): marcador
+  // explícito aberto em `POSICAO_CONFIRMADA` — o buffer segura a
+  // iluminação/limpeza do mesmo lote até o ataque (entrega à fila) ou a
+  // virada de turno (libera em ordem) fechar.
+  const janelaDeGatilhoRef = useRef(false)
+  const limpezasNaJanelaRef = useRef<LimpezaSegurada[]>([])
   const seqSnapshotRef = useRef(0)
   const keyRef = useRef(0)
   // Recursão do driver via ref (mesmo padrão de `desconectarRef` na
@@ -148,7 +174,7 @@ export function useFilaDeAtaque({
     anunciarRef.current = anunciarRecusa
     liberarLimpezaRef.current = liberarLimpezaSegurada
   }, [liberarTurnoSegurado, aplicarFatiaDoAtaque, anunciarRecusa, liberarLimpezaSegurada])
-  // Unmount descarta tudo explicitamente (timers, fila e segurados —
+  // Unmount descarta tudo explicitamente (timers, fila, janela e segurados —
   // sem vazamento entre testes/páginas; o snapshot reconcilia ao remontar).
   useEffect(
     () => () => {
@@ -157,6 +183,8 @@ export function useFilaDeAtaque({
       filaRef.current = []
       turnosSeguradosRef.current = []
       limpezasSeguradasRef.current = []
+      janelaDeGatilhoRef.current = false
+      limpezasNaJanelaRef.current = []
       emAndamentoRef.current = false
     },
     [],
@@ -244,7 +272,14 @@ export function useFilaDeAtaque({
   const enfileirarAtaque = useCallback(
     (evento: AtaqueResolvidoWireEvento, contexto: ContextoDaCoreografiaDoAtaque): void => {
       const itens = coreografarAtaque(evento, contexto)
-      if (itens.length === 0) return
+      // Sem slot (wire sem atacantes — o engine só emite com ao menos um
+      // Monstro): nada anima e nenhum driver passa a rodar — a limpeza
+      // segurada (incluindo janela recém-entregue) libera em ordem em vez
+      // de aguardar uma chegada que nunca vem.
+      if (itens.length === 0) {
+        liberarLimpezasSeguradas()
+        return
+      }
       const seqSnapshot = seqSnapshotRef.current
       const ocioso = !emAndamentoRef.current
       filaRef.current.push(...itens.map((item) => ({ item, seqSnapshot })))
@@ -253,7 +288,7 @@ export function useFilaDeAtaque({
         exibirProximo(true)
       }
     },
-    [exibirProximo],
+    [exibirProximo, liberarLimpezasSeguradas],
   )
 
   const segurarTurnoSeEmAtaque = useCallback(
@@ -274,6 +309,46 @@ export function useFilaDeAtaque({
     [],
   )
 
+  const abrirJanelaDeGatilho = useCallback((): void => {
+    janelaDeGatilhoRef.current = true
+  }, [])
+
+  const segurarNaJanelaSeAberta = useCallback(
+    (evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento): boolean => {
+      if (!janelaDeGatilhoRef.current) return false
+      limpezasNaJanelaRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current })
+      return true
+    },
+    [],
+  )
+
+  const entregarJanelaAoAtaque = useCallback((): void => {
+    janelaDeGatilhoRef.current = false
+    const emJanela = limpezasNaJanelaRef.current
+    limpezasNaJanelaRef.current = []
+    for (const segurada of emJanela) {
+      if (segurada.seqSnapshot !== seqSnapshotRef.current) continue
+      limpezasSeguradasRef.current.push(segurada)
+    }
+  }, [])
+
+  const fecharJanelaDeGatilho = useCallback((): void => {
+    if (!janelaDeGatilhoRef.current && limpezasNaJanelaRef.current.length === 0) return
+    janelaDeGatilhoRef.current = false
+    const emJanela = limpezasNaJanelaRef.current
+    limpezasNaJanelaRef.current = []
+    for (const segurada of emJanela) {
+      if (segurada.seqSnapshot !== seqSnapshotRef.current) continue
+      // Compõe com fila ativa de ataque anterior: segura junto; sem fila,
+      // libera em ordem pelo caminho direto (modelo + trigger + som).
+      if (emAndamentoRef.current) {
+        limpezasSeguradasRef.current.push(segurada)
+      } else {
+        liberarLimpezaRef.current(segurada.evento)
+      }
+    }
+  }, [])
+
   const notificarSnapshot = useCallback((): void => {
     seqSnapshotRef.current += 1
   }, [])
@@ -284,6 +359,8 @@ export function useFilaDeAtaque({
     filaRef.current = []
     turnosSeguradosRef.current = []
     limpezasSeguradasRef.current = []
+    janelaDeGatilhoRef.current = false
+    limpezasNaJanelaRef.current = []
     emAndamentoRef.current = false
     setAtaqueExibido(null)
   }, [])
@@ -298,6 +375,10 @@ export function useFilaDeAtaque({
     enfileirarAtaque,
     segurarTurnoSeEmAtaque,
     segurarLimpezaSeEmAtaque,
+    abrirJanelaDeGatilho,
+    segurarNaJanelaSeAberta,
+    entregarJanelaAoAtaque,
+    fecharJanelaDeGatilho,
     notificarSnapshot,
     cancelarAtaque,
   }

@@ -5,7 +5,8 @@
  * fila (`ataque` vindo do `useFilaDeAtaque`) renderiza; estado final
  * pixel-igual ao reducer (o overlay desmonta ao drenar — a peça do monstro
  * volta ao normal sem marcas acumuladas). `aria-hidden`: pura revelação
- * visual; o estado do jogo já foi aplicado na hora pelo reducer.
+ * visual; cada fatia de estado aplica na chegada do próprio slot (via
+ * `reduzirFatiaDoAtaque` no driver da fila), nunca tudo na hora.
  *
  * Etiqueta do estágio (`data-estagio`): `telegraph` (pulso silencioso de 1s,
  * só o selo "prepara ataque" — sem sons nem reações) precede o `ataque`

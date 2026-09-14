@@ -687,6 +687,154 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(temPecaNoEspelho('curva-1')).toBe(false)
   })
 
+  it('lote real do gatilho (POSICAO → CELULAS → LIMPEZA → ATAQUE → TURNO_*) segura até a chegada do Vulto', async () => {
+    const peoes: readonly PeaoNoSnapshot[] = [
+      { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
+      { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'reta-1' },
+      { peaoId: 'peao-azul', cor: 'azul', pecaId: 'curva-1' },
+      { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+    ]
+    const ws = await partidaComTabuleiro([VULTO_1, RETA_1, ESPECTRO_1, CURVA_1], peoes, {
+      celulasIluminadas: [
+        { linha: 3, coluna: 3 },
+        { linha: 3, coluna: 4 },
+        { linha: 5, coluna: 4 },
+        { linha: 5, coluna: 5 },
+      ],
+    })
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
+    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', MEU_JOGADOR_ID)
+    ativarTimersDoAtaque()
+
+    // Ordem canônica do engine no gatilho da confirmação (partida.ts:
+    // Iluminação → Limpeza → Ataque): a limpeza do MESMO gatilho chega
+    // ANTES de a fila existir — a janela de gatilho segura sem som/trigger.
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: MEU_JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'reta-1',
+      }),
+    )
+    act(() => ws.simulateMessage({ type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 3, coluna: 3 }] }))
+    // O próprio gatilho remove o outro monstro e a peça do alcance: o payload
+    // do ataque já nasce pós-limpeza (sem elas em `pecasNoAlcance`).
+    act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['espectro-1', 'curva-1'] }))
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
+    expect(temPecaNoEspelho('espectro-1')).toBe(true)
+    expect(temPecaNoEspelho('curva-1')).toBe(true)
+    expect(toquesDeAudio).toHaveLength(0)
+
+    // Ataque do mesmo gatilho fecha a janela entregando o buffer à fila; a
+    // virada segura na fila ativa.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [
+          {
+            pecaId: 'vulto-1',
+            tipo: 'vulto',
+            peoesNoAlcance: ['peao-vermelho'],
+            pecasNoAlcance: ['reta-1'],
+          },
+        ],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 3, amedrontado: false },
+        ],
+      }),
+    )
+    act(() => ws.simulateMessage({ type: 'TURNO_ENCERRADO', jogadorId: MEU_JOGADOR_ID }))
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
+    await act(async () => {})
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
+    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', MEU_JOGADOR_ID)
+
+    // Telegraph: as peças condenadas ainda renderizam — sem sumiço antecipado
+    // nem cegueira antes da vez do Vulto.
+    expect(temPecaNoEspelho('espectro-1')).toBe(true)
+    expect(temPecaNoEspelho('curva-1')).toBe(true)
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
+    expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
+    expect(toquesDeAudio).toHaveLength(0)
+
+    // Disparo: uivo — a limpeza segue segurada até a chegada.
+    avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
+    expect(temPecaNoEspelho('espectro-1')).toBe(true)
+    expect(temPecaNoEspelho('curva-1')).toBe(true)
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
+    // A onda só varre sobreviventes (limitação pós-limpeza documentada em
+    // `ataque.ts`): só a reta-1 reage, tremendo com o peão.
+    expect(screen.getAllByTestId('ataque-reacao')).toHaveLength(1)
+    expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-peca-id', 'reta-1')
+    expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-reacao', 'tremor')
+
+    // Chegada do Vulto: Baixa + luz encolhida + sumiço com o som sombrio —
+    // junto da fatia dele.
+    avancar(DURACAO_DISPARO_ATAQUE_MS)
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3'])
+    expect(temPecaNoEspelho('espectro-1')).toBe(false)
+    expect(temPecaNoEspelho('curva-1')).toBe(false)
+    expect(temPecaNoEspelho('reta-1')).toBe(true)
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+      CAMINHO_SOM_VULTO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
+      CAMINHO_SOM_SOMBRIO_LIMPEZA,
+    ])
+
+    // Drenou sem marcas: a virada libera em ordem — o próximo turno assume.
+    avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS)
+    await act(async () => {})
+    expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
+    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-2')
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(temPecaNoEspelho('curva-1')).toBe(false)
+  })
+
+  it('lote real sem ataque libera iluminação e limpeza em ordem no fechamento', async () => {
+    const ws = await partidaComTabuleiro([VULTO_1, RETA_1, CURVA_1], PEOES_BASE, {
+      celulasIluminadas: [
+        { linha: 3, coluna: 3 },
+        { linha: 3, coluna: 4 },
+        { linha: 5, coluna: 5 },
+      ],
+    })
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:5'])
+    expect(temPecaNoEspelho('curva-1')).toBe(true)
+    ativarTimersDoAtaque()
+
+    // Mesmo lote, sem ataque: a janela segura até a virada fechar.
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: MEU_JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'reta-1',
+      }),
+    )
+    act(() => ws.simulateMessage({ type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 3, coluna: 3 }] }))
+    act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['curva-1'] }))
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:5'])
+    expect(temPecaNoEspelho('curva-1')).toBe(true)
+    expect(toquesDeAudio).toHaveLength(0)
+
+    // Fechamento sem ataque: libera em ordem (luz encolhe, peça some com o
+    // som sombrio) e a virada passa direto, sem fila.
+    act(() => ws.simulateMessage({ type: 'TURNO_ENCERRADO', jogadorId: MEU_JOGADOR_ID }))
+    act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
+    await act(async () => {})
+    expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3'])
+    expect(temPecaNoEspelho('curva-1')).toBe(false)
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA])
+    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-2')
+  })
+
   it('sem Vulto na fila, a limpeza segurada libera ao drenar', async () => {
     const ws = await partidaComTabuleiro([ESPECTRO_1, RETA_1], PEOES_BASE, {
       celulasIluminadas: [
