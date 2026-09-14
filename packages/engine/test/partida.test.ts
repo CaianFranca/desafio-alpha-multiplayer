@@ -7,6 +7,7 @@ import {
   calcularIluminacao,
   estadoInicialDaPartida,
   estadoInicialDoTabuleiro,
+  vagasDisponiveis,
   type ComandoDePartida,
   type CodigoDeErroDaPartida,
   type EstadoDaPartida,
@@ -1587,12 +1588,48 @@ function comJogadorEmBaixa(
 }
 
 function estadoDaTravessia(): EstadoDaPartida {
-  let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
-  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
-  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  // ADR-0017 (regra "uma casa por turno"): a Travessia só parte da Peça do
+  // início do turno. A peça branca em rodada 2 aqui é a que repousa na
+  // vizinha (2,3) do inicial-1 — o turno "começa" nela (estado válido de
+  // rodada avançada: o peão está onde parou no turno anterior).
+  const base = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+  const peca = base.tabuleiro.posicionadas.find(
+    (p) => p.celula.linha === 2 && p.celula.coluna === 3,
+  );
+  if (!peca) {
+    throw new Error('esperava uma peça em (2,3) para a Travessia');
+  }
+  let estado: EstadoDaPartida = {
+    ...base,
+    pecaDoInicioDoTurnoId: peca.pecaId,
+    tabuleiro: {
+      ...base.tabuleiro,
+      peoes: base.tabuleiro.peoes.map((p) =>
+        p.peaoId === 'peao-branco' ? { ...p, pecaId: peca.pecaId } : p,
+      ),
+    },
+  };
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   return estado;
 }
+
+test('travessia do Escuro: rejeitada quando o Peão já se moveu (fora da Peça do início — "uma casa por turno")', () => {
+  // Bug 1: mover para a peça iluminada (vizinho do inicial-1 NÃO é a Peça do
+  // início do turno) e atravessar dali contaria como dois movimentos — a
+  // Travessia só vale na Peça em que o turno começou.
+  let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, moverPeao('peao-branco', 2, 3), 'ana');
+  const travessia = aplicarComandoDePartida(
+    estado,
+    atravessarOEscuro('peao-branco', 1, 3),
+    'ana',
+  );
+  assert.equal(travessia.sucesso, false);
+  if (travessia.sucesso) return;
+  assert.equal(travessia.erro.codigo, 'MOVIMENTO_INDISPONIVEL');
+  assert.match(travessia.erro.mensagem, /Peça do início do turno/);
+});
 
 test('travessia do Escuro: atravessar, encaixar a Recebida travada, confirmar sem re-seleção e encerrar', () => {
   let estado = estadoDaTravessia();
@@ -1854,9 +1891,13 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
 
   // Após a Confirmação de Posição (que em Baixa não sorteia) nada mais se move.
   {
+    // O peão muda de Peça (ida à inicial-1, dentro da zona) antes de confirmar
+    // — Confirmação sem mudança de Peça é inválida; a guarda alvo é a da
+    // travessia pós-confirmação.
     let confirmado = estadoDaTravessia();
-    confirmado = aplicar(confirmado, confirmarPosicao('peao-branco'), 'ana');
+    confirmado = aplicar(confirmado, moverPeao('peao-branco', 3, 3), 'ana');
     assert.equal(confirmado.atravessouNoTurno, false);
+    confirmado = aplicar(confirmado, confirmarPosicao('peao-branco'), 'ana');
     assert.equal(
       codigoDaRejeicao(confirmado, atravessarOEscuro('peao-branco', 1, 3), 'ana'),
       'POSICAO_CONFIRMADA',
@@ -1877,15 +1918,12 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
   // AC-3 do #272: com a Seleção nula a Travessia usa o Peão do ator como
   // referência e NÃO trava — adota a Seleção na sequência. A Movimentação
   // re-seleciona o Peão movido (#334), então a Seleção nula é construída
-  // sinteticamente para exercitar a guarda.
+  // sinteticamente para exercitar a guarda (sobre a origem legal da fixture).
   {
-    let comMovimentacao = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
-    comMovimentacao = aplicar(comMovimentacao, selecionarPeao('peao-branco'), 'ana');
-    comMovimentacao = aplicar(comMovimentacao, moverPeao('peao-branco', 2, 3), 'ana');
-    assert.equal(comMovimentacao.tabuleiro.peaoSelecionadoId, 'peao-branco');
+    const base = estadoDaTravessia();
     const semSelecao: EstadoDaPartida = {
-      ...comMovimentacao,
-      tabuleiro: { ...comMovimentacao.tabuleiro, peaoSelecionadoId: null },
+      ...base,
+      tabuleiro: { ...base.tabuleiro, peaoSelecionadoId: null },
     };
     const travessia = aplicarComandoDePartida(
       semSelecao,
@@ -1900,9 +1938,9 @@ test('travessia do Escuro: guardas na ordem canônica', () => {
     assert.equal(travessia.estado.atravessouNoTurno, true);
     // Seleção de outro Peão continua vedada.
     const estadoComOutroSelecionado: EstadoDaPartida = {
-      ...estadoDaTravessia(),
+      ...base,
       tabuleiro: {
-        ...estadoDaTravessia().tabuleiro,
+        ...base.tabuleiro,
         peaoSelecionadoId: 'peao-vermelho',
       },
     };
@@ -2163,20 +2201,21 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
     'ENCERRAMENTO_INVALIDO',
   );
   // Permanência: o mover re-seleciona o Peão (semântica única, issue #334),
-  // então o guarda do Tabuleiro não barra por seleção — após a mudança de
-  // Peça é direto ENCERRAMENTO_INVALIDO. Nenhum caminho fecha o turno sem o
-  // confirmar.
+  // então o guarda do Tabuleiro não barra por seleção — ADR-0017 / issue #377
+  // (Opção B): após a Travessia, a Permanência é vedada até o mover
+  // compulsório (MOVIMENTO_INDISPONIVEL, mesmo após mover — a flag só cai na
+  // Confirmação). Nenhum caminho fecha o turno sem o confirmar.
   assert.equal(estado.tabuleiro.peaoSelecionadoId, 'peao-branco');
   assert.equal(
     codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
-    'ENCERRAMENTO_INVALIDO',
+    'MOVIMENTO_INDISPONIVEL',
   );
   // Re-selecionar o próprio Peão é idempotente (sem novo Recebimento) e não
   // muda o veredito.
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
   assert.equal(
     codigoDaRejeicao(estado, permanecer('peao-branco'), 'ana'),
-    'ENCERRAMENTO_INVALIDO',
+    'MOVIMENTO_INDISPONIVEL',
   );
   // O confirmar fecha o gatilho com Limpeza (assinado pelo próprio fluxo):
   // estado pós-confirmação pronto para o encerramento.
@@ -2194,9 +2233,202 @@ test('travessia do Escuro: a cadeia é obrigatória — o turno não avança sem
   );
 });
 
-// ADR-0013 / issue #354 — bloqueantes do review #364
+// ADR-0017 / issue #377 — mover compulsório PARA a peça colocada.
+test('ADR-0017: mover pós-travessia só para a peça colocada — voltar à origem é rejeitado', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'reta-x', tipo: 'reta' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, escolherVaga('recebida-reta-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('reta-x', 1, 3), 'ana');
+  // O encaixe da travessia registra a peça colocada.
+  assert.equal(estado.pecaDaTravessiaId ?? null, 'reta-x');
+  assert.equal(estado.atravessouNoTurno, true);
+  // Voltar à origem (3,3, inicial-1, conectada) é rejeitado: o movimento da
+  // travessia não é desfazível.
+  assert.equal(
+    codigoDaRejeicao(estado, moverPeao('peao-branco', 3, 3), 'ana'),
+    'MOVIMENTO_INDISPONIVEL',
+  );
+  // Só a peça colocada aceita o mover.
+  estado = aplicar(estado, moverPeao('peao-branco', 1, 3), 'ana');
+  assert.equal(
+    estado.tabuleiro.peoes.find((peao) => peao.peaoId === 'peao-branco')?.pecaId,
+    'reta-x',
+  );
+});
 
-test('ADR-0013: permanecer com seleção nula adota o peão do ator (bloqueante 1)', () => {
+// ADR-0017 / issue #377 — exceção monstro: a peça sacada é Monstro (não
+// aceita peão), então o mover compulsório é impossível e o turno travado
+// fecha via Permanência — uma travessia por turno, mesmo com Monstro (a
+// flag não cai no posicionar).
+test('ADR-0017: travessia que coloca Monstro mantém o turno travado — Permanência fecha', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, escolherVaga('recebida-vulto-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('vulto-x', 1, 3), 'ana');
+  // Turno travado: flag mantida + peça-alvo registrada; o peão segue na Peça
+  // em que estava ao atravessar (reta-1, não a do início do turno).
+  assert.equal(estado.atravessouNoTurno, true);
+  assert.equal(estado.pecaDaTravessiaId ?? null, 'vulto-x');
+  assert.equal(
+    estado.tabuleiro.peoes.find((peao) => peao.peaoId === 'peao-branco')?.pecaId,
+    'reta-1',
+  );
+  // Mover para o Monstro segue rejeitado pela regra absoluta (não é o
+  // compulsório — é PECA_JA_TEM_PEAO).
+  assert.equal(
+    codigoDaRejeicao(estado, moverPeao('peao-branco', 1, 3), 'ana'),
+    'PECA_JA_TEM_PEAO',
+  );
+  // Volta à origem também é rejeitado: o movimento da travessia não é
+  // desfazível (compulsório para a colocada).
+  assert.equal(
+    codigoDaRejeicao(estado, moverPeao('peao-branco', 3, 3), 'ana'),
+    'MOVIMENTO_INDISPONIVEL',
+  );
+  // Segunda travessia no mesmo turno: vedada (a flag não caiu).
+  assert.equal(
+    codigoDaRejeicao(estado, atravessarOEscuro('peao-branco', 2, 3), 'ana'),
+    'MOVIMENTO_INDISPONIVEL',
+  );
+  // Permanência fecha o turno travado (exceção monstro — peão fora da Peça
+  // do início, permanece onde estava ao atravessar).
+  const permanencia = aplicarComandoDePartida(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  assert.equal(permanencia.estado.jogadorAtivoId, 'bruno');
+  assert.equal(permanencia.estado.atravessouNoTurno, false);
+});
+
+test('ADR-0018 (E1): confirmar sem pousar na peça da Travessia é rejeitado', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'reta-x', tipo: 'reta' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, escolherVaga('recebida-reta-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('reta-x', 1, 3), 'ana');
+  assert.equal(estado.atravessouNoTurno, true);
+  assert.equal(estado.pecaDaTravessiaId ?? null, 'reta-x');
+  // Peão segue na origem (não pousou na reta-x) — CONFIRMAR sem mover é o
+  // posicionamento grátis no escuro que a ADR-0017 rejeitou.
+  assert.equal(
+    estado.tabuleiro.peoes.find((peao) => peao.peaoId === 'peao-branco')?.pecaId,
+    'reta-1',
+  );
+  assert.equal(
+    codigoDaRejeicao(estado, confirmarPosicao('peao-branco'), 'ana'),
+    'MOVIMENTO_INDISPONIVEL',
+  );
+});
+
+test('ADR-0018 (E1): confirmar com peça da Travessia Monstro é vedado', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, escolherVaga('recebida-vulto-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('vulto-x', 1, 3), 'ana');
+  // Estado artesanal: peão forçado sobre o Monstro (o mover normal barra o
+  // pouso) — o CONFIRMAR não pode fechar esse turno pelo funil completo.
+  const sobreMonstro: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      recebidas: [],
+      peoes: estado.tabuleiro.peoes.map((peao) =>
+        peao.peaoId === 'peao-branco' ? { ...peao, pecaId: 'vulto-x' } : peao,
+      ),
+    },
+  };
+  assert.equal(
+    codigoDaRejeicao(sobreMonstro, confirmarPosicao('peao-branco'), 'ana'),
+    'PECA_JA_TEM_PEAO',
+  );
+});
+
+test('ADR-0018 (E4): permanência-monstro aplica Limpeza após o Ataque', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, escolherVaga('recebida-vulto-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('vulto-x', 1, 3), 'ana');
+  const permanencia = aplicarComandoDePartida(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  // A vulto-x em célula escura (ana já estava em Baixa — sem Baixa nova) é
+  // removida no MESMO gatilho, com o snapshot podado.
+  assert.ok(!permanencia.estado.tabuleiro.posicionadas.some((p) => p.pecaId === 'vulto-x'));
+  assert.ok(!Object.keys(permanencia.estado.peoesNoAlcance).includes('vulto-x'));
+  const limpeza = permanencia.eventos.find((e) => e.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza && limpeza.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza.pecasRemovidas.includes('vulto-x'));
+  // Ordem deliberada Ataque → Limpeza: o Monstro da aposta ataca antes de ser
+  // varrido (inversa do funil padrão, ADR-0018).
+  const ataqueIdx = permanencia.eventos.findIndex((e) => e.tipo === 'ataque_resolvido');
+  const limpezaIdx = permanencia.eventos.findIndex((e) => e.tipo === 'limpeza_aplicada');
+  if (ataqueIdx !== -1) {
+    assert.ok(ataqueIdx < limpezaIdx);
+  }
+  assert.equal(permanencia.estado.jogadorAtivoId, 'bruno');
+  assert.equal(permanencia.estado.atravessouNoTurno, false);
+});
+
+test('ADR-0018 (E4): permanecer comum segue sem Limpeza', () => {
+  const estado = partidaEmRodada2();
+  const permanencia = aplicarComandoDePartida(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  assert.ok(!permanencia.eventos.some((e) => e.tipo === 'limpeza_aplicada'));
+});
+
+// ADR-0017 / issue #377 — Opção B (revoga ADR-0016): sem sorteio no início do
+// turno em Baixa; o saque é só sob demanda, na Travessia do Escuro.
+
+test('ADR-0017: permanecer com seleção nula adota o peão do ator (bloqueante 1)', () => {
   let estado = partidaEmRodada2();
   // Ana em turno normal, peça do início = inicial-1 (3,3), sem pendências
   assert.equal(estado.jogadorAtivoId, 'ana');
@@ -2222,7 +2454,7 @@ test('ADR-0013: permanecer com seleção nula adota o peão do ator (bloqueante 
   );
 });
 
-test('ADR-0013: avancarVez em Baixa sem vaga escura ou caixa vazia não puxa (0 peças) — permanecer sem seleção sucede', () => {
+test('ADR-0017: avancarVez em Baixa nunca puxa no turno_iniciado (0 peças) — permanecer sem seleção sucede', () => {
   // Usa N=2 para controlar o wrap ana→bruno→ana
   let estado = partidaIniciadaCom(['ana', 'bruno']);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
@@ -2254,7 +2486,7 @@ test('ADR-0013: avancarVez em Baixa sem vaga escura ou caixa vazia não puxa (0 
   assert.equal(permanecerAna.estado.jogadorAtivoId, 'bruno');
 });
 
-test('ADR-0013: avancarVez em Baixa com caixa vazia não puxa (0 peças)', () => {
+test('ADR-0017: avancarVez em Baixa com caixa vazia não puxa (0 peças)', () => {
   let estado = partidaIniciadaCom(['ana', 'bruno']);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
@@ -2286,7 +2518,59 @@ test('ADR-0013: avancarVez em Baixa com caixa vazia não puxa (0 peças)', () =>
   assert.ok(!retorno.eventos.some((e) => e.tipo === 'peca_sorteada'));
 });
 
-test('ADR-0013: confirmar_posicao em Baixa mantém recebidas [] (sem sorteio no confirmar)', () => {
+test('ADR-0017 / issue #377: avancarVez em Baixa COM vaga escura e caixa cheia não puxa (0 peças)', () => {
+  // Regressão do bug: o código antigo (ADR-0016) sacava 1 peça no
+  // turno_iniciado quando havia vaga escura — travando o movimento do peão.
+  // O fluxo canônico agora é a Travessia do Escuro sob demanda (Opção B).
+  // Cena controlada: ana em Baixa com o peão sobre uma cruz livre em (5,5)
+  // (vagas escuras garantidas), caixa cheia, turno de ana em curso.
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
+  estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
+  assert.equal(estado.jogadorAtivoId, 'ana');
+  estado = comPecaFora(estado, 'livre-1', 'cruz', 5, 5);
+  const pecaLivre = estado.tabuleiro.posicionadas.find((p) => p.pecaId === 'livre-1');
+  assert.ok(pecaLivre);
+  const vagasLivres = vagasDisponiveis(estado.tabuleiro, pecaLivre);
+  assert.ok(vagasLivres.length >= 1);
+  for (const [i, vaga] of vagasLivres.slice(1).entries()) {
+    estado = comPecaFora(estado, `bloq-377-${i}`, 'reta', vaga.celula.linha, vaga.celula.coluna);
+  }
+  estado = {
+    ...estado,
+    celulasIluminadas: [],
+    pecaDoInicioDoTurnoId: 'livre-1',
+    tabuleiro: {
+      ...estado.tabuleiro,
+      peoes: estado.tabuleiro.peoes.map((p) =>
+        p.peaoId === 'peao-branco' ? { ...p, pecaId: 'livre-1' } : p,
+      ),
+    },
+  };
+  const caixaAntes = [...estado.tabuleiro.caixa];
+  assert.ok(caixaAntes.length > 0);
+  estado = comJogadorEmBaixa(estado, 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(estado.jogadorAtivoId, 'bruno');
+  estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
+  const turnoBruno = aplicarComandoDePartida(estado, permanecer('peao-vermelho'), 'bruno');
+  assert.equal(turnoBruno.sucesso, true);
+  if (!turnoBruno.sucesso) return;
+  // avancarVez para ana (Baixa, COM vaga escura e caixa cheia) → 0 peças, sem
+  // recebimento_gerado, Caixa intacta e seleção nula.
+  assert.equal(turnoBruno.estado.jogadorAtivoId, 'ana');
+  assert.equal(turnoBruno.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!turnoBruno.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(!turnoBruno.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.deepEqual(turnoBruno.estado.tabuleiro.caixa, caixaAntes);
+  assert.equal(turnoBruno.estado.tabuleiro.peaoSelecionadoId, null);
+  // E ana, sem saque no início, pode permanecer (Opção C) — o turno não trava.
+  const permanecerAna = aplicarComandoDePartida(turnoBruno.estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanecerAna.sucesso, true);
+});
+
+test('ADR-0017: confirmar_posicao em Baixa mantém recebidas [] (sem sorteio no confirmar)', () => {
   let estado = comJogadorEmBaixa(partidaEmRodada2(), 'ana');
   // Move para peça vizinha conectada e confirma — em Baixa o confirmar não sorteia
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
@@ -2309,7 +2593,7 @@ test('ADR-0013: confirmar_posicao em Baixa mantém recebidas [] (sem sorteio no 
   assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
 });
 
-test('ADR-0013: travessia usa iluminação fresca (unificada com avancarVez)', () => {
+test('ADR-0017: travessia usa iluminação fresca (unificada com posicionarPeao)', () => {
   let estado = estadoDaTravessia();
   // Injeta iluminação stale divergente: adiciona célula iluminada que cobre a vaga norte (1,3)
   // Se a travessia usasse stale, consideraria (1,3) iluminada e falharia; com fresca deve suceder
@@ -2324,11 +2608,10 @@ test('ADR-0013: travessia usa iluminação fresca (unificada com avancarVez)', (
   assert.equal(travessia.estado.tabuleiro.recebidas.length, 1);
 });
 
-// Issue #343 — Baixa nova no mesmo gatilho descarta o sorteio (espelha 8063dfe
-// do CONFIRMAR): 0 no turno, puxar-1 no proximo avancarVez (ADR-0013). Sem o
-// descarte, a pendencia comum fica irresoluvel e o turno trava com
-// PENDENCIA_NAO_RESOLVIDA. O puxar-1 e coberto pelos testes do avancarVez
-// (90f6cb3, review PR #370 Bug 1); aqui o Primeiro Turno prova 0 + encerrar.
+// Issue #343 — Baixa nova no mesmo gatilho descarta o sorteio: 0 no turno e
+// 0 no avancarVez seguinte (ADR-0017 — sem puxar-1; só a Travessia saca, sob
+// demanda). Sem o descarte, a pendencia comum fica irresoluvel e o turno
+// trava com PENDENCIA_NAO_RESOLVIDA. Aqui o Primeiro Turno prova 0 + encerrar.
 
 function comPosicionada(
   estado: EstadoDaPartida,
@@ -2441,7 +2724,7 @@ test('issue #343: Primeiro Turno com Baixa nova e vaga escura descarta a 0 (sem 
   assert.equal(encerrado.estado.jogadorAtivoId, 'bruno');
 });
 
-test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no turno, 1 no avancarVez)', () => {
+test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no turno, 0 no avancarVez — ADR-0017)', () => {
   let estado = partidaIniciadaCom(['ana', 'bruno']);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });
@@ -2471,9 +2754,10 @@ test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no
   assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'peca_sorteada'));
   assert.ok(!confirmacao.eventos.some((e) => e.tipo === 'recebimento_gerado'));
   assert.deepEqual(confirmacao.estado.tabuleiro.caixa, caixaAntes);
-  // 1 no próximo avancarVez (ADR-0013): encerra o turno de ana, bruno
-  // permanece (o permanecer já avança a vez) e ana reabre em Baixa com o
-  // puxar-1 na Bandeja.
+  // 0 também no próximo avancarVez (ADR-0017 / issue #377: sem puxar-1 no
+  // turno_iniciado — o saque em Baixa é só sob demanda, na Travessia do
+  // Escuro): encerra o turno de ana, bruno permanece (o permanecer já avança
+  // a vez) e ana reabre em Baixa SEM recebida na Bandeja, com a Caixa intacta.
   estado = aplicar(confirmacao.estado, encerrarTurno(), 'ana');
   assert.equal(estado.jogadorAtivoId, 'bruno');
   estado = aplicar(estado, selecionarPeao('peao-vermelho'), 'bruno');
@@ -2481,16 +2765,18 @@ test('review PR #370 (Bug 1): confirmar que impõe Baixa nova não sorteia (0 no
   assert.equal(turnoBruno.sucesso, true);
   if (!turnoBruno.sucesso) return;
   assert.equal(turnoBruno.estado.jogadorAtivoId, 'ana');
-  assert.equal(turnoBruno.estado.tabuleiro.recebidas.length, 1);
-  assert.ok(turnoBruno.eventos.some((e) => e.tipo === 'peca_sorteada'));
-  assert.ok(turnoBruno.eventos.some((e) => e.tipo === 'recebimento_gerado'));
-  assert.equal(turnoBruno.estado.tabuleiro.caixa.length, caixaAntes.length - 1);
+  assert.equal(turnoBruno.estado.tabuleiro.recebidas.length, 0);
+  assert.ok(!turnoBruno.eventos.some((e) => e.tipo === 'peca_sorteada'));
+  assert.ok(!turnoBruno.eventos.some((e) => e.tipo === 'recebimento_gerado'));
+  assert.deepEqual(turnoBruno.estado.tabuleiro.caixa, caixaAntes);
 });
 
 test('review PR #370 (Bug 2): fluxo Baixa completo — colocar, OK, selecionar, mover, confirmar e encerrar', () => {
   // O "puxar" é gesto local do cliente (sem comando wire — coberto no
-  // frontend); aqui a cadeia começa na vaga do puxar-1 do avancarVez,
-  // injetado com peça determinística (cruz conecta sempre, 0 giros).
+  // frontend); aqui a cadeia começa na recebida com a forma da travessia
+  // (ADR-0017: o saque em Baixa nasce no ATRAVESSAR_O_ESCURO, não mais no
+  // avancarVez), injetada com peça determinística (cruz conecta sempre,
+  // 0 giros).
   let estado = partidaIniciadaCom(['ana', 'bruno']);
   estado = concluirPrimeiroTurno(estado, { linha: 3, coluna: 3 });
   estado = concluirPrimeiroTurno(estado, { linha: 0, coluna: 0 });

@@ -1138,15 +1138,17 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
         resgatadoJogadorId: 'jogador-2',
         resgatadorJogadorId: MEU_JOGADOR_ID,
         resgatadorPeaoId: 'peao-branco',
+        emBaixaIluminacao: false,
+        sanidade: 2,
       }),
     )
 
-    // Estados limpos + sanidade restaurada a 1 (regra do Resgate no domínio).
+    // Estados limpos + sanidade restaurada a 2 (regra do Resgate no domínio).
     await waitFor(() => {
       const avatar = avatarDoAdversario('jogador-2')
       expect(avatar).not.toHaveAttribute('data-amedrontado')
       expect(avatar).not.toHaveAttribute('data-em-baixa')
-      expect(avatar).toHaveAttribute('data-sanidade', '1')
+      expect(avatar).toHaveAttribute('data-sanidade', '2')
     })
     // Resgate em silêncio: nenhum toque, nenhum clarão, nenhum anúncio.
     expect(toquesDeAudio).toHaveLength(0)

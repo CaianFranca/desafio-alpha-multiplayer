@@ -99,6 +99,12 @@ export function paraSnapshotWire(
     rodada: estado.rodada,
     pecaDoInicioDoTurnoId: estado.pecaDoInicioDoTurnoId,
     posicaoConfirmada: estado.posicaoConfirmada,
+    // Fase da Travessia do Escuro (ADR-0017 / issue #377): carregada no wire
+    // para a readmissão não órfã a fase no meio do turno (marcadores + auto-
+    // mover). Normalização defensiva: estados persistidos por binário anterior
+    // podem não ter os campos (?? false / ?? null).
+    atravessouNoTurno: estado.atravessouNoTurno ?? false,
+    pecaDaTravessiaId: estado.pecaDaTravessiaId ?? null,
     celulasIluminadas: estado.celulasIluminadas.map(copiarCelula),
     // Término (issue #179): o Resultado no estado do engine é a própria
     // condição "terminada" — o snapshot o reflete para que quem se conecta

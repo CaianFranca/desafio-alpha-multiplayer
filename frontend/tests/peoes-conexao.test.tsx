@@ -207,6 +207,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     await user.click(celulaDoEspelho(2, 3))
     expect(ws.sentMessages).toHaveLength(comandosAntes)
     expect(celulaDoEspelho(2, 3).hasAttribute('data-vaga')).toBe(false)
+    expect(celulaDoEspelho(2, 3).hasAttribute('data-vaga-pontilhada')).toBe(false)
 
     // ── 2b. Puxar a corrente (estado local, sem comando) destrava as vagas ──
     await puxarCorrente(user)
@@ -214,6 +215,11 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(celulaDoEspelho(2, 3).getAttribute('data-vaga')).toBe('true')
     expect(celulaDoEspelho(3, 4).getAttribute('data-vaga')).toBe('true')
     expect(celulaDoEspelho(0, 0).hasAttribute('data-vaga')).toBe(false)
+    // Pontinhos de vaga: só com pull — indicam onde a peça pode ser colocada.
+    expect(celulaDoEspelho(2, 3).getAttribute('data-vaga-pontilhada')).toBe('true')
+    expect(celulaDoEspelho(3, 4).getAttribute('data-vaga-pontilhada')).toBe('true')
+    expect(celulaDoEspelho(0, 0).hasAttribute('data-vaga-pontilhada')).toBe(false)
+    expect(screen.getAllByTestId('vaga-pontos')).toHaveLength(2)
     // Puxar não emite comando de wire.
     expect(ws.sentMessages).toHaveLength(comandosAntes)
 
@@ -248,6 +254,7 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(preview.getAttribute('data-coluna')).toBe('3')
     // A célula (2,3) deixou de ser vaga e virou alvo pendente.
     expect(celulaDoEspelho(2, 3).hasAttribute('data-vaga')).toBe(false)
+    expect(celulaDoEspelho(2, 3).hasAttribute('data-vaga-pontilhada')).toBe(false)
     expect(celulaDoEspelho(2, 3).getAttribute('data-alvo-pendente')).toBe('true')
     expect(pendenciaDoEspelho('recebida-1').getAttribute('data-peca-id')).toBe('reta-1')
     expect(pendenciaDoEspelho('recebida-1').getAttribute('data-vaga')).toBe('norte')
@@ -274,6 +281,8 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     expect(screen.queryAllByTestId('peca-posicionada')).toHaveLength(2)
     expect(screen.getByTestId('caixa')).toBeInTheDocument()
     expect(pecaCorrenteDaBandeja()).toBeNull()
+    // Posicionou: os pontinhos somem junto com as vagas.
+    expect(screen.queryByTestId('vaga-pontos')).not.toBeInTheDocument()
 
     // ── 5. GIRAR_PECA pós-encaixe (janela de Manipulação aberta para reta-1) ──
     // Rota pelo atalho de teclado R (os botões DOM de giro saíram; o overlay
@@ -1139,6 +1148,8 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
         resgatadoJogadorId: 'jogador-2',
         resgatadorJogadorId: JOGADOR_ID,
         resgatadorPeaoId: 'peao-branco',
+        emBaixaIluminacao: false,
+        sanidade: 3,
       })
     })
     await waitFor(() =>

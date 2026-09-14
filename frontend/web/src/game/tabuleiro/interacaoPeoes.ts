@@ -51,10 +51,13 @@
  * Gate do PERMANECER por `movimentouNoTurno` (revisão PR #309): como
  * PEAO_MOVIDO mantém o Peão selecionado (#263), o clique no próprio Peão
  * após mover rotearia para PERMANECER — que o engine rejeita com
- * ENCERRAMENTO_INVALIDO (mover já consumiu a decisão do turno). Com
- * `movimentouNoTurno` o clique no próprio Peão fica silencioso; o caminho
- * canônico de encerrar após mover é confirmar → encerrar, e o botão
- * Permanecer só vale ANTES de mover.
+ * ENCERRAMENTO_INVALIDO (mover já consumiu a decisão do turno) salvo quando
+ * o peão retorna à Peça do início do turno (ADR-0017, arrependimento: ida-e-
+ * volta livre — a validade é só "peão na Peça do início", sem guarda de
+ * movimentouNoTurno no engine). Com `movimentouNoTurno` o clique no próprio
+ * Peão fica silencioso; o caminho canônico de encerrar após mover é
+ * confirmar → encerrar, e o botão Permanecer (faseDoTurno da PartidaPage)
+ * vale ANTES de mover ou com o peão de volta na Peça do início do turno.
  */
 
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao'
@@ -74,6 +77,7 @@ import type {
   PecaPosicionada,
 } from './contrato'
 import type {
+  AtravessarOEscuroPartidaComando,
   BordaCardinal,
   Orientacao,
   PeaoComandoDoCliente,
@@ -155,10 +159,25 @@ export interface EstadoInteracaoPeoes {
    * sempre fornece o N clampeado.
    */
   readonly quantidadeDeJogadores?: number
-  /** Células iluminadas do snapshot (ADR-0013): filtra vagas escuras em Baixa. */
+  /** Células iluminadas do snapshot (ADR-0017): filtra vagas escuras em Baixa. */
   readonly celulasIluminadas?: readonly Celula[]
   /** Peões em Baixa Iluminação (per-player) — para filtrar vagas iluminadas. */
   readonly peaoIdsEmBaixa?: ReadonlySet<PeaoId>
+  /**
+   * O Peão do Jogador Ativo já atravessou o Escuro neste turno
+   * (ATRAVESSOU_O_ESCURO — ADR-0017 / issue #377, Opção B). Enquanto vigente,
+   * nova travessia não roteia (o engine rejeitaria) e a Permanência é vedada
+   * (mover compulsório — guarda do engine). Ausente (unidades puras/testes)
+   * = sem travessia no turno (comportamento legado).
+   */
+  readonly atravessouNoTurno?: boolean
+  /**
+   * Peça colocada pela Travessia do Escuro no turno (ADR-0017 / issue #377,
+   * espelho da engine): o mover pós-travessia é compulsório PARA ELA (o
+   * roteador silencia as demais — movimento não desfazível). Ausente = sem
+   * restrição (comportamento legado).
+   */
+  readonly pecaDaTravessiaId?: string | null
   /**
    * Peça do início do turno (zona da origem — espelho de partida.ts:119): a
    * Peça sob o Peão do Jogador Ativo quando o turno iniciou. O Peão só pousa
@@ -187,6 +206,15 @@ export type ResultadoDeInteracaoDePeao =
   | { readonly tipo: 'comando'; readonly comando: PeaoComandoDoCliente }
   | { readonly tipo: 'rejeicao'; readonly rejeicao: RejeicaoDeInteracao }
   | null
+
+/**
+ * Comando aceito no callback do ciclo do Peão (cena/espelho → PartidaPage):
+ * os comandos do contrato do Peão mais a travessia (ADR-0017 — viaja no
+ * canal de Partida com `jogadorId` injetado, mas nasce do ciclo).
+ */
+export type ComandoDePeaoDoDespacho =
+  | PeaoComandoDoCliente
+  | TravessiaDoEscuroSemJogador
 
 /** Resultado do clique no Peão (mesma forma do resultado do ciclo). */
 export type ResultadoDeCliqueNoPeao = ResultadoDeInteracaoDePeao
@@ -396,6 +424,22 @@ export function vagasDisponiveisDoPeao(
   if (!peao || peao.celula === null) return []
   const origem = encontrarPecaNaCelula(estado.posicionadas, peao.celula)
   if (!origem) return []
+  // ADR-0017 / issue #377 (Opção B): pendência da Travessia (célula-alvo
+  // pré-fixada, vaga ainda nula) só aceita a borda que mapeia à célula
+  // travada — espelho exato da guarda da engine (DADOS_INVALIDOS fora dela).
+  // Sem isso o clique na vaga certa não rotearia e o turno strandaria.
+  const travessiaPendente = estado.recebidasPendentes.find(
+    (r) => r.vaga === null && r.celulaAlvo !== null,
+  )
+  if (travessiaPendente?.celulaAlvo) {
+    const alvo = travessiaPendente.celulaAlvo
+    for (const borda of bordasAbertas(origem)) {
+      if (chaveCelula(celulaVizinhaNaBorda(origem.celula, borda)) === chaveCelula(alvo)) {
+        return [{ borda, celula: alvo }]
+      }
+    }
+    return []
+  }
   const bordas = bordasAbertas(origem)
   const jaEscolhidas = new Set<BordaCardinal>(
     estado.recebidasPendentes
@@ -412,7 +456,7 @@ export function vagasDisponiveisDoPeao(
     if (jaEscolhidas.has(borda)) continue
     const celula = celulaVizinhaNaBorda(origem.celula, borda)
     if (encontrarPecaNaCelula(estado.posicionadas, celula)) continue
-    // ADR-0013: em Baixa, só vagas escuras são disponíveis no espelho — fail-closed:
+    // ADR-0017: em Baixa, só vagas escuras são disponíveis no espelho — fail-closed:
     // se emBaixa e iluminadas === undefined, nenhuma vaga é considerada escura.
     if (emBaixa) {
       if (iluminadas === undefined) continue
@@ -476,9 +520,9 @@ export interface PuxadaDaBandeja {
  *     bandeja continua pública (a corrente é exibida a todos);
  *   - posição confirmada EM BAIXA (`posicaoConfirmadaNoTurno` + peão do ciclo
  *     em `peaoIdsEmBaixa`, review PR #370 Bug 1) trava o pull — moveu →
- *     sofreu ataque/Baixa → o turno encerra sem sortear e o puxar-1 vem no
- *     próximo `avancarVez` (ADR-0013); o mover checa a confirmação, o pull
- *     também. Fora da Baixa o pull pós-confirmação segue liberado: no fluxo
+ *     sofreu ataque/Baixa → o turno encerra sem sortear (ADR-0017: sem
+ *     puxar-1 no turno seguinte; só a Travessia do Escuro saca, sob
+ *     demanda); o mover checa a confirmação, o pull também. Fora da Baixa o pull pós-confirmação segue liberado: no fluxo
  *     saudável o CONFIRMAR sorteia e o encaixe (puxar → vaga → OK) acontece
  *     DEPOIS da confirmação, antes do encerramento (issue #326);
  *   - re-clique na já puxada é no-op (null), sem reação repetida;
@@ -702,12 +746,168 @@ export function mapearMovimentacao(
     estado.quantidadeDeJogadores,
     estado.pecaDoInicioDoTurnoId,
   )
-  const conectada = destinos.some(
+  const destino = destinos.find(
     (d) => chaveCelula(d.peca.celula) === chaveCelula(celula),
   )
-  if (!conectada) return null
+  if (!destino) return null
+  // ADR-0017 / issue #377: mover pós-travessia é compulsório PARA a peça
+  // colocada — voltar à origem (ou a qualquer outra) não reage; o movimento
+  // da travessia não é desfazível (espelho da guarda da engine). Vale também
+  // para Monstro (o alvo é registrado no posicionar): mover para o Monstro é
+  // rejeitado pelo pouso (PECA_JA_TEM_PEAO), e o fechamento do turno travado
+  // vira Permanência — ver permanecerNaPartida.
+  const pecaDaTravessiaId = estado.pecaDaTravessiaId ?? null
+  if (
+    estado.atravessouNoTurno === true &&
+    pecaDaTravessiaId !== null &&
+    destino.peca.pecaId !== pecaDaTravessiaId
+  ) {
+    return null
+  }
   if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
   return { tipo: 'comando', comando: { type: 'MOVER_PEAO', peaoId, celula } }
+}
+
+/**
+ * Borda da pendência travada para o auto-encadeamento da escolha
+ * (ADR-0017 / issue #377, defeito 1): a travessia nasce com a célula-alvo
+ * pré-fixada e vaga nula — a página escolhe a vaga sozinha (1 clique:
+ * escuro → preview → girar → OK), sem o segundo clique na célula. Retorna a
+ * recebida + borda que mapeia à célula travada (espelho da guarda da
+ * engine); null sem pendência travada, sem referência de peão ou sem
+ * mapeamento (a engine rejeitaria — fail-closed, sem envio).
+ */
+export function bordaDaTravessiaPendente(
+  estado: EstadoInteracaoPeoes,
+): { recebidaId: string; borda: BordaCardinal } | null {
+  if (estado.donoDoCiclo === false) return null
+  if (estado.posicaoConfirmadaNoTurno) return null
+  const peaoId = peaoDeReferenciaDaSequencia(estado)
+  if (peaoId === null) return null
+  const peao = estado.peoes.find((p) => p.peaoId === peaoId)
+  if (!peao || peao.celula === null) return null
+  const origem = encontrarPecaNaCelula(estado.posicionadas, peao.celula)
+  if (!origem) return null
+  const travada = estado.recebidasPendentes.find(
+    (r) => r.vaga === null && r.celulaAlvo !== null,
+  )
+  if (!travada?.celulaAlvo) return null
+  for (const borda of bordasAbertas(origem)) {
+    if (
+      chaveCelula(celulaVizinhaNaBorda(origem.celula, borda)) ===
+      chaveCelula(travada.celulaAlvo)
+    ) {
+      return { recebidaId: travada.recebidaId, borda }
+    }
+  }
+  return null
+}
+
+/**
+ * ADR-0017 (regra "uma casa por turno"): a Travessia só é gesto disponível na
+ * Peça do início do turno, antes de cruzar — mover para a peça iluminada de
+ * outro jogador e atravessar dali contaria como dois movimentos.
+ * Gate por localização (espelho da guarda da engine): o movimento de ida-e-
+ * volta à origem (mover e voltar) NÃO revoga o gesto (defeito #377;
+ * `movimentouNoTurno` deixa de fazer parte da condição).
+ * `pecaDoInicioDoTurnoId` ausente/nula (unidades puras / Peão na Mesa)
+ * mantém o comportamento legado.
+ */
+export function travessiaDoEscuroDisponivel(
+  estado: EstadoInteracaoPeoes,
+  peao: PeaoDaExibicao,
+): boolean {
+  const origem = estado.pecaDoInicioDoTurnoId
+  if (origem === undefined || origem === null) return true
+  if (peao.celula === null) return false
+  const pecaAcomodando = encontrarPecaNaCelula(estado.posicionadas, peao.celula)
+  return pecaAcomodando?.pecaId === origem
+}
+
+/**
+ * Células destacáveis da travessia (ADR-0017 / issue #377, defeito 2): as
+ * vagas escuras clicáveis do gesto de travessia + a célula travada da
+ * pendência da travessia sequência em curso — única fonte para o marcador
+ * na cena e o atributo do espelho DOM. Fora disso, conjunto vazio (sem
+ * reação visual). As vagas escuras só reagem com o Peão de referência em
+ * Baixa Iluminação — fora da Baixa o gesto não existe (o defeito 2 do #377
+ * pintava a movimentação normal de turnos comuns; fora da Baixa, vazio).
+ * ADR-0017 ("uma casa por turno"): também só valem na Peça do início do
+ * turno, antes de qualquer movimento (travessiaDoEscuroDisponivel).
+ */
+export function celulasDaTravessiaDoEscuro(
+  estado: EstadoInteracaoPeoes,
+): readonly Celula[] {
+  if (estado.donoDoCiclo === false) return []
+  if (estado.posicaoConfirmadaNoTurno) return []
+  const travada = estado.recebidasPendentes.find(
+    (r) => r.vaga === null && r.celulaAlvo !== null,
+  )
+  if (travada?.celulaAlvo) return [travada.celulaAlvo]
+  if (estado.atravessouNoTurno === true) return []
+  if (haRecebidasPendentes(estado)) return []
+  const peaoId = peaoDeReferenciaDaSequencia(estado)
+  if (peaoId === null) return []
+  const peao = estado.peoes.find((p) => p.peaoId === peaoId)
+  if (!peao) return []
+  if (!travessiaDoEscuroDisponivel(estado, peao)) return []
+  const emBaixa =
+    estado.peaoIdsEmBaixa !== undefined
+      ? estado.peaoIdsEmBaixa.has(peaoId)
+      : false
+  if (!emBaixa) return []
+  return vagasDisponiveisDoPeao(estado).map((v) => v.celula)
+}
+
+/**
+ * Comando de travessia sem `jogadorId` (a PartidaPage injeta uma única vez
+ * em `enviarComJogador`, como nos demais comandos do canal).
+ */
+export type TravessiaDoEscuroSemJogador = Omit<
+  AtravessarOEscuroPartidaComando,
+  'jogadorId'
+>
+
+/**
+ * Clique em vaga escura vazia com o Peão em Baixa selecionado →
+ * ATRAVESSAR_O_ESCURO (ADR-0017 / issue #377, Opção B: o saque de 1 peça
+ * acontece neste gesto, sob demanda — sem sorteio no início do turno).
+ * (espelho de `vagasDisponiveisDoPeao`). Só na Peça do início do turno e
+ * antes de qualquer movimento (travessiaDoEscuroDisponivel — "uma casa por
+ * turno"): mudou de peça ou moveu no turno → null como alvo inválido.
+ * Célula ocupada, iluminada, fora das vagas ou qualquer gate violado → null
+ * (alvos inválidos não reagem — padrão #91). Pós-confirmação → rejeição
+ * âmbar (AC3), como o mover.
+ */
+export function mapearTravessiaDoEscuro(
+  estado: EstadoInteracaoPeoes,
+  celula: Celula,
+): ResultadoDeInteracaoDePeao | { tipo: 'comando'; comando: TravessiaDoEscuroSemJogador } | null {
+  if (estado.donoDoCiclo === false) return null
+  if (haRecebidasPendentes(estado)) return null
+  if (estado.atravessouNoTurno === true) return null
+  const peaoId = peaoDeReferenciaDaSequencia(estado)
+  if (peaoId === null) return null
+  const peao = estado.peoes.find((p) => p.peaoId === peaoId)
+  if (!peao || peao.celula === null) return null
+  if (!travessiaDoEscuroDisponivel(estado, peao)) return null
+  const emBaixa =
+    estado.peaoIdsEmBaixa !== undefined
+      ? estado.peaoIdsEmBaixa.has(peaoId)
+      : false
+  if (!emBaixa) return null
+  if (encontrarPecaNaCelula(estado.posicionadas, celula)) return null
+  const iluminadas = estado.celulasIluminadas
+  // Fail-closed como as vagas: sem o mapa de iluminadas, nenhuma célula é
+  // considerada escura (unidades puras sem percepção degradam conservador).
+  if (iluminadas === undefined) return null
+  if (iluminadas.some((c) => chaveCelula(c) === chaveCelula(celula))) return null
+  const ehVaga = vagasDisponiveisDoPeao(estado).some(
+    (v) => chaveCelula(v.celula) === chaveCelula(celula),
+  )
+  if (!ehVaga) return null
+  if (estado.posicaoConfirmadaNoTurno) return REJEICAO_POSICAO_CONFIRMADA
+  return { tipo: 'comando', comando: { type: 'ATRAVESSAR_O_ESCURO', peaoId, celula } }
 }
 
 // ── Roteador do clique em célula do Tabuleiro (issue #91) ──
@@ -722,7 +922,12 @@ export function mapearMovimentacao(
  * chamador aplica o fallback ST-09).
  */
 export type ResultadoDeCliqueEmCelula =
-  | { readonly ciclo: PeaoComandoDoCliente | TabuleiroComandoDoCliente }
+  | {
+      readonly ciclo:
+        | PeaoComandoDoCliente
+        | TabuleiroComandoDoCliente
+        | TravessiaDoEscuroSemJogador
+    }
   | {
       readonly escolhaDeVagaEEncaixe: {
         readonly escolhaDeVaga: PeaoComandoDoCliente
@@ -734,7 +939,9 @@ export type ResultadoDeCliqueEmCelula =
 
 /** Converte o resultado do mapeador do ciclo em resultado do roteador. */
 function resultadoDoMapeadorParaCelula(
-  resultado: Exclude<ResultadoDeInteracaoDePeao, null>,
+  resultado:
+    | Exclude<ResultadoDeInteracaoDePeao, null>
+    | { tipo: 'comando'; comando: TravessiaDoEscuroSemJogador },
 ): Exclude<ResultadoDeCliqueEmCelula, null> {
   return resultado.tipo === 'comando'
     ? { ciclo: resultado.comando }
@@ -863,6 +1070,11 @@ export function rotearCliqueDeCelula(
     // roteia por clique (só pelo botão da fase).
     const posicionamento = mapearCliqueNaPecaInicial(estadoPeoes, celula)
     if (posicionamento) return { ciclo: posicionamento }
+    // ADR-0017 / issue #377 (Opção B): vaga escura vazia com o Peão em Baixa
+    // → ATRAVESSAR_O_ESCURO (saque sob demanda). Disjunto do mover (destino
+    // com peça) e do posicionamento (Inicial), então vem por último.
+    const travessia = mapearTravessiaDoEscuro(estadoPeoes, celula)
+    if (travessia) return resultadoDoMapeadorParaCelula(travessia)
     return null
   }
   return null
@@ -896,18 +1108,26 @@ const TIPOS_DE_COMANDO_DE_PEAO: ReadonlySet<string> = new Set([
   'ESCOLHER_VAGA_DA_PECA_RECEBIDA',
   'MOVER_PEAO',
   'PERMANECER',
+  // ADR-0017: a travessia viaja no canal de Partida (com jogadorId injetado
+  // pela PartidaPage), mas nasce do ciclo do Peão — roteia por onComandoPeao.
+  'ATRAVESSAR_O_ESCURO',
 ])
 
 /** Type guard: comando do ciclo do Peão (tipos wire disjuntos dos do Tabuleiro). */
 export function ehComandoDePeao(
-  comando: PeaoComandoDoCliente | TabuleiroComandoDoCliente,
-): comando is PeaoComandoDoCliente {
+  comando:
+    | PeaoComandoDoCliente
+    | TabuleiroComandoDoCliente
+    | TravessiaDoEscuroSemJogador,
+): comando is PeaoComandoDoCliente | TravessiaDoEscuroSemJogador {
   return TIPOS_DE_COMANDO_DE_PEAO.has(comando.type)
 }
 
 export interface DespachoDeCliqueEmCelula {
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
-  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  onComandoPeao?: (
+    comando: PeaoComandoDoCliente | TravessiaDoEscuroSemJogador,
+  ) => void
   /** Rejeição local do ciclo (AC3): motivo para o som de recusa, sem comando enviado. */
   onRejeicao?: (rejeicao: RejeicaoDeInteracao) => void
 }

@@ -1,6 +1,6 @@
-# ADR-0013: Turno em Baixa Iluminação — Puxar Primeiro
+# ADR-0016: Turno em Baixa Iluminação — Puxar Primeiro
 
-Status: Aceito
+Status: Revogado pela ADR-0017 (bug #377: o saque automático no início travava o movimento do peão)
 Data: 2026-09-10
 Revoga (parcialmente): desenho de baixa de #264/#272 (ordem mover-antes-de-puxar e `ATRAVESSAR_O_ESCURO` com célula pré-fixada)
 
@@ -47,6 +47,6 @@ Consequências:
 - `packages/engine/src/partida.ts:1298` `confirmarPosicaoDoPeao`, `1573 avancarVez`, `1142 permanecerNaPartida`, `888 atravessarOEscuroDaPartida` (legado, @deprecated)
 - `packages/engine/src/peoes.ts:346 gerarRecebidas` (overloads Baixa exigem `celulasIluminadas`), `307 vagasDisponiveis`
 - `packages/engine/src/tabuleiro.ts:792 calcularIluminacao`
-- `packages/shared/src/partida.ts:150` `AtravessarOEscuroPartidaComando` (@deprecated ADR-0013)
-- `packages/shared/src/peoes.ts:180` `AtravessouOEscuroEvento` (@deprecated ADR-0013)
+- `packages/shared/src/partida.ts:150` `AtravessarOEscuroPartidaComando` (@deprecated ADR-0016)
+- `packages/shared/src/peoes.ts:180` `AtravessouOEscuroEvento` (@deprecated ADR-0016)
 - `CONTEXT.md: Baixa Iluminação, Recebimento, Puxar, Bandeja, Limpeza`

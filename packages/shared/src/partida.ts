@@ -153,12 +153,11 @@ export interface ConfirmarPosicaoDoPeaoComando {
   readonly peaoId: PeaoId;
 }
 
-// Atravessar o Escuro (issue #264 / spec #272): o comando wire do canal de
-// Partida — o `jogadorId` viaja aqui (forma do ST-11); o contrato do Peão em
-// si (sem `jogadorId`) vive em ./peoes.ts (AtravessarOEscuroComando).
-// @deprecated ADR-0013: fluxo canônico em Baixa é puxar no início do turno
-// (avancarVez com gerarRecebidas filtrando vagas escuras). Mantido como legado
-// funcional até remoção em issue futura.
+// Atravessar o Escuro (issue #264 / spec #272, fluxo canônico sob demanda em
+// Baixa pela ADR-0017 / issue #377 — Opção B): o comando wire do canal de
+// Partida — o `jogadorId` viaja aqui (forma do ST-11). O saque de 1 peça
+// acontece neste gesto (após a escolha da célula escura), seguido de
+// posicionar → mover compulsório → confirmar.
 export interface AtravessarOEscuroPartidaComando {
   readonly type: 'ATRAVESSAR_O_ESCURO';
   readonly jogadorId: string;
@@ -373,6 +372,13 @@ export interface EstadoDaPartidaSnapshot {
   readonly rodada: number;
   readonly pecaDoInicioDoTurnoId: PecaId | null;
   readonly posicaoConfirmada: boolean;
+  // Fase da Travessia do Escuro (ADR-0017 / issue #377): pelo contrário da
+  // posição confirmada, a readmissão NÃO re-aprende por deltas (o servidor só
+  // re-entrega ESTADO_DA_PARTIDA) — sem os campos, recarregar/reconectar no
+  // meio do turno órfã a fase (marcadores voltam e o auto-mover não dispara).
+  // Opcional/defensivo: snapshots persistidos por binário anterior omitem.
+  readonly atravessouNoTurno?: boolean;
+  readonly pecaDaTravessiaId?: string | null;
   readonly celulasIluminadas: readonly Celula[];
   readonly estado: EstadoDaPartidaWire;
   // Término (issue #179): não nulo quando e somente quando estado === 'terminada' —
@@ -486,13 +492,16 @@ export interface AtaqueResolvidoWireEvento {
 }
 
 // Resgate (issue #171): chegada do aliado por conexão à peça do afetado.
-// Shape 1:1 com ResgateRealizadoEvento do domínio.
+// Carrega o estado resultante do resgatado (emBaixaIluminacao/sanidade), pois
+// a cura pode ser parcial — o cliente aplica exatamente, sem adivinhar.
 export interface ResgateRealizadoWireEvento {
   readonly type: 'RESGATE_REALIZADO';
   readonly pecaId: PecaId;
   readonly resgatadoJogadorId: string;
   readonly resgatadorJogadorId: string;
   readonly resgatadorPeaoId: PeaoId;
+  readonly emBaixaIluminacao: boolean;
+  readonly sanidade: number;
 }
 
 // Desistência (issue #288): eco do domínio — o Jogador saiu da Partida em

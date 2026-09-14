@@ -1114,9 +1114,26 @@ test('Portão com N=2 rejeita o 3º Peão sem afetado; com afetado o Resgate aut
       .length,
     3,
   );
+  // ADR-0005: o Resgate se materializa na Confirmação, não no mover.
   assert.ok(
-    resultado.eventos.some((evento) => evento.tipo === 'resgate_realizado'),
-    'esperava o resgate do afetado no Portão',
+    !resultado.eventos.some((evento) => evento.tipo === 'resgate_realizado'),
+    'mover não deve emitir resgate (efeito adiado à Confirmação)',
+  );
+  const resgateEventos = aplicarComandoDePartida(
+    resultado.estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resgateEventos.sucesso, true);
+  if (!resgateEventos.sucesso) return;
+  assert.ok(
+    resgateEventos.eventos.some((evento) => evento.tipo === 'resgate_realizado'),
+    'esperava o resgate do afetado no Portão após a Confirmação',
+  );
+  assert.equal(
+    resgateEventos.estado.jogadores.find((jogador) => jogador.jogadorId === 'bruno')!
+      .emBaixaIluminacao,
+    false,
   );
 });
 
@@ -1161,6 +1178,8 @@ test('Portão com N=3 rejeita o 4º Peão sem afetado; com afetado o Resgate aut
     'PECA_JA_TEM_PEAO',
   );
 
+  // Com afetado (bruno em Baixa no Portão): teto N+1=4 — o 4º entra e resgata
+  // na Confirmação (ADR-0005: mover não materializa o efeito).
   const comAfetado = montar(true);
   const entrando = aplicar(comAfetado, selecionarPeao('peao-branco'), 'ana');
   const resultado = aplicarComandoDePartida(
@@ -1176,7 +1195,18 @@ test('Portão com N=3 rejeita o 4º Peão sem afetado; com afetado o Resgate aut
     4,
   );
   assert.ok(
-    resultado.eventos.some((evento) => evento.tipo === 'resgate_realizado'),
+    !resultado.eventos.some((evento) => evento.tipo === 'resgate_realizado'),
+    'mover não deve emitir resgate (efeito adiado à Confirmação)',
+  );
+  const resgateEventos = aplicarComandoDePartida(
+    resultado.estado,
+    confirmarPosicao('peao-branco'),
+    'ana',
+  );
+  assert.equal(resgateEventos.sucesso, true);
+  if (!resgateEventos.sucesso) return;
+  assert.ok(
+    resgateEventos.eventos.some((evento) => evento.tipo === 'resgate_realizado'),
     'esperava o resgate do afetado no Portão',
   );
 });
