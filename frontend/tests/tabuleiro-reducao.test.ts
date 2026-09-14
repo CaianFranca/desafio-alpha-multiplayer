@@ -649,6 +649,7 @@ describe('redução dos turnos no cliente — fase, rodada e mapa aprendido (iss
     expect(inicial.rodada).toBeNull()
     expect(inicial.movimentouNoTurno).toBe(false)
     expect(inicial.posicaoConfirmadaNoTurno).toBe(false)
+    expect(inicial.atravessouNoTurno).toBe(false)
     expect(inicial.peaoPorJogador).toEqual({})
   })
 
@@ -658,6 +659,7 @@ describe('redução dos turnos no cliente — fase, rodada e mapa aprendido (iss
     expect(estado.rodada).toBe(1)
     expect(estado.movimentouNoTurno).toBe(false)
     expect(estado.posicaoConfirmadaNoTurno).toBe(false)
+    expect(estado.atravessouNoTurno).toBe(false)
 
     // Fase suja de um turno anterior é zerada pelo próximo TURNO_INICIADO.
     estado = reduzirEvento(estado, {
@@ -672,6 +674,32 @@ describe('redução dos turnos no cliente — fase, rodada e mapa aprendido (iss
     expect(estado.jogadorAtivoId).toBe('jogador-2')
     expect(estado.movimentouNoTurno).toBe(false)
     expect(estado.posicaoConfirmadaNoTurno).toBe(false)
+    expect(estado.atravessouNoTurno).toBe(false)
+  })
+
+  it('ATRAVESSOU_O_ESCURO marca a fase da travessia; TURNO_INICIADO/ENCERRADO resetam (ADR-0017)', () => {
+    let estado = reduzirEvento(criarEstadoInicialDoCliente(), TURNO_1_J1)
+    expect(estado.atravessouNoTurno).toBe(false)
+    estado = reduzirEvento(estado, {
+      type: 'ATRAVESSOU_O_ESCURO',
+      peaoId: 'peao-branco',
+      celula: { linha: 2, coluna: 3 },
+    })
+    expect(estado.atravessouNoTurno).toBe(true)
+    // Replay do mesmo turno não apaga a fase (issue #258).
+    estado = reduzirEvento(estado, TURNO_1_J1)
+    expect(estado.atravessouNoTurno).toBe(true)
+    // Troca real de turno reseta.
+    estado = reduzirEvento(estado, { type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 1 })
+    expect(estado.atravessouNoTurno).toBe(false)
+    estado = reduzirEvento(estado, {
+      type: 'ATRAVESSOU_O_ESCURO',
+      peaoId: 'peao-vermelho',
+      celula: { linha: 0, coluna: 1 },
+    })
+    expect(estado.atravessouNoTurno).toBe(true)
+    estado = reduzirEvento(estado, { type: 'TURNO_ENCERRADO', jogadorId: 'jogador-2' })
+    expect(estado.atravessouNoTurno).toBe(false)
   })
 
   it('TURNO_INICIADO deriva a Peça do início do turno (zona da origem); encerrar zera', () => {

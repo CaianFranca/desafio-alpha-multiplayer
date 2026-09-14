@@ -214,6 +214,14 @@ export function aplicarSnapshot(
     // contraditório (confirmada sem movimento) na retomada.
     movimentouNoTurno: snapshot.posicaoConfirmada ? true : estado.movimentouNoTurno,
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
+    // ADR-0017: a fase da travessia é carregada no wire do snapshot (a
+    // readmissão não re-aprende por deltas — ESTADO_DA_PARTIDA é a única
+    // mensagem da retomada). Sem isso, recarregar/reconectar/HMR no meio do
+    // turno órfã a fase: marcadores reaparecem e o auto-mover (guarda
+    // atravessouNoTurno) não dispara. Normalização defensiva para snapshots
+    // de binário anterior (ausentes → comportamento legado).
+    atravessouNoTurno: snapshot.atravessouNoTurno ?? false,
+    pecaDaTravessiaId: snapshot.pecaDaTravessiaId ?? null,
     // Zona da origem: o wire carrega a Peça do início do turno (espelho do
     // engine); o snapshot é a autoridade e substitui a derivação local do
     // TURNO_INICIADO (reload no meio do turno precisa da origem real).

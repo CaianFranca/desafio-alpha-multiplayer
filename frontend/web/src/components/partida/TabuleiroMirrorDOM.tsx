@@ -9,7 +9,7 @@ import type {
   PecaPosicionada,
 } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
-import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../../game/tabuleiro/interacaoPeoes'
+import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal } from '../../game/tabuleiro/interacaoPeoes'
 import {
   despacharCliqueDeCelula,
   despacharCliqueNaPecaDaBandeja,
@@ -18,7 +18,6 @@ import {
   puxadaVigenteNaBandeja,
 } from '../../game/tabuleiro/interacaoPeoes'
 import type {
-  PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
@@ -55,7 +54,7 @@ interface TabuleiroMirrorDOMProps {
   /** Estado do ciclo do peão: roteia cliques em células/pendências. */
   estadoPeoes?: EstadoInteracaoPeoes | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
-  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  onComandoPeao?: (comando: ComandoDePeaoDoDespacho) => void
   /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
   onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
   /** Pull aceito na bandeja (fluxo #143/revisão #199) → estado local no pai. */
@@ -64,6 +63,14 @@ interface TabuleiroMirrorDOMProps {
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (#143, cena/espelho). */
   vagasSet?: ReadonlySet<string>
+  /**
+   * Subconjunto de vagas com pontinhos (peça puxada na bandeja): mesma fonte
+   * da cena — exposto como data-vaga-pontilhada para o espelho de teste.
+   */
+  vagasPontilhadasSet?: ReadonlySet<string>
+  /** Chaves das células do gesto da travessia (ADR-0017): anel branco — mesma
+   * fonte da cena, exposta como data-travessia para o espelho de teste. */
+  travessiaSet?: ReadonlySet<string>
   /** Percepção mínima de Sanidade e estados (ST-15, issue #174) — peaoId → sanidade/estados. */
   sanidadePorPeao?: SanidadePorPeao
   /** Trigger de encaixe evento-driven (issue #241): espelha o voo mesa→célula. */
@@ -113,6 +120,8 @@ export function TabuleiroMirrorDOM({
   onPuxar,
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
+  vagasPontilhadasSet = new Set<string>(),
+  travessiaSet = new Set<string>(),
   sanidadePorPeao = {},
   encaixeTrigger = null,
   estadoVisualDoAtaque = null,
@@ -161,6 +170,7 @@ export function TabuleiroMirrorDOM({
         const ocupada = ocupadasSet.has(chave)
         const alvoPendente = alvosPendentesSet.has(chave)
         const vaga = vagasSet.has(chave)
+        const vagaPontilhada = vagasPontilhadasSet.has(chave)
         // Iluminação (issue #151): espelho DOM do MESMO set que ilumina a cena.
         const iluminada = iluminadasSet.has(chave)
         return (
@@ -172,11 +182,28 @@ export function TabuleiroMirrorDOM({
             data-coluna={celula.coluna}
             data-alvo-pendente={alvoPendente ? 'true' : undefined}
             data-vaga={vaga ? 'true' : undefined}
+            data-vaga-pontilhada={vagaPontilhada ? 'true' : undefined}
+            data-travessia={travessiaSet.has(chave) ? 'true' : undefined}
             data-iluminada={iluminada ? 'true' : undefined}
             onClick={(e) => {
               aoClicarCelula(celula, e)
             }}
-          />
+          >
+            {vagaPontilhada ? (
+              <div
+                data-testid="vaga-pontos"
+                aria-hidden="true"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  backgroundImage:
+                    'radial-gradient(circle, rgba(255,255,255,0.55) 1.5px, transparent 1.6px)',
+                  backgroundSize: '33.4% 33.4%',
+                  backgroundPosition: 'center',
+                }}
+              />
+            ) : null}
+          </div>
         )
       })}
       {/* Caixa sobre a mesa (issue #143): bloco opaco (sem conteúdo exposto),

@@ -16,10 +16,9 @@ import { Celula } from './Celula'
 import { PeaoVisual } from './PeaoVisual'
 import { cursorParaCelula, cursorParaPecaPosicionada } from './interacao'
 import type { EstadoInteracaoTabuleiro } from './interacao'
-import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from './interacaoPeoes'
+import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal } from './interacaoPeoes'
 import { despacharCliqueDeCelula, previewsProvisorios } from './interacaoPeoes'
 import type {
-  PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
 } from '@flicker/shared'
 import {
@@ -68,7 +67,7 @@ interface TabuleiroProps {
   /** Estado do ciclo do peão: com valor, cliques passam pelo roteador (#91). */
   estadoPeoes?: EstadoInteracaoPeoes | null
   /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
-  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  onComandoPeao?: (comando: ComandoDePeaoDoDespacho) => void
   /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
   onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
   /** Chaves das células-alvo de pendências ativas (destaque, #91). */
@@ -79,6 +78,14 @@ interface TabuleiroProps {
    * mesma fonte do espelho DOM.
    */
   vagasSet?: ReadonlySet<string>
+  /**
+   * Subconjunto de vagas com pontinhos brancos (peça puxada na bandeja):
+   * indicação visual de onde a peça pode ser colocada.
+   */
+  vagasPontilhadasSet?: ReadonlySet<string>
+  /** Chaves das células do gesto da travessia (ADR-0017): anel branco nas
+   * vagas escuras clicáveis + célula travada da pendência em curso. */
+  travessiaSet?: ReadonlySet<string>
   /**
    * Voo pendente do peão (issue #242): overlay erguer→flutuar→aterrissar até
    * o pouso, quando a cena avisa via `onVooAterrissou(nonce)`. Null = sem voo
@@ -132,6 +139,8 @@ export function Tabuleiro({
   onRejeicaoPeao,
   alvosPendentesSet = new Set<string>(),
   vagasSet = new Set<string>(),
+  vagasPontilhadasSet = new Set<string>(),
+  travessiaSet = new Set<string>(),
   vooPendente = null,
   onVooAterrissou,
   ocultarPecaId = null,
@@ -239,6 +248,10 @@ export function Tabuleiro({
         // vagas disponíveis para a escolha sequencial (#143) aquecem o plano.
         const alvoPendente = alvosPendentesSet.has(chave)
         const vagaDisponivel = vagasSet.has(chave)
+        const vagaPontilhada = vagasPontilhadasSet.has(chave)
+        // Anel da travessia (ADR-0017): vagas escuras clicáveis + célula
+        // travada da pendência em curso — destaque branco legível no escuro.
+        const anelTravessia = travessiaSet.has(chave)
         // Iluminada (issue #151): espelho do estado compartilhado; os destaques
         // de interação acima têm prioridade maior no plano da célula.
         const iluminada = iluminadasSet.has(chave)
@@ -280,6 +293,8 @@ export function Tabuleiro({
             destinoResgate={peca !== null && resgateSet.has(peca.pecaId)}
             alvoPendente={alvoPendente}
             vagaDisponivel={vagaDisponivel}
+            vagaPontilhada={vagaPontilhada}
+            anelTravessia={anelTravessia}
             iluminada={iluminada}
             peaoSelecionadoId={peaoSelecionadoId}
             peaoAtivoId={peaoAtivoId}

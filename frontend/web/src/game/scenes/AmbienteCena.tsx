@@ -14,8 +14,8 @@ import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
 import { ManipulacaoOverlay } from './ManipulacaoOverlay'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
-import type { EstadoInteracaoPeoes, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
-import type { PeaoComandoDoCliente, TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
+import type { TabuleiroComandoDoCliente } from '@flicker/shared'
 import { PeaoVisual } from '../tabuleiro/PeaoVisual'
 import { peaoMesaParaMundo } from '../tabuleiro/contrato'
 import { TransicaoLimpeza, type LimpezaTrigger } from './TransicaoLimpeza'
@@ -118,7 +118,7 @@ interface AmbienteCenaProps {
   /** Estado do ciclo do peão: roteia cliques em células/peças da mesa (#91). */
   estadoPeoes?: EstadoInteracaoPeoes | null
   /** Comando do ciclo do peão emitido pelo roteador (jogadorId injetado no pai). */
-  onComandoPeao?: (comando: PeaoComandoDoCliente) => void
+  onComandoPeao?: (comando: ComandoDePeaoDoDespacho) => void
   /** Rejeição local do roteador (guard pós-confirmação, AC3) → som de recusa no pai. */
   onRejeicaoPeao?: (motivo: MotivoDeRejeicaoLocal) => void
   /**
@@ -130,6 +130,15 @@ interface AmbienteCenaProps {
   alvosPendentesSet?: ReadonlySet<string>
   /** Chaves das vagas disponíveis para a pendência corrente (destaque, #143). */
   vagasSet?: ReadonlySet<string>
+  /**
+   * Subconjunto de vagas com pontinhos (peça puxada na bandeja): indica
+   * visualmente onde a peça pode ser colocada; some ao posicionar. O gesto
+   * da travessia (sem pull) não pontilha — mantém só o anel branco.
+   */
+  vagasPontilhadasSet?: ReadonlySet<string>
+  /** Chaves das células do gesto da travessia (ADR-0017): anel branco — vagas
+   * escuras clicáveis + célula travada da pendência em curso. */
+  travessiaSet?: ReadonlySet<string>
   /** Peça sorteada corrente exibida na bandeja da Caixa (null = sem corrente, #143). */
   pecaCorrente?: PecaCorrente | null
   /**
@@ -188,6 +197,8 @@ export function AmbienteCena({
   onPuxarPecaDaBandeja,
   alvosPendentesSet,
   vagasSet,
+  vagasPontilhadasSet = new Set<string>(),
+  travessiaSet = new Set<string>(),
   pecaCorrente = null,
   vooPendente = null,
   onVooAterrissou,
@@ -244,6 +255,8 @@ export function AmbienteCena({
               onRejeicaoPeao={onRejeicaoPeao}
               alvosPendentesSet={alvosPendentesSet}
               vagasSet={vagasSet}
+              vagasPontilhadasSet={vagasPontilhadasSet}
+              travessiaSet={travessiaSet}
               vooPendente={vooPendente}
               onVooAterrissou={onVooAterrissou}
               ocultarPecaId={pecaEmVooId}

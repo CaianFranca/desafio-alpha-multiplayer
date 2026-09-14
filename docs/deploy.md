@@ -49,7 +49,9 @@ deploy. O servidor (referência de lab: IP `10.10.0.141`, hostname `c041`) é
 alcançado pela rede privada via **VPN** para SSH/deploy — a exposição pública é
 feita pelo proxy do admin, que termina o TLS e encaminha
 `https://lab.alphaedtech.org.br/server01` para a porta **80** deste host,
-preservando o prefixo `/server01`.
+removendo o prefixo `/server01`. O vhost de borda serve o app tanto na raiz
+(pass-through) quanto em `/server01/` (strip), então funciona independente de o
+proxy remover ou preservar o prefixo.
 
 Estado esperado do servidor:
 
@@ -282,12 +284,17 @@ Detalhes relevantes:
     `/var/www/html` (symlink para `<release>/frontend/dist`) e `media/` via
     `alias /var/www/html/media/`; proxy de `/api/` e `/ws/lobby` para o lobby
     (127.0.0.1:3001) e de `/ws/game/` para o game server (127.0.0.1:1234).
-  - `infra/nginx/nginx.edge.conf` (borda, `listen 80 default_server`):
-    redireciona `/server01` → `/server01/` e faz `proxy_pass
-    http://127.0.0.1:8080/` para o nginx do app, **removendo o prefixo
-    `/server01/`** (barra final do `proxy_pass`); encaminha Upgrade/Connection
-    (WebSocket) e `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`; responde
-    `404` para qualquer caminho fora de `/server01/`.
+  - `infra/nginx/nginx.edge.conf` (borda, `listen 80 default_server`), com
+    três locations: (`1`) redireciona `/server01` → `/server01/` (301);
+    (`2`) `/server01/` faz `proxy_pass http://127.0.0.1:8080/` para o nginx do
+    app, **removendo o prefixo `/server01/`** (barra final do `proxy_pass`),
+    usado quando o admin preserva o prefixo; (`3`) `/` faz pass-through com
+    `proxy_pass http://127.0.0.1:8080/` (barra final), que usa o URI
+    **normalizado** (colapsa barras repetidas: `//api/...` → `/api/...`) antes
+    de entregar ao nginx do app, usado quando o admin remove o prefixo e
+    entrega a raiz. Em todos os casos
+    encaminha Upgrade/Connection (WebSocket) e
+    `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`.
 - **Env de produção** (`/opt/flicker/env`) é gerado pelo workflow a cada
   deploy, com:
 

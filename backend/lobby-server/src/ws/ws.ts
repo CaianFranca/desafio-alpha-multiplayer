@@ -71,6 +71,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
   const wss = new WebSocketServer({ server });
 
   wss.on('connection', (socket, request) => {
+    console.log(`[ws] upgrade: ${request.method} ${request.url} ${request.socket.remoteAddress}`);
     // O listener de 'message' é registrado IMEDIATAMENTE após o
     // 'connection' — antes do `await autenticarRequest`. Sem isso, o
     // `EventEmitter` do Node descarta silenciosamente mensagens que

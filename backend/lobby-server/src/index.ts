@@ -14,6 +14,20 @@ const contextoSalas = criarContextoDasSalas();
 const app = createApp({ contextoSalas });
 const server = http.createServer(app);
 
+// Diagnóstico temporário do handshake do WebSocket: loga requests em /ws/* que
+// chegam como HTTP comum (sem upgrade). O Node só emite 'request' quando NÃO há
+// upgrade; se o proxy do admin não repassar `Upgrade`/`Connection`, a conexão
+// cai aqui como GET e o Express responde 404. Nunca logar `cookie`/
+// `authorization` (carregam tokens de sessão). Remover após a evidência.
+server.on('request', (req) => {
+  if (req.url !== undefined && req.url.includes('/ws/')) {
+    console.log(
+      `[http] ws sem upgrade: ${req.method} ${req.url} HTTP/${req.httpVersion}`
+      + ` upgrade=${String(req.headers.upgrade)} connection=${String(req.headers.connection)}`,
+    );
+  }
+});
+
 createWebSocketServer(server, { verificarAccess, obterSessao, contextoSalas });
 
 const { lobbyServerPort } = getConfig();

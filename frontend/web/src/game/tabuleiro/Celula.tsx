@@ -29,6 +29,7 @@ import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { handlersDeCursor } from './cursor'
 import { texturaDoTabuleiro } from './texturasDoTabuleiro'
+import { COR_CONTORNO_PEAO_SELECIONADO, propsDoMaterialDeContorno } from './contorno'
 
 interface CelulaProps {
   celula: CelulaTipo
@@ -38,6 +39,15 @@ interface CelulaProps {
   /** Destaque visual da peça posicionada selecionada/em manipulação. */
   pecaDestacada?: boolean
   onClick?: (event: ThreeEvent<MouseEvent>) => void
+  /**
+   * Travessia do Escuro (ADR-0017 / issue #377): a célula é uma vaga ESCURA
+   * clicável — destaque por anel branco VAZADO no chão (quadrado com furo
+   * interno ≈ 82% do lado, borda fina), mesma linguagem do peão selecionado
+   * (`PeaoAvatar`), legível sobre o plano escuro onde o tom quente de
+   * `alvo/vaga` se perde — sem ocultar a peça que encaixa dentro. Distinto
+   * de `vagaDisponivel` (o anel é do movimento/gesto, não da vaga de encaixe).
+   */
+  anelTravessia?: boolean
   /**
    * Peões posicionados sobre a peça desta célula, já filtrados pelo voo ativo
    * no pai (`Tabuleiro`). A cena renderiza um visual por peão no arranjo de
@@ -97,6 +107,13 @@ interface CelulaProps {
    */
   vagaDisponivel?: boolean
   /**
+   * Vaga com pontinhos (peça puxada na bandeja): grade 3×3 de pontos brancos
+   * semi-transparentes em linhas norte→sul — indicação visual de onde a peça
+   * pode ser colocada. Puramente indicativo: sem raycast (o clique passa à
+   * célula) e sem cursor próprio.
+   */
+  vagaPontilhada?: boolean
+  /**
    * Célula iluminada no estado compartilhado (issue #151). Tom sutil sobre a
    * base; os destaques de seleção/pendência/ocupação têm prioridade maior.
    */
@@ -119,6 +136,46 @@ const BORDAS_CONFIG: readonly { pos: [number, number, number]; args: [number, nu
   { pos: [TAMANHO_CELULA / 2 - BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
   { pos: [-TAMANHO_CELULA / 2 + BORDA_OFFSET, 0, 0], args: [ESPESSURA_BORDA, BORDA_Y, CELULA_INSET] },
 ]
+
+/** Pontinhos de vaga (peça puxada na bandeja): 3×3, brancos semi-transparentes. */
+const PASSO_DOS_PONTOS = CELULA_INSET / 4
+const RAIO_DO_PONTO = 0.055
+const OPACIDADE_DO_PONTO = 0.55
+
+/**
+ * Grade de pontos chapada no plano da célula (linhas norte→sul, espaçados
+ * dentro da célula): indica onde a peça puxada pode ser colocada. Sem
+ * raycast — o clique atravessa para a célula/peca (sem double-fire) — e sem
+ * cursor próprio: puramente indicativo.
+ */
+function PontosDaVaga() {
+  const pontos: Array<[number, number]> = []
+  for (let linha = -1; linha <= 1; linha++) {
+    for (let coluna = -1; coluna <= 1; coluna++) {
+      pontos.push([coluna * PASSO_DOS_PONTOS, linha * PASSO_DOS_PONTOS])
+    }
+  }
+  return (
+    <group position={[0, CELULA_Y_BASE + 0.006, 0]}>
+      {pontos.map(([x, z], indice) => (
+        <mesh
+          key={indice}
+          position={[x, 0, z]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          raycast={() => null}
+        >
+          <circleGeometry args={[RAIO_DO_PONTO, 20]} />
+          <meshBasicMaterial
+            color="#ffffff"
+            transparent
+            opacity={OPACIDADE_DO_PONTO}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
+}
 
 interface PlanoDeFundoProps {
   celula: CelulaTipo
@@ -220,6 +277,11 @@ function PlanoDeFundoDaCelula(props: PlanoDeFundoProps) {
  */
 const RELEVO_PAREDE_NORMAL_SCALE: readonly [number, number] = [1.1, 1.1]
 const TINT_PAREDE = '#b5b5b5'
+
+// Marcador da travessia do escuro (ADR-0017): quadrado chapado no chão,
+// um pouco menor que a célula (CELULA_INSET = 1.568) — sinaliza a vaga escura
+// clicável sem confundir com a peça vazia/peão.
+const LADO_MARCADOR_TRAVESSIA = CELULA_INSET * 0.85
 
 /** Texturas das paredes do grid: cor no map (sRGB), dado linear no normal. */
 function useTexturasDaParede(): { mapa: THREE.Texture; normal: THREE.Texture } {
@@ -336,6 +398,8 @@ export function Celula({
   destinoResgate = false,
   alvoPendente = false,
   vagaDisponivel = false,
+  vagaPontilhada = false,
+  anelTravessia = false,
   provisoria = false,
   iluminada = false,
   peaoSelecionadoId = null,
@@ -377,6 +441,43 @@ export function Celula({
         : '#1b1915'
   const opacidadePlano = ocupada ? 0.82 : 0.7
 
+  // Marcador da travessia (ADR-0017 / issue #377): anel branco no chão sobre
+  // a célula escura clicável — quadrado VAZADO no meio (borda fina, furo
+  // interno ≈ 82% do lado), mesma linguagem do peão selecionado (PeaoAvatar),
+  // legível sem ocultar a peça que encaixa dentro. Nunca rouba clique.
+  const anelDaTravessia = useMemo(() => {
+    if (!anelTravessia) return null
+    const lado = LADO_MARCADOR_TRAVESSIA
+    const furo = lado * 0.82
+    const forma = new THREE.Shape()
+    forma.moveTo(-lado / 2, -lado / 2)
+    forma.lineTo(lado / 2, -lado / 2)
+    forma.lineTo(lado / 2, lado / 2)
+    forma.lineTo(-lado / 2, lado / 2)
+    forma.closePath()
+    const luz = new THREE.Path()
+    luz.moveTo(-furo / 2, -furo / 2)
+    luz.lineTo(-furo / 2, furo / 2)
+    luz.lineTo(furo / 2, furo / 2)
+    luz.lineTo(furo / 2, -furo / 2)
+    luz.closePath()
+    forma.holes.push(luz)
+    const anel = new THREE.Mesh(
+      new THREE.ShapeGeometry(forma),
+      new THREE.MeshBasicMaterial(
+        propsDoMaterialDeContorno(COR_CONTORNO_PEAO_SELECIONADO),
+      ),
+    )
+    anel.rotation.x = -Math.PI / 2
+    anel.position.y = CELULA_Y_BASE + 0.004
+    anel.material.side = THREE.FrontSide
+    anel.material.transparent = true
+    anel.material.opacity = 0.9
+    anel.material.depthWrite = false
+    anel.raycast = () => { }
+    return anel
+  }, [anelTravessia])
+
   return (
     <group position={pos}>
       <PlanoDeFundoDaCelula
@@ -387,6 +488,8 @@ export function Celula({
         cursorHandlers={cursorHandlers}
       />
       <ParedesDaCelula />
+      {anelDaTravessia !== null ? <primitive object={anelDaTravessia} /> : null}
+      {vagaPontilhada ? <PontosDaVaga /> : null}
       {peca ? (
         <PecaPlaceholder
           tipo={peca.tipo}
