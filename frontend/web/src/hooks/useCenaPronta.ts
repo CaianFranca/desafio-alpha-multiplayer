@@ -21,15 +21,48 @@ export const CENA_PRONTA_TETO_MS = 15000
  *   fecha o gate de novo. Sem isso o latch liberaria antes das peças
  *   baixarem (pop-in progressivo). Com tudo em cache, o quiet libera em
  *   400ms sem travar.
+ * - O re-arme é em fase de render (derived state documentado): o `setPronta`
+ *   força re-render antes do commit, então o latch da página jamais lê o
+ *   `true` stale do mesmo flush. Re-arme em effect chegaria um flush
+ *   atrasado e liberaria cedo — foi exatamente esse o defeito anterior.
  *
  * @param temConteudo `estadoExibicao !== null` — a cena tem o que carregar.
  */
 export function useCenaPronta(temConteudo: boolean): boolean {
   const [pronta, setPronta] = useState(true)
+  const [conteudoAnterior, setConteudoAnterior] = useState(temConteudo)
   // Pendentes na fila do manager (o three não expõe `isLoading()`).
   const pendentesRef = useRef(0)
   const quietTimerRef = useRef<number | null>(null)
-  const viuConteudoRef = useRef(false)
+
+  // Re-arme síncrono na chegada do conteúdo (mão única).
+  if (temConteudo && temConteudo !== conteudoAnterior) {
+    setConteudoAnterior(temConteudo)
+    setPronta(false)
+  }
+
+  // Agendamento do quiet quando há conteúdo e nada em voo (ex.: tudo em
+  // cache — sem `onLoad` futuro, o quiet libera rápido sem travar).
+  // Com loads em voo, o `onLoad`/`onError` agenda o quiet. O quiet stale da
+  // fase de cena vazia (Mesa) sempre cai aqui.
+  useEffect(() => {
+    if (!temConteudo) return
+    if (quietTimerRef.current !== null) {
+      window.clearTimeout(quietTimerRef.current)
+      quietTimerRef.current = null
+    }
+    if (pendentesRef.current > 0) return
+    quietTimerRef.current = window.setTimeout(() => {
+      quietTimerRef.current = null
+      setPronta((anterior) => (anterior ? anterior : true))
+    }, CENA_PRONTA_QUIET_MS)
+    return () => {
+      if (quietTimerRef.current !== null) {
+        window.clearTimeout(quietTimerRef.current)
+        quietTimerRef.current = null
+      }
+    }
+  }, [temConteudo])
 
   // Assinatura do manager (montagem).
   useEffect(() => {
@@ -92,22 +125,6 @@ export function useCenaPronta(temConteudo: boolean): boolean {
       manager.onError = prevOnError
     }
   }, [])
-
-  // Re-arme na chegada do conteúdo (mão única).
-  useEffect(() => {
-    if (!temConteudo || viuConteudoRef.current) return
-    viuConteudoRef.current = true
-    setPronta((anterior) => (anterior ? false : anterior))
-    if (pendentesRef.current === 0) {
-      // Nada em voo (tudo em cache): o quiet libera rápido sem travar.
-      // Com loads em voo, o `onLoad` agenda o quiet.
-      if (quietTimerRef.current !== null) window.clearTimeout(quietTimerRef.current)
-      quietTimerRef.current = window.setTimeout(() => {
-        quietTimerRef.current = null
-        setPronta((anterior) => (anterior ? anterior : true))
-      }, CENA_PRONTA_QUIET_MS)
-    }
-  }, [temConteudo])
 
   return pronta
 }

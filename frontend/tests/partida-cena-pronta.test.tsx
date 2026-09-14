@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { act, renderHook } from '@testing-library/react'
+import { useEffect, useState } from 'react'
+import { act, render, renderHook, screen } from '@testing-library/react'
 import { DefaultLoadingManager } from 'three'
 import {
   CENA_PRONTA_QUIET_MS,
@@ -118,6 +119,42 @@ describe('useCenaPronta (gate dos dots até a cena 3D completa)', () => {
     })
     avanca(CENA_PRONTA_QUIET_MS)
     expect(result.current).toBe(true)
+  })
+
+  it('não libera no mesmo flush da chegada do conteúdo com loads em voo (race do latch)', () => {
+    vi.useFakeTimers()
+
+    // Sonda que replica o latch da PartidaPage: revela quando
+    // disponivel + pronta no mesmo flush.
+    function Sonda({ conteudo, disponivel }: { conteudo: boolean; disponivel: boolean }) {
+      const pronta = useCenaPronta(conteudo)
+      const [revelada, setRevelada] = useState(false)
+      useEffect(() => {
+        if (disponivel && pronta && !revelada) setRevelada(true)
+      }, [disponivel, pronta, revelada])
+      return <div data-testid="revelacao">{revelada ? 'tabuleiro' : 'dots'}</div>
+    }
+
+    // Quiet da Mesa já esvaziou antes do snapshot (cena ainda vazia).
+    const { rerender } = render(<Sonda conteudo={false} disponivel={false} />)
+    disparaInicio()
+    disparaCargaCompleta()
+    avanca(CENA_PRONTA_QUIET_MS)
+    expect(screen.getByTestId('revelacao')).toHaveTextContent('dots')
+
+    // Snapshot + disponivel + loads das peças no MESMO flush: os dots seguram.
+    act(() => {
+      DefaultLoadingManager.onStart?.('peca.jpg', 0, 2)
+      rerender(<Sonda conteudo={true} disponivel={true} />)
+    })
+    expect(screen.getByTestId('revelacao')).toHaveTextContent('dots')
+
+    // Fim dos loads + silêncio: aí sim revela, uma vez só.
+    act(() => {
+      DefaultLoadingManager.onLoad?.()
+    })
+    avanca(CENA_PRONTA_QUIET_MS)
+    expect(screen.getByTestId('revelacao')).toHaveTextContent('tabuleiro')
   })
 
   it('desmontar restaura os handlers anteriores do manager', () => {
