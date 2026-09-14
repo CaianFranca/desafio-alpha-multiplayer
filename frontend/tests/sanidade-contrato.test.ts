@@ -341,4 +341,22 @@ describe('ataque centrado no atuante — momentos novos da Permanência (issue #
     expect(estado.jogadorAtivoId).toBeNull()
     expect(motivoDeRecusaDoEvento({ type: 'TURNO_ENCERRADO', jogadorId: 'j1' })).toBeNull()
   })
+
+  it('ADR-0018 (E3): RESGATE_REALIZADO sem sanidade/emBaixaIluminacao preserva o anterior (janela R2)', () => {
+    const estado = aplicarSnapshot(criarEstadoInicialDoCliente(), snapshotComJogadores([
+      { jogadorId: 'j1', apelido: 'Ana', cor: 'branco', ordem: 0, peaoId: 'peao-branco', primeiroTurnoPendente: false, sanidade: 2, emBaixaIluminacao: true, amedrontado: false, protegido: false },
+      { jogadorId: 'j2', apelido: 'Bob', cor: 'vermelho', ordem: 1, peaoId: 'peao-vermelho', primeiroTurnoPendente: false, sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false },
+    ]))
+    const anterior = estado.jogadorPorId['j1']
+    const depois = reduzirEvento(estado, {
+      type: 'RESGATE_REALIZADO',
+      pecaId: 'posicionada-1',
+      resgatadoJogadorId: 'j1',
+      resgatadorJogadorId: 'j2',
+      resgatadorPeaoId: 'peao-vermelho',
+    } as unknown as Parameters<typeof reduzirEvento>[1])
+    expect(depois.jogadorPorId['j1'].sanidade).toBe(anterior.sanidade)
+    expect(depois.jogadorPorId['j1'].emBaixaIluminacao).toBe(anterior.emBaixaIluminacao)
+    expect(depois.jogadorPorId['j1'].amedrontado).toBe(false)
+  })
 })

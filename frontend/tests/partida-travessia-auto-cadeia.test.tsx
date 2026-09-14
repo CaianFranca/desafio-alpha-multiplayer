@@ -516,3 +516,110 @@ describe('auto-cadeia da Travessia re-admitida (ADR-0017 / issue #377, Bug 2)', 
     )
   })
 })
+
+describe('retomada pós-posicionamento + piso manual (ADR-0018 / E2)', () => {
+  // Snapshot com a peça da travessia JÁ posicionada (recebidas consumidas):
+  // a cadeia parou entre posicionar e confirmar (reload/desconexão na janela
+  // "peça posicionada → confirmar"). `peaoBrancoPecaId` ancora onde o auto parou.
+  function snapshotTravessiaPosicionada(peaoBrancoPecaId: string): EstadoDaPartidaSnapshot {
+    const base = criarSnapshotDaTravessia({
+      recebidaId: 'recebida-travessia',
+      pecaId: 'reta-9',
+      tipo: 'reta',
+      orientacao: 0 as Orientacao,
+      vaga: null,
+      celulaAlvo: { linha: 2, coluna: 3 },
+    })
+    return {
+      ...base,
+      tabuleiro: {
+        ...base.tabuleiro,
+        posicionadas: [
+          ...base.tabuleiro.posicionadas,
+          { pecaId: 'reta-9', tipo: 'reta', orientacao: 0 as Orientacao, celula: { linha: 2, coluna: 3 } },
+        ],
+        peoes: base.tabuleiro.peoes.map((p) =>
+          p.peaoId === 'peao-branco' ? { ...p, pecaId: peaoBrancoPecaId } : p,
+        ),
+        recebidas: [],
+      },
+      pecaDaTravessiaId: 'reta-9',
+    }
+  }
+
+  async function partidaNoSnapshot(snapshot: EstadoDaPartidaSnapshot) {
+    renderPartida()
+    await waitFor(() => expect(MockWebSocket.last()).toBeDefined())
+    const ws = MockWebSocket.last()!
+    act(() =>
+      ws.simulateMessage({
+        type: 'ADMISSAO_ACEITA',
+        jogadorId: MEU_JOGADOR_ID,
+        apelido: 'JogadorTeste',
+        partidaId: 'p',
+        estado: 'em_andamento',
+      }),
+    )
+    act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot }))
+    await screen.findByTestId('tabuleiro')
+    return ws
+  }
+
+  it('E2a: peça posicionada + peão fora dela — retoma no auto-MOVER sozinho', async () => {
+    const ws = await partidaNoSnapshot(snapshotTravessiaPosicionada('inicial-1'))
+    await waitFor(() => expect(comandosDoTipo(ws, 'MOVER_PEAO')).toHaveLength(1))
+    expect(comandosDoTipo(ws, 'MOVER_PEAO')[0]).toEqual({
+      type: 'MOVER_PEAO',
+      peaoId: 'peao-branco',
+      celula: { linha: 2, coluna: 3 },
+      jogadorId: MEU_JOGADOR_ID,
+    })
+  })
+
+  it('E2a+E2b: peão sobre a peça sem confirmar — auto-CONFIRMAR com piso Confirmar visível; ack → auto-ENCERRAR', async () => {
+    const ws = await partidaNoSnapshot(snapshotTravessiaPosicionada('reta-9'))
+    // A retomada confirma sozinha…
+    await waitFor(() => expect(comandosDoTipo(ws, 'CONFIRMAR_POSICAO_DO_PEAO')).toHaveLength(1))
+    expect(comandosDoTipo(ws, 'CONFIRMAR_POSICAO_DO_PEAO')[0]).toEqual({
+      type: 'CONFIRMAR_POSICAO_DO_PEAO',
+      peaoId: 'peao-branco',
+      jogadorId: MEU_JOGADOR_ID,
+    })
+    // …e o piso manual (E2b) mostra o botão Confirmar em vez de tela sem botão.
+    expect(screen.getByTestId('botao-confirmar-posicao')).toBeDefined()
+    // Ack da confirmação → auto-ENCERRAR (zero cliques até o fim).
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: MEU_JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'reta-9',
+        protegido: false,
+      }),
+    )
+    await waitFor(() => expect(comandosDoTipo(ws, 'ENCERRAR_TURNO')).toHaveLength(1))
+  })
+
+  it('E2a (Monstro): peça Monstro posicionada — retoma no auto-PERMANECER, sem MOVER', async () => {
+    const base = snapshotTravessiaPosicionada('inicial-1')
+    const snapshot: EstadoDaPartidaSnapshot = {
+      ...base,
+      tabuleiro: {
+        ...base.tabuleiro,
+        posicionadas: [
+          ...base.tabuleiro.posicionadas.filter((p) => p.pecaId !== 'reta-9'),
+          { pecaId: 'vulto-x', tipo: 'vulto', orientacao: 0 as Orientacao, celula: { linha: 2, coluna: 3 } },
+        ],
+      },
+      pecaDaTravessiaId: 'vulto-x',
+    }
+    const ws = await partidaNoSnapshot(snapshot)
+    await waitFor(() => expect(comandosDoTipo(ws, 'PERMANECER')).toHaveLength(1))
+    expect(comandosDoTipo(ws, 'PERMANECER')[0]).toEqual({
+      type: 'PERMANECER',
+      peaoId: 'peao-branco',
+      jogadorId: MEU_JOGADOR_ID,
+    })
+    expect(comandosDoTipo(ws, 'MOVER_PEAO')).toHaveLength(0)
+  })
+})

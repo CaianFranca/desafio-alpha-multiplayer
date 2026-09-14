@@ -2319,6 +2319,112 @@ test('ADR-0017: travessia que coloca Monstro mantém o turno travado — Perman�
   assert.equal(permanencia.estado.atravessouNoTurno, false);
 });
 
+test('ADR-0018 (E1): confirmar sem pousar na peça da Travessia é rejeitado', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'reta-x', tipo: 'reta' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, escolherVaga('recebida-reta-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('reta-x', 1, 3), 'ana');
+  assert.equal(estado.atravessouNoTurno, true);
+  assert.equal(estado.pecaDaTravessiaId ?? null, 'reta-x');
+  // Peão segue na origem (não pousou na reta-x) — CONFIRMAR sem mover é o
+  // posicionamento grátis no escuro que a ADR-0017 rejeitou.
+  assert.equal(
+    estado.tabuleiro.peoes.find((peao) => peao.peaoId === 'peao-branco')?.pecaId,
+    'reta-1',
+  );
+  assert.equal(
+    codigoDaRejeicao(estado, confirmarPosicao('peao-branco'), 'ana'),
+    'MOVIMENTO_INDISPONIVEL',
+  );
+});
+
+test('ADR-0018 (E1): confirmar com peça da Travessia Monstro é vedado', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, escolherVaga('recebida-vulto-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('vulto-x', 1, 3), 'ana');
+  // Estado artesanal: peão forçado sobre o Monstro (o mover normal barra o
+  // pouso) — o CONFIRMAR não pode fechar esse turno pelo funil completo.
+  const sobreMonstro: EstadoDaPartida = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      recebidas: [],
+      peoes: estado.tabuleiro.peoes.map((peao) =>
+        peao.peaoId === 'peao-branco' ? { ...peao, pecaId: 'vulto-x' } : peao,
+      ),
+    },
+  };
+  assert.equal(
+    codigoDaRejeicao(sobreMonstro, confirmarPosicao('peao-branco'), 'ana'),
+    'PECA_JA_TEM_PEAO',
+  );
+});
+
+test('ADR-0018 (E4): permanência-monstro aplica Limpeza após o Ataque', () => {
+  let estado = estadoDaTravessia();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [
+        { pecaId: 'vulto-x', tipo: 'vulto' as const, orientacao: 0 as const },
+        ...estado.tabuleiro.caixa,
+      ],
+    },
+  };
+  estado = aplicar(estado, atravessarOEscuro('peao-branco', 1, 3), 'ana');
+  estado = aplicar(estado, escolherVaga('recebida-vulto-x', 'norte'), 'ana');
+  estado = aplicar(estado, posicionarPeca('vulto-x', 1, 3), 'ana');
+  const permanencia = aplicarComandoDePartida(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  // A vulto-x em célula escura (ana já estava em Baixa — sem Baixa nova) é
+  // removida no MESMO gatilho, com o snapshot podado.
+  assert.ok(!permanencia.estado.tabuleiro.posicionadas.some((p) => p.pecaId === 'vulto-x'));
+  assert.ok(!Object.keys(permanencia.estado.peoesNoAlcance).includes('vulto-x'));
+  const limpeza = permanencia.eventos.find((e) => e.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza && limpeza.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza.pecasRemovidas.includes('vulto-x'));
+  // Ordem deliberada Ataque → Limpeza: o Monstro da aposta ataca antes de ser
+  // varrido (inversa do funil padrão, ADR-0018).
+  const ataqueIdx = permanencia.eventos.findIndex((e) => e.tipo === 'ataque_resolvido');
+  const limpezaIdx = permanencia.eventos.findIndex((e) => e.tipo === 'limpeza_aplicada');
+  if (ataqueIdx !== -1) {
+    assert.ok(ataqueIdx < limpezaIdx);
+  }
+  assert.equal(permanencia.estado.jogadorAtivoId, 'bruno');
+  assert.equal(permanencia.estado.atravessouNoTurno, false);
+});
+
+test('ADR-0018 (E4): permanecer comum segue sem Limpeza', () => {
+  const estado = partidaEmRodada2();
+  const permanencia = aplicarComandoDePartida(estado, permanecer('peao-branco'), 'ana');
+  assert.equal(permanencia.sucesso, true);
+  if (!permanencia.sucesso) return;
+  assert.ok(!permanencia.eventos.some((e) => e.tipo === 'limpeza_aplicada'));
+});
+
 // ADR-0017 / issue #377 — Opção B (revoga ADR-0016): sem sorteio no início do
 // turno em Baixa; o saque é só sob demanda, na Travessia do Escuro.
 

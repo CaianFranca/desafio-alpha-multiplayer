@@ -509,6 +509,75 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
           }
+          // ADR-0018 (E2a): retomada da auto-cadeia pós-readmissão — o snapshot
+          // é a única mensagem da retomada (os deltas não se repetem e os refs
+          // nascem limpos). Deriva do estado autoritativo onde a cadeia parou
+          // e continua sozinha, com as mesmas guardas anti-duplo do caminho ao
+          // vivo (1x por peça; o ack do reenvio segue pela via de evento). Só
+          // no turno local em_andamento; a pendência travada (pré-posicionamento)
+          // segue pelo auto-ESCOLHA do useEffect.
+          if (
+            evento.snapshot.estado === 'em_andamento' &&
+            !emResultadoRef.current &&
+            !emNaoInicioRef.current &&
+            jogadorIdRef.current !== null &&
+            evento.snapshot.jogadorAtivoId === jogadorIdRef.current &&
+            (evento.snapshot.atravessouNoTurno ?? false)
+          ) {
+            const snap = evento.snapshot
+            const travessiaId = snap.pecaDaTravessiaId ?? null
+            const peaoDoAtivoId =
+              snap.jogadores.find((j) => j.jogadorId === jogadorIdRef.current)?.peaoId ?? null
+            if (travessiaId !== null && peaoDoAtivoId !== null) {
+              const pecaDaTravessia = snap.tabuleiro.posicionadas.find(
+                (p) => p.pecaId === travessiaId,
+              )
+              const travessiaEhMonstro =
+                pecaDaTravessia !== undefined && ehPecaDeMonstro(pecaDaTravessia.tipo)
+              if (travessiaEhMonstro) {
+                if (permanecerMonstroTravessiaEncadeadoRef.current !== travessiaId) {
+                  permanecerMonstroTravessiaEncadeadoRef.current = travessiaId
+                  if (snap.tabuleiro.peaoSelecionadoId !== peaoDoAtivoId) {
+                    enviarComJogadorRef.current({ type: 'SELECIONAR_PEAO', peaoId: peaoDoAtivoId })
+                  }
+                  enviarComJogadorRef.current({ type: 'PERMANECER', peaoId: peaoDoAtivoId })
+                }
+              } else if (!snap.posicaoConfirmada) {
+                const peao = snap.tabuleiro.peoes.find((p) => p.peaoId === peaoDoAtivoId)
+                if (peao !== undefined && pecaDaTravessia !== undefined && peao.pecaId !== travessiaId) {
+                  // Peça posicionada, peão fora dela — continua no auto-MOVER
+                  // (o ack PEAO_MOVIDO segue pela via de evento: auto-CONFIRMAR).
+                  if (moverTravessiaEncadeadoRef.current !== travessiaId) {
+                    moverTravessiaEncadeadoRef.current = travessiaId
+                    if (snap.tabuleiro.peaoSelecionadoId !== peaoDoAtivoId) {
+                      enviarComJogadorRef.current({ type: 'SELECIONAR_PEAO', peaoId: peaoDoAtivoId })
+                    }
+                    enviarComJogadorRef.current({
+                      type: 'MOVER_PEAO',
+                      peaoId: peaoDoAtivoId,
+                      celula: pecaDaTravessia.celula,
+                    })
+                  }
+                } else if (peao !== undefined && peao.pecaId === travessiaId) {
+                  // Peão sobre a peça, sem confirmar — continua no
+                  // auto-CONFIRMAR (o ack POSICAO_CONFIRMADA segue pela via de
+                  // evento: auto-ENCERRAR).
+                  if (!confirmarTravessiaEncadeadoRef.current) {
+                    confirmarTravessiaEncadeadoRef.current = true
+                    enviarComJogadorRef.current({
+                      type: 'CONFIRMAR_POSICAO_DO_PEAO',
+                      peaoId: peaoDoAtivoId,
+                    })
+                  }
+                }
+              } else if (!encerrarTravessiaEncadeadoRef.current) {
+                // Confirmado, sem encerramento — continua no auto-ENCERRAR.
+                confirmarTravessiaEncadeadoRef.current = true
+                encerrarTravessiaEncadeadoRef.current = true
+                enviarComJogadorRef.current({ type: 'ENCERRAR_TURNO' })
+              }
+            }
+          }
           if (evento.snapshot.estado === 'em_andamento') partidaEmAndamento()
           return
         }
@@ -686,8 +755,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           const encaixouMonstro =
             modeloRef.current.recebidasPendentes.some(
               (r) =>
-                r.pecaId === evento.pecaId &&
-                (r.tipoDaPeca === 'vulto' || r.tipoDaPeca === 'espectro'),
+                r.pecaId === evento.pecaId && ehPecaDeMonstro(r.tipoDaPeca),
             )
 
           despacharEvento(evento)
@@ -1210,6 +1278,23 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     )
     return pecaAcomodando?.pecaId === modelo.pecaDoInicioDoTurnoId
   })()
+  // ADR-0018 (E2b): piso manual de recuperação — se a retomada automática
+  // (E2a) falhar, o peão sobre a peça da travessia sem confirmar mostra o
+  // botão Confirmar em vez de tela sem botão (softlock). O predicado casa com
+  // a guarda E1 da engine (CONFIRMAR só vale sobre a peça colocada); no caminho
+  // feliz o auto dispara primeiro e o botão nem aparece.
+  const peaoAtivoSobrePecaDaTravessia = ((): boolean => {
+    if (modelo.pecaDaTravessiaId === null || peaoAtivoId === null) return false
+    const peaoDoAtivo = modelo.peoes.find((p) => p.peaoId === peaoAtivoId)
+    if (!peaoDoAtivo || peaoDoAtivo.celula === null) return false
+    const celulaDoPeao = peaoDoAtivo.celula
+    const pecaAcomodando = modelo.posicionadas.find(
+      (p) =>
+        p.celula.linha === celulaDoPeao.linha &&
+        p.celula.coluna === celulaDoPeao.coluna,
+    )
+    return pecaAcomodando?.pecaId === modelo.pecaDaTravessiaId
+  })()
   // ADR-0017 (exceção monstro): a peça da travessia é Monstro — o mover
   // compulsório é impossível (Monstro não aceita peão) e o fechamento do
   // turno travado vira Permanência.
@@ -1234,10 +1319,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             // ADR-0017 / issue #377 (Opção B): pós-travessia o mover para a
             // peça colocada é compulsório (auto-encadeado) — sem botão
             // Permanecer (o engine rejeitaria), exceto quando a peça
-            // atravessada é Monstro (fechamento via Permanência).
+            // atravessada é Monstro (fechamento via Permanência). ADR-0018
+            // (E2b): peão sobre a peça colocada sem confirmar mostra o botão
+            // Confirmar — piso manual se a retomada automática falhar.
             ? pecaDaTravessiaEhMonstro
               ? 'permanecer'
-              : null
+              : peaoAtivoSobrePecaDaTravessia
+                ? 'confirmar'
+                : null
             : peaoAtivoSobrePecaDeOrigem
               // ADR-0017 (arrependimento): peão de volta na Peça do início
               // do turno (ida-e-volta livre) — a Permanência volta a valer;

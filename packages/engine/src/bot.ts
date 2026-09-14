@@ -581,8 +581,11 @@ export function acoesValidasDaSubfase(
   // (calcularIluminacao sobre os peões em Baixa, mesmo preamble de
   // atravessarOEscuroDaPartida), então a enumeração é exata. Após atravessar,
   // o mover é compulsório: sem nova travessia e sem permanência (a engine
-  // rejeitaria ambas — MOVIMENTO_INDISPONIVEL).
-  if (emBaixa && !jaAtravessou) {
+  // rejeitaria ambas — MOVIMENTO_INDISPONIVEL). ADR-0018 (M4): Caixa vazia não
+  // é erro na engine (travessia fantasma aceita como no-op sem marcar a flag),
+  // então o bot nem enumera a travessia sem peças — evita passos desperdiçados
+  // até o failsafe.
+  if (emBaixa && !jaAtravessou && tabuleiro.caixa.length > 0) {
     const iluminadasFrescas = new Set(
       calcularIluminacao(
         tabuleiro,

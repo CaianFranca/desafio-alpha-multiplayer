@@ -24,6 +24,7 @@ import {
   mapearDesselecaoDePeao,
   peaoDeReferenciaDaSequencia,
   puxadaVigenteNaBandeja,
+  travessiaDoEscuroDisponivel,
   vagasDisponiveisDoPeao,
 } from '../../game/tabuleiro/interacaoPeoes'
 import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal, PendenciaNoCliente } from '../../game/tabuleiro/interacaoPeoes'
@@ -226,30 +227,27 @@ export function AmbienteDeJogo({
   // O destaque de vaga segue o clique: só aparece com a corrente PUXADA
   // (alvo inválido sem pull não reage — padrão #91; espectador nunca puxa,
   // logo nunca vê vaga destacada). A vigência do pull vem do predicado puro
-  // compartilhado com cena e espelho.
-  const vagasSet = new Set<string>(
+  // compartilhado com cena e espelho — computado uma vez (M3/ADR-0018).
+  const vagasComPull: readonly string[] =
     estadoPeoesComPuxada !== null &&
-      peaoDeReferenciaDaSequencia(estadoPeoesComPuxada) !== null &&
-      puxadaVigenteNaBandeja(estadoPeoesComPuxada)
+    peaoDeReferenciaDaSequencia(estadoPeoesComPuxada) !== null &&
+    puxadaVigenteNaBandeja(estadoPeoesComPuxada)
       ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
-      : [],
-  )
+      : []
+  const vagasSet = new Set<string>(vagasComPull)
   // Pontinhos de vaga (peça puxada na bandeja): mesmo conteúdo do vagasSet,
   // mas SÓ com pull vigente — o gesto da travessia em Baixa (sem pull) mantém
   // só o anel branco. Some sozinho ao posicionar: a pendência sai da lista e
   // o pull reseta (linhas acima).
-  const vagasPontilhadasSet = new Set<string>(
-    estadoPeoesComPuxada !== null &&
-      peaoDeReferenciaDaSequencia(estadoPeoesComPuxada) !== null &&
-      puxadaVigenteNaBandeja(estadoPeoesComPuxada)
-      ? vagasDisponiveisDoPeao(estadoPeoesComPuxada).map((v) => chaveCelula(v.celula))
-      : [],
-  )
+  const vagasPontilhadasSet = new Set<string>(vagasComPull)
   // ADR-0017 / issue #377 (Opção B): sem pendências e com o Peão em Baixa
   // selecionado, as vagas escuras SÃO o gesto da travessia (clique direto,
   // sem pull) — destacam junto das vagas da pendência, mesma affordância
   // nos dois renderizadores sem prop nova. Fora da Baixa, nada muda (as
-  // vagas comuns só são clicáveis com pendência puxada).
+  // vagas comuns só são clicáveis com pendência puxada). M3/ADR-0018: o
+  // destaque segue o mesmo gate de localização do clique
+  // (travessiaDoEscuroDisponivel — "uma casa por turno"): fora da Peça do
+  // início o gesto não reage, então nada destaca.
   if (
     estadoPeoesComPuxada !== null &&
     estadoPeoesComPuxada.recebidasPendentes.length === 0 &&
@@ -259,8 +257,13 @@ export function AmbienteDeJogo({
     estadoPeoesComPuxada.donoDoCiclo !== false
   ) {
     const refPeao = peaoDeReferenciaDaSequencia(estadoPeoesComPuxada)
+    const peao = refPeao !== null
+      ? estadoPeoesComPuxada.peoes.find((p) => p.peaoId === refPeao) ?? null
+      : null
     if (
       refPeao !== null &&
+      peao !== null &&
+      travessiaDoEscuroDisponivel(estadoPeoesComPuxada, peao) &&
       (estadoPeoesComPuxada.peaoIdsEmBaixa?.has(refPeao) ?? false)
     ) {
       for (const vaga of vagasDisponiveisDoPeao(estadoPeoesComPuxada)) {

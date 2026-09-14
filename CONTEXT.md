@@ -248,8 +248,8 @@ _Avoid_: mover, andar
 Escolha de manter o peão na peça atual; encerra a sequência sem novo recebimento; vedada após atravessar o Escuro no turno (o mover para a peça colocada é compulsório).
 _Avoid_: ficar, pular
 
-**Travessia do Escuro** (ADR-0017):
-Jogada exclusiva de Baixa Iluminação em que o peão alcança uma célula escura vazia vizinha conectada à peça sob ele; saca 1 peça sob demanda (sem sorteio no início do turno) com a célula-alvo pré-fixada, seguida de encaixe e movimento compulsório para a peça colocada, com fechamento automático (mover → confirmar → encerrar, sem clique); uma por turno e somente da Peça do início do turno ("uma casa por turno" — portar a outra peça iluminada não reabre a vaga; voltar à origem mantém a vaga) — inclusive quando a peça sacada é Monstro: o Monstro não aceita peão, o mover compulsório é impossível e o turno travado fecha por Permanência.
+**Travessia do Escuro** (ADR-0017, ADR-0018):
+Jogada exclusiva de Baixa Iluminação em que o peão alcança uma célula escura vazia vizinha conectada à peça sob ele; saca 1 peça sob demanda (sem sorteio no início do turno) com a célula-alvo pré-fixada, seguida de encaixe e movimento compulsório para a peça colocada, com fechamento automático (mover → confirmar → encerrar, sem clique); uma por turno e somente da Peça do início do turno ("uma casa por turno" — portar a outra peça iluminada não reabre a vaga; voltar à origem mantém a vaga) — inclusive quando a peça sacada é Monstro: o Monstro não aceita peão, o mover compulsório é impossível e o turno travado fecha por Permanência. Aposta às cegas (a célula é escolhida antes de conhecer a peça); pouso obrigatório guardado na Confirmação (confirmar sem pisar na peça é rejeitado; com Monstro, só Permanência fecha); o Monstro da aposta ataca antes de ser varrido pela Limpeza do próprio fechamento; cadeia retomada sozinha pós-readmissão, com botão Confirmar de segurança se o auto falhar.
 _Avoid_: explorar o escuro, puxar no escuro
 
 **Desseleção**:

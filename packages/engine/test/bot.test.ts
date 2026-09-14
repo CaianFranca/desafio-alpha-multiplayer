@@ -974,6 +974,35 @@ test('bot em Baixa enumera atravessar_o_escuro, uma ação por vaga escura (ADR-
   }
 });
 
+test('bot em Baixa com Caixa vazia não enumera atravessar_o_escuro (ADR-0018, M4)', () => {
+  let estado = estadoDaBaixaSemPendencias();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [],
+      // Evita a derrota caixa_esgotada: objetivos atingíveis posicionados
+      // (mesmo padrão de partida.test.ts "avancarVez em Baixa com caixa vazia").
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        { pecaId: 'gerador-1', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 2, coluna: 3 } },
+        { pecaId: 'gerador-2', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 2 } },
+        { pecaId: 'gerador-3', tipo: 'gerador' as const, orientacao: 0 as const, celula: { linha: 4, coluna: 3 } },
+        { pecaId: 'sala-1', tipo: 'sala_do_diretor' as const, orientacao: 0 as const, celula: { linha: 3, coluna: 4 } },
+        { pecaId: 'portao-1', tipo: 'portao_de_saida' as const, orientacao: 0 as const, celula: { linha: 0, coluna: 1 } },
+      ],
+    },
+  };
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  const acoes = acoesValidasDaSubfase(estado, 'ana');
+  // Caixa vazia não é erro na engine (travessia fantasma = no-op), mas o bot
+  // não desperdiça passos: sem travessia enumerada, segue por permanência.
+  assert.ok(acoes.every((a) => a.tipo !== 'atravessar_o_escuro'));
+  assert.ok(
+    acoes.some((a) => a.tipo === 'permanecer' && a.peaoId === 'peao-branco'),
+  );
+});
+
 test('bot após atravessar não enumera nova travessia nem permanência (mover compulsório, ADR-0017)', () => {
   let estado = estadoDaBaixaSemPendencias();
   estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');

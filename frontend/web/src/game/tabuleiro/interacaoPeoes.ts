@@ -813,7 +813,7 @@ export function bordaDaTravessiaPendente(
  * `pecaDoInicioDoTurnoId` ausente/nula (unidades puras / Peão na Mesa)
  * mantém o comportamento legado.
  */
-function travessiaDoEscuroDisponivel(
+export function travessiaDoEscuroDisponivel(
   estado: EstadoInteracaoPeoes,
   peao: PeaoDaExibicao,
 ): boolean {

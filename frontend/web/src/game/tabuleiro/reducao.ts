@@ -189,7 +189,8 @@ export interface EstadoDoTabuleiroNoCliente {
    * Peça colocada pela Travessia do Escuro no turno (ADR-0017 / issue #377,
    * espelho da engine): o mover pós-travessia é compulsório PARA ELA.
    * Exceção monstro dispensa a cadeia (ambos nulos). Reseta em
-   * TURNO_INICIADO/TURNO_ENCERRADO; baseline do snapshot: nula.
+   * TURNO_INICIADO/TURNO_ENCERRADO; o wire do snapshot carrega a fase
+   * (snapshot.ts aplica com `??` defensivo p/ binário anterior).
    */
   readonly pecaDaTravessiaId: string | null
   /**
@@ -197,11 +198,9 @@ export interface EstadoDoTabuleiroNoCliente {
    * (ATRAVESSOU_O_ESCURO — ADR-0017 / issue #377, Opção B). Enquanto vigente,
    * a Permanência é vedada (o mover para a peça colocada é compulsório) e
    * nova travessia é rejeitada. Reseta no TURNO_INICIADO/TURNO_ENCERRADO;
-   * baseline do snapshot: o wire não carrega a fase do turno (mesmo padrão
-   * de `movimentouNoTurno`), então a retomada parte de `false` — sem
-   * softlock: a pendência da travessia é restaurada e o mover manual segue
-   * válido; só o auto-encadeamento e o botão Permanecer degradam (o engine
-   * recusa com som).
+   * o wire do snapshot carrega a fase (snapshot.ts aplica com `??`
+   * defensivo p/ binário anterior) — a retomada da auto-cadeia parte daí
+   * (E2a, ADR-0018), com o piso manual da fase como rede (E2b).
    */
   readonly atravessouNoTurno: boolean
   /**
@@ -808,9 +807,11 @@ export function reduzirEvento(
       }
       // A cura pode ser parcial (salvador de vela apagada remove o
       // Amedrontado mas não acende a Baixa): aplica o estado resultante que
-      // o evento carrega — o snapshot autoritativo corrige em seguida se
-      // houver divergência.
-      const sanidadeRestaurada = evento.sanidade
+      // o evento carrega. Janela cliente-novo × servidor-antigo (R2/ADR-0018):
+      // o wire antigo omite sanidade/emBaixaIluminacao — preserva o anterior
+      // em vez de gravar undefined (o snapshot só chega em readmissão).
+      const sanidadeRestaurada = evento.sanidade ?? anterior.sanidade
+      const emBaixaResolvida = evento.emBaixaIluminacao ?? anterior.emBaixaIluminacao
       return {
         ...estado,
         jogadorPorId: {
@@ -818,7 +819,7 @@ export function reduzirEvento(
           [evento.resgatadoJogadorId]: {
             ...anterior,
             sanidade: sanidadeRestaurada,
-            emBaixaIluminacao: evento.emBaixaIluminacao,
+            emBaixaIluminacao: emBaixaResolvida,
             amedrontado: sanidadeRestaurada === 0,
           },
         },

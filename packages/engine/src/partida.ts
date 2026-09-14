@@ -1344,11 +1344,16 @@ function permanecerNaPartida(
   // a Peça do início do turno e a Peça decidida são a MESMA (antes = depois),
   // então permanecer DENTRO do Alcance dispara e fora→fora é silêncio. A
   // exceção monstro da travessia mantém o peão na Peça sob ele (a mesma
-  // antes/depois), portanto é essa a região avaliada. A
-  // permanência não muda a Iluminação: sem recálculo nem Limpeza aqui
-  // (ADR-0005) — se o Vulto impor Baixa Iluminação nova, a Iluminação é
-  // recalculada e a Limpeza reaplicada no MESMO gatilho, mesmo funil dos
-  // demais. O lote mantém ataque_resolvido ANTES de turno_encerrado.
+  // antes/depois), portanto é essa a região avaliada. A permanência comum não
+  // muda a Iluminação: sem recálculo nem Limpeza aqui (ADR-0005) — se o Vulto
+  // impor Baixa Iluminação nova, a Iluminação é recalculada e a Limpeza
+  // reaplicada no MESMO gatilho, mesmo funil dos demais. O lote mantém
+  // ataque_resolvido ANTES de turno_encerrado.
+  // ADR-0018 (E4): na exceção monstro o encaixe acabou de posicionar, no MESMO
+  // turno, uma peça fora da Iluminação e sob nenhum peão — a Limpeza é aplicada
+  // incondicionalmente após o Ataque (ordem deliberada Ataque → Limpeza,
+  // inversa do funil padrão: o Monstro da aposta precisa atacar antes de ser
+  // varrido; no funil padrão ele seria removido sem atacar).
   const pecaMantidaId = permanenciaEmMonstro
     ? (peao?.pecaId ?? estado.pecaDoInicioDoTurnoId ?? null)
     : (estado.pecaDoInicioDoTurnoId ?? null);
@@ -1360,6 +1365,41 @@ function permanecerNaPartida(
     pecaMantidaId,
     pecaMantidaId ?? '',
   );
+  if (permanenciaEmMonstro) {
+    const estadoParaIluminacao = { ...estado, jogadores: ataque.jogadores };
+    const iluminacao = recalcularIluminacaoEAplicarLimpeza(
+      estadoParaIluminacao,
+      resultado.estado,
+      eventos,
+    );
+    const posicionadasIds = new Set(
+      iluminacao.posicionadas.map((peca) => peca.pecaId),
+    );
+    const peoesNoAlcance: Record<string, readonly string[]> = {};
+    for (const [pecaId, peaoIds] of Object.entries(ataque.peoesNoAlcance)) {
+      if (!posicionadasIds.has(pecaId)) {
+        continue;
+      }
+      peoesNoAlcance[pecaId] = peaoIds;
+    }
+    const pecasEmPeriodoDeGraca = (estado.pecasEmPeriodoDeGraca ?? []).filter(
+      (pecaId) => posicionadasIds.has(pecaId),
+    );
+    return avancarVez(
+      {
+        ...estado,
+        tabuleiro: {
+          ...resultado.estado,
+          posicionadas: iluminacao.posicionadas,
+        },
+        celulasIluminadas: iluminacao.celulasIluminadas,
+        peoesNoAlcance,
+        pecasEmPeriodoDeGraca,
+        jogadores: ataque.jogadores,
+      },
+      [...eventos, { tipo: 'turno_encerrado', jogadorId: ator.jogadorId }],
+    );
+  }
   const { celulasIluminadas, posicionadas: posicionadasFinais } =
     reaplicarIluminacaoSeBaixaNova(
       estado,
@@ -1461,6 +1501,32 @@ function confirmarPosicaoDoPeao(
       'A Peça do Peão não foi encontrada.',
     );
   }
+  // ADR-0018 / issue #377 (E1): a Confirmação cobra o pouso na peça da
+  // Travessia — atravessar, encaixar e confirmar na origem (sem pisar na peça
+  // colocada) reabriria o posicionamento grátis no escuro que a ADR-0017
+  // rejeitou. Exceção Monstro: o Monstro não aceita peão, então o CONFIRMAR é
+  // vedado nesse turno — o fechamento é só por Permanência.
+  const travessiaId = estado.pecaDaTravessiaId ?? null;
+  if ((estado.atravessouNoTurno ?? false) && travessiaId !== null) {
+    const pecaDaTravessia = estado.tabuleiro.posicionadas.find(
+      (item) => item.pecaId === travessiaId,
+    );
+    if (
+      pecaDaTravessia !== undefined &&
+      ehPecaDeMonstro(pecaDaTravessia.tipo)
+    ) {
+      return rejeitarDaPartida(
+        'PECA_JA_TEM_PEAO',
+        'A peça da Travessia é um Monstro e não aceita Peão; o turno fecha por Permanência.',
+      );
+    }
+    if (peca.pecaId !== travessiaId) {
+      return rejeitarDaPartida(
+        'MOVIMENTO_INDISPONIVEL',
+        'Após atravessar o Escuro, o Peão deve mover para a peça colocada antes de confirmar.',
+      );
+    }
+  }
   // Issue #375 (contrato sem-mudança): confirmar na Peça do início do turno —
   // com ou sem ida-e-volta — fecha a posição sem Recebimento e exige
   // encerrar_turno; a Permanência continua distinta (encerra direto, sem
@@ -1490,7 +1556,8 @@ function confirmarPosicaoDoPeao(
   // Review PR #370 (Bug 1): quem entra saudável e sai em Baixa no MESMO
   // gatilho também não recebe sorteio nesse CONFIRMAR — o emBaixa acima é
   // pré-ataque; a Baixa nova do gatilho descarta o sorteio abaixo (0 no turno
-  // atual, 1 no próximo avancarVez, ADR-0016).
+  // atual e 0 no próximo avancarVez — ADR-0017: saque em Baixa é só sob
+  // demanda, na Travessia).
   // Issue #375: sem mudança de Peça também NÃO sorteia (recebidas = [], sem
   // consumir a Caixa, sem peca_sorteada/recebimento_gerado no lote).
   const emBaixaAntes = ator.emBaixaIluminacao ?? false;
@@ -1540,8 +1607,9 @@ function confirmarPosicaoDoPeao(
     );
   // Review PR #370 (Bug 1): o sorteio acima usou a Baixa pré-ataque — se o
   // gatilho impôs Baixa nova ao ator, o turno encerra sem sortear: remove
-  // peca_sorteada/recebimento_gerado do lote e restaura a Caixa consumida. O
-  // puxar-1 vem no próximo avancarVez (ADR-0016).
+  // peca_sorteada/recebimento_gerado do lote e restaura a Caixa consumida. Sem
+  // puxar-1 no próximo avancarVez (ADR-0017: saque em Baixa é só sob demanda,
+  // na Travessia).
   const atorAposAtaque = ataque.jogadores.find(
     (jogador) => jogador.jogadorId === ator.jogadorId,
   );
