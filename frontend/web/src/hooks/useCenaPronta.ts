@@ -3,8 +3,13 @@ import { DefaultLoadingManager } from 'three'
 
 /** Silêncio sem novos loads para considerar a cena pronta (cobre loads encadeados). */
 export const CENA_PRONTA_QUIET_MS = 400
-/** Teto anti-travamento: nunca segura os dots além disso. */
-export const CENA_PRONTA_TETO_MS = 15000
+/**
+ * Teto anti-travamento: nunca segura os dots além disso. Alto de propósito
+ * (cobre o download total no primeiro acesso em rede lenta — a partida só
+ * revela quando TUDO assentar); falha individual de asset não trava (ver
+ * `onError`); só uma conexão estagnada sem erro chega até aqui.
+ */
+export const CENA_PRONTA_TETO_MS = 30000
 
 /**
  * Prontidão dos assets 3D da Partida (texturas + GLTFs via `useLoader` do R3F,

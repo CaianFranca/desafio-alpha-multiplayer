@@ -7,6 +7,7 @@ import {
   descreverCameraFixa,
 } from '../../game/ambiente/contrato'
 import { AmbienteCena } from '../../game/scenes/AmbienteCena'
+import { PrecarregadorDeAssets } from '../../game/assets/PrecarregadorDeAssets'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import type { EstadoExibicaoTabuleiro, PecaCorrente } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
@@ -354,6 +355,10 @@ export function AmbienteDeJogo({
           />
         }
       >
+        {/* Preload total antes da revelação: dispara os downloads de todas as
+            texturas/GLBs no cache do useLoader (em paralelo com a espera do
+            WS); o gate da página só revela quando tudo assentar. */}
+        <PrecarregadorDeAssets />
         <CameraRig bordaPx={bordaPx} />
         <AmbienteCena
           bordaPx={bordaPx}

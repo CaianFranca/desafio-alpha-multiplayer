@@ -21,6 +21,7 @@ import {
 import type { EncaixeTrigger } from '../game/tabuleiro/encaixe'
 import { deveReduzirMovimento } from '../hooks/usePrefersReducedMotion'
 import { useCenaPronta } from '../hooks/useCenaPronta'
+import { useSonsProntos } from '../hooks/useSonsProntos'
 import { tocarSom } from '../game/audio/sons'
 import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
 import {
@@ -954,11 +955,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
   const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
   // Gate da revelação: os dots seguem até a cena 3D estar 100% carregada
-  // (sem pop-in progressivo) — mão única, só vale para a primeira revelação.
-  // Todo o resto (HUD, modelo, cena) segue o `estado` cru: a cena precisa
-  // montar para carregar; só o overlay espera. O re-arme acontece na chegada
-  // do conteúdo (snapshot), quando os loads das peças de fato começam.
-  const cenaPronta = useCenaPronta(estadoExibicao !== null)
+  // (sem pop-in progressivo) E todos os sons baixados — mão única, só vale
+  // para a primeira revelação. Todo o resto (HUD, modelo, cena) segue o
+  // `estado` cru: a cena precisa montar para carregar; só o overlay espera.
+  // O re-arme acontece na chegada do conteúdo (snapshot), quando os loads
+  // das peças de fato começam; o preload total (`PrecarregadorDeAssets` +
+  // `aquecerSons`, disparados no mount) faz com que, no caso comum, tudo já
+  // esteja em cache quando o snapshot chega.
+  const sonsProntos = useSonsProntos()
+  const cenaPronta = useCenaPronta(estadoExibicao !== null) && sonsProntos
   const [cenaRevelada, setCenaRevelada] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- latch mão-única da revelação, dispara uma vez
