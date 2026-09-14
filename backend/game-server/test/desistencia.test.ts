@@ -73,13 +73,16 @@ class RedisEmMemoria {
   }
 
   async eval(_script: string, _nChaves: number, ...args: unknown[]): Promise<number> {
-    // Retenção do término: as duas chaves existem no stub em todos os cenários
-    // de derrota por desistência — aplica como o Lua (retorna 1).
+    // Retenção do término (estado.ts): partida + estado existem no stub em
+    // todos os cenários de derrota por desistência — aplica como o Lua
+    // (retorna 1). A 3ª chave (chat do histórico, #388) é opcional: a lista
+    // só nasce no primeiro RPUSH, então terminadas sem mensagem não a têm.
     this.chamadasEval += 1;
     const ttl = args[args.length - 1];
     const chaves = args.slice(0, -1) as string[];
     assert.ok(typeof ttl === 'number' && ttl > 0, 'retenção exige TTL positivo');
-    for (const chave of chaves) {
+    assert.ok(chaves.length >= 2, 'retenção exige partida + estado');
+    for (const chave of chaves.slice(0, 2)) {
       assert.ok(this.dados.has(chave), `retenção com chave ausente: ${chave}`);
     }
     return 1;
@@ -448,7 +451,7 @@ test('4→3 continua e vence com N−1', async () => {
 
 test('2→1 declara derrota por desistência e dispara o Retorno uma única vez', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2']);
-  const { partidaId, handlers, sockets, avisos, desistencias } = montada;
+  const { partidaId, handlers, sockets, avisos, desistencias, redis } = montada;
 
   await handlers.aplicarMensagem(
     sockets.get('jogador-2')!.comoWebSocket(),
@@ -515,6 +518,11 @@ test('2→1 declara derrota por desistência e dispara o Retorno uma única vez'
   assert.equal(erros[0]!.codigo, 'PARTIDA_TERMINADA');
   await handlers.drenarRetornosPendentes();
   assert.equal(avisos.length, 1, 'callback de Retorno sai uma única vez');
+
+  // Retenção do término (follow-up #398/F1): o EVAL de retenção rodou sem a
+  // chave de chat (partida sem mensagens) — sem o stub opcional, o erro seria
+  // engolido pelo catch de aplicarRetencaoDeTermino e a retenção não validada.
+  assert.ok(redis.chamadasEval >= 1, 'retenção do término aplicada via eval');
 });
 
 // ─── Limpeza só-do-ausente ───
