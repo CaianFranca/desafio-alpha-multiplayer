@@ -69,7 +69,7 @@ export async function fetchCurrentPlayer(): Promise<PlayerResult> {
   if (response.status === 401) {
     // Refresh transitório (rede/5xx, issue #376): a Sessão pode estar viva —
     // o resultado vem anexado à própria resposta (escopo por request, sem
-    // flag global — review PR #383), para a reidratação retentar em vez de deslogar.
+    // flag global — review PR #383), para a reidratação retentar em vez de fazer logout.
     if (lerResultadoRefresh(response) === 'transiente')
       return { ok: false, reason: 'unknown-failure', transiente: true }
     return { ok: false, reason: 'invalid-session' }
