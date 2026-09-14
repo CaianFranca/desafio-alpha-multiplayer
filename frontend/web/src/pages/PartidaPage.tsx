@@ -20,6 +20,7 @@ import {
 } from '../components/partida/somDoEncaixe'
 import type { EncaixeTrigger } from '../game/tabuleiro/encaixe'
 import { deveReduzirMovimento } from '../hooks/usePrefersReducedMotion'
+import { useCenaPronta } from '../hooks/useCenaPronta'
 import { tocarSom } from '../game/audio/sons'
 import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
 import {
@@ -354,6 +355,17 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [partidaId])
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
+  // Gate da revelação: os dots seguem até a cena 3D estar 100% carregada
+  // (sem pop-in progressivo) — mão única, só vale para a primeira revelação.
+  // Todo o resto (HUD, modelo, cena) segue o `estado` cru: a cena precisa
+  // montar para carregar; só o overlay espera.
+  const cenaPronta = useCenaPronta()
+  const [cenaRevelada, setCenaRevelada] = useState(false)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- latch mão-única da revelação, dispara uma vez
+    if (estado === 'disponivel' && cenaPronta && !cenaRevelada) setCenaRevelada(true)
+  }, [estado, cenaPronta, cenaRevelada])
+  const estadoEfetivo = estado === 'disponivel' && !cenaRevelada ? 'carregando' : estado
   const emResultado = estado === 'resultado'
   const emResultadoRef = useRef(emResultado)
   useEffect(() => {
@@ -1510,7 +1522,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
       />
-      <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
+      <PartidaOverlays estado={estadoEfetivo} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
       {/*
         Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
         região viva sempre presente; o texto atualiza a cada recusa (som +
