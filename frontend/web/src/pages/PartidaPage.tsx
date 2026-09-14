@@ -827,11 +827,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // (false→true) e proteção (!antes && resultante) soam uma vez;
         // snapshots nunca soam. O pós-estado deriva da redução pura sobre o
         // modelo pré-despacho (a ref só atualiza no próximo render).
+        // ADR-0017 (Opção B, fundido no merge main↔399): quando a
+        // auto-confirmação da travessia ack, o FE encerra o turno sozinho —
+        // mesmo branch para não despachar 2x nem tornar o check tardio
+        // inalcançável (o `return` acima estreita o tipo e calaria o TS2367).
         if (evento.type === 'POSICAO_CONFIRMADA') {
           const antes = modeloRef.current
           const depois = reduzirEvento(antes, evento as Parameters<typeof reduzirEvento>[1])
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           tocarConquistasDaConfirmacao(antes, depois, evento.jogadorId)
+          if (
+            confirmarTravessiaEncadeadoRef.current &&
+            !encerrarTravessiaEncadeadoRef.current &&
+            modeloRef.current.jogadorAtivoId !== null &&
+            modeloRef.current.jogadorAtivoId === jogadorIdRef.current
+          ) {
+            encerrarTravessiaEncadeadoRef.current = true
+            enviarComJogadorRef.current({ type: 'ENCERRAR_TURNO' })
+          }
           return
         }
         // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
@@ -997,22 +1010,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               peaoId: peaoDoAtivoId,
             })
           }
-        }
-        // ADR-0017 (Opção B): quando a auto-confirmação da travessia ack
-        // (POSICAO_CONFIRMADA originado do auto-CONFIRMAR), o FE encerra o
-        // turno sozinho — fechamento de zero cliques (o jogador deixa a mesa
-        // sem apertar o botão Encerrar). Guardas: só o ack da auto-confirmação
-        // (flag confirmarTravessiaEncadeadoRef), só no turno local e uma vez
-        // por turno (replay/duplo ack em silêncio).
-        if (
-          evento.type === 'POSICAO_CONFIRMADA' &&
-          confirmarTravessiaEncadeadoRef.current &&
-          !encerrarTravessiaEncadeadoRef.current &&
-          modeloRef.current.jogadorAtivoId !== null &&
-          modeloRef.current.jogadorAtivoId === jogadorIdRef.current
-        ) {
-          encerrarTravessiaEncadeadoRef.current = true
-          enviarComJogadorRef.current({ type: 'ENCERRAR_TURNO' })
         }
         // Som de recusa unificado (issue #228): erros do tabuleiro incluindo
         // FORA_DA_VEZ (#118), pendências e Caixa esgotada (#143/#151); seleção,

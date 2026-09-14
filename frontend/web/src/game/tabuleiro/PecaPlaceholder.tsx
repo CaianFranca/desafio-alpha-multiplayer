@@ -490,6 +490,25 @@ export function PecaPlaceholder({
               <CorpoTexturizado {...corpo} />
             </Suspense>
           </LimiteDeErroDoModelo>
+          {/* Monstros com modelo 3D (vulto/espectro): a base acima segue
+              inalterada e o modelo aparece sobre ela — o clique no modelo é o
+              mesmo `onClick` da peça (uma coisa só). Falha some só o modelo.
+              Dentro da reação/disparo para mover junto da base. */}
+          {temModeloDeMonstro(tipo) ? (
+            <LimiteDeErroDoModelo
+              key={`modelo-${tipo}`}
+              resetKey={`modelo-${tipo}`}
+              fallback={null}
+            >
+              <Suspense fallback={null}>
+                <MonstroAvatar
+                  tipo={tipo}
+                  position={[0, TOPO_DA_BASE, 0]}
+                  aoClicar={onClick}
+                />
+              </Suspense>
+            </LimiteDeErroDoModelo>
+          ) : null}
         </GrupoDaReacao>
       </GestoDoDisparo>
       {reacaoDoAtaque === 'escudo' ? (
@@ -500,35 +519,6 @@ export function PecaPlaceholder({
       ) : null}
       {reduce && reacaoDoAtaque === 'tremor' ? (
         <ContornoDaPeca visivel corDestaque={COR_CONTORNO_TREMOR_ATAQUE} />
-      {/* B4: falha da textura (404) cai no fallback chapado em vez de
-          derrubar o Canvas inteiro; o reset segue a troca de tipo (as URLs
-          derivam do tipo). */}
-      <LimiteDeErroDoModelo
-        key={tipo}
-        resetKey={tipo}
-        fallback={fallback}
-      >
-        <Suspense fallback={fallback}>
-          <CorpoTexturizado {...corpo} />
-        </Suspense>
-      </LimiteDeErroDoModelo>
-      {/* Monstros com modelo 3D (vulto/espectro): a base acima segue
-          inalterada e o modelo aparece sobre ela — o clique no modelo é o
-          mesmo `onClick` da peça (uma coisa só). Falha some só o modelo. */}
-      {temModeloDeMonstro(tipo) ? (
-        <LimiteDeErroDoModelo
-          key={`modelo-${tipo}`}
-          resetKey={`modelo-${tipo}`}
-          fallback={null}
-        >
-          <Suspense fallback={null}>
-            <MonstroAvatar
-              tipo={tipo}
-              position={[0, TOPO_DA_BASE, 0]}
-              aoClicar={onClick}
-            />
-          </Suspense>
-        </LimiteDeErroDoModelo>
       ) : null}
     </group>
   )
