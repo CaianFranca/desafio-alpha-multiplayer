@@ -122,8 +122,6 @@ export async function obterHistoricoDoChat(
   }
   return historico;
 }
-
-/** Remove o histórico (cancelamento e não-início). */
-export async function removerHistoricoDoChat(redis: Redis, partidaId: string): Promise<void> {
-  await redis.del(chaveDoChatDaPartida(partidaId));
-}
+// NOTA (follow-up #398/F4): a remoção do histórico vive nos EVALs inline de
+// cancelamento/não-início em partidas.ts (3 DELs atômicos) — não ressuscitar
+// helper isolado aqui: DEL fora do EVAL reabriria a janela de órfão.
