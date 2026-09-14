@@ -31,6 +31,7 @@ const {
   partidaTerminadaTtlSegundos,
   partidaNaoInicioSegundos,
   partidaReconexaoEmAndamentoSegundos,
+  partidaChatHistoricoMaximo,
   lobbyRetornoCallbackUrl,
   lobbyDesistenciaCallbackUrl,
   gameServerHeartbeatIntervalMs,
@@ -48,6 +49,7 @@ const contexto: ContextoDoGameServer = {
   partidaNaoInicioSegundos,
   partidaReconexaoEmAndamentoSegundos,
   partidaTerminadaTtlSegundos,
+  partidaChatHistoricoMaximo,
   lobbyRetornoCallbackUrl,
   lobbyDesistenciaCallbackUrl,
 };
@@ -69,6 +71,7 @@ const handlers = new PartidaHandlers({
   redis: redisClient,
   broadcaster,
   partidaTerminadaTtlSegundos,
+  chatHistoricoMaximo: partidaChatHistoricoMaximo,
   notificarRetorno,
   notificarDesistencia,
   debug: streamDeDebug,

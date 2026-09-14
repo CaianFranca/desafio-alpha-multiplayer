@@ -9,6 +9,7 @@ export interface ContextoDoGameServer {
   readonly partidaNaoInicioSegundos?: number;
   readonly partidaReconexaoEmAndamentoSegundos?: number;
   readonly partidaTerminadaTtlSegundos?: number;
+  readonly partidaChatHistoricoMaximo?: number;
   readonly lobbyRetornoCallbackUrl?: string;
   readonly lobbyDesistenciaCallbackUrl?: string;
 }
