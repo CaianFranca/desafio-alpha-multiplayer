@@ -218,8 +218,8 @@ export async function armarJanelaSeEmAndamento(
     agendarExpiracaoDeReconexao(partidaId, jogadorId, undefined, redis);
     broadcaster?.enviar(partidaId, { type: 'JOGADOR_EM_RECONEXAO', jogadorId });
     return true;
-  } catch (err) {
-    console.error('[ws] falha ao armar janela de reconexão:', (err as Error).message);
+  } catch (err: unknown) {
+    console.error('[ws] falha ao armar janela de reconexão:', err instanceof Error ? err.message : String(err));
     return false;
   }
 }
@@ -266,7 +266,7 @@ function marcarDesconexaoEArmarJanela(
   void marcarDesconexao(redis, partidaId, jogadorId)
     .then(() => etapaIntermediaria?.(redis, partidaId))
     .then(() => armarJanelaSeEmAndamento(redis, partidaId, jogadorId, broadcaster))
-    .catch((err) => console.error('[ws] falha ao marcar desconexão:', (err as Error).message));
+    .catch((err: unknown) => console.error('[ws] falha ao marcar desconexão:', err instanceof Error ? err.message : String(err)));
 }
 
 export function criarWebSocketServer(
@@ -381,8 +381,8 @@ export function criarWebSocketServer(
           // com `JOGADOR_RECONECTADO` (seam da #294).
           if (transicao.estado === 'em_andamento') {
             cancelarExpiracaoDeReconexao(partidaId, sessao.jogadorId);
-            void limparJanelaDeReconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err) =>
-              console.error('[ws] falha ao limpar janela de reconexão:', (err as Error).message),
+            void limparJanelaDeReconexao(contexto.redis, partidaId, sessao.jogadorId).catch((err: unknown) =>
+              console.error('[ws] falha ao limpar janela de reconexão:', err instanceof Error ? err.message : String(err)),
             );
             anunciarVoltaSeReadmissao(depsPartida?.broadcaster, partidaId, sessao.jogadorId, transicao);
           }
@@ -417,26 +417,46 @@ export function criarWebSocketServer(
                 });
               }
               try {
-                const [estadoEngine, partidaAtual] = await Promise.all([
-                  obterEstadoDaPartida(contexto.redis, partidaId),
-                  obterPartida(contexto.redis, partidaId),
-                ]);
-                if (estadoEngine !== null && partidaAtual !== null) {
+                // Snapshot atômico da Reconexão (issue #388): tabuleiro + chat
+                // do mesmo instante intra-processo via cadeia serial da
+                // Partida — a rajada de bot nunca intercala entre o GET do
+                // estado e o LRANGE do chat (mononodo; 2 instâncias quebram).
+                // Entregue em único ESTADO_DA_PARTIDA, sem replay separado.
+                const atomico = await depsPartida.handlers.lerSnapshotAtomico(partidaId);
+                if (atomico !== null) {
                   const snapshot = paraSnapshotWire(
-                    estadoEngine,
-                    partidaAtual.roster,
+                    atomico.estado,
+                    atomico.partida.roster,
                     transicao.estado,
                     transicao.iniciadaEm,
+                    atomico.historico,
                   );
                   depsPartida.broadcaster.enviarParaSocket(ws, {
                     type: 'ESTADO_DA_PARTIDA',
                     snapshot,
                   });
                 } else {
+                  // Diagnóstico best-effort só para o log (o snapshot já
+                  // falhou): distingue `estado-nulo` de `partida-nula`.
+                  let temEstado: boolean | null = null;
+                  let temPartida: boolean | null = null;
+                  let motivo: 'estado-nulo' | 'partida-nula' | 'diagnostico-falhou' = 'diagnostico-falhou';
+                  try {
+                    temEstado = (await obterEstadoDaPartida(contexto.redis, partidaId)) !== null;
+                    if (!temEstado) {
+                      motivo = 'estado-nulo';
+                    } else {
+                      temPartida = (await obterPartida(contexto.redis, partidaId)) !== null;
+                      motivo = 'partida-nula';
+                    }
+                  } catch {
+                    // Redis fora no diagnóstico: mantém nulls + falha.
+                  }
                   console.error('[ws] estado indisponível para snapshot', {
                     partidaId,
-                    temEstado: estadoEngine !== null,
-                    temPartida: partidaAtual !== null,
+                    temEstado,
+                    temPartida,
+                    motivo,
                   });
                   depsPartida.broadcaster.enviarParaSocket(ws, {
                     type: 'ERRO_DO_TABULEIRO',
@@ -444,8 +464,14 @@ export function criarWebSocketServer(
                     mensagem: 'Estado da partida indisponível para snapshot.',
                   });
                 }
-              } catch (erro) {
-                console.error('[ws] falha ao enviar snapshot da partida:', (erro as Error).message);
+              } catch (erro: unknown) {
+                console.error('[ws] falha ao enviar snapshot da partida:', {
+                  partidaId,
+                  temEstado: null,
+                  temPartida: null,
+                  motivo: 'excecao',
+                  erro: erro instanceof Error ? erro.message : String(erro),
+                });
                 depsPartida.broadcaster.enviarParaSocket(ws, {
                   type: 'ERRO_DO_TABULEIRO',
                   codigo: 'ESTADO_INDISPONIVEL',
@@ -546,8 +572,8 @@ export function criarWebSocketServer(
               depsPartida?.broadcaster,
             );
           });
-        })().catch((error) => {
-          console.error('[ws] falha na transição pós-upgrade:', (error as Error).message);
+        })().catch((error: unknown) => {
+          console.error('[ws] falha na transição pós-upgrade:', error instanceof Error ? error.message : String(error));
           // Exceção durante a admissão (ex.: Redis fora): a mesma limpeza do
           // caminho de falha — sem ela, o socket novo ficaria registrado como
           // vigente (morto) e a conexão antiga desregistrada (review #181).
@@ -560,8 +586,8 @@ export function criarWebSocketServer(
           try { ws.close(1011, 'ERRO_INTERNO'); } catch {}
         });
       });
-    })().catch((error) => {
-      console.error('[ws] falha no fluxo de admissao:', (error as Error).message);
+    })().catch((error: unknown) => {
+      console.error('[ws] falha no fluxo de admissao:', error instanceof Error ? error.message : String(error));
       enviarErroNoSocket(socket, 500, erroRejeitada('ERRO_INTERNO', 'falha interna no servidor'));
     });
   });

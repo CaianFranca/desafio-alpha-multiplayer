@@ -54,6 +54,11 @@ import {
   salvarEstadoDaPartida,
 } from './estado.ts';
 import { chaveDoRetornoPendente } from './chaves.ts';
+import {
+  adicionarMensagemAoHistorico,
+  HISTORICO_DE_CHAT_MAXIMO_PADRAO,
+  obterHistoricoDoChat,
+} from './historico-chat.ts';
 import { obterPartida, type PartidaPreparada } from './partidas.ts';
 import type { AvisoDeRetorno, AvisoDeDesistencia } from '../retorno/cliente.ts';
 import { sleep } from '../utils/sleep.ts';
@@ -70,6 +75,13 @@ export interface PartidaHandlersDeps {
   readonly redis: Redis;
   readonly broadcaster: PartidaBroadcaster;
   readonly partidaTerminadaTtlSegundos?: number;
+  /**
+   * Teto do histórico de chat por Partida (issue #388): limitado a 50 por
+   * default (faixa 1..200), somando humanas + bot, com aparo no topo.
+   * Injetável via `PARTIDA_CHAT_HISTORICO_MAXIMO` (default 50 em fonte única
+   * `@flicker/config`).
+   */
+  readonly chatHistoricoMaximo?: number;
   readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
   /**
    * Desvinculação imediata do desistente no lobby (issue #290): a cada
@@ -92,6 +104,7 @@ export class PartidaHandlers {
   private readonly redis: Redis;
   private readonly broadcaster: PartidaBroadcaster;
   private readonly partidaTerminadaTtlSegundos: number;
+  private readonly chatHistoricoMaximo: number;
   private readonly notificarRetorno?: (aviso: AvisoDeRetorno) => Promise<void>;
   private readonly notificarDesistencia?: (aviso: AvisoDeDesistencia) => Promise<void>;
   private readonly tetoDesvinculoMs: number;
@@ -112,6 +125,7 @@ export class PartidaHandlers {
     this.redis = deps.redis;
     this.broadcaster = deps.broadcaster;
     this.partidaTerminadaTtlSegundos = deps.partidaTerminadaTtlSegundos ?? 3600;
+    this.chatHistoricoMaximo = deps.chatHistoricoMaximo ?? HISTORICO_DE_CHAT_MAXIMO_PADRAO;
     this.notificarRetorno = deps.notificarRetorno;
     this.notificarDesistencia = deps.notificarDesistencia;
     this.tetoDesvinculoMs = deps.tetoDesvinculoMs ?? 5000;
@@ -234,23 +248,30 @@ export class PartidaHandlers {
         mensagem: 'Erro interno ao processar comando da partida.',
       });
       // Espelho do erro interno no stream de debug (issue #340).
-      this.debug?.emitirParaSocket(socket, 'error', `erro interno ao processar comando: ${(erro as Error).message}`);
+      this.debug?.emitirParaSocket(socket, 'error', `erro interno ao processar comando: ${erro instanceof Error ? erro.message : String(erro)}`);
     });
   }
 
   /**
    * Julgamento do Chat de Partida (issue #390), rodando DENTRO da cadeia por
    * Partida (`enfileirarMutacao`) — a mensagem aprovada entra na MESMA ordem
-   * serial dos eventos de jogo. Passos: estado no Redis (indisponível → limpa
-   * a entrada do rate-limit da Partida e recusa), fase (`iniciadaEm` nulo →
-   * DADOS_INVALIDOS, chat nunca na preparada), pertença ao roster vigente do
-   * engine (JOGADOR_NAO_NA_PARTIDA — cobre o desistente na hora), conteúdo
+   * serial dos eventos de jogo (garantia intra-processo mononodo; 2
+   * instâncias quebram a ordem — ADR-0003 horizontal futuro, fora do escopo).
+   * Passos: estado no Redis (indisponível → limpa a entrada do rate-limit da
+   * Partida e recusa), fase (`iniciadaEm` nulo → DADOS_INVALIDOS, chat nunca
+   * na preparada; erro de infra no `obterPartida` → ESTADO_INDISPONIVEL,
+   * distinto do `null` real), pertença ao roster vigente do engine
+   * (JOGADOR_NAO_NA_PARTIDA — cobre o desistente na hora), conteúdo
    * normalizado (vazio → MENSAGEM_VAZIA; teto de 300 → MENSAGEM_LONGA_DEMAIS),
-   * rate-limit de 2s por Jogador não-bot (LIMITE_DE_MENSAGENS; bots isentos)
-   * e fan-out socket-a-socket SÓ ao roster vigente, com `apelido` da Conexão
-   * (fallback ao roster da PartidaPreparada) e `enviadoEm` ISO do servidor.
-   * Nenhuma recusa muta estado; nenhum caminho chama o engine ou
-   * `salvarEstadoDaPartida`.
+   * rate-limit de 2s por Jogador não-bot (LIMITE_DE_MENSAGENS; bots isentos;
+   * só consome após persistir — falha de Redis não consome e o retry imediato
+   * é permitido), persistência no histórico próprio da #388 (fora do blob de
+   * estado, EVAL atômico RPUSH+LTRIM+TTL) e fan-out socket-a-socket SÓ ao
+   * roster vigente, com `apelido` da Conexão (fallback ao roster da
+   * PartidaPreparada) e `enviadoEm` ISO do servidor. Nenhuma recusa muta
+   * estado nem escreve histórico; nenhum caminho chama o engine ou
+   * `salvarEstadoDaPartida`. Falha de Redis no histórico não recusa o live
+   * (warn com divergência live-vs-histórico conhecida) — o fan-out segue.
    */
   private async aplicarMensagemDeChat(
     socket: WebSocket,
@@ -275,8 +296,15 @@ export class PartidaHandlers {
         // As chaves de partida e de estado nascem, persistem e expiram
         // JUNTAS (criação, PERSIST do início, retenção e cancelamento), então
         // `partida === null` com estado presente é anomalia — fail-closed,
-        // recusando o chat como a fase preparada.
-        const partida = await obterPartida(this.redis, partidaId).catch(() => null);
+        // recusando o chat como a fase preparada. Erro de infra no Redis é
+        // distinto do `null` real: propaga como ESTADO_INDISPONIVEL.
+        let partida: PartidaPreparada | null;
+        try {
+          partida = await obterPartida(this.redis, partidaId);
+        } catch {
+          this.recusarChat(socket, 'ESTADO_INDISPONIVEL', 'Partida indisponível.');
+          return;
+        }
         if (partida === null || partida.iniciadaEm === null) {
           this.recusarChat(socket, 'DADOS_INVALIDOS', 'Chat disponível apenas com a Partida em andamento.');
           return;
@@ -313,13 +341,15 @@ export class PartidaHandlers {
         // Bots furam o rate-limit (decisão aprovada da #390): os comentários
         // pré-feitos obedecem ao teto de 300 por construção e à ordem da
         // cadeia, sem serem estrangulados pelos 2s.
-        if (membro?.ehBot !== true) {
+        const ehBot = membro?.ehBot === true;
+        if (!ehBot) {
           const ultima = limiteDaPartida.get(sessaoJogadorId);
           if (ultima !== undefined && agora - ultima < INTERVALO_MINIMO_ENTRE_MENSAGENS_MS) {
             this.recusarChat(socket, 'LIMITE_DE_MENSAGENS', 'Mensagens de chat limitadas a 1 a cada 2 segundos.');
             return;
           }
-          limiteDaPartida.set(sessaoJogadorId, agora);
+          // Sem `set` aqui: o consumo acontece SÓ após a persistência
+          // bem-sucedida (R5/R6) — falha de Redis não consome o crédito.
         }
 
         // Aprovação: identidade da Sessão, `apelido` da Conexão (JWT da
@@ -334,6 +364,22 @@ export class PartidaHandlers {
           conteudo,
           enviadoEm: new Date(agora).toISOString(),
         };
+        // Histórico persistente (issue #388): lista própria limitada com aparo
+        // no topo, fora do blob de estado, dentro da mesma mutação serial —
+        // recusas nunca escrevem; falha de Redis não recusa o live (warn com
+        // divergência live-vs-histórico conhecida). O crédito do rate-limit só
+        // é consumido após persistir (decisão R5/R6).
+        try {
+          await adicionarMensagemAoHistorico(this.redis, partidaId, evento, this.chatHistoricoMaximo);
+          if (!ehBot) {
+            limiteDaPartida.set(sessaoJogadorId, agora);
+          }
+        } catch (erroHistorico: unknown) {
+          console.warn('[partida] falha ao persistir histórico de chat', {
+            partidaId,
+            erro: erroHistorico instanceof Error ? erroHistorico.message : String(erroHistorico),
+          });
+        }
         // Fan-out socket-a-socket SÓ ao roster vigente — exclui o desistente
         // mesmo com socket aberto (o `broadcaster.enviar` mandaria a todos).
         // A iteração do Map de conexões entrega aos clientes na MESMA ordem.
@@ -352,7 +398,7 @@ export class PartidaHandlers {
         codigo: 'DADOS_INVALIDOS',
         mensagem: 'Erro interno ao processar comando da partida.',
       });
-      this.debug?.emitirParaSocket(socket, 'error', `erro interno ao processar mensagem de chat: ${(erro as Error).message}`);
+      this.debug?.emitirParaSocket(socket, 'error', `erro interno ao processar mensagem de chat: ${erro instanceof Error ? erro.message : String(erro)}`);
     }
   }
 
@@ -726,17 +772,61 @@ export class PartidaHandlers {
   }
 
   /**
-   * Enfileira a mutação na cadeia da partida. A cadeia ignora a falha de uma
-   * mutação anterior para não bloquear as seguintes, mas o erro da mutação
-   * atual é propagado para o `catch` de `aplicarMensagem`.
+   * Leitura atômica do snapshot de Reconexão (issue #388): tabuleiro + chat do
+   * mesmo instante intra-processo, dentro da cadeia serial por Partida — a
+   * rajada de bot (que escreve na mesma cadeia) nunca intercala entre o GET
+   * do estado e o LRANGE do chat. Garantia mononodo: 2 instâncias quebram a
+   * ordem (ADR-0003 horizontal futuro, fora do escopo). Entregue em único
+   * `ESTADO_DA_PARTIDA`, sem replay separado e sem duplicadas. Falha de Redis
+   * no chat degrada para [] sem negar o snapshot. `null` quando estado ou
+   * metadados sumiram (expirada/cancelada); erro de infra no Redis propaga
+   * (o `ws.ts` o converte em ESTADO_INDISPONIVEL com motivo `excecao`).
    */
-  private enfileirarMutacao(partidaId: string, fn: () => Promise<void>): Promise<void> {
+  async lerSnapshotAtomico(
+    partidaId: string,
+  ): Promise<{
+    estado: import('@flicker/engine').EstadoDaPartida;
+    partida: PartidaPreparada;
+    historico: MensagemDeChatDaPartidaEvento[];
+  } | null> {
+    return this.enfileirarMutacao(partidaId, async () => {
+      const estado = await obterEstadoDaPartida(this.redis, partidaId);
+      if (estado === null) {
+        return null;
+      }
+      const partida = await obterPartida(this.redis, partidaId);
+      if (partida === null) {
+        return null;
+      }
+      let historico: MensagemDeChatDaPartidaEvento[] = [];
+      try {
+        historico = await obterHistoricoDoChat(this.redis, partidaId);
+      } catch (erro: unknown) {
+        console.warn('[partida] falha ao ler histórico de chat para snapshot', {
+          partidaId,
+          erro: erro instanceof Error ? erro.message : String(erro),
+        });
+        historico = [];
+      }
+      return { estado, partida, historico };
+    });
+  }
+
+  /**
+   * Enfileira a mutação na cadeia da partida. A cadeia ignora a falha de uma
+   * mutação anterior para não bloquear as seguintes, mas o erro/valor da
+   * mutação atual é propagado ao chamador. Leituras atômicas (#388) reutilizam
+   * a mesma cadeia das escritas para ver tabuleiro+chat do mesmo instante
+   * intra-processo. Limpeza mononodo (R8): a entrada é removida ao assentar
+   * (`limparCadeia` só apaga se ainda for a vigente) para não vazar Maps.
+   */
+  private enfileirarMutacao<T>(partidaId: string, fn: () => Promise<T>): Promise<T> {
     const anterior = this.cadeiasPorPartida.get(partidaId) ?? Promise.resolve();
-    const proxima = anterior.catch(() => undefined).then(fn);
-    this.cadeiasPorPartida.set(partidaId, proxima);
-    void proxima.then(
-      () => this.limparCadeia(partidaId, proxima),
-      () => this.limparCadeia(partidaId, proxima),
+    const proxima = anterior.catch(() => undefined).then(fn) as Promise<T>;
+    this.cadeiasPorPartida.set(partidaId, proxima as Promise<unknown>);
+    void (proxima as Promise<unknown>).then(
+      () => this.limparCadeia(partidaId, proxima as Promise<unknown>),
+      () => this.limparCadeia(partidaId, proxima as Promise<unknown>),
     );
     return proxima;
   }

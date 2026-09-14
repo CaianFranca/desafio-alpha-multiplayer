@@ -644,6 +644,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // continuação por LIMPEZA_APLICADA/TURNO_ENCERRADO só vale para lote
         // aberto pela desistência — fora dele, os caminhos dedicados abaixo
         // seguem inalterados.
+        // PECA_POSICIONADA/PEAO_* ficam fora do gate de propósito: no mesmo
+        // act despacham de imediato e ultrapassam o TURNO ainda na fila —
+        // por isso os testes isolam o TURNO num flush antes dos deltas
+        // (split intencional, não reordenação do wire).
         const loteAbertoPorDesistencia =
           loteDeTurnoRef.current.length > 0 &&
           loteDeTurnoRef.current[0]?.type === 'DESISTENCIA_REGISTRADA'

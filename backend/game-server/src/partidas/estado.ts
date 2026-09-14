@@ -24,12 +24,15 @@ if partidaExiste == 0 or estadoExiste == 0 then
 end
 redis.call('EXPIRE', KEYS[1], ARGV[1])
 redis.call('EXPIRE', KEYS[2], ARGV[1])
+if redis.call('EXISTS', KEYS[3]) == 1 then
+  redis.call('EXPIRE', KEYS[3], ARGV[1])
+end
 return 1
 `.trim();
 
-import { chaveDaPartida, chaveDoEstadoDaPartida, chaveDoRetornoPendente } from './chaves.ts';
+import { chaveDaPartida, chaveDoChatDaPartida, chaveDoEstadoDaPartida, chaveDoRetornoPendente } from './chaves.ts';
 
-export { chaveDaPartida, chaveDoEstadoDaPartida, chaveDoRetornoPendente };
+export { chaveDaPartida, chaveDoChatDaPartida, chaveDoEstadoDaPartida, chaveDoRetornoPendente };
 
 /**
  * Grava o estado inicial da partida no Redis com o TTL da partida preparada.
@@ -107,9 +110,10 @@ export async function salvarEstadoDaPartida(
 
 /**
  * Aplica a política de retenção do término (issue #177): fixa um TTL finito
- * nas duas chaves da partida (metadados + estado) para que o resultado
- * sobreviva ao recarregamento dentro da janela, mas não viva para sempre
- * como o `PERSIST` do ST-14.
+ * nas chaves da partida (metadados + estado + histórico de chat da #388) para
+ * que o resultado sobreviva ao recarregamento dentro da janela, mas não viva
+ * para sempre como o `PERSIST` do ST-14. O chat é opcional (lista só existe
+ * após a primeira mensagem) — ausência não nega a retenção.
  */
 export async function aplicarRetencaoDeTermino(
   redis: Redis,
@@ -121,9 +125,10 @@ export async function aplicarRetencaoDeTermino(
   }
   const aplicada = await redis.eval(
     SCRIPT_APLICAR_RETENCAO_DE_TERMINO,
-    2,
+    3,
     chaveDaPartida(partidaId),
     chaveDoEstadoDaPartida(partidaId),
+    chaveDoChatDaPartida(partidaId),
     ttlSegundos,
   );
   if (Number(aplicada) !== 1) {
