@@ -47,6 +47,16 @@ export function tocarBlipDoChat(): void {
   try {
     const contexto = obterContextoDeAudio()
     if (contexto === null) return
+    // Autoplay bloqueado suspende o contexto na primeira tentativa — sem o
+    // resume o blip ficaria mudo para sempre (M2). Guarda defensiva: o stub
+    // de teste não tem resume/state.
+    if (typeof contexto.resume === 'function' && contexto.state === 'suspended') {
+      try {
+        void contexto.resume().catch(() => {})
+      } catch {
+        // Sem áudio desta vez; o badge segue sendo o canal visual.
+      }
+    }
     const oscilador = contexto.createOscillator()
     const ganho = contexto.createGain()
     oscilador.type = 'sine'

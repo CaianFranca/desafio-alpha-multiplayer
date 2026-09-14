@@ -13,8 +13,15 @@
  *
  * Envio nunca enfileira: `estaConectado()` falho = recusa local imediata,
  * fora da fila de pendentes do handshake (o chat não pode "pegar carona" no
- * drain do open). O blip (WebAudio, ADR-0007) toca só com o painel fechado
- * para mensagens de terceiros, coalescido por lote de rajada (~250ms).
+ * drain do open) — e a corrida OPEN→close que retornar `enfileirado` é
+ * purgada da fila via `descartarPendentesPorTipo` (B1). O blip (WebAudio,
+ * ADR-0007) toca só com o painel fechado para mensagens de terceiros,
+ * coalescido por lote de rajada (~250ms).
+ *
+ * O estado é por Partida (`partidaId`): trocar de Partida no mesmo mount
+ * reseta feed, não-lidas, anúncio e guardas — sem vazar conversa (B3).
+ * O anúncio para leitor de tela (`anuncio`) avança SÓ no live; a semente do
+ * histórico nunca anuncia conversa velha como nova (R2).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -71,20 +78,33 @@ export function formatarHora(iso: string): string {
 }
 
 interface UseChatDaPartidaOptions {
+  /** Partida vigente: a troca reseta todo o estado do painel (B3). */
+  partidaId: string | null
   /** Sessão autenticada do Jogador local (id da própria mensagem). */
   jogadorId: string | null
   /** Socket do canal da Partida: true só com OPEN (nunca enfileira o chat). */
   estaConectado: () => boolean
   /** Envia pelo canal; o hook monta o comando de chat com o jogadorId. */
   enviar: (comando: PartidaComandoDoCliente) => 'enviado' | 'enfileirado'
+  /** Purga a fila de pendentes do handshake (B1: chat nunca pega o drain). */
+  descartarPendentesPorTipo: (tipo: PartidaComandoDoCliente['type']) => void
 }
 
-export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComando }: UseChatDaPartidaOptions) {
+export function useChatDaPartida({
+  partidaId,
+  jogadorId,
+  estaConectado,
+  enviar: enviarComando,
+  descartarPendentesPorTipo,
+}: UseChatDaPartidaOptions) {
   const [mensagens, setMensagens] = useState<MensagemDoChatDaPartida[]>([])
   const [naoLidas, setNaoLidas] = useState(0)
   const [aberto, setAberto] = useState(false)
   const [cooldownAte, setCooldownAte] = useState<number | null>(null)
   const [recusa, setRecusa] = useState<string | null>(null)
+  // Anúncio SR só do live (R2): a semente do histórico alimenta o feed sem
+  // tocar aqui, então reconexão não anuncia conversa velha como nova.
+  const [anuncio, setAnuncio] = useState<MensagemDoChatDaPartida | null>(null)
 
   // Refs dos estados lidos em callbacks estáveis (o socket guarda o callback
   // em ref e não re-subscreve — o mesmo padrão de modeloRef/emResultadoRef).
@@ -111,6 +131,32 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
     [],
   )
 
+  // Troca de Partida no mesmo mount (B3): reseta feed, régua de leitura,
+  // anúncio e guardas — a conversa da Partida anterior não pode vazar.
+  // Roda também no mount (valores já iniciais — no-op). Mesmo padrão do
+  // reset de sala do lobby (useSalaWebSocket) — reset intencional por troca
+  // de contexto, não estado derivado do render.
+  useEffect(() => {
+    if (timerDoCooldownRef.current !== null) {
+      window.clearTimeout(timerDoCooldownRef.current)
+      timerDoCooldownRef.current = null
+    }
+    if (timerDaRecusaRef.current !== null) {
+      window.clearTimeout(timerDaRecusaRef.current)
+      timerDaRecusaRef.current = null
+    }
+    proximoIdRef.current = 0
+    ultimoBlipEmRef.current = 0
+    historicoHidratadoRef.current = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMensagens([])
+    setNaoLidas(0)
+    setAberto(false)
+    setCooldownAte(null)
+    setRecusa(null)
+    setAnuncio(null)
+  }, [partidaId])
+
   const agendarLimpezaDaRecusa = useCallback(() => {
     if (timerDaRecusaRef.current !== null) window.clearTimeout(timerDaRecusaRef.current)
     timerDaRecusaRef.current = window.setTimeout(() => {
@@ -123,6 +169,9 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
   // Reconexão carrega tabuleiro + chat do mesmo instante, sem replay
   // separado. Hidrata uma única vez; live posterior só acrescenta.
   // Ausente (binário anterior ao #388) ≡ [] — no-op.
+  // Corrida live-antes-do-snapshot (B2): o live que chegou antes é mais novo
+  // que a semente — a semente entra ANTES, com dedupe por identidade
+  // (jogadorId|enviadoEm|conteudo), então eco do servidor não duplica.
   const hidratarHistorico = useCallback(
     (historico: readonly MensagemDeChatDaPartidaEvento[] | undefined | null) => {
       if (historicoHidratadoRef.current) return
@@ -138,11 +187,12 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
           enviadoEm: evento.enviadoEm,
         }
       })
-      setMensagens((atual) =>
-        atual.length === 0
-          ? semente.slice(-TETO_DE_MENSAGENS_DO_FEED)
-          : [...atual, ...semente].slice(-TETO_DE_MENSAGENS_DO_FEED),
-      )
+      setMensagens((atual) => {
+        if (atual.length === 0) return semente.slice(-TETO_DE_MENSAGENS_DO_FEED)
+        const vistas = new Set(atual.map(identidadeDaMensagem))
+        const faltantes = semente.filter((m) => !vistas.has(identidadeDaMensagem(m)))
+        return [...faltantes, ...atual].slice(-TETO_DE_MENSAGENS_DO_FEED)
+      })
     },
     [],
   )
@@ -158,6 +208,8 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
         enviadoEm: evento.enviadoEm,
       }
       setMensagens((atual) => [...atual, mensagem].slice(-TETO_DE_MENSAGENS_DO_FEED))
+      // Único avanço do anúncio SR (R2): só live anuncia.
+      setAnuncio(mensagem)
       // Badge e blip só para mensagens de terceiros com o painel fechado:
       // eco da própria não "conta" como não-lida (a janela estava aberta
       // para enviar) e o aberto fecha a régua de leitura.
@@ -176,6 +228,14 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
 
   const aoErroDeChat = useCallback(
     (evento: ErroDoTabuleiroEvento) => {
+      // Desistente fora do roster (R1): o servidor recusa o envio com
+      // JOGADOR_NAO_NA_PARTIDA — a página só roteia até aqui sem reenvio de
+      // desistência pendente (o caso R2 com pendência segue silencioso lá).
+      if (evento.codigo === 'JOGADOR_NAO_NA_PARTIDA') {
+        setRecusa('Sua sessão não está conectada à partida.')
+        agendarLimpezaDaRecusa()
+        return
+      }
       // Guarda dupla (o roteador da página já filtra): recusas de outros
       // domínios (ex.: FORA_DA_VEZ) nunca chegam ao painel — feedback é só
       // do chat, e mensagemDaRecusa não tem ramo para códigos alheios.
@@ -239,9 +299,10 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
       }
       // Corrida OPEN→close: `enviar` pode enfileirar em vez de entregar —
       // o chat nunca pega carona no drain do handshake, então enfileirado
-      // vira a mesma recusa local enxuta do sem-conexão.
+      // purga a fila e vira a mesma recusa local enxuta do sem-conexão (B1).
       const destino = enviarComando({ type: 'ENVIAR_MENSAGEM_DE_CHAT', jogadorId, conteudo: texto })
       if (destino === 'enfileirado') {
+        descartarPendentesPorTipo('ENVIAR_MENSAGEM_DE_CHAT')
         setRecusa('Sem conexão com o servidor: sua mensagem não foi enviada.')
         agendarLimpezaDaRecusa()
         return false
@@ -250,7 +311,7 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
       setRecusa(null)
       return true
     },
-    [jogadorId, estaConectado, enviarComando, agendarLimpezaDaRecusa],
+    [jogadorId, estaConectado, enviarComando, descartarPendentesPorTipo, agendarLimpezaDaRecusa],
   )
 
   return {
@@ -259,6 +320,7 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
     aberto,
     cooldownAte,
     recusa,
+    anuncio,
     abrir,
     fechar,
     enviar,
@@ -266,6 +328,11 @@ export function useChatDaPartida({ jogadorId, estaConectado, enviar: enviarComan
     aoErroDeChat,
     hidratarHistorico,
   }
+}
+
+/** Identidade de dedupe semente×live (B2): eco do servidor não duplica. */
+function identidadeDaMensagem(mensagem: Pick<MensagemDoChatDaPartida, 'jogadorId' | 'enviadoEm' | 'conteudo'>): string {
+  return `${mensagem.jogadorId}|${mensagem.enviadoEm}|${mensagem.conteudo}`
 }
 
 /** Feedback enxuto por código de recusa do chat (anunciado via aria-live). */

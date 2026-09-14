@@ -461,6 +461,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             aoErroDeChatRef.current(evento)
             return
           }
+          // Desistente fora do roster (R1): sem reenvio de desistência
+          // pendente, o JOGADOR_NAO_NA_PARTIDA é feedback do painel (o caso
+          // com pendência cai no ramo silencioso R2 abaixo — ele já sabe).
+          if (evento.codigo === 'JOGADOR_NAO_NA_PARTIDA' && !reenvioPendenteRef.current) {
+            aoErroDeChatRef.current(evento)
+            return
+          }
           pendentesEmVoo.current.clear()
         }
         if (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') {
@@ -961,13 +968,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     aberto: chatAberto,
     cooldownAte: chatCooldownAte,
     recusa: chatRecusa,
+    anuncio: anuncioDoChat,
     abrir: abrirOChat,
     fechar: fecharOChat,
     enviar: enviarMensagemDoChat,
     aoEventoDeChat,
     aoErroDeChat,
     hidratarHistorico,
-  } = useChatDaPartida({ jogadorId, estaConectado, enviar })
+  } = useChatDaPartida({
+    partidaId,
+    jogadorId,
+    estaConectado,
+    enviar,
+    descartarPendentesPorTipo: removerPendentesPorTipo,
+  })
   useEffect(() => {
     aoEventoDeChatRef.current = aoEventoDeChat
   }, [aoEventoDeChat])
@@ -1666,6 +1680,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           aberto={chatAberto}
           cooldownAte={chatCooldownAte}
           recusa={chatRecusa}
+          anuncio={anuncioDoChat}
           jogadorPorId={modelo.jogadorPorId}
           jogadorLocalId={jogadorId}
           aoAbrir={abrirOChat}

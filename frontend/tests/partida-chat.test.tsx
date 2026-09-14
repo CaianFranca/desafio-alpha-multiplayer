@@ -431,4 +431,30 @@ describe('Chat da Partida — validação local e foco (issue #389 ajustes)', ()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(botao).toHaveFocus()
   })
+
+  it('Tab circula só dentro do painel aberto (trap de foco)', async () => {
+    await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    // Habilita o enviar para entrar na ordem de tab.
+    await userEvent.type(screen.getByTestId('chat-input'), 'oi')
+    expect(screen.getByTestId('chat-input')).toHaveFocus()
+    // Ordem no DOM: botão do chat, input, botão enviar.
+    await userEvent.tab()
+    expect(screen.getByRole('button', { name: 'Enviar mensagem' })).toHaveFocus()
+    await userEvent.tab()
+    expect(screen.getByTestId('chat-botao')).toHaveFocus()
+    await userEvent.tab({ shift: true })
+    expect(screen.getByRole('button', { name: 'Enviar mensagem' })).toHaveFocus()
+  })
+})
+
+describe('Chat da Partida — desistente fora do roster (R1)', () => {
+  it('JOGADOR_NAO_NA_PARTIDA sem reenvio pendente vira feedback do painel', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    act(() =>
+      ws.simulateMessage({ type: 'ERRO_DO_TABULEIRO', codigo: 'JOGADOR_NAO_NA_PARTIDA', mensagem: 'fora' }),
+    )
+    expect(screen.getByTestId('chat-recusa')).toHaveTextContent(/não está conectada à partida/i)
+  })
 })

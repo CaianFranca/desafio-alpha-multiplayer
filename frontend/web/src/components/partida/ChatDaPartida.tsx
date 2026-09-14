@@ -41,6 +41,12 @@ interface ChatDaPartidaProps {
   cooldownAte: number | null
   /** Feedback enxuto de recusa (vazia/longa/rate-limit/sem conexão). */
   recusa: string | null
+  /**
+   * Última mensagem do LIVE para o anúncio SR (R2): a semente do histórico
+   * nunca avança este prop, então reconexão não anuncia conversa velha.
+   * Sem live ainda, a região anuncia vazio.
+   */
+  anuncio: MensagemDoChatDaPartida | null
   /** Roster do snapshot (jogadorId → apelido/cor): fonte da cor do peão. */
   jogadorPorId: Readonly<Record<string, PercepcaoDeJogador>>
   /** Sessão do Jogador local — mensagens próprias ganham destaque âmbar. */
@@ -65,6 +71,7 @@ export function ChatDaPartida({
   aberto,
   cooldownAte,
   recusa,
+  anuncio,
   jogadorPorId,
   jogadorLocalId,
   aoAbrir,
@@ -76,31 +83,57 @@ export function ChatDaPartida({
   const botaoRef = useRef<HTMLButtonElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const feedRef = useRef<HTMLDivElement | null>(null)
+  const raizRef = useRef<HTMLDivElement | null>(null)
+  // Seguir o fim do feed (M1): o usuário que rolou para cima ler o histórico
+  // não é puxado para baixo a cada mensagem nova.
+  const seguirFeedRef = useRef(true)
   const emModoCompacto = useViewportCompacto(compacto)
   // Janela do cooldown (re-renderiza ao expirar via timer do hook).
   const emCooldown = cooldownAte !== null && cooldownAte > Date.now()
-  const ultimaMensagem = mensagens.length > 0 ? mensagens[mensagens.length - 1]! : null
   const podeEnviar = rascunho.trim().length > 0 && !emCooldown
 
-  // Abertura move o foco ao input (autoFocus é frágil em React/jsdom);
-  // Escape fecha o painel (block da cena) e devolve o foco ao botão para o
-  // teclado da cena voltar a operar (o gate da página lê o estado aberto).
+  // Abertura move o foco ao input (autoFocus é frágil em React/jsdom) e arma
+  // o block da cena: Escape fecha e devolve o foco ao botão; Tab circula SÓ
+  // dentro do painel (R4 — o backdrop bloqueia ponteiro, o trap bloqueia o
+  // teclado; o gate R/E/Espaço/Enter da página lê o estado aberto).
   useEffect(() => {
     if (!aberto) return
+    seguirFeedRef.current = true
     inputRef.current?.focus()
     const aoTeclar = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      aoFechar()
-      botaoRef.current?.focus()
+      if (e.key === 'Escape') {
+        aoFechar()
+        botaoRef.current?.focus()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const raiz = raizRef.current
+      if (!raiz) return
+      // Sem filtro de visibilidade por layout (offsetParent é null no jsdom
+      // e o painel aberto só contém elementos visíveis): o seletor já exclui
+      // desabilitados.
+      const focaveis = [...raiz.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      )]
+      if (focaveis.length === 0) return
+      const primeiro = focaveis[0]!
+      const ultimo = focaveis[focaveis.length - 1]!
+      if (e.shiftKey && document.activeElement === primeiro) {
+        e.preventDefault()
+        ultimo.focus()
+      } else if (!e.shiftKey && document.activeElement === ultimo) {
+        e.preventDefault()
+        primeiro.focus()
+      }
     }
     window.addEventListener('keydown', aoTeclar)
     return () => window.removeEventListener('keydown', aoTeclar)
   }, [aberto, aoFechar])
 
-  // Auto-scroll: nova mensagem com o painel aberto desce o feed até o fim.
-  // jsdom não implementa scrollTo — guarda defensiva com fallback a scrollTop.
+  // Auto-scroll condicional (M1): só desce sozinho quando o leitor já estava
+  // no fim (ou na abertura). jsdom não implementa scrollTo — fallback.
   useEffect(() => {
-    if (!aberto) return
+    if (!aberto || !seguirFeedRef.current) return
     const feed = feedRef.current
     if (!feed) return
     try {
@@ -111,6 +144,12 @@ export function ChatDaPartida({
     }
   }, [aberto, mensagens.length])
 
+  const aoRolarFeed = () => {
+    const feed = feedRef.current
+    if (!feed) return
+    seguirFeedRef.current = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80
+  }
+
   const aoSubmeter = (e: FormEvent) => {
     e.preventDefault()
     if (aoEnviar(rascunho)) setRascunho('')
@@ -119,6 +158,7 @@ export function ChatDaPartida({
   return (
     <>
       <div
+        ref={raizRef}
         data-testid="chat-da-partida"
         data-compacto={emModoCompacto ? 'true' : 'false'}
         className="pointer-events-auto absolute z-50"
@@ -193,11 +233,18 @@ export function ChatDaPartida({
               emModoCompacto ? 'min-h-0 flex-1' : 'h-[15.875rem]'
             }`}
           >
+            {/*
+              role=log dá semântica de histórico; aria-live=off porque o
+              anúncio polite dedicado (chat-anuncio, R2) já anuncia cada live
+              — sem isso o leitor diria tudo 2x (R3).
+            */}
             <div
               ref={feedRef}
               data-testid="chat-feed"
               role="log"
+              aria-live="off"
               aria-label="Histórico do chat"
+              onScroll={aoRolarFeed}
               className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 py-1.5"
             >
               {mensagens.length === 0 ? (
@@ -318,21 +365,20 @@ export function ChatDaPartida({
       ) : null}
       {/*
         Região viva restrita a leitores de tela (issue #389): cada mensagem
-        nova (humana ou de bot) é anunciada; o `key` remonta o nó a cada
-        chegada para repetições re-anunciarem (padrão do anúncio de recusa).
+        nova DO LIVE (humana ou de bot) é anunciada; o `key` remonta o nó a
+        cada chegada para repetições re-anunciarem. A semente do histórico
+        (R2) nunca avança `anuncio`: reconexão não anuncia conversa velha.
       */}
       <div
-        key={ultimaMensagem?.id ?? 'sem-mensagem'}
+        key={anuncio?.id ?? 'sem-mensagem'}
         data-testid="chat-anuncio"
-        data-jogador-id={ultimaMensagem?.jogadorId ?? undefined}
+        data-jogador-id={anuncio?.jogadorId ?? undefined}
         role="status"
         aria-live="polite"
         aria-atomic="true"
         className="sr-only"
       >
-        {ultimaMensagem !== null
-          ? `${ultimaMensagem.apelido}: ${ultimaMensagem.conteudo}`
-          : ''}
+        {anuncio !== null ? `${anuncio.apelido}: ${anuncio.conteudo}` : ''}
       </div>
     </>
   )
