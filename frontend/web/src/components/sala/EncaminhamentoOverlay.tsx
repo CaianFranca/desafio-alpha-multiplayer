@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { buildGameRedirectHref, REDIRECT_DELAY_MS } from '../../api/encaminhamento'
+import { texturaDaPeca } from '../../game/tabuleiro/texturasDasPecas'
 import type { EstadoDoEncaminhamento } from '../../hooks/useSalaWebSocket'
 
 interface Props {
@@ -7,6 +8,9 @@ interface Props {
   href?: string | null
   codigoDeSala?: string | null
 }
+
+// Ordem dos dots do loading (#387): Gerador → Sala Médica → Portão de Saída → Espectro.
+const DOTS_DO_CARREGAMENTO = ['gerador', 'sala_medica', 'portao_de_saida', 'espectro'] as const
 
 export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDeSala }: Props) {
   const { fase, alvo } = encaminhamento
@@ -55,12 +59,20 @@ export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDe
         data-testid="encaminhamento-carregando"
         role="status"
         aria-label="Carregando partida"
-        className="flex items-center justify-center"
+        className="encaminhamento-carregando"
       >
-        <span
-          aria-hidden="true"
-          className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-white/20 border-t-white"
-        />
+        <p aria-hidden="true" className="encaminhamento-carregando__mensagem">
+          Carregando...
+        </p>
+        <div aria-hidden="true" className="encaminhamento-carregando__dots">
+          {DOTS_DO_CARREGAMENTO.map((tipo) => (
+            <span
+              key={tipo}
+              className="encaminhamento-carregando__dot"
+              style={{ backgroundImage: `url(${texturaDaPeca(tipo).map})` }}
+            />
+          ))}
+        </div>
         <span className="sr-only">Carregando partida</span>
       </div>
     </div>
