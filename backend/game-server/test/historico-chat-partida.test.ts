@@ -38,7 +38,11 @@ import {
 } from '../src/partidas/historico-chat.ts';
 import { cancelarPartidaSeNaoIniciada } from '../src/partidas/partidas.ts';
 
-const SERVER_ID = 'game-server-teste-historico-chat';
+// SERVER_ID por processo (follow-up #398/F3): duas instâncias da suíte no
+// mesmo Redis (paralelo local ou `tsx --test` com outros arquivos) não podem
+// partilhar identidade — partidaIds já são uuid, mas o serverId compõe URLs,
+// JWT de bot e chaves de registro; o sufixo elimina a classe inteira.
+const SERVER_ID = `game-server-teste-historico-chat-${process.pid}`;
 const JWT_SECRET = 'test_secret_para_historico_chat';
 const HISTORICO_MAXIMO = 50;
 
