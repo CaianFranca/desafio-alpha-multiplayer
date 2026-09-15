@@ -735,7 +735,7 @@ export function HudDaPartida({
                   </div>
                   {emReconexaoTurno ? (
                     <span
-                      data-testid="hud-reconectando"
+                      data-testid="hud-turno-reconectando"
                       data-jogador-id={jogadorId}
                       title="Reconectando"
                       className="absolute -bottom-1 -right-1 rounded bg-amber-500 px-1 py-0.5 text-[8px] font-bold leading-none text-zinc-900 shadow"
