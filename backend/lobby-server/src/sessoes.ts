@@ -28,6 +28,11 @@ export interface SessaoCriada {
 
 const PREFIXO_SESSAO = 'sessao:';
 const PREFIXO_SESSAO_POR_JOGADOR = 'sessao:jogador:';
+// Marcador de rotação do refresh (issue #410): liga a Sessão antiga à nova
+// pelo TTL de access (sessionAccessTtlSeconds), tempo suficiente para a
+// revalidação migrar a conexão antes do marcador expirar. Login/logout/
+// revogação NÃO gravam marcador — só a rotação.
+const PREFIXO_SESSAO_ROTACIONADA = 'sessao:rotacionada:';
 
 function chaveSessao(sessaoId: string): string {
   return `${PREFIXO_SESSAO}${sessaoId}`;
@@ -35,6 +40,10 @@ function chaveSessao(sessaoId: string): string {
 
 function chaveSessaoPorJogador(jogadorId: string): string {
   return `${PREFIXO_SESSAO_POR_JOGADOR}${jogadorId}`;
+}
+
+function chaveSessaoRotacionada(sessaoId: string): string {
+  return `${PREFIXO_SESSAO_ROTACIONADA}${sessaoId}`;
 }
 
 // Cria uma nova sessão para `jogadorId`, revogando qualquer sessão anterior.
@@ -61,11 +70,13 @@ return ARGV[3]
 // KEYS[1] = sessao:<antigaId>
 // KEYS[2] = sessao:jogador:<jogadorId>
 // KEYS[3] = sessao:<novaId>
+// KEYS[4] = sessao:rotacionada:<antigaId> (marcador da rotação, issue #410)
 // ARGV[1] = TTL em segundos
 // ARGV[2] = payload JSON da nova sessão
-// ARGV[3] = novaId (gravado no mapping)
+// ARGV[3] = novaId (gravado no mapping e no marcador)
 // ARGV[4] = jogadorId esperado (validação de ownership)
 // ARGV[5] = antigaId esperado no mapping (validação de reuso)
+// ARGV[6] = TTL em segundos do marcador de rotação
 // Retorna ARGV[3] em caso de sucesso; nil se qualquer validação falhar.
 const SCRIPT_ROTACIONAR_SESSAO = `
 local payload = redis.call('GET', KEYS[1])
@@ -83,6 +94,7 @@ end
 redis.call('DEL', KEYS[1])
 redis.call('SET', KEYS[3], ARGV[2], 'EX', tonumber(ARGV[1]))
 redis.call('SET', KEYS[2], ARGV[3], 'EX', tonumber(ARGV[1]))
+redis.call('SET', KEYS[4], ARGV[3], 'EX', tonumber(ARGV[6]))
 return ARGV[3]
 `.trim();
 
@@ -112,11 +124,13 @@ declare module 'ioredis' {
       antigaSessaoKey: string,
       jogadorKey: string,
       novaSessaoKey: string,
+      marcadorKey: string,
       ttlSegundos: number,
       payloadJson: string,
       novaId: string,
       jogadorId: string,
       antigaId: string,
+      ttlMarcadorSegundos: number,
     ): Promise<string | null>;
   }
 }
@@ -133,7 +147,7 @@ function registrarScripts(): void {
     lua: SCRIPT_CRIAR_SESSAO,
   });
   redisClient.defineCommand('rotacionarSessaoAtomica', {
-    numberOfKeys: 3,
+    numberOfKeys: 4,
     lua: SCRIPT_ROTACIONAR_SESSAO,
   });
 }
@@ -174,6 +188,15 @@ export async function obterSessao(sessaoId: string): Promise<{ jogadorId: string
   }
 }
 
+/**
+ * Lê o marcador de rotação do refresh (issue #410): devolve o id da Sessão
+ * sucessora quando `sessao:rotacionada:<sessaoId>` existe, ou `null` quando a
+ * Sessão não foi rotacionada (login/logout/revogação/expiração).
+ */
+export async function obterSucessorDeSessao(sessaoId: string): Promise<string | null> {
+  return redisClient.get(chaveSessaoRotacionada(sessaoId));
+}
+
 export async function revogarSessao(sessaoId: string): Promise<void> {
   const raw = await redisClient.get(chaveSessao(sessaoId));
   if (raw !== null) {
@@ -194,7 +217,7 @@ export async function rotacionarSessao(
   jogadorId: string,
 ): Promise<{ sessaoId: string }> {
   registrarScripts();
-  const { sessionRefreshTtlSeconds } = getConfig();
+  const { sessionRefreshTtlSeconds, sessionAccessTtlSeconds } = getConfig();
 
   const novaId = randomUUID();
   const criadoEm = new Date().toISOString();
@@ -204,11 +227,13 @@ export async function rotacionarSessao(
     chaveSessao(sessaoAntigaId),
     chaveSessaoPorJogador(jogadorId),
     chaveSessao(novaId),
+    chaveSessaoRotacionada(sessaoAntigaId),
     sessionRefreshTtlSeconds,
     JSON.stringify(payload),
     novaId,
     jogadorId,
     sessaoAntigaId,
+    sessionAccessTtlSeconds,
   );
 
   if (sessaoId === null) {

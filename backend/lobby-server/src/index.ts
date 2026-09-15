@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { getConfig } from '@flicker/config';
 import { createWebSocketServer } from './ws/ws.ts';
+import { iniciarRevalidacaoDeSessao, type HandleRevalidacao } from './ws/revalidacao-de-sessao.ts';
 import { createApp } from './app.ts';
 import { pool } from './config/pg.ts';
 import { redisClient } from './config/redis.ts';
@@ -30,7 +31,9 @@ server.on('request', (req) => {
 
 createWebSocketServer(server, { verificarAccess, obterSessao, contextoSalas });
 
-const { lobbyServerPort } = getConfig();
+const { lobbyServerPort, wsSessaoRevalidacaoMs } = getConfig();
+
+let revalidacaoDeSessao: HandleRevalidacao | undefined;
 
 // O servidor só aceita WebSocket depois de PG, Redis e o estado de Salas
 // estarem prontos. Assim uma mutação nunca é calculada sobre estado vazio
@@ -44,6 +47,10 @@ async function inicializarDependencias(): Promise<void> {
   }
   await redisClient.ping();
   console.log('[lobby-server] redis conectado');
+
+  // Revalidação da Sessão das conexões WS abertas (issue #410).
+  revalidacaoDeSessao = iniciarRevalidacaoDeSessao({ intervaloMs: wsSessaoRevalidacaoMs });
+  console.log(`[lobby-server] revalidacao de sessao WS ativa interval=${wsSessaoRevalidacaoMs}ms`);
 
   await contextoSalas.estado.carregar(contextoSalas.repo, contextoSalas.projecao);
   await contextoSalas.handlers.rearmarAposRestart();
@@ -78,6 +85,8 @@ void iniciar().catch(async (error: unknown) => {
 // Graceful shutdown
 function encerrar(signal: string): void {
   console.log(`[lobby-server] ${signal} recebido, encerrando...`);
+  revalidacaoDeSessao?.parar();
+  revalidacaoDeSessao = undefined;
   server.close(() => {
     void pool.end().finally(() => {
       void redisClient.quit().finally(() => process.exit(0));

@@ -382,6 +382,8 @@ export function criarWebSocketServer(
             jogadorId: sessao.jogadorId,
             apelido: sessao.apelido,
             partidaId,
+            sessaoId: sessao.sessaoId,
+            isBot: sessao.isBot ?? false,
           };
           // Substituição (#155): a nova conexão entra no registro ANTES da
           // transição de presença e de a antiga ser encerrada —

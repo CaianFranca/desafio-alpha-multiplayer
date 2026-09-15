@@ -17,6 +17,12 @@ import { assinarAccess, assinarRefresh, verificarRefresh } from '../jwt.ts';
 import { requireSessao } from '../middleware/auth.ts';
 import { consumirTentativas, type ItemLimite } from '../rate-limit/limitador.ts';
 import { criarSessao, obterSessao, revogarSessao, rotacionarSessao, SessaoInvalidaError } from '../sessoes.ts';
+import {
+  CODIGO_SESSAO,
+  MOTIVO_SESSAO_ENCERRADA,
+  MOTIVO_SESSAO_SUBSTITUIDA,
+  registroDeConexoes,
+} from '../ws/registro-de-conexoes.ts';
 
 export const authRouter = Router();
 
@@ -292,6 +298,8 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
 
     const jogador: Jogador = result.rows[0];
     const { sessaoId } = await criarSessao(jogador.id);
+    // Troca de Sessão (issue #410): encerra as conexões WS antigas do Jogador.
+    registroDeConexoes.fecharPorJogador(jogador.id, CODIGO_SESSAO, MOTIVO_SESSAO_SUBSTITUIDA);
     emitirCookiesDeSessao(res, jogador, sessaoId);
     res.status(201).json(jogador);
   } catch (error: unknown) {
@@ -365,6 +373,8 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     const jogador: Jogador = { id: row.id, apelido: row.apelido, email: row.email };
     // criarSessao já revoga a sessão anterior (Sessão única por Jogador).
     const { sessaoId } = await criarSessao(jogador.id);
+    // Troca de Sessão (issue #410): encerra as conexões WS antigas do Jogador.
+    registroDeConexoes.fecharPorJogador(jogador.id, CODIGO_SESSAO, MOTIVO_SESSAO_SUBSTITUIDA);
     emitirCookiesDeSessao(res, jogador, sessaoId);
     res.status(200).json(jogador);
   } catch (error) {
@@ -379,6 +389,8 @@ authRouter.post('/logout', requireSessao, async (req: Request, res: Response): P
   // requireSessao garante req.jogador.
   const jogador = req.jogador!;
   await revogarSessao(jogador.sessaoId);
+  // Logout (issue #410): encerra as conexões WS vigentes do Jogador.
+  registroDeConexoes.fecharPorJogador(jogador.id, CODIGO_SESSAO, MOTIVO_SESSAO_ENCERRADA);
   limparCookiesDeSessao(res);
   res.status(204).end();
 });

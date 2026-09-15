@@ -67,3 +67,20 @@ export async function validarSessaoNoRedis(
     return false;
   }
 }
+
+/**
+ * Lê o marcador de rotação do refresh (issue #410): `sessao:rotacionada:<id>`
+ * aponta para a Sessão sucessora enquanto o marcador viver. Sem marcador
+ * (login, logout, revogação, expiração) devolve `null` — a revalidação então
+ * encerra a conexão.
+ */
+export async function obterSucessorDeSessaoNoRedis(
+  redis: Redis,
+  sessaoId: string,
+): Promise<string | null> {
+  try {
+    return await redis.get(`sessao:rotacionada:${sessaoId}`);
+  } catch {
+    return null;
+  }
+}
