@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { getConfig } from '@flicker/config';
-import { origemPermitida, LimiteDeMensagensPorConexao, securityEvents, securityLogger as sharedSecurityLogger } from '@flicker/shared/server';
+import { origemPermitida, LimiteDeMensagensPorConexao, securityEvents, securityLogger as sharedSecurityLogger, primeiroValor } from '@flicker/shared/server';
 import type { ServerMessage } from '@flicker/shared';
 import type { Logger } from 'pino';
 import { NOME_ACCESS_COOKIE } from '../cookies.ts';
@@ -76,12 +76,27 @@ function ehConexaoDeBot(socket: AuthenticatedWebSocket): boolean {
   return socket.data.email.endsWith(DOMINIO_BOT);
 }
 
+const REQUEST_ID_RE = /^[A-Za-z0-9-]{1,128}$/;
+
+function sanitizarRequestId(valor: string | string[] | undefined): string | null {
+  const raw = primeiroValor(valor);
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!REQUEST_ID_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
 function extrairIpParaLog(req: IncomingMessage): string | undefined {
-  const forwarded = req.headers['x-forwarded-for'] as string | undefined;
+  const raw = primeiroValor(req.headers['x-forwarded-for'] as string | string[] | undefined);
   const trustHops = getConfig().trustProxyHops;
-  if (trustHops > 0 && forwarded !== undefined && forwarded.trim().length > 0) {
-    // Primeiro IP da lista X-Forwarded-For é o cliente original
-    return forwarded.split(',')[0].trim() || (req.socket.remoteAddress ?? undefined);
+  if (trustHops > 0 && typeof raw === 'string' && raw.trim().length > 0) {
+    // Semântica Express trust proxy: conta da direita (cliente real = len - trustHops)
+    const partes = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    const idx = partes.length - trustHops;
+    if (idx >= 0 && idx < partes.length) {
+      return partes[idx] || (req.socket.remoteAddress ?? undefined);
+    }
   }
   return req.socket.remoteAddress ?? undefined;
 }
@@ -134,7 +149,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
       // origem — nunca cookie/token.
       if (!origemPermitida(origin, seguranca.origensPermitidas)) {
         const connectionId = randomUUID();
-        const requestId = (info.req.headers['x-request-id'] as string | undefined) ?? connectionId;
+        const requestId = sanitizarRequestId(info.req.headers['x-request-id'] as string | string[] | undefined) ?? connectionId;
         const ip = extrairIpParaLog(info.req);
         try {
           logger.warn({
@@ -161,7 +176,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
     const connectionId = randomUUID();
     // WS upgrade não passa pelo middleware Express, então X-Request-Id raramente vem do cliente/proxy.
     // Usa connectionId como fallback para garantir correlação (spec exige id de requisição/conexão).
-    const requestId = (request.headers['x-request-id'] as string | undefined) ?? connectionId;
+    const requestId = sanitizarRequestId(request.headers['x-request-id'] as string | string[] | undefined) ?? connectionId;
     // Guarda connectionId no socket para uso em logs posteriores (inclui disconnect).
     (socket as unknown as Record<string, unknown>).__connectionId = connectionId;
     // O listener de 'message' é registrado IMEDIATAMENTE após o

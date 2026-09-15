@@ -33,7 +33,7 @@ import type { Duplex } from 'node:stream';
 import type { Redis } from 'ioredis';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { getConfig } from '@flicker/config';
-import { origemPermitida, LimiteDeMensagensPorConexao, securityEvents, securityLogger as sharedSecurityLogger } from '@flicker/shared/server';
+import { origemPermitida, LimiteDeMensagensPorConexao, securityEvents, securityLogger as sharedSecurityLogger, primeiroValor } from '@flicker/shared/server';
 import type { Logger } from 'pino';
 import type {
   ServerMessage,
@@ -78,11 +78,26 @@ function segurancaDoConfig(): SegurancaWs {
 // Só o que o `ws.ts` consome do canal de Partida: o `PartidaHandlers` já
 // carrega a própria referência ao Redis. Deixar `redis` aqui seria peso morto.
 
+const REQUEST_ID_RE = /^[A-Za-z0-9-]{1,128}$/;
+
+function sanitizarRequestId(valor: string | string[] | undefined): string | null {
+  const raw = primeiroValor(valor);
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!REQUEST_ID_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
 function extrairIpParaLog(req: IncomingMessage): string | undefined {
-  const forwarded = req.headers['x-forwarded-for'] as string | undefined;
+  const raw = primeiroValor(req.headers['x-forwarded-for'] as string | string[] | undefined);
   const trustHops = getConfig().trustProxyHops;
-  if (trustHops > 0 && forwarded !== undefined && forwarded.trim().length > 0) {
-    return forwarded.split(',')[0].trim() || (req.socket.remoteAddress ?? undefined);
+  if (trustHops > 0 && typeof raw === 'string' && raw.trim().length > 0) {
+    const partes = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    const idx = partes.length - trustHops;
+    if (idx >= 0 && idx < partes.length) {
+      return partes[idx] || (req.socket.remoteAddress ?? undefined);
+    }
   }
   return req.socket.remoteAddress ?? undefined;
 }
@@ -322,7 +337,7 @@ export function criarWebSocketServer(
 
   server.on('upgrade', (request, socket, head) => {
     const connectionId = randomUUID();
-    const requestId = (request.headers['x-request-id'] as string | undefined) ?? connectionId;
+    const requestId = sanitizarRequestId(request.headers['x-request-id'] as string | string[] | undefined) ?? connectionId;
     // Endurecimento do WS (issue #409): recusa por Origem ANTES de qualquer
     // validação de token/partida — o 403 (e não o 401 de sessão) prova a
     // precedência. Origem ausente (bot/serviço) é aceita. Nunca loga

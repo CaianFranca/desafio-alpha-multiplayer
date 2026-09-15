@@ -13,14 +13,34 @@ declare global {
   }
 }
 
+const REQUEST_ID_RE = /^[A-Za-z0-9-]{1,128}$/;
+
+export function primeiroValor(header: string | string[] | undefined): string | undefined {
+  if (Array.isArray(header)) return header[0];
+  return header;
+}
+
+function sanitizarRequestId(valor: string | string[] | undefined): string | null {
+  const raw = primeiroValor(valor);
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  // Evita CRLF/header injection e limita tamanho; só alfanumérico + hífen
+  if (!REQUEST_ID_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
 export function requestIdMiddleware(req: Request, res: Response, next: NextFunction): void {
   const header = req.headers['x-request-id'];
-  const reqId = (typeof header === 'string' && header.trim().length > 0 ? header.trim() : randomUUID());
+  const sanitizado = sanitizarRequestId(header as string | string[] | undefined);
+  const reqId = sanitizado ?? randomUUID();
   (req as Request & { id: string }).id = reqId;
   res.setHeader('X-Request-Id', reqId);
   next();
 }
 
 export function getRequestId(req: Request): string | undefined {
-  return (req as Request & { id?: string }).id ?? (req.headers['x-request-id'] as string | undefined);
+  const id = (req as Request & { id?: string }).id;
+  if (typeof id === 'string' && id.length > 0) return id;
+  return sanitizarRequestId(req.headers['x-request-id'] as string | string[] | undefined) ?? undefined;
 }
