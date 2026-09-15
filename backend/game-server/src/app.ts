@@ -5,6 +5,9 @@ import { criarRoteadorDeEncaminhamento } from './routes/encaminhamento.ts';
 export function createApp(contexto: ContextoDoGameServer): Express {
   const app = express();
 
+  // Medida OWASP G5: não anunciar o framework no header X-Powered-By.
+  app.disable('x-powered-by');
+
   app.use(express.json({ limit: '10kb' }));
 
   app.get('/health', (_req, res) => {

@@ -24,6 +24,9 @@ export interface CreateAppOpcoes {
 export function createApp(opcoes: CreateAppOpcoes = {}): Express {
   const app = express();
 
+  // Medida OWASP G5: não anunciar o framework no header X-Powered-By.
+  app.disable('x-powered-by');
+
   // O nº de hops até o app depende do encadeamento real: default 1
   // (dev/Docker Compose: cliente→nginx→lobby); produção nativa define
   // TRUST_PROXY_HOPS=3 (admin→edge→app). Sem isso o Express não enxerga o
