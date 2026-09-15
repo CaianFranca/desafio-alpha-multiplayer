@@ -12,6 +12,11 @@ import {
   textoDoAnuncioDeRecusa,
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
+import { tocarConquistasDaConfirmacao } from '../components/partida/somDaConquista'
+import { TransicaoAtaque } from '../components/partida/TransicaoAtaque'
+import { useFilaDeAtaque } from '../components/partida/useFilaDeAtaque'
+import type { FatiaDoAtaque } from '../game/tabuleiro/ataque'
+import type { EstadoVisualDoAtaque } from '../game/tabuleiro/ataque'
 import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
 import {
   origemDoEncaixe,
@@ -42,12 +47,13 @@ import {
 import {
   criarEstadoInicialDoCliente,
   reduzirEvento,
+  reduzirFatiaDoAtaque,
   estadoDeExibicaoDoModelo,
   peoesEmBaixaIluminacaoDe,
 } from '../game/tabuleiro/reducao'
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearFinalizarManipulacao, mapearGiro } from '../game/tabuleiro/interacao'
-import type { EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
+import type { ComandoDePeaoDoDespacho, EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
 import { bordaDaTravessiaPendente, mapearFinalizarRecebida } from '../game/tabuleiro/interacaoPeoes'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores, ehPecaDeMonstro } from '../game/tabuleiro/contrato'
@@ -57,14 +63,18 @@ import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional, useMarcarS
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import type {
   CausaDesistencia,
+  CelulasIluminadasWireEvento,
   AtravessarOEscuroPartidaComando,
   ConfirmarPosicaoDoPeaoComando,
   DesistirDaPartidaComando,
   EncerrarTurnoComando,
   EstadoDaPartidaSnapshot,
+  LimpezaAplicadaWireEvento,
   PartidaComandoDoCliente,
   PeaoComandoDoCliente,
   TabuleiroComandoDoCliente,
+  TurnoEncerradoEvento,
+  TurnoIniciadoEvento,
 } from '@flicker/shared'
 
 /** Comandos do canal: tabuleiro (ST-09), peões (ST-10), turnos (ST-11, #118),
@@ -81,6 +91,7 @@ type ComandoDoCanal =
 
 type AcaoDoModelo =
   | { type: 'EVENTO'; evento: Parameters<typeof reduzirEvento>[1] }
+  | { type: 'FATIA_DE_ATAQUE'; fatia: FatiaDoAtaque }
   | { type: 'APLICAR_SNAPSHOT'; snapshot: EstadoDaPartidaSnapshot }
   | { type: 'SYNC_QUANTIDADE'; quantidade: number }
 
@@ -90,6 +101,9 @@ function reduzirModelo(
 ): EstadoDoTabuleiroNoCliente {
   if (acao.type === 'APLICAR_SNAPSHOT') {
     return aplicarSnapshot(estado, acao.snapshot)
+  }
+  if (acao.type === 'FATIA_DE_ATAQUE') {
+    return reduzirFatiaDoAtaque(estado, acao.fatia)
   }
   if (acao.type === 'SYNC_QUANTIDADE') {
     // Sincroniza seed pré-snapshot (risco 3): se ainda sem snapshot de roster,
@@ -239,8 +253,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Monstro não aceita peão, o mover compulsório é impossível e o turno
   // travado fecha via Permanência — o FE auto-permanece no PECA_POSICIONADA,
   // uma vez por peça posicionada. Reseta na virada de turno.
-  const permanecerMonstroTravessiaEncadeadoRef = useRef<string | null>(null)
-  // ── Fases de turno no stream de depuração (issue #340) ──
+  const permanecerMonstroTravessiaEncadeadoRef = useRef<string | null>(null)  // ── Fases de turno no stream de depuração (issue #340) ──
   // A PartidaPage consome o canal da partida: TURNO_INICIADO/TURNO_ENCERRADO
   // e snapshots projetam `jogadorAtivoId`; a fase usa a posição do peão na
   // ordem do roster (`jogadores[].ordem` do snapshot) — fallback ao índice de
@@ -271,11 +284,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     motivo: MotivoDeRecusa
   } | null>(null)
   const proximoIdDeAnuncio = useRef(0)
-  const tocarRecusa = useCallback((motivo: MotivoDeRecusa) => {
-    tocarSomDeRecusa(motivo)
+  // Anúncio sem som (issue #385): o ataque com penalidade mantém o anúncio
+  // ao leitor ("Um peão sofreu um ataque.") mas usa os sons dos monstros —
+  // nunca o THUD genérico, que segue só nas Recusas de Ação.
+  const anunciarRecusa = useCallback((motivo: MotivoDeRecusa) => {
     proximoIdDeAnuncio.current += 1
     setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
   }, [])
+  const tocarRecusa = useCallback(
+    (motivo: MotivoDeRecusa) => {
+      tocarSomDeRecusa(motivo)
+      anunciarRecusa(motivo)
+    },
+    [anunciarRecusa],
+  )
 
   // ── Voo do peão com sons (issue #242) ──
   // Único dono dos disparos: reage aos mesmos eventos do canal que atualizam
@@ -432,6 +454,79 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
   }, [despacharEvento])
 
+  // ── Fila do ataque com bloqueio da entrada do turno (issue #385 — fila na
+  // ordem de atacantes do wire) ──
+  // Turno segurado volta pelo mesmo lote atômico (ordem preservada); o hook
+  // guarda os callbacks em refs — estáveis sem re-subscrever o socket.
+  const liberarTurnoSegurado = useCallback(
+    (evento: TurnoIniciadoEvento | TurnoEncerradoEvento) => {
+      loteDeTurnoRef.current.push(evento as Parameters<typeof reduzirEvento>[1])
+      agendarFlushLote()
+    },
+    [agendarFlushLote],
+  )
+  // Fatia do slot na chegada (o ATAQUE_RESOLVIDO não despacha mais na hora:
+  // cada slot aplica a sua via este dispatch, com guarda de snapshot-seq no
+  // driver; sem vítimas/protegidos na fatia, nada a aplicar).
+  const aplicarFatiaDoAtaque = useCallback((fatia: FatiaDoAtaque) => {
+    despachar({ type: 'FATIA_DE_ATAQUE', fatia })
+  }, [])
+  // Iluminação/limpeza segurada libera pelo mesmo caminho do direto abaixo
+  // (modelo + trigger TransicaoLimpeza + som) — extraído para reutilizar nos
+  // dois pontos sem divergir.
+  const liberarLimpezaSegurada = useCallback(
+    (evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento) => {
+      if (evento.type === 'CELULAS_ILUMINADAS') {
+        despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+        return
+      }
+      if (evento.pecasRemovidas.length > 0) {
+        limpezaKeyRef.current += 1
+        setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
+        tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
+      }
+      despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+    },
+    [despacharEvento],
+  )
+  const {
+    ataqueExibido,
+    pecaIdEmTelegraph,
+    enfileirarAtaque,
+    segurarTurnoSeEmAtaque,
+    segurarLimpezaSeEmAtaque,
+    abrirJanelaDeGatilho,
+    segurarNaJanelaSeAberta,
+    entregarJanelaAoAtaque,
+    fecharJanelaDeGatilho,
+    notificarSnapshot,
+    cancelarAtaque,
+  } = useFilaDeAtaque({
+    liberarTurnoSegurado,
+    aplicarFatiaDoAtaque,
+    anunciarRecusa,
+    liberarLimpezaSegurada,
+  })
+
+  // Estado visual do ataque (issue #385, follow-up): prop única (telegraph +
+  // reação por peça + gesto do atacante) derivada do item corrente SÓ no
+  // estágio de ataque — tudo null no telegraph e ao drenar (3D e espelho DOM
+  // apagam sem marcas; os chips do overlay seguem como legenda).
+  const estadoVisualDoAtaque: EstadoVisualDoAtaque = useMemo(
+    () => ({
+      pecaIdEmTelegraph,
+      reacoesDoAtaque:
+        ataqueExibido !== null && ataqueExibido.estagio === 'ataque'
+          ? new Map(ataqueExibido.item.reacoes.map((reacao) => [reacao.pecaId, reacao] as const))
+          : null,
+      pecaIdEmDisparo:
+        ataqueExibido !== null && ataqueExibido.estagio === 'ataque'
+          ? ataqueExibido.item.pecaId
+          : null,
+    }),
+    [ataqueExibido, pecaIdEmTelegraph],
+  )
+
   // Ref do ponto único de injeção do jogadorId (#91): o `onEvento` do canal
   // é declarado antes do `enviarComJogador` (useCallback abaixo), então usa a
   // ref para quebrar o TDZ e manter o callback do socket estável (mesmo
@@ -470,7 +565,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         }
         if (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') {
           // Virada de turno invalida gates de posicionamento em voo: se o
-          // ack/erro da jogada anterior se perdeu no canal, o alvo não pode
+          // ack/erro da Ação anterior se perdeu no canal, o alvo não pode
           // ficar bloqueado no turno seguinte (bloqueio silencioso). Os
           // auto-encadeamentos da travessia resetam junto (um MOVER por peça
           // posicionada e uma ESCOLHA por recebida dentro do turno).
@@ -496,6 +591,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           }
           // Fim de jogo: nada a desistir — limpa eventual pendência de reenvio.
           esquecerReenvio()
+          // Fim de jogo: a coreografia do ataque é descartada (tela congela).
+          cancelarAtaque()
           partidaTerminada(evento.resultado, evento.motivo ?? null)
           return
         }
@@ -503,6 +600,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // Snapshot é autoridade total da seleção (#249): reconcilia
           // pendentes em voo contraditórios (limpa o conjunto).
           pendentesEmVoo.current.clear()
+          // Snapshot mais novo invalida turnos segurados pela fila do ataque
+          // (issue #385: a autoridade já projetou a vez — sem regressão) e
+          // cancela a fila + descarta fatias e iluminação/limpeza seguradas
+          // (follow-up da ordem: snapshot é autoridade).
+          notificarSnapshot()
+          cancelarAtaque()
           aplicarSnapshotNoModelo(evento.snapshot)
           if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
           // Reconciliação do indicador de reconexão (#294): o snapshot é autoridade.
@@ -602,6 +705,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           }
           if (evento.snapshot.estado === 'terminada' && evento.snapshot.resultado) {
             esquecerReenvio()
+            // Fim de jogo via snapshot: descarta a coreografia do ataque.
+            cancelarAtaque()
             partidaTerminada(evento.snapshot.resultado, evento.snapshot.motivo ?? null)
             return
           }
@@ -696,6 +801,47 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // continuação por LIMPEZA_APLICADA/TURNO_ENCERRADO só vale para lote
         // aberto pela desistência — fora dele, os caminhos dedicados abaixo
         // seguem inalterados.
+        // Fila do ataque (issue #385 + follow-up da ordem, com a coreografia
+        // ativa, a VIRADA do turno (início e encerramento) é segurada até
+        // drenar (lag deliberado por decisão do usuário); a iluminação e a
+        // limpeza que chegarem com a fila ativa seguram junto e liberam na
+        // chegada do Vulto (ou ao drenar, sem Vulto) — cegueira e sumiço não
+        // aparecem antes da vez deles. Com a janela de gatilho aberta (lote
+        // real Iluminação → Limpeza → Ataque, review PR #399), o buffer da
+        // janela tem precedência — o fechamento compõe com a fila. O resto
+        // do lote passa direto.
+        // Snapshot mais novo invalida os segurados (a autoridade já projetou
+        // a vez — sem regressão).
+        // A virada de turno fecha a janela de gatilho (review PR #399,
+        // Bloqueante 1): sem ataque no lote, o buffer libera em ordem antes
+        // de a vez cair no seguro da fila (ou passar direto, sem fila); com
+        // ataque já entregue, a janela está fechada e vale só o seguro.
+        if (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') {
+          fecharJanelaDeGatilho()
+          if (segurarTurnoSeEmAtaque(evento)) {
+            return
+          }
+        } else if (
+          evento.type === 'CELULAS_ILUMINADAS' ||
+          evento.type === 'LIMPEZA_APLICADA'
+        ) {
+          // Fotografia pré-despacho pecaId→célula (fix pós-PR #399): a limpeza
+          // pode segurar e aplicar depois (auto-fecho da janela) — a onda do
+          // ataque usa para varrer as removidas mesmo assim (só lacunas).
+          const celulas = new Map(
+            modeloRef.current.posicionadas.map((p) => [p.pecaId, p.celula] as const),
+          )
+          if (
+            segurarNaJanelaSeAberta(evento, celulas) ||
+            segurarLimpezaSeEmAtaque(evento, celulas)
+          ) {
+            // Janela de gatilho antes do seguro da fila: com a janela aberta,
+            // o buffer do gatilho segura sem som/trigger (o fechamento compõe
+            // com fila ativa anterior); sem janela, vale o seguro direto da
+            // fila ativa (segunda onda pós-Baixa, virada).
+            return
+          }
+        }
         // PECA_POSICIONADA/PEAO_* ficam fora do gate de propósito: no mesmo
         // act despacham de imediato e ultrapassam o TURNO ainda na fila —
         // por isso os testes isolam o TURNO num flush antes dos deltas
@@ -828,28 +974,66 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           esquecerReenvio()
           return
         }
-        // Monstros e estados (ST-15, issue #174): ATAQUE e RESGATE são
-        // projetados no modelo sem recarregar página. Só o ataque COM
-        // penalidade (`estadosAplicados.length > 0`, issue #228) toca a
-        // recusa — proteção que negou, gatilho sem vítimas e resgate ficam
-        // em silêncio.
+        // Monstros e estados (ST-15, issue #174 + follow-up da ordem #385):
+        // ATAQUE e RESGATE sem recarregar página. O ATAQUE_RESOLVIDO não
+        // despacha mais na hora — evento+contexto vão ao driver, que aplica
+        // cada fatia na chegada do próprio slot (na ordem de atacantes do
+        // wire) e anuncia ao leitor só com vítimas na
+        // fatia. A penalidade usa os sons dos monstros, nunca o THUD
+        // genérico; Recusas de Ação mantêm o genérico.
         if (evento.type === 'ATAQUE_RESOLVIDO' || evento.type === 'RESGATE_REALIZADO') {
-          despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           if (evento.type === 'ATAQUE_RESOLVIDO') {
-            const motivo = motivoDeRecusaDoEvento(evento)
-            if (motivo !== null) tocarRecusa(motivo)
+            // Fecha a janela do gatilho entregando o buffer à fila (review
+            // PR #399): a iluminação/limpeza do mesmo lote libera na chegada
+            // do Vulto (ou ao drenar, sem Vulto), nunca antes da vez.
+            entregarJanelaAoAtaque()
+            enfileirarAtaque(evento, modeloRef.current)
+          } else {
+            despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
           }
           return
         }
-        // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
-        // LIMPEZA_APLICADA dispara som/animação, snapshots não.
-        if (evento.type === 'LIMPEZA_APLICADA') {
-          if (evento.pecasRemovidas.length > 0) {
-            limpezaKeyRef.current += 1
-            setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
-            tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
-          }
+        // Conquistas da Confirmação de Posição (issue #385, follow-up):
+        // evento-driven por aquisição — gerador (dedupe por id novo), cartão
+        // (false→true) e proteção (!antes && resultante) soam uma vez;
+        // snapshots nunca soam. O pós-estado deriva da redução pura sobre o
+        // modelo pré-despacho (a ref só atualiza no próximo render).
+        // ADR-0017 (Opção B, fundido no merge main↔399): quando a
+        // auto-confirmação da travessia ack, o FE encerra o turno sozinho —
+        // mesmo branch para não despachar 2x nem tornar o check tardio
+        // inalcançável (o `return` acima estreita o tipo e calaria o TS2367).
+        if (evento.type === 'POSICAO_CONFIRMADA') {
+          // Janela anterior ainda aberta (dupla confirmação sem fechar — não
+          // esperada no wire): libera em ordem antes de reabrir.
+          fecharJanelaDeGatilho()
+          const antes = modeloRef.current
+          const depois = reduzirEvento(antes, evento as Parameters<typeof reduzirEvento>[1])
           despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
+          tocarConquistasDaConfirmacao(antes, depois, evento.jogadorId)
+          if (
+            confirmarTravessiaEncadeadoRef.current &&
+            !encerrarTravessiaEncadeadoRef.current &&
+            modeloRef.current.jogadorAtivoId !== null &&
+            modeloRef.current.jogadorAtivoId === jogadorIdRef.current
+          ) {
+            encerrarTravessiaEncadeadoRef.current = true
+            enviarComJogadorRef.current({ type: 'ENCERRAR_TURNO' })
+          }
+          // Abre a janela de gatilho (review PR #399, Bloqueante 1): a
+          // iluminação/limpeza do mesmo lote chega a seguir, antes do ataque
+          // — segura sem som/trigger até o lote fechar (ataque entrega à
+          // fila; virada de turno libera em ordem).
+          abrirJanelaDeGatilho()
+          return
+        }
+        // Limpeza (issue #239, B1): evento-driven para TransicaoLimpeza — só
+        // LIMPEZA_APLICADA dispara som/animação, snapshots não. Com a janela
+        // de gatilho aberta ou a fila do ataque ativa, o evento já foi
+        // segurado acima e libera na chegada do Vulto (ou ao fechar/drenar);
+        // aqui, só o caminho direto (mesmo corpo de
+        // `liberarLimpezaSegurada`, sem divergir).
+        if (evento.type === 'LIMPEZA_APLICADA') {
+          liberarLimpezaSegurada(evento)
           return
         }
         // Giro (issue #241, mudança de spec verbal): evento-driven para o
@@ -1007,22 +1191,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             })
           }
         }
-        // ADR-0017 (Opção B): quando a auto-confirmação da travessia ack
-        // (POSICAO_CONFIRMADA originado do auto-CONFIRMAR), o FE encerra o
-        // turno sozinho — fechamento de zero cliques (o jogador deixa a mesa
-        // sem apertar o botão Encerrar). Guardas: só o ack da auto-confirmação
-        // (flag confirmarTravessiaEncadeadoRef), só no turno local e uma vez
-        // por turno (replay/duplo ack em silêncio).
-        if (
-          evento.type === 'POSICAO_CONFIRMADA' &&
-          confirmarTravessiaEncadeadoRef.current &&
-          !encerrarTravessiaEncadeadoRef.current &&
-          modeloRef.current.jogadorAtivoId !== null &&
-          modeloRef.current.jogadorAtivoId === jogadorIdRef.current
-        ) {
-          encerrarTravessiaEncadeadoRef.current = true
-          enviarComJogadorRef.current({ type: 'ENCERRAR_TURNO' })
-        }
         // Som de recusa unificado (issue #228): erros do tabuleiro incluindo
         // FORA_DA_VEZ (#118), pendências e Caixa esgotada (#143/#151); seleção,
         // aprovação, sorteio, confirmação, limpeza e turnos em silêncio (null).
@@ -1031,7 +1199,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       },
       // `jogadorId` entra em deps (só troca em login/logout — o hook guarda o
       // callback em ref, sem reabrir o socket).
-      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote, jogadorId, partidaId, esquecerReenvio],
+      [aplicarSnapshotNoModelo, despacharEvento, partidaEmAndamento, partidaTerminada, tocarRecusa, agendarFlushLote, enfileirarAtaque, segurarTurnoSeEmAtaque, segurarLimpezaSeEmAtaque, abrirJanelaDeGatilho, segurarNaJanelaSeAberta, entregarJanelaAoAtaque, fecharJanelaDeGatilho, liberarLimpezaSegurada, notificarSnapshot, cancelarAtaque, jogadorId, partidaId, esquecerReenvio],
     ),
     onAdmissao: useCallback(
       (evento) => {
@@ -1232,16 +1400,30 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     void entregarESair()
   }, [aguardarConexao, enviar, finalizarSaida, jogadorId, marcarDesistenciaEntregue, marcarSaidaPropria, partidaId])
 
+  // Bloqueio de entrada durante a fila do ataque (review PR #399, Bloqueante
+  // 2): com slot em exibição, os botões de turno desabilitam e os cliques do
+  // tabuleiro (cena 3D + espelho DOM, ambos via `onComando`/`onComandoPeao`)
+  // silenciam até drenar — o clique viraria comando recusado (ida-e-volta
+  // inútil + som de recusa confuso), exatamente o que o bloqueio evita.
+  const entradaBloqueadaPeloAtaque = ataqueExibido !== null
+
   const onComando = useCallback(
     (comando: TabuleiroComandoDoCliente | null) => {
-      if (comando === null) return
+      if (comando === null || entradaBloqueadaPeloAtaque) return
       enviarComJogador(comando)
     },
-    [enviarComJogador],
+    [enviarComJogador, entradaBloqueadaPeloAtaque],
   )
 
   // ── Comandos de Peão passam pelo mesmo ponto de injeção ──
-  const onComandoPeao = enviarComJogador
+  // Com o mesmo gate da fila do ataque: silencia até drenar.
+  const onComandoPeao = useCallback(
+    (comando: ComandoDePeaoDoDespacho) => {
+      if (entradaBloqueadaPeloAtaque) return
+      enviarComJogador(comando)
+    },
+    [enviarComJogador, entradaBloqueadaPeloAtaque],
+  )
 
   // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
   const minhaVez = !emResultado && !emNaoInicio && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
@@ -1391,7 +1573,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [estadoEmAndamento, minhaVez, emResultado, emNaoInicio, estadoInteracaoPeoes, enviarComJogador])
 
   // ── Rejeição local do roteador (AC3): motivo → som de recusa + anúncio ──
-  const onRejeicaoPeao = tocarRecusa
+  // Com a fila do ataque em exibição, silencia junto (review PR #399,
+  // Bloqueante 2): clique na interação não dá feedback até drenar.
+  const onRejeicaoPeao = useCallback(
+    (motivo: MotivoDeRecusa) => {
+      if (entradaBloqueadaPeloAtaque) return
+      tocarRecusa(motivo)
+    },
+    [tocarRecusa, entradaBloqueadaPeloAtaque],
+  )
 
   // ── Turnos (issue #118): rodada, fase e peão do Jogador Ativo (minhaVez
   // derivada acima) — nulo em resultado ──
@@ -1487,6 +1677,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
   const girar = useCallback(
     (sentido: 'horario' | 'anti_horario') => {
+      if (entradaBloqueadaPeloAtaque) return
       if (pecaAlvoDeGiro === null) return
       // Peça de 4 caminhos (cruz): giro redundante, sem setas no overlay e
       // sem R/E (review PR #338). O tipo vem da posicionada em manipulação
@@ -1499,7 +1690,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       if (tipoAlvo !== null && !giroAlteraConexao(tipoAlvo)) return
       enviarComJogador(mapearGiro(pecaAlvoDeGiro, sentido))
     },
-    [enviarComJogador, pecaAlvoDeGiro, estadoInteracao, estadoExibicao, modelo.recebidasPendentes],
+    [enviarComJogador, entradaBloqueadaPeloAtaque, pecaAlvoDeGiro, estadoInteracao, estadoExibicao, modelo.recebidasPendentes],
   )
 
   // ── Acessibilidade do overlay 3D (review #338 + issue #357): o botão "OK"
@@ -1509,6 +1700,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Espaço/Enter equivale ao OK do preview (POSICIONAR_PECA na célula-alvo).
   const pecaEmManipulacaoId = estadoInteracao?.pecaEmManipulacaoId ?? null
   const finalizarManipulacao = useCallback(() => {
+    if (entradaBloqueadaPeloAtaque) return
     if (pecaEmManipulacaoId !== null) {
       enviarComJogador(mapearFinalizarManipulacao())
       return
@@ -1517,7 +1709,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       const posicionar = mapearFinalizarRecebida(estadoInteracaoPeoes)
       if (posicionar !== null) enviarComJogador(posicionar)
     }
-  }, [enviarComJogador, pecaEmManipulacaoId, estadoInteracaoPeoes])
+  }, [enviarComJogador, entradaBloqueadaPeloAtaque, pecaEmManipulacaoId, estadoInteracaoPeoes])
 
   useEffect(() => {
     if (!estadoEmAndamento) return
@@ -1585,22 +1777,25 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // recusado com PEAO_NAO_SELECIONADO — a cadeia SELECIONAR+PERMANECER segue
   // o padrão serial da #261, na mesma conexão e em ordem.
   const permanecerNoTurno = useCallback(() => {
+    if (entradaBloqueadaPeloAtaque) return
     if (peaoProprioId === null || !minhaVez) return
     if (peaoDoTurnoId !== null && peaoProprioId !== peaoDoTurnoId) return
     if (modelo.peaoSelecionadoId !== peaoProprioId) {
       enviarComJogador({ type: 'SELECIONAR_PEAO', peaoId: peaoProprioId })
     }
     enviarComJogador({ type: 'PERMANECER', peaoId: peaoProprioId })
-  }, [enviarComJogador, peaoProprioId, minhaVez, peaoDoTurnoId, modelo.peaoSelecionadoId])
+  }, [enviarComJogador, peaoProprioId, minhaVez, peaoDoTurnoId, modelo.peaoSelecionadoId, entradaBloqueadaPeloAtaque])
 
   const confirmarPosicaoNoTurno = useCallback(() => {
+    if (entradaBloqueadaPeloAtaque) return
     if (peaoProprioId === null) return
     enviarComJogador({ type: 'CONFIRMAR_POSICAO_DO_PEAO', peaoId: peaoProprioId })
-  }, [enviarComJogador, peaoProprioId])
+  }, [enviarComJogador, peaoProprioId, entradaBloqueadaPeloAtaque])
 
   const encerrarTurno = useCallback(() => {
+    if (entradaBloqueadaPeloAtaque) return
     enviarComJogador({ type: 'ENCERRAR_TURNO' })
-  }, [enviarComJogador])
+  }, [enviarComJogador, entradaBloqueadaPeloAtaque])
   const requerModoPaisagem = useRequerModoPaisagem()
   const [bordaPx, setBordaPx] = useState(0)
   const viewportCompacto = useViewportCompacto()
@@ -1671,7 +1866,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         encaixeTrigger={encaixeTrigger}
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
+        estadoVisualDoAtaque={estadoVisualDoAtaque}
       />
+      {/*
+        Coreografia do ataque (issue #385): overlay evento-driven da fila —
+        só revela (cada fatia aplica na chegada do próprio slot); desmonta
+        ao drenar, sem marcas. Com movimento reduzido, legenda estática (sons
+        e bloqueio seguem).
+      */}
+      <TransicaoAtaque ataque={ataqueExibido} />
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
       {/*
         Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
@@ -1813,7 +2016,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-permanecer"
               onClick={permanecerNoTurno}
-              disabled={peaoProprioId === null}
+              disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
               className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Permanecer
@@ -1824,7 +2027,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-confirmar-posicao"
               onClick={confirmarPosicaoNoTurno}
-              disabled={peaoProprioId === null}
+              disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
               className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Confirmar Posição
@@ -1835,7 +2038,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               type="button"
               data-testid="botao-encerrar-turno"
               onClick={encerrarTurno}
-              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700"
+              disabled={entradaBloqueadaPeloAtaque}
+              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
             >
               Encerrar Turno
             </button>

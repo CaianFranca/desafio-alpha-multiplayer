@@ -22,6 +22,7 @@ import type {
 } from '@flicker/shared'
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 import type { EncaixeTrigger } from '../../game/tabuleiro/encaixe'
+import type { EstadoVisualDoAtaque } from '../../game/tabuleiro/ataque'
 
 interface TabuleiroMirrorDOMProps {
   todasCelulas: readonly Celula[]
@@ -74,6 +75,13 @@ interface TabuleiroMirrorDOMProps {
   sanidadePorPeao?: SanidadePorPeao
   /** Trigger de encaixe evento-driven (issue #241): espelha o voo mesa→célula. */
   encaixeTrigger?: EncaixeTrigger | null
+  /**
+   * Estado visual do ataque (issue #385, follow-up): prop única (peça em
+   * telegraph + reações do alcance) — `data-telegraph`/`data-reacao` na peça,
+   * espelho do 3D para testes; `aria-hidden` herdado da raiz (sem informação
+   * nova ao leitor de tela). Null fora do slot ativo.
+   */
+  estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
 }
 
 /**
@@ -116,6 +124,7 @@ export function TabuleiroMirrorDOM({
   travessiaSet = new Set<string>(),
   sanidadePorPeao = {},
   encaixeTrigger = null,
+  estadoVisualDoAtaque = null,
 }: TabuleiroMirrorDOMProps) {
   // Mesma derivação pura usada pela cena: resolve a peça sob o peão selecionado
   // (null quando o peão está sobre a Mesa ou sem peça → sem conexões destacadas).
@@ -245,6 +254,9 @@ export function TabuleiroMirrorDOM({
           key={p.pecaId}
           data-testid="peca-posicionada"
           data-peca-id={p.pecaId}
+          data-telegraph={p.pecaId === estadoVisualDoAtaque?.pecaIdEmTelegraph ? 'true' : undefined}
+          data-reacao={estadoVisualDoAtaque?.reacoesDoAtaque?.get(p.pecaId)?.reacao}
+          className={p.pecaId === estadoVisualDoAtaque?.pecaIdEmTelegraph ? 'ataque-telegraph' : undefined}
           // Tipo derivado do modelo local (AC1 issue #145): prova de que peças
           // especiais entram no tabuleiro com o tipo correto no espelho DOM.
           data-tipo={p.tipo}

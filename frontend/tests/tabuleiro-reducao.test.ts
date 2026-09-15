@@ -2,6 +2,7 @@ import {
   criarEstadoInicialDoCliente,
   reduzirEvento,
   reduzirEventos,
+  reduzirFatiaDoAtaque,
 } from '../web/src/game/tabuleiro/reducao'
 import { aplicarSnapshot } from '../web/src/game/tabuleiro/snapshot'
 import { criarIniciaisDaMesa, QUANTIDADE_INICIAIS } from '../web/src/game/tabuleiro/contrato'
@@ -1861,5 +1862,121 @@ describe('presença em reconexão — snapshot é autoridade (issue #294, review
       ]),
     )
     expect(reconciliado.jogadorPorId['j2']?.presenca).toBe('conectado')
+    
+describe('fatia do ataque no cliente — redução por slot (issue #385, follow-up da ordem)', () => {
+  function estadoComRoster() {
+    return {
+      ...criarEstadoInicialDoCliente(2),
+      jogadorPorId: {
+        j1: {
+          apelido: 'A',
+          cor: 'branco' as const,
+          sanidade: 3,
+          emBaixaIluminacao: false,
+          amedrontado: false,
+          protegido: false,
+          ordem: 1,
+        },
+        j2: {
+          apelido: 'B',
+          cor: 'vermelho' as const,
+          sanidade: 1,
+          emBaixaIluminacao: false,
+          amedrontado: false,
+          protegido: true,
+          ordem: 2,
+        },
+      },
+    }
+  }
+
+  it('fatia do Vulto projeta só Baixa Iluminação (sanidade/Amedrontado intactos)', () => {
+    const antes = estadoComRoster()
+    const depois = reduzirFatiaDoAtaque(antes, {
+      tipo: 'vulto',
+      estadosAplicados: [
+        { jogadorId: 'j1', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+      ],
+      protegidos: [],
+    })
+    // A Baixa aplica; a sanidade do resultante (penalidade do Espectro no
+    // mesmo gatilho) NÃO vaza para o slot do Vulto.
+    expect(depois.jogadorPorId['j1']?.emBaixaIluminacao).toBe(true)
+    expect(depois.jogadorPorId['j1']?.sanidade).toBe(3)
+    expect(depois.jogadorPorId['j1']?.amedrontado).toBe(false)
+  })
+
+  it('fatia do Espectro projeta só sanidade/Amedrontado (Baixa intacta)', () => {
+    const antes = estadoComRoster()
+    const depois = reduzirFatiaDoAtaque(antes, {
+      tipo: 'espectro',
+      estadosAplicados: [
+        { jogadorId: 'j1', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+      ],
+      protegidos: [],
+    })
+    // A sanidade aplica; a Baixa do resultante (penalidade do Vulto no mesmo
+    // gatilho) NÃO vaza para o slot do Espectro.
+    expect(depois.jogadorPorId['j1']?.sanidade).toBe(2)
+    expect(depois.jogadorPorId['j1']?.amedrontado).toBe(false)
+    expect(depois.jogadorPorId['j1']?.emBaixaIluminacao).toBe(false)
+  })
+
+  it('fatia do Espectro com sanidade zero marca Amedrontado', () => {
+    const antes = estadoComRoster()
+    const depois = reduzirFatiaDoAtaque(antes, {
+      tipo: 'espectro',
+      estadosAplicados: [
+        { jogadorId: 'j2', emBaixaIluminacao: false, sanidade: 0, amedrontado: true },
+      ],
+      protegidos: [],
+    })
+    expect(depois.jogadorPorId['j2']?.sanidade).toBe(0)
+    expect(depois.jogadorPorId['j2']?.amedrontado).toBe(true)
+  })
+
+  it('fatia com protegidos consome a Proteção sem tocar nos estados', () => {
+    const antes = estadoComRoster()
+    expect(antes.jogadorPorId['j2']?.protegido).toBe(true)
+    const depois = reduzirFatiaDoAtaque(antes, {
+      tipo: 'espectro',
+      estadosAplicados: [],
+      protegidos: ['j2'],
+    })
+    expect(depois.jogadorPorId['j2']?.protegido).toBe(false)
+    expect(depois.jogadorPorId['j2']?.sanidade).toBe(1)
+  })
+
+  it('fatia vazia é no-op (referência preservada)', () => {
+    const antes = estadoComRoster()
+    const depois = reduzirFatiaDoAtaque(antes, { tipo: 'vulto', estadosAplicados: [], protegidos: [] })
+    expect(depois).toBe(antes)
+  })
+
+  it('fatia ignora jogador desconhecido antes do snapshot (sem vazar roster)', () => {
+    const antes = estadoComRoster()
+    const depois = reduzirFatiaDoAtaque(antes, {
+      tipo: 'vulto',
+      estadosAplicados: [
+        { jogadorId: 'fantasma', emBaixaIluminacao: true, sanidade: 0, amedrontado: true },
+      ],
+      protegidos: ['fantasma'],
+    })
+    expect(depois).toBe(antes)
+  })
+
+  it('reaplicar a mesma fatia é no-op (projeção absoluta idempotente)', () => {
+    const antes = estadoComRoster()
+    const fatia = {
+      tipo: 'vulto' as const,
+      estadosAplicados: [
+        { jogadorId: 'j1', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+      ],
+      protegidos: [] as readonly string[],
+    }
+    const uma = reduzirFatiaDoAtaque(antes, fatia)
+    expect(uma.jogadorPorId['j1']?.emBaixaIluminacao).toBe(true)
+    const duas = reduzirFatiaDoAtaque(uma, fatia)
+    expect(duas).toBe(uma)
   })
 })

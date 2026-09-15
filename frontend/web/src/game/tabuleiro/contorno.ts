@@ -18,6 +18,24 @@ export const COR_CONTORNO_PADRAO = '#ffe08a'
 /** Branco do contorno do peão selecionado (legível sobre qualquer cor). */
 export const COR_CONTORNO_PEAO_SELECIONADO = '#ffffff'
 
+/** Azul-claro do escudo do ataque (peça protegida reagindo, issue #385). */
+export const COR_CONTORNO_ESCUDO_ATAQUE = '#7dd3fc'
+
+/**
+ * Âmbar da casca estática do pulo sob movimento reduzido (issue #385,
+ * follow-up): sem deslocamento, a peça sem peão ganha este contorno fixo no
+ * lugar do quique — mesmo vocabulário âmbar do chip de legenda do overlay.
+ */
+export const COR_CONTORNO_PULO_ATAQUE = '#fcd34d'
+
+/**
+ * Vermelho da casca estática do tremor sob movimento reduzido (issue #385,
+ * follow-up): sem deslocamento, a peça com peão ganha este contorno fixo no
+ * lugar do balanço — mesmo vocabulário vermelho do chip de legenda do
+ * overlay (distinto do vermelho do telegraph, `COR_TELEGRAPH_ATAQUE`).
+ */
+export const COR_CONTORNO_TREMOR_ATAQUE = '#f87171'
+
 /**
  * Expansão em XZ da casca de contorno da peça (mesma altura e centro do
  * corpo — só a silhueta lateral vaza para fora).

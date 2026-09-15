@@ -17,6 +17,13 @@ import {
   VOLUME_BASE_SOM_DE_MOVIMENTO,
 } from '../web/src/components/partida/somDoEncaixe'
 import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../web/src/game/tabuleiro/animacao'
+import {
+  CAMINHO_SOM_ESPECTRO,
+  CAMINHO_SOM_TREMOR_ATAQUE,
+  CAMINHO_SOM_VULTO,
+  VOLUME_BASE_SOM_ESPECTRO,
+  VOLUME_BASE_SOM_VULTO,
+} from '../web/src/game/tabuleiro/animacao'
 import type { EstadoDaPartidaSnapshot, PecaPosicionadaNoSnapshot } from '@flicker/shared'
 
 function renderPartidaNaRota(entry: string) {
@@ -1010,13 +1017,9 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       .find((el) => el.getAttribute('data-jogador-id') === jogadorId)
   }
 
-  it('ATAQUE_RESOLVIDO com estadosAplicados atualiza o HUD e toca som de recusa', async () => {
+  it('ATAQUE_RESOLVIDO do Vulto aplica a Baixa na chegada e toca o uivo (sem THUD, #385)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
-    // Ana vira a Jogadora Ativa: o destaque do Turno passa a ser o dela.
-    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 })
-    const ativo = await screen.findByTestId('hud-turno-ativo')
-    expect(ativo).toHaveAttribute('data-jogador-id', 'jogador-2')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
 
     act(() =>
@@ -1026,27 +1029,41 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
         peoesAtingidos: ['peao-vermelho'],
         protegidos: [],
         estadosAplicados: [
-          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 3, amedrontado: false },
         ],
       }),
     )
 
-    // Projeção no modelo: avatar da Ana reflete sanidade e Baixa Iluminação.
-    await waitFor(() => {
-      const avatar = avatarDoAdversario('jogador-2')
-      expect(avatar).toHaveAttribute('data-sanidade', '2')
-      expect(avatar).toHaveAttribute('data-em-baixa', 'true')
-    })
-    // Som de recusa com motivo de ataque (PartidaPage: estadosAplicados > 0).
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
+    // Nada aplica na hora: HUD intacto, telegraph silencioso, sem anúncio.
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
+    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
+    expect(toquesDeAudio).toHaveLength(0)
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
+    // Som próprio do ataque (issue #385): telegraph silencioso de 1s e só
+    // depois o uivo no disparo, nunca o THUD genérico (Recusas de Ação
+    // mantêm o genérico).
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    // Na chegada do slot: Baixa aplica (sanidade intacta — Vulto só causa
+    // Baixa) + anúncio ao leitor, sem THUD genérico.
+    await waitFor(
+      () => {
+        const avatar = avatarDoAdversario('jogador-2')
+        expect(avatar).toHaveAttribute('data-em-baixa', 'true')
+        expect(avatar).toHaveAttribute('data-sanidade', '3')
+        expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe(
+          'ataque_com_penalidade',
+        )
+      },
+      { timeout: 3000 },
+    )
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
-    expect(anuncio.getAttribute('data-motivo')).toBe('ataque_com_penalidade')
     expect(anuncio).toHaveTextContent('ataque')
   })
 
-  it('ATAQUE_RESOLVIDO com Amedrontado atualiza o avatar no HUD', async () => {
+  it('ATAQUE_RESOLVIDO do Espectro aplica sanidade/Amedrontado na chegada e toca o trovão (#385)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
     act(() =>
@@ -1060,24 +1077,41 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
         ],
       }),
     )
-    await waitFor(() => {
-      const avatar = avatarDoAdversario('jogador-2')
-      expect(avatar).toHaveAttribute('data-sanidade', '0')
-      expect(avatar).toHaveAttribute('data-amedrontado', 'true')
+    // Nada aplica na hora: HUD intacto, telegraph silencioso, sem anúncio.
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-amedrontado')
+    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
+    expect(toquesDeAudio).toHaveLength(0)
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
+    // Ataque com penalidade usa os sons dos monstros (issue #385): telegraph
+    // silencioso e só depois o trovão no disparo do Espectro, sem THUD.
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeAudio[0]).toMatchObject({
+      src: CAMINHO_SOM_ESPECTRO,
+      volume: VOLUME_BASE_SOM_ESPECTRO,
     })
-    // Ataque com penalidade também toca a recusa.
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
-    expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe(
-      'ataque_com_penalidade',
+    // Na chegada do slot: sanidade zero + Amedrontado + anúncio.
+    await waitFor(
+      () => {
+        const avatar = avatarDoAdversario('jogador-2')
+        expect(avatar).toHaveAttribute('data-sanidade', '0')
+        expect(avatar).toHaveAttribute('data-amedrontado', 'true')
+        expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe(
+          'ataque_com_penalidade',
+        )
+      },
+      { timeout: 3000 },
     )
+    expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
   })
 
-  it('ATAQUE_RESOLVIDO sem penalidade fica em silêncio (sem vítimas ou proteção que negou)', async () => {
+  it('ATAQUE_RESOLVIDO sem penalidade soa só o monstro (sem tremor, sem anúncio, #385)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
 
-    // Gatilho sem atingidos (alcance vazio): silêncio.
+    // Gatilho sem atingidos (alcance vazio): telegraph silencioso e só depois
+    // o monstro (uivo), sem tremor/defesa (só com alvo na chegada) e sem
+    // anúncio.
     act(() =>
       ws.simulateMessage({
         type: 'ATAQUE_RESOLVIDO',
@@ -1088,10 +1122,15 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       }),
     )
     expect(toquesDeAudio).toHaveLength(0)
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
 
-    // Proteção (sala médica) negou o ataque: silêncio.
+    // Proteção (sala médica) negou o ataque: segunda resolução entra na fila
+    // — o Espectro soa ao assumir, não junto. Sincronamente, nada novo tocou
+    // (o primeiro item ainda pode estar no slot; o segundo espera o telegraph).
     act(() =>
       ws.simulateMessage({
         type: 'ATAQUE_RESOLVIDO',
@@ -1101,10 +1140,76 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
         estadosAplicados: [],
       }),
     )
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeAudio).toHaveLength(1)
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     // Sem estadosAplicados, o avatar não muda (o eco é feedback, não autoridade).
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+  })
+
+  it('teclado silencia durante a fila do ataque e volta a enviar ao drenar (review PR #399, Bloqueante 2)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+
+    // Posiciona inicial-1 → abre janela de manipulação (atalhos R/E/Espaço/Enter vivos).
+    act(() =>
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      }),
+    )
+    await screen.findByTestId('peca-posicionada')
+
+    const user = userEvent.setup()
+    // Baseline fora da fila: R envia GIRAR_PECA.
+    await user.keyboard('r')
+    await waitFor(() => {
+      expect(JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]!)).toMatchObject({
+        type: 'GIRAR_PECA',
+        pecaId: 'inicial-1',
+      })
+    })
+
+    // Fila ativa: R/E/Espaço/Enter silenciam (sem GIRAR nem FINALIZAR).
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [{ pecaId: 'vulto-1', tipo: 'vulto', peoesNoAlcance: [] }],
+        peoesAtingidos: [],
+        protegidos: [],
+        estadosAplicados: [],
+      }),
+    )
+    expect(screen.getByTestId('ataque-coreografia')).toBeInTheDocument()
+    const base = ws.sentMessages.length
+    await user.keyboard('r')
+    await user.keyboard('e')
+    await user.keyboard(' ')
+    await user.keyboard('{Enter}')
+    expect(ws.sentMessages).toHaveLength(base)
+
+    // Drenou (~2,3s reais): o teclado volta a enviar.
+    await waitFor(
+      () => expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument(),
+      { timeout: 5000 },
+    )
+    await user.keyboard('r')
+    await waitFor(() => {
+      expect(ws.sentMessages.length).toBeGreaterThan(base)
+      expect(JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]!)).toMatchObject({
+        type: 'GIRAR_PECA',
+        pecaId: 'inicial-1',
+      })
+    })
+    const aposGiro = ws.sentMessages.length
+    await user.keyboard(' ')
+    await waitFor(() => {
+      expect(ws.sentMessages.length).toBeGreaterThan(aposGiro)
+      expect(JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]!)).toMatchObject({
+        type: 'FINALIZAR_MANIPULACAO',
+      })
+    })
   })
 
   it('RESGATE_REALIZADO limpa os estados no avatar e restaura a Sanidade, em silêncio', async () => {
@@ -1157,7 +1262,7 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
       .find((el) => el.getAttribute('data-jogador-id') === jogadorId)
   }
 
-  it('permanecer dentro do Alcance: PEAO_PERMANECEU + ATAQUE projeta no HUD e toca 1 recusa', async () => {
+  it('permanecer dentro do Alcance: PEAO_PERMANECEU + ATAQUE projeta Baixa na chegada e pede som', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
 
@@ -1172,18 +1277,28 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
         peoesAtingidos: ['peao-vermelho'],
         protegidos: [],
         estadosAplicados: [
-          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 3, amedrontado: false },
         ],
       }),
     )
 
-    await waitFor(() => {
-      const avatar = avatarDoAdversario('jogador-2')
-      expect(avatar).toHaveAttribute('data-sanidade', '2')
-      expect(avatar).toHaveAttribute('data-em-baixa', 'true')
-    })
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
+    // Nada aplica na hora: HUD intacto, telegraph silencioso, sem anúncio.
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
+    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
+    expect(toquesDeAudio).toHaveLength(0)
+    // Telegraph silencioso de 1s; o uivo soa após o pulso.
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    // Na chegada: Baixa (Vulto não toca sanidade) + anúncio.
+    await waitFor(
+      () => {
+        const avatar = avatarDoAdversario('jogador-2')
+        expect(avatar).toHaveAttribute('data-em-baixa', 'true')
+        expect(avatar).toHaveAttribute('data-sanidade', '3')
+      },
+      { timeout: 3000 },
+    )
     expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe(
       'ataque_com_penalidade',
     )
@@ -1191,7 +1306,7 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
     expect(screen.getByTestId('anuncio-de-recusa')).toHaveTextContent('Um peão sofreu um ataque.')
   })
 
-  it('permanecer fora→fora: PEAO_PERMANECEU + ATAQUE vazio é silêncio no-op no HUD', async () => {
+  it('permanecer fora→fora: PEAO_PERMANECEU + ATAQUE vazio é no-op no HUD (só o monstro soa, #385)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
     await waitFor(() => {
@@ -1209,14 +1324,19 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
       }),
     )
 
+    // Gatilho vazio: no-op no HUD, mas o monstro soa após o telegraph
+    // silencioso (ataque anima e soa mesmo sem vítimas — só monstro, sem
+    // tremor e sem anúncio).
     expect(toquesDeAudio).toHaveLength(0)
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
   })
 
-  it('lote da Permanência [ataque_resolvido, turno_encerrado] reduz em ordem sem quebrar', async () => {
+  it('lote da Permanência [ataque_resolvido, turno_encerrado] reduz em ordem e o turno espera a fila (#385)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
     act(() => ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase() }))
 
@@ -1229,26 +1349,52 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
         peoesAtingidos: ['peao-vermelho'],
         protegidos: [],
         estadosAplicados: [
-          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 2, amedrontado: false },
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 3, amedrontado: false },
         ],
       }),
     )
     act(() => ws.simulateMessage({ type: 'TURNO_ENCERRADO', jogadorId: 'jogador-2' }))
 
-    // A projeção do ataque sobrevive ao encerramento; só o ataque tocou som.
-    await waitFor(() => {
-      expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '2')
-    })
-    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
-    expect(toquesDeAudio).toHaveLength(1)
+    // A projeção do ataque chega com o encerramento segurado (follow-up
+    // #385: nada aplica na hora; o uivo soa após o pulso de 1s e a fatia
+    // aplica na chegada, ~250ms depois — a virada só aplica ao drenar).
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
+    expect(toquesDeAudio).toHaveLength(0)
+    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
+    await waitFor(
+      () => {
+        expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+      },
+      { timeout: 3000 },
+    )
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
 
-    // O ciclo segue: o próximo turno assume sem quebrar a tela.
+    // O ciclo segue: com a fila ativa, a virada (encerramento + entrada) é
+    // segurada até drenar (follow-up #385: lag por decisão do usuário) — a
+    // vez não sai nem entra no meio do ataque; ao drenar (~2,3s), libera em
+    // ordem e o turno assume sem quebrar a tela (uivo + tremor assentaram).
     act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-3', rodada: 2 }))
-    const ativo = await screen.findByTestId('hud-turno-ativo')
-    expect(ativo).toHaveAttribute('data-jogador-id', 'jogador-3')
-    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '2')
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute(
+      'data-jogador-id',
+      '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',
+    )
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute(
+          'data-jogador-id',
+          'jogador-3',
+        ),
+      { timeout: 4000 },
+    )
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
+    expect(toquesDeAudio.map((toque) => toque.src)).toEqual([
+      CAMINHO_SOM_VULTO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
+    ])
   })
 })
 

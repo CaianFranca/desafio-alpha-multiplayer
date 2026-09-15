@@ -77,6 +77,7 @@ import {
   type TipoDaPeca,
 } from './contrato'
 import type { PendenciaNoCliente } from './interacaoPeoes'
+import type { FatiaDoAtaque } from './ataque'
 import type {
   AtaqueResolvidoWireEvento,
   Celula,
@@ -970,6 +971,59 @@ export function reduzirEventos(
   eventos: readonly EventoDoJogoNoCliente[],
 ): EstadoDoTabuleiroNoCliente {
   return eventos.reduce(reduzirEvento, estado)
+}
+
+/**
+ * Aplica a fatia de estado de UM slot do ataque (issue #385 — fatia por
+ * atacante, na ordem do wire) — espelha o bloco `ATAQUE_RESOLVIDO` acima, mas só
+ * com a fatia do atacante (ver `coreografarAtaque`): o Vulto só projeta Baixa
+ * Iluminação; o Espectro só Sanidade/Amedrontado; a proteção consumida zera
+ * `protegido`. Mesmos guards do bloco integral (só jogadores conhecidos via
+ * snapshot; sem vítimas/protegidos na fatia, nada a aplicar). Valores
+ * RESULTANTES absolutos — reaplicar a mesma fatia é no-op.
+ */
+export function reduzirFatiaDoAtaque(
+  estado: EstadoDoTabuleiroNoCliente,
+  fatia: FatiaDoAtaque,
+): EstadoDoTabuleiroNoCliente {
+  if (fatia.estadosAplicados.length === 0 && fatia.protegidos.length === 0) {
+    return estado
+  }
+  let mudou = false
+  const jogadorPorId = { ...estado.jogadorPorId }
+  for (const aplicado of fatia.estadosAplicados) {
+    const anterior = jogadorPorId[aplicado.jogadorId]
+    if (!anterior) continue
+    if (fatia.tipo === 'vulto') {
+      if (anterior.emBaixaIluminacao === aplicado.emBaixaIluminacao) continue
+      mudou = true
+      jogadorPorId[aplicado.jogadorId] = {
+        ...anterior,
+        emBaixaIluminacao: aplicado.emBaixaIluminacao,
+      }
+    } else {
+      if (
+        anterior.sanidade === aplicado.sanidade &&
+        anterior.amedrontado === aplicado.amedrontado
+      ) {
+        continue
+      }
+      mudou = true
+      jogadorPorId[aplicado.jogadorId] = {
+        ...anterior,
+        sanidade: aplicado.sanidade,
+        amedrontado: aplicado.amedrontado,
+      }
+    }
+  }
+  for (const jogadorId of fatia.protegidos) {
+    const anterior = jogadorPorId[jogadorId]
+    if (!anterior) continue
+    if (!anterior.protegido) continue
+    mudou = true
+    jogadorPorId[jogadorId] = { ...anterior, protegido: false }
+  }
+  return mudou ? { ...estado, jogadorPorId } : estado
 }
 
 /** Deriva o estado de exibição consumido pela cena a partir do modelo. */

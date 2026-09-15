@@ -24,6 +24,7 @@
  */
 
 import { CAMINHO_SOM_CARTA, CAMINHO_TOQUE_ENIGMATICO } from '../../game/tabuleiro/animacao'
+import { tocarAsset } from '../../game/audio/sons'
 import type { OrigemDoEncaixe } from '../../game/tabuleiro/encaixe'
 import type { EstadoDoTabuleiroNoCliente } from '../../game/tabuleiro/reducao'
 
@@ -82,24 +83,9 @@ export function origemDoEncaixe(
 }
 
 function tocarAssetDoEncaixe(caminho: string, volumeBase: number): void {
-  try {
-    const audio = new Audio(caminho)
-    // Contrato de volume (ADR-0007): base fixa do ponto; o futuro botão de
-    // volume aplica `audio.volume = master * VOLUME_BASE_*`.
-    audio.volume = volumeBase
-    const tocando: unknown = audio.play()
-    // jsdom não implementa play(): retorna undefined em vez de Promise.
-    if (
-      typeof tocando === 'object' &&
-      tocando !== null &&
-      'catch' in tocando &&
-      typeof (tocando as { catch: unknown }).catch === 'function'
-    ) {
-      ;(tocando as Promise<void>).catch(() => {})
-    }
-  } catch {
-    // Sem asset ou autoplay bloqueado: silêncio sem quebrar a Partida.
-  }
+  // Sem mestre (assinatura preservada): o futuro botão de volume aplica
+  // `audio.volume = master * VOLUME_BASE_*` — hoje, master 1.
+  tocarAsset(caminho, volumeBase)
 }
 
 /**
