@@ -29,9 +29,11 @@ export interface SessaoCriada {
 const PREFIXO_SESSAO = 'sessao:';
 const PREFIXO_SESSAO_POR_JOGADOR = 'sessao:jogador:';
 // Marcador de rotação do refresh (issue #410): liga a Sessão antiga à nova
-// pelo TTL de access (sessionAccessTtlSeconds), tempo suficiente para a
-// revalidação migrar a conexão antes do marcador expirar. Login/logout/
-// revogação NÃO gravam marcador — só a rotação.
+// pelo TTL calculado em `ttlMarcadorRotacaoSegundos` — nunca abaixo de
+// `sessionAccessTtlSeconds`, mas sempre cobrindo 2 intervalos de revalidação +
+// 60s de margem. Assim o rastro da rotação sobrevive até a varredura das
+// conexões WS alcançar a Sessão antiga, mesmo com TTL de access curto. Login/
+// logout/revogação NÃO gravam marcador — só a rotação.
 const PREFIXO_SESSAO_ROTACIONADA = 'sessao:rotacionada:';
 
 function chaveSessao(sessaoId: string): string {
@@ -44,6 +46,25 @@ function chaveSessaoPorJogador(jogadorId: string): string {
 
 function chaveSessaoRotacionada(sessaoId: string): string {
   return `${PREFIXO_SESSAO_ROTACIONADA}${sessaoId}`;
+}
+
+/**
+ * TTL (segundos) do marcador `sessao:rotacionada:<antigaId>` (issue #410,
+ * bug 2): o marcador precisa sobreviver pelo menos até a revalidação periódica
+ * das conexões WS observar a conexão ainda apontando para a Sessão antiga.
+ * Usa o maior valor entre o TTL de access e 2 intervalos de revalidação + 60s
+ * de margem — assim o marcador não pode expirar entre duas varreduras mesmo
+ * quando `WS_SESSAO_REVALIDACAO_MS` é maior que `sessionAccessTtlSeconds`.
+ * Exportada para teste direto da fórmula.
+ */
+export function ttlMarcadorRotacaoSegundos(
+  sessionAccessTtlSeconds: number,
+  wsSessaoRevalidacaoMs: number,
+): number {
+  return Math.max(
+    sessionAccessTtlSeconds,
+    Math.ceil(wsSessaoRevalidacaoMs / 1000) * 2 + 60,
+  );
 }
 
 // Cria uma nova sessão para `jogadorId`, revogando qualquer sessão anterior.
@@ -217,7 +238,7 @@ export async function rotacionarSessao(
   jogadorId: string,
 ): Promise<{ sessaoId: string }> {
   registrarScripts();
-  const { sessionRefreshTtlSeconds, sessionAccessTtlSeconds } = getConfig();
+  const { sessionRefreshTtlSeconds, sessionAccessTtlSeconds, wsSessaoRevalidacaoMs } = getConfig();
 
   const novaId = randomUUID();
   const criadoEm = new Date().toISOString();
@@ -233,7 +254,7 @@ export async function rotacionarSessao(
     novaId,
     jogadorId,
     sessaoAntigaId,
-    sessionAccessTtlSeconds,
+    ttlMarcadorRotacaoSegundos(sessionAccessTtlSeconds, wsSessaoRevalidacaoMs),
   );
 
   if (sessaoId === null) {

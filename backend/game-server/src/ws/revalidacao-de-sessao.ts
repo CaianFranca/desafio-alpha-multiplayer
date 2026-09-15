@@ -10,8 +10,9 @@
 //   - sem sucessor (logout, expiração, revogação) encerra com 4401 — o `close`
 //     resultante mantém `marcarDesconexaoEArmarJanela` como hoje.
 //
-// Falha de Redis não derruba conexões: `validarSessaoNoRedis` devolve `false`
-// só quando a Sessão não existe/pertence a outro Jogador.
+// Falha de Redis não derruba conexões: o `catch` por conexão em
+// `revalidarConexoesDeSessao` loga uma vez, aborta o ciclo e preserva TODAS as
+// conexões — diferente de uma Sessão ausente, que encerra com 4401.
 
 import type { Redis } from 'ioredis';
 import { obterSucessorDeSessaoNoRedis, validarSessaoNoRedis } from '../auth.ts';
@@ -89,10 +90,14 @@ export async function revalidarConexoesDeSessao(deps: DepsRevalidacaoSessao): Pr
         conexao.sessaoId = sessaoViva;
       }
     } catch (erro) {
+      // Falha de infra (ex.: Redis fora): loga UMA vez, aborta o ciclo — todas
+      // as conexões são preservadas — e a revalidação repete no próximo
+      // intervalo. Sem o `break`, cada conexão do registro repetiria o log.
       console.error(
         '[ws] falha na revalidação de sessão:',
         erro instanceof Error ? erro.message : String(erro),
       );
+      break;
     }
   }
 }
@@ -107,8 +112,26 @@ export function iniciarRevalidacaoDeSessao(opcoes: OpcoesRevalidacaoSessao): Han
       opcoes.obterSucessorDeSessao
       ?? ((sessaoId) => obterSucessorDeSessaoNoRedis(opcoes.redis, sessaoId)),
   };
+  // Guarda anti-sobreposição: um ciclo só dispara o próximo depois de terminar.
+  // Sem ela, um Redis lento acumularia ciclos concorrentes varrendo o registro.
+  let emExecucao = false;
   const timer = setInterval(() => {
-    void revalidarConexoesDeSessao(deps);
+    if (emExecucao) {
+      return;
+    }
+    emExecucao = true;
+    void (async () => {
+      try {
+        await revalidarConexoesDeSessao(deps);
+      } catch (erro) {
+        console.error(
+          '[ws] falha inesperada na revalidação de sessão:',
+          erro instanceof Error ? erro.message : String(erro),
+        );
+      } finally {
+        emExecucao = false;
+      }
+    })();
   }, opcoes.intervaloMs);
   timer.unref();
   return {

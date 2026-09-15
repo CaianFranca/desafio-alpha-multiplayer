@@ -22,6 +22,8 @@ export interface DadosDeConexaoWs {
   sessaoId: string;
   email: string;
   apelido: string;
+  /** Bots internos (`@bot.teste`) são isentos da revalidação de Sessão. */
+  isBot?: boolean;
 }
 
 export interface ConexaoRegistrada {
@@ -72,6 +74,22 @@ export class RegistroDeConexoes {
     const dados = this.porSocket.get(socket);
     if (dados !== undefined) {
       dados.sessaoId = sessaoId;
+    }
+  }
+
+  /**
+   * Migra todas as conexões vigentes do Jogador para `novaSessaoId` — usado
+   * após a rotação do refresh em `POST /refresh`, quando o novo `sessaoId` já
+   * é conhecido dentro da própria rota (sem esperar a revalidação periódica).
+   * Como `migrarSessao`, muta o mesmo objeto de `socket.data`.
+   */
+  migrarSessaoPorJogador(jogadorId: string, novaSessaoId: string): void {
+    const sockets = this.porJogador.get(jogadorId);
+    if (sockets === undefined) {
+      return;
+    }
+    for (const socket of sockets) {
+      this.migrarSessao(socket, novaSessaoId);
     }
   }
 

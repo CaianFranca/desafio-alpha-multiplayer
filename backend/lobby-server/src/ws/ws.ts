@@ -18,6 +18,8 @@ export interface WsAuthData {
   sessaoId: string;
   apelido: string;
   email: string;
+  /** Bots internos (`@bot.teste`) são isentos de rate limit e revalidação. */
+  isBot: boolean;
 }
 
 export type AuthenticatedWebSocket = WebSocket & { data: WsAuthData };
@@ -66,7 +68,7 @@ function segurancaDoConfig(): SegurancaWs {
 }
 
 function ehConexaoDeBot(socket: AuthenticatedWebSocket): boolean {
-  return socket.data.email.endsWith(DOMINIO_BOT);
+  return socket.data.isBot === true;
 }
 
 async function autenticarRequest(
@@ -96,6 +98,7 @@ async function autenticarRequest(
     sessaoId: payload.sessaoId,
     apelido: payload.apelido,
     email: payload.email,
+    isBot: payload.email.endsWith(DOMINIO_BOT),
   };
 }
 

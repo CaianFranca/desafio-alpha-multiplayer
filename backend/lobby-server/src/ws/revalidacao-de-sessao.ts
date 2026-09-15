@@ -1,7 +1,7 @@
 // Revalidação periódica da Sessão das conexões WS abertas do lobby (issue #410).
 //
 // A cada `wsSessaoRevalidacaoMs` varre o registro de conexões e, para cada uma:
-//   - bots (@bot.teste) são isentos;
+//   - bots (flag `isBot`) são isentos;
 //   - se `sessao:<id>` continua viva e do mesmo Jogador, mantém a conexão;
 //   - se sumiu, segue o marcador `sessao:rotacionada:<antigaId>` (rotação do
 //     refresh) até achar uma Sessão viva do mesmo Jogador e migra o `sessaoId`;
@@ -9,7 +9,9 @@
 //
 // A implementação é local ao lobby (a do game-server é espelhada, sem
 // abstração nova em `packages/shared`). Falha de Redis não derruba conexões:
-// o ciclo é abortado e repetido no próximo intervalo.
+// o ciclo é abortado na primeira falha (uma única linha de log) e repetido no
+// próximo intervalo. Ticks não se sobrepõem: o handle guarda uma flag
+// anti-sobreposição e o próximo tick é ignorado enquanto o anterior roda.
 
 import { obterSessao, obterSucessorDeSessao } from '../sessoes.ts';
 import {
@@ -20,8 +22,6 @@ import {
   type RegistroDeConexoes,
 } from './registro-de-conexoes.ts';
 
-/** Domínio reservado de bots (ver `routes/auth.ts`): conexões de bot não são revalidadas. */
-const DOMINIO_BOT = '@bot.teste';
 /** Teto de saltos no encadeamento de marcadores de rotação, anti-loop. */
 const MAX_SALTOS_ROTACAO = 8;
 
@@ -68,7 +68,7 @@ async function resolverSessaoViva(
 
 export async function revalidarConexoesDeSessao(deps: DepsRevalidacaoSessao): Promise<void> {
   for (const { socket, dados } of deps.registro.listar()) {
-    if (dados.email.endsWith(DOMINIO_BOT)) {
+    if (dados.isBot === true) {
       continue;
     }
     try {
@@ -79,10 +79,13 @@ export async function revalidarConexoesDeSessao(deps: DepsRevalidacaoSessao): Pr
         deps.registro.migrarSessao(socket, sessaoViva);
       }
     } catch (erro) {
+      // Falha de Redis/infra: aborta o ciclo inteiro. Loga uma única vez para
+      // não spammar o log a cada conexão — o próximo tick reexecuta.
       console.error(
-        '[ws] falha na revalidação de sessão:',
+        '[ws] falha na revalidação de sessão (ciclo abortado):',
         erro instanceof Error ? erro.message : String(erro),
       );
+      break;
     }
   }
 }
@@ -93,8 +96,18 @@ export function iniciarRevalidacaoDeSessao(opcoes: OpcoesRevalidacaoSessao): Han
     obterSessao: opcoes.obterSessao ?? obterSessao,
     obterSucessorDeSessao: opcoes.obterSucessorDeSessao ?? obterSucessorDeSessao,
   };
+  // Guarda anti-sobreposição: um tick lento (Redis) não pode acumular ciclos
+  // concorrentes sobre o mesmo registro. Enquanto um roda, os próximos são
+  // ignorados.
+  let emExecucao = false;
   const timer = setInterval(() => {
-    void revalidarConexoesDeSessao(deps);
+    if (emExecucao) {
+      return;
+    }
+    emExecucao = true;
+    void revalidarConexoesDeSessao(deps).finally(() => {
+      emExecucao = false;
+    });
   }, opcoes.intervaloMs);
   timer.unref();
   return {

@@ -8,9 +8,10 @@
 // singleton compartilhado com o WS e as rotas de auth. Estilo: node:test.
 
 import assert from 'node:assert/strict';
-import { after, test } from 'node:test';
+import { after, afterEach, test } from 'node:test';
 import { WebSocket } from 'ws';
 import {
+  apelidoUnico,
   cadastroValido,
   comServidor,
   conectarWs,
@@ -19,15 +20,23 @@ import {
   esperarClose,
   esperarMensagem,
   extrairCookies,
+  pool,
   postJson,
   redis,
   registrarJogador,
+  sufixo,
 } from './helpers/salas-ws.ts';
 import {
   iniciarRevalidacaoDeSessao,
   type HandleRevalidacao,
 } from '../src/ws/revalidacao-de-sessao.ts';
-import { registroDeConexoes } from '../src/ws/registro-de-conexoes.ts';
+import {
+  registroDeConexoes,
+  type DadosDeConexaoWs,
+  type RegistroDeConexoes,
+} from '../src/ws/registro-de-conexoes.ts';
+import { criarSessao, ttlMarcadorRotacaoSegundos } from '../src/sessoes.ts';
+import { assinarAccess } from '../src/jwt.ts';
 
 configurarHooks();
 
@@ -56,6 +65,16 @@ after(() => {
     handle.parar();
   }
   handles.length = 0;
+});
+
+// O `registroDeConexoes` é um singleton compartilhado entre arquivos/roteadores
+// de teste: sem reset explícito, sockets de um caso permanecem indexados e a
+// revalidação do caso seguinte os visitaria. Como o `close` do socket nem
+// sempre chega antes do fim do teste, limpamos os índices no `afterEach`.
+afterEach(() => {
+  for (const { socket } of registroDeConexoes.listar()) {
+    registroDeConexoes.desregistrar(socket);
+  }
 });
 
 // --- (a) Sessão removida do Redis -> fecha na revalidação ---
@@ -143,6 +162,100 @@ test('Rotação do refresh preserva a conexão, que segue responsiva a PING/PONG
       await new Promise((resolve) => setTimeout(resolve, 250));
       assert.equal(ws.readyState, WebSocket.OPEN, 'a conexão deveria permanecer aberta');
       await aguardarAutenticacao(ws);
+    } finally {
+      handle.parar();
+    }
+
+    ws.close();
+    await esperarClose(ws).catch(() => undefined);
+  });
+});
+
+// --- (e) TTL do marcador de rotação ---
+
+test('TTL do marcador de rotação cobre 2 intervalos + margem quando maior que o access TTL', () => {
+  // Intervalo de revalidação (60s) muito maior que o TTL de access (10s): sem
+  // a fórmula, o marcador expiraria antes da varredura alcançar a Sessão
+  // antiga. 2 ticks + 60s de margem = 180s.
+  assert.equal(ttlMarcadorRotacaoSegundos(10, 60000), 180);
+  assert.ok(
+    ttlMarcadorRotacaoSegundos(10, 60000) > 10,
+    'o marcador deveria sobreviver além de sessionAccessTtlSeconds',
+  );
+  // Access TTL dominante: preserva o valor de access (900s).
+  assert.equal(ttlMarcadorRotacaoSegundos(900, 60000), 900);
+  // Intervalo grande o bastante para superar o access TTL: 500s * 2 + 60 = 1060s.
+  assert.equal(ttlMarcadorRotacaoSegundos(900, 500000), 1060);
+});
+
+// --- (f) Guarda anti-sobreposição ---
+
+test('Ticks lentos não sobrepõem execuções da revalidação', async () => {
+  const dados: DadosDeConexaoWs = {
+    jogadorId: 'jogador-lento',
+    sessaoId: 'sessao-lenta',
+    email: 'lento@teste.local',
+    apelido: 'Lento',
+  };
+  let varreduras = 0;
+  let ciclosEmVoo = 0;
+  let maxCiclosEmVoo = 0;
+  const registroFake = {
+    listar: () => [{ socket: {} as WebSocket, dados }],
+    fecharConexao: () => undefined,
+    migrarSessao: () => undefined,
+  } as unknown as RegistroDeConexoes;
+
+  const handle = iniciarRevalidacaoDeSessao({
+    intervaloMs: 10,
+    registro: registroFake,
+    // Cada varredura "demora" 60ms — 6x o intervalo; sem a guarda vários
+    // ciclos rodariam em paralelo.
+    obterSessao: async () => {
+      varreduras += 1;
+      ciclosEmVoo += 1;
+      maxCiclosEmVoo = Math.max(maxCiclosEmVoo, ciclosEmVoo);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      ciclosEmVoo -= 1;
+      return { jogadorId: dados.jogadorId };
+    },
+    obterSucessorDeSessao: async () => null,
+  });
+
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  } finally {
+    handle.parar();
+  }
+
+  assert.ok(varreduras >= 1, 'ao menos uma varredura deveria ter rodado');
+  assert.equal(maxCiclosEmVoo, 1, 'ticks concorrentes não deveriam se sobrepor');
+});
+
+// --- (g) Isenção de bot pela flag `isBot` ---
+
+test('Conexão de bot (@bot.teste) é isenta da revalidação de Sessão', async () => {
+  await comServidor(async (servidor) => {
+    const inserido = await pool.query<{ id: string; apelido: string; email: string }>(
+      `INSERT INTO usuarios (apelido, email, senha, bot)
+       VALUES ($1, $2, $3, true)
+       RETURNING id, apelido, email`,
+      [apelidoUnico('bot'), `bot-${sufixo()}@bot.teste`, 'bot_nopassword'],
+    );
+    const bot = inserido.rows[0]!;
+    const { sessaoId } = await criarSessao(bot.id);
+    const accessToken = assinarAccess(bot, sessaoId);
+
+    const ws = await conectarWs(servidor.wsUrl, { access_token: accessToken });
+    await aguardarAutenticacao(ws);
+
+    // Sessão removida: um não-bot seria encerrado; o bot deve seguir vivo.
+    await redis.del(`sessao:${sessaoId}`);
+
+    const handle = iniciarRevalidacao();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      assert.equal(ws.readyState, WebSocket.OPEN, 'conexão de bot não deveria fechar');
     } finally {
       handle.parar();
     }

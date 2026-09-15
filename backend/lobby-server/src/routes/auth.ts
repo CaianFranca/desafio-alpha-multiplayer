@@ -298,8 +298,6 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
 
     const jogador: Jogador = result.rows[0];
     const { sessaoId } = await criarSessao(jogador.id);
-    // Troca de Sessão (issue #410): encerra as conexões WS antigas do Jogador.
-    registroDeConexoes.fecharPorJogador(jogador.id, CODIGO_SESSAO, MOTIVO_SESSAO_SUBSTITUIDA);
     emitirCookiesDeSessao(res, jogador, sessaoId);
     res.status(201).json(jogador);
   } catch (error: unknown) {
@@ -373,7 +371,10 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     const jogador: Jogador = { id: row.id, apelido: row.apelido, email: row.email };
     // criarSessao já revoga a sessão anterior (Sessão única por Jogador).
     const { sessaoId } = await criarSessao(jogador.id);
-    // Troca de Sessão (issue #410): encerra as conexões WS antigas do Jogador.
+    // Troca de Sessão (issue #410): encerra NA HORA as conexões WS antigas
+    // deste Jogador no processo lobby. O game-server é um processo separado
+    // e só encerra no seu tick de revalidação (WS_SESSAO_REVALIDACAO_MS,
+    // default 30000, teto 60000).
     registroDeConexoes.fecharPorJogador(jogador.id, CODIGO_SESSAO, MOTIVO_SESSAO_SUBSTITUIDA);
     emitirCookiesDeSessao(res, jogador, sessaoId);
     res.status(200).json(jogador);
@@ -389,7 +390,9 @@ authRouter.post('/logout', requireSessao, async (req: Request, res: Response): P
   // requireSessao garante req.jogador.
   const jogador = req.jogador!;
   await revogarSessao(jogador.sessaoId);
-  // Logout (issue #410): encerra as conexões WS vigentes do Jogador.
+  // Logout (issue #410): encerra NA HORA as conexões WS vigentes do Jogador
+  // no processo lobby. O game-server é um processo separado e só encerra no
+  // seu tick de revalidação (WS_SESSAO_REVALIDACAO_MS, default 30000, teto 60000).
   registroDeConexoes.fecharPorJogador(jogador.id, CODIGO_SESSAO, MOTIVO_SESSAO_ENCERRADA);
   limparCookiesDeSessao(res);
   res.status(204).end();
@@ -456,6 +459,11 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
 
     const jogador: Jogador = result.rows[0];
     const rotacionada = await rotacionarSessao(payload.sessaoId, jogador.id);
+    // A rotação troca o `sessaoId` da Sessão; migrar o registro das conexões
+    // deste Jogador para o novo id fecha a janela em que `CRIAR_SALA`/`ENTRAR_NA_SALA`
+    // ainda revalidariam o `sessaoId` antigo e responderiam 4401 indevido até o
+    // próximo tick de revalidação (WS_SESSAO_REVALIDACAO_MS).
+    registroDeConexoes.migrarSessaoPorJogador(payload.jogadorId, rotacionada.sessaoId);
     emitirCookiesDeSessao(res, jogador, rotacionada.sessaoId);
     res.status(200).json(jogador);
   } catch (error) {

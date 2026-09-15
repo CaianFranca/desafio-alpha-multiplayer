@@ -9,7 +9,7 @@
 // `criarSessaoNoRedis`) e usa `--test-force-exit` já configurado.
 
 import assert from 'node:assert/strict';
-import { after, before, test } from 'node:test';
+import { after, afterEach, before, test } from 'node:test';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
@@ -19,10 +19,15 @@ import type { MembroDaSala, PartidaId } from '@flicker/shared';
 import { createApp } from '../src/app.ts';
 import { criarWebSocketServer } from '../src/ws/ws.ts';
 import { chaveDaPartida } from '../src/partidas/partidas.ts';
+import { listarConexoes, removerConexao } from '../src/ws/conexao.ts';
 import {
   iniciarRevalidacaoDeSessao,
   type HandleRevalidacao,
 } from '../src/ws/revalidacao-de-sessao.ts';
+import {
+  obterSucessorDeSessaoNoRedis,
+  validarSessaoNoRedis,
+} from '../src/auth.ts';
 import type { ContextoDoGameServer } from '../src/contexto.ts';
 
 const SERVER_ID = 'game-server-teste-sessao';
@@ -247,6 +252,15 @@ after(async () => {
   }
 });
 
+// O registro de conexões é global ao processo: zera entre testes para que as
+// deps injetadas (que varrem `listarConexoes`) não enxerguem conexões mortas
+// de testes anteriores.
+afterEach(() => {
+  for (const conexao of listarConexoes()) {
+    removerConexao(conexao);
+  }
+});
+
 // --- (a) Sessão revogada -> fecha na revalidação ---
 
 test('Sessão revogada durante a conexão é encerrada na revalidação (4401)', async () => {
@@ -359,6 +373,69 @@ test('Conexão de bot é isenta da revalidação de Sessão', async () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 250));
       assert.equal(ws.readyState, WebSocket.OPEN, 'conexão de bot não deveria fechar');
+      await pingPong(ws);
+    } finally {
+      handle.parar();
+    }
+
+    ws.close();
+    await esperarClose(ws).catch(() => undefined);
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+// --- (e) Redis fora durante a revalidação -> conexão preservada (fail-open) ---
+
+test('Falha de Redis na revalidação preserva a conexão e recupera no próximo tick', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = 'partida-sessao-redis-fora';
+    await criarPartidaNoRedis(partidaId, [membro(1)]);
+    const { token } = await tokenParaJogador('jogador-1', 'Jogador 1');
+
+    const ws = await conectarPartida(servidor, partidaId, token);
+    await pingPong(ws);
+
+    // `falhar` simula o Redis fora: as deps injetadas lançam como
+    // `validarSessaoNoRedis`/`obterSucessorDeSessaoNoRedis` passam a fazer
+    // depois do B1. Enquanto isso, a conexão NÃO pode ser encerrada (fail-open).
+    let falhar = true;
+    let codigoDeFechamento: number | null = null;
+    ws.on('close', (code: number) => {
+      codigoDeFechamento = code;
+    });
+
+    const handle = iniciarRevalidacaoDeSessao({
+      intervaloMs: 50,
+      redis,
+      validarSessao: (sessaoId, jogadorId) => {
+        if (falhar) {
+          throw new Error('redis fora');
+        }
+        return validarSessaoNoRedis(redis, sessaoId, jogadorId);
+      },
+      obterSucessorDeSessao: (sessaoId) => {
+        if (falhar) {
+          throw new Error('redis fora');
+        }
+        return obterSucessorDeSessaoNoRedis(redis, sessaoId);
+      },
+    });
+    handles.push(handle);
+    try {
+      // Vários ticks com Redis "fora": nenhum 4401, conexão intacta.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      assert.equal(codigoDeFechamento, null, `não deveria fechar, fechou com ${codigoDeFechamento}`);
+      assert.notEqual(codigoDeFechamento, 4401, 'falha de Redis não pode encerrar a sessão (4401)');
+      assert.equal(ws.readyState, WebSocket.OPEN, 'a conexão deveria seguir aberta');
+      await pingPong(ws);
+
+      // Redis volta: a Sessão continua válida e a conexão permanece.
+      falhar = false;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      assert.equal(codigoDeFechamento, null, `não deveria fechar após recuperar, fechou com ${codigoDeFechamento}`);
+      assert.equal(ws.readyState, WebSocket.OPEN, 'a conexão deveria seguir aberta');
       await pingPong(ws);
     } finally {
       handle.parar();

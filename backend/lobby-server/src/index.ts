@@ -77,6 +77,8 @@ async function iniciar(): Promise<void> {
 
 void iniciar().catch(async (error: unknown) => {
   console.error('[lobby-server] falha na inicialização:', (error as Error).message);
+  revalidacaoDeSessao?.parar();
+  revalidacaoDeSessao = undefined;
   await pool.end().catch(() => undefined);
   await redisClient.quit().catch(() => undefined);
   process.exitCode = 1;

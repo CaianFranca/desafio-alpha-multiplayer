@@ -50,17 +50,22 @@ export function validarTokenDeSessao(token: string, secret: string): SessaoDoJog
 
 /**
  * Valida se a sessão no Redis existe e pertence ao jogador indicado.
+ *
+ * Erro de infraestrutura (Redis fora) PROPAGA — quem chama decide entre
+ * fail-open (revalidação periódica) e fail-closed (handshake). `false` fica
+ * reservado a Sessão ausente ou de outro Jogador. Mesmo padrão de
+ * `obterSessao` no lobby (`sessoes.ts`).
  */
 export async function validarSessaoNoRedis(
   redis: Redis,
   sessaoId: string,
   jogadorIdEsperado: string,
 ): Promise<boolean> {
+  const raw = await redis.get(`sessao:${sessaoId}`);
+  if (raw === null) {
+    return false;
+  }
   try {
-    const raw = await redis.get(`sessao:${sessaoId}`);
-    if (raw === null) {
-      return false;
-    }
     const parsed = JSON.parse(raw) as { jogadorId?: string };
     return parsed.jogadorId === jogadorIdEsperado;
   } catch {
@@ -72,15 +77,13 @@ export async function validarSessaoNoRedis(
  * Lê o marcador de rotação do refresh (issue #410): `sessao:rotacionada:<id>`
  * aponta para a Sessão sucessora enquanto o marcador viver. Sem marcador
  * (login, logout, revogação, expiração) devolve `null` — a revalidação então
- * encerra a conexão.
+ * encerra a conexão. Erro de infraestrutura (Redis fora) PROPAGA — quem chama
+ * decide entre fail-open e fail-closed. Mesmo padrão de `obterSucessorDeSessao`
+ * no lobby (`sessoes.ts`).
  */
 export async function obterSucessorDeSessaoNoRedis(
   redis: Redis,
   sessaoId: string,
 ): Promise<string | null> {
-  try {
-    return await redis.get(`sessao:rotacionada:${sessaoId}`);
-  } catch {
-    return null;
-  }
+  return redis.get(`sessao:rotacionada:${sessaoId}`);
 }
