@@ -33,7 +33,9 @@ paths:
         Registra um Cadastro com Apelido, email e senha e, em caso de sucesso,
         já autentica o novo Jogador (auto-login), retornando os cookies de
         Sessão. O Apelido é único (case-insensitive) com 3 a 20 caracteres; o
-        email é único (case-insensitive); a senha tem mínimo de 8 caracteres.
+        email é único (case-insensitive); a senha tem mínimo de 8 caracteres e
+        no máximo 72 bytes (UTF-8) — acima disso a senha é recusada porque o
+        bcrypt trunca em 72 bytes.
       requestBody:
         required: true
         content:
@@ -83,6 +85,8 @@ paths:
                     erros:
                       - campo: email
                         mensagem: Email já está em uso.
+        "429":
+          $ref: "#/components/responses/ExcessoTentativas"
   /api/auth/login:
     post:
       tags:
@@ -135,6 +139,8 @@ paths:
                   value:
                     erros:
                       - mensagem: Credenciais inválidas.
+        "429":
+          $ref: "#/components/responses/ExcessoTentativas"
   /api/auth/logout:
     post:
       tags:
@@ -284,6 +290,29 @@ components:
                 erros:
                   - campo: senha
                     mensagem: A senha deve ter no mínimo 8 caracteres.
+    ExcessoTentativas:
+      description: |
+        Excesso de tentativas de autenticação. A recusa é genérica e pode ser
+        disparada tanto pelo limite de tentativas do IP quanto pelo limite de
+        tentativas da conta, sem revelar se o Cadastro existe. O header
+        `Retry-After` indica em quantos segundos uma nova tentativa é aceita.
+      headers:
+        Retry-After:
+          description: Segundos até a janela de tentativas permitir uma nova tentativa.
+          schema:
+            type: integer
+            minimum: 0
+          example: 900
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErroResponse"
+          examples:
+            excessoTentativas:
+              summary: Tentativas excedidas para o IP ou para a conta
+              value:
+                erros:
+                  - mensagem: Muitas tentativas. Tente novamente mais tarde.
     SessaoInvalida:
       description: |
         Sessão ausente, revogada ou expirada. A pessoa volta ao estado de
@@ -322,7 +351,9 @@ components:
           type: string
           format: password
           minLength: 8
-          description: Senha das Credenciais, com mínimo de 8 caracteres.
+          description: |
+            Senha das Credenciais, com mínimo de 8 caracteres e no máximo 72
+            bytes em UTF-8 (o bcrypt trunca em 72 bytes).
           example: senha-segura-1
     LoginRequest:
       type: object

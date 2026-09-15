@@ -41,11 +41,8 @@ const redis = criarClienteRedis();
 let appServidor: ReturnType<typeof createApp> | null = null;
 let contador = 0;
 
-async function subirServidor(): Promise<ServidorEfemero> {
-  if (appServidor === null) {
-    appServidor = createApp();
-  }
-  const server = http.createServer(appServidor);
+async function subirServidorCom(app: ReturnType<typeof createApp>): Promise<ServidorEfemero> {
+  const server = http.createServer(app);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => resolve());
@@ -58,6 +55,13 @@ async function subirServidor(): Promise<ServidorEfemero> {
         server.close((err) => (err === undefined ? resolve() : reject(err)));
       }),
   };
+}
+
+async function subirServidor(): Promise<ServidorEfemero> {
+  if (appServidor === null) {
+    appServidor = createApp();
+  }
+  return subirServidorCom(appServidor);
 }
 
 async function comServidor<T>(executar: (servidor: ServidorEfemero) => Promise<T>): Promise<T> {
@@ -114,11 +118,21 @@ function headerDeCookies(cookies: Cookies): string {
   return partes.join('; ');
 }
 
-function postJson(baseUrl: string, path: string, corpo: unknown, cookies?: Cookies): Promise<Response> {
+function postJson(
+  baseUrl: string,
+  path: string,
+  corpo: unknown,
+  cookies?: Cookies,
+  ip?: string,
+): Promise<Response> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   const cookieHeader = headerDeCookies(cookies ?? {});
   if (cookieHeader.length > 0) {
     headers.cookie = cookieHeader;
+  }
+  if (ip !== undefined) {
+    // Com `trust proxy` = 1, o Express usa o primeiro IP do XFF como req.ip.
+    headers['x-forwarded-for'] = ip;
   }
   return fetch(`${baseUrl}${path}`, {
     method: 'POST',
@@ -126,6 +140,30 @@ function postJson(baseUrl: string, path: string, corpo: unknown, cookies?: Cooki
     body: typeof corpo === 'string' ? corpo : JSON.stringify(corpo),
   });
 }
+
+// Executa com variáveis de ambiente de rate limit sobrescritas e as restaura
+// ao final, mesmo em caso de falha — `getConfig()` lê `process.env` a cada
+// chamada, então a rota enxerga os valores vigentes no momento do request.
+async function comEnv<T>(valores: Record<string, string>, executar: () => Promise<T>): Promise<T> {
+  const anteriores = new Map<string, string | undefined>();
+  for (const [chave, valor] of Object.entries(valores)) {
+    anteriores.set(chave, process.env[chave]);
+    process.env[chave] = valor;
+  }
+  try {
+    return await executar();
+  } finally {
+    for (const [chave, anterior] of anteriores) {
+      if (anterior === undefined) {
+        delete process.env[chave];
+      } else {
+        process.env[chave] = anterior;
+      }
+    }
+  }
+}
+
+const CORPO_EXCESSO = { erros: [{ mensagem: 'Muitas tentativas. Tente novamente mais tarde.' }] };
 
 function getAuth(baseUrl: string, path: string, cookies?: Cookies): Promise<Response> {
   const headers: Record<string, string> = {};
@@ -671,5 +709,207 @@ test('concorrência: 2 refreshes paralelos com o mesmo refresh — exatamente 1 
     const falhas = refreshes.filter((r) => r.status === 401).length;
     assert.equal(sucessos, 1, `esperava 1 sucesso, encontrei ${sucessos}`);
     assert.equal(falhas, N - 1, `esperava ${N - 1} falhas, encontrei ${falhas}`);
+  });
+});
+
+// --- 25. login: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP ---
+
+test('login: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP', async () => {
+  await comEnv(
+    {
+      AUTH_RATE_LIMIT_MAX_POR_IP: '2',
+      AUTH_RATE_LIMIT_MAX_POR_CONTA: '100',
+      AUTH_RATE_LIMIT_JANELA_SEGUNDOS: '900',
+    },
+    async () => {
+      await comServidor(async (servidor) => {
+        const ip = '203.0.113.10';
+        const credenciais = { email: emailUnico('limite-ip'), senha: 'senha_dev_123' };
+
+        const primeira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+        const segunda = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+        const terceira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+
+        assert.equal(primeira.status, 401);
+        assert.equal(segunda.status, 401);
+        assert.equal(terceira.status, 429);
+        const retryAfter = terceira.headers.get('retry-after');
+        assert.ok(retryAfter !== null, 'esperava header Retry-After');
+        assert.ok(Number.isInteger(Number(retryAfter)) && Number(retryAfter) > 0, `Retry-After inválido: ${retryAfter}`);
+        assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+      });
+    },
+  );
+});
+
+// --- 26. login: 429 por conta com IPs distintos ---
+
+test('login: 429 por conta quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_CONTA', async () => {
+  await comEnv(
+    { AUTH_RATE_LIMIT_MAX_POR_IP: '100', AUTH_RATE_LIMIT_MAX_POR_CONTA: '2' },
+    async () => {
+      await comServidor(async (servidor) => {
+        const credenciais = { email: emailUnico('limite-conta'), senha: 'senha_dev_123' };
+
+        const primeira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, '203.0.113.21');
+        const segunda = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, '203.0.113.22');
+        const terceira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, '203.0.113.23');
+
+        assert.equal(primeira.status, 401);
+        assert.equal(segunda.status, 401);
+        assert.equal(terceira.status, 429);
+        assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+      });
+    },
+  );
+});
+
+// --- 27. register: 429 por IP ---
+
+test('register: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP', async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '2', AUTH_RATE_LIMIT_MAX_POR_CONTA: '100' }, async () => {
+    await comServidor(async (servidor) => {
+      const ip = '203.0.113.31';
+      const primeira = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido(), undefined, ip);
+      const segunda = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido(), undefined, ip);
+      const terceira = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido(), undefined, ip);
+
+      assert.equal(primeira.status, 201);
+      assert.equal(segunda.status, 201);
+      assert.equal(terceira.status, 429);
+      assert.ok(terceira.headers.get('retry-after') !== null, 'esperava header Retry-After');
+      assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+    });
+  });
+});
+
+// --- 28. register: 429 por conta com IPs distintos ---
+
+test('register: 429 por conta quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_CONTA', async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '100', AUTH_RATE_LIMIT_MAX_POR_CONTA: '2' }, async () => {
+    await comServidor(async (servidor) => {
+      const corpo = {
+        apelido: apelidoUnico('jogador'),
+        email: emailUnico('limite-conta-reg'),
+        senha: 'senha_dev_123',
+      };
+      const primeira = await postJson(servidor.baseUrl, '/api/auth/register', corpo, undefined, '203.0.113.41');
+      const segunda = await postJson(servidor.baseUrl, '/api/auth/register', corpo, undefined, '203.0.113.42');
+      const terceira = await postJson(servidor.baseUrl, '/api/auth/register', corpo, undefined, '203.0.113.43');
+
+      assert.equal(primeira.status, 201);
+      assert.equal(segunda.status, 409);
+      assert.equal(terceira.status, 429);
+      assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+    });
+  });
+});
+
+// --- 29. 429 não distingue conta existente de inexistente ---
+
+test('login: 429 não distingue conta existente de inexistente', async () => {
+  const existente = cadastroValido();
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', existente);
+    assert.equal(reg.status, 201);
+  });
+
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '1', AUTH_RATE_LIMIT_MAX_POR_CONTA: '1' }, async () => {
+    const respostaExistente = await comServidor(async (servidor) => {
+      const ip = '203.0.113.51';
+      const credenciais = { email: existente.email, senha: 'senha_errada_999' };
+      await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      return postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+    });
+
+    await redis.flushdb();
+
+    const respostaInexistente = await comServidor(async (servidor) => {
+      const ip = '203.0.113.52';
+      const credenciais = { email: emailUnico('inexistente-limite'), senha: 'senha_dev_123' };
+      await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      return postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+    });
+
+    assert.equal(respostaExistente.status, 429);
+    assert.equal(respostaInexistente.status, 429);
+    assert.equal(
+      respostaExistente.headers.get('retry-after') !== null,
+      respostaInexistente.headers.get('retry-after') !== null,
+    );
+    assert.deepEqual(await respostaExistente.json(), await respostaInexistente.json());
+  });
+});
+
+// --- 30. contador sobrevive a nova instância da aplicação (mesmo Redis) ---
+
+test('rate limit: contador persiste em nova instância da aplicação', async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '1', AUTH_RATE_LIMIT_MAX_POR_CONTA: '100' }, async () => {
+    const ip = '203.0.113.61';
+    const credenciais = { email: emailUnico('persistente'), senha: 'senha_dev_123' };
+
+    await comServidor(async (servidor) => {
+      const primeira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      const segunda = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      assert.equal(primeira.status, 401);
+      assert.equal(segunda.status, 429);
+    });
+
+    const novaInstancia = await subirServidorCom(createApp());
+    try {
+      const terceira = await postJson(novaInstancia.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      assert.equal(terceira.status, 429, 'nova instância deve enxergar o contador no Redis');
+      assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+    } finally {
+      await novaInstancia.fechar();
+    }
+  });
+});
+
+// --- 31. register: senha acima de 72 bytes (UTF-8) é recusada ---
+
+test('register: 400 com campo=senha para senha acima de 72 bytes', async () => {
+  await comServidor(async (servidor) => {
+    const ascii = await postJson(servidor.baseUrl, '/api/auth/register', {
+      apelido: apelidoUnico('jogador'),
+      email: emailUnico('senha-73'),
+      senha: 'a'.repeat(73),
+    });
+    assert.equal(ascii.status, 400);
+    const bodyAscii = (await ascii.json()) as ErroResponse;
+    const erroAscii = bodyAscii.erros.find((e) => e.campo === 'senha');
+    assert.ok(erroAscii, 'esperava erro de campo=senha');
+    assert.equal(erroAscii!.mensagem, 'A senha excede o limite de 72 bytes (UTF-8).');
+
+    const multibyte = await postJson(servidor.baseUrl, '/api/auth/register', {
+      apelido: apelidoUnico('jogador'),
+      email: emailUnico('senha-74'),
+      senha: 'é'.repeat(37), // 37 × 2 bytes = 74 bytes
+    });
+    assert.equal(multibyte.status, 400);
+    const bodyMultibyte = (await multibyte.json()) as ErroResponse;
+    const erroMultibyte = bodyMultibyte.erros.find((e) => e.campo === 'senha');
+    assert.ok(erroMultibyte, 'esperava erro de campo=senha multibyte');
+    assert.equal(erroMultibyte!.mensagem, 'A senha excede o limite de 72 bytes (UTF-8).');
+  });
+});
+
+// --- 32. register: senha de exatamente 72 bytes (UTF-8) é aceita ---
+
+test('register: 201 para senha de exatamente 72 bytes', async () => {
+  await comServidor(async (servidor) => {
+    const ascii = await postJson(servidor.baseUrl, '/api/auth/register', {
+      apelido: apelidoUnico('jogador'),
+      email: emailUnico('senha-72'),
+      senha: 'a'.repeat(72),
+    });
+    assert.equal(ascii.status, 201);
+
+    const multibyte = await postJson(servidor.baseUrl, '/api/auth/register', {
+      apelido: apelidoUnico('jogador'),
+      email: emailUnico('senha-72mb'),
+      senha: 'é'.repeat(36), // 36 × 2 bytes = 72 bytes
+    });
+    assert.equal(multibyte.status, 201);
   });
 });
