@@ -94,7 +94,6 @@ import type {
   TurnoIniciadoEvento,
   JogadorEmReconexaoWireEvento,
   JogadorReconectadoWireEvento,
-  JogadorPresencaAtualizadaWireEvento,
   PresencaNaPartidaWire,
 } from '@flicker/shared'
 
@@ -146,7 +145,7 @@ export function peoesEmBaixaIluminacaoDe(
  * (issue #151), monstros/estados (ST-15, #174 — ATAQUE_RESOLVIDO e
  * RESGATE_REALIZADO), desistência (issue #290 — DESISTENCIA_REGISTRADA) e
  * presença em reconexão (issue #294 — JOGADOR_EM_RECONEXAO/
- * JOGADOR_RECONECTADO/JOGADOR_PRESENCA_ATUALIZADA).
+ * JOGADOR_RECONECTADO).
  * É o tipo roteado pelo socket e aceito pelo reducer.
  */
 export type EventoDoJogoNoCliente =
@@ -165,7 +164,6 @@ export type EventoDoJogoNoCliente =
   | DesistenciaRegistradaWireEvento
   | JogadorEmReconexaoWireEvento
   | JogadorReconectadoWireEvento
-  | JogadorPresencaAtualizadaWireEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -909,22 +907,6 @@ export function reduzirEvento(
         jogadorPorId: {
           ...estado.jogadorPorId,
           [evento.jogadorId]: { ...anterior, presenca: 'conectado' as const },
-        },
-      }
-    }
-
-    case 'JOGADOR_PRESENCA_ATUALIZADA': {
-      // Seam genérico que espelha MEMBRO_DESCONECTADO/RECONECTADO da Sala
-      // (compat com push por evento ou só via snapshot). Fallback `conectado`.
-      const anterior = estado.jogadorPorId[evento.jogadorId]
-      if (!anterior) return estado
-      const presenca = evento.presenca === 'em_reconexao' ? 'em_reconexao' as const : 'conectado' as const
-      if (anterior.presenca === presenca) return estado
-      return {
-        ...estado,
-        jogadorPorId: {
-          ...estado.jogadorPorId,
-          [evento.jogadorId]: { ...anterior, presenca },
         },
       }
     }

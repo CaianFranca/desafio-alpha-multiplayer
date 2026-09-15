@@ -41,7 +41,6 @@ import type {
   DesistenciaRegistradaWireEvento,
   JogadorEmReconexaoWireEvento,
   JogadorReconectadoWireEvento,
-  JogadorPresencaAtualizadaWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 import {
@@ -58,8 +57,7 @@ import {
  * limpeza (issue #151), snapshot (PARTIDA_INICIADA/ESTADO_DA_PARTIDA),
  * monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO),
  * desistência (issue #290 — DESISTENCIA_REGISTRADA) e presença em reconexão
- * (issue #294 — JOGADOR_EM_RECONEXAO/JOGADOR_RECONECTADO/
- * JOGADOR_PRESENCA_ATUALIZADA) agora roteados exclusivamente pelo contrato de Partida.
+ * (issue #294 — JOGADOR_EM_RECONEXAO/JOGADOR_RECONECTADO) agora roteados exclusivamente pelo contrato de Partida.
  */
 export type EventoDoCanalDaPartida =
   | TabuleiroEventoDoServidor
@@ -79,7 +77,6 @@ export type EventoDoCanalDaPartida =
   | DesistenciaRegistradaWireEvento
   | JogadorEmReconexaoWireEvento
   | JogadorReconectadoWireEvento
-  | JogadorPresencaAtualizadaWireEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -333,7 +330,6 @@ export function usePartidaWebSocket({
         case 'DESISTENCIA_REGISTRADA':
         case 'JOGADOR_EM_RECONEXAO':
         case 'JOGADOR_RECONECTADO':
-        case 'JOGADOR_PRESENCA_ATUALIZADA':
           // O grupo de cases acima é intencionalmente vazio (fall-through):
           // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
           // o cliente apenas espelha).

@@ -306,7 +306,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const desistenciasPreSnapshotRef = useRef<Array<{ jogadorId: string; peaoId: string; causa: 'desistencia' | 'expiracao' }>>([])
 
   // ── Aviso de reconexão (issue #294, spec #292) ──
-  // Evento-driven: JOGADOR_EM_RECONEXAO / JOGADOR_RECONECTADO / JOGADOR_PRESENCA_ATUALIZADA
+  // Evento-driven: JOGADOR_EM_RECONEXAO / JOGADOR_RECONECTADO
   // projetam no modelo + toast visível e anúncio SR. Snapshot reconcilia (autoridade).
   // Auto-dismiss em 8s como desistência. Sem bloquear tela dos demais.
   const [avisoReconexao, setAvisoReconexao] = useState<{
@@ -657,12 +657,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           return
         }
         // Presença em reconexão (issue #294, spec #292): JOGADOR_EM_RECONEXAO /
-        // JOGADOR_RECONECTADO / JOGADOR_PRESENCA_ATUALIZADA atualizam o modelo
+        // JOGADOR_RECONECTADO atualizam o modelo
         // (snapshot é autoridade) e anunciam com toast + SR sem bloquear tela.
         if (
           evento.type === 'JOGADOR_EM_RECONEXAO' ||
-          evento.type === 'JOGADOR_RECONECTADO' ||
-          evento.type === 'JOGADOR_PRESENCA_ATUALIZADA'
+          evento.type === 'JOGADOR_RECONECTADO'
         ) {
           // Após término a presença não importa — ignora como demais eventos de jogo.
           if (emResultadoRef.current) return
@@ -674,7 +673,6 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           let tipo: 'reconectando' | 'reconectado' | null = null
           if (evento.type === 'JOGADOR_EM_RECONEXAO') tipo = 'reconectando'
           else if (evento.type === 'JOGADOR_RECONECTADO') tipo = 'reconectado'
-          else tipo = evento.presenca === 'em_reconexao' ? 'reconectando' : 'reconectado'
           if (!temRoster) {
             const fila = reconexoesPreSnapshotRef.current
             // Dedupe por jogadorId+tipo para não acumular replay
