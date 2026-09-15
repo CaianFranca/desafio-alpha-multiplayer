@@ -1041,7 +1041,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     expect(toquesDeAudio).toHaveLength(0)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
     // Som próprio do ataque (issue #385): telegraph silencioso de 1s e só
-    // depois o uivo no disparo, nunca o THUD genérico (recusas de jogada
+    // depois o uivo no disparo, nunca o THUD genérico (Recusas de Ação
     // mantêm o genérico).
     await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
     expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })

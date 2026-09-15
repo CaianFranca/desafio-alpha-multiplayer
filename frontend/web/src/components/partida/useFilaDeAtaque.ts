@@ -1,6 +1,6 @@
 /**
- * Fila de animação do ataque dos monstros (issue #385 + follow-up da ordem
- * Espectro→Vulto, decisão do usuário).
+ * Fila de animação do ataque dos monstros (issue #385 — fila sequencial na
+ * ordem de atacantes do wire).
  *
  * Evento-driven como a limpeza/encaixe: o `ATAQUE_RESOLVIDO` NÃO despacha o
  * estado na hora — a PartidaPage entrega evento+contexto aqui e o driver
@@ -8,8 +8,9 @@
  * instante da chegada do próprio slot (`DURACAO_DISPARO_ATAQUE_MS` após o
  * disparo), com guarda de snapshot-seq (pula se `seqSnapshot` mudou — mesmo
  * padrão dos turnos segurados). Sem vítimas/protegidos na fatia, nada a
- * aplicar. O Espectro resolve por completo primeiro (animação, som,
- * consequências) e só após seu fim o Vulto entra em telegraph.
+ * aplicar. Cada slot resolve por completo (animação, som, consequências) na
+ * ordem do wire e só após seu fim o próximo entra em telegraph — com mais de
+ * um atacante a virada de turno espera a fila drenar.
  *
  * Cada item abre com o telegraph silencioso de 1s (contorno vermelho pulsante
  * na peça do monstro, sem som nem consequência) e só depois o monstro soa no
@@ -26,8 +27,9 @@
  * `CELULAS_ILUMINADAS`/`LIMPEZA_APLICADA` seguintes vão ao buffer da janela
  * (sem som/trigger); se `ATAQUE_RESOLVIDO` chegar antes do fechamento, o
  * buffer entra na fila (libera na chegada do Vulto, ou ao drenar sem Vulto);
- * senão, libera em ordem no fechamento (a virada de turno fecha), compondo
- * com fila ativa de ataque anterior. Com a fila ativa (segunda onda
+ * senão, libera em ordem no fechamento — auto-fecho de
+ * `DURACAO_JANELA_GATILHO_MS` sem ataque (o lote aplica ao confirmar) ou a
+ * virada de turno — compondo com fila ativa de ataque anterior. Com a fila ativa (segunda onda
  * pós-Baixa, virada), o seguro direto abaixo segue valendo, na ordem de
  * chegada. Snapshot (`ESTADO_DA_PARTIDA`) e `PARTIDA_TERMINADA` aplicam na
  * hora pela PartidaPage e cancelam a fila + descartam janela e segurados
@@ -51,6 +53,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AtaqueResolvidoWireEvento,
+  Celula,
   CelulasIluminadasWireEvento,
   LimpezaAplicadaWireEvento,
   TurnoEncerradoEvento,
@@ -60,6 +63,7 @@ import {
   DURACAO_ATAQUE_POR_ATACANTE_MS,
   DURACAO_BASE_ATAQUE_MS,
   DURACAO_DISPARO_ATAQUE_MS,
+  DURACAO_JANELA_GATILHO_MS,
   DURACAO_TELEGRAPH_ATAQUE_MS,
 } from '../../game/tabuleiro/animacao'
 import {
@@ -89,6 +93,12 @@ interface TurnoSegurado {
 interface LimpezaSegurada {
   readonly evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento
   readonly seqSnapshot: number
+  /**
+   * Fotografia pecaId→célula no instante do seguro (modelo pré-despacho): a
+   * limpeza pode aplicar antes de o ataque chegar (auto-fecho da janela) —
+   * a onda do coreógrafo usa para varrer as removidas (só lacunas).
+   */
+  readonly celulas: ReadonlyMap<string, Celula>
 }
 
 interface ItemNaFila {
@@ -128,6 +138,7 @@ export function useFilaDeAtaque({
   /** Segura iluminação/limpeza com a fila ativa (libera na chegada do Vulto). */
   readonly segurarLimpezaSeEmAtaque: (
     evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento,
+    celulas?: ReadonlyMap<string, Celula>,
   ) => boolean
   /** Abre a janela de gatilho da confirmação (o lote real chega antes do ataque). */
   readonly abrirJanelaDeGatilho: () => void
@@ -137,6 +148,7 @@ export function useFilaDeAtaque({
    */
   readonly segurarNaJanelaSeAberta: (
     evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento,
+    celulas?: ReadonlyMap<string, Celula>,
   ) => boolean
   /** Fecha a janela entregando o buffer à fila (libera na chegada do Vulto). */
   readonly entregarJanelaAoAtaque: () => void
@@ -157,6 +169,13 @@ export function useFilaDeAtaque({
   // virada de turno (libera em ordem) fechar.
   const janelaDeGatilhoRef = useRef(false)
   const limpezasNaJanelaRef = useRef<LimpezaSegurada[]>([])
+  // Retidas do fecho sem ataque (fix pós-review PR #399 — onda cega no
+  // ataque tardio): o auto-fecho aplica a limpeza e esvazia o buffer — mas um
+  // ATAQUE_RESOLVIDO tardio do mesmo gatilho (sem TURNO no meio) ainda precisa
+  // varrer as removidas. Guarda pecaId→célula pré-limpeza (ids = chaves).
+  // Expira em: nova janela (outro lote), virada de turno, snapshot, dreno com
+  // uso (enfileirar consome), cancelar/unmount.
+  const celulasRetidasRef = useRef(new Map<string, Celula>())
   const seqSnapshotRef = useRef(0)
   const keyRef = useRef(0)
   // Recursão do driver via ref (mesmo padrão de `desconectarRef` na
@@ -174,8 +193,9 @@ export function useFilaDeAtaque({
     anunciarRef.current = anunciarRecusa
     liberarLimpezaRef.current = liberarLimpezaSegurada
   }, [liberarTurnoSegurado, aplicarFatiaDoAtaque, anunciarRecusa, liberarLimpezaSegurada])
-  // Unmount descarta tudo explicitamente (timers, fila, janela e segurados —
-  // sem vazamento entre testes/páginas; o snapshot reconcilia ao remontar).
+  // Unmount descarta tudo explicitamente (timers, fila, janela, segurados e
+  // retidas — sem vazamento entre testes/páginas; o snapshot reconcilia ao
+  // remontar).
   useEffect(
     () => () => {
       for (const id of timersRef.current) window.clearTimeout(id)
@@ -185,6 +205,7 @@ export function useFilaDeAtaque({
       limpezasSeguradasRef.current = []
       janelaDeGatilhoRef.current = false
       limpezasNaJanelaRef.current = []
+      celulasRetidasRef.current.clear()
       emAndamentoRef.current = false
     },
     [],
@@ -279,7 +300,31 @@ export function useFilaDeAtaque({
 
   const enfileirarAtaque = useCallback(
     (evento: AtaqueResolvidoWireEvento, contexto: ContextoDaCoreografiaDoAtaque): void => {
-      const itens = coreografarAtaque(evento, contexto)
+      // Retidas do fecho sem ataque (onda cega no ataque tardio): ids das
+      // removidas + células pré-limpeza das seguradas — um ATAQUE tardio do
+      // mesmo gatilho (sem TURNO no meio) ainda varre as removidas. Drena no
+      // uso (enfileirar consome); o resto expira adiante.
+      const retidas = celulasRetidasRef.current
+      const removidasSeguradas = limpezasSeguradasRef.current.flatMap((segurada) =>
+        segurada.evento.type === 'LIMPEZA_APLICADA' ? segurada.evento.pecasRemovidas : [],
+      )
+      for (const pecaId of retidas.keys()) {
+        if (!removidasSeguradas.includes(pecaId)) removidasSeguradas.push(pecaId)
+      }
+      // Células pré-limpeza fotografadas nos seguros (fix pós-PR #399): a
+      // limpeza pode já ter aplicado (auto-fecho da janela) quando o ataque
+      // chega — a onda usa para varrer as removidas (só lacunas).
+      const celulasPreLimpeza = new Map<string, Celula>()
+      for (const segurada of limpezasSeguradasRef.current) {
+        for (const [pecaId, celula] of segurada.celulas) {
+          if (!celulasPreLimpeza.has(pecaId)) celulasPreLimpeza.set(pecaId, celula)
+        }
+      }
+      for (const [pecaId, celula] of retidas) {
+        if (!celulasPreLimpeza.has(pecaId)) celulasPreLimpeza.set(pecaId, celula)
+      }
+      retidas.clear()
+      const itens = coreografarAtaque(evento, contexto, removidasSeguradas, celulasPreLimpeza)
       // Sem slot (wire sem atacantes — o engine só emite com ao menos um
       // Monstro): nada anima e nenhum driver passa a rodar — a limpeza
       // segurada (incluindo janela recém-entregue) libera em ordem em vez
@@ -301,6 +346,9 @@ export function useFilaDeAtaque({
 
   const segurarTurnoSeEmAtaque = useCallback(
     (evento: TurnoIniciadoEvento | TurnoEncerradoEvento): boolean => {
+      // Virada expira as retidas do fecho sem ataque: outro turno, outro
+      // lote — removidas antigas não assombram ondas futuras.
+      celulasRetidasRef.current.clear()
       if (!emAndamentoRef.current) return false
       turnosSeguradosRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current })
       return true
@@ -309,28 +357,58 @@ export function useFilaDeAtaque({
   )
 
   const segurarLimpezaSeEmAtaque = useCallback(
-    (evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento): boolean => {
+    (
+      evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento,
+      celulas: ReadonlyMap<string, Celula> = new Map(),
+    ): boolean => {
       if (!emAndamentoRef.current) return false
-      limpezasSeguradasRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current })
+      limpezasSeguradasRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current, celulas })
       return true
     },
     [],
   )
 
-  const abrirJanelaDeGatilho = useCallback((): void => {
-    janelaDeGatilhoRef.current = true
+  const fecharJanelaRef = useRef<() => void>(() => undefined)
+  const janelaTimerRef = useRef<number | null>(null)
+  const cancelarTimerDaJanela = useCallback((): void => {
+    if (janelaTimerRef.current !== null) {
+      window.clearTimeout(janelaTimerRef.current)
+      timersRef.current = timersRef.current.filter((t) => t !== janelaTimerRef.current)
+      janelaTimerRef.current = null
+    }
   }, [])
 
+  const abrirJanelaDeGatilho = useCallback((): void => {
+    // Reabertura (dupla confirmação sem fechar — não esperada no wire):
+    // descarta o timer anterior antes de rearmar.
+    cancelarTimerDaJanela()
+    // Lote novo expira as retidas do lote anterior.
+    celulasRetidasRef.current.clear()
+    janelaDeGatilhoRef.current = true
+    // Auto-fecho (fix pós-PR #399): o lote real chega no mesmo burst (ms) —
+    // sem ATAQUE no prazo, o lote aplica ao confirmar em vez de segurar até
+    // a virada de turno. O timer morre em entregar/fechar/cancelar/unmount.
+    agendar(DURACAO_JANELA_GATILHO_MS, () => {
+      janelaTimerRef.current = null
+      fecharJanelaRef.current()
+    })
+    janelaTimerRef.current = timersRef.current[timersRef.current.length - 1] ?? null
+  }, [agendar, cancelarTimerDaJanela])
+
   const segurarNaJanelaSeAberta = useCallback(
-    (evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento): boolean => {
+    (
+      evento: CelulasIluminadasWireEvento | LimpezaAplicadaWireEvento,
+      celulas: ReadonlyMap<string, Celula> = new Map(),
+    ): boolean => {
       if (!janelaDeGatilhoRef.current) return false
-      limpezasNaJanelaRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current })
+      limpezasNaJanelaRef.current.push({ evento, seqSnapshot: seqSnapshotRef.current, celulas })
       return true
     },
     [],
   )
 
   const entregarJanelaAoAtaque = useCallback((): void => {
+    cancelarTimerDaJanela()
     janelaDeGatilhoRef.current = false
     const emJanela = limpezasNaJanelaRef.current
     limpezasNaJanelaRef.current = []
@@ -338,9 +416,10 @@ export function useFilaDeAtaque({
       if (segurada.seqSnapshot !== seqSnapshotRef.current) continue
       limpezasSeguradasRef.current.push(segurada)
     }
-  }, [])
+  }, [cancelarTimerDaJanela])
 
   const fecharJanelaDeGatilho = useCallback((): void => {
+    cancelarTimerDaJanela()
     if (!janelaDeGatilhoRef.current && limpezasNaJanelaRef.current.length === 0) return
     janelaDeGatilhoRef.current = false
     const emJanela = limpezasNaJanelaRef.current
@@ -348,20 +427,32 @@ export function useFilaDeAtaque({
     for (const segurada of emJanela) {
       if (segurada.seqSnapshot !== seqSnapshotRef.current) continue
       // Compõe com fila ativa de ataque anterior: segura junto; sem fila,
-      // libera em ordem pelo caminho direto (modelo + trigger + som).
+      // libera em ordem pelo caminho direto (modelo + trigger + som) e retém
+      // as fotos — um ataque tardio do mesmo gatilho ainda varre as removidas.
       if (emAndamentoRef.current) {
         limpezasSeguradasRef.current.push(segurada)
       } else {
+        for (const [pecaId, celula] of segurada.celulas) {
+          if (!celulasRetidasRef.current.has(pecaId)) {
+            celulasRetidasRef.current.set(pecaId, celula)
+          }
+        }
         liberarLimpezaRef.current(segurada.evento)
       }
     }
-  }, [])
+  }, [cancelarTimerDaJanela])
+  useEffect(() => {
+    fecharJanelaRef.current = fecharJanelaDeGatilho
+  }, [fecharJanelaDeGatilho])
 
   const notificarSnapshot = useCallback((): void => {
     seqSnapshotRef.current += 1
+    // Snapshot é autoridade total: fotos antigas expiram.
+    celulasRetidasRef.current.clear()
   }, [])
 
   const cancelarAtaque = useCallback((): void => {
+    cancelarTimerDaJanela()
     for (const id of timersRef.current) window.clearTimeout(id)
     timersRef.current = []
     filaRef.current = []
@@ -369,9 +460,10 @@ export function useFilaDeAtaque({
     limpezasSeguradasRef.current = []
     janelaDeGatilhoRef.current = false
     limpezasNaJanelaRef.current = []
+    celulasRetidasRef.current.clear()
     emAndamentoRef.current = false
     setAtaqueExibido(null)
-  }, [])
+  }, [cancelarTimerDaJanela])
 
   const pecaIdEmTelegraph = ataqueExibido !== null && ataqueExibido.estagio === 'telegraph'
     ? ataqueExibido.item.pecaId

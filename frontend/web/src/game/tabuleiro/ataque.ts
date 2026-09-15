@@ -2,9 +2,8 @@
  * Coreografia do ataque dos monstros (issue #385) — 100% pura.
  *
  * Deriva do `ATAQUE_RESOLVIDO` + modelo PRÉ-despacho a fila sequencial de
- * itens (um por atacante, Espectro antes do Vulto — ordem estável; mesmo tipo
- * mantém a ordem de `atacantes`, que o engine emite na ordem de
- * posicionamento): telegraph silencioso de
+ * itens (um por atacante, na ordem de `atacantes` do wire — o cliente nunca
+ * reordena; qualquer ordem do engine anima e soa sem quebrar): telegraph silencioso de
  * 1s com contorno vermelho na peça do monstro, depois gesto de disparo antes
  * da reação em cadeia. O Vulto ondula por camadas de distância toroidal da
  * célula do monstro (ADR-0012: na borda, a onda atravessa para o lado oposto;
@@ -18,8 +17,8 @@
  * causa Baixa Iluminação; o Espectro só perda de Sanidade/Amedrontado
  * (espelho do funil do engine, partida.ts — penalidades por tipo). Jogador
  * atingido pelos dois revela a sanidade no slot do Espectro e a Baixa no
- * slot do Vulto. A proteção consumida (`protegidos`) revela no primeiro slot
- * cujo alcance contém o peão (ordem Espectro→Vulto).
+ * slot de cada tipo. A proteção consumida (`protegidos`) revela no primeiro slot
+ * (ordem do wire) cujo alcance contém o peão.
  *
  * Reação por peça do alcance: sem peão pula (sem sair da célula); com peão
  * treme junto sem pular; protegido recebe só escudo (sem tremor nem
@@ -28,11 +27,12 @@
  * o campo ativa o fallback (sem onda, sem quebra) — sons, fila e bloqueio
  * funcionam igual. Nenhum julgamento de regra no cliente.
  *
- * Limitação conhecida (review PR #399, só documentada): `pecasNoAlcance` é
- * computado pós-limpeza no engine — as peças removidas no próprio gatilho
- * não entram no payload, então a onda não as varre (só revela as
- * sobreviventes). Não é bug do cliente: a fila segura a limpeza até a
- * chegada do Vulto, mas o alcance listado já nasceu sem as removidas.
+ * Onda sobre as removidas do gatilho (fix do review PR #399):
+ * `pecasNoAlcance` é computado pós-limpeza no engine — as peças removidas no
+ * próprio gatilho não entram no payload. Como o modelo aqui ainda é
+ * PRÉ-despacho (a limpeza do lote chega segurada na fila/janela), a fila
+ * entrega os ids removidos (`pecasRemovidasDoGatilho`) e a onda as varre junto
+ * pela distância toroidal da célula pré-limpeza — sem julgar regra, só revela.
  */
 
 import type { AtaqueResolvidoWireEvento, EstadoResultanteNoAtaque } from '@flicker/shared'
@@ -65,7 +65,7 @@ export interface PecaReagindoNoAtaque {
   readonly atrasoMs: number
 }
 
-/** Um atacante da fila — Espectro antes do Vulto (ordem estável). */
+/** Um atacante da fila — na ordem de `atacantes` do wire. */
 export interface ItemCoreografadoDoAtaque {
   readonly pecaId: string
   readonly tipo: 'vulto' | 'espectro'
@@ -85,7 +85,7 @@ export interface ItemCoreografadoDoAtaque {
   /**
    * Peões protegidos DENTRO do alcance deste atacante
    * (`peoesNoAlcance × protegidos` globais, resolvidos a peão via contexto) —
-   * só no PRIMEIRO slot (ordem Espectro→Vulto) cujo alcance contém o peão; os
+   * só no PRIMEIRO slot (ordem do wire) cujo alcance contém o peão; os
    * demais slots silenciam (sem defesa dupla pelo mesmo consumo).
    */
   readonly peoesProtegidos: readonly string[]
@@ -116,8 +116,8 @@ export interface FatiaDoAtaque {
    */
   readonly estadosAplicados: readonly EstadoResultanteNoAtaque[]
   /**
-   * Proteção consumida revelada neste slot: só o primeiro slot (ordem
-   * Espectro→Vulto) cujo alcance contém o peão; mapeamento desconhecido ou
+   * Proteção consumida revelada neste slot: só o primeiro slot (ordem do
+   * wire) cujo alcance contém o peão; mapeamento desconhecido ou
    * fora de todos os alcances cai no primeiro item (nunca se perde consumo).
    */
   readonly protegidos: readonly string[]
@@ -195,11 +195,16 @@ export function duracaoDaFilaDeAtaque(quantidadeDeAtacantes: number): number {
 }
 
 /**
- * Coreografa o ataque em fila sequencial por atacante (Espectro antes do
- * Vulto, ordem estável — mesmo tipo mantém a ordem de `atacantes`, que o
- * engine emite na ordem de posicionamento). O estado do jogo aplica cada
- * fatia na chegada do próprio slot (via `reduzirFatiaDoAtaque` no driver);
- * isto só revela.
+ * Coreografa o ataque em fila sequencial por atacante, na ordem de
+ * `atacantes` do wire (issue #385: "na ordem de atacantes" — o cliente nunca
+ * reordena; Vulto antes do Espectro ou o inverso animam sem quebrar). O
+ * fatiamento é por tipo (Vulto só Baixa, Espectro só sanidade — a redução
+ * mascara por `fatia.tipo`) e por alcance (dono do peão), ambos independentes
+ * da ordem — por isso qualquer ordem do engine é segura. Com mais de um
+ * atacante, cada slot resolve por completo antes do próximo entrar em
+ * telegraph; o driver segura a virada de turno até a fila drenar. O estado do
+ * jogo aplica cada fatia na chegada do próprio slot (via
+ * `reduzirFatiaDoAtaque` no driver); isto só revela.
  */
 export function coreografarAtaque(
   evento: Pick<
@@ -207,6 +212,19 @@ export function coreografarAtaque(
     'atacantes' | 'peoesAtingidos' | 'protegidos' | 'estadosAplicados'
   >,
   contexto: ContextoDaCoreografiaDoAtaque,
+  /**
+   * Peças removidas pela limpeza do mesmo gatilho (ainda seguradas, modelo
+   * PRÉ-despacho): a onda as varre junto — ver bloco da reação abaixo.
+   * Omissão (legado/testes) = só o wire, sem quebra.
+   */
+  pecasRemovidasDoGatilho: readonly string[] = [],
+  /**
+   * Células pré-limpeza das removidas (fotografadas ao segurar o evento, pois
+   * a limpeza pode já ter aplicado no modelo quando o ataque chega — ex.
+   * auto-fecho da janela sem ataque no prazo e ataque tardio em seguida).
+   * Só preenche o que o contexto não tem; nunca sobrescreve posição viva.
+   */
+  celulasPreLimpeza: ReadonlyMap<string, Celula> = new Map(),
 ): ItemCoreografadoDoAtaque[] {
   const atingidos = new Set(evento.peoesAtingidos)
   const peoesProtegidos = new Set<string>()
@@ -216,19 +234,19 @@ export function coreografarAtaque(
   }
   const celulaPorPeca = new Map<string, Celula>()
   for (const p of contexto.posicionadas) celulaPorPeca.set(p.pecaId, p.celula)
+  // Fotografia pré-limpeza (fix pós-PR #399): a limpeza do gatilho pode já
+  // ter aplicado no modelo (auto-fecho da janela) quando o ataque chega —
+  // as removidas seguradas trazem a célula conhecida. Só completa lacunas.
+  for (const [pecaId, celula] of celulasPreLimpeza) {
+    if (!celulaPorPeca.has(pecaId)) celulaPorPeca.set(pecaId, celula)
+  }
 
-  // Ordem estável Espectro→Vulto (decisão do usuário, follow-up da #385): o
-  // Espectro resolve por completo primeiro e só após seu fim o Vulto entra em
-  // telegraph. `Array.sort` é estável — mesmo tipo preserva a ordem do engine.
-  const ordemEstavel = evento.atacantes
-    .map((atacante, indice) => ({ atacante, indice }))
-    .sort(
-      (a, b) =>
-        (a.atacante.tipo === 'espectro' ? 0 : 1) - (b.atacante.tipo === 'espectro' ? 0 : 1) ||
-        a.indice - b.indice,
-    )
+  // Sem reordenação: a fila segue a ordem de `atacantes` do wire (1:1 com os
+  // itens). Qualquer ordem do engine é segura porque dono (alcance) e fatia
+  // (tipo) não dependem de posição.
+  const atacantes = evento.atacantes
 
-  const itens: ItemCoreografadoDoAtaque[] = ordemEstavel.map(({ atacante }) => {
+  const itens: ItemCoreografadoDoAtaque[] = atacantes.map((atacante) => {
     // Fallback legado (rolling deploy / replay sem #384): sem o campo não há
     // onda — o item ainda soa (monstro) e ocupa seu slot na fila.
     const pecasNoAlcance = atacante.pecasNoAlcance ?? []
@@ -243,7 +261,26 @@ export function coreografarAtaque(
     }
     const temAtingido = peoesAtingidos.length > 0
     const celulaDoMonstro = celulaPorPeca.get(atacante.pecaId) ?? null
-    const reacoes = pecasNoAlcance.map((pecaId, indice) => {
+    // Removidas do gatilho na onda (fix do review PR #399): o wire nasce
+    // pós-limpeza, mas o contexto é pré-despacho — a célula da removida é
+    // conhecida e ela reage pelas mesmas regras (peão presente treme junto,
+    // senão pula; protegida veste escudo). Só entra quem ainda está em
+    // `posicionadas`, fora da lista do wire e diferente da peça do atacante
+    // (sem duplicar, sem fantasma de lote antigo, sem auto-reação).
+    const removidasNaOnda = pecasRemovidasDoGatilho.filter(
+      (pecaId) =>
+        pecaId !== atacante.pecaId &&
+        !pecasNoAlcance.includes(pecaId) &&
+        celulaPorPeca.has(pecaId),
+    )
+    // O atacante nunca reage à própria onda (só o gesto de disparo): se o
+    // wire um dia listar a própria peça no alcance, ela cai aqui — sem pulo,
+    // tremor ou escudo sobre o monstro.
+    const pecasParaReacao = [
+      ...pecasNoAlcance.filter((pecaId) => pecaId !== atacante.pecaId),
+      ...removidasNaOnda,
+    ]
+    const reacoes = pecasParaReacao.map((pecaId, indice) => {
       const celula = celulaPorPeca.get(pecaId) ?? null
       const chave = celula !== null ? chaveCelula(celula) : null
       const peoesNaPeca =
@@ -294,13 +331,11 @@ export function coreografarAtaque(
   //   atingido pelos dois aparece nas duas fatias; mapeamento
   //   jogador→peão desconhecido inclui por defesa (projeção absoluta é
   //   idempotente — revelar cedo no fallback é melhor que perder o estado).
-  // - `protegidos`: cada consumo revela SÓ no primeiro slot (ordem
-  //   Espectro→Vulto) cujo alcance contém o peão; sem mapeamento ou fora de
+  // - `protegidos`: cada consumo revela SÓ no primeiro slot (ordem do wire)
+  //   cujo alcance contém o peão; sem mapeamento ou fora de
   //   todos os alcances, cai no primeiro item (nunca se perde consumo).
   const peaoPorJogador = contexto.peaoPorJogador
-  const alcances = itens.map(
-    (item, indice) => new Set(ordemEstavel[indice]!.atacante.peoesNoAlcance ?? []),
-  )
+  const alcances = atacantes.map((atacante) => new Set(atacante.peoesNoAlcance ?? []))
   const protegidosPorSlot: string[][] = itens.map(() => [])
   evento.protegidos.forEach((jogadorId) => {
     const peaoId = peaoPorJogador[jogadorId]

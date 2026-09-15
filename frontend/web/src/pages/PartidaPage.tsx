@@ -252,8 +252,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Monstro não aceita peão, o mover compulsório é impossível e o turno
   // travado fecha via Permanência — o FE auto-permanece no PECA_POSICIONADA,
   // uma vez por peça posicionada. Reseta na virada de turno.
-  const permanecerMonstroTravessiaEncadeadoRef = useRef<string | null>(null)
-  // ── Fases de turno no stream de depuração (issue #340) ──
+  const permanecerMonstroTravessiaEncadeadoRef = useRef<string | null>(null)  // ── Fases de turno no stream de depuração (issue #340) ──
   // A PartidaPage consome o canal da partida: TURNO_INICIADO/TURNO_ENCERRADO
   // e snapshots projetam `jogadorAtivoId`; a fase usa a posição do peão na
   // ordem do roster (`jogadores[].ordem` do snapshot) — fallback ao índice de
@@ -286,7 +285,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const proximoIdDeAnuncio = useRef(0)
   // Anúncio sem som (issue #385): o ataque com penalidade mantém o anúncio
   // ao leitor ("Um peão sofreu um ataque.") mas usa os sons dos monstros —
-  // nunca o THUD genérico, que segue só nas recusas de jogada.
+  // nunca o THUD genérico, que segue só nas Recusas de Ação.
   const anunciarRecusa = useCallback((motivo: MotivoDeRecusa) => {
     proximoIdDeAnuncio.current += 1
     setAnuncioDeRecusa({ id: proximoIdDeAnuncio.current, motivo })
@@ -418,8 +417,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     })
   }, [despacharEvento])
 
-  // ── Fila do ataque com bloqueio da entrada do turno (issue #385 + follow-up
-  // da ordem Espectro→Vulto) ──
+  // ── Fila do ataque com bloqueio da entrada do turno (issue #385 — fila na
+  // ordem de atacantes do wire) ──
   // Turno segurado volta pelo mesmo lote atômico (ordem preservada); o hook
   // guarda os callbacks em refs — estáveis sem re-subscrever o socket.
   const liberarTurnoSegurado = useCallback(
@@ -529,7 +528,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         }
         if (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') {
           // Virada de turno invalida gates de posicionamento em voo: se o
-          // ack/erro da jogada anterior se perdeu no canal, o alvo não pode
+          // ack/erro da Ação anterior se perdeu no canal, o alvo não pode
           // ficar bloqueado no turno seguinte (bloqueio silencioso). Os
           // auto-encadeamentos da travessia resetam junto (um MOVER por peça
           // posicionada e uma ESCOLHA por recebida dentro do turno).
@@ -728,14 +727,25 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             return
           }
         } else if (
-          (evento.type === 'CELULAS_ILUMINADAS' || evento.type === 'LIMPEZA_APLICADA') &&
-          (segurarNaJanelaSeAberta(evento) || segurarLimpezaSeEmAtaque(evento))
+          evento.type === 'CELULAS_ILUMINADAS' ||
+          evento.type === 'LIMPEZA_APLICADA'
         ) {
-          // Janela de gatilho antes do seguro da fila: com a janela aberta,
-          // o buffer do gatilho segura sem som/trigger (o fechamento compõe
-          // com fila ativa anterior); sem janela, vale o seguro direto da
-          // fila ativa (segunda onda pós-Baixa, virada).
-          return
+          // Fotografia pré-despacho pecaId→célula (fix pós-PR #399): a limpeza
+          // pode segurar e aplicar depois (auto-fecho da janela) — a onda do
+          // ataque usa para varrer as removidas mesmo assim (só lacunas).
+          const celulas = new Map(
+            modeloRef.current.posicionadas.map((p) => [p.pecaId, p.celula] as const),
+          )
+          if (
+            segurarNaJanelaSeAberta(evento, celulas) ||
+            segurarLimpezaSeEmAtaque(evento, celulas)
+          ) {
+            // Janela de gatilho antes do seguro da fila: com a janela aberta,
+            // o buffer do gatilho segura sem som/trigger (o fechamento compõe
+            // com fila ativa anterior); sem janela, vale o seguro direto da
+            // fila ativa (segunda onda pós-Baixa, virada).
+            return
+          }
         }
         // PECA_POSICIONADA/PEAO_* ficam fora do gate de propósito: no mesmo
         // act despacham de imediato e ultrapassam o TURNO ainda na fila —
@@ -829,10 +839,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // Monstros e estados (ST-15, issue #174 + follow-up da ordem #385):
         // ATAQUE e RESGATE sem recarregar página. O ATAQUE_RESOLVIDO não
         // despacha mais na hora — evento+contexto vão ao driver, que aplica
-        // cada fatia na chegada do próprio slot (Espectro resolve por completo
-        // primeiro; Vulto depois) e anuncia ao leitor só com vítimas na
+        // cada fatia na chegada do próprio slot (na ordem de atacantes do
+        // wire) e anuncia ao leitor só com vítimas na
         // fatia. A penalidade usa os sons dos monstros, nunca o THUD
-        // genérico; recusas de jogada mantêm o genérico.
+        // genérico; Recusas de Ação mantêm o genérico.
         if (evento.type === 'ATAQUE_RESOLVIDO' || evento.type === 'RESGATE_REALIZADO') {
           if (evento.type === 'ATAQUE_RESOLVIDO') {
             // Fecha a janela do gatilho entregando o buffer à fila (review

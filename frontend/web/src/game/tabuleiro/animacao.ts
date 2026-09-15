@@ -60,9 +60,9 @@ export const CAMINHO_SOM_PROTECAO_ADQUIRIDA = comBase('/media/medicine.mp3')
  * ADR-0007: `audio.volume = master × VOLUME_BASE_*`, com master em [0, 1]).
  * Conquistas celebram (bases médias-altas, pontuais — uma vez por aquisição).
  */
-export const VOLUME_BASE_SOM_GERADOR_LIGADO = 0.8
-export const VOLUME_BASE_SOM_CARTAO_ACESSO = 0.7
-export const VOLUME_BASE_SOM_PROTECAO_ADQUIRIDA = 0.6
+export const VOLUME_BASE_SOM_GERADOR_LIGADO = 0.1
+export const VOLUME_BASE_SOM_CARTAO_ACESSO = 0.5
+export const VOLUME_BASE_SOM_PROTECAO_ADQUIRIDA = 0.5
 
 /**
  * Fila do ataque (issue #385): cada item abre com o telegraph silencioso
@@ -79,6 +79,13 @@ export const DURACAO_BASE_ATAQUE_MS = 700
 export const DURACAO_ATAQUE_POR_ATACANTE_MS = 600
 export const DURACAO_TELEGRAPH_ATAQUE_MS = 1000
 export const DURACAO_DISPARO_ATAQUE_MS = 250
+/**
+ * Janela do gatilho da confirmação (review pós-PR #399): a iluminação e a
+ * limpeza do lote da confirmação seguram até o `ATAQUE_RESOLVIDO` chegar —
+ * mas SÓ se ele vier no mesmo burst (ms). Sem ataque no prazo, a janela
+ * fecha sozinha e o lote aplica ao confirmar, sem esperar a virada de turno.
+ */
+export const DURACAO_JANELA_GATILHO_MS = 200
 export const DURACAO_ONDA_VULTO_CAMADA_MS = 120
 /** Vermelho do telegraph do ataque (contorno 3D + marca DOM, issue #385). */
 export const COR_TELEGRAPH_ATAQUE = '#ef4444'

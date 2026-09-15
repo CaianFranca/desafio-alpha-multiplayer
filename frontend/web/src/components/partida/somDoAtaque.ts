@@ -4,7 +4,7 @@
  * Quatro pontos próprios no duto canônico de mídia (`frontend/web/media/` →
  * servido em `/media/`): uivo no disparo do Vulto, trovão no impacto do
  * Espectro, tremor na chegada ao alvo e defesa no protegido — sons distintos
- * do THUD de recusa (`somDeRecusa.ts`, intacto: recusas de jogada mantêm o
+ * do THUD de recusa (`somDeRecusa.ts`, intacto: Recusas de Ação mantêm o
  * genérico; a penalidade do ataque usa estes sons, nunca o genérico).
  *
  * Sem arquivo = no-op silencioso (`new Audio(...)` + `play()` com `catch`,

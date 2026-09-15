@@ -15,6 +15,7 @@ import {
   DURACAO_ATAQUE_POR_ATACANTE_MS,
   DURACAO_BASE_ATAQUE_MS,
   DURACAO_DISPARO_ATAQUE_MS,
+  DURACAO_JANELA_GATILHO_MS,
   DURACAO_TELEGRAPH_ATAQUE_MS,
   VOLUME_BASE_SOM_DEFESA_ATAQUE,
   VOLUME_BASE_SOM_ESPECTRO,
@@ -24,6 +25,7 @@ import {
 import {
   coreografarAtaque,
   duracaoDaFilaDeAtaque,
+  type PecaReagindoNoAtaque,
 } from '../web/src/game/tabuleiro/ataque'
 import type {
   EstadoDaPartidaSnapshot,
@@ -31,8 +33,8 @@ import type {
   PecaPosicionadaNoSnapshot,
 } from '@flicker/shared'
 
-// Coreografia do ataque em fila (issue #385 + follow-up do telegraph e da
-// ordem Espectro→Vulto, decisão do usuário):
+// Coreografia do ataque em fila (issue #385 + follow-up do telegraph — fila na
+// ordem de atacantes do wire, sem reordenação):
 // áudio e WebSocket mockados — cada atacante abre com 1s de telegraph
 // silencioso (contorno vermelho na própria peça, 3D + espelho DOM) e só
 // depois dispara som + animação; a fatia de estado do slot aplica na chegada
@@ -415,7 +417,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(toquesDeAudio).toHaveLength(2)
   })
 
-  it('dois monstros animam em fila com telegraph por atacante, sem sobreposição (Espectro primeiro)', async () => {
+  it('dois monstros animam em fila com telegraph por atacante, sem sobreposição (ordem do wire)', async () => {
     const peoes: readonly PeaoNoSnapshot[] = [
       { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
       { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'reta-1' },
@@ -426,7 +428,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     ativarTimersDoAtaque()
 
     // O engine emite na ordem de posicionamento (Vulto primeiro) — o cliente
-    // reordena estável Espectro→Vulto (decisão do usuário, follow-up da #385).
+    // anima na ordem do wire, sem reordenar (issue #385: "na ordem de atacantes").
     act(() =>
       ws.simulateMessage({
         type: 'ATAQUE_RESOLVIDO',
@@ -453,48 +455,53 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
       }),
     )
 
-    // Telegraph do primeiro: Espectro (reordenado), silencioso.
-    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
+    // Telegraph do primeiro: Vulto (ordem do wire), silencioso.
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
     expect(toquesDeAudio).toHaveLength(0)
 
-    // Disparo do primeiro + chegada: trovão, depois tremor.
+    // Disparo do primeiro + chegada: uivo, depois tremor.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_ESPECTRO])
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
     avancar(DURACAO_DISPARO_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_ESPECTRO, CAMINHO_SOM_TREMOR_ATAQUE])
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO, CAMINHO_SOM_TREMOR_ATAQUE])
+    // Chegada do Vulto: Baixa do vermelho aplica; sanidade do azul intacta.
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(avatarDoAdversario('jogador-3')).toHaveAttribute('data-sanidade', '3')
 
-    // Passagem da vez: telegraph do Vulto — silencioso, sem sobrepor nada
+    // Passagem da vez: telegraph do Espectro — silencioso, sem sobrepor nada
     // do anterior (sons do primeiro já terminaram; o segundo ainda não soou).
     avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
-    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
-    expect(pecaNoEspelho('vulto-1')).toHaveAttribute('data-telegraph', 'true')
-    expect(pecaNoEspelho('espectro-1')).not.toHaveAttribute('data-telegraph')
+    expect(pecaNoEspelho('espectro-1')).toHaveAttribute('data-telegraph', 'true')
+    expect(pecaNoEspelho('vulto-1')).not.toHaveAttribute('data-telegraph')
     expect(toquesDeAudio.map((t) => t.src)).toEqual([
-      CAMINHO_SOM_ESPECTRO,
+      CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
     ])
 
     // Disparo do segundo + chegada + dreno total (~3,9s): sem marcas.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
     expect(toquesDeAudio.map((t) => t.src)).toEqual([
-      CAMINHO_SOM_ESPECTRO,
-      CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_VULTO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
+      CAMINHO_SOM_ESPECTRO,
     ])
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     avancar(DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
     expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
     expect(toquesDeAudio.map((t) => t.src)).toEqual([
-      CAMINHO_SOM_ESPECTRO,
-      CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
+      CAMINHO_SOM_ESPECTRO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
     ])
+    // Sanidade do azul aplicou na chegada do Espectro.
+    expect(avatarDoAdversario('jogador-3')).toHaveAttribute('data-sanidade', '2')
   })
 
-  it('peão no alcance de dois monstros: sanidade no slot Espectro, Baixa no slot Vulto', async () => {
+  it('peão no alcance de dois monstros: Baixa no slot Vulto, sanidade no slot Espectro (ordem do wire)', async () => {
     const peoes: readonly PeaoNoSnapshot[] = [
       { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
       { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'reta-1' },
@@ -504,8 +511,9 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     const ws = await partidaComTabuleiro([VULTO_1, RETA_1, ESPECTRO_1, CURVA_1], peoes)
     ativarTimersDoAtaque()
 
-    // O engine emite o Vulto primeiro — o Espectro resolve por completo
-    // primeiro (sanidade na chegada dele); a Baixa só na chegada do Vulto.
+    // O engine emite o Vulto primeiro — a fila segue o wire: o Vulto resolve
+    // por completo primeiro (Baixa na chegada dele); a sanidade só na chegada
+    // do Espectro.
     act(() =>
       ws.simulateMessage({
         type: 'ATAQUE_RESOLVIDO',
@@ -536,44 +544,44 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
 
-    // Slot 1 (Espectro, reordenado): telegraph silencioso, depois trovão.
-    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
+    // Slot 1 (Vulto, ordem do wire): telegraph silencioso, depois uivo.
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
     expect(toquesDeAudio).toHaveLength(0)
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'ataque')
-    // Sem peão sobre curva-1: a peça pula, mas a tremor soa (dono do alcance).
-    expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-reacao', 'pulo')
+    // Com peão sobre reta-1: a peça treme junto.
+    expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-reacao', 'tremor')
     avancar(DURACAO_DISPARO_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_ESPECTRO, CAMINHO_SOM_TREMOR_ATAQUE])
-    // Chegada do Espectro: sanidade aplica, Baixa ainda não, com anúncio.
-    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '2')
-    expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO, CAMINHO_SOM_TREMOR_ATAQUE])
+    // Chegada do Vulto: Baixa aplica, sanidade ainda não, com anúncio.
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe(
       'ataque_com_penalidade',
     )
 
-    // Slot 2 (Vulto): telegraph SÓ após o fim do Espectro — silencioso.
+    // Slot 2 (Espectro): telegraph SÓ após o fim do Vulto — silencioso.
     avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
-    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
-    expect(pecaNoEspelho('vulto-1')).toHaveAttribute('data-telegraph', 'true')
+    expect(pecaNoEspelho('espectro-1')).toHaveAttribute('data-telegraph', 'true')
     expect(toquesDeAudio).toHaveLength(2)
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
     expect(toquesDeAudio.map((t) => t.src)).toEqual([
-      CAMINHO_SOM_ESPECTRO,
-      CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_VULTO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
+      CAMINHO_SOM_ESPECTRO,
     ])
-    // Com peão sobre reta-1: a peça treme junto.
-    expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-reacao', 'tremor')
+    // Sem peão sobre curva-1: a peça pula, mas a tremor soa (dono do alcance).
+    expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-reacao', 'pulo')
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     expect(toquesDeAudio.map((t) => t.src)).toEqual([
-      CAMINHO_SOM_ESPECTRO,
-      CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
+      CAMINHO_SOM_ESPECTRO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
     ])
-    // Chegada do Vulto: Baixa aplica (sanidade segue a do Espectro).
+    // Chegada do Espectro: sanidade aplica (Baixa segue a do Vulto).
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '2')
 
@@ -601,8 +609,8 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(temPecaNoEspelho('curva-1')).toBe(true)
     ativarTimersDoAtaque()
 
-    // Gatilho misto (engine emite o Vulto primeiro): o Espectro atinge o azul
-    // (sanidade), o Vulto atinge o vermelho (Baixa).
+    // Gatilho misto na ordem do wire (Vulto primeiro): o Vulto atinge o
+    // vermelho (Baixa), o Espectro atinge o azul (sanidade).
     act(() =>
       ws.simulateMessage({
         type: 'ATAQUE_RESOLVIDO',
@@ -628,55 +636,58 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
         ],
       }),
     )
-    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
 
     // Iluminação encolhida + limpeza do mesmo gatilho chegam com a fila ativa:
     // seguram (nada aplica, nenhum som) — cegueira e sumiço não aparecem
-    // antes da vez do Vulto.
+    // antes da chegada do Vulto.
     act(() => ws.simulateMessage({ type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 3, coluna: 3 }] }))
     act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['curva-1'] }))
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
     expect(temPecaNoEspelho('curva-1')).toBe(true)
     expect(toquesDeAudio).toHaveLength(0)
 
-    // Slot do Espectro: telegraph, disparo, chegada — sanidade do azul aplica,
-    // mas a luz e as peças seguem intactas (sem Baixa do vermelho ainda).
+    // Slot do Vulto: telegraph, disparo, chegada — Baixa do vermelho aplica e
+    // a limpeza segura libera junto (último Vulto da fila).
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_ESPECTRO])
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
     expect(temPecaNoEspelho('curva-1')).toBe(true)
-    avancar(DURACAO_DISPARO_ATAQUE_MS)
-    expect(avatarDoAdversario('jogador-3')).toHaveAttribute('data-sanidade', '2')
-    expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
-    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
-    expect(temPecaNoEspelho('curva-1')).toBe(true)
-    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(0)
-
-    // Slot do Vulto (só após o fim do Espectro): telegraph e disparo — ainda
-    // segurado até a chegada.
-    avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
-    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
-    expect(temPecaNoEspelho('curva-1')).toBe(true)
-    avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
-      CAMINHO_SOM_ESPECTRO,
-      CAMINHO_SOM_TREMOR_ATAQUE,
-      CAMINHO_SOM_VULTO,
-    ])
-    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
-
-    // Chegada do Vulto: Baixa do vermelho + luz encolhida + sumiço da peça com
-    // o som sombrio — junto da fatia dele.
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(avatarDoAdversario('jogador-3')).toHaveAttribute('data-sanidade', '3')
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3'])
     expect(temPecaNoEspelho('curva-1')).toBe(false)
     expect(toquesDeAudio.map((t) => t.src)).toEqual([
-      CAMINHO_SOM_ESPECTRO,
-      CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_SOMBRIO_LIMPEZA,
+    ])
+
+    // Slot do Espectro (só após o fim do Vulto): telegraph e disparo sobre o
+    // tabuleiro já limpo.
+    avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
+    expect(temPecaNoEspelho('curva-1')).toBe(false)
+    avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+      CAMINHO_SOM_VULTO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
+      CAMINHO_SOM_SOMBRIO_LIMPEZA,
+      CAMINHO_SOM_ESPECTRO,
+    ])
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3'])
+
+    // Chegada do Espectro: sanidade do azul aplica — sem tremor duplo da
+    // limpeza (já liberada no Vulto).
+    avancar(DURACAO_DISPARO_ATAQUE_MS)
+    expect(avatarDoAdversario('jogador-3')).toHaveAttribute('data-sanidade', '2')
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+      CAMINHO_SOM_VULTO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
+      CAMINHO_SOM_SOMBRIO_LIMPEZA,
+      CAMINHO_SOM_ESPECTRO,
+      CAMINHO_SOM_TREMOR_ATAQUE,
     ])
 
     // Drenou sem marcas; o estado final segue projetado.
@@ -766,11 +777,22 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(temPecaNoEspelho('espectro-1')).toBe(true)
     expect(temPecaNoEspelho('curva-1')).toBe(true)
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
-    // A onda só varre sobreviventes (limitação pós-limpeza documentada em
-    // `ataque.ts`): só a reta-1 reage, tremendo com o peão.
-    expect(screen.getAllByTestId('ataque-reacao')).toHaveLength(1)
-    expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-peca-id', 'reta-1')
-    expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-reacao', 'tremor')
+    // A onda varre também as removidas do gatilho (fix do review PR #399): o
+    // payload nasce pós-limpeza (só reta-1 no wire), mas o modelo ainda é
+    // pré-despacho — espectro-1 e curva-1 reagem pela célula conhecida antes
+    // de sumir. A reta-1 treme com o peão; a curva-1 treme com o azul; a
+    // espectro-1 (sem peão) pula.
+    const reacoes = screen.getAllByTestId('ataque-reacao')
+    expect(reacoes).toHaveLength(3)
+    const reacaoPorPeca = new Map(
+      reacoes.map((el) => [
+        el.getAttribute('data-peca-id'),
+        el.getAttribute('data-reacao'),
+      ]),
+    )
+    expect(reacaoPorPeca.get('reta-1')).toBe('tremor')
+    expect(reacaoPorPeca.get('curva-1')).toBe('tremor')
+    expect(reacaoPorPeca.get('espectro-1')).toBe('pulo')
 
     // Chegada do Vulto: Baixa + luz encolhida + sumiço com o som sombrio —
     // junto da fatia dele.
@@ -794,6 +816,133 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-2')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
     expect(temPecaNoEspelho('curva-1')).toBe(false)
+  })
+
+  it('lote sem ataque: a janela fecha sozinha e a limpeza aplica ao confirmar (fix pós-PR #399)', async () => {
+    const peoes: readonly PeaoNoSnapshot[] = [
+      { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
+      { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'reta-1' },
+      { peaoId: 'peao-azul', cor: 'azul', pecaId: 'curva-1' },
+      { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+    ]
+    const ws = await partidaComTabuleiro([VULTO_1, RETA_1, ESPECTRO_1, CURVA_1], peoes, {
+      celulasIluminadas: [
+        { linha: 3, coluna: 3 },
+        { linha: 3, coluna: 4 },
+        { linha: 5, coluna: 4 },
+        { linha: 5, coluna: 5 },
+      ],
+    })
+    ativarTimersDoAtaque()
+
+    // Confirmação sem ataque no lote: a janela segura luz e limpeza.
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: MEU_JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'reta-1',
+      }),
+    )
+    act(() => ws.simulateMessage({ type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 3, coluna: 3 }] }))
+    act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['curva-1'] }))
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
+    expect(temPecaNoEspelho('curva-1')).toBe(true)
+    expect(toquesDeAudio).toHaveLength(0)
+
+    // Sem ATAQUE no prazo da janela: aplica ao confirmar — sem esperar turno.
+    avancar(DURACAO_JANELA_GATILHO_MS)
+    await act(async () => {})
+    expect(celulasIluminadasNoEspelho()).toEqual(['3:3'])
+    expect(temPecaNoEspelho('curva-1')).toBe(false)
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA])
+    expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
+  })
+
+  it('ataque tardio pós-fecho varre as removidas retidas (onda cega corrigida)', async () => {
+    const peoes: readonly PeaoNoSnapshot[] = [
+      { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
+      { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: 'reta-1' },
+      { peaoId: 'peao-azul', cor: 'azul', pecaId: 'curva-1' },
+      { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+    ]
+    const ws = await partidaComTabuleiro([VULTO_1, RETA_1, ESPECTRO_1, CURVA_1], peoes, {
+      celulasIluminadas: [
+        { linha: 3, coluna: 3 },
+        { linha: 3, coluna: 4 },
+        { linha: 5, coluna: 4 },
+        { linha: 5, coluna: 5 },
+      ],
+    })
+    ativarTimersDoAtaque()
+
+    // Mesmo lote do teste do fecho: confirma → luz + limpeza seguradas.
+    act(() =>
+      ws.simulateMessage({
+        type: 'POSICAO_CONFIRMADA',
+        jogadorId: MEU_JOGADOR_ID,
+        peaoId: 'peao-branco',
+        pecaId: 'reta-1',
+      }),
+    )
+    act(() => ws.simulateMessage({ type: 'CELULAS_ILUMINADAS', celulas: [{ linha: 3, coluna: 3 }] }))
+    act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['espectro-1', 'curva-1'] }))
+    // Janela fecha sem ataque: aplica e RETÉM fotos + ids.
+    avancar(DURACAO_JANELA_GATILHO_MS)
+    await act(async () => {})
+    expect(temPecaNoEspelho('curva-1')).toBe(false)
+    expect(temPecaNoEspelho('espectro-1')).toBe(false)
+
+    // ATAQUE tardio do mesmo gatilho (sem TURNO no meio): o payload nasce
+    // pós-limpeza (só reta-1 no wire), mas a onda varre as retidas.
+    act(() =>
+      ws.simulateMessage({
+        type: 'ATAQUE_RESOLVIDO',
+        atacantes: [
+          {
+            pecaId: 'vulto-1',
+            tipo: 'vulto',
+            peoesNoAlcance: ['peao-vermelho'],
+            pecasNoAlcance: ['reta-1'],
+          },
+        ],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [
+          { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 3, amedrontado: false },
+        ],
+      }),
+    )
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
+    avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
+    // Sombrio da limpeza liberada no fecho + uivo no disparo do Vulto.
+    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA, CAMINHO_SOM_VULTO])
+
+    // A onda varre as 3: reta-1 (wire) + espectro-1/curva-1 (retidas) —
+    // legenda do overlay, com camadas toroidais reais da célula pré-limpeza.
+    const reacoes = screen.getAllByTestId('ataque-reacao')
+    expect(reacoes.map((el) => el.getAttribute('data-peca-id'))).toEqual([
+      'reta-1',
+      'espectro-1',
+      'curva-1',
+    ])
+    const porPeca = new Map(
+      reacoes.map((el) => [
+        el.getAttribute('data-peca-id'),
+        {
+          reacao: el.getAttribute('data-reacao'),
+          camada: el.getAttribute('data-camada'),
+        },
+      ]),
+    )
+    expect(porPeca.get('reta-1')).toEqual({ reacao: 'tremor', camada: '1' })
+    expect(porPeca.get('espectro-1')).toEqual({ reacao: 'pulo', camada: '3' })
+    expect(porPeca.get('curva-1')).toEqual({ reacao: 'tremor', camada: '4' })
+
+    // Chegada aplica a fatia normalmente (Baixa, sem tocar na sanidade).
+    avancar(DURACAO_DISPARO_ATAQUE_MS)
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
+    expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
   })
 
   it('[Vulto, Vulto] segura a limpeza até a chegada do último Vulto (review PR #399, item 3)', async () => {
@@ -1102,8 +1251,8 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
     await act(async () => {})
 
-    // Slot 1 (Espectro, reordenado): vez antiga congelada no telegraph e no disparo.
-    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
+    // Slot 1 (Vulto, ordem do wire): vez antiga congelada no telegraph e no disparo.
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', MEU_JOGADOR_ID)
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
     await act(async () => {})
@@ -1112,10 +1261,10 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     await act(async () => {})
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', MEU_JOGADOR_ID)
 
-    // Passagem ao slot 2 (Vulto): a virada segue segurada, sem o próximo turno.
+    // Passagem ao slot 2 (Espectro): a virada segue segurada, sem o próximo turno.
     avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
     await act(async () => {})
-    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
+    expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', MEU_JOGADOR_ID)
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
@@ -1356,7 +1505,7 @@ describe('coreografia pura do ataque — ordem, dono por alcance e fatias (issue
     ],
   }
 
-  it('ordena Espectro antes do Vulto (estável no mesmo tipo)', () => {
+  it('preserva a ordem de atacantes do wire (sem reordenar)', () => {
     const itens = coreografarAtaque(
       {
         atacantes: [
@@ -1372,12 +1521,13 @@ describe('coreografia pura do ataque — ordem, dono por alcance e fatias (issue
       contexto,
     )
 
-    // Espectros primeiro (ordem do engine entre eles), depois Vultos (idem).
+    // Ordem do wire 1:1 (issue #385: "na ordem de atacantes") — Vulto antes
+    // do Espectro anima sem quebrar.
     expect(itens.map((item) => item.pecaId)).toEqual([
-      'espectro-1',
-      'espectro-2',
       'vulto-1',
+      'espectro-1',
       'vulto-2',
+      'espectro-2',
     ])
   })
 
@@ -1407,33 +1557,33 @@ describe('coreografia pura do ataque — ordem, dono por alcance e fatias (issue
       contexto,
     )
 
-    // Ordem Espectro→Vulto mesmo com o Vulto primeiro no wire.
+    // Ordem do wire (Vulto primeiro) — dono e fatia por slot, sem reordenar.
     expect(itens).toHaveLength(2)
-    expect(itens[0]!.pecaId).toBe('espectro-1')
-    expect(itens[1]!.pecaId).toBe('vulto-1')
+    expect(itens[0]!.pecaId).toBe('vulto-1')
+    expect(itens[1]!.pecaId).toBe('espectro-1')
     // Dono do alcance: vermelho (atingido) só no Vulto, azul (protegido, não
     // atingido) só no Espectro.
-    expect(itens[0]!.temAtingido).toBe(false)
-    expect(itens[0]!.temProtegido).toBe(true)
-    expect(itens[0]!.peoesAtingidos).toEqual([])
-    expect(itens[0]!.peoesProtegidos).toEqual(['peao-azul'])
-    expect(itens[1]!.temAtingido).toBe(true)
-    expect(itens[1]!.temProtegido).toBe(false)
-    expect(itens[1]!.peoesAtingidos).toEqual(['peao-vermelho'])
-    expect(itens[1]!.peoesProtegidos).toEqual([])
-    // Fatias: Espectro leva só o consumo (sem vítimas no alcance dele);
-    // Vulto leva o resultante do vermelho.
+    expect(itens[0]!.temAtingido).toBe(true)
+    expect(itens[0]!.temProtegido).toBe(false)
+    expect(itens[0]!.peoesAtingidos).toEqual(['peao-vermelho'])
+    expect(itens[0]!.peoesProtegidos).toEqual([])
+    expect(itens[1]!.temAtingido).toBe(false)
+    expect(itens[1]!.temProtegido).toBe(true)
+    expect(itens[1]!.peoesAtingidos).toEqual([])
+    expect(itens[1]!.peoesProtegidos).toEqual(['peao-azul'])
+    // Fatias: Vulto leva o resultante do vermelho; Espectro leva só o consumo
+    // (sem vítimas no alcance dele).
     expect(itens[0]!.fatia).toEqual({
-      tipo: 'espectro',
-      estadosAplicados: [],
-      protegidos: ['jogador-3'],
-    })
-    expect(itens[1]!.fatia).toEqual({
       tipo: 'vulto',
       estadosAplicados: [
         { jogadorId: 'jogador-2', emBaixaIluminacao: true, sanidade: 3, amedrontado: false },
       ],
       protegidos: [],
+    })
+    expect(itens[1]!.fatia).toEqual({
+      tipo: 'espectro',
+      estadosAplicados: [],
+      protegidos: ['jogador-3'],
     })
   })
 
@@ -1463,8 +1613,8 @@ describe('coreografia pura do ataque — ordem, dono por alcance e fatias (issue
       contexto,
     )
 
-    expect(itens[0]!.pecaId).toBe('espectro-1')
-    expect(itens[1]!.pecaId).toBe('vulto-1')
+    expect(itens[0]!.pecaId).toBe('vulto-1')
+    expect(itens[1]!.pecaId).toBe('espectro-1')
     expect(itens[0]!.peoesAtingidos).toEqual(['peao-vermelho'])
     expect(itens[1]!.peoesAtingidos).toEqual(['peao-vermelho'])
     // O mesmo resultante aparece nas duas fatias (a redução mascara por tipo:
@@ -1473,7 +1623,7 @@ describe('coreografia pura do ataque — ordem, dono por alcance e fatias (issue
     expect(itens[1]!.fatia.estadosAplicados).toHaveLength(1)
   })
 
-  it('protegido nos dois alcances revela o consumo só no primeiro slot (Espectro)', () => {
+  it('protegido nos dois alcances revela o consumo só no primeiro slot (ordem do wire)', () => {
     const itens = coreografarAtaque(
       {
         atacantes: [
@@ -1497,7 +1647,7 @@ describe('coreografia pura do ataque — ordem, dono por alcance e fatias (issue
       contexto,
     )
 
-    expect(itens[0]!.pecaId).toBe('espectro-1')
+    expect(itens[0]!.pecaId).toBe('vulto-1')
     expect(itens[0]!.fatia.protegidos).toEqual(['jogador-2'])
     expect(itens[0]!.temProtegido).toBe(true)
     // O segundo slot silencia a defesa (sem som duplo pelo mesmo consumo).
@@ -1552,6 +1702,68 @@ describe('coreografia pura do ataque — ordem, dono por alcance e fatias (issue
     expect(itens[0]!.temAtingido).toBe(false)
     expect(itens[0]!.peoesAtingidos).toEqual([])
     expect(itens[0]!.fatia.estadosAplicados).toEqual([])
+  })
+
+  it('onda varre as removidas do gatilho pela célula pré-limpeza (fix review PR #399)', () => {
+    const itens = coreografarAtaque(
+      {
+        atacantes: [
+          {
+            pecaId: 'vulto-1',
+            tipo: 'vulto',
+            peoesNoAlcance: ['peao-vermelho'],
+            pecasNoAlcance: ['reta-1'],
+          },
+        ],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [],
+      },
+      contexto,
+      ['reta-1', 'curva-1', 'espectro-1', 'fantasma-1', 'vulto-1'],
+    )
+
+    // O campo do item espelha o wire (sem as removidas); a onda as varre
+    // junto: reta-1 (wire) não duplica; curva-1 e espectro-1 (pré-limpeza,
+    // com e sem peão) entram; fantasma-1 (fora do tabuleiro) e vulto-1 (peça
+    // do atacante) ficam de fora.
+    expect(itens[0]!.pecasNoAlcance).toEqual(['reta-1'])
+    expect(itens[0]!.reacoes.map((r) => r.pecaId)).toEqual(['reta-1', 'curva-1', 'espectro-1'])
+    const reacaoDe = (pecaId: string): PecaReagindoNoAtaque =>
+      itens[0]!.reacoes.find((r) => r.pecaId === pecaId)!
+    expect(reacaoDe('reta-1').reacao).toBe('tremor')
+    expect(reacaoDe('curva-1').reacao).toBe('tremor')
+    expect(reacaoDe('espectro-1').reacao).toBe('pulo')
+    // Camada toroidal real da célula pré-limpeza (não o índice de fallback).
+    expect(reacaoDe('reta-1').camada).toBe(1)
+    expect(reacaoDe('curva-1').camada).toBe(4)
+    expect(reacaoDe('espectro-1').camada).toBe(3)
+  })
+
+  it('atacante nunca reage à própria onda (blindagem do wire)', () => {
+    const itens = coreografarAtaque(
+      {
+        atacantes: [
+          {
+            pecaId: 'vulto-1',
+            tipo: 'vulto',
+            peoesNoAlcance: ['peao-vermelho'],
+            // Wire hipotético listando o próprio atacante no alcance.
+            pecasNoAlcance: ['vulto-1', 'reta-1'],
+          },
+        ],
+        peoesAtingidos: ['peao-vermelho'],
+        protegidos: [],
+        estadosAplicados: [],
+      },
+      contexto,
+    )
+
+    // O slot existe (som + fila intactos), mas sem auto-reação.
+    expect(itens).toHaveLength(1)
+    expect(itens[0]!.pecasNoAlcance).toEqual(['vulto-1', 'reta-1'])
+    expect(itens[0]!.reacoes.map((r) => r.pecaId)).toEqual(['reta-1'])
+    expect(itens[0]!.temAtingido).toBe(true)
   })
 
   it('duração da fila soma telegraph por atacante (~2,3s/1, ~3,9s/2)', () => {

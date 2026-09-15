@@ -923,8 +923,8 @@ export function reduzirEventos(
 }
 
 /**
- * Aplica a fatia de estado de UM slot do ataque (issue #385, follow-up da
- * ordem Espectro→Vulto) — espelha o bloco `ATAQUE_RESOLVIDO` acima, mas só
+ * Aplica a fatia de estado de UM slot do ataque (issue #385 — fatia por
+ * atacante, na ordem do wire) — espelha o bloco `ATAQUE_RESOLVIDO` acima, mas só
  * com a fatia do atacante (ver `coreografarAtaque`): o Vulto só projeta Baixa
  * Iluminação; o Espectro só Sanidade/Amedrontado; a proteção consumida zera
  * `protegido`. Mesmos guards do bloco integral (só jogadores conhecidos via
