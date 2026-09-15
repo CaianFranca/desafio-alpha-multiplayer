@@ -183,6 +183,11 @@ describe('partida estados da tela', () => {
     expect(overlay).toBeInTheDocument()
     expect(overlay).toHaveAttribute('role', 'status')
     expect(screen.getByRole('status', { name: /aguardando partida/i })).toBeInTheDocument()
+    // Sem texto visível (consistente com #386): só o nome acessível anuncia.
+    expect(screen.queryByText(/aguardando partida/i)).not.toBeInTheDocument()
+    // Dots presentes, sem nó sr-only duplicado (o aria-label externo nomeia).
+    expect(overlay.querySelectorAll('.encaminhamento-carregando__dot')).toHaveLength(4)
+    expect(overlay.querySelector('.sr-only')).toBeNull()
   })
 
   it('disponivel não mostra overlay (canvas livre)', () => {

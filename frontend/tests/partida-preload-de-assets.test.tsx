@@ -1,11 +1,13 @@
-// Aquecimento de sons + gate da revelação com sons.
+// Aquecimento de sons + gate da revelação sem sons.
 //
 // - `aquecerSonsViaFetch` é o mecanismo puro (fetch injetado): sempre
 //   resolve, tendo o som baixado ou falhado — falha abre com fallback.
-// - `aquecerSons`/`useSonsProntos` somem o fast-path sem rede (jsdom/SSR).
-// - A sonda replica o latch da `PartidaPage` (`disponivel + cenaPronta` com
-//   `cenaPronta = useCenaPronta(...) && sonsProntos`): os dots seguram
-//   enquanto QUALQUER um dos dois não assentou.
+// - `aquecerSons`/`useSonsProntos` somem o fast-path sem rede (jsdom/SSR)
+//   e seguem como aquecimento best-effort em paralelo, fora do gate.
+// - A sonda replica o latch da `PartidaPage` (`disponivel + cenaPronta`
+//   com `cenaPronta = useCenaPronta(...)`, sem `sonsProntos`): os dots
+//   seguram só pela cena 3D; sons pendentes/falhados nunca bloqueiam
+//   (falha de som = silêncio, nunca dots).
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useEffect, useState } from 'react'
 import { act, render, renderHook, screen } from '@testing-library/react'
@@ -105,7 +107,10 @@ function SondaComSons({
   disponivel: boolean
   sonsProntos: boolean
 }) {
-  const pronta = useCenaPronta(conteudo) && sonsProntos
+  // `sonsProntos` recebido mas ignorado de propósito: replica o novo
+  // contrato da PartidaPage — áudio fora do gate, só a cena 3D revela.
+  void sonsProntos
+  const pronta = useCenaPronta(conteudo)
   const [revelada, setRevelada] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- latch mão-única da sonda, replica o da PartidaPage
@@ -114,10 +119,10 @@ function SondaComSons({
   return <div data-testid="revelacao">{revelada ? 'tabuleiro' : 'dots'}</div>
 }
 
-describe('gate da revelação com sons (contrato da PartidaPage)', () => {
-  it('sons pendentes seguram os dots mesmo com a cena 3D pronta', () => {
+describe('gate da revelação sem sons (contrato da PartidaPage)', () => {
+  it('sons pendentes não seguram os dots: só a cena 3D revela', () => {
     vi.useFakeTimers()
-    const { rerender } = render(
+    render(
       <SondaComSons conteudo={true} disponivel={true} sonsProntos={false} />,
     )
     act(() => {
@@ -125,11 +130,6 @@ describe('gate da revelação com sons (contrato da PartidaPage)', () => {
       DefaultLoadingManager.onLoad?.()
     })
     avanca(CENA_PRONTA_QUIET_MS)
-    expect(screen.getByTestId('revelacao')).toHaveTextContent('dots')
-
-    rerender(
-      <SondaComSons conteudo={true} disponivel={true} sonsProntos={true} />,
-    )
     expect(screen.getByTestId('revelacao')).toHaveTextContent('tabuleiro')
   })
 

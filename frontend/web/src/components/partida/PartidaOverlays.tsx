@@ -114,7 +114,7 @@ export function PartidaOverlays({
     return (
       <div data-testid="overlay-carregando" role="status" aria-label="Carregando" className={loadingClasses}>
         <div className="encaminhamento-carregando">
-          <DotsDeCarregamento rotuloVisivel="Carregando..." nomeAcessivel="Carregando" />
+          <DotsDeCarregamento rotuloVisivel="Carregando..." />
         </div>
       </div>
     )
@@ -124,7 +124,7 @@ export function PartidaOverlays({
     return (
       <div data-testid="overlay-aguardando" role="status" aria-label="Aguardando partida" className={loadingClasses}>
         <div className="encaminhamento-carregando">
-          <DotsDeCarregamento nomeAcessivel="Aguardando partida" />
+          <DotsDeCarregamento />
         </div>
       </div>
     )

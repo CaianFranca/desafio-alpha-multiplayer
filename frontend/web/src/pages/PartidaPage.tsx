@@ -1334,15 +1334,26 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // Estado de exibição: exclusivamente do modelo quando disponível ou em resultado (tabuleiro congelado)
   const estadoExibicao = estadoEmAndamento || emResultado ? estadoDeExibicaoDoModelo(modelo) : null
   // Gate da revelação: os dots seguem até a cena 3D estar 100% carregada
-  // (sem pop-in progressivo) E todos os sons baixados — mão única, só vale
-  // para a primeira revelação. Todo o resto (HUD, modelo, cena) segue o
-  // `estado` cru: a cena precisa montar para carregar; só o overlay espera.
+  // (sem pop-in progressivo) — mão única, só vale para a primeira
+  // revelação. O áudio (`useSonsProntos`/`aquecerSons`) é aquecimento
+  // best-effort em paralelo e nunca bloqueia: falha de som abre com
+  // silêncio, nunca segura os dots.
+  // Timeout/erro: erro individual de asset vai ao quiet
+  // (`CENA_PRONTA_QUIET_MS = 400ms`) e libera; o teto
+  // (`CENA_PRONTA_TETO_MS = 30000ms`) garante a liberação mesmo com a
+  // conexão estagnada sem erro.
+  // Precedência: o gate só mascara o overlay na primeira revelação
+  // (`disponivel` → `carregando` via latch `cenaRevelada` mão-única, só
+  // alimenta `PartidaOverlays`). Todo o resto segue o `estado` cru e é
+  // ortogonal: HUD, modelo, cena (precisa montar para carregar) e a fila
+  // de ataques (`useFilaDeAtaque`, com bloqueio de entrada durante
+  // ataques) nunca passam por `estadoEfetivo`.
   // O re-arme acontece na chegada do conteúdo (snapshot), quando os loads
   // das peças de fato começam; o preload total (`PrecarregadorDeAssets` +
   // `aquecerSons`, disparados no mount) faz com que, no caso comum, tudo já
   // esteja em cache quando o snapshot chega.
-  const sonsProntos = useSonsProntos()
-  const cenaPronta = useCenaPronta(estadoExibicao !== null) && sonsProntos
+  useSonsProntos()
+  const cenaPronta = useCenaPronta(estadoExibicao !== null)
   const [cenaRevelada, setCenaRevelada] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- latch mão-única da revelação, dispara uma vez
