@@ -406,6 +406,27 @@ describe('Chat da Partida — pós-Resultado e histórico (issues #389/#390/#388
   })
 })
 
+describe('Chat da Partida — Resultado sem backdrop (bloqueante 3)', () => {
+  it('backdrop presente no andamento; PARTIDA_TERMINADA remove o backdrop e libera o overlay, Escape fecha sempre', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
+    expect(screen.getByTestId('chat-backdrop')).toBeInTheDocument()
+
+    // Termina a Partida com o painel aberto: sem backdrop, overlay alcançável.
+    act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'vitoria' }))
+    expect(screen.getByTestId('chat-da-partida')).toBeInTheDocument()
+    expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
+    expect(screen.queryByTestId('chat-backdrop')).not.toBeInTheDocument()
+    expect(screen.getByTestId('overlay-resultado')).toBeInTheDocument()
+    expect(screen.getByTestId('voltar-a-sala')).toBeInTheDocument()
+
+    // Escape continua fechando no Resultado (atalho, não bloqueio).
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByTestId('chat-painel')).not.toBeInTheDocument()
+  })
+})
+
 describe('Chat da Partida — validação local e foco (issue #389 ajustes)', () => {
   it('envio vazio e longo falham localmente sem ir ao socket', async () => {
     const ws = await partidaComSnapshot(criarSnapshotBase())

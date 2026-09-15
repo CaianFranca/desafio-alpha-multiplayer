@@ -1,8 +1,8 @@
 /**
  * Estado do painel de chat da Partida (issue #389).
  *
- * Dono único do feed (ordem de chegada — sem sort, mesmo critério do lobby:
- * horários de relógios diferentes reordenariam o feed), do badge de não
+ * Dono único do feed (ordem por `enviadoEm` do servidor — relógio único,
+ * `handlers.ts` —, com dedupe por identidade contra o live), do badge de não
  * lidas, do painel aberto/fechado e do cooldown local pós-rate-limit.
  *
  * O cooldown é espelho do servidor (issue #390): o game-server impõe o ritmo
@@ -121,7 +121,6 @@ export function useChatDaPartida({
   }, [cooldownAte])
   const proximoIdRef = useRef(0)
   const ultimoBlipEmRef = useRef(0)
-  const historicoHidratadoRef = useRef(false)
   const timerDoCooldownRef = useRef<number | null>(null)
   const timerDaRecusaRef = useRef<number | null>(null)
 
@@ -150,7 +149,6 @@ export function useChatDaPartida({
     }
     proximoIdRef.current = 0
     ultimoBlipEmRef.current = 0
-    historicoHidratadoRef.current = false
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAgora(Date.now())
     setMensagens([])
@@ -171,16 +169,19 @@ export function useChatDaPartida({
 
   // Semente do histórico (issue #388, fronteira do #389): snapshot de
   // Reconexão carrega tabuleiro + chat do mesmo instante, sem replay
-  // separado. Hidrata uma única vez; live posterior só acrescenta.
+  // separado. Roda a CADA snapshot com dedupe por identidade
+  // (jogadorId|enviadoEm|conteudo): o snapshot da reconexão traz as
+  // mensagens que chegaram durante a queda — sem isso a perda é silenciosa.
   // Ausente (binário anterior ao #388) ≡ [] — no-op.
-  // Corrida live-antes-do-snapshot (B2): o live que chegou antes é mais novo
-  // que a semente — a semente entra ANTES, com dedupe por identidade
-  // (jogadorId|enviadoEm|conteudo), então eco do servidor não duplica.
+  // Ordenação por `enviadoEm`: o campo é gerado pelo servidor (relógio único,
+  // `handlers.ts`) — seguro ordenar por ele; a regra "sem sort" protege contra
+  // relógios de *clientes* distintos, não do servidor. Concat + sort estável
+  // basta (teto 200). A semente nunca avança `anuncio` (R2) nem conta não-lida.
+  // Corrida live-antes-do-snapshot (B2): o live que chegou antes é ecoado na
+  // semente — o dedupe impede duplicar.
   const hidratarHistorico = useCallback(
     (historico: readonly MensagemDeChatDaPartidaEvento[] | undefined | null) => {
-      if (historicoHidratadoRef.current) return
       if (!historico || historico.length === 0) return
-      historicoHidratadoRef.current = true
       const semente: MensagemDoChatDaPartida[] = historico.map((evento) => {
         proximoIdRef.current += 1
         return {
@@ -192,10 +193,11 @@ export function useChatDaPartida({
         }
       })
       setMensagens((atual) => {
-        if (atual.length === 0) return semente.slice(-TETO_DE_MENSAGENS_DO_FEED)
+        if (atual.length === 0) return ordenarPorEnviadoEm(semente).slice(-TETO_DE_MENSAGENS_DO_FEED)
         const vistas = new Set(atual.map(identidadeDaMensagem))
         const faltantes = semente.filter((m) => !vistas.has(identidadeDaMensagem(m)))
-        return [...faltantes, ...atual].slice(-TETO_DE_MENSAGENS_DO_FEED)
+        if (faltantes.length === 0) return atual
+        return ordenarPorEnviadoEm([...atual, ...faltantes]).slice(-TETO_DE_MENSAGENS_DO_FEED)
       })
     },
     [],
@@ -347,6 +349,20 @@ export function useChatDaPartida({
 /** Identidade de dedupe semente×live (B2): eco do servidor não duplica. */
 function identidadeDaMensagem(mensagem: Pick<MensagemDoChatDaPartida, 'jogadorId' | 'enviadoEm' | 'conteudo'>): string {
   return `${mensagem.jogadorId}|${mensagem.enviadoEm}|${mensagem.conteudo}`
+}
+
+/**
+ * Ordenação estável por `enviadoEm` do servidor (relógio único). Entrada
+ * inválida (NaN) preserva a ordem relativa: trata como igual para não
+ * reordenar arbitrariamente.
+ */
+function ordenarPorEnviadoEm(mensagens: MensagemDoChatDaPartida[]): MensagemDoChatDaPartida[] {
+  return [...mensagens].sort((a, b) => {
+    const tempoA = Date.parse(a.enviadoEm)
+    const tempoB = Date.parse(b.enviadoEm)
+    if (Number.isNaN(tempoA) || Number.isNaN(tempoB)) return 0
+    return tempoA - tempoB
+  })
 }
 
 /** Feedback enxuto por código de recusa do chat (anunciado via aria-live). */

@@ -77,6 +77,63 @@ describe('useChatDaPartida — B2: semente entra antes do live com dedupe', () =
   })
 })
 
+describe('useChatDaPartida — B2 (reconexão): snapshot traz o gap em ordem, sem duplicar', () => {
+  it('live antes da queda + snapshot com faltantes → merge ordenado por enviadoEm, idempotente', () => {
+    const { result } = montar()
+    act(() => {
+      result.current.hidratarHistorico([
+        eventoLive('ana', 'Ana', 'oi', '2026-09-14T14:00:00Z'),
+        eventoLive('beto', 'Beto', 'bora', '2026-09-14T14:01:00Z'),
+      ])
+    })
+    act(() => {
+      result.current.aoEventoDeChat(eventoLive('cara', 'Cara', 'cheguei', '2026-09-14T14:04:00Z'))
+    })
+    expect(result.current.mensagens.map((m) => m.conteudo)).toEqual(['oi', 'bora', 'cheguei'])
+    const anuncioAposLive = result.current.anuncio?.conteudo
+    const naoLidasAposLive = result.current.naoLidas
+
+    // Reconexão: snapshot traz as antigas + gap do período de queda + eco do live.
+    act(() => {
+      result.current.hidratarHistorico([
+        eventoLive('ana', 'Ana', 'oi', '2026-09-14T14:00:00Z'),
+        eventoLive('beto', 'Beto', 'bora', '2026-09-14T14:01:00Z'),
+        eventoLive('ana', 'Ana', 'gap-1', '2026-09-14T14:02:00Z'),
+        eventoLive('beto', 'Beto', 'gap-2', '2026-09-14T14:03:00Z'),
+        eventoLive('cara', 'Cara', 'cheguei', '2026-09-14T14:04:00Z'),
+      ])
+    })
+    expect(result.current.mensagens.map((m) => m.conteudo)).toEqual([
+      'oi',
+      'bora',
+      'gap-1',
+      'gap-2',
+      'cheguei',
+    ])
+    // Semente nunca anuncia nem conta como não lida.
+    expect(result.current.anuncio?.conteudo).toBe(anuncioAposLive)
+    expect(result.current.naoLidas).toBe(naoLidasAposLive)
+
+    // Re-hidratação com o mesmo snapshot é idempotente.
+    act(() => {
+      result.current.hidratarHistorico([
+        eventoLive('ana', 'Ana', 'oi', '2026-09-14T14:00:00Z'),
+        eventoLive('beto', 'Beto', 'bora', '2026-09-14T14:01:00Z'),
+        eventoLive('ana', 'Ana', 'gap-1', '2026-09-14T14:02:00Z'),
+        eventoLive('beto', 'Beto', 'gap-2', '2026-09-14T14:03:00Z'),
+        eventoLive('cara', 'Cara', 'cheguei', '2026-09-14T14:04:00Z'),
+      ])
+    })
+    expect(result.current.mensagens.map((m) => m.conteudo)).toEqual([
+      'oi',
+      'bora',
+      'gap-1',
+      'gap-2',
+      'cheguei',
+    ])
+  })
+})
+
 describe('useChatDaPartida — B3: troca de Partida reseta o painel', () => {
   it('feed, não-lidas e anúncio zeram no novo partidaId', () => {
     const { result, rerender } = montar('partida-1')

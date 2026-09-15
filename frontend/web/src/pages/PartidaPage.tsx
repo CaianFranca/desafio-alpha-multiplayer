@@ -31,10 +31,10 @@ import {
 } from '../game/tabuleiro/vooDoPeao'
 import type { VooDoPeaoPendente } from '../game/tabuleiro/vooDoPeao'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
-import { useChatDaPartida } from '../hooks/useChatDaPartida'
 import { CODIGOS_DE_RECUSA_DO_CHAT } from '../hooks/useChatDaPartida'
 import type { CodigoDeRecusaDoChat } from '../hooks/useChatDaPartida'
-import { ChatDaPartida } from '../components/partida/ChatDaPartida'
+import { PainelDeChatDaPartida } from '../components/partida/PainelDeChatDaPartida'
+import type { PainelDeChatDaPartidaHandle } from '../components/partida/PainelDeChatDaPartida'
 import { definirFase } from '../utils/coletorDeDepuracao'
 import { useRequerModoPaisagem } from '../hooks/useModoPaisagemCelular'
 import { OverlayModoPaisagem } from '../components/partida/OverlayModoPaisagem'
@@ -415,17 +415,24 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const pendentesEmVoo = useRef<Set<string>>(new Set())
 
   // ── Roteamento do chat (issue #389) ──
-  // O hook do canal é construído antes do hook do chat (as opções do painel
-  // vêm do retorno do socket) e o `onEvento` é passado na CONSTRUÇÃO do
-  // socket — para quebrar a circularidade, o direcionamento do chat vive em
-  // refs preenchidas após o `useChatDaPartida` (mesmo padrão de
-  // enviarComJogadorRef/desconectarRef acima): o callback do canal permanece
-  // estável (sem re-subscrição) e só lê o destinatário na chegada do evento.
+  // O hook do canal é construído antes do painel do chat e o `onEvento` é
+  // passado na CONSTRUÇÃO do socket — para quebrar a circularidade, o
+  // direcionamento vive em refs que delegam ao handle imperativo do
+  // `PainelDeChatDaPartida` (dono do `useChatDaPartida`, isolado da página
+  // para mensagens não re-renderizarem a cena — bloqueante 1 da review #401).
+  // O callback do canal permanece estável (sem re-subscrição) e só lê o
+  // destinatário na chegada do evento. `chatAbertoRef` alimenta o gate de
+  // teclado da cena, lido DENTRO do `onKey` (sem `chatAberto` nas deps).
   const aoEventoDeChatRef = useRef<(evento: MensagemDeChatDaPartidaEvento) => void>(() => {})
   const aoErroDeChatRef = useRef<(evento: ErroDoTabuleiroEvento) => void>(() => {})
   const hidratarHistoricoDoChatRef = useRef<
     (historico: readonly MensagemDeChatDaPartidaEvento[] | undefined | null) => void
   >(() => {})
+  const painelDeChatRef = useRef<PainelDeChatDaPartidaHandle | null>(null)
+  const chatAbertoRef = useRef(false)
+  const aoMudarAberturaDoChat = useCallback((aberto: boolean) => {
+    chatAbertoRef.current = aberto
+  }, [])
 
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, estaConectado, conectar: reconectarSocket, desconectar, aguardarConexao, removerPendentesPorTipo } = usePartidaWebSocket({
@@ -963,38 +970,15 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
   // ── Chat da partida (issue #389) ──
   // O painel envia SÓ com socket OPEN (nunca enfileira o chat: o comando não
-  // pode "pegar carona" no drain do handshake). `enviar`/`estaConectado` vêm
-  // do canal; o feed/cooldown é do hook. As refs de roteamento acima são
-  // preenchidas aqui — o `onEvento` do socket permanece estável.
-  const {
-    mensagens: mensagensDoChat,
-    naoLidas: chatNaoLidas,
-    aberto: chatAberto,
-    emCooldown: chatEmCooldown,
-    recusa: chatRecusa,
-    anuncio: anuncioDoChat,
-    abrir: abrirOChat,
-    fechar: fecharOChat,
-    enviar: enviarMensagemDoChat,
-    aoEventoDeChat,
-    aoErroDeChat,
-    hidratarHistorico,
-  } = useChatDaPartida({
-    partidaId,
-    jogadorId,
-    estaConectado,
-    enviar,
-    descartarPendentesPorTipo: removerPendentesPorTipo,
-  })
+  // pode "pegar carona" no drain do handshake). O estado mora no
+  // `PainelDeChatDaPartida` (bloqueante 1): a página só delega eventos ao
+  // handle imperativo — nenhum `setState` do chat re-renderiza a página/cena.
   useEffect(() => {
-    aoEventoDeChatRef.current = aoEventoDeChat
-  }, [aoEventoDeChat])
-  useEffect(() => {
-    aoErroDeChatRef.current = aoErroDeChat
-  }, [aoErroDeChat])
-  useEffect(() => {
-    hidratarHistoricoDoChatRef.current = hidratarHistorico
-  }, [hidratarHistorico])
+    aoEventoDeChatRef.current = (evento) => painelDeChatRef.current?.receberMensagem(evento)
+    aoErroDeChatRef.current = (evento) => painelDeChatRef.current?.receberRecusa(evento)
+    hidratarHistoricoDoChatRef.current = (historico) =>
+      painelDeChatRef.current?.receberHistorico(historico)
+  }, [])
 
   // Reenvio da desistência pendente (R2): "Sair mesmo assim" ou aba fechada
   // durante o "saindo" gravaram a pendência; ao (re)abrir a partida com o
@@ -1464,8 +1448,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     const onKey = (e: KeyboardEvent) => {
       // Block da cena (issue #389): com o painel do chat aberto o teclado é
       // do chat — R/E/Espaço/Enter não operam o tabuleiro (o input já é
-      // filtrado pelo alvo acima; o resto da cena, não).
-      if (chatAberto) return
+      // filtrado pelo alvo acima; o resto da cena, não). Lido na ref DENTRO
+      // do handler (bloqueante 1): sem `aberto` nas deps, o chat não
+      // re-subscreve este effect a cada mensagem.
+      if (chatAbertoRef.current) return
       const alvo = e.target as HTMLElement | null
       if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA')) return
       if (e.key === 'r' || e.key === 'R') girar('horario')
@@ -1485,7 +1471,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao, estadoInteracao, estadoInteracaoPeoes, chatAberto])
+  }, [estadoEmAndamento, girar, pecaEmManipulacaoId, finalizarManipulacao, estadoInteracao, estadoInteracaoPeoes])
 
   const tentarNovamenteComConexao = useCallback(() => {
     // Desistente não reconecta (o servidor rejeitaria com
@@ -1675,22 +1661,21 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         Chat da partida (issue #389, contrato #390): irmão do HUD em andamento
         E após o Resultado até a saída individual — bot de vitória/derrota e
         conversa pós-jogo vivem aqui. Desmonta só em preparada/não-início.
-        `data-*` dos testes vivem no componente.
+        Dono do estado isolado no container (bloqueante 1): mensagens não
+        re-renderizam a página/cena. `data-*` dos testes vivem no componente.
       */}
       {(estadoEmAndamento || emResultado) ? (
-        <ChatDaPartida
-          mensagens={mensagensDoChat}
-          naoLidas={chatNaoLidas}
-          aberto={chatAberto}
-          emCooldown={chatEmCooldown}
-          recusa={chatRecusa}
-          anuncio={anuncioDoChat}
+        <PainelDeChatDaPartida
+          ref={painelDeChatRef}
+          partidaId={partidaId}
+          jogadorId={jogadorId}
+          estaConectado={estaConectado}
+          enviar={enviar}
+          descartarPendentesPorTipo={removerPendentesPorTipo}
           jogadorPorId={modelo.jogadorPorId}
-          jogadorLocalId={jogadorId}
-          aoAbrir={abrirOChat}
-          aoFechar={fecharOChat}
-          aoEnviar={enviarMensagemDoChat}
+          bloqueiaCena={estadoEmAndamento}
           compacto={viewportCompacto}
+          aoMudarAbertura={aoMudarAberturaDoChat}
         />
       ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (

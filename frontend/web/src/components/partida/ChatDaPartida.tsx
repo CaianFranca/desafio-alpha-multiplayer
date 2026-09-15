@@ -7,9 +7,12 @@
  * renderizadas igual — a cor vem do roster `jogadorPorId`, a identidade do
  * bot também vive lá) e input com contador do limite.
  *
- * Block da cena: com o painel aberto um backdrop cobre a tela engolindo
- * cliques (Escape, clique no backdrop ou no botão fecham e devolvem o
- * controle) — o jogo NÃO pausa, só o input para. O gate de teclado para a
+ * Block da cena: com o painel aberto EM ANDAMENTO um backdrop cobre a tela
+ * engolindo cliques (Escape, clique no backdrop ou no botão fecham e devolvem
+ * o controle) — o jogo NÃO pausa, só o input para. No RESULTADO não há
+ * backdrop nem trap de Tab (o jogo já acabou e os botões de Vitória/Derrota
+ * precisam seguir clicáveis — a cena segue protegida pelo próprio overlay);
+ * Escape fecha sempre, em qualquer estado. O gate de teclado para a
  * cena (R/E/Espaço/Enter) vive na PartidaPage, que lê o estado aberto.
  * Notícias de novas mensagens (e recusas) saem por região aria-live; o
  * badge zera ao abrir.
@@ -55,6 +58,12 @@ interface ChatDaPartidaProps {
   aoFechar: () => void
   /** Envia; devolve true quando aceito localmente (o painel limpa o rascunho). */
   aoEnviar: (conteudo: string) => boolean
+  /**
+   * Bloqueio da cena: true em andamento (backdrop + trap de Tab ativos),
+   * false no Resultado (sem backdrop, sem trap — só Escape fecha). A página
+   * passa `estadoEmAndamento`.
+   */
+  bloqueiaCena?: boolean
   /** Força/deriva o modo compacto paisagem-celular (issue #230). */
   compacto?: boolean | null
 }
@@ -77,6 +86,7 @@ export function ChatDaPartida({
   aoAbrir,
   aoFechar,
   aoEnviar,
+  bloqueiaCena = true,
   compacto = null,
 }: ChatDaPartidaProps) {
   const [rascunho, setRascunho] = useState('')
@@ -91,9 +101,12 @@ export function ChatDaPartida({
   const podeEnviar = rascunho.trim().length > 0 && !emCooldown
 
   // Abertura move o foco ao input (autoFocus é frágil em React/jsdom) e arma
-  // o block da cena: Escape fecha e devolve o foco ao botão; Tab circula SÓ
-  // dentro do painel (R4 — o backdrop bloqueia ponteiro, o trap bloqueia o
-  // teclado; o gate R/E/Espaço/Enter da página lê o estado aberto).
+  // o block da cena: Escape fecha SEMPRE (atalho, não bloqueio) e devolve o
+  // foco ao botão; Tab circula SÓ dentro do painel quando `bloqueiaCena`
+  // (em andamento — o backdrop bloqueia ponteiro, o trap bloqueia o teclado;
+  // o gate R/E/Espaço/Enter da página lê o estado aberto). No Resultado
+  // (`bloqueiaCena=false`) não há trap: os botões de Vitória/Derrota seguem
+  // alcançáveis por teclado.
   useEffect(() => {
     if (!aberto) return
     seguirFeedRef.current = true
@@ -104,6 +117,7 @@ export function ChatDaPartida({
         botaoRef.current?.focus()
         return
       }
+      if (!bloqueiaCena) return
       if (e.key !== 'Tab') return
       const raiz = raizRef.current
       if (!raiz) return
@@ -126,7 +140,7 @@ export function ChatDaPartida({
     }
     window.addEventListener('keydown', aoTeclar)
     return () => window.removeEventListener('keydown', aoTeclar)
-  }, [aberto, aoFechar])
+  }, [aberto, aoFechar, bloqueiaCena])
 
   // Auto-scroll condicional (M1): só desce sozinho quando o leitor já estava
   // no fim (ou na abertura). jsdom não implementa scrollTo — fallback.
@@ -350,7 +364,7 @@ export function ChatDaPartida({
           </div>
         ) : null}
       </div>
-      {aberto ? (
+      {aberto && bloqueiaCena ? (
         <div
           data-testid="chat-backdrop"
           onClick={() => {
