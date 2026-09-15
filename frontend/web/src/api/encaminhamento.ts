@@ -13,17 +13,25 @@ export function buildGameWsUrl(serverId: string, partidaId: string): string {
 
 export function buildGameRedirectHref(serverId: string, partidaId: string, codigoDeSala?: string | null): string {
   // Rota SPA da partida — a PartidaPage abrirá o WS de jogo.
-  const base = `/partida?serverId=${encodeURIComponent(serverId)}&partidaId=${encodeURIComponent(partidaId)}`
+  // Subpath (VITE_BASE_PATH): window.location.assign faz reload full-page e
+  // ignora o basename do router, então o href precisa carregar o prefixo
+  // (/server01/partida?...). Com base / mantém /partida?... (sem regressão).
+  const base = `${baseDoApp()}partida?serverId=${encodeURIComponent(serverId)}&partidaId=${encodeURIComponent(partidaId)}`
   if (codigoDeSala) return `${base}&codigoDeSala=${encodeURIComponent(codigoDeSala)}`
   return base
 }
 
+// Delay do redirect automático da fase disponivel — fonte única para o overlay e os testes.
+export const REDIRECT_DELAY_MS = 1500
+
 /** URL legível exibida como alvo do redirect (ex.: wss://host/ws/game/...). */
+// TODO(#386): avaliar remoção ou integração ao PainelDeDepuração — hoje dead code sem uso no painel (ADR-0011 é stream de debug, não helpers de URL).
 export function alvoDoRedirectLegivel(serverId: string, partidaId: string): string {
   return buildGameWsUrl(serverId, partidaId)
 }
 
-/** Fonte única para URLs do alvo do encaminhamento — evita duplicar buildGame* entre SalaPage e overlay. */
+/** Fonte única para URLs do alvo do encaminhamento. */
+// TODO(#386): avaliar remoção ou integração ao PainelDeDepuração — hoje dead code sem uso no painel (ADR-0011 é stream de debug, não helpers de URL).
 export function urlsDoAlvo(serverId: string, partidaId: string, codigoDeSala?: string | null): { wsUrl: string; href: string } {
   return { wsUrl: buildGameWsUrl(serverId, partidaId), href: buildGameRedirectHref(serverId, partidaId, codigoDeSala) }
 }

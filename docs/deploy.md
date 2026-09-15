@@ -45,11 +45,13 @@ selecionando a branch `prod`.
 ## 2. Pré-requisitos do servidor
 
 O bootstrap do servidor **já foi executado** e não faz parte da rotina de
-deploy. O servidor (referência de lab: IP `10.10.0.141`, hostname `c041`) é
-alcançado pela rede privada via **VPN** para SSH/deploy — a exposição pública é
+deploy. O servidor (referência de lab: hostname `c041`) é alcançado pela rede privada
+via **VPN** para SSH/deploy — a exposição pública é
 feita pelo proxy do admin, que termina o TLS e encaminha
 `https://lab.alphaedtech.org.br/server01` para a porta **80** deste host,
-preservando o prefixo `/server01`.
+removendo o prefixo `/server01`. O vhost de borda serve o app tanto na raiz
+(pass-through) quanto em `/server01/` (strip), então funciona independente de o
+proxy remover ou preservar o prefixo.
 
 Estado esperado do servidor:
 
@@ -224,7 +226,7 @@ issues, PRs ou logs).
 | --- | --- |
 | `VPN_CONFIG` | Conteúdo completo do arquivo `.ovpn` do cliente OpenVPN (certificados e chave inclusos). Usado no passo de VPN para subir o túnel até a rede privada. Se o servidor VPN fizer push de `redirect-gateway`, o config deve conter o fallback da seção 7a. |
 | `SSH_PRIVATE_KEY` | Chave privada SSH dedicada ao deploy (chave pública autorizada no `authorized_keys` do usuário `SERVER_USER` no servidor). |
-| `SERVER_HOST` | Host/IP do servidor de produção na rede privada (lab: `10.10.0.141`). Usado para ping VPN, SSH, `ssh-keyscan` e scp. |
+| `SERVER_HOST` | Host/IP do servidor de produção na rede privada. Usado para ping VPN, SSH, `ssh-keyscan` e scp. |
 | `SERVER_USER` | Usuário SSH usado no deploy (precisa permissão de `sudo`/root para o `deploy-server.sh` e acesso de escrita em `/tmp`). |
 | `PROD_POSTGRES_PASSWORD` | Senha da role `flicker` do Postgres de produção. O workflow a injeta no env de produção e a sincroniza (idempotente) na role. |
 | `PROD_JWT_SECRET` | Segredo de assinatura do JWT de acesso em produção. Obrigatório: a config **falha ao iniciar** se ausente ou igual ao default de dev. |
@@ -282,12 +284,17 @@ Detalhes relevantes:
     `/var/www/html` (symlink para `<release>/frontend/dist`) e `media/` via
     `alias /var/www/html/media/`; proxy de `/api/` e `/ws/lobby` para o lobby
     (127.0.0.1:3001) e de `/ws/game/` para o game server (127.0.0.1:1234).
-  - `infra/nginx/nginx.edge.conf` (borda, `listen 80 default_server`):
-    redireciona `/server01` → `/server01/` e faz `proxy_pass
-    http://127.0.0.1:8080/` para o nginx do app, **removendo o prefixo
-    `/server01/`** (barra final do `proxy_pass`); encaminha Upgrade/Connection
-    (WebSocket) e `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`; responde
-    `404` para qualquer caminho fora de `/server01/`.
+  - `infra/nginx/nginx.edge.conf` (borda, `listen 80 default_server`), com
+    três locations: (`1`) redireciona `/server01` → `/server01/` (301);
+    (`2`) `/server01/` faz `proxy_pass http://127.0.0.1:8080/` para o nginx do
+    app, **removendo o prefixo `/server01/`** (barra final do `proxy_pass`),
+    usado quando o admin preserva o prefixo; (`3`) `/` faz pass-through com
+    `proxy_pass http://127.0.0.1:8080/` (barra final), que usa o URI
+    **normalizado** (colapsa barras repetidas: `//api/...` → `/api/...`) antes
+    de entregar ao nginx do app, usado quando o admin remove o prefixo e
+    entrega a raiz. Em todos os casos
+    encaminha Upgrade/Connection (WebSocket) e
+    `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`.
 - **Env de produção** (`/opt/flicker/env`) é gerado pelo workflow a cada
   deploy, com:
 
@@ -343,8 +350,9 @@ pull-filter ignore "redirect-gateway"
 route <IP_DO_SERVIDOR> 255.255.255.255 net_gateway
 ```
 
-No lab: `route 10.10.0.141 255.255.255.255 net_gateway`. Alternativa
-equivalente: `route-nopull` + rota estática para o servidor.
+`<IP_DO_SERVIDOR>` é o valor do secret `SERVER_HOST` (o IP do servidor na rede
+privada). Alternativa equivalente: `route-nopull` + rota estática para o
+servidor.
 
 ### b) Health check falha → rollback automático
 
@@ -354,7 +362,7 @@ ar (o script faz o flip de volta sozinho) — **não é preciso agir para restau
 o serviço**, apenas investigar a causa:
 
 ```bash
-ssh <user>@10.10.0.141
+ssh <user>@<IP_DO_SERVIDOR>   # valor do secret SERVER_HOST
 journalctl -u flicker-lobby -u flicker-game --since "15 minutes ago" --no-pager
 ```
 
@@ -372,8 +380,20 @@ hostname do serviço no Docker Compose. Em produção nativa esse hostname não
 resolve, e o fluxo de "INICIAR PARTIDA" falha ao usar o endereço registrado.
 
 **Fix planejado**: env `GAME_SERVER_ADVERTISE_HOST` para o game-server anunciar
-o host correto (no lab: `10.10.0.141`). Até lá, partidas iniciadas em produção
+o host correto (no lab, o IP privado do próprio servidor — ver secret
+`SERVER_HOST`). Até lá, partidas iniciadas em produção
 nativa estão afetadas por este bug — ver a issue #252 para status.
+
+### d) WebSocket do lobby retorna 404 (`Cannot GET /ws/lobby`)
+
+O browser não consegue abrir `wss://…/server01/ws/lobby` e recebe `404` com
+`X-Powered-By: Express`; nenhuma linha `[ws] upgrade:` aparece no journal. Não é
+rota ausente: o **proxy do admin** reproxa a requisição como HTTP/1.0 sem os
+headers `Upgrade`/`Connection` (hop-by-hop), então o Node nunca emite o evento
+`upgrade` e o `GET` cai no Express (404). Borda, nginx do app e lobby aceitam o
+handshake normalmente. O diagnóstico completo, as evidências e o snippet de
+correção do proxy do admin estão em
+[`docs/diagnostico-websocket-server01.md`](diagnostico-websocket-server01.md).
 
 ---
 

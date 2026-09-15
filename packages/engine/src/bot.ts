@@ -23,8 +23,11 @@
 //   (c) Primeiro Turno → selecionar/posicionar a Inicial, selecionar o Peão,
 //       posicionar o Peão e, sem pendências, encerrar;
 //   (d) turno normal sem Confirmação → selecionar o Peão e, sobre a Peça do
-//       início, mover (uma vez) ou permanecer; fora dela, só confirmar a
-//       posição — o bot nunca encadeia 2 movers no mesmo turno;
+//       início, mover (uma vez), atravessar o Escuro (em Baixa, uma vez por
+//       turno — ADR-0017 / issue #377, Opção B) ou permanecer; fora dela, só
+//       confirmar a posição — o bot nunca encadeia 2 movers no mesmo turno;
+//       após atravessar, o mover é compulsório (sem nova travessia nem
+//       permanência — a engine rejeitaria);
 //   (e) posição confirmada (e sem pendências) → encerrar o turno.
 //
 // Randomização da orientação: todo posicionar_peca sorteado passa por
@@ -41,14 +44,15 @@
 // ela o loop jamais alcançaria o encerrar_turno nos turnos normais.
 //
 // Fora do escopo deliberado: finalizar_manipulacao (janela de Manipulação
-// pós-encaixe — o bot não manipula após posicionar), atravessar_o_escuro
-// (jogada opcional de Baixa Iluminação — o bot em Baixa usa a movimentação
-// normal) e desselecionar_peao (sem efeito útil no turno). O girar_peca
-// pré-encaixe FAZ parte do plano, via expandirPosicionamentoDoBot. A
-// pendência da Travessia (Baixa, com célula travada) segue enumerada em (b).
+// pós-encaixe — o bot não manipula após posicionar) e desselecionar_peao
+// (sem efeito útil no turno). O girar_peca pré-encaixe FAZ parte do plano,
+// via expandirPosicionamentoDoBot, e o atravessar_o_escuro FAZ parte do plano
+// em Baixa (Opção B da ADR-0017 — ramo (d) abaixo). A pendência da Travessia
+// (Baixa, com célula travada) segue enumerada em (b).
 
 import {
   bordasAbertas,
+  calcularIluminacao,
   celulaVizinhaNaBorda,
   ehPecaDeMonstro,
   ehPecaEspecial,
@@ -543,9 +547,18 @@ export function acoesValidasDaSubfase(
     return [];
   }
   const acoes: ComandoDePartida[] = [];
+  // ADR-0017 / issue #377: mover pós-travessia é compulsório PARA a peça
+  // colocada — a FSM espelha a guarda da engine (só ela é enumerada; as
+  // demais seriam rejeitadas com MOVIMENTO_INDISPONIVEL).
+  const pecaDaTravessiaId = estado.pecaDaTravessiaId ?? null;
+  const moverSoParaTravessia =
+    (estado.atravessouNoTurno ?? false) && pecaDaTravessiaId !== null;
   for (const vizinha of vizinhasConectadas(tabuleiro, origem.pecaId)) {
     // Monstros nunca aceitam peão; a engine rejeitaria.
     if (ehPecaDeMonstro(vizinha.tipo)) {
+      continue;
+    }
+    if (moverSoParaTravessia && vizinha.pecaId !== pecaDaTravessiaId) {
       continue;
     }
     const ocupantes = tabuleiro.peoes.filter(
@@ -560,12 +573,56 @@ export function acoesValidasDaSubfase(
       celula: vizinha.celula,
     });
   }
+  const emBaixa = jogador.emBaixaIluminacao ?? false;
+  const jaAtravessou = estado.atravessouNoTurno ?? false;
+  // ADR-0017 / issue #377 (Opção B): em Baixa, o bot pode atravessar o Escuro —
+  // uma ação por vaga escura conectada (borda aberta com célula vizinha vazia
+  // e não-iluminada). A iluminação é a fresca unificada com a engine
+  // (calcularIluminacao sobre os peões em Baixa, mesmo preamble de
+  // atravessarOEscuroDaPartida), então a enumeração é exata. Após atravessar,
+  // o mover é compulsório: sem nova travessia e sem permanência (a engine
+  // rejeitaria ambas — MOVIMENTO_INDISPONIVEL). ADR-0018 (M4): Caixa vazia não
+  // é erro na engine (travessia fantasma aceita como no-op sem marcar a flag),
+  // então o bot nem enumera a travessia sem peças — evita passos desperdiçados
+  // até o failsafe.
+  if (emBaixa && !jaAtravessou && tabuleiro.caixa.length > 0) {
+    const iluminadasFrescas = new Set(
+      calcularIluminacao(
+        tabuleiro,
+        estado.jogadores
+          .filter((j) => (j.emBaixaIluminacao ?? false))
+          .map((j) => j.peaoId),
+      ).map((celula) => `${celula.linha},${celula.coluna}`),
+    );
+    for (const vaga of vagasDisponiveis(tabuleiro, origem, tabuleiro.recebidas)) {
+      if (
+        iluminadasFrescas.has(`${vaga.celula.linha},${vaga.celula.coluna}`)
+      ) {
+        continue;
+      }
+      acoes.push({
+        tipo: 'atravessar_o_escuro',
+        peaoId: jogador.peaoId,
+        celula: vaga.celula,
+      });
+    }
+  }
   // A Permanência vale só sobre a Peça do início do turno — e nunca sob o
-  // período de graça do Resgate (a engine rejeitaria).
+  // período de graça do Resgate (a engine rejeitaria). Vale também após
+  // atravessar o Escuro QUANDO a peça atravessada é Monstro: o Monstro não
+  // aceita peão, o mover compulsório é impossível e o turno fechado via
+  // Permanência (permanecerNaPartida reabre a via só para o monstro).
+  const pecaDaTravessia = (estado.pecaDaTravessiaId ?? null)
+    ? tabuleiro.posicionadas.find(
+        (peca) => peca.pecaId === estado.pecaDaTravessiaId,
+      )
+    : undefined;
+  const travessiaEhMonstro =
+    pecaDaTravessia !== undefined && ehPecaDeMonstro(pecaDaTravessia.tipo);
   const emGraca = (estado.pecasEmPeriodoDeGraca ?? []).includes(
     peao.pecaId,
   );
-  if (!emGraca) {
+  if (!emGraca && (!jaAtravessou || travessiaEhMonstro)) {
     acoes.push({ tipo: 'permanecer', peaoId: jogador.peaoId });
   }
   return acoes;

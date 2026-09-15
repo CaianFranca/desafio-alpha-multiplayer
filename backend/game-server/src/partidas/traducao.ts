@@ -208,6 +208,8 @@ export function traduzirEventos(
           resgatadoJogadorId: evento.resgatadoJogadorId,
           resgatadorJogadorId: evento.resgatadorJogadorId,
           resgatadorPeaoId: evento.resgatadorPeaoId,
+          emBaixaIluminacao: evento.emBaixaIluminacao,
+          sanidade: evento.sanidade,
         });
         break;
       default: {

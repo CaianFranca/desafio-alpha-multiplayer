@@ -123,6 +123,14 @@ export interface EstadoDaPartida {
   // uma única vez; a flag é zerada no avanço da vez. Retrocompatível: estados
   // antigos persistem sem o campo (acesso via ?? false).
   readonly atravessouNoTurno: boolean;
+  // Peça colocada pela Travessia do Escuro no turno (ADR-0017 / issue #377):
+  // o mover pós-travessia é compulsório PARA ELA — voltar à origem (ou a
+  // qualquer outra) é rejeitado. Vale também para Monstro (não aceita peão):
+  // o turno segue travado e o fechamento vira Permanência
+  // (permanecerNaPartida reabre a via só para a peça da travessia).
+  // Opcional retrocompatível (estados antigos persistem sem o campo — acesso
+  // via ?? null); zerado no avanço da vez junto da flag.
+  readonly pecaDaTravessiaId?: string | null;
   readonly celulasIluminadas: readonly Celula[];
   // Término da Partida (issue #176): o Desfecho !== null é a própria
   // condição "terminada" — sem flag duplicada. Os contadores globais de
@@ -233,6 +241,12 @@ export interface ResgateRealizadoEvento {
   readonly resgatadoJogadorId: string;
   readonly resgatadorJogadorId: string;
   readonly resgatadorPeaoId: string;
+  // Estado resultante do resgatado (issue #227, mesmo precedente do
+  // protegido em posicao_confirmada): a cura pode ser parcial (salvador de
+  // vela apagada remove o Amedrontado mas não acende a Baixa) — o cliente
+  // aplica exatamente, sem adivinhar.
+  readonly emBaixaIluminacao: boolean;
+  readonly sanidade: number;
 }
 
 // Desistência (issue #289): eco do domínio — o Jogador saiu da Partida em
@@ -379,6 +393,7 @@ export function estadoInicialDaPartida(
     pecaDoInicioDoTurnoId: null,
     posicaoConfirmada: false,
     atravessouNoTurno: false,
+    pecaDaTravessiaId: null,
     celulasIluminadas: [],
     resultado: null,
     geradoresLigados: [],
@@ -590,7 +605,31 @@ function posicionarPecaDaPartida(
   if (ehRecebida) {
     estado = adotarSelecaoDoAtor(estado, ator);
   }
-  return delegarAoTabuleiro(estado, comando);
+  // ADR-0017 / issue #377 (Opção B): o encaixe que resolve a pendência da
+  // Travessia (vaga + célula-alvo travadas casando o comando) registra a peça
+  // colocada — o mover pós-travessia é compulsório PARA ELA. Vale também para
+  // Monstro: a cadeia não dispensa o turno travado — Monstro não aceita peão
+  // (peoes.ts), então o fechamento vira Permanência (permanecerNaPartida), que
+  // reabre a via só para a peça da travessia.
+  const travessiaPendente =
+    (estado.atravessouNoTurno ?? false)
+      ? (estado.tabuleiro.recebidas.find(
+          (item) =>
+            item.pecaId === comando.pecaId &&
+            item.vaga !== null &&
+            item.celulaAlvo !== null &&
+            item.celulaAlvo.linha === comando.celula.linha &&
+            item.celulaAlvo.coluna === comando.celula.coluna,
+        ) ?? null)
+      : null;
+  const resultado = delegarAoTabuleiro(estado, comando);
+  if (!resultado.sucesso || travessiaPendente === null) {
+    return resultado;
+  }
+  return sucessoDaPartida(
+    { ...resultado.estado, pecaDaTravessiaId: comando.pecaId },
+    resultado.eventos,
+  );
 }
 
 // ST-11: no Primeiro Turno, o encaixe do Peão gera o Recebimento
@@ -626,7 +665,7 @@ function posicionarPeaoDaPartida(
   // uma Peça; sem Peça, o Recebimento simplesmente não é gerado. O Recebimento
   // sorteia as peças da Caixa (#138) — peca_sorteada por peça — e cria as
   // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
-  // ADR-0013 / issue #354: em Baixa, só vagas escuras geram puxada — sem vaga
+  // ADR-0017 / issue #377: em Baixa, só vagas escuras geram puxada — sem vaga
   // escura não há peça (evita pendência irresolúvel da #343). Em Baixa a
   // iluminação para o filtro é a fresca pós-posicionamento (inclui o novo peão).
   const emBaixaAntes = ator.emBaixaIluminacao ?? false;
@@ -793,6 +832,24 @@ function moverPeaoDaPartida(
   // (MOVIMENTO_NAO_CONECTADO, PECA_JA_TEM_PEAO). A Travessia do Escuro (#272)
   // é isenta: o mover_peao da cadeia nasce de atravessar_o_escuro — Baixa
   // Iluminação — e sai da zona de propósito.
+  // ADR-0017 / issue #377: com a peça da travessia registrada, o mover
+  // pós-travessia é compulsório PARA ELA — voltar à origem (ou a qualquer
+  // outra peça) é rejeitado; o movimento da travessia não é desfazível. A
+  // peça-alvo pode ser Monstro (neste caso o Tabuleiro barra o pouso, PEPEJA
+  // da guarda de ocupação) e o turno fecha via Permanência — exceção de
+  // permanecerNaPartida.
+  const pecaDaTravessiaId = estado.pecaDaTravessiaId ?? null;
+  if (
+    (estado.atravessouNoTurno ?? false) &&
+    pecaDaTravessiaId !== null &&
+    destino &&
+    destino.pecaId !== pecaDaTravessiaId
+  ) {
+    return rejeitarDaPartida(
+      'MOVIMENTO_INDISPONIVEL',
+      'Após atravessar o Escuro, o Peão deve mover para a peça colocada.',
+    );
+  }
   const origemDoTurnoId = estado.pecaDoInicioDoTurnoId;
   const origemDoTurno = origemDoTurnoId
     ? estado.tabuleiro.posicionadas.find((peca) => peca.pecaId === origemDoTurnoId)
@@ -820,7 +877,6 @@ function moverPeaoDaPartida(
   const resultadoTab = aplicarComandoDeTabuleiro(estado.tabuleiro, comando);
   let tabuleiroNovo: EstadoDoTabuleiro;
   let eventosTab: readonly EventoDoTabuleiro[];
-  let pecaIdPara: string | null = null;
 
   if (!resultadoTab.sucesso) {
     // Se a rejeição foi por ocupação mas a exceção de resgate permite, realiza
@@ -870,7 +926,6 @@ function moverPeaoDaPartida(
             celula: comando.celula,
           },
         ];
-        pecaIdPara = destino.pecaId;
       } else {
         return { sucesso: false, erro: resultadoTab.erro };
       }
@@ -880,83 +935,44 @@ function moverPeaoDaPartida(
   } else {
     tabuleiroNovo = resultadoTab.estado;
     eventosTab = resultadoTab.eventos;
-    const movEvento = eventosTab.find((evento) => evento.tipo === 'peao_movido') as
-      | { pecaIdPara: string }
-      | undefined;
-    pecaIdPara = movEvento?.pecaIdPara ?? destino?.pecaId ?? null;
   }
 
-  // Resgate + período de graça atômico após mover sucesso.
-  // O resgate é por aliado: exclui o próprio ator (movimento próprio não
-  // resgata a si mesmo).
-  const afetadosNoDestino = estado.jogadores.filter((jogador) => {
-    if (jogador.jogadorId === ator.jogadorId) return false;
-    const peao = tabuleiroNovo.peoes.find((item) => item.peaoId === jogador.peaoId);
-    return (
-      peao?.pecaId === pecaIdPara &&
-      ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
-    );
-  });
-
-  let jogadoresNovos: readonly JogadorDaPartida[] = estado.jogadores;
-  const eventosResgate: EventoDaPartida[] = [];
-
-  if (afetadosNoDestino.length > 0 && pecaIdPara !== null) {
-    jogadoresNovos = estado.jogadores.map((jogador) => {
-      const ehAfetado = afetadosNoDestino.some((item) => item.jogadorId === jogador.jogadorId);
-      if (!ehAfetado) return jogador;
-      const eraAmedrontado = (jogador.amedrontado ?? jogador.sanidade === 0) === true;
-      const novaSanidade = eraAmedrontado ? 1 : jogador.sanidade;
-      return {
-        ...jogador,
-        emBaixaIluminacao: false,
-        amedrontado: false,
-        sanidade: novaSanidade,
-      };
-    });
-    for (const afetado of afetadosNoDestino) {
-      eventosResgate.push({
-        tipo: 'resgate_realizado',
-        pecaId: pecaIdPara,
-        resgatadoJogadorId: afetado.jogadorId,
-        resgatadorJogadorId: ator.jogadorId,
-        resgatadorPeaoId: comando.peaoId,
-      });
-    }
-  }
-
+  // Re-seleção do Peão (#263/#324/#334): após o mover_peao bem-sucedido, o
+  // Peão movido permanece/re-é selecionado em TODOS os ramos (delegação e
+  // fallback) — o confirmar substitui o permanecer sem exigir re-seleção.
+  // ADR-0005 (pontos definitivos): o Resgate NÃO se materializa aqui — mover
+  // é etapa não-definitiva; a cura/graça/evento são computados só na
+  // Confirmação de Posição (confirmarPosicaoDoPeao), se o salvador ainda
+  // co-ocupar a peça confirmada. A tolerância de ocupação (+1 com afetado)
+  // permanece avaliada no mover via tetoOcupacao/temAfetadoNaPeca.
+  //
+  // Período de graça (issue #171): a saída de um peão da peça graçada libera
+  // a Permanência — a graça é ADICIONADA na Confirmação (resgatarNaPeca), mas
+  // a REMOÇÃO por desocupação vive aqui (qualquer peão que deixe a peça encerra
+  // o bloqueio). A poda stale (peça graçada removida por Limpeza) também.
   let pecasEmPeriodoDeGraca = [...(estado.pecasEmPeriodoDeGraca ?? [])];
-  if (afetadosNoDestino.length > 0 && pecaIdPara !== null) {
-    if (!pecasEmPeriodoDeGraca.includes(pecaIdPara)) {
-      pecasEmPeriodoDeGraca = [...pecasEmPeriodoDeGraca, pecaIdPara];
-    }
-  }
+  const pecaAposMover =
+    tabuleiroNovo.peoes.find((peao) => peao.peaoId === comando.peaoId)?.pecaId ?? null;
   if (
     origemPecaId !== null &&
     pecasEmPeriodoDeGraca.includes(origemPecaId) &&
-    origemPecaId !== pecaIdPara
+    pecaAposMover !== null &&
+    pecaAposMover !== origemPecaId
   ) {
     pecasEmPeriodoDeGraca = pecasEmPeriodoDeGraca.filter((id) => id !== origemPecaId);
   }
-  // Poda stale: se a peça graçada não existe mais no tabuleiro (ex.: limpeza
-  // defensiva), remove da lista para não reter ID órfão.
   if (pecasEmPeriodoDeGraca.length > 0) {
     const idsPosicionadas = new Set(tabuleiroNovo.posicionadas.map((peca) => peca.pecaId));
     pecasEmPeriodoDeGraca = pecasEmPeriodoDeGraca.filter((id) => idsPosicionadas.has(id));
   }
 
-  // Re-seleção do Peão (#263/#324/#334): após o mover_peao bem-sucedido, o
-  // Peão movido permanece/re-é selecionado em TODOS os ramos (delegação e
-  // fallback de resgate) — o confirmar substitui o permanecer sem exigir
-  // re-seleção manual.
   const estadoNovo: EstadoDaPartida = {
     ...estado,
     tabuleiro: { ...tabuleiroNovo, peaoSelecionadoId: comando.peaoId },
-    jogadores: jogadoresNovos,
     pecasEmPeriodoDeGraca,
   };
 
-  return sucessoDaPartida(estadoNovo, [...eventosTab, ...eventosResgate]);
+  return sucessoDaPartida(estadoNovo, [...eventosTab]);
 }
 
 // Travessia do Escuro (issue #264 / spec #272): jogada exclusiva de Baixa
@@ -1059,6 +1075,20 @@ function atravessarOEscuroDaPartida(
       'A Peça do Peão não foi encontrada.',
     );
   }
+  // ADR-0017 (regra "uma casa por turno"): a Travessia só vale na Peça em que
+  // o Peão iniciou o turno — mover antes (para peça iluminada de outro
+  // jogador) e atravessar dali ainda contaria como dois movimentos. Espelho
+  // da zona da origem (linha 844): guarda por localização, sem trackear
+  // movimento.
+  if (
+    estado.pecaDoInicioDoTurnoId !== null &&
+    peao.pecaId !== estado.pecaDoInicioDoTurnoId
+  ) {
+    return rejeitarDaPartida(
+      'MOVIMENTO_INDISPONIVEL',
+      'A Travessia do Escuro só vale na Peça do início do turno.',
+    );
+  }
 
   const alvo = comando.celula;
   if (!estaDentroDaGrade(alvo.linha) || !estaDentroDaGrade(alvo.coluna)) {
@@ -1090,8 +1120,8 @@ function atravessarOEscuroDaPartida(
       'A célula de destino não é uma vaga escura conectada à Peça sob o Peão.',
     );
   }
-  // ADR-0013 bloqueante 3: iluminação fresca unificada — mesmo preamble de
-  // avancarVez/posicionarPeao, não o snapshot stale do turno anterior.
+  // ADR-0017 bloqueante 3: iluminação fresca unificada — mesmo preamble de
+  // posicionarPeao, não o snapshot stale do turno anterior.
   const celulasParaFiltroTravessia = calcularIluminacao(
     estado.tabuleiro,
     estado.jogadores.filter((j) => (j.emBaixaIluminacao ?? false)).map((j) => j.peaoId),
@@ -1113,9 +1143,9 @@ function atravessarOEscuroDaPartida(
   // Peão é preservada para a sequência (escolher vaga → encaixar → mover) —
   // e, quando nula (AC-3 do #272), adotada a partir do Peão do ator: nenhum
   // passo intermediário exige re-seleção.
-  // ADR-0013: mantido como legado; o fluxo canônico é Puxar no início do turno
-  // (avancarVez). Aqui o sorteio respeita vagas escuras (sem vaga escura → 0)
-  // com iluminação fresca — unificada com avancarVez/posicionarPeao (bloqueante 3).
+  // ADR-0017 / issue #377 (Opção B): fluxo canônico do saque em Baixa é a
+  // Travessia do Escuro sob demanda — o sorteio respeita vagas escuras (sem
+  // vaga escura → 0) com iluminação fresca.
   const sorteio = gerarRecebidas(estado.tabuleiro, pecaSobOPeao, true, celulasParaFiltroTravessia);
   const recebidas = sorteio.recebidas.map((recebida) => ({
     ...recebida,
@@ -1255,7 +1285,34 @@ function permanecerNaPartida(
     );
   }
 
-  // ADR-0013 / issue #354: Permanência com seleção nula adota o peão do ator
+  // ADR-0017 / issue #377 (Opção B): depois de atravessar o Escuro, o Peão
+  // deve mover para a peça colocada — a Permanência fica vedada até esse
+  // movimento (o mover pós-posicionamento é compulsório). Exceção Monstro: o
+  // Monstro não acomoda peão, o mover é impossível e o turno travado fecha
+  // por Permanência — o peão permanece onde estava ao atravessar (a Peça sob
+  // ele pode não ser a do início do turno; só a via de fechamento abre aqui).
+  const pecaDaTravessiaEhMonstro = (() => {
+    if (!(estado.atravessouNoTurno ?? false)) return false;
+    const pecaDaTravessiaId = estado.pecaDaTravessiaId ?? null;
+    if (pecaDaTravessiaId === null) return false;
+    const pecaDaTravessia = estado.tabuleiro.posicionadas.find(
+      (item) => item.pecaId === pecaDaTravessiaId,
+    );
+    return (
+      pecaDaTravessia !== undefined && ehPecaDeMonstro(pecaDaTravessia.tipo)
+    );
+  })();
+  if (
+    !pecaDaTravessiaEhMonstro &&
+    (estado.atravessouNoTurno ?? false)
+  ) {
+    return rejeitarDaPartida(
+      'MOVIMENTO_INDISPONIVEL',
+      'Após atravessar o Escuro, o Peão deve mover para a peça colocada.',
+    );
+  }
+
+  // ADR-0017 / issue #377: Permanência com seleção nula adota o peão do ator
   // (mesmo AC-3 de mover/confirmar) — evita PEAO_NAO_SELECIONADO quando o turno
   // em Baixa não tem seleção vigente mas tem pecaDoInicio válida.
   // NB2: adoção só para null; seleção alheia permanece rejeitada (PEAO_NAO_SELECIONADO)
@@ -1275,9 +1332,16 @@ function permanecerNaPartida(
   const peao = resultado.estado.peoes.find(
     (item) => item.peaoId === comando.peaoId,
   );
-  if (peao?.pecaId !== estado.pecaDoInicioDoTurnoId) {
-    // Encerramento inválido: o resultado do Tabuleiro é descartado e o estado
-    // da Partida permanece inalterado.
+  // Exceção monstro (ADR-0017): a Permanência que fecha o turno travado da
+  // travessia-monstro vale com o peão fora da Peça do início (ele permanece
+  // onde estava ao atravessar). Nas demais vias o resultado do Tabuleiro é
+  // descartado e o estado da Partida permanece inalterado.
+  const permanenciaEmMonstro =
+    pecaDaTravessiaEhMonstro && (estado.atravessouNoTurno ?? false);
+  if (
+    peao?.pecaId !== estado.pecaDoInicioDoTurnoId &&
+    !permanenciaEmMonstro
+  ) {
     return rejeitarDaPartida(
       'ENCERRAMENTO_INVALIDO',
       'A Permanência exige que o Peão esteja na Peça do início do turno.',
@@ -1287,11 +1351,20 @@ function permanecerNaPartida(
   // Ataque centrado no atuante (issues #172/#236): a Permanência é gatilho —
   // a Peça do início do turno e a Peça decidida são a MESMA (antes = depois),
   // então permanecer DENTRO do Alcance dispara e fora→fora é silêncio. A
-  // permanência não muda a Iluminação: sem recálculo nem Limpeza aqui
-  // (ADR-0005) — se o Vulto impor Baixa Iluminação nova, a Iluminação é
-  // recalculada e a Limpeza reaplicada no MESMO gatilho, mesmo funil dos
-  // demais. O lote mantém ataque_resolvido ANTES de turno_encerrado.
-  const pecaMantidaId = estado.pecaDoInicioDoTurnoId ?? null;
+  // exceção monstro da travessia mantém o peão na Peça sob ele (a mesma
+  // antes/depois), portanto é essa a região avaliada. A permanência comum não
+  // muda a Iluminação: sem recálculo nem Limpeza aqui (ADR-0005) — se o Vulto
+  // impor Baixa Iluminação nova, a Iluminação é recalculada e a Limpeza
+  // reaplicada no MESMO gatilho, mesmo funil dos demais. O lote mantém
+  // ataque_resolvido ANTES de turno_encerrado.
+  // ADR-0018 (E4): na exceção monstro o encaixe acabou de posicionar, no MESMO
+  // turno, uma peça fora da Iluminação e sob nenhum peão — a Limpeza é aplicada
+  // incondicionalmente após o Ataque (ordem deliberada Ataque → Limpeza,
+  // inversa do funil padrão: o Monstro da aposta precisa atacar antes de ser
+  // varrido; no funil padrão ele seria removido sem atacar).
+  const pecaMantidaId = permanenciaEmMonstro
+    ? (peao?.pecaId ?? estado.pecaDoInicioDoTurnoId ?? null)
+    : (estado.pecaDoInicioDoTurnoId ?? null);
   const eventos: EventoDaPartida[] = [...resultado.eventos];
   const ataque = resolverAtaqueNoGatilho(
     estado,
@@ -1300,6 +1373,41 @@ function permanecerNaPartida(
     pecaMantidaId,
     pecaMantidaId ?? '',
   );
+  if (permanenciaEmMonstro) {
+    const estadoParaIluminacao = { ...estado, jogadores: ataque.jogadores };
+    const iluminacao = recalcularIluminacaoEAplicarLimpeza(
+      estadoParaIluminacao,
+      resultado.estado,
+      eventos,
+    );
+    const posicionadasIds = new Set(
+      iluminacao.posicionadas.map((peca) => peca.pecaId),
+    );
+    const peoesNoAlcance: Record<string, readonly string[]> = {};
+    for (const [pecaId, peaoIds] of Object.entries(ataque.peoesNoAlcance)) {
+      if (!posicionadasIds.has(pecaId)) {
+        continue;
+      }
+      peoesNoAlcance[pecaId] = peaoIds;
+    }
+    const pecasEmPeriodoDeGraca = (estado.pecasEmPeriodoDeGraca ?? []).filter(
+      (pecaId) => posicionadasIds.has(pecaId),
+    );
+    return avancarVez(
+      {
+        ...estado,
+        tabuleiro: {
+          ...resultado.estado,
+          posicionadas: iluminacao.posicionadas,
+        },
+        celulasIluminadas: iluminacao.celulasIluminadas,
+        peoesNoAlcance,
+        pecasEmPeriodoDeGraca,
+        jogadores: ataque.jogadores,
+      },
+      [...eventos, { tipo: 'turno_encerrado', jogadorId: ator.jogadorId }],
+    );
+  }
   const { celulasIluminadas, posicionadas: posicionadasFinais } =
     reaplicarIluminacaoSeBaixaNova(
       estado,
@@ -1401,6 +1509,32 @@ function confirmarPosicaoDoPeao(
       'A Peça do Peão não foi encontrada.',
     );
   }
+  // ADR-0018 / issue #377 (E1): a Confirmação cobra o pouso na peça da
+  // Travessia — atravessar, encaixar e confirmar na origem (sem pisar na peça
+  // colocada) reabriria o posicionamento grátis no escuro que a ADR-0017
+  // rejeitou. Exceção Monstro: o Monstro não aceita peão, então o CONFIRMAR é
+  // vedado nesse turno — o fechamento é só por Permanência.
+  const travessiaId = estado.pecaDaTravessiaId ?? null;
+  if ((estado.atravessouNoTurno ?? false) && travessiaId !== null) {
+    const pecaDaTravessia = estado.tabuleiro.posicionadas.find(
+      (item) => item.pecaId === travessiaId,
+    );
+    if (
+      pecaDaTravessia !== undefined &&
+      ehPecaDeMonstro(pecaDaTravessia.tipo)
+    ) {
+      return rejeitarDaPartida(
+        'PECA_JA_TEM_PEAO',
+        'A peça da Travessia é um Monstro e não aceita Peão; o turno fecha por Permanência.',
+      );
+    }
+    if (peca.pecaId !== travessiaId) {
+      return rejeitarDaPartida(
+        'MOVIMENTO_INDISPONIVEL',
+        'Após atravessar o Escuro, o Peão deve mover para a peça colocada antes de confirmar.',
+      );
+    }
+  }
   // Issue #375 (contrato sem-mudança): confirmar na Peça do início do turno —
   // com ou sem ida-e-volta — fecha a posição sem Recebimento e exige
   // encerrar_turno; a Permanência continua distinta (encerra direto, sem
@@ -1410,15 +1544,28 @@ function confirmarPosicaoDoPeao(
   // silêncio).
   const semMudancaDePeca = peca.pecaId === estado.pecaDoInicioDoTurnoId;
 
+  // Resgate (ponto definitivo, ADR-0005): aliados afetados que co-ocupam a peça
+  // confirmada são curados AQUI — o mover é etapa não-definitiva e não
+  // materializa o efeito. A avaliação usa o roster pré-gatilho e alimenta a
+  // Iluminação/Limpeza/Ataque abaixo, preservando a ordem relativa anterior
+  // (cura antes do gatilho), só que comprometida na Confirmação.
+  const resgate = resgatarNaPeca(estado, peca.pecaId, ator.jogadorId, peao.peaoId);
+  const estadoPosResgate = { ...estado, jogadores: resgate.jogadores };
+
   // O Recebimento sorteia as peças da Caixa (#138): peca_sorteada por peça e
   // pendências sem vaga. ST-15 / issue #170: Baixa Iluminação limita a 1 peça.
+  // ADR-0017 / issue #377 (Opção B): o fluxo canônico do saque em Baixa é a
+  // Travessia do Escuro sob demanda (atravessarOEscuroDaPartida) — a Confirmação
+  // em Baixa NÃO sorteia (recebidas = []), mantendo Limpeza/Ataque do gatilho.
+  // Esse "Baixa" é pré-ataque; se o gatilho impõe Baixa NOVA ao ator, o turno
+  // segue sem sorteio (só a Travessia do Escuro saca, sob demanda).
   // Issue #264 / spec #272: em Baixa o Recebimento acontece na Travessia do
-  // Escuro (ou não acontece — célula iluminada consome 0); a Confirmação em
-  // Baixa NÃO sorteia (recebidas = []), mantendo Limpeza/Ataque do gatilho.
+  // Escuro (ou não acontece — célula iluminada consome 0).
   // Review PR #370 (Bug 1): quem entra saudável e sai em Baixa no MESMO
   // gatilho também não recebe sorteio nesse CONFIRMAR — o emBaixa acima é
   // pré-ataque; a Baixa nova do gatilho descarta o sorteio abaixo (0 no turno
-  // atual, 1 no próximo avancarVez, ADR-0013).
+  // atual e 0 no próximo avancarVez — ADR-0017: saque em Baixa é só sob
+  // demanda, na Travessia).
   // Issue #375: sem mudança de Peça também NÃO sorteia (recebidas = [], sem
   // consumir a Caixa, sem peca_sorteada/recebimento_gerado no lote).
   const emBaixaAntes = ator.emBaixaIluminacao ?? false;
@@ -1439,15 +1586,18 @@ function confirmarPosicaoDoPeao(
       recebidas: projetarRecebidas(sorteio.recebidas),
     });
   }
+  // O resgate entra no lote antes da Iluminação/Limpeza/Ataque do gatilho
+  // (espelha a ordem computada: cura antes do gatilho).
+  eventos.push(...resgate.eventos);
   const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
   // Limpeza e Ataque (issues #172/#236) na mesma ordem do Primeiro Turno:
   // Iluminação → Limpeza → Ataque → atualização do snapshot do Alcance. A
   // avaliação é centrada no atuante: Peça do início do turno (antes) vs Peça
   // confirmada (depois).
-  const iluminacao = recalcularIluminacaoEAplicarLimpeza(estado, tabuleiro, eventos);
+  const iluminacao = recalcularIluminacaoEAplicarLimpeza(estadoPosResgate, tabuleiro, eventos);
   const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
   const ataque = resolverAtaqueNoGatilho(
-    estado,
+    estadoPosResgate,
     tabuleiroPosLimpeza,
     eventos,
     // ?? null: defensivo para estados persistidos sem o campo (binário
@@ -1457,7 +1607,7 @@ function confirmarPosicaoDoPeao(
   );
   const { celulasIluminadas, posicionadas: posicionadasPosAtaque } =
     reaplicarIluminacaoSeBaixaNova(
-      estado,
+      estadoPosResgate,
       ataque.jogadores,
       tabuleiroPosLimpeza,
       iluminacao,
@@ -1465,8 +1615,9 @@ function confirmarPosicaoDoPeao(
     );
   // Review PR #370 (Bug 1): o sorteio acima usou a Baixa pré-ataque — se o
   // gatilho impôs Baixa nova ao ator, o turno encerra sem sortear: remove
-  // peca_sorteada/recebimento_gerado do lote e restaura a Caixa consumida. O
-  // puxar-1 vem no próximo avancarVez (ADR-0013).
+  // peca_sorteada/recebimento_gerado do lote e restaura a Caixa consumida. Sem
+  // puxar-1 no próximo avancarVez (ADR-0017: saque em Baixa é só sob demanda,
+  // na Travessia).
   const atorAposAtaque = ataque.jogadores.find(
     (jogador) => jogador.jogadorId === ator.jogadorId,
   );
@@ -1534,6 +1685,11 @@ function confirmarPosicaoDoPeao(
           : jogador,
       )
     : ataque.jogadores;
+  const pecasEmPeriodoDeGraca = resgate.pecaEmGraca
+    ? (estado.pecasEmPeriodoDeGraca ?? []).includes(peca.pecaId)
+      ? (estado.pecasEmPeriodoDeGraca ?? [])
+      : [...(estado.pecasEmPeriodoDeGraca ?? []), peca.pecaId]
+    : (estado.pecasEmPeriodoDeGraca ?? []);
   // Proteção do ator no fim do gatilho completo (issue #227): true quando a
   // Sala Médica acabou de conceder (sobrevive ao ataque do MESMO gatilho) ou
   // quando uma Proteção prévia não foi consumida; false quando não havia
@@ -1553,7 +1709,7 @@ function confirmarPosicaoDoPeao(
       geradoresLigados,
       cartaoDeAcessoObtido,
       jogadores,
-      pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
+      pecasEmPeriodoDeGraca,
     },
     // O posicao_confirmada abre o lote (ordem canônica da Confirmação
     // preservada) já com o protegido RESULTANTE (issue #227).
@@ -1788,6 +1944,7 @@ function desistirDaPartida(
         pecaDoInicioDoTurnoId: peaoDoPrimeiro?.pecaId ?? null,
         posicaoConfirmada: false,
         atravessouNoTurno: false,
+        pecaDaTravessiaId: null,
         celulasIluminadas: iluminacao.celulasIluminadas,
         peoesNoAlcance,
         pecasEmPeriodoDeGraca,
@@ -1809,6 +1966,7 @@ function desistirDaPartida(
       pecaDoInicioDoTurnoId: peaoDoAlvo?.pecaId ?? null,
       posicaoConfirmada: false,
       atravessouNoTurno: false,
+      pecaDaTravessiaId: null,
       celulasIluminadas: iluminacao.celulasIluminadas,
       peoesNoAlcance,
       pecasEmPeriodoDeGraca,
@@ -1907,6 +2065,7 @@ function avancarVez(
         )?.pecaId ?? null,
       posicaoConfirmada: false,
       atravessouNoTurno: false,
+      pecaDaTravessiaId: null,
       celulasIluminadas: estado.celulasIluminadas,
       resultado: estado.resultado,
       geradoresLigados: estado.geradoresLigados,
@@ -1924,58 +2083,19 @@ function avancarVez(
   const peaoDoAlvo = tabuleiroLimpo.peoes.find(
     (item) => item.peaoId === alvo.peaoId,
   );
-  // ADR-0013 / issue #354: Puxar no início do turno em Baixa — se o próximo
-  // jogador está em Baixa e há vaga escura disponível, sorteia 1 peça para a
-  // Bandeja já no turno_iniciado. Sem vaga escura ou caixa vazia → 0 (sem
-  // pendência irresolúvel, regra do relator: "quando não tem célula disponível,
-  // não puxa"). Primeiro turno pendente (peão sobre a Mesa) não puxa.
-  // Iluminação fresca para filtro escuro (não o snapshot stale do turno anterior).
-  let tabuleiroDoNovoTurno: EstadoDoTabuleiro = tabuleiroLimpo;
-  let eventosDoSorteioInicial: readonly EventoDaPartida[] = [];
-  const alvoEmBaixa = alvo !== null ? (alvo.emBaixaIluminacao ?? false) : false;
-  if (alvo !== null && alvoEmBaixa && peaoDoAlvo?.pecaId !== null && peaoDoAlvo?.pecaId !== undefined) {
-    const pecaSobPeaoDoAlvo = tabuleiroLimpo.posicionadas.find(
-      (p) => p.pecaId === peaoDoAlvo.pecaId,
-    );
-    if (pecaSobPeaoDoAlvo) {
-      const celulasParaFiltroAvanco = calcularIluminacao(
-        tabuleiroLimpo,
-        estado.jogadores
-          .filter((j) => (j.emBaixaIluminacao ?? false))
-          .map((j) => j.peaoId),
-      );
-      const sorteioInicial = gerarRecebidas(
-        tabuleiroLimpo,
-        pecaSobPeaoDoAlvo,
-        true,
-        celulasParaFiltroAvanco,
-      );
-      if (sorteioInicial.recebidas.length > 0) {
-        tabuleiroDoNovoTurno = {
-          ...sorteioInicial.estado,
-          recebidas: sorteioInicial.recebidas,
-          // Mantém seleção nula no início; o gesto Puxar na Bandeja habilita a
-          // escolha de vaga, sem auto-selecionar aqui (evita travar PERMANECER).
-          peaoSelecionadoId: null,
-        };
-        eventosDoSorteioInicial = [
-          ...sorteioInicial.eventos,
-          { tipo: 'recebimento_gerado', recebidas: projetarRecebidas(sorteioInicial.recebidas) },
-        ];
-      } else {
-        // Sem vaga escura ou caixa vazia → 0, mantém tabuleiroLimpo sem recebidas
-        tabuleiroDoNovoTurno = sorteioInicial.estado;
-      }
-    }
-  }
+  // ADR-0017 / issue #377: o turno em Baixa NÃO saca peça no início. As três
+  // opções são (A) mover para caminho iluminado sem saque, (B) atravessar o
+  // escuro (ATRAVESSAR_O_ESCURO saca 1 peça sob demanda, após a escolha da
+  // célula escura) e (C) permanecer — nenhum sorteio no turno_iniciado.
   const novoEstado: EstadoDaPartida = {
-    tabuleiro: tabuleiroDoNovoTurno,
+    tabuleiro: tabuleiroLimpo,
     jogadores: estado.jogadores,
     jogadorAtivoId: alvo.jogadorId,
     rodada: rodadaAlvo,
     pecaDoInicioDoTurnoId: peaoDoAlvo?.pecaId ?? null,
     posicaoConfirmada: false,
     atravessouNoTurno: false,
+    pecaDaTravessiaId: null,
     celulasIluminadas: estado.celulasIluminadas,
     resultado: estado.resultado,
     geradoresLigados: estado.geradoresLigados,
@@ -1983,14 +2103,10 @@ function avancarVez(
     peoesNoAlcance: estado.peoesNoAlcance,
     pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
   };
-  // Ordem do lote: turno_iniciado vem antes do sorteio inicial para que o
-  // redutor do cliente (TURNO_INICIADO limpa pendências) não apague a
-  // recebida de Baixa recém-gerada — o RECEBIMENTO_GERADO repopula depois.
   const eventosFinais: readonly EventoDaPartida[] = [
     ...eventos,
     ...fechamentoDaManipulacao,
     { tipo: 'turno_iniciado', jogadorId: alvo.jogadorId, rodada: rodadaAlvo },
-    ...eventosDoSorteioInicial,
   ];
   return sucessoDaPartida(novoEstado, eventosFinais);
 }
@@ -2429,6 +2545,91 @@ function temAfetadoNaPeca(pecaId: string, estado: EstadoDaPartida): boolean {
       ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
     );
   });
+}
+
+// Sanidade máxima de um Jogador (issue #176): o Resgate nunca a ultrapassa.
+// Vela acesa: o salvador só "acende a vela" de outro (cura Baixa Iluminação)
+// quando a sua própria vela está acesa — fora da Baixa Iluminação. Mesmo de
+// vela apagada, o salvador remove o Amedrontado do co-ocupante (não acende a
+// vela, mas tira o amedrontamento).
+const SANIDADE_MAXIMA = 3;
+
+function velaAcesa(jogador: JogadorDaPartida): boolean {
+  return !(jogador.emBaixaIluminacao ?? false);
+}
+
+// Resgate (issue #174/#145-exp F3) materializado no PONTO DEFINITIVO da
+// Confirmação (ADR-0005): aliados afetados (Baixa ou Amedrontado) que co-ocupam
+// a peça confirmada são curados — Amedrontado sempre sai (sanidade +2,
+// respeitando o teto); Baixa Iluminação só sai com o salvador de vela acesa.
+// Um evento resgate_realizado por resgatado com ao menos um estado removido.
+// O próprio ator é excluído (movimento próprio não se resgata). O período de
+// graça é adicionado pela chamada (pecaEmGraca). Salvador desconhecido no
+// roster: fail-closed, sem resgate.
+function resgatarNaPeca(
+  estado: EstadoDaPartida,
+  pecaId: string,
+  resgatadorJogadorId: string,
+  resgatadorPeaoId: string,
+): {
+  jogadores: readonly JogadorDaPartida[];
+  eventos: EventoDaPartida[];
+  pecaEmGraca: boolean;
+} {
+  const resgatador = estado.jogadores.find(
+    (jogador) => jogador.jogadorId === resgatadorJogadorId,
+  );
+  const acendeVela = resgatador !== undefined && velaAcesa(resgatador);
+  const afetados = estado.jogadores.filter((jogador) => {
+    if (jogador.jogadorId === resgatadorJogadorId) return false;
+    const peao = estado.tabuleiro.peoes.find((item) => item.peaoId === jogador.peaoId);
+    return (
+      peao?.pecaId === pecaId &&
+      ((jogador.emBaixaIluminacao ?? false) || (jogador.amedrontado ?? jogador.sanidade === 0))
+    );
+  });
+
+  let jogadores = estado.jogadores;
+  const eventos: EventoDaPartida[] = [];
+  const curados = new Set<string>();
+
+  if (resgatador !== undefined && afetados.length > 0) {
+    jogadores = estado.jogadores.map((jogador) => {
+      const ehAfetado = afetados.some((item) => item.jogadorId === jogador.jogadorId);
+      if (!ehAfetado) return jogador;
+      const eraAmedrontado = (jogador.amedrontado ?? jogador.sanidade === 0) === true;
+      const estavaEmBaixa = jogador.emBaixaIluminacao ?? false;
+      const limpaAmedrontado = eraAmedrontado;
+      const limpaBaixa = estavaEmBaixa && acendeVela;
+      if (!limpaAmedrontado && !limpaBaixa) return jogador;
+      curados.add(jogador.jogadorId);
+      return {
+        ...jogador,
+        emBaixaIluminacao: limpaBaixa ? false : jogador.emBaixaIluminacao,
+        amedrontado: limpaAmedrontado ? false : jogador.amedrontado,
+        sanidade: limpaAmedrontado
+          ? Math.min(SANIDADE_MAXIMA, jogador.sanidade + 2)
+          : jogador.sanidade,
+      };
+    });
+    for (const afetado of afetados) {
+      if (!curados.has(afetado.jogadorId)) continue;
+      const resgatado = jogadores.find(
+        (jogador) => jogador.jogadorId === afetado.jogadorId,
+      )!;
+      eventos.push({
+        tipo: 'resgate_realizado',
+        pecaId,
+        resgatadoJogadorId: afetado.jogadorId,
+        resgatadorJogadorId,
+        resgatadorPeaoId,
+        emBaixaIluminacao: resgatado.emBaixaIluminacao,
+        sanidade: resgatado.sanidade,
+      });
+    }
+  }
+
+  return { jogadores, eventos, pecaEmGraca: eventos.length > 0 };
 }
 
 function tetoOcupacao(peca: PecaPosicionada, estado: EstadoDaPartida): number {

@@ -43,6 +43,8 @@ import type {
   JogadorReconectadoWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
+import { refreshSession } from '../api/auth'
+import { agendarReconexaoComSlide } from './agendarReconexaoComSlide'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -319,6 +321,7 @@ export function usePartidaWebSocket({
         case 'LIMPEZA_APLICADA':
         case 'PECA_SORTEADA':
         case 'VAGA_DA_PECA_RECEBIDA_ESCOLHIDO':
+        case 'ATRAVESSOU_O_ESCURO':
         case 'TURNO_INICIADO':
         case 'TURNO_ENCERRADO':
         case 'POSICAO_CONFIRMADA':
@@ -354,21 +357,20 @@ export function usePartidaWebSocket({
         onPartidaNaoIniciadaRef.current?.()
         return
       }
-      // Reconexão simples após 1s se ainda montado.
-      if (reconnectTimerRef.current === null) {
-        reconnectTimerRef.current = window.setTimeout(() => {
-          reconnectTimerRef.current = null
-          // eslint-disable-next-line react-hooks/immutability -- reconexão recursiva segura em runtime
-          conectar()
-        }, 1000)
-      }
+      // Reconexão simples após 1s se ainda montado, com a Sessão renovada
+      // antes (issue #376, review PR #383): gate compartilhado em
+      // `agendarReconexaoComSlide` — o refresh começa já (aproveita a janela
+      // de 1s) e a reconexão aguarda o assentamento.
+      // eslint-disable-next-line react-hooks/immutability -- reconexão recursiva segura em runtime
+      agendarReconexaoComSlide(reconnectTimerRef, montadoRef, refreshSession(), conectar)
     }
 
     ws.onerror = () => {
       if (!montadoRef.current) return
       // Falha de conexão não deve reconectar sozinha — exibe tela de falha
-      // até retry manual (PartidaPage.tentarNovamenteComConexao). Suprime o
-      // agendamento do onclose subsequente.
+      // até retry manual (PartidaPage.tentarNovamenteComConexao, que já renova
+      // a Sessão com `await` antes de reconectar). Suprime o agendamento do
+      // onclose subsequente.
       ws.onclose = null
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current)
