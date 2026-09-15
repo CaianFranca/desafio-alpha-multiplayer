@@ -55,6 +55,7 @@ import { useAuth } from '../state/useAuth'
 import { useSalaCodigoOptional, useQuantidadeDeMembrosDaSalaOptional, useMarcarSaidaPropriaOptional } from '../state/sala-web-socket-context'
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import type {
+  CausaDesistencia,
   ConfirmarPosicaoDoPeaoComando,
   DesistirDaPartidaComando,
   EncerrarTurnoComando,
@@ -611,7 +612,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // Desistência (issue #290): projeta remoção do peão/ordem no modelo
           // (CELULAS_ILUMINADAS/LIMPEZA_APLICADA/TURNO_* do mesmo lote
           // completam o tabuleiro) + toast visível e anúncio SR. Snapshot
-          // reconcilia.
+          // reconcilia. Conversão por expiração (#294) projeta o mesmo
+          // resultado da desistência (reducer ignora a causa) e termina pelo
+          // fluxo B (#295, motivo `desistencia` no PARTIDA_TERMINADA — o wire
+          // não tem `expiracao`); a causa só diferencia toast/SR.
           if (evento.type === 'DESISTENCIA_REGISTRADA') {
             // Eco da própria desistência (reenvio após "sair mesmo assim"): o
             // modelo projeta via flush; o toast seria "você desistiu" para si
@@ -622,7 +626,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
             }
             const anterior = modeloRef.current
             const apelido = anterior.jogadorPorId[evento.jogadorId]?.apelido ?? 'Um jogador'
-            const causa = (evento as { causa?: 'desistencia' | 'expiracao' }).causa ?? 'desistencia'
+            const causa: CausaDesistencia = evento.causa ?? 'desistencia'
             // Limpa indicador de reconexão residual (se o jogador estava em `em_reconexao`,
             // a conversão limpa sem resíduo; desistência explícita também limpa).
             setAvisoReconexao((prev) => (prev?.jogadorId === evento.jogadorId ? null : prev))

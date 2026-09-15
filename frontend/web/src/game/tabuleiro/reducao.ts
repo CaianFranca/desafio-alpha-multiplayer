@@ -821,7 +821,9 @@ export function reduzirEvento(
       // sobreviver sem TURNO_* — limpa aqui para não deixar peça órfã
       // selecionada. Demais casos ficam para o TURNO_*/LIMPEZA do lote.
       // Causa (issue #294): `desistencia` vs `expiracao` não muda a remoção —
-      // só o feedback visível/SR no caller (PartidaPage).
+      // só o feedback visível/SR no caller (PartidaPage). O término da
+      // conversão herda o motivo `desistencia` no PARTIDA_TERMINADA (fluxo B
+      // da #295 — o wire de motivo não tem `expiracao`).
       const jogadorId = evento.jogadorId
       const peaoId = evento.peaoId
       const temJogador = Object.prototype.hasOwnProperty.call(estado.jogadorPorId, jogadorId)

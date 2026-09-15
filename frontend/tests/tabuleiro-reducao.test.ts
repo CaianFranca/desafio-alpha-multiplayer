@@ -1765,6 +1765,24 @@ describe('DESISTENCIA_REGISTRADA — queda óbvia otimista (issue #290, review P
     expect(duas).toEqual(uma)
   })
 
+  it('causa expiracao projeta a mesma remocao da desistencia (conversao #294 herda o fluxo B)', () => {
+    const comDesistencia = reduzirEvento(estadoComHospedeira(), {
+      type: 'DESISTENCIA_REGISTRADA',
+      jogadorId: 'j1',
+      peaoId: 'peao-branco',
+      causa: 'desistencia',
+    })
+    const comExpiracao = reduzirEvento(estadoComHospedeira(), {
+      type: 'DESISTENCIA_REGISTRADA',
+      jogadorId: 'j1',
+      peaoId: 'peao-branco',
+      causa: 'expiracao',
+    })
+    expect(comExpiracao).toEqual(comDesistencia)
+    expect(comExpiracao.jogadorPorId['j1']).toBeUndefined()
+    expect(comExpiracao.peoes.some((p) => p.peaoId === 'peao-branco')).toBe(false)
+  })
+
   it('lote integral do engine projeta tabuleiro/ordem/Limpeza resultantes (AC2)', () => {
     // Ordem do lote atômico no wire (engine partida.ts): a desistência abre,
     // CELULAS_ILUMINADAS + LIMPEZA_APLICADA trazem o tabuleiro resultante e a
