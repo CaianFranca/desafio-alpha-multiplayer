@@ -27,12 +27,14 @@
 // `conectado` porque o registro já aponta para a nova conexão (checagem de
 // vigência em `removerConexao`).
 
+import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Redis } from 'ioredis';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { getConfig } from '@flicker/config';
-import { origemPermitida, LimiteDeMensagensPorConexao } from '@flicker/shared/server';
+import { origemPermitida, LimiteDeMensagensPorConexao, securityEvents, securityLogger as sharedSecurityLogger } from '@flicker/shared/server';
+import type { Logger } from 'pino';
 import type {
   ServerMessage,
   PartidaId,
@@ -82,8 +84,19 @@ export interface PartidaWsDeps {
   readonly debug?: import('./debug-stream.ts').DebugStreamDaPartida;
 }
 
+let securityLogger: Logger = sharedSecurityLogger as unknown as Logger;
+
+export function __setGameWsSecurityLoggerForTests(logger: Logger): void {
+  securityLogger = logger;
+}
+
+export function __resetGameWsSecurityLogger(): void {
+  securityLogger = sharedSecurityLogger as unknown as Logger;
+}
+
 export interface WebSocketServerDeps {
   readonly partida?: PartidaWsDeps;
+  readonly securityLogger?: Logger;
 }
 
 interface UpgradeResultado {
@@ -296,13 +309,26 @@ export function criarWebSocketServer(
   // fluxo de admissão) para evitar shadowing: `depsPartida` são as deps do
   // canal de Partida, `partida` é a partida persistida.
   const depsPartida = deps?.partida;
+  const logger = deps?.securityLogger ?? securityLogger;
 
   server.on('upgrade', (request, socket, head) => {
+    const connectionId = randomUUID();
+    const requestId = (request.headers['x-request-id'] as string | undefined) ?? undefined;
     // Endurecimento do WS (issue #409): recusa por Origem ANTES de qualquer
     // validação de token/partida — o 403 (e não o 401 de sessão) prova a
     // precedência. Origem ausente (bot/serviço) é aceita. Nunca loga
     // token/cookie: só a origem.
     if (!origemPermitida(request.headers.origin, seguranca.origensPermitidas)) {
+      try {
+        logger.warn({
+          event: securityEvents.WS_HANDSHAKE_REJECTED,
+          reason: 'origin_not_allowed',
+          origin: request.headers.origin ?? null,
+          ip: (request.headers['x-forwarded-for'] as string | undefined) ?? request.socket.remoteAddress ?? undefined,
+          connectionId,
+          requestId,
+        });
+      } catch {}
       console.warn('[ws] handshake recusado por origem', { origin: request.headers.origin });
       enviarErroNoSocket(socket, 403, erroRejeitada('ORIGEM_NAO_PERMITIDA', 'origem não permitida'));
       return;
@@ -550,6 +576,15 @@ export function criarWebSocketServer(
             if (!sessao.isBot && !limiteDeMensagens.registrar()) {
               if (!encerradoPorRateLimit) {
                 encerradoPorRateLimit = true;
+                try {
+                  logger.warn({
+                    event: securityEvents.WS_RATE_LIMIT_EXCEEDED,
+                    partidaId,
+                    jogadorId: sessao.jogadorId,
+                    connectionId,
+                    requestId,
+                  });
+                } catch {}
                 ws.close(1008, 'RATE_LIMIT');
               }
               return;
@@ -557,6 +592,16 @@ export function criarWebSocketServer(
 
             const parsed = parsearMensagem(data);
             if (parsed === null) {
+              try {
+                logger.warn({
+                  event: securityEvents.WS_MESSAGE_REJECTED,
+                  reason: 'invalid_json',
+                  partidaId,
+                  jogadorId: sessao.jogadorId,
+                  connectionId,
+                  requestId,
+                });
+              } catch {}
               return;
             }
 
@@ -590,7 +635,18 @@ export function criarWebSocketServer(
             void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
           });
 
-          ws.on('close', () => {
+          ws.on('close', (code: number) => {
+            if (code === 1009) {
+              try {
+                logger.warn({
+                  event: securityEvents.WS_PAYLOAD_TOO_LARGE,
+                  partidaId,
+                  jogadorId: sessao.jogadorId,
+                  connectionId,
+                  requestId,
+                });
+              } catch {}
+            }
             console.info('[ws] jogador desconectado', {
               jogadorId: sessao.jogadorId,
               partidaId,

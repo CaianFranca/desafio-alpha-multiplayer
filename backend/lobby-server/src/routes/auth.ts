@@ -17,6 +17,19 @@ import { assinarAccess, assinarRefresh, verificarRefresh } from '../jwt.ts';
 import { requireSessao } from '../middleware/auth.ts';
 import { consumirTentativas, type ItemLimite } from '../rate-limit/limitador.ts';
 import { criarSessao, obterSessao, revogarSessao, rotacionarSessao, SessaoInvalidaError } from '../sessoes.ts';
+import { hashEmail, securityEvents, securityLogger as sharedSecurityLogger } from '@flicker/shared/server';
+import { getRequestId } from '../middleware/requestId.ts';
+import type { Logger } from 'pino';
+
+let securityLogger: Logger = sharedSecurityLogger as unknown as Logger;
+
+export function __setAuthSecurityLoggerForTests(logger: Logger): void {
+  securityLogger = logger;
+}
+
+export function __resetAuthSecurityLogger(): void {
+  securityLogger = sharedSecurityLogger as unknown as Logger;
+}
 
 export const authRouter = Router();
 
@@ -169,6 +182,17 @@ async function aplicarLimiteDeTentativas(
     const limite = await consumirTentativas(chavesDeLimite(ip, rota, email));
     if (limite.excedido) {
       responderExcessoDeTentativas(res, limite.retryAfterSegundos);
+      try {
+        const emailHash = email.trim().length > 0 ? hashEmail(email) : undefined;
+        securityLogger.warn({
+          event: securityEvents.AUTH_RATE_LIMIT_EXCEEDED,
+          rota,
+          ip,
+          emailHash,
+          retryAfter: limite.retryAfterSegundos,
+          requestId: getRequestId(req),
+        });
+      } catch {}
       return false;
     }
     return true;
@@ -294,19 +318,52 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
     const { sessaoId } = await criarSessao(jogador.id);
     emitirCookiesDeSessao(res, jogador, sessaoId);
     res.status(201).json(jogador);
+    try {
+      securityLogger.info({
+        event: securityEvents.AUTH_REGISTER_SUCCESS,
+        emailHash: hashEmail(emailNormalizado),
+        ip: ipDoCliente(req),
+        requestId: getRequestId(req),
+        jogadorId: jogador.id,
+      });
+    } catch {}
   } catch (error: unknown) {
     const pgError = error as PgError23505;
     if (pgError.code === '23505') {
       const campo = campoDoConstraint(pgError.constraint);
       if (campo === 'apelido') {
         res.status(409).json({ erros: [{ campo: 'apelido', mensagem: 'Apelido já está em uso.' }] });
+        try {
+          securityLogger.info({
+            event: securityEvents.AUTH_REGISTER_CONFLICT,
+            campo: 'apelido',
+            ip: ipDoCliente(req),
+            requestId: getRequestId(req),
+          });
+        } catch {}
         return;
       }
       if (campo === 'email') {
         res.status(409).json({ erros: [{ campo: 'email', mensagem: 'Email já está em uso.' }] });
+        try {
+          securityLogger.info({
+            event: securityEvents.AUTH_REGISTER_CONFLICT,
+            campo: 'email',
+            emailHash: hashEmail(emailNormalizado),
+            ip: ipDoCliente(req),
+            requestId: getRequestId(req),
+          });
+        } catch {}
         return;
       }
       res.status(409).json({ erros: [{ mensagem: 'Cadastro já existe.' }] });
+      try {
+        securityLogger.info({
+          event: securityEvents.AUTH_REGISTER_CONFLICT,
+          ip: ipDoCliente(req),
+          requestId: getRequestId(req),
+        });
+      } catch {}
       return;
     }
     console.error('[auth/register] error:', error);
@@ -352,6 +409,15 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       // Equaliza o custo do bcrypt mesmo quando o email não existe.
       await bcrypt.compare(senhaBruta, DUMMY_BCRYPT_HASH).catch(() => false);
       responderErroNaoAutorizado(res);
+      try {
+        securityLogger.warn({
+          event: securityEvents.AUTH_LOGIN_FAILURE,
+          reason: 'email_not_found',
+          emailHash: hashEmail(emailNormalizado),
+          ip: ipDoCliente(req),
+          requestId: getRequestId(req),
+        });
+      } catch {}
       return;
     }
 
@@ -359,6 +425,16 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     const senhaValida = await bcrypt.compare(senhaBruta, row.senha).catch(() => false);
     if (!senhaValida) {
       responderErroNaoAutorizado(res);
+      try {
+        securityLogger.warn({
+          event: securityEvents.AUTH_LOGIN_FAILURE,
+          reason: 'invalid_password',
+          emailHash: hashEmail(emailNormalizado),
+          ip: ipDoCliente(req),
+          requestId: getRequestId(req),
+          jogadorId: row.id,
+        });
+      } catch {}
       return;
     }
 
@@ -367,6 +443,15 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     const { sessaoId } = await criarSessao(jogador.id);
     emitirCookiesDeSessao(res, jogador, sessaoId);
     res.status(200).json(jogador);
+    try {
+      securityLogger.info({
+        event: securityEvents.AUTH_LOGIN_SUCCESS,
+        emailHash: hashEmail(emailNormalizado),
+        ip: ipDoCliente(req),
+        requestId: getRequestId(req),
+        jogadorId: jogador.id,
+      });
+    } catch {}
   } catch (error) {
     console.error('[auth/login] error:', error);
     res.status(500).json({ erros: [{ mensagem: 'Erro interno do servidor.' }] });
@@ -451,6 +536,15 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
       // TOCTOU entre obterSessao e a rotação (refresh concorrente) ou reuso
       // de refresh já rotacionado — o script Lua detectou e sinalizou.
       res.status(401).json({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] });
+      try {
+        securityLogger.warn({
+          event: securityEvents.AUTH_SESSION_REUSE,
+          reason: 'refresh_reuse',
+          ip: ipDoCliente(req),
+          requestId: getRequestId(req),
+          jogadorId: payload.jogadorId,
+        });
+      } catch {}
       return;
     }
     console.error('[auth/refresh] error:', error);

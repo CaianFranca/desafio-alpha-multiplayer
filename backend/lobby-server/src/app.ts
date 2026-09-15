@@ -6,6 +6,7 @@ import { criarRetornoRouter } from './routes/retorno.ts';
 import { criarDesistenciaRouter } from './routes/desistencia.ts';
 import { criarBotsRouter } from './routes/bots.ts';
 import { cookieMiddleware } from './middleware/cookie.ts';
+import { requestIdMiddleware } from './middleware/requestId.ts';
 import { pool } from './config/pg.ts';
 import { redisClient } from './config/redis.ts';
 import type { SalasContexto } from './salas/index.ts';
@@ -30,6 +31,7 @@ export function createApp(opcoes: CreateAppOpcoes = {}): Express {
   // IP real do cliente atrás do proxy.
   app.set('trust proxy', getConfig().trustProxyHops);
 
+  app.use(requestIdMiddleware);
   app.use(express.json({ limit: '10kb' }));
   app.use(cookieMiddleware);
 

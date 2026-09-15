@@ -63,6 +63,18 @@ import { obterPartida, type PartidaPreparada } from './partidas.ts';
 import type { AvisoDeRetorno, AvisoDeDesistencia } from '../retorno/cliente.ts';
 import { sleep } from '../utils/sleep.ts';
 import { obterConexoes } from '../ws/conexao.ts';
+import { securityEvents, securityLogger as sharedSecurityLogger } from '@flicker/shared/server';
+import type { Logger } from 'pino';
+
+let securityLogger: Logger = sharedSecurityLogger as unknown as Logger;
+
+export function __setPartidaSecurityLoggerForTests(logger: Logger): void {
+  securityLogger = logger;
+}
+
+export function __resetPartidaSecurityLogger(): void {
+  securityLogger = sharedSecurityLogger as unknown as Logger;
+}
 
 // Chat de Partida (issue #390): 1 mensagem a cada 2s por Jogador não-bot e
 // teto de 300 caracteres após a normalização (trim com quebras colapsadas em
@@ -148,6 +160,14 @@ export class PartidaHandlers {
     mensagem: unknown,
   ): Promise<void> {
     if (!ehComandoDaPartida(mensagem)) {
+      try {
+        securityLogger.warn({
+          event: securityEvents.WS_MESSAGE_REJECTED,
+          reason: 'invalid_command',
+          partidaId,
+          jogadorId: sessaoJogadorId,
+        });
+      } catch {}
       this.broadcaster.enviarParaSocket(socket, {
         type: 'ERRO_DO_TABULEIRO',
         codigo: 'DADOS_INVALIDOS',
