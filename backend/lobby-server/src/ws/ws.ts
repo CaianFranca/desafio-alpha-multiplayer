@@ -124,7 +124,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
       // origem — nunca cookie/token.
       if (!origemPermitida(origin, seguranca.origensPermitidas)) {
         const connectionId = randomUUID();
-        const requestId = (info.req.headers['x-request-id'] as string | undefined) ?? undefined;
+        const requestId = (info.req.headers['x-request-id'] as string | undefined) ?? connectionId;
         const ip = info.req.headers['x-forwarded-for'] as string | undefined
           ?? info.req.socket.remoteAddress ?? undefined;
         try {
@@ -136,8 +136,9 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
             connectionId,
             requestId,
           });
-        } catch {}
-        console.warn('[ws] handshake recusado por origem', { origin });
+        } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+        // Evento estruturado já emitido acima (pino JSON); console.warn removido para não duplicar
+        // Se precisar de visibilidade em dev, use DEBUG=* ou log do pino
         callback(false, 403, 'Forbidden');
         return;
       }
@@ -146,9 +147,12 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
   });
 
   wss.on('connection', (socket, request) => {
+    // Log de diagnóstico não-estruturado mantido apenas para correlação local (sem segredo)
     console.log(`[ws] upgrade: ${request.method} ${request.url} ${request.socket.remoteAddress}`);
     const connectionId = randomUUID();
-    const requestId = (request.headers['x-request-id'] as string | undefined) ?? undefined;
+    // WS upgrade não passa pelo middleware Express, então X-Request-Id raramente vem do cliente/proxy.
+    // Usa connectionId como fallback para garantir correlação (spec exige id de requisição/conexão).
+    const requestId = (request.headers['x-request-id'] as string | undefined) ?? connectionId;
     // Guarda connectionId no socket para uso em logs posteriores (inclui disconnect).
     (socket as unknown as Record<string, unknown>).__connectionId = connectionId;
     // O listener de 'message' é registrado IMEDIATAMENTE após o
@@ -183,7 +187,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
               ip: request.socket.remoteAddress ?? undefined,
               jogadorId: (authSocket as unknown as { data?: WsAuthData }).data?.jogadorId,
             });
-          } catch {}
+          } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
           socket.close(1008, 'RATE_LIMIT');
         }
         return;
@@ -214,8 +218,10 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
             requestId,
             ip: request.socket.remoteAddress ?? undefined,
           });
-        } catch {}
+        } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
       }
+      // Limpa marca de correlação para GC
+      try { delete (socket as unknown as Record<string, unknown>).__connectionId; } catch {}
       console.log('[ws] disconnect');
       // Stream de debug (issue #340): desconexão encerra o registro do
       // cliente de debug antes do fechamento das Salas.
@@ -263,13 +269,13 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
         } catch {
           try {
             socket.terminate();
-          } catch {}
+          } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
         }
       }
     })().catch(() => {
       try {
         socket.terminate();
-      } catch {}
+      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
     });
   });
 
@@ -299,7 +305,7 @@ async function handleMessage(
         requestId,
         jogadorId: (socket as unknown as { data?: WsAuthData }).data?.jogadorId,
       });
-    } catch {}
+    } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
     return;
   }
 
@@ -323,7 +329,7 @@ async function handleMessage(
   if (isPingMessage(parsed)) {
     try {
       socket.send(JSON.stringify({ type: 'PONG' }));
-    } catch {}
+    } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
     return;
   }
 
@@ -337,7 +343,7 @@ async function handleMessage(
       requestId,
       jogadorId: (socket as unknown as { data?: WsAuthData }).data?.jogadorId,
     });
-  } catch {}
+  } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
 }
 
 function isPingMessage(value: unknown): boolean {

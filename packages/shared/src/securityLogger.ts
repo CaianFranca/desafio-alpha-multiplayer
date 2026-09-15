@@ -59,7 +59,7 @@ export function redact<T>(input: T): T {
   }
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    if (SENSITIVE_KEYS.has(key) || SENSITIVE_KEYS.has(key.toLowerCase())) {
+    if (SENSITIVE_KEYS.has(key.toLowerCase())) {
       out[key] = REDACTED;
     } else if (value !== null && typeof value === 'object') {
       out[key] = redact(value);
@@ -126,6 +126,15 @@ export function createSecurityLogger(options: CreateSecurityLoggerOptions = {}):
     // Segurança adicional: pino redact nativo (além do helper) para caminhos aninhados
     redact: {
       paths: [
+        'senha',
+        'password',
+        'token',
+        'cookie',
+        'authorization',
+        'jwt',
+        'secret',
+        'refresh_token',
+        'access_token',
         '*.senha',
         '*.password',
         '*.token',
@@ -150,29 +159,15 @@ export function createSecurityLogger(options: CreateSecurityLoggerOptions = {}):
       censor: REDACTED,
       remove: false,
     },
-    // Base vazio: cada log carrega apenas o que é passado + level/time/name.
-    // Evita vazar hostname/pid em alguns ambientes; pino inclui pid/hostname por default — mantemos.
   };
 
-  // Envolve pino para garantir redação do payload antes de emitir.
-  const base = destination !== undefined ? pino(pinoOptions, destination) : pino(pinoOptions);
+  // Em produção sem sink, usa pino.destination() para evitar perda sob backpressure
+  const base =
+    destination !== undefined
+      ? pino(pinoOptions, destination)
+      : pino(pinoOptions, pino.destination({ sync: false }));
 
-  // Proxy leve que redige objetos antes de delegar ao pino.
-  const wrap =
-    (method: keyof Logger) =>
-    (objOrMsg: unknown, msg?: string) => {
-      if (typeof objOrMsg === 'object' && objOrMsg !== null) {
-        const safe = redact(objOrMsg as Record<string, unknown>);
-        if (msg !== undefined) {
-          return (base[method] as unknown as (a: unknown, b: string) => unknown)(safe, msg);
-        }
-        return (base[method] as unknown as (a: unknown) => unknown)(safe);
-      }
-      // pino permite logger.info('string msg')
-      return (base[method] as unknown as (a: unknown) => unknown)(objOrMsg);
-    };
-
-  // Retorna o logger base com métodos envoltos por redação. Preserva demais props.
+  // Envolve métodos para garantir redação profunda antes de delegar ao pino
   const logger = base as unknown as Record<string, unknown>;
   for (const m of ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const) {
     const original = base[m].bind(base);
@@ -189,9 +184,6 @@ export function createSecurityLogger(options: CreateSecurityLoggerOptions = {}):
   // Expõe helpers para testes
   (logger as unknown as { hashEmail: typeof hashEmail }).hashEmail = hashEmail;
   (logger as unknown as { redact: typeof redact }).redact = redact;
-
-  // Evita variável não usada
-  void wrap;
 
   return base;
 }

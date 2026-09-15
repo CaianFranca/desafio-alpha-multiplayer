@@ -313,7 +313,7 @@ export function criarWebSocketServer(
 
   server.on('upgrade', (request, socket, head) => {
     const connectionId = randomUUID();
-    const requestId = (request.headers['x-request-id'] as string | undefined) ?? undefined;
+    const requestId = (request.headers['x-request-id'] as string | undefined) ?? connectionId;
     // Endurecimento do WS (issue #409): recusa por Origem ANTES de qualquer
     // validação de token/partida — o 403 (e não o 401 de sessão) prova a
     // precedência. Origem ausente (bot/serviço) é aceita. Nunca loga
@@ -328,8 +328,8 @@ export function criarWebSocketServer(
           connectionId,
           requestId,
         });
-      } catch {}
-      console.warn('[ws] handshake recusado por origem', { origin: request.headers.origin });
+      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+      // Evento estruturado já emitido (pino JSON); console.warn removido para não duplicar
       enviarErroNoSocket(socket, 403, erroRejeitada('ORIGEM_NAO_PERMITIDA', 'origem não permitida'));
       return;
     }
@@ -431,7 +431,7 @@ export function criarWebSocketServer(
             limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior, depsPartida?.broadcaster);
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
-            } catch {}
+            } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
             ws.close(1011, 'ERRO_INTERNO');
             return;
           }
@@ -584,7 +584,7 @@ export function criarWebSocketServer(
                     connectionId,
                     requestId,
                   });
-                } catch {}
+                } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
                 ws.close(1008, 'RATE_LIMIT');
               }
               return;
@@ -601,7 +601,7 @@ export function criarWebSocketServer(
                   connectionId,
                   requestId,
                 });
-              } catch {}
+              } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
               return;
             }
 
@@ -632,7 +632,8 @@ export function criarWebSocketServer(
             // nunca o `jogadorId` autodeclarado no wire: o handler injeta a
             // sessão como ator (#155) mesmo quando o `jogadorId` do wire
             // diverge — o campo segue obrigatório só pela guarda de forma.
-            void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
+            // Issue #411: propaga connectionId/requestId para correlação nos logs.
+            void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed, { connectionId, requestId });
           });
 
           ws.on('close', (code: number) => {
@@ -645,7 +646,7 @@ export function criarWebSocketServer(
                   connectionId,
                   requestId,
                 });
-              } catch {}
+              } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
             }
             console.info('[ws] jogador desconectado', {
               jogadorId: sessao.jogadorId,
@@ -684,8 +685,8 @@ export function criarWebSocketServer(
           }
           try {
             ws.send(erroRejeitada('ERRO_INTERNO', 'falha na admissão da partida'));
-          } catch {}
-          try { ws.close(1011, 'ERRO_INTERNO'); } catch {}
+          } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+          try { ws.close(1011, 'ERRO_INTERNO'); } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
         });
       });
     })().catch((error: unknown) => {

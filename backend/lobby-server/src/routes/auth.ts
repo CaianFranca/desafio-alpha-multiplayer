@@ -192,7 +192,7 @@ async function aplicarLimiteDeTentativas(
           retryAfter: limite.retryAfterSegundos,
           requestId: getRequestId(req),
         });
-      } catch {}
+      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
       return false;
     }
     return true;
@@ -326,7 +326,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
         requestId: getRequestId(req),
         jogadorId: jogador.id,
       });
-    } catch {}
+    } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
   } catch (error: unknown) {
     const pgError = error as PgError23505;
     if (pgError.code === '23505') {
@@ -340,7 +340,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
             ip: ipDoCliente(req),
             requestId: getRequestId(req),
           });
-        } catch {}
+        } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
         return;
       }
       if (campo === 'email') {
@@ -353,7 +353,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
             ip: ipDoCliente(req),
             requestId: getRequestId(req),
           });
-        } catch {}
+        } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
         return;
       }
       res.status(409).json({ erros: [{ mensagem: 'Cadastro já existe.' }] });
@@ -363,7 +363,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
           ip: ipDoCliente(req),
           requestId: getRequestId(req),
         });
-      } catch {}
+      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
       return;
     }
     console.error('[auth/register] error:', error);
@@ -417,7 +417,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
           ip: ipDoCliente(req),
           requestId: getRequestId(req),
         });
-      } catch {}
+      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
       return;
     }
 
@@ -434,7 +434,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
           requestId: getRequestId(req),
           jogadorId: row.id,
         });
-      } catch {}
+      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
       return;
     }
 
@@ -451,7 +451,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
         requestId: getRequestId(req),
         jogadorId: jogador.id,
       });
-    } catch {}
+    } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
   } catch (error) {
     console.error('[auth/login] error:', error);
     res.status(500).json({ erros: [{ mensagem: 'Erro interno do servidor.' }] });
@@ -544,7 +544,7 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
           requestId: getRequestId(req),
           jogadorId: payload.jogadorId,
         });
-      } catch {}
+      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
       return;
     }
     console.error('[auth/refresh] error:', error);
