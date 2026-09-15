@@ -377,21 +377,40 @@ test('Mensagem acima do teto de payload fecha com 1009', async () => {
 
 // --- 5. Rate limit geral por conexão ---
 
-test('Conexão que estoura o rate limit fecha com 1008', async () => {
+test('Conexão que estoura o rate limit fecha com 1008 sem afetar outra conexão', async () => {
   const servidor = await subirServidor({ ...SEGURANCA_BASE, limiteMensagens: 3 });
   try {
     const partidaId = 'partida-rate-limit';
-    await criarPartidaNoRedis(partidaId, [membro(1)]);
-    const token = await tokenParaJogador('jogador-1', 'Jogador 1');
+    // Dois membros no roster para sustentar duas conexões válidas simultâneas
+    // (o limite é POR CONEXÃO, então cada socket tem o próprio contador).
+    await criarPartidaNoRedis(partidaId, [membro(1), membro(2)]);
+    const tokenA = await tokenParaJogador('jogador-1', 'Jogador 1');
+    const tokenB = await tokenParaJogador('jogador-2', 'Jogador 2');
 
-    const ws = await conectarPartida(servidor, partidaId, token);
+    const wsA = await conectarPartida(servidor, partidaId, tokenA);
+    const wsB = await conectarPartida(servidor, partidaId, tokenB);
 
-    // Rajada de 4 mensagens com limite 3: a 4ª estoura e fecha com 1008.
+    // B entra e responde dentro do limite (1 das 3 mensagens da janela).
+    const pongB1 = esperarMensagens(wsB, 1);
+    wsB.send(JSON.stringify({ type: 'PING' }));
+    assert.equal(tipoDaMensagem((await pongB1)[0]!), 'PONG');
+
+    // Rajada de 4 mensagens em A com limite 3: a 4ª estoura e fecha com 1008.
     for (let i = 0; i < 4; i += 1) {
-      ws.send(JSON.stringify({ type: 'PING' }));
+      wsA.send(JSON.stringify({ type: 'PING' }));
     }
-    const { code } = await esperarClose(ws);
+    const { code } = await esperarClose(wsA);
     assert.equal(code, 1008, `esperava close 1008, recebeu ${code}`);
+
+    // B continua viva e respondendo: o flood de A não afeta quem está dentro
+    // do limite (o contador é por conexão).
+    assert.equal(wsB.readyState, WebSocket.OPEN);
+    const pongB2 = esperarMensagens(wsB, 1);
+    wsB.send(JSON.stringify({ type: 'PING' }));
+    assert.equal(tipoDaMensagem((await pongB2)[0]!), 'PONG');
+
+    wsB.close();
+    await esperarClose(wsB).catch(() => undefined);
   } finally {
     await servidor.fechar();
   }
