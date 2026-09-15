@@ -3,7 +3,6 @@
 // assinado com JWT_SECRET e com `aud`/`role` de serviço; bloqueia JWTs de
 // Jogador (mesmo válidos) por não portarem o audience correto, evitando
 // quebra do invariante "Sessão: uma ativa por Jogador" (CONTEXT.md:38).
-// Em dev mantém aberto para compatibilidade de testes de integração.
 
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
@@ -13,10 +12,6 @@ import { SERVICE_TOKEN_AUDIENCE } from '../jwt.ts';
 export { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../jwt.ts';
 
 export function requireServiceToken(req: Request, res: Response, next: NextFunction): void {
-  if (process.env.NODE_ENV !== 'production') {
-    next();
-    return;
-  }
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     res.status(401).json({ error: 'não autorizado' });
