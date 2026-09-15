@@ -39,10 +39,13 @@ describe('encaminhamento: WS respeita o subpath (VITE_BASE_PATH)', () => {
     expect(url).not.toContain('//ws/game')
   })
 
-  it('href da rota SPA fica a cargo do basename do router (não recebe o base)', () => {
+  it('href do redirect carrega o base (window.location.assign ignora o basename)', () => {
     vi.stubEnv('BASE_URL', '/server01/')
     expect(buildGameRedirectHref('s', 'p', 'A3K9M2')).toBe(
-      '/partida?serverId=s&partidaId=p&codigoDeSala=A3K9M2',
+      '/server01/partida?serverId=s&partidaId=p&codigoDeSala=A3K9M2',
     )
+    expect(buildGameRedirectHref('s', 'p')).toBe('/server01/partida?serverId=s&partidaId=p')
+    // Sem barra dupla vinda da concatenação do base.
+    expect(buildGameRedirectHref('s', 'p')).not.toContain('//partida')
   })
 })

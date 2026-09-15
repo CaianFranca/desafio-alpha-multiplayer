@@ -24,6 +24,7 @@
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
 import { comBase } from '../../api/basePath'
 import { VOLUME_MASTER_PARTIDA } from './volumeMaster'
+import { tocarAsset } from '../../game/audio/sons'
 
 /** Asset de recusa (web/media → servido em /media/), já com o subpath do build. */
 export const CAMINHO_SOM_DE_RECUSA = comBase('/media/bumpintowall.mp3')

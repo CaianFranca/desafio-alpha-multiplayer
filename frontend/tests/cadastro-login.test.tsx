@@ -315,6 +315,8 @@ describe('LoginPage', () => {
       'fetch',
       stubAuthFetch({
         me: async () => new Response(null, { status: 401 }),
+        // Refresh também expirado: sem renovação, cai direto a Visitante.
+        refresh: async () => jsonResponse({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] }, 401),
       }),
     )
     const router = createMemoryRouter(routes, {

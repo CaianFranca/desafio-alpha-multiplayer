@@ -13,7 +13,10 @@ export function buildGameWsUrl(serverId: string, partidaId: string): string {
 
 export function buildGameRedirectHref(serverId: string, partidaId: string, codigoDeSala?: string | null): string {
   // Rota SPA da partida — a PartidaPage abrirá o WS de jogo.
-  const base = `/partida?serverId=${encodeURIComponent(serverId)}&partidaId=${encodeURIComponent(partidaId)}`
+  // Subpath (VITE_BASE_PATH): window.location.assign faz reload full-page e
+  // ignora o basename do router, então o href precisa carregar o prefixo
+  // (/server01/partida?...). Com base / mantém /partida?... (sem regressão).
+  const base = `${baseDoApp()}partida?serverId=${encodeURIComponent(serverId)}&partidaId=${encodeURIComponent(partidaId)}`
   if (codigoDeSala) return `${base}&codigoDeSala=${encodeURIComponent(codigoDeSala)}`
   return base
 }
