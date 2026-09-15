@@ -23,6 +23,7 @@ import type {
   PeaoId,
   PecaPosicionada,
 } from './contrato'
+import type { ReacaoDePecaNoAtaque } from './ataque'
 import { PeaoVisual } from './PeaoVisual'
 import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
@@ -68,6 +69,21 @@ interface CelulaProps {
    * da lista renderizada (`peoes`).
    */
   filaDeChegada?: readonly PeaoId[]
+  /**
+   * Telegraph do ataque (issue #385): peça do monstro com contorno vermelho
+   * pulsante durante o pulso silencioso — apaga ao entrar no disparo.
+   */
+  emTelegraph?: boolean
+  /**
+   * Reação da peça no alcance do ataque (issue #385, follow-up): duplo
+   * feedback com os chips do overlay — a peça pula/treme/escuda no 3D e o
+   * peão sobre ela treme junto (só no `tremor`). Null = sem reação.
+   */
+  reacaoDoAtaque?: ReacaoDePecaNoAtaque | null
+  /** Atraso da onda até esta peça (`atrasoMs` do coreógrafo). */
+  atrasoDoAtaqueMs?: number
+  /** Peça do atacante no estágio de disparo: gesto de escala + flash. */
+  emDisparo?: boolean
   /** Peça é destino válido do peão selecionado: destaque + cursor pointer. */
   destinoValido?: boolean
   /**
@@ -371,6 +387,10 @@ export function Celula({
   peca,
   cursor = 'default',
   pecaDestacada = false,
+  emTelegraph = false,
+  reacaoDoAtaque = null,
+  atrasoDoAtaqueMs = 0,
+  emDisparo = false,
   onClick,
   peoes = [],
   filaDeChegada,
@@ -477,6 +497,10 @@ export function Celula({
           position={[0, PECA_Y, 0]}
           destacada={pecaDestacada || destinoValido || provisoria}
           corDestaque={destinoResgate ? COR_DESTAQUE_RESGATE : undefined}
+          emTelegraph={emTelegraph}
+          reacaoDoAtaque={reacaoDoAtaque}
+          atrasoDoAtaqueMs={atrasoDoAtaqueMs}
+          emDisparo={emDisparo}
           cursor={cursorEfetivo}
           onClick={onClick}
         />
@@ -495,6 +519,8 @@ export function Celula({
             selecionado={peao.peaoId === peaoSelecionadoId}
             ativo={peao.peaoId === peaoAtivoId}
             emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(peao.peaoId)}
+            tremendo={reacaoDoAtaque === 'tremor'}
+            atrasoDoTremorMs={atrasoDoAtaqueMs}
             aoClicar={
               onSelecionarPeao
                 ? () => onSelecionarPeao(peao.peaoId)
