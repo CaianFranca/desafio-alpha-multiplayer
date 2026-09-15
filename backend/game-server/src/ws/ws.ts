@@ -31,6 +31,8 @@ import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Redis } from 'ioredis';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
+import { getConfig } from '@flicker/config';
+import { origemPermitida, LimiteDeMensagensPorConexao } from '@flicker/shared/server';
 import type {
   ServerMessage,
   PartidaId,
@@ -56,6 +58,20 @@ import { PartidaBroadcaster } from '../partidas/broadcast.ts';
 import { PartidaHandlers } from '../partidas/handlers.ts';
 
 const WS_PATH_RE = /^\/ws\/game\/([^/]+)$/;
+
+/** Endurecimento do WS (issue #409) — ver `getConfig()` para os defaults. */
+type SegurancaWs = NonNullable<ContextoDoGameServer['wsSeguranca']>;
+
+/** Fallback dos testes/instâncias sem `contexto.wsSeguranca` explícito. */
+function segurancaDoConfig(): SegurancaWs {
+  const config = getConfig();
+  return {
+    origensPermitidas: config.wsOrigensPermitidas,
+    maxPayloadBytes: config.wsMaxPayloadBytes,
+    limiteMensagens: config.wsLimiteMensagens,
+    janelaLimiteMensagensMs: config.wsJanelaLimiteMensagensMs,
+  };
+}
 
 // Só o que o `ws.ts` consome do canal de Partida: o `PartidaHandlers` já
 // carrega a própria referência ao Redis. Deixar `redis` aqui seria peso morto.
@@ -274,13 +290,24 @@ export function criarWebSocketServer(
   contexto: ContextoDoGameServer,
   deps?: WebSocketServerDeps,
 ): WebSocketServer {
-  const wss = new WebSocketServer({ noServer: true });
+  const seguranca = contexto.wsSeguranca ?? segurancaDoConfig();
+  const wss = new WebSocketServer({ noServer: true, maxPayload: seguranca.maxPayloadBytes });
   // Nome distinto de `partida` (a PartidaPreparada buscada no Redis dentro do
   // fluxo de admissão) para evitar shadowing: `depsPartida` são as deps do
   // canal de Partida, `partida` é a partida persistida.
   const depsPartida = deps?.partida;
 
   server.on('upgrade', (request, socket, head) => {
+    // Endurecimento do WS (issue #409): recusa por Origem ANTES de qualquer
+    // validação de token/partida — o 403 (e não o 401 de sessão) prova a
+    // precedência. Origem ausente (bot/serviço) é aceita. Nunca loga
+    // token/cookie: só a origem.
+    if (!origemPermitida(request.headers.origin, seguranca.origensPermitidas)) {
+      console.warn('[ws] handshake recusado por origem', { origin: request.headers.origin });
+      enviarErroNoSocket(socket, 403, erroRejeitada('ORIGEM_NAO_PERMITIDA', 'origem não permitida'));
+      return;
+    }
+
     const resultado = parsearUpgrade(request, contexto.serverId);
 
     if (!resultado.permitido) {
@@ -340,6 +367,15 @@ export function criarWebSocketServer(
         // durante a admissão (ex.: Redis fora) — review da PR #181.
         let conexaoRegistrada: ConexaoDoJogador | null = null;
         let conexaoAnterior: ConexaoDoJogador | null = null;
+        // Rate limit geral por conexão (issue #409): o handler de 'message'
+        // só é anexado no fim da admissão, então só mensagens pós-admissão
+        // contam. Bots (`sessao.isBot`) são isentos. Flag evita fechar
+        // repetidamente quando a rajada continua chegando após o close.
+        const limiteDeMensagens = new LimiteDeMensagensPorConexao(
+          seguranca.limiteMensagens,
+          seguranca.janelaLimiteMensagensMs,
+        );
+        let encerradoPorRateLimit = false;
         void (async () => {
           const conexao: ConexaoDoJogador = {
             socket: ws,
@@ -509,6 +545,16 @@ export function criarWebSocketServer(
           });
 
           ws.on('message', (data: RawData) => {
+            // Rate limit geral (issue #409): no topo, antes do parse/despacho.
+            // Bots são isentos; o teto de payload é do próprio `ws` (1009).
+            if (!sessao.isBot && !limiteDeMensagens.registrar()) {
+              if (!encerradoPorRateLimit) {
+                encerradoPorRateLimit = true;
+                ws.close(1008, 'RATE_LIMIT');
+              }
+              return;
+            }
+
             const parsed = parsearMensagem(data);
             if (parsed === null) {
               return;

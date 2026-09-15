@@ -39,6 +39,10 @@ const {
   gameServerId: configServerId,
   gameServerAdvertiseHost,
   jwtSecret,
+  wsOrigensPermitidas,
+  wsMaxPayloadBytes,
+  wsLimiteMensagens,
+  wsJanelaLimiteMensagensMs,
 } = getConfig();
 const serverId: ServerId = resolverServerId(configServerId) as ServerId;
 const contexto: ContextoDoGameServer = {
@@ -52,6 +56,12 @@ const contexto: ContextoDoGameServer = {
   partidaChatHistoricoMaximo,
   lobbyRetornoCallbackUrl,
   lobbyDesistenciaCallbackUrl,
+  wsSeguranca: {
+    origensPermitidas: wsOrigensPermitidas,
+    maxPayloadBytes: wsMaxPayloadBytes,
+    limiteMensagens: wsLimiteMensagens,
+    janelaLimiteMensagensMs: wsJanelaLimiteMensagensMs,
+  },
 };
 const app = createApp(contexto);
 
