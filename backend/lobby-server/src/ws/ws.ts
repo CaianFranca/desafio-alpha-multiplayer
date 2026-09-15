@@ -1,6 +1,8 @@
 import type { Server } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
+import { getConfig } from '@flicker/config';
+import { origemPermitida, LimiteDeMensagensPorConexao } from '@flicker/shared/server';
 import type { ServerMessage } from '@flicker/shared';
 import { NOME_ACCESS_COOKIE } from '../cookies.ts';
 import { parseCookies } from '../middleware/cookie.ts';
@@ -19,6 +21,17 @@ export interface WsAuthData {
 
 export type AuthenticatedWebSocket = WebSocket & { data: WsAuthData };
 
+/** Endurecimento do WS (issue #409) — ver `getConfig()` para os defaults. */
+export interface SegurancaWs {
+  origensPermitidas: readonly string[];
+  maxPayloadBytes: number;
+  limiteMensagens: number;
+  janelaLimiteMensagensMs: number;
+}
+
+/** Domínio reservado de bots (ver `routes/auth.ts`): conexões de bot não consomem o rate limit. */
+const DOMINIO_BOT = '@bot.teste';
+
 export interface WsDeps {
   verificarAccess?: typeof verificarAccess;
   obterSessao?: typeof obterSessao;
@@ -29,6 +42,25 @@ export interface WsDeps {
    * compatibilidade com testes que não montam contexto de Salas).
    */
   contextoSalas?: SalasContexto;
+  /**
+   * Endurecimento do WS (issue #409): allowlist de Origem, teto de payload e
+   * rate limit geral por conexão. Quando ausente, deriva de `getConfig()`.
+   */
+  seguranca?: SegurancaWs;
+}
+
+function segurancaDoConfig(): SegurancaWs {
+  const config = getConfig();
+  return {
+    origensPermitidas: config.wsOrigensPermitidas,
+    maxPayloadBytes: config.wsMaxPayloadBytes,
+    limiteMensagens: config.wsLimiteMensagens,
+    janelaLimiteMensagensMs: config.wsJanelaLimiteMensagensMs,
+  };
+}
+
+function ehConexaoDeBot(socket: AuthenticatedWebSocket): boolean {
+  return socket.data.email.endsWith(DOMINIO_BOT);
 }
 
 async function autenticarRequest(
@@ -67,8 +99,23 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
     obterSessao: deps.obterSessao ?? obterSessao,
   };
   const contextoSalas = deps.contextoSalas;
+  const seguranca = deps.seguranca ?? segurancaDoConfig();
 
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({
+    server,
+    maxPayload: seguranca.maxPayloadBytes,
+    verifyClient: (info, callback) => {
+      const origin = info.req.headers.origin;
+      // Recusa no handshake, ANTES de qualquer leitura de sessão. Loga só a
+      // origem — nunca cookie/token.
+      if (!origemPermitida(origin, seguranca.origensPermitidas)) {
+        console.warn('[ws] handshake recusado por origem', { origin });
+        callback(false, 403, 'Forbidden');
+        return;
+      }
+      callback(true);
+    },
+  });
 
   wss.on('connection', (socket, request) => {
     console.log(`[ws] upgrade: ${request.method} ${request.url} ${request.socket.remoteAddress}`);
@@ -83,6 +130,24 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
     const mensagensAguardandoAuth: RawData[] = [];
     const LIMITE_BUFFER_PRE_AUTH = 32;
     let autenticado = false;
+    // Rate limit geral por conexão (issue #409), ativo só após a autenticação:
+    // as mensagens pré-auth bufferizadas não contam. Bots (@bot.teste) são isentos.
+    const limiteDeMensagens = new LimiteDeMensagensPorConexao(
+      seguranca.limiteMensagens,
+      seguranca.janelaLimiteMensagensMs,
+    );
+    let encerradoPorRateLimit = false;
+
+    const processarMensagem = (data: RawData): void => {
+      if (!ehConexaoDeBot(authSocket) && !limiteDeMensagens.registrar()) {
+        if (!encerradoPorRateLimit) {
+          encerradoPorRateLimit = true;
+          socket.close(1008, 'RATE_LIMIT');
+        }
+        return;
+      }
+      void handleMessage(data, authSocket, contextoSalas);
+    };
 
     socket.on('error', (error) => {
       console.error('[ws] error:', error.message);
@@ -90,7 +155,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
 
     socket.on('message', (data) => {
       if (autenticado) {
-        void handleMessage(data, authSocket, contextoSalas);
+        processarMensagem(data);
       } else if (mensagensAguardandoAuth.length < LIMITE_BUFFER_PRE_AUTH) {
         mensagensAguardandoAuth.push(data);
       }
@@ -138,7 +203,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
 
         // Drena o buffer de mensagens que chegaram antes da autenticação.
         for (const data of mensagensAguardandoAuth.splice(0)) {
-          void handleMessage(data, authSocket, contextoSalas);
+          processarMensagem(data);
         }
       } catch {
         try {
