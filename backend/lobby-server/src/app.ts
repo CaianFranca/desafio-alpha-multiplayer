@@ -1,4 +1,5 @@
 import express, { type Express } from 'express';
+import { getConfig } from '@flicker/config';
 import { authRouter } from './routes/auth.ts';
 import { gameServersRouter } from './routes/gameServers.ts';
 import { criarRetornoRouter } from './routes/retorno.ts';
@@ -22,6 +23,10 @@ export interface CreateAppOpcoes {
 
 export function createApp(opcoes: CreateAppOpcoes = {}): Express {
   const app = express();
+
+  // O nº de hops até o app depende do encadeamento admin→edge→app; sem isso o
+  // Express não enxerga o IP real do cliente atrás do proxy.
+  app.set('trust proxy', getConfig().trustProxyHops);
 
   app.use(express.json({ limit: '10kb' }));
   app.use(cookieMiddleware);
