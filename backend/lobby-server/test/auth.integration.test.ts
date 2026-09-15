@@ -913,3 +913,20 @@ test('register: 201 para senha de exatamente 72 bytes', async () => {
     assert.equal(multibyte.status, 201);
   });
 });
+
+// --- 33. respostas não expõem X-Powered-By (medida OWASP G5) ---
+
+test('respostas não expõem X-Powered-By', async () => {
+  await comServidor(async (servidor) => {
+    // Resposta de sucesso conhecida.
+    const health = await getAuth(servidor.baseUrl, '/health');
+    assert.equal(health.status, 200);
+    assert.equal(health.headers.get('x-powered-by'), null);
+
+    // Resposta 404 gerada pelo handler default do Express — o vetor do
+    // vazamento observado em produção (issue #413).
+    const inexistente = await getAuth(servidor.baseUrl, '/api/nao-existe');
+    assert.equal(inexistente.status, 404);
+    assert.equal(inexistente.headers.get('x-powered-by'), null);
+  });
+});

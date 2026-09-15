@@ -406,8 +406,8 @@ nativa estão afetadas por este bug — ver a issue #252 para status.
 
 ### d) WebSocket do lobby retorna 404 (`Cannot GET /ws/lobby`)
 
-O browser não consegue abrir `wss://…/server01/ws/lobby` e recebe `404` com
-`X-Powered-By: Express`; nenhuma linha `[ws] upgrade:` aparece no journal. Não é
+O browser não consegue abrir `wss://…/server01/ws/lobby` e recebe `404`;
+nenhuma linha `[ws] upgrade:` aparece no journal. Não é
 rota ausente: o **proxy do admin** reproxa a requisição como HTTP/1.0 sem os
 headers `Upgrade`/`Connection` (hop-by-hop), então o Node nunca emite o evento
 `upgrade` e o `GET` cai no Express (404). Borda, nginx do app e lobby aceitam o

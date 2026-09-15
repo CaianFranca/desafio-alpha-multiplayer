@@ -378,3 +378,18 @@ test('partida preparada expira pelo TTL e DELETE posterior responde PARTIDA_NAO_
     assert.equal(corpo.codigo, 'PARTIDA_NAO_ENCONTRADA');
   });
 });
+
+test('respostas não expõem X-Powered-By', async () => {
+  await comServidor(600, async (servidor) => {
+    // Resposta de sucesso conhecida.
+    const health = await fetch(`${servidor.baseUrl}/health`);
+    assert.equal(health.status, 200);
+    assert.equal(health.headers.get('x-powered-by'), null);
+
+    // Resposta 404 gerada pelo handler default do Express — o vetor do
+    // vazamento observado em produção (issue #413).
+    const inexistente = await fetch(`${servidor.baseUrl}/api/nao-existe`);
+    assert.equal(inexistente.status, 404);
+    assert.equal(inexistente.headers.get('x-powered-by'), null);
+  });
+});
