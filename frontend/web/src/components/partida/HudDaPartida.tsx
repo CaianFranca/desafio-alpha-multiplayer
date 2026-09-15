@@ -54,7 +54,7 @@ export interface HudDaPartidaProps {
   iniciadaEm?: number | null
   /**
    * Foto por jogador (jogadorId → URL); ausente/null mantém as iniciais.
-   * Ainda sem fonte no snapshot — prop pronta para quando o servidor expor.
+   * Alimentada pela PartidaPage via cor do peão → foto do avatar (#404).
    */
   imagemPorJogador?: Readonly<Record<string, string | null | undefined>>
   /** Desistência da Partida (issue #290): envia DESISTIR_DA_PARTIDA e sai à principal. */
@@ -102,7 +102,12 @@ function ConteudoDoAvatar({
   cor: CorDoPeao
   imagemUrl?: string | null
 }) {
-  if (imagemUrl) {
+  // Falha de carregamento (issue #404): a URL com erro volta às iniciais na
+  // cor do peão. Guarda a URL que falhou (não um booleano) para resetar
+  // automaticamente quando `imagemUrl` trocar.
+  const [urlComFalha, setUrlComFalha] = useState<string | null>(null)
+  const comFalha = imagemUrl !== null && imagemUrl === urlComFalha
+  if (imagemUrl && !comFalha) {
     return (
       <img
         src={imagemUrl}
@@ -110,6 +115,7 @@ function ConteudoDoAvatar({
         aria-hidden="true"
         draggable={false}
         className="h-full w-full object-cover"
+        onError={() => setUrlComFalha(imagemUrl)}
       />
     )
   }

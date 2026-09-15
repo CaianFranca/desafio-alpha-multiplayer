@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, act, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, act, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -523,6 +523,198 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     expect(retrato).not.toHaveTextContent('JO')
     // Adversário sem URL mantém as iniciais.
     expect(screen.getAllByTestId('hud-avatar-adversario')[0]).toHaveTextContent('AN')
+    unmount()
+  })
+
+  it('foto do avatar aparece nos 3 pontos (retrato local, adversários, fila de turno) — issue #404', () => {
+    const jogadores: Record<string, PercepcaoDeJogador> = {
+      [MEU_JOGADOR_ID]: { apelido: 'JogadorTeste', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 1, protegido: false },
+      ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
+    }
+    const { unmount } = render(
+      <HudDaPartida
+        jogadorPorId={jogadores}
+        jogadorAtivoId={MEU_JOGADOR_ID}
+        jogadorLocalId={MEU_JOGADOR_ID}
+        geradoresLigados={[]}
+        cartaoDeAcessoObtido={false}
+        emAndamento
+        emResultado={false}
+        imagemPorJogador={{ [MEU_JOGADOR_ID]: 'https://exemplo.test/eu.png', ['jogador-2']: 'https://exemplo.test/ana.png' }}
+        onSair={() => {}}
+      />,
+    )
+    // Retrato local.
+    expect(
+      screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+    ).toHaveAttribute('src', 'https://exemplo.test/eu.png')
+    // Adversários (sup-esq).
+    expect(screen.getByTestId('hud-avatar-adversario').querySelector('img')).toHaveAttribute(
+      'src',
+      'https://exemplo.test/ana.png',
+    )
+    // Fila de turno (inf-dir): ativo + próximo com foto.
+    expect(screen.getByTestId('hud-turno-ativo').querySelector('img')).toHaveAttribute(
+      'src',
+      'https://exemplo.test/eu.png',
+    )
+    expect(screen.getByTestId('hud-turno-proximo').querySelector('img')).toHaveAttribute(
+      'src',
+      'https://exemplo.test/ana.png',
+    )
+    unmount()
+  })
+
+  it('erro de carregamento da foto volta às iniciais na cor do peão (issue #404)', () => {
+    const { unmount } = render(
+      <HudDaPartida
+        jogadorPorId={JOGADORES_HUD}
+        jogadorAtivoId={MEU_JOGADOR_ID}
+        jogadorLocalId={MEU_JOGADOR_ID}
+        geradoresLigados={[]}
+        cartaoDeAcessoObtido={false}
+        emAndamento
+        emResultado={false}
+        imagemPorJogador={{ [MEU_JOGADOR_ID]: 'https://exemplo.test/quebrada.png' }}
+        onSair={() => {}}
+      />,
+    )
+    const retrato = screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' })
+    const img = retrato.querySelector('img')!
+    expect(img).toHaveAttribute('src', 'https://exemplo.test/quebrada.png')
+    fireEvent.error(img)
+    expect(retrato.querySelector('img')).toBeNull()
+    expect(retrato).toHaveTextContent('JO')
+    unmount()
+  })
+
+  it('ordem canônica com 4 jogadores: cada foto segue a cor do peão (issue #404)', () => {
+    const jogadores: Record<string, PercepcaoDeJogador> = {
+      ['j1']: { apelido: 'Um', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 1, protegido: false },
+      ['j2']: { apelido: 'Dois', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
+      ['j3']: { apelido: 'Tres', cor: 'azul', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 3, protegido: false },
+      ['j4']: { apelido: 'Quatro', cor: 'amarelo', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 4, protegido: false },
+    }
+    const { unmount } = render(
+      <HudDaPartida
+        jogadorPorId={jogadores}
+        jogadorAtivoId="j1"
+        jogadorLocalId="j1"
+        geradoresLigados={[]}
+        cartaoDeAcessoObtido={false}
+        emAndamento
+        emResultado={false}
+        imagemPorJogador={{
+          ['j1']: '/base/assets/avatars/diretor.png',
+          ['j2']: '/base/assets/avatars/enfermeira.png',
+          ['j3']: '/base/assets/avatars/janitor.png',
+          ['j4']: '/base/assets/avatars/paciente.png',
+        }}
+        onSair={() => {}}
+      />,
+    )
+    // Retrato local = Diretor; adversários seguem a ordem de entrada.
+    expect(
+      screen.getByRole('img', { name: 'Retrato de Um, com a vez' }).querySelector('img'),
+    ).toHaveAttribute('src', '/base/assets/avatars/diretor.png')
+    const adversarios = screen.getAllByTestId('hud-avatar-adversario')
+    expect(adversarios).toHaveLength(3)
+    expect(adversarios[0].querySelector('img')).toHaveAttribute('src', '/base/assets/avatars/enfermeira.png')
+    expect(adversarios[1].querySelector('img')).toHaveAttribute('src', '/base/assets/avatars/janitor.png')
+    expect(adversarios[2].querySelector('img')).toHaveAttribute('src', '/base/assets/avatars/paciente.png')
+    // Fila de turno começa no ativo e segue a ordem de entrada com wrap.
+    const fila = [screen.getByTestId('hud-turno-ativo'), ...screen.getAllByTestId('hud-turno-proximo')]
+    expect(fila.map((el) => el.querySelector('img')?.getAttribute('src'))).toEqual([
+      '/base/assets/avatars/diretor.png',
+      '/base/assets/avatars/enfermeira.png',
+      '/base/assets/avatars/janitor.png',
+      '/base/assets/avatars/paciente.png',
+    ])
+    unmount()
+  })
+
+  it('com 2 e 3 jogadores só os slots presentes têm foto (issue #404)', () => {
+    const dois: Record<string, PercepcaoDeJogador> = {
+      ['j1']: { apelido: 'Um', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 1, protegido: false },
+      ['j2']: { apelido: 'Dois', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
+    }
+    const { unmount } = render(
+      <HudDaPartida
+        jogadorPorId={dois}
+        jogadorAtivoId="j1"
+        jogadorLocalId="j1"
+        geradoresLigados={[]}
+        cartaoDeAcessoObtido={false}
+        emAndamento
+        emResultado={false}
+        imagemPorJogador={{
+          ['j1']: '/base/assets/avatars/diretor.png',
+          ['j2']: '/base/assets/avatars/enfermeira.png',
+        }}
+        onSair={() => {}}
+      />,
+    )
+    expect(screen.getAllByTestId('hud-avatar-adversario')).toHaveLength(1)
+    expect(
+      screen.getAllByTestId('hud-avatar-adversario')[0].querySelector('img'),
+    ).toHaveAttribute('src', '/base/assets/avatars/enfermeira.png')
+    expect(
+      screen.getByRole('img', { name: 'Retrato de Um, com a vez' }).querySelector('img'),
+    ).toHaveAttribute('src', '/base/assets/avatars/diretor.png')
+    unmount()
+
+    const tres: Record<string, PercepcaoDeJogador> = {
+      ...dois,
+      ['j3']: { apelido: 'Tres', cor: 'azul', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 3, protegido: false },
+    }
+    render(
+      <HudDaPartida
+        jogadorPorId={tres}
+        jogadorAtivoId="j1"
+        jogadorLocalId="j1"
+        geradoresLigados={[]}
+        cartaoDeAcessoObtido={false}
+        emAndamento
+        emResultado={false}
+        imagemPorJogador={{
+          ['j1']: '/base/assets/avatars/diretor.png',
+          ['j2']: '/base/assets/avatars/enfermeira.png',
+          ['j3']: '/base/assets/avatars/janitor.png',
+        }}
+        onSair={() => {}}
+      />,
+    )
+    expect(screen.getAllByTestId('hud-avatar-adversario')).toHaveLength(2)
+    expect(
+      screen.getAllByTestId('hud-avatar-adversario')[1].querySelector('img'),
+    ).toHaveAttribute('src', '/base/assets/avatars/janitor.png')
+  })
+
+  it('Baixa Iluminação/Amedrontado não trocam a foto (issue #404)', () => {
+    const jogadores: Record<string, PercepcaoDeJogador> = {
+      [MEU_JOGADOR_ID]: { apelido: 'JogadorTeste', cor: 'branco', sanidade: 2, emBaixaIluminacao: true, amedrontado: true, ordem: 1, protegido: false },
+      ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 1, emBaixaIluminacao: true, amedrontado: true, ordem: 2, protegido: false },
+    }
+    const { unmount } = render(
+      <HudDaPartida
+        jogadorPorId={jogadores}
+        jogadorAtivoId={MEU_JOGADOR_ID}
+        jogadorLocalId={MEU_JOGADOR_ID}
+        geradoresLigados={[]}
+        cartaoDeAcessoObtido={false}
+        emAndamento
+        emResultado={false}
+        imagemPorJogador={{ [MEU_JOGADOR_ID]: 'https://exemplo.test/eu.png', ['jogador-2']: 'https://exemplo.test/ana.png' }}
+        onSair={() => {}}
+      />,
+    )
+    expect(
+      screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+    ).toHaveAttribute('src', 'https://exemplo.test/eu.png')
+    expect(screen.getByTestId('hud-avatar-adversario').querySelector('img')).toHaveAttribute(
+      'src',
+      'https://exemplo.test/ana.png',
+    )
     unmount()
   })
 

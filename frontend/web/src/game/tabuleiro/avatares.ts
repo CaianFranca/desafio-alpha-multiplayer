@@ -63,6 +63,34 @@ export const AVATARES_POR_SLOT: ReadonlyMap<number, AvatarConfig> = new Map([
   ],
 ])
 
+/**
+ * Fotos 2D dos avatares para o HUD da Partida (issue #404).
+ *
+ * Seam puro: slot → URL do PNG (versão acesa fixa, sem variação por Baixa
+ * Iluminação/Amedrontado — os estados seguem só nos indicadores do HUD). Os
+ * PNGs vivem em `web/public/assets/avatars/` (servidos sob
+ * `import.meta.env.BASE_URL + assets/avatars/…`, empacotados no `dist` via
+ * `publicDir` — mesmo precedente dos GLBs acima). Sem three.js/DOM: só URLs
+ * e slot — testável em jsdom.
+ */
+export const FOTOS_DOS_AVATARES_POR_SLOT: ReadonlyMap<number, string> =
+  new Map([
+    [0, `${baseAssets()}assets/avatars/diretor.png`],
+    [1, `${baseAssets()}assets/avatars/enfermeira.png`],
+    [2, `${baseAssets()}assets/avatars/janitor.png`],
+    [3, `${baseAssets()}assets/avatars/paciente.png`],
+  ])
+
+/** Foto 2D do avatar neste slot (`null` quando sem foto). */
+export function fotoDoAvatarPorSlot(slot: number): string | null {
+  return FOTOS_DOS_AVATARES_POR_SLOT.get(slot) ?? null
+}
+
+/** Foto 2D do avatar do peão desta cor (`null` quando sem foto). */
+export function fotoDoAvatarPorCor(cor: CorDoPeao): string | null {
+  return fotoDoAvatarPorSlot(slotDoAvatar(cor))
+}
+
 /** Slot de um peão pela cor (índice em `CORES_DOS_PEOES`). */
 export function slotDoAvatar(cor: CorDoPeao): number {
   return CORES_DOS_PEOES.indexOf(cor)

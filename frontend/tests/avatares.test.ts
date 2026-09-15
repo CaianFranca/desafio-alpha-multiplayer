@@ -11,6 +11,9 @@
 import { CORES_DOS_PEOES } from '../web/src/game/tabuleiro/contrato'
 import {
   AVATARES_POR_SLOT,
+  FOTOS_DOS_AVATARES_POR_SLOT,
+  fotoDoAvatarPorCor,
+  fotoDoAvatarPorSlot,
   slotDoAvatar,
   temAvatarNoSlot,
 } from '../web/src/game/tabuleiro/avatares'
@@ -93,5 +96,30 @@ describe('avatares dos peões (issues #297, #300, #301 e #299)', () => {
 
   it('derivação vazia em sanidade vazia: set sem peões', () => {
     expect([...peoesEmBaixaIluminacaoDe({})]).toEqual([])
+  })
+
+  it('fotos 2D do HUD (issue #404): slot → PNG aceso fixo dos 4 avatares', () => {
+    expect(FOTOS_DOS_AVATARES_POR_SLOT.size).toBe(4)
+    expect(FOTOS_DOS_AVATARES_POR_SLOT.get(0)).toContain('assets/')
+    expect(FOTOS_DOS_AVATARES_POR_SLOT.get(0)?.endsWith('diretor.png')).toBe(true)
+    expect(FOTOS_DOS_AVATARES_POR_SLOT.get(1)?.endsWith('enfermeira.png')).toBe(true)
+    expect(FOTOS_DOS_AVATARES_POR_SLOT.get(2)?.endsWith('janitor.png')).toBe(true)
+    expect(FOTOS_DOS_AVATARES_POR_SLOT.get(3)?.endsWith('paciente.png')).toBe(true)
+  })
+
+  it('foto por slot retorna a URL e null fora dos 4 slots', () => {
+    expect(fotoDoAvatarPorSlot(0)?.endsWith('diretor.png')).toBe(true)
+    expect(fotoDoAvatarPorSlot(1)?.endsWith('enfermeira.png')).toBe(true)
+    expect(fotoDoAvatarPorSlot(2)?.endsWith('janitor.png')).toBe(true)
+    expect(fotoDoAvatarPorSlot(3)?.endsWith('paciente.png')).toBe(true)
+    expect(fotoDoAvatarPorSlot(-1)).toBeNull()
+    expect(fotoDoAvatarPorSlot(4)).toBeNull()
+  })
+
+  it('foto por cor espelha a ordem canônica (branco → Diretor … amarelo → Paciente)', () => {
+    expect(fotoDoAvatarPorCor('branco')?.endsWith('diretor.png')).toBe(true)
+    expect(fotoDoAvatarPorCor('vermelho')?.endsWith('enfermeira.png')).toBe(true)
+    expect(fotoDoAvatarPorCor('azul')?.endsWith('janitor.png')).toBe(true)
+    expect(fotoDoAvatarPorCor('amarelo')?.endsWith('paciente.png')).toBe(true)
   })
 })
