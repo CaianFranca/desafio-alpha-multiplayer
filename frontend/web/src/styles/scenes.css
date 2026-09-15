@@ -493,7 +493,7 @@
     height: 2.5rem;
     flex-shrink: 0;
     border-radius: 9999px;
-    border: 1px solid rgba(245, 241, 232, 0.28);
+    border: 1px solid color-mix(in srgb, var(--color-text) 28%, transparent);
     background-color: var(--color-surface);
     background-size: cover;
     background-position: center;

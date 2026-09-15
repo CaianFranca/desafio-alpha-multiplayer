@@ -58,7 +58,7 @@ export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDe
         aria-label="Carregando partida"
         className="encaminhamento-carregando"
       >
-        <DotsDeCarregamento rotuloVisivel="Carregando..." nomeAcessivel="Carregando partida" />
+        <DotsDeCarregamento nomeAcessivel="Carregando partida" />
       </div>
     </div>
   )
