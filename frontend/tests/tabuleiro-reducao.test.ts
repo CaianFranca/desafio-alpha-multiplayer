@@ -1862,7 +1862,9 @@ describe('presença em reconexão — snapshot é autoridade (issue #294, review
       ]),
     )
     expect(reconciliado.jogadorPorId['j2']?.presenca).toBe('conectado')
-    
+  })
+})
+
 describe('fatia do ataque no cliente — redução por slot (issue #385, follow-up da ordem)', () => {
   function estadoComRoster() {
     return {
