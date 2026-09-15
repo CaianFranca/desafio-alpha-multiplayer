@@ -60,7 +60,10 @@ Estado esperado do servidor:
 - **PostgreSQL 17** rodando localmente (role e database `flicker` são criados
   de forma idempotente pelo próprio workflow a cada deploy).
 - **Redis** rodando localmente com persistência AOF (`appendonly no`... ou
-  seja, AOF **desativado**; o estado efêmero do jogo é reconstruído).
+  seja, AOF **desativado**; o estado efêmero do jogo é reconstruído) e com
+  `requirepass` habilitado (ver seção 6 — `REDIS_PASSWORD` no env e
+  `/etc/redis/redis.conf` com `requirepass <senha>`; `redis-cli` sem `AUTH` deve
+  retornar `NOAUTH`).
 - **nginx** instalado. O deploy instala a conf do app (`:8080`) em
   `sites-available/flicker` e o vhost de borda (`:80`, `default_server`) em
   `sites-available/flicker-edge`, e remove o site `default` do Debian de
@@ -229,6 +232,7 @@ issues, PRs ou logs).
 | `SERVER_HOST` | Host/IP do servidor de produção na rede privada. Usado para ping VPN, SSH, `ssh-keyscan` e scp. |
 | `SERVER_USER` | Usuário SSH usado no deploy (precisa permissão de `sudo`/root para o `deploy-server.sh` e acesso de escrita em `/tmp`). |
 | `PROD_POSTGRES_PASSWORD` | Senha da role `flicker` do Postgres de produção. O workflow a injeta no env de produção e a sincroniza (idempotente) na role. |
+| `PROD_REDIS_PASSWORD` | Senha do Redis de produção (`requirepass`). Obrigatória: a config **falha ao iniciar** se ausente ou igual ao default de dev (`flicker_redis_dev_password`); o workflow a injeta como `REDIS_PASSWORD` no env. |
 | `PROD_JWT_SECRET` | Segredo de assinatura do JWT de acesso em produção. Obrigatório: a config **falha ao iniciar** se ausente ou igual ao default de dev. |
 | `PROD_JWT_REFRESH_SECRET` | Segredo de assinatura do JWT de refresh em produção. Mesma validação estrita. |
 
@@ -309,6 +313,7 @@ POSTGRES_DB=flicker
 POSTGRES_PASSWORD=<secret PROD_POSTGRES_PASSWORD>
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
+REDIS_PASSWORD=<secret PROD_REDIS_PASSWORD>
 JWT_SECRET=<secret PROD_JWT_SECRET>
 JWT_REFRESH_SECRET=<secret PROD_JWT_REFRESH_SECRET>
 LOBBY_PUBLIC_URL=<variable PROD_LOBBY_PUBLIC_URL>
@@ -334,6 +339,22 @@ TRUST_PROXY_HOPS=3
 > em `packages/config` já é `Secure=true` quando `NODE_ENV=production`; o env
 > apenas o torna explícito. O nginx do app repassa `X-Forwarded-Proto` recebido
 > da borda para que redirects/cookies sejam gerados como `https`.
+
+> **Redis com `requirepass` em produção:** o servidor Redis deve ser iniciado
+> com autenticação. Em prod nativa (fora do Compose), configure
+> `/etc/redis/redis.conf` com `requirepass <valor de REDIS_PASSWORD>` (ou
+> `redis-server --requirepass "$REDIS_PASSWORD"` no unit/systemd) e reinicie o
+> serviço (`systemctl restart redis-server` ou `redis`). No Compose (dev/test) o
+> `docker-compose.yml` já passa `--requirepass ${REDIS_PASSWORD}` ao `redis:7` e
+> o healthcheck usa `redis-cli -a "$REDIS_PASSWORD" ping`. Sempre valide:
+> `redis-cli ping` sem `AUTH` deve retornar `NOAUTH Authentication required.`, e
+> `redis-cli -a "$REDIS_PASSWORD" ping` deve retornar `PONG`.
+
+> **`REDIS_PASSWORD` é obrigatória em produção**: com `NODE_ENV=production`, o
+> `getConfig()` (`packages/config/src/index.ts`) lança erro no boot se a env
+> estiver ausente, vazia ou igual ao default de dev
+> (`flicker_redis_dev_password`). Sem ela, o lobby e o game-server não sobem —
+> falha de propósito para não subir desprotegido.
 
 > **Monitoramento do `/health`**: `GET /health` responde `200` com
 > `{ status: 'ok' }` e `503` com
@@ -388,8 +409,10 @@ journalctl -u flicker-lobby -u flicker-game --since "15 minutes ago" --no-pager
 
 Causas comuns: env ausente/incorreto (`/opt/flicker/env`), migration quebrada,
 porta ocupada, crash no boot (a config de produção lança erro se
-`JWT_SECRET`/`JWT_REFRESH_SECRET`/`POSTGRES_PASSWORD` estiverem ausentes ou
-iguais aos defaults de dev, ou se `LOBBY_PUBLIC_URL` não estiver definida).
+`JWT_SECRET`/`JWT_REFRESH_SECRET`/`POSTGRES_PASSWORD`/`REDIS_PASSWORD` estiverem
+ausentes ou iguais aos defaults de dev, ou se `LOBBY_PUBLIC_URL` não estiver
+definida). Para Redis, veja também `journalctl -u redis-server` e valide
+`/etc/redis/redis.conf` com `requirepass`.
 
 ### c) Problema conhecido: issue #252 — "INICIAR PARTIDA" falha em produção nativa
 
@@ -414,6 +437,28 @@ headers `Upgrade`/`Connection` (hop-by-hop), então o Node nunca emite o evento
 handshake normalmente. O diagnóstico completo, as evidências e o snippet de
 correção do proxy do admin estão em
 [`docs/diagnostico-websocket-server01.md`](diagnostico-websocket-server01.md).
+
+### e) Redis `NOAUTH` / `LOADING` no health check
+
+Sintoma: `curl http://127.0.0.1:3001/health` retorna `503 { dependencia: 'redis' }`
+ou o journal mostra `NOAUTH Authentication required.` / `WRONGPASS`.
+
+Causa: o Redis está com `requirepass` mas `REDIS_PASSWORD` no `/opt/flicker/env`
+está ausente/vazio/divergente, ou o `/etc/redis/redis.conf` não tem `requirepass`.
+
+Fix:
+```bash
+# Conferir env
+grep REDIS_PASSWORD /opt/flicker/env
+# Conferir redis.conf
+grep -n requirepass /etc/redis/redis.conf
+# Testar
+redis-cli ping                               # deve dar NOAUTH
+redis-cli -a "$REDIS_PASSWORD" ping          # deve dar PONG (carrega do env: . /opt/flicker/env; echo $REDIS_PASSWORD)
+sudo systemctl restart redis-server  # ou redis
+systemctl status redis-server --no-pager
+journalctl -u flicker-lobby -u flicker-game --since "5 minutes ago" --no-pager
+```
 
 ---
 

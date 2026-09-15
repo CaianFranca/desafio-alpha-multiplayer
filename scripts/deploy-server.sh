@@ -58,6 +58,53 @@ chmod o+x "$ROOT" "$RELEASES"
 log "rodando migrations"
 set -a; . "$ENV_FILE"; set +a
 export NODE_ENV=production
+[ -n "${REDIS_PASSWORD:-}" ] || die "REDIS_PASSWORD vazio no env ($ENV_FILE) — defina PROD_REDIS_PASSWORD no workflow"
+# Garante requirepass no Redis nativo (se o serviço existir); idempotente.
+if command -v redis-cli >/dev/null 2>&1 && [ -f /etc/redis/redis.conf ]; then
+  log "garantindo requirepass em /etc/redis/redis.conf"
+  tmp_conf="$(mktemp)"
+  tmp_conf2="${tmp_conf}.2"
+  # Preserva permissões/dono do arquivo original
+  orig_stat="$(stat -c '%a %u %g' /etc/redis/redis.conf 2>/dev/null || echo '640 0 0')"
+  # shellcheck disable=SC2206
+  orig_perm=($orig_stat)
+  grep -vE '^\s*requirepass\s+' /etc/redis/redis.conf > "$tmp_conf" || true
+  # Também remove linha comentada # requirepass para evitar duplicidade
+  grep -vE '^\s*#\s*requirepass\s+' "$tmp_conf" > "$tmp_conf2" && mv "$tmp_conf2" "$tmp_conf" || true
+  printf 'requirepass %s\n' "$REDIS_PASSWORD" >> "$tmp_conf"
+  # Só substitui se mudou (evita restart desnecessário)
+  if ! cmp -s "$tmp_conf" /etc/redis/redis.conf; then
+    cp --preserve=mode,ownership /etc/redis/redis.conf "/etc/redis/redis.conf.bak.$(date +%s)" 2>/dev/null || cp /etc/redis/redis.conf /etc/redis/redis.conf.bak 2>/dev/null || true
+    cat "$tmp_conf" > /etc/redis/redis.conf
+    # Restaura permissões/dono originais
+    chmod "${orig_perm[0]}" /etc/redis/redis.conf 2>/dev/null || chmod 640 /etc/redis/redis.conf 2>/dev/null || true
+    if [ "${#orig_perm[@]}" -ge 3 ]; then
+      chown "${orig_perm[1]}:${orig_perm[2]}" /etc/redis/redis.conf 2>/dev/null || chown redis:redis /etc/redis/redis.conf 2>/dev/null || true
+    fi
+    log "requirepass atualizado — reiniciando redis"
+    systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
+    # Aguarda redis ficar pronto com a nova senha (fail-closed: aborta deploy se não subir)
+    for i in $(seq 1 10); do
+      if redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then
+        log "redis pronto com requirepass (tentativa $i)"
+        break
+      fi
+      if [ "$i" -eq 10 ]; then
+        log "ERRO: redis não respondeu PONG após requirepass — restaurando backup"
+        # Restaura backup mais recente
+        latest_bak="$(ls -t /etc/redis/redis.conf.bak* 2>/dev/null | head -n1 || true)"
+        if [ -n "$latest_bak" ]; then
+          cat "$latest_bak" > /etc/redis/redis.conf
+          systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
+        fi
+        rm -f "$tmp_conf" "$tmp_conf2" 2>/dev/null || true
+        die "redis com requirepass não subiu — verifique /etc/redis/redis.conf"
+      fi
+      sleep 1
+    done
+  fi
+  rm -f "$tmp_conf" "$tmp_conf2" 2>/dev/null || true
+fi
 ( cd "$RELEASE_DIR/db" && ./node_modules/.bin/knex migrate:latest --knexfile dist/knexfile.js )
 
 # ── 4. Instalar units systemd + conf nginx ──────────────────────────────────

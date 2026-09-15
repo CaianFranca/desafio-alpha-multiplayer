@@ -130,7 +130,7 @@ diretas no host para desenvolvimento:
 | `3001` (`LOBBY_SERVER_PORT`)       | `3001` (`LOBBY_SERVER_PORT`) | lobby-server | mesma porta no host e no container              |
 | `1234` (`GAME_SERVER_PORT`)        | `1234` (`GAME_SERVER_PORT`)  | game-server  | mesma porta no host e no container              |
 | `5432` (`POSTGRES_PORT`)           | `5432`                       | postgres     | volume `postgres_data`                          |
-| `6379` (`REDIS_PORT`)              | `6379`                       | redis        | volátil (`--save "" --appendonly no`)           |
+| `6379` (`REDIS_PORT`)              | `6379`                       | redis        | volátil (`--save "" --appendonly no --requirepass $REDIS_PASSWORD`) — exige senha (`REDIS_PASSWORD`, default `flicker_redis_dev_password`) |
 
 Rotas via NGINX (`infra/nginx/nginx.conf`):
 

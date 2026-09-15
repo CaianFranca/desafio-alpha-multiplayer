@@ -7,7 +7,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import jwt from 'jsonwebtoken';
-import { getConfig } from '@flicker/config';
+import { DEFAULT_REDIS_PASSWORD, getConfig } from '@flicker/config';
 import { GAME_SERVERS_PREFIX } from '@flicker/shared/server';
 import { createApp } from '../src/app.ts';
 import { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../src/middleware/serviceToken.ts';
@@ -24,7 +24,7 @@ interface ServidorEfemero {
 const redis = new Redis({
   host: process.env.REDIS_HOST ?? 'localhost',
   port: Number(process.env.REDIS_PORT ?? 6379),
-  password: process.env.REDIS_PASSWORD ?? undefined,
+  password: process.env.REDIS_PASSWORD ?? DEFAULT_REDIS_PASSWORD,
   lazyConnect: true,
   maxRetriesPerRequest: 1,
   connectTimeout: 1000,
@@ -258,6 +258,7 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
   const nodeEnvOrig = process.env.NODE_ENV;
   const refreshOrig = process.env.JWT_REFRESH_SECRET;
   const pgOrig = process.env.POSTGRES_PASSWORD;
+  const redisOrig = process.env.REDIS_PASSWORD;
   const lobbyOrig = process.env.LOBBY_PUBLIC_URL;
   const trustProxyOrig = process.env.TRUST_PROXY_HOPS;
   // Usa secrets temporários para não depender do .env do dev. Em produção,
@@ -267,6 +268,7 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
   process.env.JWT_SECRET = `test-secret-${Date.now()}`;
   process.env.JWT_REFRESH_SECRET = `test-refresh-${Date.now()}`;
   process.env.POSTGRES_PASSWORD = `test-pg-${Date.now()}`;
+  process.env.REDIS_PASSWORD = `test-redis-${Date.now()}`;
   process.env.LOBBY_PUBLIC_URL = 'http://localhost:3000';
   process.env.TRUST_PROXY_HOPS = '1';
   process.env.NODE_ENV = 'production';
@@ -325,6 +327,8 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
     else process.env.JWT_REFRESH_SECRET = refreshOrig;
     if (pgOrig === undefined) delete process.env.POSTGRES_PASSWORD;
     else process.env.POSTGRES_PASSWORD = pgOrig;
+    if (redisOrig === undefined) delete process.env.REDIS_PASSWORD;
+    else process.env.REDIS_PASSWORD = redisOrig;
     if (lobbyOrig === undefined) delete process.env.LOBBY_PUBLIC_URL;
     else process.env.LOBBY_PUBLIC_URL = lobbyOrig;
     if (trustProxyOrig === undefined) delete process.env.TRUST_PROXY_HOPS;

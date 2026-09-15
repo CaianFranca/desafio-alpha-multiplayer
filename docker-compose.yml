@@ -34,11 +34,13 @@ services:
   redis:
     image: redis:7
     profiles: [db, backend, nginx, full, test]
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "${REDIS_PASSWORD:-flicker_redis_dev_password}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-flicker_redis_dev_password}
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD:-flicker_redis_dev_password}\" ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -76,7 +78,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flicker_dev_password}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-flicker_redis_dev_password}
       LOBBY_SERVER_PORT: ${LOBBY_SERVER_PORT:-3001}
       LOBBY_PUBLIC_URL: ${LOBBY_PUBLIC_URL:-http://localhost:${NGINX_PORT:-8080}}
       WS_ORIGENS_PERMITIDAS: ${WS_ORIGENS_PERMITIDAS:-}
@@ -131,7 +133,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flicker_dev_password}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-flicker_redis_dev_password}
       GAME_SERVER_PORT: ${GAME_SERVER_PORT:-1234}
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_me}
       PARTIDA_TERMINADA_TTL_SEGUNDOS: ${PARTIDA_TERMINADA_TTL_SEGUNDOS:-3600}
