@@ -575,7 +575,7 @@ export class PartidaHandlers {
                   try {
                     partidaReagendada = await obterPartida(this.redis, partidaId);
                     if (partidaReagendada !== null) break;
-                  } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+                  } catch (e) { console.error('[partida] falha ao obter partida para reagendamento:', e); }
                   if (partidaReagendada === null && tentativa < 2) {
                     await sleep(100 * 2 ** tentativa);
                   }
@@ -591,7 +591,7 @@ export class PartidaHandlers {
                       let partidaReagendada2: PartidaPreparada | null = null;
                       try {
                         partidaReagendada2 = await obterPartida(this.redis, partidaId);
-                      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+                      } catch (e) { console.error('[partida] falha ao obter partida para reagendamento (2):', e); }
                       if (partidaReagendada2 === null && partidaPrevia !== null) {
                         partidaReagendada2 = partidaPrevia;
                       }

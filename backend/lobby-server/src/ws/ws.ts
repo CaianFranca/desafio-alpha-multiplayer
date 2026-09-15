@@ -76,6 +76,16 @@ function ehConexaoDeBot(socket: AuthenticatedWebSocket): boolean {
   return socket.data.email.endsWith(DOMINIO_BOT);
 }
 
+function extrairIpParaLog(req: IncomingMessage): string | undefined {
+  const forwarded = req.headers['x-forwarded-for'] as string | undefined;
+  const trustHops = getConfig().trustProxyHops;
+  if (trustHops > 0 && forwarded !== undefined && forwarded.trim().length > 0) {
+    // Primeiro IP da lista X-Forwarded-For é o cliente original
+    return forwarded.split(',')[0].trim() || (req.socket.remoteAddress ?? undefined);
+  }
+  return req.socket.remoteAddress ?? undefined;
+}
+
 async function autenticarRequest(
   request: IncomingMessage,
   deps: Required<Pick<WsDeps, 'verificarAccess' | 'obterSessao'>>,
@@ -125,8 +135,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
       if (!origemPermitida(origin, seguranca.origensPermitidas)) {
         const connectionId = randomUUID();
         const requestId = (info.req.headers['x-request-id'] as string | undefined) ?? connectionId;
-        const ip = info.req.headers['x-forwarded-for'] as string | undefined
-          ?? info.req.socket.remoteAddress ?? undefined;
+        const ip = extrairIpParaLog(info.req);
         try {
           logger.warn({
             event: securityEvents.WS_HANDSHAKE_REJECTED,
@@ -184,7 +193,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
               event: securityEvents.WS_RATE_LIMIT_EXCEEDED,
               connectionId,
               requestId,
-              ip: request.socket.remoteAddress ?? undefined,
+              ip: extrairIpParaLog(request),
               jogadorId: (authSocket as unknown as { data?: WsAuthData }).data?.jogadorId,
             });
           } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
@@ -216,7 +225,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
             event: securityEvents.WS_PAYLOAD_TOO_LARGE,
             connectionId,
             requestId,
-            ip: request.socket.remoteAddress ?? undefined,
+            ip: extrairIpParaLog(request),
           });
         } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
       }
@@ -269,13 +278,13 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
         } catch {
           try {
             socket.terminate();
-          } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+          } catch (e) { console.error('[ws] falha ao encerrar socket após erro interno:', e); }
         }
       }
     })().catch(() => {
       try {
         socket.terminate();
-      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+      } catch (e) { console.error('[ws] falha ao encerrar socket:', e); }
     });
   });
 
@@ -329,7 +338,7 @@ async function handleMessage(
   if (isPingMessage(parsed)) {
     try {
       socket.send(JSON.stringify({ type: 'PONG' }));
-    } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+    } catch (e) { console.error('[ws] falha ao enviar PONG:', e); }
     return;
   }
 

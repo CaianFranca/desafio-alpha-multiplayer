@@ -77,6 +77,15 @@ function segurancaDoConfig(): SegurancaWs {
 
 // Só o que o `ws.ts` consome do canal de Partida: o `PartidaHandlers` já
 // carrega a própria referência ao Redis. Deixar `redis` aqui seria peso morto.
+
+function extrairIpParaLog(req: IncomingMessage): string | undefined {
+  const forwarded = req.headers['x-forwarded-for'] as string | undefined;
+  const trustHops = getConfig().trustProxyHops;
+  if (trustHops > 0 && forwarded !== undefined && forwarded.trim().length > 0) {
+    return forwarded.split(',')[0].trim() || (req.socket.remoteAddress ?? undefined);
+  }
+  return req.socket.remoteAddress ?? undefined;
+}
 export interface PartidaWsDeps {
   readonly broadcaster: PartidaBroadcaster;
   readonly handlers: PartidaHandlers;
@@ -324,7 +333,7 @@ export function criarWebSocketServer(
           event: securityEvents.WS_HANDSHAKE_REJECTED,
           reason: 'origin_not_allowed',
           origin: request.headers.origin ?? null,
-          ip: (request.headers['x-forwarded-for'] as string | undefined) ?? request.socket.remoteAddress ?? undefined,
+          ip: extrairIpParaLog(request),
           connectionId,
           requestId,
         });
@@ -431,7 +440,7 @@ export function criarWebSocketServer(
             limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior, depsPartida?.broadcaster);
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
-            } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+            } catch (e) { console.error('[ws] falha ao enviar erro interno:', e); }
             ws.close(1011, 'ERRO_INTERNO');
             return;
           }
@@ -583,6 +592,7 @@ export function criarWebSocketServer(
                     jogadorId: sessao.jogadorId,
                     connectionId,
                     requestId,
+                    ip: extrairIpParaLog(request),
                   });
                 } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
                 ws.close(1008, 'RATE_LIMIT');
@@ -600,6 +610,7 @@ export function criarWebSocketServer(
                   jogadorId: sessao.jogadorId,
                   connectionId,
                   requestId,
+                  ip: extrairIpParaLog(request),
                 });
               } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
               return;
@@ -645,6 +656,7 @@ export function criarWebSocketServer(
                   jogadorId: sessao.jogadorId,
                   connectionId,
                   requestId,
+                  ip: extrairIpParaLog(request),
                 });
               } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
             }
@@ -685,8 +697,8 @@ export function criarWebSocketServer(
           }
           try {
             ws.send(erroRejeitada('ERRO_INTERNO', 'falha na admissão da partida'));
-          } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
-          try { ws.close(1011, 'ERRO_INTERNO'); } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+          } catch (e) { console.error('[ws] falha ao enviar erro interno na admissão:', e); }
+          try { ws.close(1011, 'ERRO_INTERNO'); } catch (e) { console.error('[ws] falha ao fechar socket na admissão:', e); }
         });
       });
     })().catch((error: unknown) => {

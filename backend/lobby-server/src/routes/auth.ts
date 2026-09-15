@@ -337,6 +337,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
           securityLogger.info({
             event: securityEvents.AUTH_REGISTER_CONFLICT,
             campo: 'apelido',
+            emailHash: hashEmail(emailNormalizado),
             ip: ipDoCliente(req),
             requestId: getRequestId(req),
           });
@@ -360,6 +361,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
       try {
         securityLogger.info({
           event: securityEvents.AUTH_REGISTER_CONFLICT,
+          emailHash: hashEmail(emailNormalizado),
           ip: ipDoCliente(req),
           requestId: getRequestId(req),
         });

@@ -4,3 +4,4 @@
 export * from './redis/gameServers.js';
 export * from './segurancaWs.js';
 export * from './securityLogger.js';
+export * from './requestId.js';
