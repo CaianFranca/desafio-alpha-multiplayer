@@ -41,6 +41,8 @@ import type {
   AtaqueResolvidoWireEvento,
   ResgateRealizadoWireEvento,
   DesistenciaRegistradaWireEvento,
+  JogadorEmReconexaoWireEvento,
+  JogadorReconectadoWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 import { refreshSession } from '../api/auth'
@@ -79,6 +81,8 @@ export type EventoDoCanalDaPartida =
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
   | DesistenciaRegistradaWireEvento
+  | JogadorEmReconexaoWireEvento
+  | JogadorReconectadoWireEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -338,6 +342,8 @@ export function usePartidaWebSocket({
         case 'RESGATE_REALIZADO':
         case 'DESISTENCIA_REGISTRADA':
         case 'MENSAGEM_DE_CHAT_DA_PARTIDA':
+        case 'JOGADOR_EM_RECONEXAO':
+        case 'JOGADOR_RECONECTADO':
           // O grupo de cases acima é intencionalmente vazio (fall-through):
           // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
           // o cliente apenas espelha).
