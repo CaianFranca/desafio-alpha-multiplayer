@@ -40,7 +40,7 @@ function comEnv(vars: Record<string, string | undefined>, fn: () => void): void 
   }
 }
 
-type CampoNumericoWs = 'wsMaxPayloadBytes' | 'wsLimiteMensagens' | 'wsJanelaLimiteMensagensMs';
+type CampoNumericoWs = 'wsMaxPayloadBytes' | 'wsLimiteMensagens' | 'wsJanelaLimiteMensagensMs' | 'wsSessaoRevalidacaoMs';
 
 const CASOS_NUMERICOS: ReadonlyArray<{
   readonly nome: string;
@@ -74,6 +74,15 @@ const CASOS_NUMERICOS: ReadonlyArray<{
   { nome: 'WS_JANELA_LIMITE_MENSAGENS_MS não-numérico recusa com warn', chave: 'WS_JANELA_LIMITE_MENSAGENS_MS', campo: 'wsJanelaLimiteMensagensMs', env: 'abc', esperado: 10000, avisa: true },
   { nome: 'WS_JANELA_LIMITE_MENSAGENS_MS fracionário recusa com warn', chave: 'WS_JANELA_LIMITE_MENSAGENS_MS', campo: 'wsJanelaLimiteMensagensMs', env: '1.5', esperado: 10000, avisa: true },
   { nome: 'WS_JANELA_LIMITE_MENSAGENS_MS vazio recusa com warn', chave: 'WS_JANELA_LIMITE_MENSAGENS_MS', campo: 'wsJanelaLimiteMensagensMs', env: '', esperado: 10000, avisa: true },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS ausente cai no default 30000', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: undefined, esperado: 30000, avisa: false },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS piso', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: '1000', esperado: 1000, avisa: false },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS teto', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: '60000', esperado: 60000, avisa: false },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS zero recusa com warn', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: '0', esperado: 30000, avisa: true },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS acima do teto recusa com warn', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: '60001', esperado: 30000, avisa: true },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS antigo teto 300000 agora recusa com warn', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: '300000', esperado: 30000, avisa: true },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS não-numérico recusa com warn', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: 'abc', esperado: 30000, avisa: true },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS fracionário recusa com warn', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: '1.5', esperado: 30000, avisa: true },
+  { nome: 'WS_SESSAO_REVALIDACAO_MS vazio recusa com warn', chave: 'WS_SESSAO_REVALIDACAO_MS', campo: 'wsSessaoRevalidacaoMs', env: '', esperado: 30000, avisa: true },
 ];
 
 for (const caso of CASOS_NUMERICOS) {

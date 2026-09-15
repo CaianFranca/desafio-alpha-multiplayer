@@ -12,6 +12,7 @@ import { verificarAccess } from '../jwt.ts';
 import { obterSessao } from '../sessoes.ts';
 import { ehSalaComando } from '../salas/handlers.ts';
 import { tipoDeComandoDeDebug } from './debug-stream.ts';
+import { RegistroDeConexoes, registroDeConexoes } from './registro-de-conexoes.ts';
 import type { SalasContexto } from '../salas/index.ts';
 
 let securityLogger: Logger = sharedSecurityLogger as unknown as Logger;
@@ -29,6 +30,8 @@ export interface WsAuthData {
   sessaoId: string;
   apelido: string;
   email: string;
+  /** Bots internos (`@bot.teste`) são isentos de rate limit e revalidação. */
+  isBot: boolean;
 }
 
 export type AuthenticatedWebSocket = WebSocket & { data: WsAuthData };
@@ -60,6 +63,11 @@ export interface WsDeps {
    */
   seguranca?: SegurancaWs;
   securityLogger?: Logger;
+  /**
+   * Registro das conexões autenticadas (issue #410). Quando ausente, usa o
+   * singleton compartilhado com as rotas de auth e a revalidação de Sessão.
+   */
+  registroConexoes?: RegistroDeConexoes;
 }
 
 function segurancaDoConfig(): SegurancaWs {
@@ -73,7 +81,7 @@ function segurancaDoConfig(): SegurancaWs {
 }
 
 function ehConexaoDeBot(socket: AuthenticatedWebSocket): boolean {
-  return socket.data.email.endsWith(DOMINIO_BOT);
+  return socket.data.isBot === true;
 }
 
 const REQUEST_ID_RE = /^[A-Za-z0-9-]{1,128}$/;
@@ -128,6 +136,7 @@ async function autenticarRequest(
     sessaoId: payload.sessaoId,
     apelido: payload.apelido,
     email: payload.email,
+    isBot: payload.email.endsWith(DOMINIO_BOT),
   };
 }
 
@@ -139,6 +148,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
   const contextoSalas = deps.contextoSalas;
   const seguranca = deps.seguranca ?? segurancaDoConfig();
   const logger = deps.securityLogger ?? securityLogger;
+  const registro = deps.registroConexoes ?? registroDeConexoes;
 
   const wss = new WebSocketServer({
     server,
@@ -247,6 +257,9 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
       // Limpa marca de correlação para GC
       try { delete (socket as unknown as Record<string, unknown>).__connectionId; } catch {}
       console.log('[ws] disconnect');
+      // Registro de conexões (issue #410): a saída do socket o remove dos
+      // índices antes de qualquer outra limpeza.
+      registro.desregistrar(socket);
       // Stream de debug (issue #340): desconexão encerra o registro do
       // cliente de debug antes do fechamento das Salas.
       contextoSalas?.debug?.desconectar(authSocket);
@@ -270,6 +283,9 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
 
         authSocket.data = auth;
         autenticado = true;
+        // Registro de conexões (issue #410): guarda o mesmo objeto de `data`
+        // para que a migração de `sessaoId` na rotação alcance o socket.
+        registro.registrar(socket, auth);
         console.log(`[ws] auth: ${auth.jogadorId} (${auth.apelido})`);
         console.log(`[ws] connect: ${request.socket.remoteAddress} jogador=${auth.jogadorId}`);
 

@@ -203,7 +203,7 @@ curl -i http://localhost:8080/media/inexistente.png
 curl -i -X POST http://localhost:8080/api/auth/register \
   -H 'content-type: application/json' \
   -d '{"apelido":"Smoke","email":"smoke@example.local","senha":"senha_development_123"}'
-# esperado: HTTP/1.1 201 + content-type: application/json + X-Powered-By: Express
+# esperado: HTTP/1.1 201 + content-type: application/json
 # corpo: { id, apelido, email } + Set-Cookie: access_token=...; refresh_token=...
 
 curl -i -X POST http://localhost:8080/api/auth/login \

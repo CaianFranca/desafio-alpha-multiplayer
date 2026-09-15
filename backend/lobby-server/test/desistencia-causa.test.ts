@@ -10,6 +10,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { criarDesistenciaRouter } from '../src/routes/desistencia.ts';
+import { assinarServiceToken } from '../src/jwt.ts';
 import type { SalasContexto } from '../src/salas/index.ts';
 
 function montarApp(remocoes: string[]): express.Express {
@@ -59,7 +60,7 @@ async function comApp<T>(remocoes: string[], exec: (baseUrl: string) => Promise<
 async function post(baseUrl: string, corpo: object): Promise<{ status: number; corpo: unknown }> {
   const res = await fetch(`${baseUrl}/api/desistencia`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${assinarServiceToken()}` },
     body: JSON.stringify(corpo),
   });
   return { status: res.status, corpo: await res.json() };

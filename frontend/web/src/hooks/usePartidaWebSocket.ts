@@ -46,6 +46,7 @@ import type {
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 import { refreshSession } from '../api/auth'
+import { notificarSessaoExpirada } from '../api/client'
 import { agendarReconexaoComSlide } from './agendarReconexaoComSlide'
 import {
   aoAtivarModo,
@@ -151,6 +152,20 @@ export const MOTIVO_PARTIDA_NAO_INICIADA = 'PARTIDA_NAO_INICIADA'
 
 function fechamentoDeNaoInicio(code: number, reason: string | undefined): boolean {
   return code === CODIGO_FECHAMENTO_PARTIDA_NAO_INICIADA && reason === MOTIVO_PARTIDA_NAO_INICIADA
+}
+
+/**
+ * Fechamento terminal por Sessão (lobby e game-server, issue #410/PR #422):
+ * código de aplicação `4401` usado com os motivos `SESSAO_ENCERRADA`,
+ * `SESSAO_SUBSTITUIDA`, `SESSAO_INVALIDA` e `Unauthorized`. Diferente do
+ * não-início, a decisão é só pelo código: a Sessão deixou de valer e o
+ * upgrade seguinte seria rejeitado de novo — reconectar geraria loop e storm
+ * de `POST /api/auth/refresh`. Terminal: sem reconexão, notifica a expiração.
+ */
+export const CODIGO_SESSAO_ENCERRADA = 4401
+
+export function fechamentoDeSessao(code: number): boolean {
+  return code === CODIGO_SESSAO_ENCERRADA
 }
 
 /**
@@ -366,6 +381,15 @@ export function usePartidaWebSocket({
         viuNaoInicioRef.current = true
         encerrarSemReconexao(ws)
         onPartidaNaoIniciadaRef.current?.()
+        return
+      }
+      // Sessão encerrada (issue #410, PR #422): terminal — a Sessão deixou de
+      // valer (logout/troca/expiração/revogação) e o upgrade seguinte cairia
+      // no mesmo 4401, gerando loop + storm de refresh. Encerra sem reconexão
+      // e sinaliza a expiração para o app voltar a Visitante.
+      if (fechamentoDeSessao(event.code)) {
+        encerrarSemReconexao(ws)
+        notificarSessaoExpirada()
         return
       }
       // Reconexão simples após 1s se ainda montado, com a Sessão renovada
