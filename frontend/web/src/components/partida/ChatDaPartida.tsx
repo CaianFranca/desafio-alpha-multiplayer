@@ -19,8 +19,9 @@
  *
  * Em viewport compacto de paisagem (#230) o painel vira drawer ancorado na
  * faixa entre o sistema sup-dir e o Turno inf-dir — mesma moldura do modal
- * de saída. O backdrop bloqueia cena + HUD (decisão: painel aberto é modal),
- * o jogo segue rolando por baixo.
+ * de saída. No compacto o backdrop fica ABAIXO do HUD (drawer, critério [5]
+ * da #389: o HUD essencial segue clicável), no integral segue modal
+ * (backdrop acima de tudo). O jogo segue rolando por baixo em ambos.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -367,12 +368,25 @@ export function ChatDaPartida({
       {aberto && bloqueiaCena ? (
         <div
           data-testid="chat-backdrop"
+          data-compacto={emModoCompacto ? 'true' : 'false'}
           onClick={() => {
             aoFechar()
             botaoRef.current?.focus()
           }}
           aria-hidden="true"
-          className="absolute inset-0 z-40 bg-zinc-950/30"
+          // Ordem de empilhamento (critério [5] da #389, review #401):
+          // cena (`ambiente-de-jogo`, absolute sem z → z-auto) < backdrop
+          // < HUD (`hud-da-partida`, z-30 com pointer-events-none na raiz e
+          // auto só nos interativos) < painel do chat (z-50). No compacto o
+          // backdrop em z-20 engole o clique na cena mas deixa os botões do
+          // HUD (SAIR, Turno) acima e clicáveis — drawer, não modal. No
+          // integral o backdrop em z-40 mantém o modal (cena + HUD
+          // bloqueados). O gate de teclado (R/E/Espaço/Enter) vale nos dois.
+          className={
+            emModoCompacto
+              ? 'absolute inset-0 z-20 bg-zinc-950/30'
+              : 'absolute inset-0 z-40 bg-zinc-950/30'
+          }
         />
       ) : null}
       {/*

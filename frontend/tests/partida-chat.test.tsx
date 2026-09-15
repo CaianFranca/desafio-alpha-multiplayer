@@ -223,9 +223,11 @@ describe('Chat da Partida — block da cena (issue #389 [3])', () => {
     expect(JSON.parse(ws.sentMessages[antes]!)).toMatchObject({ type: 'GIRAR_PECA', pecaId: 'peca-em-manipulacao', sentido: 'horario' })
 
     // Painel aberto: backdrop cobre a cena e teclas da cena são ignoradas.
+    // No integral o backdrop segue modal (z-40, acima do HUD z-30).
     await userEvent.click(screen.getByTestId('chat-botao'))
     expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
-    expect(screen.getByTestId('chat-backdrop')).toBeInTheDocument()
+    expect(screen.getByTestId('chat-backdrop')).toHaveAttribute('data-compacto', 'false')
+    expect(screen.getByTestId('chat-backdrop').className).toContain('z-40')
     const comAberto = ws.sentMessages.length
     fireEvent.keyDown(window, { key: 'r' })
     fireEvent.keyDown(window, { key: 'E' })
@@ -338,7 +340,12 @@ describe('Chat da Partida — acessibilidade e drawer (issue #389 [5])', () => {
     salvarViewport()
     mockViewport(800, 360)
     try {
-      await partidaComSnapshot(criarSnapshotBase())
+      const base = criarSnapshotBase()
+      const ws = await partidaComSnapshot(
+        criarSnapshotBase({
+          tabuleiro: { ...base.tabuleiro, pecaEmManipulacaoId: 'peca-em-manipulacao' },
+        }),
+      )
       expect(screen.getByTestId('chat-da-partida')).toHaveAttribute('data-compacto', 'true')
 
       await userEvent.click(screen.getByTestId('chat-botao'))
@@ -346,6 +353,36 @@ describe('Chat da Partida — acessibilidade e drawer (issue #389 [5])', () => {
       // Drawer: ocupa a faixa entre o sistema sup-dir e o Turno inf-dir.
       expect(screen.getByTestId('chat-da-partida')).toHaveStyle({ display: 'flex' })
       expect(screen.getByTestId('chat-painel').className).toContain('flex-1')
+
+      // Contrato de empilhamento (critério [5], review #401): no compacto o
+      // backdrop fica ABAIXO do HUD (z-20 < z-30), acima só da cena (z-auto).
+      // jsdom não faz hit-test visual — o teste fixa o contrato (classe +
+      // data-*) e o comportamento observável: HUD clicável, cena bloqueada.
+      const backdrop = screen.getByTestId('chat-backdrop')
+      expect(backdrop).toHaveAttribute('data-compacto', 'true')
+      expect(backdrop.className).toContain('z-20')
+
+      // HUD essencial segue clicável com o painel aberto: SAIR abre a
+      // confirmação por cima do drawer.
+      await userEvent.click(screen.getByTestId('hud-sair'))
+      expect(screen.getByTestId('hud-confirmacao-saida')).toBeInTheDocument()
+      await userEvent.click(screen.getByTestId('hud-sair-cancelar'))
+      expect(screen.queryByTestId('hud-confirmacao-saida')).not.toBeInTheDocument()
+      expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
+
+      // Cena segue bloqueada no compacto: teclas não operam o jogo.
+      const comAberto = ws.sentMessages.length
+      fireEvent.keyDown(window, { key: 'r' })
+      fireEvent.keyDown(window, { key: 'E' })
+      fireEvent.keyDown(window, { key: ' ' })
+      fireEvent.keyDown(window, { key: 'Enter' })
+      expect(ws.sentMessages.length).toBe(comAberto)
+
+      // Escape fecha e devolve o controle à cena.
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByTestId('chat-painel')).not.toBeInTheDocument()
+      fireEvent.keyDown(window, { key: 'r' })
+      expect(ws.sentMessages.length).toBe(comAberto + 1)
     } finally {
       restaurarViewport()
     }
