@@ -17,6 +17,7 @@ import {
   todasAsCelulas,
 } from '../../game/tabuleiro/contrato'
 import type { PeaoId } from '../../game/tabuleiro/contrato'
+import type { EstadoVisualDoAtaque } from '../../game/tabuleiro/ataque'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 import {
   celulasDaTravessiaDoEscuro,
@@ -92,6 +93,12 @@ interface AmbienteDeJogoProps {
    * real de jogadores (clamp 2..4 no pai), nunca peoes.length (risco 5).
    */
   quantidadeDeJogadores: number
+  /**
+   * Estado visual do ataque (issue #385, follow-up): prop única (peça em
+   * telegraph + reações do alcance + peça em disparo) — tudo null fora do
+   * slot ativo (a cena 3D e o espelho DOM apagam sem marcas).
+   */
+  estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
 }
 
 export function AmbienteDeJogo({
@@ -112,6 +119,7 @@ export function AmbienteDeJogo({
   onFimEncaixe,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   quantidadeDeJogadores,
+  estadoVisualDoAtaque = null,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -378,6 +386,7 @@ export function AmbienteDeJogo({
           encaixeTrigger={encaixeTrigger}
           onFimEncaixe={onFimEncaixe}
           emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
+          estadoVisualDoAtaque={estadoVisualDoAtaque}
         />
       </Canvas>
       {estadoExibicao ? (
@@ -407,6 +416,7 @@ export function AmbienteDeJogo({
           travessiaSet={travessiaSet}
           sanidadePorPeao={sanidadePorPeao}
           encaixeTrigger={encaixeTrigger}
+          estadoVisualDoAtaque={estadoVisualDoAtaque}
         />
       ) : null}
     </div>

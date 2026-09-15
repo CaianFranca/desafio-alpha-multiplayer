@@ -77,6 +77,7 @@ import {
   type TipoDaPeca,
 } from './contrato'
 import type { PendenciaNoCliente } from './interacaoPeoes'
+import type { FatiaDoAtaque } from './ataque'
 import type {
   AtaqueResolvidoWireEvento,
   Celula,
@@ -92,6 +93,9 @@ import type {
   PartidaIniciadaEvento,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
+  JogadorEmReconexaoWireEvento,
+  JogadorReconectadoWireEvento,
+  PresencaNaPartidaWire,
 } from '@flicker/shared'
 
 export type PercepcaoDeJogador = {
@@ -107,6 +111,14 @@ export type PercepcaoDeJogador = {
    * (`...anterior`); projeções sem snapshot ficam sem ordem até a baseline.
    */
   readonly ordem: number
+  /**
+   * Presença na Partida em andamento (issue #294, spec #292): indica se o
+   * jogador está em janela de reconexão. Opcional com fallback `conectado`
+   * (compat com snapshots/payloads antigos sem campo). O snapshot é
+   * autoridade (como `protegido`/`sanidade`): deltas de presença reconciliam
+   * em `ESTADO_DA_PARTIDA`.
+   */
+  readonly presenca?: PresencaNaPartidaWire
 }
 
 export type SanidadePorPeao = Readonly<
@@ -131,8 +143,10 @@ export function peoesEmBaixaIluminacaoDe(
 /**
  * Eventos que o canal da Partida entrega ao redutor: tabuleiro (ST-09),
  * peões/ciclo (ST-10), turnos (ST-11, issue #118), iluminação/limpeza
- * (issue #151), monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO e
- * RESGATE_REALIZADO) e desistência (issue #290 — DESISTENCIA_REGISTRADA).
+ * (issue #151), monstros/estados (ST-15, #174 — ATAQUE_RESOLVIDO e
+ * RESGATE_REALIZADO), desistência (issue #290 — DESISTENCIA_REGISTRADA) e
+ * presença em reconexão (issue #294 — JOGADOR_EM_RECONEXAO/
+ * JOGADOR_RECONECTADO).
  * É o tipo roteado pelo socket e aceito pelo reducer.
  */
 export type EventoDoJogoNoCliente =
@@ -149,6 +163,8 @@ export type EventoDoJogoNoCliente =
   | ResgateRealizadoWireEvento
   | PartidaIniciadaEvento
   | DesistenciaRegistradaWireEvento
+  | JogadorEmReconexaoWireEvento
+  | JogadorReconectadoWireEvento
 
 /** Estado do modelo de tabuleiro mantido no cliente. */
 export interface EstadoDoTabuleiroNoCliente {
@@ -845,6 +861,10 @@ export function reduzirEvento(
       // (Passagem iminente no lote) e a seleção do turno anterior não pode
       // sobreviver sem TURNO_* — limpa aqui para não deixar peça órfã
       // selecionada. Demais casos ficam para o TURNO_*/LIMPEZA do lote.
+      // Causa (issue #294): `desistencia` vs `expiracao` não muda a remoção —
+      // só o feedback visível/SR no caller (PartidaPage). O término da
+      // conversão herda o motivo `desistencia` no PARTIDA_TERMINADA (fluxo B
+      // da #295 — o wire de motivo não tem `expiracao`).
       const jogadorId = evento.jogadorId
       const peaoId = evento.peaoId
       const temJogador = Object.prototype.hasOwnProperty.call(estado.jogadorPorId, jogadorId)
@@ -902,6 +922,38 @@ export function reduzirEvento(
       }
     }
 
+    case 'JOGADOR_EM_RECONEXAO': {
+      // Presença em reconexão (issue #294, spec #292 história 2): coloca o
+      // jogador em `em_reconexao` para o HUD exibir "reconectando". Sem
+      // snapshot ainda, aguarda autoridade; jogador inexistente é no-op (não
+      // inventa roster). Idempotente e compatível com snapshot (que reconcilia).
+      const anterior = estado.jogadorPorId[evento.jogadorId]
+      if (!anterior) return estado
+      if (anterior.presenca === 'em_reconexao') return estado
+      return {
+        ...estado,
+        jogadorPorId: {
+          ...estado.jogadorPorId,
+          [evento.jogadorId]: { ...anterior, presenca: 'em_reconexao' as const },
+        },
+      }
+    }
+
+    case 'JOGADOR_RECONECTADO': {
+      // Volta dentro da janela (#294): restaura `conectado` e limpa o indicador
+      // sem resíduo. Snapshot que vier em seguida confirma a limpeza.
+      const anterior = estado.jogadorPorId[evento.jogadorId]
+      if (!anterior) return estado
+      if (anterior.presenca === 'conectado') return estado
+      return {
+        ...estado,
+        jogadorPorId: {
+          ...estado.jogadorPorId,
+          [evento.jogadorId]: { ...anterior, presenca: 'conectado' as const },
+        },
+      }
+    }
+
     default: {
       // Exaustividade: novo evento wire sem case falha em compilação.
       const _exaustivo: never = evento
@@ -919,6 +971,59 @@ export function reduzirEventos(
   eventos: readonly EventoDoJogoNoCliente[],
 ): EstadoDoTabuleiroNoCliente {
   return eventos.reduce(reduzirEvento, estado)
+}
+
+/**
+ * Aplica a fatia de estado de UM slot do ataque (issue #385 — fatia por
+ * atacante, na ordem do wire) — espelha o bloco `ATAQUE_RESOLVIDO` acima, mas só
+ * com a fatia do atacante (ver `coreografarAtaque`): o Vulto só projeta Baixa
+ * Iluminação; o Espectro só Sanidade/Amedrontado; a proteção consumida zera
+ * `protegido`. Mesmos guards do bloco integral (só jogadores conhecidos via
+ * snapshot; sem vítimas/protegidos na fatia, nada a aplicar). Valores
+ * RESULTANTES absolutos — reaplicar a mesma fatia é no-op.
+ */
+export function reduzirFatiaDoAtaque(
+  estado: EstadoDoTabuleiroNoCliente,
+  fatia: FatiaDoAtaque,
+): EstadoDoTabuleiroNoCliente {
+  if (fatia.estadosAplicados.length === 0 && fatia.protegidos.length === 0) {
+    return estado
+  }
+  let mudou = false
+  const jogadorPorId = { ...estado.jogadorPorId }
+  for (const aplicado of fatia.estadosAplicados) {
+    const anterior = jogadorPorId[aplicado.jogadorId]
+    if (!anterior) continue
+    if (fatia.tipo === 'vulto') {
+      if (anterior.emBaixaIluminacao === aplicado.emBaixaIluminacao) continue
+      mudou = true
+      jogadorPorId[aplicado.jogadorId] = {
+        ...anterior,
+        emBaixaIluminacao: aplicado.emBaixaIluminacao,
+      }
+    } else {
+      if (
+        anterior.sanidade === aplicado.sanidade &&
+        anterior.amedrontado === aplicado.amedrontado
+      ) {
+        continue
+      }
+      mudou = true
+      jogadorPorId[aplicado.jogadorId] = {
+        ...anterior,
+        sanidade: aplicado.sanidade,
+        amedrontado: aplicado.amedrontado,
+      }
+    }
+  }
+  for (const jogadorId of fatia.protegidos) {
+    const anterior = jogadorPorId[jogadorId]
+    if (!anterior) continue
+    if (!anterior.protegido) continue
+    mudou = true
+    jogadorPorId[jogadorId] = { ...anterior, protegido: false }
+  }
+  return mudou ? { ...estado, jogadorPorId } : estado
 }
 
 /** Deriva o estado de exibição consumido pela cena a partir do modelo. */

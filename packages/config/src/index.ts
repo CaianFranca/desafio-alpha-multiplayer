@@ -41,6 +41,14 @@ export interface Config {
   gameServerId: string | undefined;
   /** Host que o game-server anuncia no registro do Redis, consumido pelo lobby no encaminhamento. */
   gameServerAdvertiseHost: string;
+  /** Origens exatas autorizadas a abrir o WS (issue #409); sem wildcard. */
+  wsOrigensPermitidas: string[];
+  /** Teto de bytes por mensagem WS (issue #409). */
+  wsMaxPayloadBytes: number;
+  /** Máximo de mensagens por conexão dentro da janela do rate limit (issue #409). */
+  wsLimiteMensagens: number;
+  /** Janela em ms do rate limit geral por conexão (issue #409). */
+  wsJanelaLimiteMensagensMs: number;
 }
 
 // Alinhado com .env.example e docker-compose.yml (1234), como o lobby faz com a 3001.
@@ -69,6 +77,17 @@ const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CADASTRO = 10;
 export const DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO = 50;
 export const MINIMO_PARTIDA_CHAT_HISTORICO_MAXIMO = 1;
 export const MAXIMO_PARTIDA_CHAT_HISTORICO_MAXIMO = 200;
+// Defaults e faixas do endurecimento do WS (issue #409): teto de payload e
+// rate limit geral por conexão. Exportados para reuso em testes e backends.
+export const DEFAULT_WS_MAX_PAYLOAD_BYTES = 65536;
+export const MIN_WS_MAX_PAYLOAD_BYTES = 1024;
+export const MAX_WS_MAX_PAYLOAD_BYTES = 1048576;
+export const DEFAULT_WS_LIMITE_MENSAGENS = 100;
+export const MIN_WS_LIMITE_MENSAGENS = 1;
+export const MAX_WS_LIMITE_MENSAGENS = 10000;
+export const DEFAULT_WS_JANELA_LIMITE_MENSAGENS_MS = 10000;
+export const MIN_WS_JANELA_LIMITE_MENSAGENS_MS = 100;
+export const MAX_WS_JANELA_LIMITE_MENSAGENS_MS = 600000;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -236,6 +255,85 @@ function parseAuthRateLimitMaxPorCadastro(raw: string | undefined): number {
   );
 }
 
+function parseWsMaxPayloadBytes(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_MAX_PAYLOAD_BYTES,
+    'WS_MAX_PAYLOAD_BYTES',
+    MIN_WS_MAX_PAYLOAD_BYTES,
+    MAX_WS_MAX_PAYLOAD_BYTES,
+  );
+}
+
+function parseWsLimiteMensagens(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_LIMITE_MENSAGENS,
+    'WS_LIMITE_MENSAGENS',
+    MIN_WS_LIMITE_MENSAGENS,
+    MAX_WS_LIMITE_MENSAGENS,
+  );
+}
+
+function parseWsJanelaLimiteMensagensMs(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_JANELA_LIMITE_MENSAGENS_MS,
+    'WS_JANELA_LIMITE_MENSAGENS_MS',
+    MIN_WS_JANELA_LIMITE_MENSAGENS_MS,
+    MAX_WS_JANELA_LIMITE_MENSAGENS_MS,
+  );
+}
+
+/**
+ * Origens exatas autorizadas no WS (issue #409). O `Origin` de navegador é
+ * sempre `scheme://host:port` e nunca carrega subpath, por isso o default
+ * deriva `.origin` de `lobbyPublicUrl` (tolerando deploy sob base path, ex.:
+ * VITE_BASE_PATH=/server01). Sem env em desenvolvimento, libera as portas
+ * padrão do Vite para o frontend local.
+ */
+function parseWsOrigensPermitidas(
+  raw: string | undefined,
+  lobbyPublicUrl: string,
+  isProduction: boolean,
+): string[] {
+  if (raw === undefined || raw.trim().length === 0) {
+    const origens = new Set<string>([new URL(lobbyPublicUrl).origin]);
+    if (!isProduction) {
+      origens.add('http://localhost:5173');
+      origens.add('http://127.0.0.1:5173');
+    }
+    return [...origens];
+  }
+
+  const origens = new Set<string>();
+  for (const entrada of raw.split(',')) {
+    const valor = entrada.trim();
+    if (valor.length === 0) {
+      continue;
+    }
+    if (valor.includes('*')) {
+      throw new Error('WS_ORIGENS_PERMITIDAS não aceita wildcard — informe origens exatas');
+    }
+    let url: URL;
+    try {
+      url = new URL(valor);
+    } catch {
+      throw new Error(`WS_ORIGENS_PERMITIDAS deve conter origens HTTP(S) absolutas: "${valor}"`);
+    }
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      url.pathname !== '/' ||
+      url.search !== '' ||
+      url.hash !== ''
+    ) {
+      throw new Error(`WS_ORIGENS_PERMITIDAS deve conter origens HTTP(S) absolutas: "${valor}"`);
+    }
+    origens.add(url.origin);
+  }
+  return [...origens];
+}
+
 function parseLobbyRetornoCallbackUrl(raw: string | undefined, fallback: string): string {
   if (raw === undefined || raw.trim().length === 0) {
     return fallback;
@@ -391,6 +489,16 @@ export function getConfig(): Config {
   const authRateLimitMaxPorCadastro = parseAuthRateLimitMaxPorCadastro(
     process.env.AUTH_RATE_LIMIT_MAX_POR_CADASTRO as string | undefined,
   );
+  const wsOrigensPermitidas = parseWsOrigensPermitidas(
+    process.env.WS_ORIGENS_PERMITIDAS as string | undefined,
+    lobbyPublicUrl,
+    isProduction,
+  );
+  const wsMaxPayloadBytes = parseWsMaxPayloadBytes(process.env.WS_MAX_PAYLOAD_BYTES as string | undefined);
+  const wsLimiteMensagens = parseWsLimiteMensagens(process.env.WS_LIMITE_MENSAGENS as string | undefined);
+  const wsJanelaLimiteMensagensMs = parseWsJanelaLimiteMensagensMs(
+    process.env.WS_JANELA_LIMITE_MENSAGENS_MS as string | undefined,
+  );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
@@ -494,6 +602,10 @@ export function getConfig(): Config {
     gameServerHeartbeatTtlMs,
     gameServerId,
     gameServerAdvertiseHost,
+    wsOrigensPermitidas,
+    wsMaxPayloadBytes,
+    wsLimiteMensagens,
+    wsJanelaLimiteMensagensMs,
   };
 }
 

@@ -25,6 +25,7 @@
 import { useMemo, useState } from 'react'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS, type CorDoPeao } from '../../game/tabuleiro/contrato'
 import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
+import type { PresencaNaPartidaWire } from '@flicker/shared'
 import { useCronometroDaPartida } from './useCronometroDaPartida'
 import { useViewportCompacto } from '../../hooks/useViewportCompacto'
 
@@ -250,6 +251,8 @@ export function HudDaPartida({
       >
         {adversarios.map(({ jogadorId, dados }) => {
           const ehAtivo = jogadorId === jogadorAtivoId
+          const presenca: PresencaNaPartidaWire = (dados as { presenca?: PresencaNaPartidaWire }).presenca ?? 'conectado'
+          const emReconexao = presenca === 'em_reconexao'
           return (
             <div key={jogadorId} className="flex items-center gap-1.5">
               <div className={`relative flex items-center justify-center ${emModoCompacto ? 'h-10 w-10' : 'h-14 w-14'}`}>
@@ -293,9 +296,10 @@ export function HudDaPartida({
                   data-em-baixa={dados.emBaixaIluminacao ? 'true' : undefined}
                   data-amedrontado={dados.amedrontado ? 'true' : undefined}
                   data-protegido={dados.protegido ? 'true' : undefined}
+                  data-presenca={emReconexao ? 'em_reconexao' : undefined}
                   role="img"
-                aria-label={`${dados.apelido}, Sanidade ${dados.sanidade} de 3${dados.emBaixaIluminacao ? ', em Baixa Iluminação' : ''}${dados.amedrontado ? ', Amedrontado' : ''}${dados.protegido ? ', protegido' : ''}`}
-                title={dados.apelido}
+                aria-label={`${dados.apelido}, Sanidade ${dados.sanidade} de 3${dados.emBaixaIluminacao ? ', em Baixa Iluminação' : ''}${dados.amedrontado ? ', Amedrontado' : ''}${dados.protegido ? ', protegido' : ''}${emReconexao ? ', reconectando' : ''}`}
+                title={emReconexao ? 'Reconectando' : dados.apelido}
                   data-compacto={emModoCompacto ? 'true' : undefined}
                   className={`flex items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${emModoCompacto ? 'h-8 w-8 text-xs' : 'h-12 w-12 text-base'} ${
                     dados.amedrontado
@@ -303,7 +307,7 @@ export function HudDaPartida({
                       : dados.emBaixaIluminacao
                         ? 'brightness-75 saturate-50'
                         : ''
-                  }`}
+                  } ${emReconexao ? 'ring-2 ring-amber-400/70' : ''}`}
                 >
                   <ConteudoDoAvatar
                     apelido={dados.apelido}
@@ -311,6 +315,16 @@ export function HudDaPartida({
                     imagemUrl={imagemPorJogador[jogadorId] ?? null}
                   />
                 </div>
+                {emReconexao ? (
+                  <span
+                    data-testid="hud-reconectando"
+                    data-jogador-id={jogadorId}
+                    title="Reconectando"
+                    className="absolute -bottom-1 -right-1 rounded bg-amber-500 px-1 py-0.5 text-[10px] font-bold leading-none text-zinc-900 shadow"
+                  >
+                    <span aria-hidden="true">⟳</span> reconectando
+                  </span>
+                ) : null}
               </div>
               <div className="flex flex-col gap-0.5" aria-hidden="true">
                 {dados.emBaixaIluminacao ? (
@@ -326,6 +340,15 @@ export function HudDaPartida({
                 {dados.protegido ? (
                   <span data-testid="hud-estado-protecao" title="Proteção" className="rounded border border-cyan-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none text-cyan-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
                     🛡
+                  </span>
+                ) : null}
+                {emReconexao ? (
+                  <span
+                    data-testid="hud-estado-reconectando"
+                    title="Reconectando"
+                    className="rounded border border-amber-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none text-amber-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]"
+                  >
+                    <span aria-hidden="true">⟳</span> reconectando
                   </span>
                 ) : null}
               </div>
@@ -679,6 +702,8 @@ export function HudDaPartida({
           <div className="flex items-center gap-1.5">
             {ordemDoTurno.map(({ jogadorId, dados }) => {
               const ehAtivo = jogadorId === jogadorAtivoId
+              const presencaTurno: PresencaNaPartidaWire = (dados as { presenca?: PresencaNaPartidaWire }).presenca ?? 'conectado'
+              const emReconexaoTurno = presencaTurno === 'em_reconexao'
               return (
                 <div key={jogadorId} className={`relative flex items-center justify-center ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'}`}>
                   {ehAtivo ? (
@@ -691,15 +716,16 @@ export function HudDaPartida({
                   <div
                     data-testid={ehAtivo ? 'hud-turno-ativo' : 'hud-turno-proximo'}
                     data-jogador-id={jogadorId}
+                    data-presenca={emReconexaoTurno ? 'em_reconexao' : undefined}
                     role="img"
-                    aria-label={ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}
-                    title={dados.apelido}
+                    aria-label={`${ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}${emReconexaoTurno ? ', reconectando' : ''}`}
+                    title={emReconexaoTurno ? `${dados.apelido} — reconectando` : dados.apelido}
                     data-compacto={emModoCompacto ? 'true' : undefined}
                     className={`flex items-center justify-center overflow-hidden rounded-lg border font-display text-xs transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
                       ehAtivo
                         ? 'border-amber-300/40 bg-zinc-800'
                         : 'border-zinc-800 bg-zinc-950 opacity-50 grayscale'
-                    }`}
+                    } ${emReconexaoTurno ? 'ring-2 ring-amber-400/70' : ''}`}
                   >
                     <ConteudoDoAvatar
                       apelido={dados.apelido}
@@ -707,6 +733,16 @@ export function HudDaPartida({
                       imagemUrl={imagemPorJogador[jogadorId] ?? null}
                     />
                   </div>
+                  {emReconexaoTurno ? (
+                    <span
+                      data-testid="hud-turno-reconectando"
+                      data-jogador-id={jogadorId}
+                      title="Reconectando"
+                      className="absolute -bottom-1 -right-1 rounded bg-amber-500 px-1 py-0.5 text-[8px] font-bold leading-none text-zinc-900 shadow"
+                    >
+                      <span aria-hidden="true">⟳</span> reconectando
+                    </span>
+                  ) : null}
                 </div>
               )
             })}

@@ -299,6 +299,8 @@ export type TipoDaPecaWire =
   | 'vulto'
   | 'espectro';
 
+export type PresencaNaPartidaWire = 'conectado' | 'em_reconexao';
+
 export interface JogadorNoSnapshot {
   readonly jogadorId: string;
   readonly apelido: string;
@@ -317,6 +319,10 @@ export interface JogadorNoSnapshot {
   // eventos (a concessão vive na Confirmação de Posição e o consumo em
   // ATAQUE_RESOLVIDO.protegidos).
   readonly protegido: boolean;
+  // Presença na Partida em andamento (issue #294, spec #292): indica se o
+  // jogador está em janela de reconexão (`em_reconexao`) ou conectado.
+  // Opcional com fallback `conectado` (compat com snapshots antigos sem campo).
+  readonly presenca?: PresencaNaPartidaWire;
 }
 
 export interface PecaPosicionadaNoSnapshot {

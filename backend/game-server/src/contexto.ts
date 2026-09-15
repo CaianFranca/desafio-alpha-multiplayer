@@ -12,4 +12,15 @@ export interface ContextoDoGameServer {
   readonly partidaChatHistoricoMaximo?: number;
   readonly lobbyRetornoCallbackUrl?: string;
   readonly lobbyDesistenciaCallbackUrl?: string;
+  /**
+   * Endurecimento do WS (issue #409): allowlist de Origem, teto de payload e
+   * rate limit geral por conexão. Quando ausente, `ws.ts` deriva de
+   * `getConfig()` (mantém os testes antigos operando com os defaults).
+   */
+  readonly wsSeguranca?: {
+    readonly origensPermitidas: readonly string[];
+    readonly maxPayloadBytes: number;
+    readonly limiteMensagens: number;
+    readonly janelaLimiteMensagensMs: number;
+  };
 }

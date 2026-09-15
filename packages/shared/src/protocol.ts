@@ -36,6 +36,7 @@ export type CodigoDeErroDeAdmissao =
   | 'JOGADOR_FORA_DO_ROSTER'
   | 'JOGADOR_NAO_NA_PARTIDA'
   | 'PARTIDA_ID_AUSENTE'
+  | 'ORIGEM_NAO_PERMITIDA'
   | 'ERRO_INTERNO';
 
 export interface AdmissaoRejeitadaEvento {
