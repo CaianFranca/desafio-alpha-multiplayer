@@ -317,6 +317,13 @@ COOKIE_SECURE=true
 TRUST_PROXY_HOPS=3
 ```
 
+> **`TRUST_PROXY_HOPS` é obrigatória em produção**: com
+> `NODE_ENV=production`, o `getConfig()` (`packages/config`) lança erro no boot
+> se a env estiver ausente, vazia ou fora da faixa `0..10`. A inicialização
+> falha de propósito: sem o número correto de hops, o rate limit por IP usaria
+> o endereço do proxy como chave e viraria um contador global silencioso,
+> derrubando o login de todos ao mesmo tempo.
+
 > **`GAME_SERVER_ADVERTISE_HOST=127.0.0.1`**: em prod nativa o lobby e o
 > game-server coabitam o mesmo host, e o encaminhamento usa o host anunciado
 > no registro do Redis; o default (`game-server`, em `packages/config`) só
@@ -327,6 +334,15 @@ TRUST_PROXY_HOPS=3
 > em `packages/config` já é `Secure=true` quando `NODE_ENV=production`; o env
 > apenas o torna explícito. O nginx do app repassa `X-Forwarded-Proto` recebido
 > da borda para que redirects/cookies sejam gerados como `https`.
+
+> **Monitoramento do `/health`**: `GET /health` responde `200` com
+> `{ status: 'ok' }` e `503` com
+> `{ status: 'unhealthy', dependencia: 'postgres' | 'redis' }`. Configure um
+> alerta para **qualquer resposta ≠ 200**. Por decisão fail-closed, com o Redis
+> indisponível o `/health` responde `503` e `/login`/`/register` respondem
+> `500` — Redis fora significa autenticação fora. As Sessões também vivem no
+> Redis, então a indisponibilidade de auth sem Redis não é novidade do
+> limitador.
 
 ---
 

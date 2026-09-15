@@ -56,6 +56,8 @@ const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
 const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
 const DEFAULT_TRUST_PROXY_HOPS = 1;
+const MINIMO_TRUST_PROXY_HOPS = 0;
+const MAXIMO_TRUST_PROXY_HOPS = 10;
 const DEFAULT_AUTH_RATE_LIMIT_JANELA_SEGUNDOS = 900;
 const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_IP = 30;
 const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CADASTRO = 10;
@@ -207,7 +209,7 @@ function parsePartidaChatHistoricoMaximo(raw: string | undefined): number {
 }
 
 function parseTrustProxyHops(raw: string | undefined): number {
-  return parseInteiroComLimites(raw, DEFAULT_TRUST_PROXY_HOPS, 'TRUST_PROXY_HOPS', 0, 10);
+  return parseInteiroComLimites(raw, DEFAULT_TRUST_PROXY_HOPS, 'TRUST_PROXY_HOPS', MINIMO_TRUST_PROXY_HOPS, MAXIMO_TRUST_PROXY_HOPS);
 }
 
 function parseAuthRateLimitJanelaSegundos(raw: string | undefined): number {
@@ -419,6 +421,18 @@ export function getConfig(): Config {
     }
     if (process.env.LOBBY_PUBLIC_URL === undefined) {
       throw new Error('LOBBY_PUBLIC_URL deve ser definido em produção');
+    }
+    const trustProxyHopsBruto = process.env.TRUST_PROXY_HOPS;
+    if (trustProxyHopsBruto === undefined || trustProxyHopsBruto.trim().length === 0) {
+      throw new Error('TRUST_PROXY_HOPS deve ser definido explicitamente em produção');
+    }
+    const trustProxyHopsNumero = Number(trustProxyHopsBruto);
+    if (
+      !Number.isInteger(trustProxyHopsNumero)
+      || trustProxyHopsNumero < MINIMO_TRUST_PROXY_HOPS
+      || trustProxyHopsNumero > MAXIMO_TRUST_PROXY_HOPS
+    ) {
+      throw new Error(`TRUST_PROXY_HOPS inválido em produção: "${trustProxyHopsBruto}"`);
     }
   }
 

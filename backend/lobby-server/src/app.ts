@@ -36,12 +36,21 @@ export function createApp(opcoes: CreateAppOpcoes = {}): Express {
   app.get('/health', async (_req, res) => {
     try {
       await verificarPostgres();
-      await verificarRedis();
-      res.status(200).json({ status: 'ok' });
     } catch (error) {
-      console.error('[health] check falhou:', (error as Error).message);
-      res.status(503).json({ status: 'unhealthy' });
+      console.error('[health] postgres indisponível:', (error as Error).message);
+      res.status(503).json({ status: 'unhealthy', dependencia: 'postgres' });
+      return;
     }
+
+    try {
+      await verificarRedis();
+    } catch (error) {
+      console.error('[health] redis indisponível:', (error as Error).message);
+      res.status(503).json({ status: 'unhealthy', dependencia: 'redis' });
+      return;
+    }
+
+    res.status(200).json({ status: 'ok' });
   });
 
   app.use('/api/auth', authRouter);
