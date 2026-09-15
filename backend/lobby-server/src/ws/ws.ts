@@ -130,8 +130,9 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
     const mensagensAguardandoAuth: RawData[] = [];
     const LIMITE_BUFFER_PRE_AUTH = 32;
     let autenticado = false;
-    // Rate limit geral por conexão (issue #409), ativo só após a autenticação:
-    // as mensagens pré-auth bufferizadas não contam. Bots (@bot.teste) são isentos.
+    // Rate limit geral por conexão (issue #409), aplicado a partir da autenticação:
+    // mensagens pré-auth bufferizadas não consomem cota antes do aceite, mas contam
+    // ao serem drenadas. Bots (@bot.teste) são isentos.
     const limiteDeMensagens = new LimiteDeMensagensPorConexao(
       seguranca.limiteMensagens,
       seguranca.janelaLimiteMensagensMs,

@@ -369,6 +369,48 @@ test('Sem header Origin conecta e responde PING/PONG', async () => {
   });
 });
 
+test('Origin vazio é recusado no handshake (403)', async () => {
+  let autenticou = false;
+  const deps: WsDeps = {
+    seguranca: SEGURANCA_BASE,
+    // Espião: header presente porém vazio não é ausência de Origin e deve ser
+    // recusado antes da autenticação.
+    obterSessao: async () => {
+      autenticou = true;
+      return null;
+    },
+  };
+  await comServidor(deps, async (servidor) => {
+    const cookies = await registrarJogador(servidor, 'origem-vazia');
+    const resultado = await conectarRecusado(servidor.wsUrl, cookies, '');
+
+    assert.equal(resultado.statusCode, 403, `esperava 403, recebeu ${resultado.statusCode}`);
+    assert.equal(resultado.abriu, false, 'cliente não deveria abrir a conexão');
+    assert.equal(autenticou, false, 'a autenticação não deveria rodar para origem recusada');
+  });
+});
+
+test('Origin "null" (iframe sandboxed) é recusado no handshake (403)', async () => {
+  let autenticou = false;
+  const deps: WsDeps = {
+    seguranca: SEGURANCA_BASE,
+    // Espião: `"null"` de iframe sandboxed é header presente e deve ser recusado
+    // antes da autenticação.
+    obterSessao: async () => {
+      autenticou = true;
+      return null;
+    },
+  };
+  await comServidor(deps, async (servidor) => {
+    const cookies = await registrarJogador(servidor, 'origem-null');
+    const resultado = await conectarRecusado(servidor.wsUrl, cookies, 'null');
+
+    assert.equal(resultado.statusCode, 403, `esperava 403, recebeu ${resultado.statusCode}`);
+    assert.equal(resultado.abriu, false, 'cliente não deveria abrir a conexão');
+    assert.equal(autenticou, false, 'a autenticação não deveria rodar para origem recusada');
+  });
+});
+
 // --- 4. Teto de payload ---
 
 test('Mensagem acima do teto de payload fecha com 1009', async () => {

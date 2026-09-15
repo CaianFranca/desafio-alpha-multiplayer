@@ -354,6 +354,50 @@ test('Sem header Origin é aceita e responde PING/PONG', async () => {
   }
 });
 
+test('Origin vazio é recusada com 403 (ORIGEM_NAO_PERMITIDA)', async () => {
+  const servidor = await subirServidor(SEGURANCA_BASE);
+  try {
+    const partidaId = 'partida-origem-vazia';
+    await criarPartidaNoRedis(partidaId, [membro(1)]);
+
+    // Token inválido de propósito: header Origin presente porém vazio não é
+    // ausência de header, então a recusa 403 precede o 401 SESSAO_INVALIDA.
+    const resultado = await fazerUpgradeHttp(servidor.port, partidaId, {
+      token: 'token-invalido',
+      origin: '',
+    });
+
+    assert.equal(resultado.status, 403, `esperava 403, recebeu ${resultado.status}`);
+    const corpo = JSON.parse(resultado.texto) as { type: string; codigo: string };
+    assert.equal(corpo.type, 'ADMISSAO_REJEITADA');
+    assert.equal(corpo.codigo, 'ORIGEM_NAO_PERMITIDA');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('Origin "null" (iframe sandboxed) é recusada com 403 (ORIGEM_NAO_PERMITIDA)', async () => {
+  const servidor = await subirServidor(SEGURANCA_BASE);
+  try {
+    const partidaId = 'partida-origem-null';
+    await criarPartidaNoRedis(partidaId, [membro(1)]);
+
+    // `"null"` de iframe sandboxed é header presente e deve ser recusado antes
+    // da validação de token.
+    const resultado = await fazerUpgradeHttp(servidor.port, partidaId, {
+      token: 'token-invalido',
+      origin: 'null',
+    });
+
+    assert.equal(resultado.status, 403, `esperava 403, recebeu ${resultado.status}`);
+    const corpo = JSON.parse(resultado.texto) as { type: string; codigo: string };
+    assert.equal(corpo.type, 'ADMISSAO_REJEITADA');
+    assert.equal(corpo.codigo, 'ORIGEM_NAO_PERMITIDA');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
 // --- 4. Teto de payload ---
 
 test('Mensagem acima do teto de payload fecha com 1009', async () => {

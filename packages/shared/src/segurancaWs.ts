@@ -2,11 +2,13 @@
 // sem dependência de Node além de Date.
 
 /**
- * `Origin` de navegador é sempre `scheme://host:port`; clientes não-navegador
- * (testes, bots) não enviam o header, e nesse caso a checagem não bloqueia.
+ * `Origin` de navegador é sempre `scheme://host:port`. Clientes não-navegador
+ * (testes, bots) não enviam o header, e esse caso não é bloqueado. Um header
+ * presente (inclusive vazio ou `"null"` de iframe sandboxed) fora da allowlist
+ * é recusado.
  */
 export function origemPermitida(origin: string | undefined, permitidas: readonly string[]): boolean {
-  if (origin === undefined || origin.length === 0) {
+  if (origin === undefined) {
     return true;
   }
   return permitidas.includes(origin);
