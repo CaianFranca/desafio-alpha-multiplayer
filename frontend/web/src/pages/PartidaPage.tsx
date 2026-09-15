@@ -317,7 +317,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   } | null>(null)
   const avisoReconexaoIdRef = useRef(0)
   const avisoReconexaoTimerRef = useRef<number | null>(null)
+  // Espelho do aviso para leitura fora de updaters (review PR #395): updaters
+  // de setState devem ser puros — o clearTimeout do timer vive no caller.
+  const avisoReconexaoRef = useRef<typeof avisoReconexao>(null)
   useEffect(() => {
+    avisoReconexaoRef.current = avisoReconexao
     if (avisoReconexao === null) return
     if (avisoReconexaoTimerRef.current !== null) window.clearTimeout(avisoReconexaoTimerRef.current)
     avisoReconexaoTimerRef.current = window.setTimeout(() => {
@@ -461,34 +465,27 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           // ou saiu do roster), limpa o aviso sem resíduo e cancela o timer.
           // Só afeta avisos de `reconectando` — `reconectado` é toast transitório
           // com presença `conectado` e segue seu próprio auto-dismiss.
-          setAvisoReconexao((prev) => {
-            if (prev === null) return null
-            if (prev.tipo !== 'reconectando') return prev
+          // Updater puro (review PR #395): a decisão é computada antes, com o
+          // aviso atual lido do espelho — clearTimeout nunca dentro do updater.
+          const avisoAtual = avisoReconexaoRef.current
+          if (avisoAtual !== null && avisoAtual.tipo === 'reconectando') {
             const snapshotJogadores = evento.snapshot.jogadores
             const temEmReconexao = snapshotJogadores.some(
               (j) => (j as { presenca?: string }).presenca === 'em_reconexao',
             )
-            if (!temEmReconexao) {
-              if (avisoReconexaoTimerRef.current !== null) {
-                window.clearTimeout(avisoReconexaoTimerRef.current)
-                avisoReconexaoTimerRef.current = null
-              }
-              return null
-            }
-            const alvo = snapshotJogadores.find((j) => j.jogadorId === prev.jogadorId) as
+            const alvo = snapshotJogadores.find((j) => j.jogadorId === avisoAtual.jogadorId) as
               | { presenca?: string }
               | undefined
             const presencaAlvo = alvo?.presenca ?? 'conectado'
-            const foraDoRoster = !alvo
-            if (foraDoRoster || presencaAlvo !== 'em_reconexao') {
+            const foraDoRoster = alvo === undefined
+            if (!temEmReconexao || foraDoRoster || presencaAlvo !== 'em_reconexao') {
               if (avisoReconexaoTimerRef.current !== null) {
                 window.clearTimeout(avisoReconexaoTimerRef.current)
                 avisoReconexaoTimerRef.current = null
               }
-              return null
+              setAvisoReconexao(null)
             }
-            return prev
-          })
+          }
           // Supressão de fantasma quando snapshot chega sem em_reconexao mas ainda
           // há evento enfileirado de reconectando — a re-emissão abaixo já filtra,
           // mas se nenhum jogador está em_reconexao, o aviso residual anterior já
