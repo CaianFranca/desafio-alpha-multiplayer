@@ -10,7 +10,9 @@ import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
 import { baseDoApp } from '../api/basePath'
 import { refreshSession } from '../api/auth'
+import { notificarSessaoExpirada } from '../api/client'
 import { agendarReconexaoComSlide } from './agendarReconexaoComSlide'
+import { fechamentoDeSessao } from './usePartidaWebSocket'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -338,10 +340,23 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       if (!montadoRef.current) return
       setConectado(false)
       wsRef.current = null
+      // Sessão encerrada (issue #410, PR #422): terminal — a Sessão deixou de
+      // valer (logout/troca/expiração/revogação) e o upgrade seguinte cairia
+      // no mesmo 4401, gerando loop + storm de refresh. Espelha o
+      // `encerrarSemReconexao` do canal da Partida.
+      if (fechamentoDeSessao(event.code)) {
+        if (reconnectTimerRef.current !== null) {
+          clearTimeout(reconnectTimerRef.current)
+          reconnectTimerRef.current = null
+        }
+        ws.onclose = null
+        notificarSessaoExpirada()
+        return
+      }
       // Reconexão simples após 1s se ainda montado, com a Sessão renovada
       // antes (issue #376, review PR #383): gate compartilhado em
       // `agendarReconexaoComSlide` (simetria com usePartidaWebSocket).

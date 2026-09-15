@@ -49,6 +49,8 @@ export interface Config {
   wsLimiteMensagens: number;
   /** Janela em ms do rate limit geral por conexão (issue #409). */
   wsJanelaLimiteMensagensMs: number;
+  /** Intervalo em ms da revalidação da Sessão das conexões WS abertas (issue #410). */
+  wsSessaoRevalidacaoMs: number;
 }
 
 // Alinhado com .env.example e docker-compose.yml (1234), como o lobby faz com a 3001.
@@ -88,6 +90,14 @@ export const MAX_WS_LIMITE_MENSAGENS = 10000;
 export const DEFAULT_WS_JANELA_LIMITE_MENSAGENS_MS = 10000;
 export const MIN_WS_JANELA_LIMITE_MENSAGENS_MS = 100;
 export const MAX_WS_JANELA_LIMITE_MENSAGENS_MS = 600000;
+// Revalidação da Sessão das conexões WS abertas (issue #410). O teto (60s)
+// limita a janela em que o game-server ainda aceita comandos de uma Sessão
+// revogada: o lobby encerra na hora e o game-server, em até o intervalo. O
+// teto fica abaixo do TTL do marcador de rotação (sessionAccessTtlSeconds =
+// 900s), para o refresh não perder o rastro da Sessão rotacionada.
+export const DEFAULT_WS_SESSAO_REVALIDACAO_MS = 30000;
+export const MIN_WS_SESSAO_REVALIDACAO_MS = 1000;
+export const MAX_WS_SESSAO_REVALIDACAO_MS = 60000;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -282,6 +292,16 @@ function parseWsJanelaLimiteMensagensMs(raw: string | undefined): number {
     'WS_JANELA_LIMITE_MENSAGENS_MS',
     MIN_WS_JANELA_LIMITE_MENSAGENS_MS,
     MAX_WS_JANELA_LIMITE_MENSAGENS_MS,
+  );
+}
+
+function parseWsSessaoRevalidacaoMs(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_SESSAO_REVALIDACAO_MS,
+    'WS_SESSAO_REVALIDACAO_MS',
+    MIN_WS_SESSAO_REVALIDACAO_MS,
+    MAX_WS_SESSAO_REVALIDACAO_MS,
   );
 }
 
@@ -499,6 +519,9 @@ export function getConfig(): Config {
   const wsJanelaLimiteMensagensMs = parseWsJanelaLimiteMensagensMs(
     process.env.WS_JANELA_LIMITE_MENSAGENS_MS as string | undefined,
   );
+  const wsSessaoRevalidacaoMs = parseWsSessaoRevalidacaoMs(
+    process.env.WS_SESSAO_REVALIDACAO_MS as string | undefined,
+  );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
@@ -606,6 +629,7 @@ export function getConfig(): Config {
     wsMaxPayloadBytes,
     wsLimiteMensagens,
     wsJanelaLimiteMensagensMs,
+    wsSessaoRevalidacaoMs,
   };
 }
 

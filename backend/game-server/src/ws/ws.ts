@@ -326,7 +326,19 @@ export function criarWebSocketServer(
     void (async () => {
       // Bots autenticados por Service Token não dependem de sessão no Redis
       if (!sessao.isBot) {
-        const sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
+        // `validarSessaoNoRedis` propaga erro de Redis (issue #410, B1). O
+        // handshake segue fail-closed: sem conseguir confirmar a Sessão, não
+        // admite — recusa com o mesmo 401 SESSAO_INVALIDA de antes. O `catch`
+        // local evita que o erro suba ao catch global do IIFE e vire 500.
+        let sessaoValida = false;
+        try {
+          sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
+        } catch (erro) {
+          console.error(
+            '[ws] falha ao validar sessão no handshake:',
+            erro instanceof Error ? erro.message : String(erro),
+          );
+        }
         if (!sessaoValida) {
           enviarErroNoSocket(socket, 401, erroRejeitada('SESSAO_INVALIDA', 'sessão revogada ou inexistente'));
           return;
@@ -382,6 +394,8 @@ export function criarWebSocketServer(
             jogadorId: sessao.jogadorId,
             apelido: sessao.apelido,
             partidaId,
+            sessaoId: sessao.sessaoId,
+            isBot: sessao.isBot ?? false,
           };
           // Substituição (#155): a nova conexão entra no registro ANTES da
           // transição de presença e de a antiga ser encerrada —

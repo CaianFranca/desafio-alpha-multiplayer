@@ -208,7 +208,13 @@ function ehRotaDeAuthSemRetry(input: RequestInfo | URL): boolean {
   )
 }
 
-function notificarSessaoExpirada(): void {
+/**
+ * Notifica os assinantes de que a Sessão deixou de valer (logout, troca,
+ * expiração ou revogação) — o `AuthProvider` volta o app a Visitante. Público
+ * para reuso pelos canais WS (issue #410, PR #422): o fechamento `4401` é
+ * terminal e não pode virar loop de reconexão + storm de refresh.
+ */
+export function notificarSessaoExpirada(): void {
   for (const listener of sessionExpiredListeners) listener()
 }
 

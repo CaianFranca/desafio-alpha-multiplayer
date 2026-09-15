@@ -459,6 +459,26 @@ test('CRIAR_SALA revalida a Sessão no Redis antes de criar vínculo', async () 
   });
 });
 
+test('CRIAR_SALA após refresh usa a Sessão rotacionada (bug 1 da PR #422)', async () => {
+  await comServidor(async (servidor) => {
+    const a = await registrarJogador(servidor.baseUrl);
+    const wsA = await conectarWs(servidor.wsUrl, a.cookies);
+
+    // A rotação troca o `sessaoId` sem esperar a revalidação periódica; o
+    // registro da conexão precisa migrar no próprio /refresh, senão o
+    // CRIAR_SALA revalida o id antigo e fecha com 4401 indevido até o tick.
+    const refresh = await postJson(servidor.baseUrl, '/api/auth/refresh', {}, a.cookies);
+    assert.equal(refresh.status, 200);
+
+    enviar(wsA, { type: 'CRIAR_SALA' });
+    const evento = await esperarSalaAtualizada(wsA);
+    assert.match(evento.sala.codigoDeSala, /^[A-Z0-9]{6}$/);
+
+    wsA.close();
+    await esperarClose(wsA).catch(() => undefined);
+  });
+});
+
 test('CRIAR_SALA repete Código de Sala após colisão e monta Convite público', async () => {
   const codigos = ['AAAAAA', 'AAAAAA', 'BBBBBB'];
   await comServidor(async (servidor) => {
