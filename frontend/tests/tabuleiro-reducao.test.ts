@@ -18,7 +18,7 @@ import type {
   PecaPosicionadaNoSnapshot,
   TabuleiroEventoDoServidor,
 } from '@flicker/shared'
-import { jogador } from './helpers/rosterN'
+import { jogador, snapshotComJogadores } from './helpers/rosterN'
 
 // Pendência sorteada (#138) compartilhada nos cenários do ciclo.
 function pendenciaSorteada(
@@ -1794,6 +1794,24 @@ describe('DESISTENCIA_REGISTRADA — queda óbvia otimista (issue #290, review P
     expect(duas).toEqual(uma)
   })
 
+  it('causa expiracao projeta a mesma remocao da desistencia (conversao #294 herda o fluxo B)', () => {
+    const comDesistencia = reduzirEvento(estadoComHospedeira(), {
+      type: 'DESISTENCIA_REGISTRADA',
+      jogadorId: 'j1',
+      peaoId: 'peao-branco',
+      causa: 'desistencia',
+    })
+    const comExpiracao = reduzirEvento(estadoComHospedeira(), {
+      type: 'DESISTENCIA_REGISTRADA',
+      jogadorId: 'j1',
+      peaoId: 'peao-branco',
+      causa: 'expiracao',
+    })
+    expect(comExpiracao).toEqual(comDesistencia)
+    expect(comExpiracao.jogadorPorId['j1']).toBeUndefined()
+    expect(comExpiracao.peoes.some((p) => p.peaoId === 'peao-branco')).toBe(false)
+  })
+
   it('lote integral do engine projeta tabuleiro/ordem/Limpeza resultantes (AC2)', () => {
     // Ordem do lote atômico no wire (engine partida.ts): a desistência abre,
     // CELULAS_ILUMINADAS + LIMPEZA_APLICADA trazem o tabuleiro resultante e a
@@ -1818,6 +1836,32 @@ describe('DESISTENCIA_REGISTRADA — queda óbvia otimista (issue #290, review P
     // Tabuleiro resultante: hospedeira (otimista) + limpeza do lote aplicadas.
     expect(depois.posicionadas).toEqual([])
     expect(depois.celulasIluminadas).toEqual([{ linha: 3, coluna: 3 }])
+  })
+})
+
+describe('presença em reconexão — snapshot é autoridade (issue #294, review PR #395)', () => {
+  it('snapshot sem presenca reseta em_reconexao para conectado (volta-na-janela sem resíduo)', () => {
+    const base = aplicarSnapshot(
+      criarEstadoInicialDoCliente(),
+      snapshotComJogadores([
+        jogador('j1', 'A', 'branco', 1),
+        jogador('j2', 'B', 'vermelho', 2),
+      ]),
+    )
+    const emReconexao = reduzirEvento(base, {
+      type: 'JOGADOR_EM_RECONEXAO',
+      jogadorId: 'j2',
+    })
+    expect(emReconexao.jogadorPorId['j2']?.presenca).toBe('em_reconexao')
+    // Servidor omite presenca no snapshot: autoridade reseta, sem fantasma.
+    const reconciliado = aplicarSnapshot(
+      emReconexao,
+      snapshotComJogadores([
+        jogador('j1', 'A', 'branco', 1),
+        jogador('j2', 'B', 'vermelho', 2),
+      ]),
+    )
+    expect(reconciliado.jogadorPorId['j2']?.presenca).toBe('conectado')
   })
 })
 

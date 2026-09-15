@@ -39,6 +39,8 @@ import type {
   AtaqueResolvidoWireEvento,
   ResgateRealizadoWireEvento,
   DesistenciaRegistradaWireEvento,
+  JogadorEmReconexaoWireEvento,
+  JogadorReconectadoWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
 import { refreshSession } from '../api/auth'
@@ -55,9 +57,9 @@ import {
  * Eventos que o canal da Partida entrega à página (issue #156): tabuleiro
  * (ST-09), peões (ST-10), os três eventos de turno (ST-11), iluminação/
  * limpeza (issue #151), snapshot (PARTIDA_INICIADA/ESTADO_DA_PARTIDA),
- * monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO)
- * e desistência (issue #290 — DESISTENCIA_REGISTRADA)
- * agora roteados exclusivamente pelo contrato de Partida.
+ * monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO),
+ * desistência (issue #290 — DESISTENCIA_REGISTRADA) e presença em reconexão
+ * (issue #294 — JOGADOR_EM_RECONEXAO/JOGADOR_RECONECTADO) agora roteados exclusivamente pelo contrato de Partida.
  */
 export type EventoDoCanalDaPartida =
   | TabuleiroEventoDoServidor
@@ -75,6 +77,8 @@ export type EventoDoCanalDaPartida =
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
   | DesistenciaRegistradaWireEvento
+  | JogadorEmReconexaoWireEvento
+  | JogadorReconectadoWireEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -327,6 +331,8 @@ export function usePartidaWebSocket({
         case 'ATAQUE_RESOLVIDO':
         case 'RESGATE_REALIZADO':
         case 'DESISTENCIA_REGISTRADA':
+        case 'JOGADOR_EM_RECONEXAO':
+        case 'JOGADOR_RECONECTADO':
           // O grupo de cases acima é intencionalmente vazio (fall-through):
           // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
           // o cliente apenas espelha).
