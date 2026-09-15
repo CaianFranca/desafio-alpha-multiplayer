@@ -5,6 +5,7 @@ import { AuthProvider } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
+import { enviarLote } from './helpers/partida-ws'
 import { toquesDeAudio } from './helpers/mockAudio'
 import {
   CAMINHO_SOM_DE_RECUSA,
@@ -371,29 +372,31 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
-      ws.simulateMessage({
+    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    // TURNO isolado: flush do lote antes dos deltas (ver enviarLote).
+    await enviarLote(
+      ws,
+      {
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
         orientacao: 0,
-      })
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-      ws.simulateMessage({
+      },
+      { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
+      {
         type: 'PEAO_POSICIONADO',
         peaoId: 'peao-branco',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
-      })
-      ws.simulateMessage({
+      },
+      {
         type: 'RECEBIMENTO_GERADO',
         recebidas: [
           recebidaSorteada('r1', 'reta-1', 'reta'),
           recebidaSorteada('r2', 'cruz-1', 'cruz'),
         ],
-      })
-    })
+      },
+    )
     // Fecha a janela de Manipulação da Inicial (gate): só então a corrente r1
     // aparece na bandeja.
     act(() => {
@@ -604,14 +607,15 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     // O rebate: PECA_GIRADA de pecaId de pendência atualiza a orientação no
     // modelo e a derivação da corrente (bandeja) reflete o giro sem re-sync.
     const ws = await partidaDisponivel()
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-      ws.simulateMessage({
+    await enviarLote(
+      ws,
+      { type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 },
+      { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
+      {
         type: 'RECEBIMENTO_GERADO',
         recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
-      })
-    })
+      },
+    )
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-orientacao')).toBe('0')
 
     act(() => {
@@ -637,14 +641,15 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     // o gesto de puxar (donoDoCiclo) e, por derivação, o destaque de vaga.
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogadora-2', rodada: 2 })
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-vermelho' })
-      ws.simulateMessage({
+    await enviarLote(
+      ws,
+      { type: 'TURNO_INICIADO', jogadorId: 'jogadora-2', rodada: 2 },
+      { type: 'PEAO_SELECIONADO', peaoId: 'peao-vermelho' },
+      {
         type: 'RECEBIMENTO_GERADO',
         recebidas: [recebidaSorteada('r1', 'reta-1', 'reta')],
-      })
-    })
+      },
+    )
 
     // Corrente pública: presente no espelho do espectador.
     const corrente = pecaCorrenteDaBandeja()
@@ -668,17 +673,18 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     // corrente; nenhum estado de erro local é derivado da contagem (a
     // autoridade dela é o engine: Esgotamento da Caixa).
     const ws = await partidaDisponivel()
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-      ws.simulateMessage({
+    await enviarLote(
+      ws,
+      { type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 },
+      { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
+      {
         type: 'RECEBIMENTO_GERADO',
         recebidas: [
           recebidaSorteada('r1', 'reta-1', 'reta'),
           recebidaSorteada('r2', 't-1', 'T'),
         ],
-      })
-    })
+      },
+    )
     expect(screen.getAllByTestId('recebida-pendente')).toHaveLength(2)
     expect(screen.getAllByTestId('caixa-peca-sorteada')).toHaveLength(1)
     expect(pecaCorrenteDaBandeja()!.getAttribute('data-recebida-id')).toBe('r1')
@@ -696,34 +702,36 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     }
 
     // Turno meu, rodada 2: peão posicionado na Inicial e movido à reta vizinha.
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
-      ws.simulateMessage({
+    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    // TURNO isolado: flush do lote antes dos deltas (ver enviarLote).
+    await enviarLote(
+      ws,
+      {
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
         orientacao: 0,
-      })
-      ws.simulateMessage({
+      },
+      {
         type: 'PECA_SORTEADA',
         pecaId: 'reta-1',
         tipoDaPeca: 'reta',
         orientacao: 0,
-      })
-      ws.simulateMessage({
+      },
+      {
         type: 'PECA_POSICIONADA',
         pecaId: 'reta-1',
         celula: { linha: 2, coluna: 3 },
         orientacao: 0,
-      })
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-      ws.simulateMessage({
+      },
+      { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
+      {
         type: 'PEAO_POSICIONADO',
         peaoId: 'peao-branco',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
-      })
-    })
+      },
+    )
     // Controle: seleção ativa e SEM confirmação → destino conectado destacado.
     expect(pecaDoEspelho('reta-1').getAttribute('data-conectada')).toBe('true')
 
@@ -868,33 +876,35 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
-      ws.simulateMessage({
+    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    // TURNO isolado: flush do lote antes dos deltas (ver enviarLote).
+    await enviarLote(
+      ws,
+      {
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
         orientacao: 0,
-      })
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-      ws.simulateMessage({
+      },
+      { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
+      {
         type: 'PEAO_POSICIONADO',
         peaoId: 'peao-branco',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
-      })
+      },
       // O servidor sorteia o Monstro e o entrega no Recebimento como peça comum.
-      ws.simulateMessage({
+      {
         type: 'PECA_SORTEADA',
         pecaId: 'vulto-1',
         tipoDaPeca: 'vulto',
         orientacao: 0,
-      })
-      ws.simulateMessage({
+      },
+      {
         type: 'RECEBIMENTO_GERADO',
         recebidas: [recebidaSorteada('r1', 'vulto-1', 'vulto')],
-      })
-    })
+      },
+    )
     // Fecha a janela de Manipulação da Inicial (gate): a bandeja passa a
     // exibir o Monstro corrente.
     act(() => {
@@ -960,32 +970,34 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
-      ws.simulateMessage({
+    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    // TURNO isolado: flush do lote antes dos deltas (ver enviarLote).
+    await enviarLote(
+      ws,
+      {
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
         orientacao: 0,
-      })
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-      ws.simulateMessage({
+      },
+      { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
+      {
         type: 'PEAO_POSICIONADO',
         peaoId: 'peao-branco',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
-      })
-      ws.simulateMessage({
+      },
+      {
         type: 'PECA_SORTEADA',
         pecaId: 'espectro-1',
         tipoDaPeca: 'espectro',
         orientacao: 0,
-      })
-      ws.simulateMessage({
+      },
+      {
         type: 'RECEBIMENTO_GERADO',
         recebidas: [recebidaSorteada('r1', 'espectro-1', 'espectro')],
-      })
-    })
+      },
+    )
     // Fecha a janela de Manipulação da Inicial (gate) para exibir a corrente.
     act(() => {
       ws.simulateMessage({ type: 'MANIPULACAO_FINALIZADA', pecaId: 'inicial-1' })
@@ -1032,36 +1044,38 @@ describe('monstros na Caixa e resgate por clique na tela (#145-exp F3)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
-    act(() => {
-      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
-      ws.simulateMessage({
+    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    // TURNO isolado: flush do lote antes dos deltas (ver enviarLote).
+    await enviarLote(
+      ws,
+      {
         type: 'PECA_POSICIONADA',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
         orientacao: 0,
-      })
+      },
       // O servidor sorteia o Monstro e o posiciona no tabuleiro (rota real:
       // o modelo local só posiciona peça cujo tipo conhece via sorteio).
-      ws.simulateMessage({
+      {
         type: 'PECA_SORTEADA',
         pecaId: 'vulto-1',
         tipoDaPeca: 'vulto',
         orientacao: 0,
-      })
-      ws.simulateMessage({
+      },
+      {
         type: 'PECA_POSICIONADA',
         pecaId: 'vulto-1',
         celula: { linha: 3, coluna: 4 },
         orientacao: 0,
-      })
-      ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
-      ws.simulateMessage({
+      },
+      { type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' },
+      {
         type: 'PEAO_POSICIONADO',
         peaoId: 'peao-branco',
         pecaId: 'inicial-1',
         celula: { linha: 3, coluna: 3 },
-      })
-    })
+      },
+    )
 
     // O Monstro está no tabuleiro, mas NÃO é destino do peão selecionado.
     const vulto = pecaPosicionadaDoEspelho('vulto-1')

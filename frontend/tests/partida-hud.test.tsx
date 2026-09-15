@@ -1229,7 +1229,7 @@ describe('HUD da Partida — Proteção no HUD (#225)', () => {
     await waitFor(() => expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'false'))
   })
 
-  it('delta ATAQUE_RESOLVIDO consome Proteção dos protegidos listados', async () => {
+  it('delta ATAQUE_RESOLVIDO consome Proteção dos protegidos listados (na chegada do slot)', async () => {
     const ws = await partidaComSnapshot(
       criarSnapshotBase({
         jogadores: [
@@ -1252,7 +1252,9 @@ describe('HUD da Partida — Proteção no HUD (#225)', () => {
         estadosAplicados: [],
       }),
     )
-    await waitFor(() => expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'false'))
+    // Nada consome na hora: a fatia do slot aplica na chegada (~1,25s).
+    expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'true')
+    await waitFor(() => expect(screen.getByTestId('hud-card-protecao')).toHaveAttribute('data-ativo', 'false'), { timeout: 3000 })
     expect(screen.queryByTestId('hud-estado-protecao')).not.toBeInTheDocument()
     const avatarAna = screen
       .getAllByTestId('hud-avatar-adversario')

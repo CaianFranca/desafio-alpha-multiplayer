@@ -62,6 +62,12 @@ describe('reidratação da sessão', () => {
   it('sessão expirada (401 no /me) mantém o estado de Visitante', async () => {
     mockApi([
       { url: '/api/auth/me', response: () => jsonResponse({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] }, 401) },
+      // Refresh também expirado: sem renovação, cai direto a Visitante.
+      {
+        url: '/api/auth/refresh',
+        method: 'POST',
+        response: () => jsonResponse({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] }, 401),
+      },
     ])
     renderApp()
 
@@ -83,7 +89,14 @@ describe('reidratação da sessão', () => {
 
 describe('rotas protegidas', () => {
   it('redireciona visitante para /login com mensagem orientativa', async () => {
-    mockApi([{ url: '/api/auth/me', response: () => jsonResponse({}, 401) }])
+    mockApi([
+      { url: '/api/auth/me', response: () => jsonResponse({}, 401) },
+      {
+        url: '/api/auth/refresh',
+        method: 'POST',
+        response: () => jsonResponse({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] }, 401),
+      },
+    ])
     renderApp(['/salas/criar'])
 
     expect(await screen.findByRole('heading', { name: /^entrar$/i })).toBeInTheDocument()
@@ -108,9 +121,26 @@ describe('rotas protegidas', () => {
 
 describe('sessão expirada durante o uso', () => {
   it('401 em chamada de API devolve o Jogador ao estado de Visitante', async () => {
+    let me = 0
     mockApi([
-      { url: '/api/auth/me', response: () => jsonResponse(jogador) },
+      // Sessão morta de forma consistente: só a reidratação inicial encontra
+      // o Jogador; a sonda crua do caminho `invalida` (slide-session, review
+      // PR #383) também recebe 401 e confirma a morte — um /me sempre-200
+      // diria "sessão viva" e seguraria o logout como transitório.
+      {
+        url: '/api/auth/me',
+        response: () => {
+          me += 1
+          return me === 1 ? jsonResponse(jogador) : jsonResponse({}, 401)
+        },
+      },
       { url: '/api/salas', response: () => jsonResponse({}, 401) },
+      // Refresh expirado: o 401 confirma a morte da Sessão → Visitante.
+      {
+        url: '/api/auth/refresh',
+        method: 'POST',
+        response: () => jsonResponse({ erros: [{ mensagem: 'Sessão inválida ou expirada.' }] }, 401),
+      },
     ])
     renderApp()
 

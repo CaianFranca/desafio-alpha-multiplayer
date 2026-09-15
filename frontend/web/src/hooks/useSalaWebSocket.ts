@@ -9,6 +9,8 @@ import type {
 import { normalizarCodigoDeSala } from '../utils/codigoDeSala'
 import { mensagemDeErroDoEncaminhamento } from '../api/encaminhamento'
 import { baseDoApp } from '../api/basePath'
+import { refreshSession } from '../api/auth'
+import { agendarReconexaoComSlide } from './agendarReconexaoComSlide'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -231,6 +233,11 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   const [expulso, setExpulso] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
+  // Guarda de montagem (review PR #383, bloqueante 3): o `onclose` aguarda o
+  // assentamento do refresh antes de reconectar; se o efeito reexecutar ou o
+  // componente desmontar durante o `await`, o `conectar()` com closure antiga
+  // abriria uma conexão órfã — espelha o `montadoRef` de usePartidaWebSocket.
+  const montadoRef = useRef(true)
   const salaRef = useRef<Sala | null>(null)
   // Avisos auto-dismiss: guarda os timers por instância para limpar no unmount.
   const avisoTimersRef = useRef<number[]>([])
@@ -313,6 +320,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     wsRef.current = ws
 
     ws.onopen = () => {
+      if (!montadoRef.current) return
       setConectado(true)
       setErro(null)
       // Drena comandos enfileirados enquanto o socket estava conectando.
@@ -331,19 +339,18 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
     }
 
     ws.onclose = () => {
+      if (!montadoRef.current) return
       setConectado(false)
       wsRef.current = null
-      // Reconexão simples após 1s se ainda montado
-      if (reconnectTimerRef.current === null) {
-        reconnectTimerRef.current = window.setTimeout(() => {
-          reconnectTimerRef.current = null
-          // eslint-disable-next-line react-hooks/immutability -- chamada recursiva após declaração, segura em runtime
-          conectar()
-        }, 1000)
-      }
+      // Reconexão simples após 1s se ainda montado, com a Sessão renovada
+      // antes (issue #376, review PR #383): gate compartilhado em
+      // `agendarReconexaoComSlide` (simetria com usePartidaWebSocket).
+      // eslint-disable-next-line react-hooks/immutability -- chamada recursiva após declaração, segura em runtime
+      agendarReconexaoComSlide(reconnectTimerRef, montadoRef, refreshSession(), conectar)
     }
 
     ws.onerror = () => {
+      if (!montadoRef.current) return
       setErro('Erro de conexão')
     }
 
@@ -527,6 +534,7 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
   }, [adicionarAviso, jogadorId, sincronizarEncaminhamentoDoSnapshot])
 
   useEffect(() => {
+    montadoRef.current = true
     // Ativação em sessão corrente (issue #340): o modo pode ser ativado com o
     // socket já aberto — envia o controle no instante da ativação (ou enfileira
     // se o socket ainda conecta). Uma única assinatura por montagem: lê o
@@ -585,12 +593,14 @@ export function useSalaWebSocket(jogadorId?: string): UseSalaWebSocketReturn {
       expulsoRef.current = false
       saiuRef.current = false
       return () => {
+        montadoRef.current = false
         desinscreverAtivacao()
         desinscreverDesativacao()
       }
     }
     conectar()
     return () => {
+      montadoRef.current = false
       desinscreverAtivacao()
       desinscreverDesativacao()
       if (reconnectTimerRef.current !== null) {

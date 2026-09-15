@@ -28,6 +28,7 @@ import type {
   PecaCorrente,
   EstadoExibicaoTabuleiro,
 } from '../tabuleiro/contrato'
+import type { EstadoVisualDoAtaque } from '../tabuleiro/ataque'
 import type { VooDoPeaoPendente } from '../tabuleiro/vooDoPeao'
 import { deveSuprimirPeaoNaMesa } from '../tabuleiro/vooDoPeao'
 
@@ -159,6 +160,12 @@ interface AmbienteCenaProps {
    * afetado, em todas as posições (célula/fileira/voo).
    */
   emBaixaIluminacaoPorPeaoId?: ReadonlySet<PeaoId>
+  /**
+   * Estado visual do ataque (issue #385, follow-up): prop única (peça em
+   * telegraph + reações do alcance + peça em disparo) — tudo null fora do
+   * slot ativo (apaga sem marcas).
+   */
+  estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -199,6 +206,7 @@ export function AmbienteCena({
   encaixeTrigger = null,
   onFimEncaixe,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
+  estadoVisualDoAtaque = null,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
@@ -252,6 +260,7 @@ export function AmbienteCena({
               vooPendente={vooPendente}
               onVooAterrissou={onVooAterrissou}
               ocultarPecaId={pecaEmVooId}
+              estadoVisualDoAtaque={estadoVisualDoAtaque}
               emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
               ordemDeChegadaPorChave={estadoExibicao.ordemDeChegadaPorChave}
               quantidadeDePeoes={estadoExibicao.peoes.length}

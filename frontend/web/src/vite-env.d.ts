@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_AUTH_MOCK?: string
+  /** Espelho de SESSION_ACCESS_TTL_SECONDS do servidor (slide-session, #376). */
+  readonly VITE_SESSION_ACCESS_TTL_SECONDS?: string
 }
 
 interface ImportMeta {

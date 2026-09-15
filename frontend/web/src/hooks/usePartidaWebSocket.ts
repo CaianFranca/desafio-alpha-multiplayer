@@ -11,10 +11,11 @@
  * não reagenda reconexão e sinaliza `onPartidaNaoIniciada`. A
  * `ADMISSAO_REJEITADA` com `PARTIDA_NAO_ENCONTRADA` só é terminal no retry
  * pós-não-início (após o close 4000); sem esse contexto, é falha com retry.
- * Trata apenas `ADMISSAO_ACEITA`
- * (sinaliza que a partida ficou disponível) e eventos da partida
- * (`EventoDoCanalDaPartida` via callback — tabuleiro, peões/ciclo, turnos
- * (ST-11) e iluminação/limpeza da issue #151); mensagens desconhecidas são
+*  Trata apenas `ADMISSAO_ACEITA`
+ *  (sinaliza que a partida ficou disponível) e eventos da partida
+ *  (`EventoDoCanalDaPartida` via callback — tabuleiro, peões/ciclo, turnos
+ *  (ST-11), iluminação/limpeza da issue #151 e chat da Partida #390/#389);
+ *  mensagens desconhecidas são
  * ignoradas (o socket pode receber PING/PONG ou eventos fora do escopo da
  * ST-09/10/11 sem quebrar o cliente).
  */
@@ -31,6 +32,7 @@ import type {
   TurnoIniciadoEvento,
   CelulasIluminadasWireEvento,
   LimpezaAplicadaWireEvento,
+  MensagemDeChatDaPartidaEvento,
   PartidaIniciadaEvento,
   EstadoDaPartidaEvento,
   PecaSorteadaEvento,
@@ -39,8 +41,12 @@ import type {
   AtaqueResolvidoWireEvento,
   ResgateRealizadoWireEvento,
   DesistenciaRegistradaWireEvento,
+  JogadorEmReconexaoWireEvento,
+  JogadorReconectadoWireEvento,
 } from '@flicker/shared'
 import { buildGameWsUrl } from '../api/encaminhamento'
+import { refreshSession } from '../api/auth'
+import { agendarReconexaoComSlide } from './agendarReconexaoComSlide'
 import {
   aoAtivarModo,
   aoDesativarModo,
@@ -51,11 +57,12 @@ import {
 
 /**
  * Eventos que o canal da Partida entrega à página (issue #156): tabuleiro
- * (ST-09), peões (ST-10), os três eventos de turno (ST-11), iluminação/
- * limpeza (issue #151), snapshot (PARTIDA_INICIADA/ESTADO_DA_PARTIDA),
- * monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO)
- * e desistência (issue #290 — DESISTENCIA_REGISTRADA)
- * agora roteados exclusivamente pelo contrato de Partida.
+*  (ST-09), peões (ST-10), os três eventos de turno (ST-11), iluminação/
+ *  limpeza (issue #151), snapshot (PARTIDA_INICIADA/ESTADO_DA_PARTIDA),
+ *  monstros/estados (ST-15, issue #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO),
+ *  desistência (issue #290 — DESISTENCIA_REGISTRADA) e mensagens de chat
+ *  (issue #390/#389 — MENSAGEM_DE_CHAT_DA_PARTIDA)
+ *  agora roteados exclusivamente pelo contrato de Partida.
  */
 export type EventoDoCanalDaPartida =
   | TabuleiroEventoDoServidor
@@ -65,6 +72,7 @@ export type EventoDoCanalDaPartida =
   | PosicaoConfirmadaEvento
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
+  | MensagemDeChatDaPartidaEvento
   | PecaSorteadaEvento
   | VagaDaPecaRecebidaEscolhidaEvento
   | PartidaIniciadaEvento
@@ -73,6 +81,8 @@ export type EventoDoCanalDaPartida =
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
   | DesistenciaRegistradaWireEvento
+  | JogadorEmReconexaoWireEvento
+  | JogadorReconectadoWireEvento
 
 export interface UsePartidaWebSocketReturn {
   conectar: () => void
@@ -85,6 +95,12 @@ export interface UsePartidaWebSocketReturn {
    * de desconectar.
    */
   enviar: (comando: PartidaComandoDoCliente) => 'enviado' | 'enfileirado'
+  /**
+   * Diz se o canal está com socket aberto agora (issue #389): o chat da
+   * Partida NÃO enfileira — sem conexão o envio falha localmente com
+   * feedback enxuto em vez de entrar na fila de pendentes do handshake.
+   */
+  estaConectado: () => boolean
   /**
    * Aguarda a conexão abrir até o teto (R2). Resolve `true` imediato se já
    * OPEN, `true` no próximo `open`, `false` no timeout ou no unmount. Sem
@@ -325,6 +341,9 @@ export function usePartidaWebSocket({
         case 'ATAQUE_RESOLVIDO':
         case 'RESGATE_REALIZADO':
         case 'DESISTENCIA_REGISTRADA':
+        case 'MENSAGEM_DE_CHAT_DA_PARTIDA':
+        case 'JOGADOR_EM_RECONEXAO':
+        case 'JOGADOR_RECONECTADO':
           // O grupo de cases acima é intencionalmente vazio (fall-through):
           // todos roteiam ao modelo no mesmo padrão (o motor é autoridade;
           // o cliente apenas espelha).
@@ -349,21 +368,20 @@ export function usePartidaWebSocket({
         onPartidaNaoIniciadaRef.current?.()
         return
       }
-      // Reconexão simples após 1s se ainda montado.
-      if (reconnectTimerRef.current === null) {
-        reconnectTimerRef.current = window.setTimeout(() => {
-          reconnectTimerRef.current = null
-          // eslint-disable-next-line react-hooks/immutability -- reconexão recursiva segura em runtime
-          conectar()
-        }, 1000)
-      }
+      // Reconexão simples após 1s se ainda montado, com a Sessão renovada
+      // antes (issue #376, review PR #383): gate compartilhado em
+      // `agendarReconexaoComSlide` — o refresh começa já (aproveita a janela
+      // de 1s) e a reconexão aguarda o assentamento.
+      // eslint-disable-next-line react-hooks/immutability -- reconexão recursiva segura em runtime
+      agendarReconexaoComSlide(reconnectTimerRef, montadoRef, refreshSession(), conectar)
     }
 
     ws.onerror = () => {
       if (!montadoRef.current) return
       // Falha de conexão não deve reconectar sozinha — exibe tela de falha
-      // até retry manual (PartidaPage.tentarNovamenteComConexao). Suprime o
-      // agendamento do onclose subsequente.
+      // até retry manual (PartidaPage.tentarNovamenteComConexao, que já renova
+      // a Sessão com `await` antes de reconectar). Suprime o agendamento do
+      // onclose subsequente.
       ws.onclose = null
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current)
@@ -442,6 +460,11 @@ export function usePartidaWebSocket({
     return 'enfileirado'
   }, [])
 
+  const estaConectado = useCallback((): boolean => {
+    const ws = wsRef.current
+    return ws !== null && ws.readyState === WebSocket.OPEN
+  }, [])
+
   const aguardarConexao = useCallback((timeoutMs?: number): Promise<boolean> => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(true)
@@ -470,5 +493,5 @@ export function usePartidaWebSocket({
     )
   }, [])
 
-  return { conectar, desconectar, enviar, aguardarConexao, removerPendentesPorTipo }
+  return { conectar, desconectar, enviar, estaConectado, aguardarConexao, removerPendentesPorTipo }
 }
