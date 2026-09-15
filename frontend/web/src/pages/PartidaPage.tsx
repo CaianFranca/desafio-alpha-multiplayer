@@ -36,6 +36,10 @@ import {
 } from '../game/tabuleiro/vooDoPeao'
 import type { VooDoPeaoPendente } from '../game/tabuleiro/vooDoPeao'
 import { usePartidaWebSocket } from '../hooks/usePartidaWebSocket'
+import { CODIGOS_DE_RECUSA_DO_CHAT } from '../hooks/useChatDaPartida'
+import type { CodigoDeRecusaDoChat } from '../hooks/useChatDaPartida'
+import { PainelDeChatDaPartida } from '../components/partida/PainelDeChatDaPartida'
+import type { PainelDeChatDaPartidaHandle } from '../components/partida/PainelDeChatDaPartida'
 import { definirFase } from '../utils/coletorDeDepuracao'
 import { useRequerModoPaisagem } from '../hooks/useModoPaisagemCelular'
 import { OverlayModoPaisagem } from '../components/partida/OverlayModoPaisagem'
@@ -68,7 +72,9 @@ import type {
   ConfirmarPosicaoDoPeaoComando,
   DesistirDaPartidaComando,
   EncerrarTurnoComando,
+  ErroDoTabuleiroEvento,
   EstadoDaPartidaSnapshot,
+  MensagemDeChatDaPartidaEvento,
   LimpezaAplicadaWireEvento,
   PartidaComandoDoCliente,
   PeaoComandoDoCliente,
@@ -541,14 +547,46 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // snapshot limpam). Ref estável, fora do modelo (nunca persiste).
   const pendentesEmVoo = useRef<Set<string>>(new Set())
 
+  // ── Roteamento do chat (issue #389) ──
+  // O hook do canal é construído antes do painel do chat e o `onEvento` é
+  // passado na CONSTRUÇÃO do socket — para quebrar a circularidade, o
+  // direcionamento vive em refs que delegam ao handle imperativo do
+  // `PainelDeChatDaPartida` (dono do `useChatDaPartida`, isolado da página
+  // para mensagens não re-renderizarem a cena — bloqueante 1 da review #401).
+  // O callback do canal permanece estável (sem re-subscrição) e só lê o
+  // destinatário na chegada do evento. `chatAbertoRef` alimenta o gate de
+  // teclado da cena, lido DENTRO do `onKey` (sem `chatAberto` nas deps).
+  const aoEventoDeChatRef = useRef<(evento: MensagemDeChatDaPartidaEvento) => void>(() => {})
+  const aoErroDeChatRef = useRef<(evento: ErroDoTabuleiroEvento) => void>(() => {})
+  const hidratarHistoricoDoChatRef = useRef<
+    (historico: readonly MensagemDeChatDaPartidaEvento[] | undefined | null) => void
+  >(() => {})
+  const painelDeChatRef = useRef<PainelDeChatDaPartidaHandle | null>(null)
+  const chatAbertoRef = useRef(false)
+  // Espelho de `chatAbertoRef` só para o `inert` declarativo da cena: abre/fecha
+  // (raro) re-renderiza a página, mas mensagem/cooldown (frequente) seguem
+  // isolados no container — B1 preservado. O gate de teclado segue lendo a ref.
+  const [chatAbertoParaInert, setChatAbertoParaInert] = useState(false)
+  const aoMudarAberturaDoChat = useCallback((aberto: boolean) => {
+    chatAbertoRef.current = aberto
+    setChatAbertoParaInert(aberto)
+  }, [])
+
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
-  const { enviar, conectar: reconectarSocket, desconectar, aguardarConexao, removerPendentesPorTipo } = usePartidaWebSocket({
+  const { enviar, estaConectado, conectar: reconectarSocket, desconectar, aguardarConexao, removerPendentesPorTipo } = usePartidaWebSocket({
     serverId,
     partidaId,
     onEvento: useCallback(
       (evento) => {
         // Após o não-início, ignora eventos tardios (terminal) — via ref para evitar stale closure
         if (emNaoInicioRef.current) return
+        // Chat (issue #389, contrato #390): mensagens não tocam o modelo —
+        // rota direta ao painel. Vale em andamento E após o Resultado até a
+        // saída individual; nunca na preparada (o servidor recusa lá).
+        if (evento.type === 'MENSAGEM_DE_CHAT_DA_PARTIDA') {
+          aoEventoDeChatRef.current(evento)
+          return
+        }
         // Consumo dos pendentes otimistas (#249): ack remove o alvo em voo;
         // erro e snapshot reconciliam (autoridade total — limpam).
         if (
@@ -561,6 +599,20 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           consumirAck(pendentesEmVoo.current, evento)
         }
         if (evento.type === 'ERRO_DO_TABULEIRO') {
+          // Recusas do chat (issue #389): rota própria do painel, em
+          // silêncio — fora dos pendentes em voo (#249) e do tratamento
+          // genérico de recusa (motivoDeRecusaDoEvento já as ignora).
+          if (CODIGOS_DE_RECUSA_DO_CHAT.includes(evento.codigo as CodigoDeRecusaDoChat)) {
+            aoErroDeChatRef.current(evento)
+            return
+          }
+          // Desistente fora do roster (R1): sem reenvio de desistência
+          // pendente, o JOGADOR_NAO_NA_PARTIDA é feedback do painel (o caso
+          // com pendência cai no ramo silencioso R2 abaixo — ele já sabe).
+          if (evento.codigo === 'JOGADOR_NAO_NA_PARTIDA' && !reenvioPendenteRef.current) {
+            aoErroDeChatRef.current(evento)
+            return
+          }
           pendentesEmVoo.current.clear()
         }
         if (evento.type === 'TURNO_INICIADO' || evento.type === 'TURNO_ENCERRADO') {
@@ -607,6 +659,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           notificarSnapshot()
           cancelarAtaque()
           aplicarSnapshotNoModelo(evento.snapshot)
+          // Semente do histórico do chat (#388, fronteira do #389): tabuleiro
+          // + chat do mesmo instante, sem replay separado. Ausente (binário
+          // anterior ao #388) ≡ [] — no-op dentro do hook.
+          hidratarHistoricoDoChatRef.current(evento.snapshot.historicoDeChat)
           if (deveLimparVooNoSnapshot(evento)) setVooPendente(null)
           // Reconciliação do indicador de reconexão (#294): o snapshot é autoridade.
           // Se o snapshot não contém ninguém em `em_reconexao` ou o jogador do
@@ -1224,6 +1280,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     desconectarRef.current = desconectar
   }, [desconectar])
 
+  // ── Chat da partida (issue #389) ──
+  // O painel envia SÓ com socket OPEN (nunca enfileira o chat: o comando não
+  // pode "pegar carona" no drain do handshake). O estado mora no
+  // `PainelDeChatDaPartida` (bloqueante 1): a página só delega eventos ao
+  // handle imperativo — nenhum `setState` do chat re-renderiza a página/cena.
+  useEffect(() => {
+    aoEventoDeChatRef.current = (evento) => painelDeChatRef.current?.receberMensagem(evento)
+    aoErroDeChatRef.current = (evento) => painelDeChatRef.current?.receberRecusa(evento)
+    hidratarHistoricoDoChatRef.current = (historico) =>
+      painelDeChatRef.current?.receberHistorico(historico)
+  }, [])
+
   // Reenvio da desistência pendente (R2): "Sair mesmo assim" ou aba fechada
   // durante o "saindo" gravaram a pendência; ao (re)abrir a partida com o
   // mesmo jogador, reenviamos no primeiro open. Sem socket (upgrade recusado,
@@ -1714,6 +1782,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     if (!estadoEmAndamento) return
     const onKey = (e: KeyboardEvent) => {
+      // Block da cena (issue #389): com o painel do chat aberto o teclado é
+      // do chat — R/E/Espaço/Enter não operam o tabuleiro (o input já é
+      // filtrado pelo alvo acima; o resto da cena, não). Lido na ref DENTRO
+      // do handler (bloqueante 1): sem `aberto` nas deps, o chat não
+      // re-subscreve este effect a cada mensagem.
+      if (chatAbertoRef.current) return
       const alvo = e.target as HTMLElement | null
       if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA')) return
       if (e.key === 'r' || e.key === 'R') girar('horario')
@@ -1848,6 +1922,19 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           : ''}
       </div>
       <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
+      {/*
+        Cena interativa isolada para o `inert` do chat (review #401): com o
+        painel aberto em andamento, atalho/foco programático fora da lista do
+        gate (R/E/Espaço/Enter) não alcança o tabuleiro — backdrop bloqueia o
+        ponteiro, trap de Tab + gate bloqueiam o teclado comum, `inert`
+        bloqueia o resto. HUD e chat ficam FORA deste wrapper de propósito:
+        no compacto o HUD essencial (SAIR) segue clicável (drawer, Spec [5]);
+        no Resultado nunca há `inert` (B3, `bloqueiaCena=false`).
+      */}
+      <div
+        data-testid="cena-interativa"
+        inert={chatAbertoParaInert && estadoEmAndamento}
+      >
       <AmbienteDeJogo
         bordaPx={bordaPx}
         estadoExibicao={estadoExibicao}
@@ -1868,6 +1955,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
         estadoVisualDoAtaque={estadoVisualDoAtaque}
       />
+      </div>
       {/*
         Coreografia do ataque (issue #385): overlay evento-driven da fila —
         só revela (cada fatia aplica na chegada do próprio slot); desmonta
@@ -1995,12 +2083,34 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           compacto={viewportCompacto}
         />
       ) : null}
+      {/*
+        Chat da partida (issue #389, contrato #390): irmão do HUD em andamento
+        E após o Resultado até a saída individual — bot de vitória/derrota e
+        conversa pós-jogo vivem aqui. Desmonta só em preparada/não-início.
+        Dono do estado isolado no container (bloqueante 1): mensagens não
+        re-renderizam a página/cena. `data-*` dos testes vivem no componente.
+      */}
+      {(estadoEmAndamento || emResultado) ? (
+        <PainelDeChatDaPartida
+          ref={painelDeChatRef}
+          partidaId={partidaId}
+          jogadorId={jogadorId}
+          estaConectado={estaConectado}
+          enviar={enviar}
+          descartarPendentesPorTipo={removerPendentesPorTipo}
+          jogadorPorId={modelo.jogadorPorId}
+          bloqueiaCena={estadoEmAndamento}
+          compacto={viewportCompacto}
+          aoMudarAbertura={aoMudarAberturaDoChat}
+        />
+      ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (
         // Botões de turno acima do card de Turno do HUD (inf-dir, #226;
         // contidos no compacto #230 com safe-area, sem sobrepor HUD/alvos).
         <div
           data-testid="controles-de-turno"
           data-compacto={viewportCompacto ? 'true' : 'false'}
+          inert={chatAbertoParaInert && estadoEmAndamento}
           style={
             viewportCompacto
               ? {
