@@ -24,6 +24,7 @@ import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { registrosDeBlipDoChat } from './helpers/mockAudio'
 import { VOLUME_BASE_SOM_DE_BLIP_DO_CHAT } from '../web/src/components/partida/somDeBlipDoChat'
+import { VOLUME_MASTER_PARTIDA } from '../web/src/components/partida/volumeMaster'
 import { HEX_COR_PEAO } from '../web/src/game/tabuleiro/contrato'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 
@@ -167,6 +168,21 @@ describe('Chat da Partida — mensagem própria, alheia e de bot (issue #389 [1]
     // Mensagens de terceiros com o painel aberto não viram não lidas.
     expect(screen.queryByTestId('chat-badge')).not.toBeInTheDocument()
   })
+
+  it('id fora do roster cai em branco sem quebrar; destaque âmbar é só sessão local', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByTestId('chat-botao'))
+
+    act(() => {
+      ws.simulateMessage(mensagemDeChat('jogador-fantasma', 'Ghost', 'boo', '2026-09-14T14:08:00Z'))
+    })
+
+    const mensagens = screen.getAllByTestId('chat-mensagem')
+    expect(mensagens).toHaveLength(1)
+    expect(mensagens[0]).toHaveAttribute('data-jogador-id', 'jogador-fantasma')
+    expect(mensagens[0]).toHaveAttribute('data-propria', 'false')
+    expect(within(mensagens[0]).getByText('Ghost')).toHaveStyle({ color: HEX_COR_PEAO.branco })
+  })
 })
 
 describe('Chat da Partida — badge e blip (issue #389 [2])', () => {
@@ -195,9 +211,9 @@ describe('Chat da Partida — badge e blip (issue #389 [2])', () => {
     })
     expect(screen.getByTestId('chat-badge')).toHaveTextContent('4')
 
-    // Contrato de volume (ADR-0007): ganho = master (1) * VOLUME_BASE.
+    // Contrato de volume (ADR-0007): ganho = master * VOLUME_BASE.
     expect(registrosDeBlipDoChat).toHaveLength(2)
-    expect(registrosDeBlipDoChat[0]?.ganho).toBe(VOLUME_BASE_SOM_DE_BLIP_DO_CHAT)
+    expect(registrosDeBlipDoChat[0]?.ganho).toBe(VOLUME_MASTER_PARTIDA * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT)
 
     // Abrir zera o badge; fechar e receber nova mensagem reacende com 1.
     await userEvent.click(screen.getByTestId('chat-botao'))
@@ -258,6 +274,30 @@ describe('Chat da Partida — block da cena (issue #389 [3])', () => {
       expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-2'),
     )
     expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
+  })
+
+  it('cena fica inert com o painel aberto em andamento; fecha libera, Resultado nunca trava', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+
+    // Fechado: cena livre.
+    expect(screen.getByTestId('cena-interativa')).not.toHaveAttribute('inert')
+
+    // Aberto em andamento: cena + turnos inert, chat fora do wrapper segue vivo.
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    expect(screen.getByTestId('cena-interativa')).toHaveAttribute('inert')
+    expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
+
+    // Fechar libera.
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByTestId('chat-painel')).not.toBeInTheDocument()
+    expect(screen.getByTestId('cena-interativa')).not.toHaveAttribute('inert')
+
+    // Resultado: mesmo aberto, sem inert (overlay precisa seguir clicável).
+    await userEvent.click(screen.getByTestId('chat-botao'))
+    act(() => ws.simulateMessage({ type: 'PARTIDA_TERMINADA', resultado: 'vitoria' }))
+    expect(screen.getByTestId('chat-painel')).toBeInTheDocument()
+    expect(screen.getByTestId('cena-interativa')).not.toHaveAttribute('inert')
+    expect(screen.queryByTestId('chat-backdrop')).not.toBeInTheDocument()
   })
 })
 

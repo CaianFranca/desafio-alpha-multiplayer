@@ -430,8 +430,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   >(() => {})
   const painelDeChatRef = useRef<PainelDeChatDaPartidaHandle | null>(null)
   const chatAbertoRef = useRef(false)
+  // Espelho de `chatAbertoRef` só para o `inert` declarativo da cena: abre/fecha
+  // (raro) re-renderiza a página, mas mensagem/cooldown (frequente) seguem
+  // isolados no container — B1 preservado. O gate de teclado segue lendo a ref.
+  const [chatAbertoParaInert, setChatAbertoParaInert] = useState(false)
   const aoMudarAberturaDoChat = useCallback((aberto: boolean) => {
     chatAbertoRef.current = aberto
+    setChatAbertoParaInert(aberto)
   }, [])
 
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
@@ -1564,6 +1569,19 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           : ''}
       </div>
       <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
+      {/*
+        Cena interativa isolada para o `inert` do chat (review #401): com o
+        painel aberto em andamento, atalho/foco programático fora da lista do
+        gate (R/E/Espaço/Enter) não alcança o tabuleiro — backdrop bloqueia o
+        ponteiro, trap de Tab + gate bloqueiam o teclado comum, `inert`
+        bloqueia o resto. HUD e chat ficam FORA deste wrapper de propósito:
+        no compacto o HUD essencial (SAIR) segue clicável (drawer, Spec [5]);
+        no Resultado nunca há `inert` (B3, `bloqueiaCena=false`).
+      */}
+      <div
+        data-testid="cena-interativa"
+        inert={chatAbertoParaInert && estadoEmAndamento}
+      >
       <AmbienteDeJogo
         bordaPx={bordaPx}
         estadoExibicao={estadoExibicao}
@@ -1583,6 +1601,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
       />
+      </div>
       <PartidaOverlays estado={estado} resultado={resultado} motivo={motivo} onRetry={tentarNovamenteComConexao} onVoltar={voltarASala} semRetry={desistiu} />
       {/*
         Anúncio de recusa restrito a leitores de tela (issue #228, história 8):
@@ -1684,6 +1703,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         <div
           data-testid="controles-de-turno"
           data-compacto={viewportCompacto ? 'true' : 'false'}
+          inert={chatAbertoParaInert && estadoEmAndamento}
           style={
             viewportCompacto
               ? {

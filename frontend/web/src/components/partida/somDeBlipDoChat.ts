@@ -13,7 +13,9 @@
  * Falhas de áudio (autoplay/bloqueios) viram no-op silencioso.
  */
 
-/** Volume base do blip (ADR-0007: `master * VOLUME_BASE`, master padrão 1). */
+import { VOLUME_MASTER_PARTIDA } from './volumeMaster'
+
+/** Volume base do blip (ADR-0007: `master * VOLUME_BASE`, master em `volumeMaster`). */
 export const VOLUME_BASE_SOM_DE_BLIP_DO_CHAT = 0.15
 
 /** Frequência do blip (Hz) — tom curto e discreto, abaixo do estridente. */
@@ -61,9 +63,9 @@ export function tocarBlipDoChat(): void {
     const ganho = contexto.createGain()
     oscilador.type = 'sine'
     oscilador.frequency.value = FREQUENCIA_DO_BLIP_HZ
-    // Contrato de volume (ADR-0007): base fixa; o futuro botão de volume
-    // aplica `ganho = master * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT`.
-    ganho.gain.value = 1 * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT
+    // Contrato de volume (ADR-0007): `ganho = master * VOLUME_BASE`; o
+    // futuro botão de volume controla só o master (`volumeMaster`).
+    ganho.gain.value = VOLUME_MASTER_PARTIDA * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT
     oscilador.connect(ganho)
     ganho.connect(contexto.destination)
     oscilador.start()

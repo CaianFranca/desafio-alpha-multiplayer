@@ -5,7 +5,11 @@
  * expansível ancorado à direita sob o sistema do HUD: histórico rolável com
  * hora HH:MM e apelido na cor do peão por mensagem (humanas e de bot
  * renderizadas igual — a cor vem do roster `jogadorPorId`, a identidade do
- * bot também vive lá) e input com contador do limite.
+ * bot também vive lá; id fora do roster cai em branco como fallback de
+ * corrida, sem quebrar) e input com contador do limite. O destaque âmbar
+ * (`data-propria`) é só sessão local, não tipo de autor. Fechado ≡
+ * minimizado da spec: sem estado minimizado separado, o sinal de mensagem
+ * nova com painel fechado é badge + blip.
  *
  * Block da cena: com o painel aberto EM ANDAMENTO um backdrop cobre a tela
  * engolindo cliques (Escape, clique no backdrop ou no botão fecham e devolvem

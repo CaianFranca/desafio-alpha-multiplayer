@@ -287,19 +287,19 @@ export function useChatDaPartida({
     (conteudo: string): boolean => {
       const texto = conteudo.trim()
       if (texto.length === 0) {
-        setRecusa('Escreva uma mensagem antes de enviar.')
+        setRecusa(mensagemDaRecusa('MENSAGEM_VAZIA'))
         agendarLimpezaDaRecusa()
         return false
       }
       if (texto.length > LIMITE_DE_CARACTERES_DO_CHAT) {
-        setRecusa('Mensagem longa demais para o chat.')
+        setRecusa(mensagemDaRecusa('MENSAGEM_LONGA_DEMAIS'))
         agendarLimpezaDaRecusa()
         return false
       }
       const emCooldown =
         cooldownAteRef.current !== null && cooldownAteRef.current > Date.now()
       if (emCooldown) {
-        setRecusa('Muitas mensagens em pouco tempo. Aguarde para enviar de novo.')
+        setRecusa(mensagemDaRecusa('LIMITE_DE_MENSAGENS'))
         agendarLimpezaDaRecusa()
         return false
       }

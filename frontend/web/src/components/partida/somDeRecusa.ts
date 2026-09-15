@@ -23,6 +23,7 @@
 
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
 import { comBase } from '../../api/basePath'
+import { VOLUME_MASTER_PARTIDA } from './volumeMaster'
 
 /** Asset de recusa (web/media → servido em /media/), já com o subpath do build. */
 export const CAMINHO_SOM_DE_RECUSA = comBase('/media/bumpintowall.mp3')
@@ -112,9 +113,9 @@ export function motivoDeRecusaDoEvento(
 export function tocarSomDeRecusa(motivo: MotivoDeRecusa): void {
   try {
     const audio = new Audio(SOM_POR_MOTIVO[motivo])
-    // Contrato de volume (ADR-0007): base fixa; o futuro botão de volume
-    // aplica `audio.volume = master * VOLUME_BASE_SOM_DE_RECUSA`.
-    audio.volume = VOLUME_BASE_SOM_DE_RECUSA
+    // Contrato de volume (ADR-0007): `audio.volume = master * VOLUME_BASE`;
+    // o futuro botão de volume controla só o master (`volumeMaster`).
+    audio.volume = VOLUME_MASTER_PARTIDA * VOLUME_BASE_SOM_DE_RECUSA
     const tocando: unknown = audio.play()
     // jsdom não implementa play(): retorna undefined em vez de Promise.
     if (
