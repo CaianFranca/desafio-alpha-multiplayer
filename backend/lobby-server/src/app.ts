@@ -24,8 +24,10 @@ export interface CreateAppOpcoes {
 export function createApp(opcoes: CreateAppOpcoes = {}): Express {
   const app = express();
 
-  // O nº de hops até o app depende do encadeamento admin→edge→app; sem isso o
-  // Express não enxerga o IP real do cliente atrás do proxy.
+  // O nº de hops até o app depende do encadeamento real: default 1
+  // (dev/Docker Compose: cliente→nginx→lobby); produção nativa define
+  // TRUST_PROXY_HOPS=3 (admin→edge→app). Sem isso o Express não enxerga o
+  // IP real do cliente atrás do proxy.
   app.set('trust proxy', getConfig().trustProxyHops);
 
   app.use(express.json({ limit: '10kb' }));

@@ -1,5 +1,5 @@
 // Limitador de tentativas sobre contadores no Redis. Cada item é uma chave
-// independente (ex.: por IP, por conta); INCR + EXPIRE precisam ser atômicos
+// independente (ex.: por IP, por Cadastro); INCR + EXPIRE precisam ser atômicos
 // para que a janela seja aplicada exatamente uma vez, sem corrida entre
 // requests concorrentes que criariam o contador sem TTL.
 

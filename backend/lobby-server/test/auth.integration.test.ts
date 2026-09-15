@@ -718,7 +718,7 @@ test('login: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP', async () => {
   await comEnv(
     {
       AUTH_RATE_LIMIT_MAX_POR_IP: '2',
-      AUTH_RATE_LIMIT_MAX_POR_CONTA: '100',
+      AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '100',
       AUTH_RATE_LIMIT_JANELA_SEGUNDOS: '900',
     },
     async () => {
@@ -742,14 +742,14 @@ test('login: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP', async () => {
   );
 });
 
-// --- 26. login: 429 por conta com IPs distintos ---
+// --- 26. login: 429 por Cadastro com IPs distintos ---
 
-test('login: 429 por conta quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_CONTA', async () => {
+test('login: 429 por Cadastro quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_CADASTRO', async () => {
   await comEnv(
-    { AUTH_RATE_LIMIT_MAX_POR_IP: '100', AUTH_RATE_LIMIT_MAX_POR_CONTA: '2' },
+    { AUTH_RATE_LIMIT_MAX_POR_IP: '100', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '2' },
     async () => {
       await comServidor(async (servidor) => {
-        const credenciais = { email: emailUnico('limite-conta'), senha: 'senha_dev_123' };
+        const credenciais = { email: emailUnico('limite-cadastro'), senha: 'senha_dev_123' };
 
         const primeira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, '203.0.113.21');
         const segunda = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, '203.0.113.22');
@@ -767,7 +767,7 @@ test('login: 429 por conta quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_
 // --- 27. register: 429 por IP ---
 
 test('register: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP', async () => {
-  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '2', AUTH_RATE_LIMIT_MAX_POR_CONTA: '100' }, async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '2', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '100' }, async () => {
     await comServidor(async (servidor) => {
       const ip = '203.0.113.31';
       const primeira = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido(), undefined, ip);
@@ -783,14 +783,14 @@ test('register: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP', async () =
   });
 });
 
-// --- 28. register: 429 por conta com IPs distintos ---
+// --- 28. register: 429 por Cadastro com IPs distintos ---
 
-test('register: 429 por conta quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_CONTA', async () => {
-  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '100', AUTH_RATE_LIMIT_MAX_POR_CONTA: '2' }, async () => {
+test('register: 429 por Cadastro quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_CADASTRO', async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '100', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '2' }, async () => {
     await comServidor(async (servidor) => {
       const corpo = {
         apelido: apelidoUnico('jogador'),
-        email: emailUnico('limite-conta-reg'),
+        email: emailUnico('limite-cadastro-reg'),
         senha: 'senha_dev_123',
       };
       const primeira = await postJson(servidor.baseUrl, '/api/auth/register', corpo, undefined, '203.0.113.41');
@@ -805,16 +805,16 @@ test('register: 429 por conta quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_P
   });
 });
 
-// --- 29. 429 não distingue conta existente de inexistente ---
+// --- 29. 429 não distingue Cadastro existente de inexistente ---
 
-test('login: 429 não distingue conta existente de inexistente', async () => {
+test('login: 429 não distingue Cadastro existente de inexistente', async () => {
   const existente = cadastroValido();
   await comServidor(async (servidor) => {
     const reg = await postJson(servidor.baseUrl, '/api/auth/register', existente);
     assert.equal(reg.status, 201);
   });
 
-  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '1', AUTH_RATE_LIMIT_MAX_POR_CONTA: '1' }, async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '1', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '1' }, async () => {
     const respostaExistente = await comServidor(async (servidor) => {
       const ip = '203.0.113.51';
       const credenciais = { email: existente.email, senha: 'senha_errada_999' };
@@ -844,7 +844,7 @@ test('login: 429 não distingue conta existente de inexistente', async () => {
 // --- 30. contador sobrevive a nova instância da aplicação (mesmo Redis) ---
 
 test('rate limit: contador persiste em nova instância da aplicação', async () => {
-  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '1', AUTH_RATE_LIMIT_MAX_POR_CONTA: '100' }, async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '1', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '100' }, async () => {
     const ip = '203.0.113.61';
     const credenciais = { email: emailUnico('persistente'), senha: 'senha_dev_123' };
 

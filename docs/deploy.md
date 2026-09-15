@@ -295,6 +295,9 @@ Detalhes relevantes:
     entrega a raiz. Em todos os casos
     encaminha Upgrade/Connection (WebSocket) e
     `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`.
+  - Há **3 proxies** entre o cliente e o lobby (proxy admin TLS → nginx edge:80
+    → nginx app:8080 → lobby), portanto em produção usa-se
+    `TRUST_PROXY_HOPS=3`; dev/Docker Compose (cliente→nginx→lobby) usa 1.
 - **Env de produção** (`/opt/flicker/env`) é gerado pelo workflow a cada
   deploy, com:
 
@@ -311,6 +314,7 @@ JWT_REFRESH_SECRET=<secret PROD_JWT_REFRESH_SECRET>
 LOBBY_PUBLIC_URL=<variable PROD_LOBBY_PUBLIC_URL>
 GAME_SERVER_ADVERTISE_HOST=127.0.0.1
 COOKIE_SECURE=true
+TRUST_PROXY_HOPS=3
 ```
 
 > **`GAME_SERVER_ADVERTISE_HOST=127.0.0.1`**: em prod nativa o lobby e o

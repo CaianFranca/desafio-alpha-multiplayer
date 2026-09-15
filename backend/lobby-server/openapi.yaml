@@ -294,7 +294,7 @@ components:
       description: |
         Excesso de tentativas de autenticação. A recusa é genérica e pode ser
         disparada tanto pelo limite de tentativas do IP quanto pelo limite de
-        tentativas da conta, sem revelar se o Cadastro existe. O header
+        tentativas do Cadastro, sem revelar se ele existe. O header
         `Retry-After` indica em quantos segundos uma nova tentativa é aceita.
       headers:
         Retry-After:
@@ -309,7 +309,7 @@ components:
             $ref: "#/components/schemas/ErroResponse"
           examples:
             excessoTentativas:
-              summary: Tentativas excedidas para o IP ou para a conta
+              summary: Tentativas excedidas para o IP ou para o Cadastro
               value:
                 erros:
                   - mensagem: Muitas tentativas. Tente novamente mais tarde.

@@ -120,23 +120,28 @@ function responderErroNaoAutorizado(res: Response): void {
 
 // --- helpers de rate limit de tentativas ---
 
-function ipDoCliente(req: Request): string {
-  return req.ip ?? req.socket.remoteAddress ?? 'desconhecido';
+function ipDoCliente(req: Request): string | null {
+  return req.ip ?? req.socket.remoteAddress ?? null;
 }
 
-function chavesDeLimite(req: Request, rota: 'login' | 'register', email: string): ItemLimite[] {
-  const { authRateLimitJanelaSegundos, authRateLimitMaxPorIp, authRateLimitMaxPorConta } = getConfig();
+function chavesDeLimite(ip: string, rota: 'login' | 'register', email: string): ItemLimite[] {
+  const { authRateLimitJanelaSegundos, authRateLimitMaxPorIp, authRateLimitMaxPorCadastro } = getConfig();
   const itens: ItemLimite[] = [
     {
-      chave: `auth:rate:ip:${ipDoCliente(req)}:${rota}`,
+      chave: `auth:rate:ip:${ip}:${rota}`,
       maximo: authRateLimitMaxPorIp,
       janelaSegundos: authRateLimitJanelaSegundos,
     },
   ];
-  if (email.length > 0) {
+  const emailNormalizado = normalizarEmail(email);
+  // Só limita por Cadastro quando o email tem formato válido: emails inválidos
+  // criariam chaves de cardinalidade livre. `user+tag@x.com` continua sendo um
+  // Cadastro distinto porque `normalizarEmail` (identidade de lookup) não
+  // canoniza plus-addressing — a chave espelha a identidade real do Cadastro.
+  if (emailNormalizado.length > 0 && validarFormatoEmail(emailNormalizado)) {
     itens.push({
-      chave: `auth:rate:conta:${normalizarEmail(email)}:${rota}`,
-      maximo: authRateLimitMaxPorConta,
+      chave: `auth:rate:cadastro:${emailNormalizado}:${rota}`,
+      maximo: authRateLimitMaxPorCadastro,
       janelaSegundos: authRateLimitJanelaSegundos,
     });
   }
@@ -146,6 +151,32 @@ function chavesDeLimite(req: Request, rota: 'login' | 'register', email: string)
 function responderExcessoDeTentativas(res: Response, retryAfterSegundos: number): void {
   res.setHeader('Retry-After', String(retryAfterSegundos));
   res.status(429).json({ erros: [{ mensagem: MENSAGEM_EXCESSO }] });
+}
+
+async function aplicarLimiteDeTentativas(
+  req: Request,
+  res: Response,
+  rota: 'login' | 'register',
+  email: string,
+): Promise<boolean> {
+  const ip = ipDoCliente(req);
+  if (ip === null) {
+    console.error(`[auth/${rota}] não foi possível determinar o IP do cliente`);
+    res.status(500).json({ erros: [{ mensagem: 'Erro interno do servidor.' }] });
+    return false;
+  }
+  try {
+    const limite = await consumirTentativas(chavesDeLimite(ip, rota, email));
+    if (limite.excedido) {
+      responderExcessoDeTentativas(res, limite.retryAfterSegundos);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error(`[auth/${rota}] rate limit error:`, error);
+    res.status(500).json({ erros: [{ mensagem: 'Erro interno do servidor.' }] });
+    return false;
+  }
 }
 
 // --- helpers de cookies de sessão ---
@@ -202,15 +233,7 @@ authRouter.post('/register', async (req: Request, res: Response): Promise<void> 
   const emailBruto = typeof body.email === 'string' ? body.email.trim() : '';
   const senhaBruta = typeof body.senha === 'string' ? body.senha : '';
 
-  try {
-    const limite = await consumirTentativas(chavesDeLimite(req, 'register', emailBruto));
-    if (limite.excedido) {
-      responderExcessoDeTentativas(res, limite.retryAfterSegundos);
-      return;
-    }
-  } catch (error) {
-    console.error('[auth/register] rate limit error:', error);
-    res.status(500).json({ erros: [{ mensagem: 'Erro interno do servidor.' }] });
+  if (!(await aplicarLimiteDeTentativas(req, res, 'register', emailBruto))) {
     return;
   }
 
@@ -299,15 +322,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
   const emailBruto = typeof body.email === 'string' ? body.email.trim() : '';
   const senhaBruta = typeof body.senha === 'string' ? body.senha : '';
 
-  try {
-    const limite = await consumirTentativas(chavesDeLimite(req, 'login', emailBruto));
-    if (limite.excedido) {
-      responderExcessoDeTentativas(res, limite.retryAfterSegundos);
-      return;
-    }
-  } catch (error) {
-    console.error('[auth/login] rate limit error:', error);
-    res.status(500).json({ erros: [{ mensagem: 'Erro interno do servidor.' }] });
+  if (!(await aplicarLimiteDeTentativas(req, res, 'login', emailBruto))) {
     return;
   }
 

@@ -15,7 +15,7 @@ type Campo =
   | 'trustProxyHops'
   | 'authRateLimitJanelaSegundos'
   | 'authRateLimitMaxPorIp'
-  | 'authRateLimitMaxPorConta';
+  | 'authRateLimitMaxPorCadastro';
 
 const DESCRITORES: ReadonlyArray<{
   readonly chave: string;
@@ -34,8 +34,8 @@ const DESCRITORES: ReadonlyArray<{
   },
   { chave: 'AUTH_RATE_LIMIT_MAX_POR_IP', campo: 'authRateLimitMaxPorIp', padrao: 30, piso: 1, teto: 100000 },
   {
-    chave: 'AUTH_RATE_LIMIT_MAX_POR_CONTA',
-    campo: 'authRateLimitMaxPorConta',
+    chave: 'AUTH_RATE_LIMIT_MAX_POR_CADASTRO',
+    campo: 'authRateLimitMaxPorCadastro',
     padrao: 10,
     piso: 1,
     teto: 100000,

@@ -20,7 +20,7 @@ export interface Config {
   trustProxyHops: number;
   authRateLimitJanelaSegundos: number;
   authRateLimitMaxPorIp: number;
-  authRateLimitMaxPorConta: number;
+  authRateLimitMaxPorCadastro: number;
   lobbyRetornoCallbackUrl: string;
   lobbyDesistenciaCallbackUrl: string;
   postgres: {
@@ -58,7 +58,7 @@ const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
 const DEFAULT_TRUST_PROXY_HOPS = 1;
 const DEFAULT_AUTH_RATE_LIMIT_JANELA_SEGUNDOS = 900;
 const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_IP = 30;
-const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CONTA = 10;
+const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CADASTRO = 10;
 /**
  * Teto do histórico de chat por Partida (issue #388): fonte única do default
  * 50 (faixa 1..200). `historico-chat.ts` importa este default em vez de
@@ -224,11 +224,11 @@ function parseAuthRateLimitMaxPorIp(raw: string | undefined): number {
   return parseInteiroComLimites(raw, DEFAULT_AUTH_RATE_LIMIT_MAX_POR_IP, 'AUTH_RATE_LIMIT_MAX_POR_IP', 1, 100000);
 }
 
-function parseAuthRateLimitMaxPorConta(raw: string | undefined): number {
+function parseAuthRateLimitMaxPorCadastro(raw: string | undefined): number {
   return parseInteiroComLimites(
     raw,
-    DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CONTA,
-    'AUTH_RATE_LIMIT_MAX_POR_CONTA',
+    DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CADASTRO,
+    'AUTH_RATE_LIMIT_MAX_POR_CADASTRO',
     1,
     100000,
   );
@@ -386,8 +386,8 @@ export function getConfig(): Config {
   const authRateLimitMaxPorIp = parseAuthRateLimitMaxPorIp(
     process.env.AUTH_RATE_LIMIT_MAX_POR_IP as string | undefined,
   );
-  const authRateLimitMaxPorConta = parseAuthRateLimitMaxPorConta(
-    process.env.AUTH_RATE_LIMIT_MAX_POR_CONTA as string | undefined,
+  const authRateLimitMaxPorCadastro = parseAuthRateLimitMaxPorCadastro(
+    process.env.AUTH_RATE_LIMIT_MAX_POR_CADASTRO as string | undefined,
   );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
@@ -471,7 +471,7 @@ export function getConfig(): Config {
     trustProxyHops,
     authRateLimitJanelaSegundos,
     authRateLimitMaxPorIp,
-    authRateLimitMaxPorConta,
+    authRateLimitMaxPorCadastro,
     lobbyRetornoCallbackUrl,
     lobbyDesistenciaCallbackUrl,
     postgres,
