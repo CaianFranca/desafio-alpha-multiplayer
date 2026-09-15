@@ -170,7 +170,7 @@ export async function verificarNaoInicioSeNecessario(redis: Redis, partidaId: st
   }
   try {
     globalBroadcaster?.fecharSocketsDeNaoInicio(partidaIdTyped, 4000, 'PARTIDA_NAO_INICIADA');
-  } catch {}
+  } catch (e) { console.warn('[nao-inicio] falha ao fechar sockets de não-início:', e); }
   cancelarNaoInicio(partidaIdTyped);
   if (notificarRetorno !== undefined) {
     const aviso: AvisoDeRetorno = {
@@ -246,7 +246,7 @@ export async function rearmarNaoInicioAposRestart(redis: Redis): Promise<void> {
             agendarNaoInicio(partida.partidaId, restante);
             reagendadas += 1;
           }
-        } catch {}
+        } catch (e) { console.warn('[nao-inicio] falha ao processar linha do rearme:', e); }
       }
       // Yield por lote: não monopoliza o event loop no boot com N partidas.
       await new Promise<void>((resolve) => setImmediate(resolve));

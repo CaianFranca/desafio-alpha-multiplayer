@@ -3,3 +3,5 @@
 // importe ioredis/@flicker/config. Ver comment da fronteira no índice.
 export * from './redis/gameServers.js';
 export * from './segurancaWs.js';
+export * from './securityLogger.js';
+export * from './requestId.js';
