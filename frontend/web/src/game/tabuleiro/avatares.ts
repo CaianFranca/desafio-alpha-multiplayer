@@ -91,6 +91,21 @@ export function fotoDoAvatarPorCor(cor: CorDoPeao): string | null {
   return fotoDoAvatarPorSlot(slotDoAvatar(cor))
 }
 
+/**
+ * Fiação da PartidaPage (issue #404): jogadorId → URL da foto derivada da
+ * cor do peão. Cores sem foto ficam fora do mapa (o HUD mantém as iniciais).
+ */
+export function montarImagemPorJogador(
+  jogadorPorId: Readonly<Record<string, { readonly cor: CorDoPeao }>>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [jogadorId, dados] of Object.entries(jogadorPorId)) {
+    const foto = fotoDoAvatarPorCor(dados.cor)
+    if (foto !== null) out[jogadorId] = foto
+  }
+  return out
+}
+
 /** Slot de um peão pela cor (índice em `CORES_DOS_PEOES`). */
 export function slotDoAvatar(cor: CorDoPeao): number {
   return CORES_DOS_PEOES.indexOf(cor)

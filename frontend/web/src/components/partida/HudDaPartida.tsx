@@ -104,9 +104,10 @@ function ConteudoDoAvatar({
 }) {
   // Falha de carregamento (issue #404): a URL com erro volta às iniciais na
   // cor do peão. Guarda a URL que falhou (não um booleano) para resetar
-  // automaticamente quando `imagemUrl` trocar.
+  // automaticamente quando `imagemUrl` trocar. Retorno a URL já falha mantém
+  // o fallback sem retentar (cache negativo intencional, evita loop de erro).
   const [urlComFalha, setUrlComFalha] = useState<string | null>(null)
-  const comFalha = imagemUrl !== null && imagemUrl === urlComFalha
+  const comFalha = imagemUrl != null && imagemUrl === urlComFalha
   if (imagemUrl && !comFalha) {
     return (
       <img

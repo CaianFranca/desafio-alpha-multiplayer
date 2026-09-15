@@ -14,6 +14,7 @@ import {
   FOTOS_DOS_AVATARES_POR_SLOT,
   fotoDoAvatarPorCor,
   fotoDoAvatarPorSlot,
+  montarImagemPorJogador,
   slotDoAvatar,
   temAvatarNoSlot,
 } from '../web/src/game/tabuleiro/avatares'
@@ -121,5 +122,20 @@ describe('avatares dos peões (issues #297, #300, #301 e #299)', () => {
     expect(fotoDoAvatarPorCor('vermelho')?.endsWith('enfermeira.png')).toBe(true)
     expect(fotoDoAvatarPorCor('azul')?.endsWith('janitor.png')).toBe(true)
     expect(fotoDoAvatarPorCor('amarelo')?.endsWith('paciente.png')).toBe(true)
+  })
+
+  it('fiação da PartidaPage (issue #404): jogadorId → foto pela cor do peão', () => {
+    const mapa = montarImagemPorJogador({
+      j1: { cor: 'branco' },
+      j2: { cor: 'vermelho' },
+      j3: { cor: 'azul' },
+      j4: { cor: 'amarelo' },
+    })
+    expect(Object.keys(mapa).sort()).toEqual(['j1', 'j2', 'j3', 'j4'])
+    expect(mapa.j1.endsWith('diretor.png')).toBe(true)
+    expect(mapa.j2.endsWith('enfermeira.png')).toBe(true)
+    expect(mapa.j3.endsWith('janitor.png')).toBe(true)
+    expect(mapa.j4.endsWith('paciente.png')).toBe(true)
+    expect(montarImagemPorJogador({})).toEqual({})
   })
 })
