@@ -17,6 +17,10 @@ export interface Config {
   partidaNaoInicioSegundos: number;
   partidaReconexaoEmAndamentoSegundos: number;
   partidaChatHistoricoMaximo: number;
+  trustProxyHops: number;
+  authRateLimitJanelaSegundos: number;
+  authRateLimitMaxPorIp: number;
+  authRateLimitMaxPorCadastro: number;
   lobbyRetornoCallbackUrl: string;
   lobbyDesistenciaCallbackUrl: string;
   postgres: {
@@ -59,6 +63,12 @@ const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
 const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
+const DEFAULT_TRUST_PROXY_HOPS = 1;
+const MINIMO_TRUST_PROXY_HOPS = 0;
+const MAXIMO_TRUST_PROXY_HOPS = 10;
+const DEFAULT_AUTH_RATE_LIMIT_JANELA_SEGUNDOS = 900;
+const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_IP = 30;
+const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CADASTRO = 10;
 /**
  * Teto do histórico de chat por Partida (issue #388): fonte única do default
  * 50 (faixa 1..200). `historico-chat.ts` importa este default em vez de
@@ -172,8 +182,8 @@ function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
 /**
  * Parser inteiro genérico dos TTLs de partida com faixa mínima/máxima:
  * devolve o valor quando inteiro dentro da faixa, senão o fallback (com warn
- * só quando a env veio definida mas inválida — ausente cai silenciosamente no
- * default, como os demais parsers deste módulo).
+ * só quando a env veio definida mas inválida — inclusive vazia; ausente cai
+ * silenciosamente no default, como os demais parsers deste módulo).
  */
 function parseInteiroComLimites(
   raw: string | undefined,
@@ -182,8 +192,9 @@ function parseInteiroComLimites(
   minimo: number,
   maximo?: number,
 ): number {
+  const vazio = raw !== undefined && raw.trim() === '';
   const parsed = Number(raw ?? fallback);
-  if (Number.isInteger(parsed) && parsed >= minimo && (maximo === undefined || parsed <= maximo)) {
+  if (!vazio && Number.isInteger(parsed) && parsed >= minimo && (maximo === undefined || parsed <= maximo)) {
     return parsed;
   }
   if (raw !== undefined) {
@@ -213,6 +224,34 @@ function parsePartidaChatHistoricoMaximo(raw: string | undefined): number {
     'PARTIDA_CHAT_HISTORICO_MAXIMO',
     MINIMO_PARTIDA_CHAT_HISTORICO_MAXIMO,
     MAXIMO_PARTIDA_CHAT_HISTORICO_MAXIMO,
+  );
+}
+
+function parseTrustProxyHops(raw: string | undefined): number {
+  return parseInteiroComLimites(raw, DEFAULT_TRUST_PROXY_HOPS, 'TRUST_PROXY_HOPS', MINIMO_TRUST_PROXY_HOPS, MAXIMO_TRUST_PROXY_HOPS);
+}
+
+function parseAuthRateLimitJanelaSegundos(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_AUTH_RATE_LIMIT_JANELA_SEGUNDOS,
+    'AUTH_RATE_LIMIT_JANELA_SEGUNDOS',
+    1,
+    86400,
+  );
+}
+
+function parseAuthRateLimitMaxPorIp(raw: string | undefined): number {
+  return parseInteiroComLimites(raw, DEFAULT_AUTH_RATE_LIMIT_MAX_POR_IP, 'AUTH_RATE_LIMIT_MAX_POR_IP', 1, 100000);
+}
+
+function parseAuthRateLimitMaxPorCadastro(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CADASTRO,
+    'AUTH_RATE_LIMIT_MAX_POR_CADASTRO',
+    1,
+    100000,
   );
 }
 
@@ -440,6 +479,16 @@ export function getConfig(): Config {
   const partidaChatHistoricoMaximo = parsePartidaChatHistoricoMaximo(
     process.env.PARTIDA_CHAT_HISTORICO_MAXIMO as string | undefined,
   );
+  const trustProxyHops = parseTrustProxyHops(process.env.TRUST_PROXY_HOPS as string | undefined);
+  const authRateLimitJanelaSegundos = parseAuthRateLimitJanelaSegundos(
+    process.env.AUTH_RATE_LIMIT_JANELA_SEGUNDOS as string | undefined,
+  );
+  const authRateLimitMaxPorIp = parseAuthRateLimitMaxPorIp(
+    process.env.AUTH_RATE_LIMIT_MAX_POR_IP as string | undefined,
+  );
+  const authRateLimitMaxPorCadastro = parseAuthRateLimitMaxPorCadastro(
+    process.env.AUTH_RATE_LIMIT_MAX_POR_CADASTRO as string | undefined,
+  );
   const wsOrigensPermitidas = parseWsOrigensPermitidas(
     process.env.WS_ORIGENS_PERMITIDAS as string | undefined,
     lobbyPublicUrl,
@@ -480,6 +529,18 @@ export function getConfig(): Config {
     }
     if (process.env.LOBBY_PUBLIC_URL === undefined) {
       throw new Error('LOBBY_PUBLIC_URL deve ser definido em produção');
+    }
+    const trustProxyHopsBruto = process.env.TRUST_PROXY_HOPS;
+    if (trustProxyHopsBruto === undefined || trustProxyHopsBruto.trim().length === 0) {
+      throw new Error('TRUST_PROXY_HOPS deve ser definido explicitamente em produção');
+    }
+    const trustProxyHopsNumero = Number(trustProxyHopsBruto);
+    if (
+      !Number.isInteger(trustProxyHopsNumero)
+      || trustProxyHopsNumero < MINIMO_TRUST_PROXY_HOPS
+      || trustProxyHopsNumero > MAXIMO_TRUST_PROXY_HOPS
+    ) {
+      throw new Error(`TRUST_PROXY_HOPS inválido em produção: "${trustProxyHopsBruto}"`);
     }
   }
 
@@ -529,6 +590,10 @@ export function getConfig(): Config {
     partidaNaoInicioSegundos,
     partidaReconexaoEmAndamentoSegundos,
     partidaChatHistoricoMaximo,
+    trustProxyHops,
+    authRateLimitJanelaSegundos,
+    authRateLimitMaxPorIp,
+    authRateLimitMaxPorCadastro,
     lobbyRetornoCallbackUrl,
     lobbyDesistenciaCallbackUrl,
     postgres,

@@ -116,6 +116,7 @@ test('WS_ORIGENS_PERMITIDAS sem env em produção não inclui o Vite local', () 
       JWT_SECRET: 'prod-jwt-secret',
       JWT_REFRESH_SECRET: 'prod-jwt-refresh-secret',
       POSTGRES_PASSWORD: 'prod-postgres-password',
+      TRUST_PROXY_HOPS: '3',
     },
     () => {
       assert.deepEqual(getConfig().wsOrigensPermitidas, ['https://host']);

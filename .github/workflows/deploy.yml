@@ -210,6 +210,9 @@ jobs:
             echo "JWT_SECRET=${PROD_JWT_SECRET}"
             echo "JWT_REFRESH_SECRET=${PROD_JWT_REFRESH_SECRET}"
             echo "LOBBY_PUBLIC_URL=${LOBBY_PUBLIC_URL}"
+            # Produção nativa tem 3 hops até o lobby (admin TLS → nginx edge →
+            # nginx app → lobby); o default do config (1) é só para dev/Docker Compose.
+            echo 'TRUST_PROXY_HOPS=3'
             # TLS terminado na borda (proxy do admin): o navegador aceita
             # cookie Secure, então mantemos o default seguro explicitamente.
             echo 'COOKIE_SECURE=true'

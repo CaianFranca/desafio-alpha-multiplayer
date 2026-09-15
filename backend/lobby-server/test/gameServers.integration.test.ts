@@ -197,13 +197,16 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
   const refreshOrig = process.env.JWT_REFRESH_SECRET;
   const pgOrig = process.env.POSTGRES_PASSWORD;
   const lobbyOrig = process.env.LOBBY_PUBLIC_URL;
+  const trustProxyOrig = process.env.TRUST_PROXY_HOPS;
   // Usa secrets temporários para não depender do .env do dev. Em produção,
-  // getConfig() valida JWT_REFRESH_SECRET / POSTGRES_PASSWORD / LOBBY_PUBLIC_URL
-  // (packages/config/src/index.ts:219-232); sem eles o teste falha em checkout limpo.
+  // getConfig() valida JWT_REFRESH_SECRET / POSTGRES_PASSWORD / LOBBY_PUBLIC_URL /
+  // TRUST_PROXY_HOPS (packages/config/src/index.ts); sem eles o teste falha em
+  // checkout limpo.
   process.env.JWT_SECRET = `test-secret-${Date.now()}`;
   process.env.JWT_REFRESH_SECRET = `test-refresh-${Date.now()}`;
   process.env.POSTGRES_PASSWORD = `test-pg-${Date.now()}`;
   process.env.LOBBY_PUBLIC_URL = 'http://localhost:3000';
+  process.env.TRUST_PROXY_HOPS = '1';
   process.env.NODE_ENV = 'production';
   // força recriação do app com novo NODE_ENV
   appServidor = createApp();
@@ -262,6 +265,8 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
     else process.env.POSTGRES_PASSWORD = pgOrig;
     if (lobbyOrig === undefined) delete process.env.LOBBY_PUBLIC_URL;
     else process.env.LOBBY_PUBLIC_URL = lobbyOrig;
+    if (trustProxyOrig === undefined) delete process.env.TRUST_PROXY_HOPS;
+    else process.env.TRUST_PROXY_HOPS = trustProxyOrig;
     if (nodeEnvOrig === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = nodeEnvOrig;
     appServidor = createApp();

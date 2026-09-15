@@ -295,6 +295,9 @@ Detalhes relevantes:
     entrega a raiz. Em todos os casos
     encaminha Upgrade/Connection (WebSocket) e
     `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`.
+  - Há **3 proxies** entre o cliente e o lobby (proxy admin TLS → nginx edge:80
+    → nginx app:8080 → lobby), portanto em produção usa-se
+    `TRUST_PROXY_HOPS=3`; dev/Docker Compose (cliente→nginx→lobby) usa 1.
 - **Env de produção** (`/opt/flicker/env`) é gerado pelo workflow a cada
   deploy, com:
 
@@ -311,7 +314,15 @@ JWT_REFRESH_SECRET=<secret PROD_JWT_REFRESH_SECRET>
 LOBBY_PUBLIC_URL=<variable PROD_LOBBY_PUBLIC_URL>
 GAME_SERVER_ADVERTISE_HOST=127.0.0.1
 COOKIE_SECURE=true
+TRUST_PROXY_HOPS=3
 ```
+
+> **`TRUST_PROXY_HOPS` é obrigatória em produção**: com
+> `NODE_ENV=production`, o `getConfig()` (`packages/config`) lança erro no boot
+> se a env estiver ausente, vazia ou fora da faixa `0..10`. A inicialização
+> falha de propósito: sem o número correto de hops, o rate limit por IP usaria
+> o endereço do proxy como chave e viraria um contador global silencioso,
+> derrubando o login de todos ao mesmo tempo.
 
 > **`GAME_SERVER_ADVERTISE_HOST=127.0.0.1`**: em prod nativa o lobby e o
 > game-server coabitam o mesmo host, e o encaminhamento usa o host anunciado
@@ -323,6 +334,15 @@ COOKIE_SECURE=true
 > em `packages/config` já é `Secure=true` quando `NODE_ENV=production`; o env
 > apenas o torna explícito. O nginx do app repassa `X-Forwarded-Proto` recebido
 > da borda para que redirects/cookies sejam gerados como `https`.
+
+> **Monitoramento do `/health`**: `GET /health` responde `200` com
+> `{ status: 'ok' }` e `503` com
+> `{ status: 'unhealthy', dependencia: 'postgres' | 'redis' }`. Configure um
+> alerta para **qualquer resposta ≠ 200**. Por decisão fail-closed, com o Redis
+> indisponível o `/health` responde `503` e `/login`/`/register` respondem
+> `500` — Redis fora significa autenticação fora. As Sessões também vivem no
+> Redis, então a indisponibilidade de auth sem Redis não é novidade do
+> limitador.
 
 ---
 

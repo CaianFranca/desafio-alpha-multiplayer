@@ -260,10 +260,12 @@ test('guarda 401: sem service token em produção é recusado', async()=>{
   const originalJwtRefresh=process.env.JWT_REFRESH_SECRET;
   const originalPgPass=process.env.POSTGRES_PASSWORD;
   const originalLobbyUrl=process.env.LOBBY_PUBLIC_URL;
+  const originalTrustProxy=process.env.TRUST_PROXY_HOPS;
   process.env.JWT_SECRET='test-jwt-secret-para-retorno-401';
   process.env.JWT_REFRESH_SECRET='test-refresh-secret-para-retorno-401';
   process.env.POSTGRES_PASSWORD='test_pg_pass';
   process.env.LOBBY_PUBLIC_URL='http://localhost:3001';
+  process.env.TRUST_PROXY_HOPS='1';
   process.env.NODE_ENV='production';
   try {
     await comServidor(async ({baseUrl,wsUrl})=>{
@@ -299,6 +301,7 @@ test('guarda 401: sem service token em produção é recusado', async()=>{
     if (originalJwtRefresh === undefined) delete process.env.JWT_REFRESH_SECRET; else process.env.JWT_REFRESH_SECRET=originalJwtRefresh;
     if (originalPgPass === undefined) delete process.env.POSTGRES_PASSWORD; else process.env.POSTGRES_PASSWORD=originalPgPass;
     if (originalLobbyUrl === undefined) delete process.env.LOBBY_PUBLIC_URL; else process.env.LOBBY_PUBLIC_URL=originalLobbyUrl;
+    if (originalTrustProxy === undefined) delete process.env.TRUST_PROXY_HOPS; else process.env.TRUST_PROXY_HOPS=originalTrustProxy;
   }
 });
 
