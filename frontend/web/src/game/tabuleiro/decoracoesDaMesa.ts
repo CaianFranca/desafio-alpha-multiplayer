@@ -1,7 +1,7 @@
 /**
  * Decorações da Mesa (objetos 3D puramente visuais, sem regra).
  *
- * Seam puro: `vela | algemas → URL` dos GLBs commitados em
+ * Seam puro: `vela | algemas | livro → URL` dos GLBs commitados em
  * `web/public/assets/3d-models/` (servido sob
  * `import.meta.env.BASE_URL + assets/3d-models/…`, empacotado no `dist` via
  * `publicDir` — ver `frontend/vite.config.ts`). Sem three.js/DOM: só URLs,
@@ -22,7 +22,7 @@ import {
   POSICAO_CAIXA,
 } from './contrato'
 
-export type NomeDaDecoracao = 'vela' | 'algemas'
+export type NomeDaDecoracao = 'vela' | 'algemas' | 'livro' | 'livroEmpilhado'
 
 function baseAssets(): string {
   const base = import.meta.env.BASE_URL ?? '/'
@@ -37,12 +37,16 @@ function modelo(nomeDoArquivo: string): string {
 export const MODELOS_DAS_DECORACOES: Record<NomeDaDecoracao, string> = {
   vela: modelo('vela.glb'),
   algemas: modelo('algemas.glb'),
+  livro: modelo('livro.glb'),
+  livroEmpilhado: modelo('livro.glb'),
 }
 
 /** Decorações com visual próprio (ordem de montagem na cena). */
 export const NOMES_DAS_DECORACOES: readonly NomeDaDecoracao[] = [
   'vela',
   'algemas',
+  'livro',
+  'livroEmpilhado',
 ]
 
 /** Resolve a URL do GLB de uma decoração da Mesa. */
@@ -73,6 +77,12 @@ export const AJUSTES_DAS_DECORACOES: Record<
   // Algemas no canto inferior esquerdo: ponto de partida contido (×1, sem
   // giro) para calibrar via screenshot.
   algemas: { escala: 3, rotacaoY: 1 },
+  // Livro sobre a pilha de páginas do canto superior esquerdo (calibrado
+  // via screenshot).
+  livro: { escala: 2.2, rotacaoY: -0.5 },
+  // Segundo livro, em cima do primeiro: mesma escala e mesma base, só o
+  // giro muda um pouco (pilha levemente desalinhada, natural).
+  livroEmpilhado: { escala: 2.2, rotacaoY: -0.15 },
 }
 
 /** Pegada de normalização da vela sobre a Mesa (contida, sem excedente). */
@@ -82,6 +92,10 @@ export const VELA_PROFUNDIDADE = 1.2
 /** Pegada de normalização das algemas sobre a Mesa (contida, sem excedente). */
 export const ALGEMAS_LARGURA = 1.6
 export const ALGEMAS_PROFUNDIDADE = 1.6
+
+/** Pegada de normalização do livro sobre a Mesa (contida, sem excedente). */
+export const LIVRO_LARGURA = 2.0
+export const LIVRO_PROFUNDIDADE = 2.0
 
 /**
  * Posição da base da vela sobre a Mesa (centro da pegada, y = 0 no plano
@@ -103,13 +117,40 @@ export const POSICAO_ALGEMAS: readonly [number, number, number] = [
   7.2,
 ]
 
-/** Posições das decorações (base em y = 0, plano superior da Mesa). */
+/**
+ * Posição da base do livro: sobre a pilha de páginas do canto superior
+ * esquerdo — o `y` nasce logo acima do topo das folhas (sem afundar nem
+ * flutuar visível).
+ */
+export const POSICAO_LIVRO: readonly [number, number, number] = [
+  -6.9,
+  0.03,
+  -6.9,
+]
+
+/**
+ * Altura da base do segundo livro acima da base do primeiro (ponto único de
+ * calibragem via screenshot): deve equivaler à altura do livro na escala
+ * vigente — se flutuar ou afundar, ajuste aqui.
+ */
+export const ALTURA_PARA_EMPILHAR_LIVRO = 0.7
+
+/** Base do segundo livro: mesmo x/z do primeiro, empilhado acima. */
+export const POSICAO_LIVRO_EMPILHADO: readonly [number, number, number] = [
+  POSICAO_LIVRO[0],
+  POSICAO_LIVRO[1] + ALTURA_PARA_EMPILHAR_LIVRO,
+  POSICAO_LIVRO[2],
+]
+
+/** Posições das decorações (base em y = 0 no plano superior da Mesa). */
 export const POSICOES_DAS_DECORACOES: Record<
   NomeDaDecoracao,
   readonly [number, number, number]
 > = {
   vela: POSICAO_VELA,
   algemas: POSICAO_ALGEMAS,
+  livro: POSICAO_LIVRO,
+  livroEmpilhado: POSICAO_LIVRO_EMPILHADO,
 }
 
 /**
@@ -171,6 +212,8 @@ export const LUZ_DA_CHAMA_POR_DECORACAO: Record<
   },
   // Sem chama: sem ponto de luz.
   algemas: null,
+  livro: null,
+  livroEmpilhado: null,
 }
 
 /** Config do ponto de luz da chama (`null` = decoração sem chama). */
@@ -247,10 +290,50 @@ export function validarPosicaoDasAlgemas(): string | null {
   return null
 }
 
+/** Invariante de layout: livros dentro da Mesa, fora do tabuleiro e sobre as páginas. */
+export function validarPosicaoDoLivro(): string | null {
+  for (const posicao of [POSICAO_LIVRO, POSICAO_LIVRO_EMPILHADO]) {
+    const [x, y, z] = posicao
+    if (
+      Math.abs(x) + LIVRO_LARGURA / 2 > LARGURA_MESA / 2 ||
+      Math.abs(z) + LIVRO_PROFUNDIDADE / 2 > PROFUNDIDADE_MESA / 2
+    ) {
+      return 'Livro deve ficar dentro da Mesa'
+    }
+    if (
+      Math.abs(x) - LIVRO_LARGURA / 2 < LARGURA_TABULEIRO / 2 &&
+      Math.abs(z) - LIVRO_PROFUNDIDADE / 2 < PROFUNDIDADE_TABULEIRO / 2
+    ) {
+      return 'Livro deve ficar fora do tabuleiro'
+    }
+    if (y <= 0) {
+      return 'Livro deve ficar acima do plano da Mesa'
+    }
+    // Sobre a pilha: perto de ao menos uma página largada.
+    const sobrePaginas = INSTANCIAS_DOS_DOCUMENTOS.some((instancia) => {
+      const [px, , pz] = instancia.posicao
+      return Math.hypot(x - px, z - pz) < 3
+    })
+    if (!sobrePaginas) {
+      return 'Livro deve ficar sobre as páginas'
+    }
+  }
+  // Empilhado acima do primeiro, na mesma base.
+  const [x1, y1, z1] = POSICAO_LIVRO
+  const [x2, y2, z2] = POSICAO_LIVRO_EMPILHADO
+  if (x2 !== x1 || z2 !== z1) {
+    return 'Livro empilhado deve ficar na mesma base'
+  }
+  if (y2 <= y1) {
+    return 'Livro empilhado deve ficar acima do primeiro'
+  }
+  return null
+}
+
 // ── Documentos largados na Mesa (páginas 3D via textura, sem GLB) ─────────
 // Uma página é uma lâmina fina com a textura no topo (+y); as dimensões
 // seguem a proporção exata dos arquivos (medida nos assets):
-// - `documento.jpg`: 1295×816 (horizontal) → 7.0 × 4.42 (dobro do vertical).
+// - `documento.jpg`: 1295×816 (horizontal) → 5.0 × 3.15 (maior que o vertical).
 // - `documento-vertical.jpg`: 880×1206 (vertical) → 2.55 × 3.5.
 
 export type TipoDocumento = 'vertical' | 'horizontal'
@@ -282,13 +365,13 @@ export const PROPORCAO_DOS_DOCUMENTOS: Record<TipoDocumento, number> = {
   horizontal: 1295 / 816,
 }
 
-/** Dimensões da lâmina sobre a Mesa (horizontal em dobro: 7.0 de lado). */
+/** Dimensões da lâmina sobre a Mesa (horizontal maior que o vertical). */
 export const DIMENSOES_DOS_DOCUMENTOS: Record<
   TipoDocumento,
   { readonly largura: number; readonly profundidade: number }
 > = {
   vertical: { largura: 2.55, profundidade: 3.5 },
-  horizontal: { largura: 5.0, profundidade: 3.5 },
+  horizontal: { largura: 5.0, profundidade: 3.15 },
 }
 
 /** Espessura da folha (lâmina fina assentada no plano da Mesa). */
@@ -318,13 +401,13 @@ export const INSTANCIAS_DOS_DOCUMENTOS: readonly InstanciaDeDocumento[] = [
   { tipo: 'vertical', posicao: [-5.1, 0.014, -7.7], rotacaoY: -0.2 },
   { tipo: 'vertical', posicao: [-7.6, 0.018, -5.9], rotacaoY: 0.55 },
   // Sob as algemas: bordas espiando por baixo do modelo.
-  { tipo: 'vertical', posicao: [-5.8, 0.022, 8], rotacaoY: 0.2 },
-  // Horizontais em dobro (7.0 de lado): só cabem nas faixas norte/sul no
-  // sentido do comprimento, giro 0 — a borda escorrega ~0.03 para baixo da
-  // borda do tabuleiro (efeito intencional, ver tolerância no validador).
-  { tipo: 'horizontal', posicao: [-7, 0.026, 7.78], rotacaoY: -1 },
-  { tipo: 'horizontal', posicao: [4.5, 0.03, 9.2], rotacaoY: -0.5 },
-  { tipo: 'vertical', posicao: [8.5, 0.034, 7.6], rotacaoY: -0.15 },
+  { tipo: 'vertical', posicao: [-5.8, 0.022, 7.9], rotacaoY: 0.2 },
+  // Horizontais maiores (5.0 de lado) na diagonal do sudoeste/sudeste —
+  // cantos girados conferidos contra tabuleiro, Iniciais e borda.
+  { tipo: 'horizontal', posicao: [-7.0, 0.026, 7.9], rotacaoY: -0.2 },
+  { tipo: 'horizontal', posicao: [4.0, 0.03, 7.85], rotacaoY: -0.2 },
+  // Vertical ao norte, entre a pilha e a vela.
+  { tipo: 'vertical', posicao: [-0.5, 0.034, -7.7], rotacaoY: 0.2 },
 ]
 
 /**

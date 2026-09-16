@@ -10,20 +10,30 @@ import {
   MODELOS_DAS_DECORACOES,
   NOMES_DAS_DECORACOES,
   POSICAO_ALGEMAS,
+  POSICAO_LIVRO,
+  POSICAO_LIVRO_EMPILHADO,
   POSICAO_VELA,
   escalaEfetivaDaDecoracao,
   luzDaChama,
   modeloDaDecoracao,
   validarPosicaoDaVela,
   validarPosicaoDasAlgemas,
+  validarPosicaoDoLivro,
 } from '../web/src/game/tabuleiro/decoracoesDaMesa'
 import { POSICAO_CAIXA } from '../web/src/game/tabuleiro/contrato'
 
 describe('decorações da Mesa', () => {
-  it('vela e algemas resolvem URLs sob assets/3d-models/*.glb', () => {
-    expect([...NOMES_DAS_DECORACOES].sort()).toEqual(['algemas', 'vela'])
+  it('vela, algemas e livros resolvem URLs sob assets/3d-models/*.glb', () => {
+    expect([...NOMES_DAS_DECORACOES].sort()).toEqual([
+      'algemas',
+      'livro',
+      'livroEmpilhado',
+      'vela',
+    ])
     expect(Object.keys(MODELOS_DAS_DECORACOES).sort()).toEqual([
       'algemas',
+      'livro',
+      'livroEmpilhado',
       'vela',
     ])
     for (const nome of NOMES_DAS_DECORACOES) {
@@ -34,6 +44,10 @@ describe('decorações da Mesa', () => {
     }
     expect(MODELOS_DAS_DECORACOES.vela).toContain('vela.glb')
     expect(MODELOS_DAS_DECORACOES.algemas).toContain('algemas.glb')
+    expect(MODELOS_DAS_DECORACOES.livro).toContain('livro.glb')
+    expect(modeloDaDecoracao('livroEmpilhado')).toBe(
+      modeloDaDecoracao('livro'),
+    )
   })
 
   it('vela a noroeste da Caixa, fora do tabuleiro e dentro da Mesa', () => {
@@ -97,5 +111,35 @@ describe('decorações da Mesa', () => {
   it('algemas calibradas via screenshot (×3, giro 1)', () => {
     expect(AJUSTES_DAS_DECORACOES.algemas.escala).toBe(3)
     expect(AJUSTES_DAS_DECORACOES.algemas.rotacaoY).toBe(1)
+  })
+
+  it('livro sobre a pilha de páginas do canto superior esquerdo', () => {
+    expect(validarPosicaoDoLivro()).toBeNull()
+    const [x, y, z] = POSICAO_LIVRO
+    // Acima do plano (repousa sobre as folhas) e no quadrante NO.
+    expect(y).toBeGreaterThan(0)
+    expect(x).toBeLessThan(0)
+    expect(z).toBeLessThan(0)
+    expect(luzDaChama('livro')).toBeNull()
+  })
+
+  it('livro calibrado via screenshot (×2.2, giro -0.5)', () => {
+    expect(AJUSTES_DAS_DECORACOES.livro.escala).toBe(2.2)
+    expect(AJUSTES_DAS_DECORACOES.livro.rotacaoY).toBe(-0.5)
+  })
+
+  it('livro empilhado segue o primeiro, só com o giro diferente', () => {
+    expect(validarPosicaoDoLivro()).toBeNull()
+    // Mesma escala, mesma base, acima — só o giro muda um pouco.
+    expect(AJUSTES_DAS_DECORACOES.livroEmpilhado.escala).toBe(
+      AJUSTES_DAS_DECORACOES.livro.escala,
+    )
+    expect(POSICAO_LIVRO_EMPILHADO[0]).toBe(POSICAO_LIVRO[0])
+    expect(POSICAO_LIVRO_EMPILHADO[2]).toBe(POSICAO_LIVRO[2])
+    expect(POSICAO_LIVRO_EMPILHADO[1]).toBeGreaterThan(POSICAO_LIVRO[1])
+    expect(AJUSTES_DAS_DECORACOES.livroEmpilhado.rotacaoY).not.toBe(
+      AJUSTES_DAS_DECORACOES.livro.rotacaoY,
+    )
+    expect(luzDaChama('livroEmpilhado')).toBeNull()
   })
 })

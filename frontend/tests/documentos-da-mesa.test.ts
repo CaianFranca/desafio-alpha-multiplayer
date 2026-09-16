@@ -53,13 +53,13 @@ describe('documentos largados na Mesa', () => {
     }
   })
 
-  it('horizontal tem o dobro do vertical no lado maior (lados ×2)', () => {
-    // O lado maior dobra exato; o menor segue a proporção de cada arquivo
-    // (as texturas têm aspectos diferentes — ver teste de proporção).
+  it('horizontal maior que o vertical no lado maior', () => {
+    // O lado maior do horizontal supera o do vertical; o menor de cada um
+    // segue a proporção do próprio arquivo (aspectos diferentes).
     const ladoMaior = (d: { largura: number; profundidade: number }) =>
       Math.max(d.largura, d.profundidade)
-    expect(ladoMaior(DIMENSOES_DOS_DOCUMENTOS.horizontal)).toBeCloseTo(
-      2 * ladoMaior(DIMENSOES_DOS_DOCUMENTOS.vertical),
+    expect(ladoMaior(DIMENSOES_DOS_DOCUMENTOS.horizontal)).toBeGreaterThan(
+      ladoMaior(DIMENSOES_DOS_DOCUMENTOS.vertical),
     )
   })
 
@@ -77,20 +77,21 @@ describe('documentos largados na Mesa', () => {
       return Math.hypot(x - ax, z - az) < 3
     })
     expect(sobAsAlgemas.length).toBeGreaterThanOrEqual(1)
-    // Horizontais em dobro ocupam as faixas norte e sul (uma em cada).
+    // Horizontais maiores na diagonal do sul (sudoeste + sudeste).
     const horizontais = INSTANCIAS_DOS_DOCUMENTOS.filter(
       (instancia) => instancia.tipo === 'horizontal',
     )
     expect(horizontais.length).toBe(2)
-    expect(
-      horizontais.some((instancia) => instancia.posicao[2] < 0),
-    ).toBe(true)
-    expect(
-      horizontais.some((instancia) => instancia.posicao[2] > 0),
-    ).toBe(true)
     for (const instancia of horizontais) {
-      expect(instancia.rotacaoY).toBe(0)
+      expect(instancia.posicao[2]).toBeGreaterThan(0)
+      expect(instancia.rotacaoY).toBe(-0.2)
     }
+    expect(
+      horizontais.some((instancia) => instancia.posicao[0] < 0),
+    ).toBe(true)
+    expect(
+      horizontais.some((instancia) => instancia.posicao[0] > 0),
+    ).toBe(true)
     // Os dois tipos de página aparecem na Mesa.
     const tipos = new Set(
       INSTANCIAS_DOS_DOCUMENTOS.map((instancia) => instancia.tipo),

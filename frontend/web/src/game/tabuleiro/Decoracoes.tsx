@@ -6,6 +6,8 @@ import {
   AJUSTES_DAS_DECORACOES,
   ALGEMAS_LARGURA,
   ALGEMAS_PROFUNDIDADE,
+  LIVRO_LARGURA,
+  LIVRO_PROFUNDIDADE,
   POSICOES_DAS_DECORACOES,
   VELA_LARGURA,
   VELA_PROFUNDIDADE,
@@ -218,6 +220,16 @@ export function DecoracoesDaMesa() {
         nome="algemas"
         largura={ALGEMAS_LARGURA}
         profundidade={ALGEMAS_PROFUNDIDADE}
+      />
+      <Decoracao
+        nome="livro"
+        largura={LIVRO_LARGURA}
+        profundidade={LIVRO_PROFUNDIDADE}
+      />
+      <Decoracao
+        nome="livroEmpilhado"
+        largura={LIVRO_LARGURA}
+        profundidade={LIVRO_PROFUNDIDADE}
       />
       <DocumentosDaMesa />
     </group>
