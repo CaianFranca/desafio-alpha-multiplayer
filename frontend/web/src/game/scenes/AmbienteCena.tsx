@@ -1,7 +1,19 @@
-import { useMemo } from 'react'
+import { Suspense, useLayoutEffect, useMemo } from 'react'
 import { useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import mesaTopoUrl from '../assets/mesa_topo.jpg'
+import mesaTopoNormalUrl from '../assets/mesa_topo-normal-map.jpg'
+import mesaTopoRoughnessUrl from '../assets/mesa_topo-roughness-map.jpg'
+import {
+  ABERTURA_DO_FUNDO,
+  ALTURA_DO_FUNDO,
+  ESCALA_DO_FUNDO,
+  INCLINACAO_DO_FUNDO,
+  INICIO_THETA_DO_FUNDO,
+  POSICAO_DO_FUNDO,
+  RAIO_DO_FUNDO,
+  TEXTURA_DO_FUNDO,
+} from '../ambiente/ceu'
 import {
   COR_FUNDO,
   COR_LATERAIS_MESA,
@@ -12,6 +24,10 @@ import {
 import { aspectoVisivel, nevoaParaAspecto } from '../ambiente/cameraLimites'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
+import { BandejaDosPeoes } from '../tabuleiro/BandejaDosPeoes'
+import { DecoracoesDaMesa } from '../tabuleiro/Decoracoes'
+import { NevoaDaMesa } from '../tabuleiro/Nevoa'
+import { LimiteDeErroDoModelo } from '../tabuleiro/LimiteDeErroDoModelo'
 import { ManipulacaoOverlay } from './ManipulacaoOverlay'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
@@ -69,13 +85,77 @@ function Iluminacao() {
 
 /**
  * Mesa: box com o plano superior em y = 0 (origem do ambiente; ver
- * ambiente/contrato.ts). Face +y (índice de material 2) recebe a textura
- * aprovada; as demais faces são sólidas escuras, fundindo com o vazio.
+ * ambiente/contrato.ts). Face +y (índice de material 2) recebe o trio PBR
+ * aprovado — `map` (cor) + `normalMap` (relevo sob a luz rasante) +
+ * `roughnessMap` (verniz × fosco). No modelo PBR não há slot de
+ * `specularMap`: brilho = 1 − roughness, e o `roughnessMap` assume a
+ * variação de brilho. As demais faces são sólidas escuras, fundindo com o vazio.
  */
 function Mesa() {
   const texturaCarregada = useLoader(THREE.TextureLoader, mesaTopoUrl)
-  // Cópia com espaço de cor sRGB: o topo da Mesa é cor, não dado linear.
-  // Clonar evita mutar a textura cacheada pelo useLoader.
+  const normalCarregado = useLoader(THREE.TextureLoader, mesaTopoNormalUrl)
+  const roughnessCarregado = useLoader(THREE.TextureLoader, mesaTopoRoughnessUrl)
+  // Cópias sem mutar o cache do useLoader: o topo da Mesa é cor (sRGB);
+  // normal e roughness são dados lineares (sem espaço de cor).
+  const { textura, normal, roughness } = useMemo(() => {
+    const textura = texturaCarregada.clone()
+    textura.colorSpace = THREE.SRGBColorSpace
+    textura.needsUpdate = true
+    const normal = normalCarregado.clone()
+    normal.needsUpdate = true
+    const roughness = roughnessCarregado.clone()
+    roughness.needsUpdate = true
+    return { textura, normal, roughness }
+  }, [texturaCarregada, normalCarregado, roughnessCarregado])
+
+  // Descarta os clones no unmount/troca (o cache do `useLoader` segue
+  // intacto) — sem isso cada mount vaza 3 texturas GPU.
+  useLayoutEffect(() => {
+    return () => {
+      textura.dispose()
+      normal.dispose()
+      roughness.dispose()
+    }
+  }, [textura, normal, roughness])
+
+  return (
+    <mesh position={[0, -ESPESSURA_MESA / 2, 0]} receiveShadow>
+      <boxGeometry args={[LARGURA_MESA, ESPESSURA_MESA, PROFUNDIDADE_MESA]} />
+      <meshStandardMaterial attach="material-0" color={COR_LATERAIS_MESA} />
+      <meshStandardMaterial attach="material-1" color={COR_LATERAIS_MESA} />
+      <meshStandardMaterial
+        attach="material-2"
+        map={textura}
+        normalMap={normal}
+        normalScale={[0.5, 0.5]}
+        roughnessMap={roughness}
+        roughness={1}
+        metalness={0}
+      />
+      <meshStandardMaterial attach="material-3" color={COR_LATERAIS_MESA} />
+      <meshStandardMaterial attach="material-4" color={COR_LATERAIS_MESA} />
+      <meshStandardMaterial attach="material-5" color={COR_LATERAIS_MESA} />
+    </mesh>
+  )
+}
+
+/**
+ * Fundo da partida (trecho de cilindro côncavo ao fundo do tabuleiro): o
+ * panorama INTEIRO distribuído pelo arco, na proporção exata do arquivo —
+ * sem o estiramento de polo da esfera e sem deformação de perspectiva do
+ * plano. Visto por dentro (`BackSide`), espelhado no eixo X (`scale` com X
+ * negativo, receita oficial de panorama — sem isso a imagem sai invertida),
+ * com inclinação e escala do seam (`INCLINACAO_DO_FUNDO`, `ESCALA_DO_FUNDO`). Sem
+ * responder à névoa (`fog={false}`: a distância apagaria a imagem).
+ * Estático e compatível com `frameloop="demand"`; o clique borbulha ao grupo
+ * da cena e desseleciona, como o clique direto na Mesa. Enquanto carrega ou
+ * se falhar, o fundo segue a cor sólida (`<color attach="background">`) —
+ * a cena nunca quebra.
+ */
+function Fundo() {
+  const texturaCarregada = useLoader(THREE.TextureLoader, TEXTURA_DO_FUNDO)
+  // Cópia com espaço de cor sRGB: o fundo é cor, não dado linear. Clonar
+  // evita mutar a textura cacheada pelo useLoader.
   const textura = useMemo(() => {
     const copia = texturaCarregada.clone()
     copia.colorSpace = THREE.SRGBColorSpace
@@ -83,15 +163,38 @@ function Mesa() {
     return copia
   }, [texturaCarregada])
 
+  // Descarta o clone no unmount/troca (o cache do `useLoader` segue intacto).
+  useLayoutEffect(() => {
+    return () => {
+      textura.dispose()
+    }
+  }, [textura])
+
+  const [x, y, z] = POSICAO_DO_FUNDO
+  const s = ESCALA_DO_FUNDO
   return (
-    <mesh position={[0, -ESPESSURA_MESA / 2, 0]} receiveShadow>
-      <boxGeometry args={[LARGURA_MESA, ESPESSURA_MESA, PROFUNDIDADE_MESA]} />
-      <meshStandardMaterial attach="material-0" color={COR_LATERAIS_MESA} />
-      <meshStandardMaterial attach="material-1" color={COR_LATERAIS_MESA} />
-      <meshStandardMaterial attach="material-2" map={textura} />
-      <meshStandardMaterial attach="material-3" color={COR_LATERAIS_MESA} />
-      <meshStandardMaterial attach="material-4" color={COR_LATERAIS_MESA} />
-      <meshStandardMaterial attach="material-5" color={COR_LATERAIS_MESA} />
+    <mesh
+      position={[x, y, z]}
+      rotation={[INCLINACAO_DO_FUNDO, 0, 0]}
+      scale={[-s, s, s]}
+    >      <cylinderGeometry
+        args={[
+          RAIO_DO_FUNDO,
+          RAIO_DO_FUNDO,
+          ALTURA_DO_FUNDO,
+          64,
+          1,
+          true,
+          INICIO_THETA_DO_FUNDO,
+          ABERTURA_DO_FUNDO,
+        ]}
+      />
+      <meshBasicMaterial
+        map={textura}
+        side={THREE.BackSide}
+        toneMapped={false}
+        fog={false}
+      />
     </mesh>
   )
 }
@@ -237,6 +340,13 @@ export function AmbienteCena({
       */}
       <group onClick={onDesselecionar}>
         <Mesa />
+        <NevoaDaMesa />
+        <LimiteDeErroDoModelo resetKey={TEXTURA_DO_FUNDO} fallback={null}>
+          <Suspense fallback={null}>
+            <Fundo />
+          </Suspense>
+        </LimiteDeErroDoModelo>
+        <DecoracoesDaMesa />
         {estadoExibicao ? (
           <>
             <Tabuleiro
@@ -279,6 +389,7 @@ export function AmbienteCena({
               onPuxar={onPuxarPecaDaBandeja}
             />
             <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
+            <BandejaDosPeoes />
             {peoesNaMesa.map((peao) => {
               // Voo ativo (#242): o peão voador não renderiza estático na Mesa
               // (Primeiro Turno: origem mesa→Peça Inicial) — só o overlay voa.

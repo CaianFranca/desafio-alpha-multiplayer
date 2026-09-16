@@ -32,6 +32,7 @@ import {
   type AjusteDoModeloDaCaixa,
 } from './modelosDaCaixa'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
+import { PilhaDaCaixa } from './PilhaDaCaixa'
 import { handlersDeCursor } from './cursor'
 
 interface CaixaProps {
@@ -101,6 +102,12 @@ interface ModeloNormalizadoProps {
    * do modelo, preservando normal/roughness dele. `undefined` = cor do GLB.
    */
   mapUrl?: string
+  /**
+   * Desliga o `normalMap` do GLB (só a bandeja dos peões): o relevo
+   * embutido deforma sob o esticamento — sem ele a calha sai lisa.
+   * `false` (padrão) preserva o normal do modelo.
+   */
+  semNormalMap?: boolean
 }
 
 /**
@@ -157,13 +164,14 @@ function prepararMeshesDoClone(objeto: THREE.Object3D): THREE.Material[] {
  * o multiplicador sai exato, sem clamp — o excedente sobre a pegada é
  * intencional para coerência em tela (decisão do PO). Não reduzir.
  */
-function ModeloNormalizado({
+export function ModeloNormalizado({
   largura,
   profundidade,
   alturaMaxima,
   ajuste,
   url,
   mapUrl,
+  semNormalMap = false,
 }: ModeloNormalizadoProps) {
   const gltf = useLoader(GLTFLoader, url)
   // Puro no memo: clona a hierarquia, mede o `Box3` e deriva escala
@@ -195,13 +203,32 @@ function ModeloNormalizado({
   // `useLayoutEffect` roda antes do paint: o primeiro frame já sai correto.
   useLayoutEffect(() => {
     const materiaisDoClone = prepararMeshesDoClone(objeto)
+    if (semNormalMap) {
+      // Relevo desligado: os materiais já são clones isolados (sem tocar no
+      // cache) — remover o mapa exige recompilar o shader (`needsUpdate`).
+      objeto.traverse((filho) => {
+        if (!(filho instanceof THREE.Mesh)) return
+        const lista = Array.isArray(filho.material)
+          ? filho.material
+          : [filho.material]
+        for (const material of lista) {
+          if (
+            material instanceof THREE.MeshStandardMaterial &&
+            material.normalMap !== null
+          ) {
+            material.normalMap = null
+            material.needsUpdate = true
+          }
+        }
+      })
+    }
     return () => {
       // B1: descarta os materiais clonados no unmount/troca. As geometrias
       // seguem compartilhadas com o cache do `useLoader` — sem `dispose`
       // (não tocar no cache).
       for (const material of materiaisDoClone) material.dispose()
     }
-  }, [objeto])
+  }, [objeto, semNormalMap])
 
   return (
     <group scale={[escala, escala, escala]} rotation={[0, ajuste.rotacaoY, 0]}>
@@ -317,7 +344,8 @@ export function Caixa({
   return (
     <group>
       {/* Caixa fechada e opaca: corpo do GLB normalizado na pegada (tampo do
-          próprio modelo, sem overlay); primitivas como fallback/erro. */}
+          próprio modelo, sem overlay); primitivas como fallback/erro. A pilha
+          de peças sobre o tampo vende que as peças vêm da Caixa. */}
       <group position={[POSICAO_CAIXA[0], POSICAO_CAIXA[1], POSICAO_CAIXA[2]]}>
         <LimiteDeErroDoModelo
           key={modeloDaCaixa('caixa')}
@@ -329,6 +357,7 @@ export function Caixa({
           </Suspense>
         </LimiteDeErroDoModelo>
       </group>
+      <PilhaDaCaixa />
 
       {/* Bandeja de slot único: SÓ o visual vira o GLB da cesta (posição,
           pegada, clique, pull vigente e origem `bandeja` do voo inalterados).

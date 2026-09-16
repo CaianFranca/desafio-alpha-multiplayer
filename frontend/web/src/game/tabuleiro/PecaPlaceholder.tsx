@@ -39,6 +39,12 @@ interface PecaPlaceholderProps {
   /** Cursor do ponteiro ao pairar (peça da mesa selecionável). */
   cursor?: 'default' | 'pointer'
   /**
+   * Topo chapado: sem `normalMap` nem `emissiveMap` (só o albedo) — para
+   * peças que o relevo/emissão deformariam ou estourariam (pilha da Caixa).
+   * `false` (padrão) mantém o topo completo do tipo.
+   */
+  semRelevoEEmissao?: boolean
+  /**
    * Telegraph do ataque (issue #385): contorno vermelho pulsante na peça do
    * monstro durante o pulso silencioso de 1s — apaga ao entrar no disparo e
    * ao drenar (sem marcas). Sobrepõe o destaque de seleção no tom.
@@ -336,12 +342,15 @@ function CorpoTexturizado({
   emTelegraph = false,
   cursor,
   onClick,
+  semRelevoEEmissao = false,
 }: CorpoProps) {
   const { map, normalMap, emissiveMap } = texturaDaPeca(tipo)
-  const [mapCarregado, normalCarregado, emissaoCarregada] = useLoader(
-    THREE.TextureLoader,
-    [map, normalMap, emissiveMap],
-  )
+  // Topo chapado carrega só o albedo (nem busca normal/emissão na rede).
+  const urls = semRelevoEEmissao ? [map] : [map, normalMap, emissiveMap]
+  const carregadas = useLoader(THREE.TextureLoader, urls)
+  const mapCarregado = carregadas[0]
+  const normalCarregado = semRelevoEEmissao ? null : carregadas[1]
+  const emissaoCarregada = semRelevoEEmissao ? null : carregadas[2]
   // Clona para não mutar o cache do useLoader (precedente da Mesa): cor no
   // map, dado linear no normal; centro no meio para girar o motivo.
   const { mapaTopo, normalTopo, emissaoTopo } = useMemo(() => {
@@ -351,26 +360,30 @@ function CorpoTexturizado({
     mapa.center.set(0.5, 0.5)
     mapa.rotation = rotacao
     mapa.needsUpdate = true
-    const normal = normalCarregado.clone()
-    normal.center.set(0.5, 0.5)
-    normal.rotation = rotacao
-    normal.needsUpdate = true
+    const normal = normalCarregado === null ? null : normalCarregado.clone()
+    if (normal !== null) {
+      normal.center.set(0.5, 0.5)
+      normal.rotation = rotacao
+      normal.needsUpdate = true
+    }
     // Emissão própria do tipo: mesmo giro do motivo; `emissive` branco na
     // intensidade de `INTENSIDADE_EMISSAO_DO_TOPO` — o mapa dita o brilho.
-    const emissao = emissaoCarregada.clone()
-    emissao.colorSpace = THREE.SRGBColorSpace
-    emissao.center.set(0.5, 0.5)
-    emissao.rotation = rotacao
-    emissao.needsUpdate = true
+    const emissao = emissaoCarregada === null ? null : emissaoCarregada.clone()
+    if (emissao !== null) {
+      emissao.colorSpace = THREE.SRGBColorSpace
+      emissao.center.set(0.5, 0.5)
+      emissao.rotation = rotacao
+      emissao.needsUpdate = true
+    }
     return { mapaTopo: mapa, normalTopo: normal, emissaoTopo: emissao }
   }, [mapCarregado, normalCarregado, emissaoCarregada, orientacao])
-  // B1: descarta os 3 clones no unmount/troca (~90 peças por mount) — o
+  // B1: descarta os clones no unmount/troca (~90 peças por mount) — o
   // cache do `useLoader` segue intacto.
   useEffect(
     () => () => {
       mapaTopo.dispose()
-      normalTopo.dispose()
-      emissaoTopo.dispose()
+      normalTopo?.dispose()
+      emissaoTopo?.dispose()
     },
     [mapaTopo, normalTopo, emissaoTopo],
   )
@@ -387,11 +400,19 @@ function CorpoTexturizado({
         <meshStandardMaterial
           attach="material-2"
           map={mapaTopo}
-          normalMap={normalTopo}
-          normal-scale={RELEVO_TOPO_NORMAL_SCALE}
-          emissiveMap={emissaoTopo}
-          emissive="#ffffff"
-          emissiveIntensity={INTENSIDADE_EMISSAO_DO_TOPO}
+          {...(normalTopo !== null
+            ? {
+                normalMap: normalTopo,
+                'normal-scale': RELEVO_TOPO_NORMAL_SCALE,
+              }
+            : {})}
+          {...(emissaoTopo !== null
+            ? {
+                emissiveMap: emissaoTopo,
+                emissive: '#ffffff',
+                emissiveIntensity: INTENSIDADE_EMISSAO_DO_TOPO,
+              }
+            : {})}
           toneMapped={false}
         />
         <meshStandardMaterial attach="material-3" color={COR_LATERAL} />
@@ -458,6 +479,7 @@ export function PecaPlaceholder({
   emDisparo = false,
   cursor = 'default',
   onClick,
+  semRelevoEEmissao = false,
 }: PecaPlaceholderProps) {
   const corpo: CorpoProps = {
     tipo,
@@ -467,6 +489,7 @@ export function PecaPlaceholder({
     emTelegraph,
     cursor,
     onClick,
+    semRelevoEEmissao,
   }
   const fallback = <CorpoFallback {...corpo} />
   // Movimento reduzido: pulo/tremor não deslocam (`GrupoDaReacao` estático) —

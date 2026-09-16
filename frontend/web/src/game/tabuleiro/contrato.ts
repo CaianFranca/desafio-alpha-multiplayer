@@ -9,6 +9,7 @@
  */
 
 import { LARGURA_MESA } from '../ambiente/contrato'
+import type { AjusteDoModeloDaCaixa } from './modelosDaCaixa'
 
 export const LADO_DA_GRADE = 7
 
@@ -72,6 +73,63 @@ export const POSICAO_INICIAIS: readonly [number, number, number] = [
 ]
 export const COLUNAS_INICIAIS = 2
 export const QUANTIDADE_INICIAIS = 4
+
+// ── Pilha da Caixa (peças de caminho à mostra dentro da caixa) ───────────
+// Ficção: as peças vêm da Caixa — 4 peças de caminho em montinho dentro da
+// caixa aberta (GLB sem tampa: só `bottom_*`), espalhadas mesmo que colidam
+// com as paredes. Puramente visual: nunca entra no wire, nunca é clicável
+// (sem `onClick`), nunca aparece no espelho DOM.
+
+/** Uma peça da pilha: controle manual total — tipo, giro Y, posição e inclinação. */
+export interface PecaDaPilha {
+  readonly tipo: TipoDaPeca
+  readonly orientacao: Orientacao
+  /** Centro da peça, relativo ao grupo da Caixa (y sobe do fundo interno). */
+  readonly posicao: readonly [number, number, number]
+  /** Inclinação em radianos [rx, rz] — o montinho bagunçado (0 = chapada). */
+  readonly inclinacao: readonly [number, number]
+}
+
+export const PILHA_DA_CAIXA: readonly PecaDaPilha[] = [
+  { tipo: 'reta', orientacao: 0, posicao: [-0.8, 0.5, -0.5], inclinacao: [1, 0.8] },
+  { tipo: 'T', orientacao: 180, posicao: [0.2, 1.0, 0.4], inclinacao: [0.3, 0] },
+  { tipo: 'cruz', orientacao: 90, posicao: [-0.8, 0.5, -0.9], inclinacao: [1, 0.8] },
+  { tipo: 'reta', orientacao: 90, posicao: [0.4, 1, 1.1], inclinacao: [0.5, -0.1] },
+]
+
+/** Tipos de caminho que a pilha pode exibir (nunca Inicial/especial/monstro). */
+export const TIPOS_DA_PILHA: readonly TipoDaPeca[] = ['reta', 'T', 'cruz']
+
+/** Invariante: 4 peças de caminho dentro da caixa, com pose válida. */
+export function validarPilhaDaCaixa(): string | null {
+  if (PILHA_DA_CAIXA.length !== 4) {
+    return 'Pilha da Caixa deve ter 4 peças'
+  }
+  for (const [indice, peca] of PILHA_DA_CAIXA.entries()) {
+    if (!TIPOS_DA_PILHA.includes(peca.tipo)) {
+      return `Pilha ${indice} deve ser peça de caminho`
+    }
+    if (![0, 90, 180, 270].includes(peca.orientacao)) {
+      return `Pilha ${indice} deve ter orientação válida`
+    }
+    const [x, y, z] = peca.posicao
+    // Dentro do volume da caixa (pegada visual 4.39×2.31, altura 2.80 —
+    // colisões com as paredes liberadas, fora disso é erro).
+    if (Math.abs(x) > 2.2 || Math.abs(z) > 1.2 || y < 0 || y > 3.2) {
+      return `Pilha ${indice} deve ficar dentro da caixa`
+    }
+    const [rx, rz] = peca.inclinacao
+    if (
+      !Number.isFinite(rx) ||
+      !Number.isFinite(rz) ||
+      Math.abs(rx) > 1 ||
+      Math.abs(rz) > 1
+    ) {
+      return `Pilha ${indice} deve ter inclinação válida`
+    }
+  }
+  return null
+}
 
 export const CELULA_INSET = TAMANHO_CELULA * 0.98
 export const ESPESSURA_BORDA = 0.04
@@ -246,11 +304,68 @@ export const HEX_COR_PEAO: Record<CorDoPeao, string> = {
 export const PEAO_Y = PECA_Y + 0.14
 
 /**
- * Fileira dos peões não posicionados sobre a Mesa: lado oposto à zona da
- * Caixa (-X; Caixa fica em +X). Altura y = 0 (plano superior da Mesa). O
- * espaçamento usa o padrão compartilhado `ESPACAMENTO_ENTRE_PECAS_MESA`.
+ * Fileira dos peões não posicionados: lado oposto à zona da Caixa (-X;
+ * Caixa fica em +X), repousando sobre a bandeja dos peões (não mais no
+ * tampo). O espaçamento usa o padrão compartilhado
+ * `ESPACAMENTO_ENTRE_PECAS_MESA`.
  */
 export const OFFSET_FILEIRA_PEOES_X = -8.0
+
+// ── Bandeja dos Peões sobre a Mesa ──────────────────────────────────────
+// Duplicata esticada da cesta (`serving_tray` + albedo `obscuro`) sob a
+// fileira de peões não posicionados: os peões repousam sobre ela em vez do
+// tampo. O esticamento é não-uniforme em Z (fator sobre a normalização
+// uniforme) para cobrir a fileira N=2..4.
+export const POSICAO_BANDEJA_PEOES: readonly [number, number, number] = [
+  OFFSET_FILEIRA_PEOES_X,
+  ALTURA_ZONA_CAIXA,
+  0.0,
+]
+export const BANDEJA_PEOES_LARGURA = 0.9
+export const BANDEJA_PEOES_PROFUNDIDADE = 2.4
+/** Esticamento em Z sobre a pegada (ponto único de calibragem). */
+export const FATOR_ESTICAR_BANDEJA_PEOES = 5.7
+
+/**
+ * Ajuste próprio da bandeja dos peões (ponto único de calibragem via
+ * screenshot) — INDEPENDENTE da bandeja original da Caixa: escala e giro
+ * aqui não tocam na zona da Caixa.
+ */
+export const AJUSTE_DA_BANDEJA_DOS_PEOES: AjusteDoModeloDaCaixa = {
+  escala: 2,
+  rotacaoY: 0,
+}
+
+/**
+ * Altura da base do peão sobre a bandeja (topo do modelo esticado —
+ * ponto único de calibragem via screenshot: se o peão flutuar ou afundar,
+ * ajuste aqui).
+ */
+export const ALTURA_BASE_PEAO_NA_BANDEJA = 0.1
+
+/** Invariante: bandeja dos peões dentro da Mesa e cobrindo a fileira N=4. */
+export function validarBandejaDosPeoes(): string | null {
+  const [x, , z] = POSICAO_BANDEJA_PEOES
+  const meiaLargura = BANDEJA_PEOES_LARGURA / 2
+  const meiaProfundidade =
+    (BANDEJA_PEOES_PROFUNDIDADE * FATOR_ESTICAR_BANDEJA_PEOES) / 2
+  if (
+    Math.abs(x) + meiaLargura > LARGURA_MESA / 2 ||
+    Math.abs(z) + meiaProfundidade > LARGURA_MESA / 2
+  ) {
+    return 'Bandeja dos peões deve ficar dentro da Mesa'
+  }
+  if (x >= 0) {
+    return 'Bandeja dos peões deve ficar no lado oposto à Caixa (−X)'
+  }
+  // Cobre a fileira cheia (N=4: z ±2.55 + raio do peão).
+  const pontaDaFileira =
+    ((QUANTIDADE_PEOES - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA + 0.5
+  if (meiaProfundidade < pontaDaFileira) {
+    return 'Bandeja dos peões deve cobrir a fileira'
+  }
+  return null
+}
 
 // ── Composição inicial das Peças Iniciais na mesa (issue #143) ──
 // Espelha `estadoInicialDoTabuleiro()` do engine: as 4 iniciais (`inicial-1`
@@ -658,9 +773,9 @@ export function destinosConectadosDoPeao(
   return destinos
 }
 
-/** Posição mundo da fileira de peões sobre a Mesa (índice = posição em `peoes`, quantidade = N). */
+/** Posição mundo da fileira de peões sobre a bandeja dos peões (índice = posição em `peoes`, quantidade = N). */
 export function peaoMesaParaMundo(indice: number, quantidadeDePeoes: number = QUANTIDADE_PEOES): [number, number, number] {
   const n = quantidadeValidaDeJogadores(quantidadeDePeoes)
   const z = (indice - (n - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA
-  return [OFFSET_FILEIRA_PEOES_X, 0, z]
+  return [OFFSET_FILEIRA_PEOES_X, ALTURA_BASE_PEAO_NA_BANDEJA, z]
 }
