@@ -8,6 +8,7 @@ import {
   ALGEMAS_PROFUNDIDADE,
   LIVRO_LARGURA,
   LIVRO_PROFUNDIDADE,
+  NOMES_DAS_LUZES_LIVRES,
   POSICOES_DAS_DECORACOES,
   VELA_LARGURA,
   VELA_PEQUENA_LARGURA,
@@ -15,10 +16,12 @@ import {
   VELA_PROFUNDIDADE,
   escalaEfetivaDaDecoracao,
   luzDaChama,
+  luzLivre,
   modeloDaDecoracao,
   type AjusteDaDecoracao,
   type LuzDaChama,
   type NomeDaDecoracao,
+  type SombraDaChama,
 } from './decoracoesDaMesa'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { DocumentosDaMesa } from './Documentos'
@@ -206,6 +209,51 @@ function Decoracao({
 }
 
 /**
+ * Props de sombra do cube map de um ponto de luz (`null` = sem sombra, sem
+ * custo). Mesmo padrão da chama acima.
+ */
+function propsDeSombraDaLuz(sombra: SombraDaChama | null) {
+  return sombra !== null
+    ? {
+        castShadow: true as const,
+        'shadow-mapSize': [sombra.tamanhoDoMapa, sombra.tamanhoDoMapa] as [
+          number,
+          number,
+        ],
+        'shadow-camera-near': sombra.near,
+        'shadow-camera-far': sombra.far,
+        'shadow-bias': sombra.bias,
+      }
+    : {}
+}
+
+/**
+ * Luzes livres da Mesa (sem modelo): acentos estáticos de atmosfera, ex. o
+ * recorte azul nas algemas — com sombra projetada. Luz não intercepta
+ * clique; estática = compatível com `frameloop="demand"`.
+ */
+function LuzesLivresDaMesa() {
+  return (
+    <group>
+      {NOMES_DAS_LUZES_LIVRES.map((nome) => {
+        const luz = luzLivre(nome)
+        return (
+          <pointLight
+            key={nome}
+            position={[luz.posicao[0], luz.posicao[1], luz.posicao[2]]}
+            color={luz.cor}
+            intensity={luz.intensidade}
+            distance={luz.distancia}
+            decay={luz.decaimento}
+            {...propsDeSombraDaLuz(luz.sombra)}
+          />
+        )
+      })}
+    </group>
+  )
+}
+
+/**
  * Decorações da Mesa: objetos 3D puramente visuais sobre o plano superior
  * (y = 0). Sem estado, sem clique, sem wire — só atmosfera. Com sombra
  * (castShadow + receiveShadow) e sem raycast, no padrão da Caixa.
@@ -243,6 +291,7 @@ export function DecoracoesDaMesa() {
         largura={VELA_PEQUENA_LARGURA}
         profundidade={VELA_PEQUENA_PROFUNDIDADE}
       />
+      <LuzesLivresDaMesa />
       <DocumentosDaMesa />
     </group>
   )

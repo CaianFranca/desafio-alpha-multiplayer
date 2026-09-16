@@ -17,7 +17,9 @@ import {
   POSICAO_VELA_SUDOESTE,
   escalaEfetivaDaDecoracao,
   luzDaChama,
+  luzLivre,
   modeloDaDecoracao,
+  validarLuzDeRecorteDasAlgemas,
   validarPosicaoDaVela,
   validarPosicaoDasAlgemas,
   validarPosicaoDasVelasPequenas,
@@ -177,5 +179,23 @@ describe('decorações da Mesa', () => {
     expect(AJUSTES_DAS_DECORACOES.velaSudoeste.rotacaoY).toBe(0)
     expect(AJUSTES_DAS_DECORACOES.velaLeste.escala).toBe(1)
     expect(AJUSTES_DAS_DECORACOES.velaLeste.rotacaoY).toBe(0)
+  })
+
+  it('recorte azul-bebê a sudoeste com sombra sobre as algemas', () => {
+    expect(validarLuzDeRecorteDasAlgemas()).toBeNull()
+    const luz = luzLivre('recorteAlgemas')
+    // Azul-bebê: canais verde e azul dominam o vermelho.
+    const r = Number.parseInt(luz.cor.slice(1, 3), 16)
+    const g = Number.parseInt(luz.cor.slice(3, 5), 16)
+    const b = Number.parseInt(luz.cor.slice(5, 7), 16)
+    expect(g).toBeGreaterThan(r)
+    expect(b).toBeGreaterThan(r)
+    expect(luz.intensidade).toBeGreaterThan(0)
+    // Com sombra projetada cobrindo o alcance da luz.
+    expect(luz.sombra).not.toBeNull()
+    expect(luz.sombra!.tamanhoDoMapa).toBeGreaterThanOrEqual(512)
+    expect(luz.sombra!.near).toBeGreaterThan(0)
+    expect(luz.sombra!.far).toBeGreaterThanOrEqual(luz.distancia)
+    expect(luz.sombra!.bias).toBeLessThan(0)
   })
 })

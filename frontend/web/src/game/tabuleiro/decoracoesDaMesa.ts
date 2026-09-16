@@ -271,6 +271,76 @@ export function luzDaChama(nome: NomeDaDecoracao): LuzDaChama | null {
 }
 
 /**
+ * Luzes livres da Mesa: `pointLight`s posicionados à mão (sem modelo) para
+ * acentos de atmosfera. Ponto único de calibragem via screenshot
+ * (`LUZES_LIVRES_DA_MESA`).
+ */
+export interface LuzLivre {
+  readonly cor: string
+  readonly intensidade: number
+  readonly distancia: number
+  readonly decaimento: number
+  readonly posicao: readonly [number, number, number]
+  readonly sombra: SombraDaChama | null
+}
+
+export type NomeDaLuzLivre = 'recorteAlgemas'
+
+export const LUZES_LIVRES_DA_MESA: Record<NomeDaLuzLivre, LuzLivre> = {
+  // Recorte azul-bebê a sudoeste (−x esquerda, +z frente): banho lateral nas
+  // algemas para destacá-las do tampo escuro, COM sombra projetada (a
+  // algema desenha sombra sob o recorte). Sem modelo na lâmpada — o `near`
+  // só precisa afastar o próprio tampo.
+  recorteAlgemas: {
+    cor: '#8fd0f2',
+    intensidade: 6,
+    distancia: 7,
+    decaimento: 1,
+    posicao: [-9.3, 1.4, 9.3],
+    sombra: {
+      tamanhoDoMapa: 1024,
+      near: 0.3,
+      far: 9,
+      bias: -0.004,
+    },
+  },
+}
+
+/** Luzes livres com montagem própria (ordem de montagem na cena). */
+export const NOMES_DAS_LUZES_LIVRES: readonly NomeDaLuzLivre[] = [
+  'recorteAlgemas',
+]
+
+/** Resolve a config de uma luz livre da Mesa. */
+export function luzLivre(nome: NomeDaLuzLivre): LuzLivre {
+  return LUZES_LIVRES_DA_MESA[nome]
+}
+
+/** Invariante: recorte no quadrante SO, acima da Mesa e ao alcance das algemas. */
+export function validarLuzDeRecorteDasAlgemas(): string | null {
+  const luz = LUZES_LIVRES_DA_MESA.recorteAlgemas
+  const [x, y, z] = luz.posicao
+  if (Math.abs(x) > LARGURA_MESA / 2 || Math.abs(z) > PROFUNDIDADE_MESA / 2) {
+    return 'Recorte deve ficar dentro da Mesa'
+  }
+  if (y <= 0) {
+    return 'Recorte deve ficar acima do plano da Mesa'
+  }
+  if (!(x < 0 && z > 0)) {
+    return 'Recorte deve ficar a sudoeste'
+  }
+  const [ax, , az] = POSICAO_ALGEMAS
+  const alcance = Math.hypot(x - ax, y - 0, z - az)
+  if (alcance > luz.distancia) {
+    return 'Recorte deve alcançar as algemas'
+  }
+  if (luz.sombra !== null && luz.sombra.far < luz.distancia) {
+    return 'Sombra do recorte deve cobrir o alcance da luz'
+  }
+  return null
+}
+
+/**
  * Escala efetiva pós-ajuste (mesma semântica de `escalaEfetivaDoModelo` da
  * Caixa): multiplicador sobre a escala de encaixe `Math.min` da pegada, sem
  * clamp — o excedente seria intencional, mas a vela nasce contida (×1).
