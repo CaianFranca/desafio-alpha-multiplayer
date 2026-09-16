@@ -160,6 +160,15 @@ describe('partida conectada ao game-server (issue #85)', () => {
   it('rotação por tecla R envia GIRAR_PECA para a peça em manipulação ao WS', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
+    // Issue #433: o teclado do ciclo é exclusivo do dono da vez — o teste
+    // roda com o jogador local como Jogador Ativo (fora da vez, R fica
+    // inerte e silencioso; coberto nos testes de página da #433).
+    await enviarLote(ws, {
+      type: 'TURNO_INICIADO',
+      jogadorId: mockAuthenticatedState.jogador.id,
+      rodada: 2,
+    })
+
     // Posiciona inicial-1 → abre janela de manipulação.
     act(() =>
       ws.simulateMessage({
@@ -304,6 +313,14 @@ describe('partida conectada ao game-server (issue #85)', () => {
   it('overlay de giro 3D: presente apenas com peça em manipulação (pós-encaixe)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
 
+    // Issue #433: a janela de Manipulação é controle do turno do Jogador
+    // Ativo — o teste roda com o jogador local como dono da vez.
+    await enviarLote(ws, {
+      type: 'TURNO_INICIADO',
+      jogadorId: mockAuthenticatedState.jogador.id,
+      rodada: 2,
+    })
+
     // 1. Sem nada selecionado: sem overlay emitido (a cena 3D é caixa-preta
     // no jsdom; o seam data-manipulacao espelha a mesma fonte).
     const semJanela = () =>
@@ -344,6 +361,12 @@ describe('partida conectada ao game-server (issue #85)', () => {
 
   it('envia apenas comandos Partida com jogadorId (hook restrito)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+    // Issue #433: o posicionamento por clique é gesto do dono da vez.
+    await enviarLote(ws, {
+      type: 'TURNO_INICIADO',
+      jogadorId: mockAuthenticatedState.jogador.id,
+      rodada: 2,
+    })
     act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' }))
     const user = userEvent.setup()
     // Tenta posicionar via clique vazio -> deve enviar POSICIONAR_PECA com jogadorId
@@ -411,6 +434,13 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
 
   it('LIMPEZA_APLICADA remove a peça da cena, libera a célula, e aceita novo posicionamento sem recarregar', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Issue #433: o reposicionamento por clique exige a vez do jogador local.
+    await enviarLote(ws, {
+      type: 'TURNO_INICIADO',
+      jogadorId: mockAuthenticatedState.jogador.id,
+      rodada: 2,
+    })
 
     // Posiciona inicial-1 em 3:3 via broadcast (mesma via dos eventos de #85).
     act(() =>
@@ -549,6 +579,13 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
 
   it('fade+encolher termina sem resíduos — peça removida desaparece e célula fica livre para reuso', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Issue #433: o reuso da célula por clique exige a vez do jogador local.
+    await enviarLote(ws, {
+      type: 'TURNO_INICIADO',
+      jogadorId: mockAuthenticatedState.jogador.id,
+      rodada: 2,
+    })
 
     act(() =>
       ws.simulateMessage({ type: 'PECA_POSICIONADA', pecaId: 'inicial-1', celula: { linha: 2, coluna: 2 }, orientacao: 0 }),
@@ -760,6 +797,13 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
 
   it('Espaço com manipulação aberta equivale ao OK do overlay 3D (a11y, review #338)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=server-1&partidaId=partida-1')
+
+    // Issue #433: Espaço/Enter no OK do ciclo é gesto do dono da vez.
+    await enviarLote(ws, {
+      type: 'TURNO_INICIADO',
+      jogadorId: MEU_JOGADOR_ID,
+      rodada: 2,
+    })
 
     // Posiciona inicial-1 → abre janela de manipulação.
     act(() =>
@@ -1151,6 +1195,14 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
 
   it('teclado silencia durante a fila do ataque e volta a enviar ao drenar (review PR #399, Bloqueante 2)', async () => {
     const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+
+    // Issue #433: os atalhos do ciclo (R/E/Espaço) só valem no turno local —
+    // o teste roda com o jogador local como dono da vez.
+    await enviarLote(ws, {
+      type: 'TURNO_INICIADO',
+      jogadorId: MEU_JOGADOR_ID,
+      rodada: 2,
+    })
 
     // Posiciona inicial-1 → abre janela de manipulação (atalhos R/E/Espaço/Enter vivos).
     act(() =>
