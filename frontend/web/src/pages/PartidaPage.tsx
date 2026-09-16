@@ -42,6 +42,12 @@ import { CODIGOS_DE_RECUSA_DO_CHAT } from '../hooks/useChatDaPartida'
 import type { CodigoDeRecusaDoChat } from '../hooks/useChatDaPartida'
 import { PainelDeChatDaPartida } from '../components/partida/PainelDeChatDaPartida'
 import type { PainelDeChatDaPartidaHandle } from '../components/partida/PainelDeChatDaPartida'
+import { PainelDeTutorialDaPartida } from '../components/partida/PainelDeTutorialDaPartida'
+import type { PainelDeTutorialDaPartidaHandle } from '../components/partida/PainelDeTutorialDaPartida'
+import {
+  marcarTutorialComoVistoNaAba,
+  tutorialJaVistoNaAba,
+} from '../components/partida/conteudoDoTutorialDaPartida'
 import { definirFase } from '../utils/coletorDeDepuracao'
 import { useRequerModoPaisagem } from '../hooks/useModoPaisagemCelular'
 import { OverlayModoPaisagem } from '../components/partida/OverlayModoPaisagem'
@@ -574,6 +580,37 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     chatAbertoRef.current = aberto
     setChatAbertoParaInert(aberto)
   }, [])
+
+  // ── Tutorial em carrossel (issue #434) ──
+  // Mesmo isolamento do chat (bloqueante 1): o container é dono de
+  // `aberto` + slide atual, fora da página — navegar no carrossel nunca
+  // re-renderiza a cena. `tutorialAbertoRef` alimenta o gate de teclado
+  // (lido DENTRO do `onKey`, sem `aberto` nas deps).
+  const painelDeTutorialRef = useRef<PainelDeTutorialDaPartidaHandle | null>(null)
+  const tutorialAbertoRef = useRef(false)
+  // Espelho de `tutorialAbertoRef` só para o `inert` declarativo da cena.
+  const [tutorialAbertoParaInert, setTutorialAbertoParaInert] = useState(false)
+  const aoMudarAberturaDoTutorial = useCallback((aberto: boolean) => {
+    tutorialAbertoRef.current = aberto
+    setTutorialAbertoParaInert(aberto)
+  }, [])
+  const abrirTutorial = useCallback(() => {
+    painelDeTutorialRef.current?.abrir()
+  }, [])
+  // Auto-abertura uma vez por aba (histórias 1 e 15): a primeira Partida EM
+  // ANDAMENTO abre o modal; Partidas seguintes na mesma aba já começam
+  // minimizadas (sessionStorage, sem persistência por usuário); nova aba
+  // exibe de novo. Só em andamento — nunca resultado, não-início ou
+  // carregamento (o painel nem monta fora de andamento/resultado).
+  const tentativaAutoTutorialRef = useRef(false)
+  useEffect(() => {
+    if (!estadoEmAndamento) return
+    if (tentativaAutoTutorialRef.current) return
+    tentativaAutoTutorialRef.current = true
+    if (tutorialJaVistoNaAba()) return
+    marcarTutorialComoVistoNaAba()
+    painelDeTutorialRef.current?.abrir()
+  }, [estadoEmAndamento])
 
   // ── Conexão do canal da partida (#156, ST-16 #180) ──
   const { enviar, estaConectado, conectar: reconectarSocket, desconectar, aguardarConexao, removerPendentesPorTipo } = usePartidaWebSocket({
@@ -1822,12 +1859,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   useEffect(() => {
     if (!estadoEmAndamento) return
     const onKey = (e: KeyboardEvent) => {
-      // Block da cena (issue #389): com o painel do chat aberto o teclado é
-      // do chat — R/E/Espaço/Enter não operam o tabuleiro (o input já é
-      // filtrado pelo alvo acima; o resto da cena, não). Lido na ref DENTRO
-      // do handler (bloqueante 1): sem `aberto` nas deps, o chat não
-      // re-subscreve este effect a cada mensagem.
-      if (chatAbertoRef.current) return
+      // Block da cena (issues #389 e #434): com o painel do chat ou o modal
+      // do tutorial abertos o teclado é deles — R/E/Espaço/Enter não operam
+      // o tabuleiro (o input já é filtrado pelo alvo acima; o resto da cena,
+      // não). Lido nas refs DENTRO do handler (bloqueante 1): sem `aberto`
+      // nas deps, chat e tutorial não re-subscrevem este effect a cada
+      // mensagem/slide.
+      if (chatAbertoRef.current || tutorialAbertoRef.current) return
       const alvo = e.target as HTMLElement | null
       if (alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA')) return
       if (e.key === 'r' || e.key === 'R') girar('horario')
@@ -1963,17 +2001,18 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       </div>
       <div data-testid="conteudo-jogo" inert={requerModoPaisagem}>
       {/*
-        Cena interativa isolada para o `inert` do chat (review #401): com o
-        painel aberto em andamento, atalho/foco programático fora da lista do
-        gate (R/E/Espaço/Enter) não alcança o tabuleiro — backdrop bloqueia o
-        ponteiro, trap de Tab + gate bloqueiam o teclado comum, `inert`
-        bloqueia o resto. HUD e chat ficam FORA deste wrapper de propósito:
-        no compacto o HUD essencial (SAIR) segue clicável (drawer, Spec [5]);
-        no Resultado nunca há `inert` (B3, `bloqueiaCena=false`).
+        Cena interativa isolada para o `inert` do chat e do tutorial (review
+        #401): com o painel aberto em andamento, atalho/foco programático fora
+        da lista do gate (R/E/Espaço/Enter) não alcança o tabuleiro — backdrop
+        bloqueia o ponteiro, trap de Tab + gate bloqueiam o teclado comum,
+        `inert` bloqueia o resto. HUD e chat/tutorial ficam FORA deste wrapper
+        de propósito: no compacto o HUD essencial (SAIR) segue clicável
+        (drawer, Spec [5]); no Resultado nunca há `inert` (B3,
+        `bloqueiaCena=false`).
       */}
       <div
         data-testid="cena-interativa"
-        inert={chatAbertoParaInert && estadoEmAndamento}
+        inert={(chatAbertoParaInert || tutorialAbertoParaInert) && estadoEmAndamento}
       >
       <AmbienteDeJogo
         bordaPx={bordaPx}
@@ -2122,6 +2161,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           onSairMesmoAssim={sairMesmoAssim}
           onCancelarSaida={cancelarSaida}
           compacto={viewportCompacto}
+          onAbrirTutorial={abrirTutorial}
         />
       ) : null}
       {/*
@@ -2145,13 +2185,30 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           aoMudarAbertura={aoMudarAberturaDoChat}
         />
       ) : null}
+      {/*
+        Tutorial da Partida (issue #434): irmão do chat em andamento E após o
+        Resultado até a saída individual — consulta de regras pós-jogo vive
+        aqui. Desmonta só em preparada/não-início. Dono do estado isolado no
+        container (bloqueante 1): navegar no carrossel não re-renderiza a
+        página/cena. Auto-abre uma vez por aba em andamento (histórias 1/15);
+        fechar ≡ minimizar para o botão no HUD. `data-*` dos testes vivem no
+        componente.
+      */}
+      {(estadoEmAndamento || emResultado) ? (
+        <PainelDeTutorialDaPartida
+          ref={painelDeTutorialRef}
+          bloqueiaCena={estadoEmAndamento}
+          compacto={viewportCompacto}
+          aoMudarAbertura={aoMudarAberturaDoTutorial}
+        />
+      ) : null}
       {estadoEmAndamento && faseDoTurno !== null ? (
         // Botões de turno acima do card de Turno do HUD (inf-dir, #226;
         // contidos no compacto #230 com safe-area, sem sobrepor HUD/alvos).
         <div
           data-testid="controles-de-turno"
           data-compacto={viewportCompacto ? 'true' : 'false'}
-          inert={chatAbertoParaInert && estadoEmAndamento}
+          inert={(chatAbertoParaInert || tutorialAbertoParaInert) && estadoEmAndamento}
           style={
             viewportCompacto
               ? {
