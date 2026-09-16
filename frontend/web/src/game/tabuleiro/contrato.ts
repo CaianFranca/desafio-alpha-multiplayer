@@ -74,6 +74,63 @@ export const POSICAO_INICIAIS: readonly [number, number, number] = [
 export const COLUNAS_INICIAIS = 2
 export const QUANTIDADE_INICIAIS = 4
 
+// ── Pilha da Caixa (peças de caminho à mostra dentro da caixa) ───────────
+// Ficção: as peças vêm da Caixa — 4 peças de caminho em montinho dentro da
+// caixa aberta (GLB sem tampa: só `bottom_*`), espalhadas mesmo que colidam
+// com as paredes. Puramente visual: nunca entra no wire, nunca é clicável
+// (sem `onClick`), nunca aparece no espelho DOM.
+
+/** Uma peça da pilha: controle manual total — tipo, giro Y, posição e inclinação. */
+export interface PecaDaPilha {
+  readonly tipo: TipoDaPeca
+  readonly orientacao: Orientacao
+  /** Centro da peça, relativo ao grupo da Caixa (y sobe do fundo interno). */
+  readonly posicao: readonly [number, number, number]
+  /** Inclinação em radianos [rx, rz] — o montinho bagunçado (0 = chapada). */
+  readonly inclinacao: readonly [number, number]
+}
+
+export const PILHA_DA_CAIXA: readonly PecaDaPilha[] = [
+  { tipo: 'reta', orientacao: 0, posicao: [-0.8, 0.5, -0.5], inclinacao: [1, 0.8] },
+  { tipo: 'T', orientacao: 180, posicao: [0.2, 1.0, 0.4], inclinacao: [0.3, 0] },
+  { tipo: 'cruz', orientacao: 90, posicao: [-0.8, 0.5, -0.9], inclinacao: [1, 0.8] },
+  { tipo: 'reta', orientacao: 90, posicao: [0.4, 1, 1.1], inclinacao: [0.5, -0.1] },
+]
+
+/** Tipos de caminho que a pilha pode exibir (nunca Inicial/especial/monstro). */
+export const TIPOS_DA_PILHA: readonly TipoDaPeca[] = ['reta', 'T', 'cruz']
+
+/** Invariante: 4 peças de caminho dentro da caixa, com pose válida. */
+export function validarPilhaDaCaixa(): string | null {
+  if (PILHA_DA_CAIXA.length !== 4) {
+    return 'Pilha da Caixa deve ter 4 peças'
+  }
+  for (const [indice, peca] of PILHA_DA_CAIXA.entries()) {
+    if (!TIPOS_DA_PILHA.includes(peca.tipo)) {
+      return `Pilha ${indice} deve ser peça de caminho`
+    }
+    if (![0, 90, 180, 270].includes(peca.orientacao)) {
+      return `Pilha ${indice} deve ter orientação válida`
+    }
+    const [x, y, z] = peca.posicao
+    // Dentro do volume da caixa (pegada visual 4.39×2.31, altura 2.80 —
+    // colisões com as paredes liberadas, fora disso é erro).
+    if (Math.abs(x) > 2.2 || Math.abs(z) > 1.2 || y < 0 || y > 3.2) {
+      return `Pilha ${indice} deve ficar dentro da caixa`
+    }
+    const [rx, rz] = peca.inclinacao
+    if (
+      !Number.isFinite(rx) ||
+      !Number.isFinite(rz) ||
+      Math.abs(rx) > 1 ||
+      Math.abs(rz) > 1
+    ) {
+      return `Pilha ${indice} deve ter inclinação válida`
+    }
+  }
+  return null
+}
+
 export const CELULA_INSET = TAMANHO_CELULA * 0.98
 export const ESPESSURA_BORDA = 0.04
 export const BORDA_OFFSET = 0.02

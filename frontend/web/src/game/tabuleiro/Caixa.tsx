@@ -32,6 +32,7 @@ import {
   type AjusteDoModeloDaCaixa,
 } from './modelosDaCaixa'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
+import { PilhaDaCaixa } from './PilhaDaCaixa'
 import { handlersDeCursor } from './cursor'
 
 interface CaixaProps {
@@ -343,7 +344,8 @@ export function Caixa({
   return (
     <group>
       {/* Caixa fechada e opaca: corpo do GLB normalizado na pegada (tampo do
-          próprio modelo, sem overlay); primitivas como fallback/erro. */}
+          próprio modelo, sem overlay); primitivas como fallback/erro. A pilha
+          de peças sobre o tampo vende que as peças vêm da Caixa. */}
       <group position={[POSICAO_CAIXA[0], POSICAO_CAIXA[1], POSICAO_CAIXA[2]]}>
         <LimiteDeErroDoModelo
           key={modeloDaCaixa('caixa')}
@@ -355,6 +357,7 @@ export function Caixa({
           </Suspense>
         </LimiteDeErroDoModelo>
       </group>
+      <PilhaDaCaixa />
 
       {/* Bandeja de slot único: SÓ o visual vira o GLB da cesta (posição,
           pegada, clique, pull vigente e origem `bandeja` do voo inalterados).

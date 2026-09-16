@@ -25,6 +25,8 @@ import {
   inicialIndiceParaLocal,
   todasAsCelulas,
   validarDimensoes,
+  PILHA_DA_CAIXA,
+  validarPilhaDaCaixa,
 } from '../web/src/game/tabuleiro/contrato'
 import { LARGURA_MESA } from '../web/src/game/ambiente/contrato'
 import { criarEstadoExibicaoMock } from './helpers/mockExibicao'
@@ -157,6 +159,23 @@ describe('contrato do tabuleiro', () => {
       'espectro',
     ] as const) {
       expect(abreJanelaDeManipulacao(tipo)).toBe(false)
+    }
+  })
+
+  it('pilha da Caixa: 4 peças de caminho com pose manual válida', () => {
+    expect(validarPilhaDaCaixa()).toBeNull()
+    expect(PILHA_DA_CAIXA).toHaveLength(4)
+    // Só caminho (nunca Inicial/especial/monstro), cada qual com posição
+    // dentro da caixa e inclinação válida.
+    for (const peca of PILHA_DA_CAIXA) {
+      expect(['reta', 'T', 'cruz']).toContain(peca.tipo)
+      const [x, y, z] = peca.posicao
+      expect(Math.abs(x)).toBeLessThanOrEqual(2.2)
+      expect(Math.abs(z)).toBeLessThanOrEqual(1.2)
+      expect(y).toBeGreaterThanOrEqual(0)
+      const [rx, rz] = peca.inclinacao
+      expect(Number.isFinite(rx)).toBe(true)
+      expect(Number.isFinite(rz)).toBe(true)
     }
   })
 })
