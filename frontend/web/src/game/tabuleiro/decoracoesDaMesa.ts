@@ -1,7 +1,7 @@
 /**
  * Decorações da Mesa (objetos 3D puramente visuais, sem regra).
  *
- * Seam puro: `vela → URL` do GLB commitado em
+ * Seam puro: `vela | algemas → URL` dos GLBs commitados em
  * `web/public/assets/3d-models/` (servido sob
  * `import.meta.env.BASE_URL + assets/3d-models/…`, empacotado no `dist` via
  * `publicDir` — ver `frontend/vite.config.ts`). Sem three.js/DOM: só URLs,
@@ -18,10 +18,11 @@ import { LARGURA_MESA, PROFUNDIDADE_MESA } from '../ambiente/contrato'
 import {
   LARGURA_TABULEIRO,
   PROFUNDIDADE_TABULEIRO,
+  OFFSET_FILEIRA_PEOES_X,
   POSICAO_CAIXA,
 } from './contrato'
 
-export type NomeDaDecoracao = 'vela'
+export type NomeDaDecoracao = 'vela' | 'algemas'
 
 function baseAssets(): string {
   const base = import.meta.env.BASE_URL ?? '/'
@@ -35,10 +36,14 @@ function modelo(nomeDoArquivo: string): string {
 /** URLs dos GLBs decorativos (um por objeto de cena). */
 export const MODELOS_DAS_DECORACOES: Record<NomeDaDecoracao, string> = {
   vela: modelo('vela.glb'),
+  algemas: modelo('algemas.glb'),
 }
 
 /** Decorações com visual próprio (ordem de montagem na cena). */
-export const NOMES_DAS_DECORACOES: readonly NomeDaDecoracao[] = ['vela']
+export const NOMES_DAS_DECORACOES: readonly NomeDaDecoracao[] = [
+  'vela',
+  'algemas',
+]
 
 /** Resolve a URL do GLB de uma decoração da Mesa. */
 export function modeloDaDecoracao(nome: NomeDaDecoracao): string {
@@ -65,11 +70,18 @@ export const AJUSTES_DAS_DECORACOES: Record<
   // Vela contida junto à Caixa: cabe na pegada de 1.2×1.2 sem excedente.
   // Calibrar via screenshot (posição primeiro, tamanho depois).
   vela: { escala: 3, rotacaoY: 3.6 },
+  // Algemas no canto inferior esquerdo: ponto de partida contido (×1, sem
+  // giro) para calibrar via screenshot.
+  algemas: { escala: 3, rotacaoY: 1 },
 }
 
 /** Pegada de normalização da vela sobre a Mesa (contida, sem excedente). */
 export const VELA_LARGURA = 1.2
 export const VELA_PROFUNDIDADE = 1.2
+
+/** Pegada de normalização das algemas sobre a Mesa (contida, sem excedente). */
+export const ALGEMAS_LARGURA = 1.6
+export const ALGEMAS_PROFUNDIDADE = 1.6
 
 /**
  * Posição da base da vela sobre a Mesa (centro da pegada, y = 0 no plano
@@ -79,12 +91,25 @@ export const VELA_PROFUNDIDADE = 1.2
  */
 export const POSICAO_VELA: readonly [number, number, number] = [4.79, 0, -7.4]
 
+/**
+ * Posição da base das algemas sobre a Mesa (centro da pegada, y = 0 no plano
+ * superior): canto inferior esquerdo da tela (−x, +z — a câmera olha de +z
+ * para a origem), fora do tabuleiro central e longe da fileira de peões
+ * (x = −8, faixa central em z).
+ */
+export const POSICAO_ALGEMAS: readonly [number, number, number] = [
+  -7.0,
+  0,
+  7.2,
+]
+
 /** Posições das decorações (base em y = 0, plano superior da Mesa). */
 export const POSICOES_DAS_DECORACOES: Record<
   NomeDaDecoracao,
   readonly [number, number, number]
 > = {
   vela: POSICAO_VELA,
+  algemas: POSICAO_ALGEMAS,
 }
 
 /**
@@ -144,6 +169,8 @@ export const LUZ_DA_CHAMA_POR_DECORACAO: Record<
       bias: -0.004,
     },
   },
+  // Sem chama: sem ponto de luz.
+  algemas: null,
 }
 
 /** Config do ponto de luz da chama (`null` = decoração sem chama). */
@@ -173,8 +200,7 @@ export function escalaEfetivaDaDecoracao(
 }
 
 /** Invariante de layout: vela dentro da Mesa, fora do tabuleiro, a NO da Caixa. */
-export function validarPosicaoDaVela(): string | null {
-  const [x, , z] = POSICAO_VELA
+export function validarPosicaoDaVela(): string | null {  const [x, , z] = POSICAO_VELA
   if (
     Math.abs(x) > LARGURA_MESA / 2 ||
     Math.abs(z) > PROFUNDIDADE_MESA / 2
@@ -190,6 +216,33 @@ export function validarPosicaoDaVela(): string | null {
   const [caixaX, , caixaZ] = POSICAO_CAIXA
   if (!(x < caixaX && z < caixaZ)) {
     return 'Vela deve ficar a noroeste da Caixa'
+  }
+  return null
+}
+
+/** Invariante de layout: algemas no canto inferior esquerdo, livres. */
+export function validarPosicaoDasAlgemas(): string | null {
+  const [x, , z] = POSICAO_ALGEMAS
+  if (
+    Math.abs(x) > LARGURA_MESA / 2 ||
+    Math.abs(z) > PROFUNDIDADE_MESA / 2
+  ) {
+    return 'Algemas devem ficar dentro da Mesa'
+  }
+  if (
+    Math.abs(x) < LARGURA_TABULEIRO / 2 &&
+    Math.abs(z) < PROFUNDIDADE_TABULEIRO / 2
+  ) {
+    return 'Algemas devem ficar fora do tabuleiro'
+  }
+  // Canto inferior esquerdo da tela: −x (esquerda), +z (frente/câmera).
+  if (!(x < 0 && z > 0)) {
+    return 'Algemas devem ficar no canto inferior esquerdo'
+  }
+  // Longe da fileira de peões (x = −8, faixa central em z): perto em x SÓ
+  // vale com z bem afastado do centro.
+  if (Math.abs(x - OFFSET_FILEIRA_PEOES_X) < 2 && Math.abs(z) < 4.5) {
+    return 'Algemas devem ficar longe da fileira de peões'
   }
   return null
 }

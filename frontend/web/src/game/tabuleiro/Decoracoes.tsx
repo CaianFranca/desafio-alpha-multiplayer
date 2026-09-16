@@ -4,6 +4,8 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import {
   AJUSTES_DAS_DECORACOES,
+  ALGEMAS_LARGURA,
+  ALGEMAS_PROFUNDIDADE,
   POSICOES_DAS_DECORACOES,
   VELA_LARGURA,
   VELA_PROFUNDIDADE,
@@ -26,6 +28,19 @@ function VelaFallback() {
     <mesh position={[0, 0.25, 0]} castShadow receiveShadow>
       <cylinderGeometry args={[0.22, 0.26, 0.5, 12]} />
       <meshStandardMaterial color="#2a2320" />
+    </mesh>
+  )
+}
+
+/**
+ * Primitiva genérica enquanto o GLB carrega ou se falhar (decorações sem
+ * fallback próprio): volume baixo e escuro, coerente com o sanatório.
+ */
+function DecoracaoGenericaFallback() {
+  return (
+    <mesh position={[0, 0.08, 0]} castShadow receiveShadow>
+      <boxGeometry args={[0.9, 0.16, 0.6]} />
+      <meshStandardMaterial color="#241f1c" />
     </mesh>
   )
 }
@@ -163,14 +178,15 @@ function Decoracao({
 }) {
   const posicao = POSICOES_DAS_DECORACOES[nome]
   const url = modeloDaDecoracao(nome)
+  const fallback = nome === 'vela' ? <VelaFallback /> : <DecoracaoGenericaFallback />
   return (
     <group position={[posicao[0], posicao[1], posicao[2]]}>
       <LimiteDeErroDoModelo
         key={url}
         resetKey={url}
-        fallback={<VelaFallback />}
+        fallback={fallback}
       >
-        <Suspense fallback={<VelaFallback />}>
+        <Suspense fallback={fallback}>
           <DecoracaoNormalizada
             largura={largura}
             profundidade={profundidade}
@@ -196,6 +212,11 @@ export function DecoracoesDaMesa() {
         nome="vela"
         largura={VELA_LARGURA}
         profundidade={VELA_PROFUNDIDADE}
+      />
+      <Decoracao
+        nome="algemas"
+        largura={ALGEMAS_LARGURA}
+        profundidade={ALGEMAS_PROFUNDIDADE}
       />
     </group>
   )

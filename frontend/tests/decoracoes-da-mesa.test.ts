@@ -9,21 +9,31 @@ import {
   AJUSTES_DAS_DECORACOES,
   MODELOS_DAS_DECORACOES,
   NOMES_DAS_DECORACOES,
+  POSICAO_ALGEMAS,
   POSICAO_VELA,
   escalaEfetivaDaDecoracao,
   luzDaChama,
   modeloDaDecoracao,
   validarPosicaoDaVela,
+  validarPosicaoDasAlgemas,
 } from '../web/src/game/tabuleiro/decoracoesDaMesa'
 import { POSICAO_CAIXA } from '../web/src/game/tabuleiro/contrato'
 
 describe('decorações da Mesa', () => {
-  it('vela resolve URL sob assets/3d-models/vela.glb', () => {
-    expect([...NOMES_DAS_DECORACOES]).toEqual(['vela'])
-    const url = modeloDaDecoracao('vela')
-    expect(url).toBe(MODELOS_DAS_DECORACOES.vela)
-    expect(url).toContain('assets/3d-models/')
-    expect(url).toContain('vela.glb')
+  it('vela e algemas resolvem URLs sob assets/3d-models/*.glb', () => {
+    expect([...NOMES_DAS_DECORACOES].sort()).toEqual(['algemas', 'vela'])
+    expect(Object.keys(MODELOS_DAS_DECORACOES).sort()).toEqual([
+      'algemas',
+      'vela',
+    ])
+    for (const nome of NOMES_DAS_DECORACOES) {
+      const url = modeloDaDecoracao(nome)
+      expect(url).toBe(MODELOS_DAS_DECORACOES[nome])
+      expect(url).toContain('assets/3d-models/')
+      expect(url.endsWith('.glb')).toBe(true)
+    }
+    expect(MODELOS_DAS_DECORACOES.vela).toContain('vela.glb')
+    expect(MODELOS_DAS_DECORACOES.algemas).toContain('algemas.glb')
   })
 
   it('vela a noroeste da Caixa, fora do tabuleiro e dentro da Mesa', () => {
@@ -58,8 +68,8 @@ describe('decorações da Mesa', () => {
     // e a Caixa vizinha, com alcance cortado — e a lâmpada acima do topo
     // do modelo (nunca dentro dele).
     expect(luz!.cor.toLowerCase()).toMatch(/^#ff/)
-    expect(luz!.intensidade).toBe(15)
-    expect(luz!.distancia).toBe(15)
+    expect(luz!.intensidade).toBe(18)
+    expect(luz!.distancia).toBe(10)
     expect(luz!.decaimento).toBe(1)
     expect(luz!.folgaAcimaDoTopo).toBeGreaterThan(0)
   })
@@ -73,5 +83,19 @@ describe('decorações da Mesa', () => {
     expect(sombra!.near).toBeGreaterThan(0)
     expect(sombra!.far).toBeGreaterThanOrEqual(luzDaChama('vela')!.distancia)
     expect(sombra!.bias).toBeLessThan(0)
+  })
+
+  it('algemas no canto inferior esquerdo, fora do tabuleiro e sem chama', () => {
+    expect(validarPosicaoDasAlgemas()).toBeNull()
+    const [x, y, z] = POSICAO_ALGEMAS
+    expect(y).toBe(0)
+    expect(x).toBeLessThan(0)
+    expect(z).toBeGreaterThan(0)
+    expect(luzDaChama('algemas')).toBeNull()
+  })
+
+  it('algemas nascem contidas (×1, sem giro) para calibrar via screenshot', () => {
+    expect(AJUSTES_DAS_DECORACOES.algemas.escala).toBe(1)
+    expect(AJUSTES_DAS_DECORACOES.algemas.rotacaoY).toBe(0)
   })
 })
