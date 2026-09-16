@@ -1,0 +1,12 @@
+# cloudflare-realip.snippet — restaura o IP real do cliente atrás do Cloudflare
+# Quick Tunnel. O Cloudflare seta CF-Connecting-IP no salto Cloudflare→origem e
+# o cloudflared conecta ao nginx a partir do localhost. Só pares confiáveis
+# (127.0.0.1/::1) podem sobrescrever $remote_addr; acesso direto à :80 com
+# header forjado é ignorado (fica o IP do par). Incluído no server da borda,
+# para não alterar o $remote_addr do vhost do app.
+# Se o cloudflared rodar em container, acrescente a faixa do bridge
+# (ex.: set_real_ip_from 172.16.0.0/12;).
+set_real_ip_from 127.0.0.1;
+set_real_ip_from ::1;
+real_ip_header CF-Connecting-IP;
+real_ip_recursive on;

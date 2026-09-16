@@ -4,8 +4,8 @@
 # Emite o header só quando o TLS foi terminado no proxy da borda
 # (X-Forwarded-Proto começando com https, case-insensitive). Valor vazio =
 # header omitido em HTTP puro (add_header com valor vazio não emite).
-# max-age de 30 dias como ramp-up no host compartilhado
-# lab.alphaedtech.org.br; alvo final OWASP após período estável:
+# max-age de 30 dias como ramp-up no host público compartilhado/efêmero
+# (Cloudflare Quick Tunnel); alvo final OWASP após período estável:
 # max-age=31536000 (sem includeSubDomains).
 map $http_x_forwarded_proto $hsts_header {
     default "";
