@@ -80,6 +80,14 @@ jobs:
       - name: Typecheck (workspaces)
         run: npm ci && npm run typecheck
 
+      # Rollback (workflow_dispatch com `sha`) não é gateado: audita-se o deploy
+      # normal. O gate é high/critical nas dependências de produção dos três
+      # roots npm (raiz/workspaces, db e frontend); exceções em
+      # dependency-audit-allowlist.json só valem sem correção disponível.
+      - name: Auditoria de dependências de produção (workspaces + db + frontend)
+        if: inputs.sha == ''
+        run: node scripts/audit-dependencies.mjs
+
       - name: Migrations (db não é workspace da raiz)
         working-directory: db
         run: npm ci && npx knex migrate:latest --knexfile knexfile.ts

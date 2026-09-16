@@ -5,7 +5,9 @@ Flicker of Sanity em produção nativa (sem Docker). Qualquer dev deve conseguir
 executar a rotina completa a partir daqui, sem contexto externo.
 
 Fontes da verdade: `.github/workflows/deploy.yml`, `scripts/build-release.sh`,
-`scripts/deploy-server.sh`, `packages/config/src/index.ts`, `infra/systemd/`,
+`scripts/deploy-server.sh`, `scripts/audit-dependencies.mjs` +
+`dependency-audit-allowlist.json` (auditoria de dependências, seção 3.6),
+`packages/config/src/index.ts`, `infra/systemd/`,
 `infra/nginx/nginx.prod.conf` (nginx do app, `:8080`) e
 `infra/nginx/nginx.edge.conf` (vhost de borda, `:80`).
 
@@ -23,7 +25,7 @@ O pipeline tem três jobs encadeados (`quality` → `build` → `deploy`):
 
 | Job | O que faz | Timeout |
 | --- | --- | --- |
-| `quality` | Typecheck dos workspaces (`npm run typecheck`) + migrations do `db/` contra um Postgres 17 limpo (service container). **NÃO roda testes** — decisão do time (2026-09-05): a suíte de integração e frontend não é mantida e os testes de frontend se mostraram flaky no runner do Actions. Validação de comportamento é feita localmente antes do merge. | 10 min |
+| `quality` | Auditoria de dependências de produção (`npm audit --omit=dev` nos três roots npm; high/critical reprova — seção 3.6) + typecheck dos workspaces (`npm run typecheck`) + migrations do `db/` contra um Postgres 17 limpo (service container). **NÃO roda testes** — decisão do time (2026-09-05): a suíte de integração e frontend não é mantida e os testes de frontend se mostraram flaky no runner do Actions. Validação de comportamento é feita localmente antes do merge. | 10 min |
 | `build` | Executa `scripts/build-release.sh <sha-curto>`, que empacota o tarball `release/flicker-<sha>.tar.gz` e o publica como artifact `flicker-<sha>` (retenção de 14 dias). | 15 min |
 | `deploy` | Conecta ao servidor de produção via **OpenVPN + SSH**, instala o env de produção, prepara o Postgres (idempotente) e executa `scripts/deploy-server.sh` no servidor. | 15 min |
 
@@ -100,9 +102,12 @@ Acompanhe em **Actions → Deploy — Flicker of Sanity**.
 ### 3.2 O que cada job faz
 
 **`quality`** — checkout (do SHA de rollback se houver, senão do HEAD da
-`prod`), Node 24, `npm ci` + typecheck na raiz; em `db/`, `npm ci` +
-`knex migrate:latest` contra o Postgres 17 do service container (env de teste,
-nenhum secret real). Garante que o schema migra de zero sem erro.
+`prod`), Node 24, auditoria de dependências de produção (seção 3.6) —
+`npm audit --omit=dev` nos três roots npm (raiz, `db` e `frontend`), reprovando
+em high/critical sem exceção justificada —, `npm ci` + typecheck na raiz; em
+`db/`, `npm ci` + `knex migrate:latest` contra o Postgres 17 do service
+container (env de teste, nenhum secret real). Garante que o schema migra de
+zero sem erro.
 
 **`build`** — checkout do mesmo ref, `scripts/build-release.sh "$SHORT_SHA"`.
 O tarball contém tudo que o servidor precisa em runtime (o servidor **nunca
@@ -195,6 +200,43 @@ verificação os exige no lobby e no game-server. Tokens emitidos antes desta
 mudança são recusados: após o deploy, todas as Sessões ativas exigem novo
 login — não há janela de graça. O corte é intencional (hardening #416).
 
+### 3.6 Auditoria de dependências e exceções (allowlist)
+
+O step "Auditoria de dependências de produção" roda
+`node scripts/audit-dependencies.mjs`, que executa
+`npm audit --omit=dev --package-lock-only` em cada root npm — `.` (raiz +
+workspaces), `db` e `frontend` — e reprova o pipeline (exit 1) em qualquer
+advisory **high** ou **critical** nas dependências de produção. O step é
+isento no rollback (seção 4): só roda quando `inputs.sha` está vazio.
+
+Exit codes do script: `0` sem pendência, `1` com high/critical pendente e `2`
+para erro operacional (ex.: lockfile ausente) ou allowlist inválida — erro
+operacional nunca é tratado como "verde".
+
+Exceções vivem em `dependency-audit-allowlist.json` (raiz do repo). Uma entrada
+só é aceita para advisory **sem correção disponível** (`fixAvailable === false`
+no relatório do npm); um advisory com correção disponível continua reprovando,
+mesmo listado. O vínculo é pelo **GHSA id** (ex.: `GHSA-xxxx-xxxx-xxxx`), não
+pelo nome do pacote:
+
+```json
+{
+  "policy": "<texto fixo explicando a política de exceções>",
+  "allowlist": [
+    {
+      "advisory": "GHSA-xxxx-xxxx-xxxx",
+      "package": "pacote-afetado",
+      "justification": "por que o risco é aceito e qual a mitigação"
+    }
+  ]
+}
+```
+
+`advisory` e `justification` são obrigatórios (não-vazios); allowlist malformada
+aborta com exit 2. Entrada que não corresponde a nenhum advisory high/critical
+atual vira aviso e deve ser removida. Cada exceção aplicada aparece no log como
+`[allow] <GHSA> (<pacote>) — <justificativa>`.
+
 ---
 
 ## 4. Rollback
@@ -208,7 +250,10 @@ commit** e redeploya:
    `refs/heads/prod`) e preencha o input **`sha`** com o SHA curto.
 4. O workflow roda os três jobs normalmente, mas com checkout do SHA
    informado: `quality` re-valida, `build` re-gera `flicker-<sha>` e o
-   `deploy` publica essa release.
+   `deploy` publica essa release. A **auditoria de dependências é isenta** no
+   rollback (o step só roda com `inputs.sha` vazio, isto é, em deploy normal):
+   o objetivo é republicar um commit antigo, não barrá-lo por advisory já
+   conhecido.
 
 Como `deploy-server.sh` mantém as últimas 3 releases em disco, voltar para um
 SHA recente costuma reaproveitar o diretório já extraído (extração idempotente).
