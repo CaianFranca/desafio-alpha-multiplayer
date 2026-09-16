@@ -8,13 +8,20 @@
  */
 
 import {
+  DIMENSOES_DO_CARTAO,
   DIMENSOES_DOS_DOCUMENTOS,
   INSTANCIAS_DOS_DOCUMENTOS,
+  PARAMETROS_DO_CARTAO,
   POSICAO_ALGEMAS,
+  POSICAO_DO_CARTAO,
+  PROPORCAO_DO_CARTAO,
   PROPORCAO_DOS_DOCUMENTOS,
+  ROTACAO_DO_CARTAO,
+  TEXTURA_DO_CARTAO,
   TEXTURAS_DOS_DOCUMENTOS,
   TIPOS_DE_DOCUMENTO,
   texturaDoDocumento,
+  validarPosicaoDoCartao,
   validarPosicaoDosDocumentos,
 } from '../web/src/game/tabuleiro/decoracoesDaMesa'
 
@@ -113,5 +120,28 @@ describe('documentos largados na Mesa', () => {
       (instancia) => instancia.posicao[1],
     )
     expect(new Set(alturas).size).toBe(INSTANCIAS_DOS_DOCUMENTOS.length)
+  })
+
+  it('cartão de acesso resolve cartao.jpg na proporção do arquivo', () => {
+    // Proporção medida no asset: 648×391.
+    expect(PROPORCAO_DO_CARTAO).toBeCloseTo(648 / 391)
+    expect(TEXTURA_DO_CARTAO).toContain('assets/textures/')
+    expect(TEXTURA_DO_CARTAO).toContain('cartao.jpg')
+    expect(DIMENSOES_DO_CARTAO.largura / DIMENSOES_DO_CARTAO.profundidade).toBeCloseTo(
+      PROPORCAO_DO_CARTAO,
+      2,
+    )
+    expect(PARAMETROS_DO_CARTAO.url).toBe(TEXTURA_DO_CARTAO)
+    expect(PARAMETROS_DO_CARTAO.rotacaoY).toBe(ROTACAO_DO_CARTAO)
+  })
+
+  it('cartão repousa sobre o horizontal do canto inferior direito', () => {
+    expect(validarPosicaoDoCartao()).toBeNull()
+    const [x, y, z] = POSICAO_DO_CARTAO
+    // No quadrante do documento (+x, +z) e acima do plano.
+    expect(x).toBeGreaterThan(0)
+    expect(z).toBeGreaterThan(0)
+    expect(y).toBeGreaterThan(0.035)
+    expect(Number.isFinite(ROTACAO_DO_CARTAO)).toBe(true)
   })
 })

@@ -449,3 +449,123 @@ export function validarPosicaoDosDocumentos(): string | null {
   }
   return null
 }
+
+// ── Cartão de acesso largado na Mesa (lâmina com textura, sem GLB) ─────────
+// Mesma técnica das páginas: lâmina fina com a textura no topo (+y).
+// `cartao.jpg`: 648×391 → 1.4 × 0.845. Repousa sobre o horizontal do canto
+// inferior direito.
+
+/** Textura do cartão de acesso (topo da lâmina, em sRGB fiel ao arquivo). */
+export const TEXTURA_DO_CARTAO = textura('cartao.jpg')
+
+/** Proporção largura/profundidade do cartão (espelha o arquivo). */
+export const PROPORCAO_DO_CARTAO = 648 / 391
+
+/** Dimensões da lâmina do cartão sobre a Mesa. */
+export const DIMENSOES_DO_CARTAO = { largura: 2.1, profundidade: 1.245 } as const
+
+/** Espessura do cartão (plástico rígido, mais grosso que o papel). */
+export const ESPESSURA_DO_CARTAO = 0.012
+
+/** Tom da borda do cartão (topo recebe a textura). */
+export const COR_BORDA_DO_CARTAO = '#232a30'
+
+/** Giro em Y do cartão (ponto único de calibragem via screenshot). */
+export const ROTACAO_DO_CARTAO = 0.45
+
+/**
+ * Posição do centro do cartão: sobre o horizontal do canto inferior direito
+ * (+x, +z) — o `y` nasce acima do topo da página com folga anti-coplanar
+ * (sem z-fighting no encosto).
+ */
+export const POSICAO_DO_CARTAO: readonly [number, number, number] = [
+  6.2,
+  0.045,
+  7.9,
+]
+
+/** Parâmetros montados da lâmina do cartão (para o componente). */
+export interface ParametrosDaLamina {
+  readonly url: string
+  readonly largura: number
+  readonly profundidade: number
+  readonly espessura: number
+  readonly posicao: readonly [number, number, number]
+  readonly rotacaoY: number
+  readonly corBorda: string
+}
+
+/** Parâmetros da lâmina do cartão de acesso. */
+export const PARAMETROS_DO_CARTAO: ParametrosDaLamina = {
+  url: TEXTURA_DO_CARTAO,
+  largura: DIMENSOES_DO_CARTAO.largura,
+  profundidade: DIMENSOES_DO_CARTAO.profundidade,
+  espessura: ESPESSURA_DO_CARTAO,
+  posicao: POSICAO_DO_CARTAO,
+  rotacaoY: ROTACAO_DO_CARTAO,
+  corBorda: COR_BORDA_DO_CARTAO,
+}
+
+/** Parâmetros da lâmina de uma página (para o componente). */
+export function parametrosDaPagina(
+  instancia: InstanciaDeDocumento,
+): ParametrosDaLamina {
+  return {
+    url: texturaDoDocumento(instancia.tipo),
+    largura: DIMENSOES_DOS_DOCUMENTOS[instancia.tipo].largura,
+    profundidade: DIMENSOES_DOS_DOCUMENTOS[instancia.tipo].profundidade,
+    espessura: ESPESSURA_DO_DOCUMENTO,
+    posicao: instancia.posicao,
+    rotacaoY: instancia.rotacaoY,
+    corBorda: COR_BORDA_DO_PAPEL,
+  }
+}
+
+/** Invariante de layout: cartão dentro da Mesa e repousando sobre a página. */
+export function validarPosicaoDoCartao(): string | null {
+  const [x, y, z] = POSICAO_DO_CARTAO
+  const { largura, profundidade } = DIMENSOES_DO_CARTAO
+  const meiaDiagonal = Math.hypot(largura, profundidade) / 2
+  if (
+    Math.abs(x) + meiaDiagonal > LARGURA_MESA / 2 ||
+    Math.abs(z) + meiaDiagonal > PROFUNDIDADE_MESA / 2
+  ) {
+    return 'Cartão deve ficar dentro da Mesa'
+  }
+  // Sobre o horizontal do canto inferior direito (+x, +z): centro contido no
+  // retângulo da página (margem da meia-diagonal do cartão) e base acima do
+  // topo da folha, sem encosto coplanar.
+  const pagina =
+    INSTANCIAS_DOS_DOCUMENTOS.find(
+      (instancia) =>
+        instancia.tipo === 'horizontal' &&
+        instancia.posicao[0] > 0 &&
+        instancia.posicao[2] > 0,
+    ) ?? null
+  if (pagina === null) {
+    return 'Cartão deve ficar sobre o documento do canto inferior direito'
+  }
+  const [px, py, pz] = pagina.posicao
+  const dimensoes = DIMENSOES_DOS_DOCUMENTOS.horizontal
+  const cosseno = Math.cos(pagina.rotacaoY)
+  const seno = Math.sin(pagina.rotacaoY)
+  const dx = x - px
+  const dz = z - pz
+  const localX = dx * cosseno - dz * seno
+  const localZ = dx * seno + dz * cosseno
+  if (
+    Math.abs(localX) > dimensoes.largura / 2 - meiaDiagonal ||
+    Math.abs(localZ) > dimensoes.profundidade / 2 - meiaDiagonal
+  ) {
+    return 'Cartão deve ficar sobre a página'
+  }
+  const topoDaPagina = py + ESPESSURA_DO_DOCUMENTO / 2
+  const baseDoCartao = y - ESPESSURA_DO_CARTAO / 2
+  if (baseDoCartao < topoDaPagina) {
+    return 'Cartão deve ficar acima da página'
+  }
+  if (!Number.isFinite(ROTACAO_DO_CARTAO)) {
+    return 'Cartão deve ter giro válido'
+  }
+  return null
+}
