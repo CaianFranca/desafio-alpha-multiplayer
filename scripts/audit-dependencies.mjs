@@ -28,6 +28,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOTS_PADRAO = ['.', 'db', 'frontend'];
 const ALLOWLIST_PADRAO = join(REPO_ROOT, 'dependency-audit-allowlist.json');
 const SEVERIDADES_GATE = new Set(['high', 'critical']);
+const TITULO_SUMMARY = '## Auditoria de dependências de produção';
 
 const log = (msg) => console.log(`[audit-deps] ${msg}`);
 const warn = (msg) => console.warn(`[audit-deps] AVISO: ${msg}`);
@@ -268,8 +269,12 @@ function auditarRoot(rootAbs) {
   return { erro: ultimoErro };
 }
 
+function rotuloPacotes(item) {
+  return item.pacotes?.join(', ') || item.pacote || '';
+}
+
 function imprimirPendencia(pendencia) {
-  const pacotes = pendencia.pacotes?.join(', ') || pendencia.pacote;
+  const pacotes = rotuloPacotes(pendencia);
   console.error(`  - ${pacotes} (${pendencia.severidade}) ${pendencia.advisory}`);
   console.error(`      título: ${pendencia.titulo}`);
   console.error(`      url: ${pendencia.url || '(sem url)'}`);
@@ -302,7 +307,7 @@ function main() {
     args = parseArgs(process.argv.slice(2));
   } catch (e) {
     erro(e.message);
-    escreverSummary(`## Auditoria de dependências de produção\n\n**ERRO OPERACIONAL**\n\n- ${e.message}`);
+    escreverSummary(`${TITULO_SUMMARY}\n\n**ERRO OPERACIONAL**\n\n- ${e.message}`);
     return 2;
   }
 
@@ -312,7 +317,7 @@ function main() {
   } catch (e) {
     erro(`allowlist inválida (${args.allowlist}): ${e.message}`);
     escreverSummary(
-      `## Auditoria de dependências de produção\n\n**ERRO OPERACIONAL**\n\n- allowlist inválida (${args.allowlist}): ${e.message}`,
+      `${TITULO_SUMMARY}\n\n**ERRO OPERACIONAL**\n\n- allowlist inválida (${args.allowlist}): ${e.message}`,
     );
     return 2;
   }
@@ -349,7 +354,7 @@ function main() {
   const pendencias = deduplicar(pendenciasBrutas, (p) => `${p.root}::${p.advisory.toUpperCase()}::${p.motivo}`);
   const excecoesAplicadas = permitidos.length;
   for (const item of permitidos) {
-    log(`[allow] ${item.advisory} (${item.pacotes.join(', ') || item.pacote}) — ${item.justificativa}`);
+    log(`[allow] ${item.advisory} (${rotuloPacotes(item)}) — ${item.justificativa}`);
   }
 
   // "Não utilizada" é global: uma exceção vale se casar em QUALQUER root.
@@ -364,7 +369,7 @@ function main() {
     for (const e of erros) erro(e);
     erro('auditoria interrompida por erro operacional — pipeline REPROVADO');
     escreverSummary(
-      `## Auditoria de dependências de produção\n\n**ERRO OPERACIONAL**\n\n${erros
+      `${TITULO_SUMMARY}\n\n**ERRO OPERACIONAL**\n\n${erros
         .map((e) => `- ${e}`)
         .join('\n')}`,
     );
@@ -380,12 +385,12 @@ function main() {
     erro('pipeline REPROVADO — corrija as dependências ou registre exceção apenas sem correção');
     escreverSummary(
       [
-        '## Auditoria de dependências de produção',
+        TITULO_SUMMARY,
         '',
         '**REPROVADO — high/critical pendente**',
         '',
         ...pendencias.map(
-          (p) => `- [${p.root}] ${p.pacotes.join(', ') || p.pacote} (${p.severidade}) ${p.advisory} — ${p.titulo}`,
+          (p) => `- [${p.root}] ${rotuloPacotes(p)} (${p.severidade}) ${p.advisory} — ${p.titulo}`,
         ),
       ].join('\n'),
     );
@@ -394,7 +399,7 @@ function main() {
 
   log(`OK — nenhuma vulnerabilidade high/critical pendente (${excecoesAplicadas} exceção(ões) aplicada(s))`);
   escreverSummary(
-    `## Auditoria de dependências de produção\n\n**OK** — nenhuma vulnerabilidade high/critical pendente (${excecoesAplicadas} exceção(ões) aplicada(s)).`,
+    `${TITULO_SUMMARY}\n\n**OK** — nenhuma vulnerabilidade high/critical pendente (${excecoesAplicadas} exceção(ões) aplicada(s)).`,
   );
   return 0;
 }
