@@ -335,6 +335,84 @@ describe('HUD da Partida — Sanidade e estados (#226 [3])', () => {
         ),
     ).toHaveLength(0)
   })
+
+  it('anel, nome, efeitos e barra local usam a cor do peão (HEX_COR_PEAO)', () => {
+    const jogadores: Record<string, PercepcaoDeJogador> = {
+      [MEU_JOGADOR_ID]: { apelido: 'JogadorTeste', cor: 'branco', sanidade: 2, emBaixaIluminacao: false, amedrontado: false, ordem: 1, protegido: false },
+      ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 2, emBaixaIluminacao: true, amedrontado: false, ordem: 2, protegido: true },
+    }
+    const { unmount } = render(
+      <HudDaPartida
+        jogadorPorId={jogadores}
+        jogadorAtivoId={MEU_JOGADOR_ID}
+        jogadorLocalId={MEU_JOGADOR_ID}
+        geradoresLigados={[]}
+        cartaoDeAcessoObtido={false}
+        emAndamento
+        emResultado={false}
+        onSair={() => {}}
+      />,
+    )
+    try {
+      // Anel: data-cor expõe a cor do peão; preenchidos usam stroke HEX, sem amber.
+      const anelAna = screen
+        .getAllByTestId('hud-anel-sanidade')
+        .find((el) => el.getAttribute('data-jogador-id') === 'jogador-2')!
+      expect(anelAna).toHaveAttribute('data-cor', 'vermelho')
+      const segmentosAna = screen
+        .getAllByTestId('hud-anel-sanidade-segmento')
+        .filter((el) => el.getAttribute('data-jogador-id') === 'jogador-2')
+      expect(segmentosAna).toHaveLength(3)
+      for (const segmento of segmentosAna.filter((el) => el.getAttribute('data-preenchido') === 'true')) {
+        // jsdom normaliza o HEX para rgb no atributo style (#c0392b → rgb(192, 57, 43)).
+        expect(segmento.getAttribute('style') ?? '').toContain('rgb(192, 57, 43)')
+        expect(segmento.getAttribute('class') ?? '').not.toContain('stroke-amber-400')
+      }
+      for (const segmento of segmentosAna.filter((el) => el.getAttribute('data-preenchido') === 'false')) {
+        expect(segmento).toHaveClass('stroke-zinc-600')
+      }
+
+      // Nome do adversário: apelido visível na cor do peão, acima dos efeitos no DOM.
+      const nomeAna = screen
+        .getAllByTestId('hud-nome-adversario')
+        .find((el) => el.getAttribute('data-jogador-id') === 'jogador-2')!
+      expect(nomeAna).toHaveTextContent('Ana')
+      expect(nomeAna.getAttribute('style') ?? '').toContain('rgb(192, 57, 43)')
+      const efeitoBaixa = screen.getByTestId('hud-estado-baixa-iluminacao')
+      const efeitoProtecao = screen.getByTestId('hud-estado-protecao')
+      expect(nomeAna.compareDocumentPosition(efeitoBaixa) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(nomeAna.compareDocumentPosition(efeitoProtecao) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+      // Efeitos: borda e texto na cor do peão, fundo escuro mantido.
+      for (const efeito of [efeitoBaixa, efeitoProtecao]) {
+        expect(efeito.getAttribute('style') ?? '').toContain('rgb(192, 57, 43)')
+        expect(efeito).toHaveClass('bg-zinc-950/90')
+        // Badge quadrado pequeno sob o nome: sem stretch da coluna.
+        expect(efeito).toHaveClass('w-fit')
+        expect(efeito).toHaveClass('self-start')
+      }
+
+      // Barra local: preenchidos com background HEX do peão (branco), vazios cinza.
+      const preenchidosLocais = screen
+        .getAllByTestId('hud-sanidade-segmento')
+        .filter((el) => el.getAttribute('data-preenchido') === 'true')
+      expect(preenchidosLocais).toHaveLength(2)
+      for (const segmento of preenchidosLocais) {
+        // jsdom normaliza o HEX para rgb (#f2efe6 → rgb(242, 239, 230)).
+        expect(segmento.getAttribute('style') ?? '').toContain('rgb(242, 239, 230)')
+        expect(segmento.getAttribute('class') ?? '').not.toContain('bg-amber-400')
+      }
+      const vaziosLocais = screen
+        .getAllByTestId('hud-sanidade-segmento')
+        .filter((el) => el.getAttribute('data-preenchido') === 'false')
+      expect(vaziosLocais).toHaveLength(1)
+      for (const segmento of vaziosLocais) {
+        expect(segmento).toHaveClass('bg-zinc-700')
+      }
+    } finally {
+      unmount()
+    }
+  })
 })
 
 describe('HUD da Partida — Turno em fila circular a partir do ativo (#226 [4])', () => {
