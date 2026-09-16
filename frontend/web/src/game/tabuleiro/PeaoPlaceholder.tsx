@@ -115,7 +115,7 @@ export function PeaoPlaceholder({
   return (
     <group position={position} scale={[escala, escala, escala]} {...groupHandlers}>
       {/* Base cilíndrica */}
-      <mesh position={[0, Y_BASE, 0]}>
+      <mesh position={[0, Y_BASE, 0]} castShadow receiveShadow>
         <cylinderGeometry args={[BASE_RAIO, BASE_RAIO, BASE_ALTURA, 20]} />
         <meshStandardMaterial
           color={hex}
@@ -124,7 +124,7 @@ export function PeaoPlaceholder({
         />
       </mesh>
       {/* Corpo cônico (cone apontando para cima) */}
-      <mesh position={[0, Y_CORPO, 0]}>
+      <mesh position={[0, Y_CORPO, 0]} castShadow receiveShadow>
         <cylinderGeometry
           args={[CORPO_RAIO_TOPO, CORPO_RAIO_BASE, CORPO_ALTURA, 20]}
         />
@@ -135,7 +135,7 @@ export function PeaoPlaceholder({
         />
       </mesh>
       {/* Colarinho */}
-      <mesh position={[0, Y_COLARINHO, 0]}>
+      <mesh position={[0, Y_COLARINHO, 0]} castShadow receiveShadow>
         <cylinderGeometry
           args={[COLARINHO_RAIO, COLARINHO_RAIO, COLARINHO_ALTURA, 20]}
         />
@@ -146,7 +146,7 @@ export function PeaoPlaceholder({
         />
       </mesh>
       {/* Cabeça esférica */}
-      <mesh position={[0, Y_CABECA, 0]}>
+      <mesh position={[0, Y_CABECA, 0]} castShadow receiveShadow>
         <sphereGeometry args={[CABECA_RAIO, 20, 16]} />
         <meshStandardMaterial
           color={hex}
