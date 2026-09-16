@@ -1539,11 +1539,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ciclo ativo) lê `pecaSelecionadaId`/`pecaEmManipulacaoId` daqui; com os
   // dois zerados, o espectador não tem o que despachar e a célula fica muda
   // (os guards `donoDoCiclo === false` de `interacaoPeoes.ts` completam o
-  // silêncio das rotas do ciclo).
-  const estadoInteracao: EstadoDoTabuleiroNoCliente | null =
-    estadoInteracaoCru !== null && !minhaVez
-      ? { ...estadoInteracaoCru, pecaSelecionadaId: null, pecaEmManipulacaoId: null }
-      : estadoInteracaoCru
+  // silêncio das rotas do ciclo). useMemo: identidade estável entre renders
+  // (o teclado/efeitos abaixo têm o objeto nas deps; para o dono a referência
+  // continua sendo o próprio modelo).
+  const estadoInteracao: EstadoDoTabuleiroNoCliente | null = useMemo(
+    () =>
+      estadoInteracaoCru !== null && !minhaVez
+        ? { ...estadoInteracaoCru, pecaSelecionadaId: null, pecaEmManipulacaoId: null }
+        : estadoInteracaoCru,
+    [estadoInteracaoCru, minhaVez],
+  )
 
   // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
   // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados

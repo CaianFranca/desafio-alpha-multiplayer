@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import {
   FOV_CAMERA,
@@ -165,7 +165,12 @@ export function AmbienteDeJogo({
   // única exibida na bandeja de slot único. Vagas disponíveis derivam do
   // mesmo roteador puro (`vagasDisponiveisDoPeao`) e destacam as células
   // enquanto há pendência sem vaga — fonte única cena + espelho DOM.
-  const recebidasPendentes = estadoInteracaoPeoes?.recebidasPendentes ?? []
+  // useMemo: identidade estável do array entre renders (é dep do efeito de
+  // pull abaixo — sem o memo o lint marca "logical expression in deps").
+  const recebidasPendentes = useMemo(
+    () => estadoInteracaoPeoes?.recebidasPendentes ?? [],
+    [estadoInteracaoPeoes],
+  )
 
   // ── Pull da bandeja (fluxo aprovado na revisão #199) ──
   // Estado visual LOCAL, fora do modelo autoritativo: clicar a corrente
