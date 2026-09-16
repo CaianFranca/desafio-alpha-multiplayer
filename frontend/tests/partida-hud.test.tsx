@@ -8,6 +8,7 @@ import { visitorState } from '../web/src/state/auth-context'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { HudDaPartida } from '../web/src/components/partida/HudDaPartida'
+import { montarImagemPorJogador } from '../web/src/game/tabuleiro/avatares'
 import type { PercepcaoDeJogador } from '../web/src/game/tabuleiro/reducao'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { SalaWebSocketContext } from '../web/src/state/sala-web-socket-context'
@@ -1534,8 +1535,140 @@ describe('HUD da Partida — Proteção no HUD (#225)', () => {
   })
 })
 
-describe('HUD da Partida — responsividade até tablet (#226 [9])', () => {
-  it.each([
+describe('HUD da Partida — foto por estado nos 3 pontos (extra PR #421)', () => {
+  const JOGADORES_VARIANTE: Record<string, PercepcaoDeJogador> = {
+    [MEU_JOGADOR_ID]: { apelido: 'JogadorTeste', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 1, protegido: false },
+    ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
+  }
+
+  function propsComVariante(jogadores: Record<string, PercepcaoDeJogador>) {
+    return {
+      jogadorPorId: jogadores,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      emAndamento: true,
+      emResultado: false,
+      imagemPorJogador: montarImagemPorJogador(jogadores),
+      onSair: () => {},
+    }
+  }
+
+  it('estado normal exibe a foto base nos 3 pontos', () => {
+    const { unmount } = render(<HudDaPartida {...propsComVariante(JOGADORES_VARIANTE)} />)
+    try {
+      expect(
+        screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+      ).toHaveAttribute('src', expect.stringMatching(/diretor\.png$/))
+      expect(screen.getByTestId('hud-avatar-adversario').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira\.png$/),
+      )
+      expect(screen.getByTestId('hud-turno-ativo').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/diretor\.png$/),
+      )
+      expect(screen.getByTestId('hud-turno-proximo').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira\.png$/),
+      )
+    } finally {
+      unmount()
+    }
+  })
+
+  it('amedrontado troca a foto nos 3 pontos (sem filtro CSS simulado)', () => {
+    const jogadores: Record<string, PercepcaoDeJogador> = {
+      [MEU_JOGADOR_ID]: { ...JOGADORES_VARIANTE[MEU_JOGADOR_ID], amedrontado: true },
+      ['jogador-2']: { ...JOGADORES_VARIANTE['jogador-2'], amedrontado: true },
+    }
+    const { unmount } = render(<HudDaPartida {...propsComVariante(jogadores)} />)
+    try {
+      expect(
+        screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+      ).toHaveAttribute('src', expect.stringMatching(/diretor_amedrontado\.png$/))
+      const adversario = screen.getByTestId('hud-avatar-adversario')
+      expect(adversario.querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira_amedrontada\.png$/),
+      )
+      // A variante substitui o filtro CSS: sem grayscale/opacity simulados.
+      expect(adversario.className).not.toMatch(/grayscale/)
+      expect(adversario.className).not.toMatch(/opacity-70/)
+      expect(screen.getByTestId('hud-turno-ativo').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/diretor_amedrontado\.png$/),
+      )
+      expect(screen.getByTestId('hud-turno-proximo').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira_amedrontada\.png$/),
+      )
+    } finally {
+      unmount()
+    }
+  })
+
+  it('baixa iluminação tem prioridade sobre amedrontado nos 3 pontos', () => {
+    const jogadores: Record<string, PercepcaoDeJogador> = {
+      [MEU_JOGADOR_ID]: { ...JOGADORES_VARIANTE[MEU_JOGADOR_ID], amedrontado: true, emBaixaIluminacao: true },
+      ['jogador-2']: { ...JOGADORES_VARIANTE['jogador-2'], amedrontado: true, emBaixaIluminacao: true },
+    }
+    const { unmount } = render(<HudDaPartida {...propsComVariante(jogadores)} />)
+    try {
+      expect(
+        screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+      ).toHaveAttribute('src', expect.stringMatching(/diretor_baixa\.png$/))
+      const adversario = screen.getByTestId('hud-avatar-adversario')
+      expect(adversario.querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira_baixa\.png$/),
+      )
+      expect(adversario.className).not.toMatch(/brightness-75/)
+      expect(adversario.className).not.toMatch(/saturate-50/)
+      expect(screen.getByTestId('hud-turno-ativo').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/diretor_baixa\.png$/),
+      )
+      expect(screen.getByTestId('hud-turno-proximo').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira_baixa\.png$/),
+      )
+    } finally {
+      unmount()
+    }
+  })
+
+  it('rerender com troca de estado troca a URL da foto (adversário, local e turno)', () => {
+    const { rerender, unmount } = render(<HudDaPartida {...propsComVariante(JOGADORES_VARIANTE)} />)
+    try {
+      expect(screen.getByTestId('hud-avatar-adversario').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira\.png$/),
+      )
+      const comBaixa: Record<string, PercepcaoDeJogador> = {
+        [MEU_JOGADOR_ID]: { ...JOGADORES_VARIANTE[MEU_JOGADOR_ID], emBaixaIluminacao: true },
+        ['jogador-2']: { ...JOGADORES_VARIANTE['jogador-2'], emBaixaIluminacao: true },
+      }
+      rerender(<HudDaPartida {...propsComVariante(comBaixa)} />)
+      expect(screen.getByTestId('hud-avatar-adversario').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira_baixa\.png$/),
+      )
+      expect(
+        screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+      ).toHaveAttribute('src', expect.stringMatching(/diretor_baixa\.png$/))
+      expect(screen.getByTestId('hud-turno-proximo').querySelector('img')).toHaveAttribute(
+        'src',
+        expect.stringMatching(/enfermeira_baixa\.png$/),
+      )
+    } finally {
+      unmount()
+    }
+  })
+})
+
+describe('HUD da Partida — responsividade até tablet (#226 [9])', () => {  it.each([
     ['tablet (768px)', 768],
     ['notebook (1024px)', 1024],
     ['desktop (1280px)', 1280],

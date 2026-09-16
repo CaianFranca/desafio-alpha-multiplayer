@@ -1516,9 +1516,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       return out
     }, [modelo.jogadorPorId, modelo.peaoPorJogador])
 
-  // ── Fotos 2D do HUD da Partida (issue #404): jogadorId → URL da foto do
-  // avatar derivada da cor do peão (slot = ordem de entrada). Versão acesa
-  // fixa — Baixa Iluminação/Amedrontado seguem só nos indicadores do HUD.
+  // ── Fotos 2D do HUD da Partida (issue #404, extra PR #421): jogadorId →
+  // URL da foto do avatar derivada da cor do peão (slot = ordem de entrada)
+  // + estado do jogador (Baixa Iluminação > Amedrontado > normal). Reativa:
+  // o useMemo depende de `modelo.jogadorPorId`, então a troca de estado
+  // troca a URL nos 3 pontos do HUD (adversários, retrato local, turno).
   const imagemPorJogador: Readonly<Record<string, string>> = useMemo(
     () => montarImagemPorJogador(modelo.jogadorPorId),
     [modelo.jogadorPorId],

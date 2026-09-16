@@ -311,12 +311,8 @@ export function HudDaPartida({
                 title={emReconexao ? 'Reconectando' : dados.apelido}
                   data-compacto={emModoCompacto ? 'true' : undefined}
                   className={`flex items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${emModoCompacto ? 'h-8 w-8 text-xs' : 'h-12 w-12 text-base'} ${
-                    dados.amedrontado
-                      ? 'opacity-70 grayscale'
-                      : dados.emBaixaIluminacao
-                        ? 'brightness-75 saturate-50'
-                        : ''
-                  } ${emReconexao ? 'ring-2 ring-amber-400/70' : ''}`}
+                    emReconexao ? 'ring-2 ring-amber-400/70' : ''
+                  }`}
                 >
                   <ConteudoDoAvatar
                     apelido={dados.apelido}
