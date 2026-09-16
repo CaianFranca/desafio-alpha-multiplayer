@@ -1853,3 +1853,254 @@ describe('reload do primeiro turno — peça de volta à mesa e turno concluíve
     expect(toquesDeAudio).toHaveLength(0)
   })
 })
+
+describe('controles só para o dono da vez — gate de montagem do espectador (issue #433)', () => {
+  const MEU_JOGADOR_ID = '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90'
+  const ADVERSARIO_ID = 'jogador-2'
+
+  afterEach(() => {
+    MockWebSocket.clean()
+  })
+
+  function peaoDoEspelho(peaoId: string): HTMLElement | undefined {
+    return screen
+      .getAllByTestId('peao')
+      .find((el) => el.getAttribute('data-peao-id') === peaoId)
+  }
+
+  function pecaPosicionadaDoEspelho(pecaId: string): HTMLElement | undefined {
+    return screen
+      .getAllByTestId('peca-posicionada')
+      .find((el) => el.getAttribute('data-peca-id') === pecaId)
+  }
+
+  function pecaInicialDoEspelho2(pecaId: string): HTMLElement {
+    const peca = screen
+      .getAllByTestId('mesa-peca-inicial')
+      .find((el) => el.getAttribute('data-peca-id') === pecaId)
+    if (!peca) throw new Error(`inicial ${pecaId} não encontrada na mesa`)
+    return peca
+  }
+
+  /**
+   * Vez do ADVERSÁRIO com o ciclo visível no broadcast: seleção vigente no
+   * peão dele, janela de Manipulação aberta (inicial-1 recém-posicionada) e
+   * duas Recebidas pendentes — a corrente na bandeja (r2, sem vaga) e o
+   * preview pré-encaixe (r1, vaga 'norte' escolhida, célula-alvo 2:3). É o
+   * estado que o espectador RECEBE do servidor; o gate #433 decide o que ele
+   * monta (nada dos controles) e o que segue público (peças, pendências,
+   * bandeja e a indicação do Jogador Ativo).
+   */
+  async function vezDoAdversarioComCicloVisivel() {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: ADVERSARIO_ID, rodada: 2 })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+      // PEAO_POSICIONADO na janela do turno aprende o mapa jogador→peão
+      // (#118) e deixa a seleção vigente — mesmo efeito prático do
+      // PEAO_SELECIONADO do fluxo real.
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-vermelho',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+    })
+    act(() => {
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [
+          {
+            recebidaId: 'r1',
+            pecaId: 'reta-1',
+            tipoDaPeca: 'reta',
+            orientacao: 0,
+            vaga: 'norte',
+            celulaAlvo: { linha: 2, coluna: 3 },
+          },
+          {
+            recebidaId: 'r2',
+            pecaId: 't-1',
+            tipoDaPeca: 'T',
+            orientacao: 0,
+            vaga: null,
+            celulaAlvo: null,
+          },
+        ],
+      })
+      ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'reta-1' })
+    })
+    await screen.findByTestId('peca-posicionada')
+    return ws
+  }
+
+  it('espectador: wire ativo do adversário não monta controles no espelho', async () => {
+    await vezDoAdversarioComCicloVisivel()
+
+    // Janela de Manipulação do Ativo: a peça existe no espelho (broadcast),
+    // mas sem data-manipulacao (a sanitização cala o foco para o espectador).
+    const inicial1 = pecaPosicionadaDoEspelho('inicial-1')
+    expect(inicial1).toBeDefined()
+    expect(inicial1!.hasAttribute('data-manipulacao')).toBe(false)
+    // Preview pré-encaixe do Ativo: não monta.
+    expect(screen.queryAllByTestId('peca-provisoria')).toHaveLength(0)
+    // Alvo da pendência com vaga: sem destaque data-alvo-pendente.
+    expect(
+      screen.getAllByTestId('tabuleiro-celula').filter((el) => el.hasAttribute('data-alvo-pendente')),
+    ).toHaveLength(0)
+    // Seleção do Ativo: nenhum peão montado como selecionado…
+    for (const peao of screen.getAllByTestId('peao')) {
+      expect(peao.getAttribute('data-selecionado')).toBe('false')
+    }
+    // …e sem espelho de destinos/destaque de conexão.
+    expect(
+      screen.getAllByTestId('peca-posicionada').filter((el) => el.hasAttribute('data-conectada')),
+    ).toHaveLength(0)
+    // Vagas/pontilhadas/travessia: segue tudo vazio fora da vez (regressão
+    // dos gates por pull/donoDoCiclo já existentes — invariante #433).
+    for (const atributo of ['data-vaga', 'data-vaga-pontilhada', 'data-travessia'] as const) {
+      expect(
+        screen.getAllByTestId('tabuleiro-celula').filter((el) => el.hasAttribute(atributo)),
+      ).toHaveLength(0)
+    }
+    // O que segue PÚBLICO: indicação do Ativo, pendências broadcast e a
+    // bandeja com a corrente (sem o destaque emissivo de pull — o espectador
+    // nunca puxa, nem por resíduo local).
+    expect(peaoDoEspelho('peao-vermelho')?.getAttribute('data-ativo')).toBe('true')
+    expect(screen.getAllByTestId('recebida-pendente')).toHaveLength(2)
+    const corrente = screen.getByTestId('caixa-peca-sorteada')
+    expect(corrente.getAttribute('data-recebida-id')).toBe('r2')
+    expect(corrente.getAttribute('data-puxada')).toBe('false')
+  })
+
+  it('espectador: teclas e cliques do ciclo não enviam comando nem geram recusa', async () => {
+    const ws = await vezDoAdversarioComCicloVisivel()
+    const user = userEvent.setup()
+    const comandosBase = ws.sentMessages.length
+    toquesDeAudio.length = 0
+
+    // Teclado (H8): R/E giram, Espaço/Enter finalizam — tudo inerte fora da
+    // vez (pecaAlvoDeGiro/pecaEmManipulacaoId sanitizados + gate do OK).
+    await user.keyboard('r')
+    await user.keyboard('e')
+    await user.keyboard(' ')
+    await user.keyboard('{Enter}')
+    expect(ws.sentMessages).toHaveLength(comandosBase)
+
+    // Cliques (H4/H5/H9/H10): peão do Ativo, célula do preview/alvo, Inicial
+    // da mesa e área vazia (desseleção) — nenhum roteia comando pelo estado
+    // broadcast e nenhum dispara recusa local (com som).
+    await user.click(peaoDoEspelho('peao-vermelho')!)
+    await user.click(celulaDoEspelho(2, 3))
+    await user.click(pecaInicialDoEspelho2('inicial-2'))
+    await user.click(screen.getByTestId('tabuleiro'))
+    expect(ws.sentMessages).toHaveLength(comandosBase)
+    expect(toquesDeAudio).toHaveLength(0)
+    expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
+  })
+
+  it('espectador: auto-pull da Travessia alheia não vaza vaga/pull no espelho (#377 × #433)', async () => {
+    const ws = await partidaDisponivel('/partida?serverId=s&partidaId=p')
+    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: ADVERSARIO_ID, rodada: 2 })
+    // Pendência da Travessia (forma #377): vaga nula + célula-alvo pré-fixada
+    // — é o gatilho do auto-pull local em AmbienteDeJogo. O gate donoDoCiclo
+    // O impede que ela puxe a vaga para o espectador.
+    act(() => {
+      ws.simulateMessage({
+        type: 'PECA_POSICIONADA',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+        orientacao: 0,
+      })
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-vermelho',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [
+          {
+            recebidaId: 'rt',
+            pecaId: 'reta-9',
+            tipoDaPeca: 'reta',
+            orientacao: 0,
+            vaga: null,
+            celulaAlvo: { linha: 2, coluna: 3 },
+          },
+        ],
+      })
+    })
+    await screen.findByTestId('recebida-pendente')
+
+    // Sem auto-pull do espectador: nem `data-puxada` na corrente, nem
+    // destaque de vaga/pontilhado na célula travada (o travessiaSet puro já é
+    // gated por donoDoCiclo).
+    const corrente = screen.getByTestId('caixa-peca-sorteada')
+    expect(corrente.getAttribute('data-recebida-id')).toBe('rt')
+    expect(corrente.getAttribute('data-puxada')).toBe('false')
+    for (const atributo of ['data-vaga', 'data-vaga-pontilhada', 'data-alvo-pendente', 'data-travessia'] as const) {
+      expect(
+        screen.getAllByTestId('tabuleiro-celula').filter((el) => el.hasAttribute(atributo)),
+      ).toHaveLength(0)
+    }
+  })
+
+  it('contraprova: no turno local os mesmos controles montam e operam', async () => {
+    const ws = await vezDoAdversarioComCicloVisivel()
+    // A vez vira para o jogador local (TURNO_INICIADO reseta o ciclo no
+    // espelho; os deltas seguintes reconstroem a mesma foto do Ativo).
+    await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
+    act(() => {
+      ws.simulateMessage({
+        type: 'PEAO_POSICIONADO',
+        peaoId: 'peao-branco',
+        pecaId: 'inicial-1',
+        celula: { linha: 3, coluna: 3 },
+      })
+      ws.simulateMessage({
+        type: 'RECEBIMENTO_GERADO',
+        recebidas: [
+          {
+            recebidaId: 'r1',
+            pecaId: 'reta-1',
+            tipoDaPeca: 'reta',
+            orientacao: 0,
+            vaga: 'norte',
+            celulaAlvo: { linha: 2, coluna: 3 },
+          },
+        ],
+      })
+      ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'reta-1' })
+    })
+
+    // Mesma fonte, dono do ciclo: seleção montada, alvo destacado, preview
+    // provisório no espelho…
+    await waitFor(() =>
+      expect(peaoDoEspelho('peao-branco')?.getAttribute('data-selecionado')).toBe('true'),
+    )
+    expect(celulaDoEspelho(2, 3).getAttribute('data-alvo-pendente')).toBe('true')
+    const preview = await screen.findByTestId('peca-provisoria')
+    expect(preview.getAttribute('data-peca-id')).toBe('reta-1')
+    // …e o teclado volta a operar o ciclo (R gira a peça em foco).
+    const comandosAntes = ws.sentMessages.length
+    const user = userEvent.setup()
+    await user.keyboard('r')
+    await waitFor(() => {
+      expect(ws.sentMessages.length).toBeGreaterThan(comandosAntes)
+      const ultimo = ws.sentMessages[ws.sentMessages.length - 1]!
+      expect(JSON.parse(ultimo)).toEqual({
+        type: 'GIRAR_PECA',
+        pecaId: 'reta-1',
+        sentido: 'horario',
+        jogadorId: MEU_JOGADOR_ID,
+      })
+    })
+  })
+})
