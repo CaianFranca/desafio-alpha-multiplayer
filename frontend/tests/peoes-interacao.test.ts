@@ -2221,3 +2221,225 @@ describe('pós-confirmação suprime ST-09 e Mesa (review #333)', () => {
     expect(comandos).toEqual([])
   })
 })
+
+describe('fora da vez: espectador silencia o ciclo (issue #433)', () => {
+  const VAGA_NORTE = { linha: 2, coluna: 3 }
+  const VAGA_LESTE = { linha: 3, coluna: 4 }
+
+  /** Projeção ST-09 sanitizada — como a PartidaPage entrega ao espectador
+   *  fora da vez (pecaSelecionadaId/pecaEmManipulacaoId filtrados para null). */
+  function tabuleiroSanitizado(estadoPeoes: EstadoInteracaoPeoes): EstadoInteracaoTabuleiro {
+    return {
+      iniciais: [{ pecaId: 'inicial-2' }, { pecaId: 'inicial-3' }],
+      posicionadas: estadoPeoes.posicionadas,
+      pecaSelecionadaId: null,
+      pecaEmManipulacaoId: null,
+    }
+  }
+
+  // ── Clique no Peão: SELECIONAR_PEAO exclusivo do dono do ciclo ──
+
+  it('clique no peão: dono seleciona; espectador fica mudo (nem no peão do Ativo)', () => {
+    const dono = estadoBase({ peaoSelecionadoId: null, donoDoCiclo: true })
+    expect(mapearCliqueNoPeao(dono, 'peao-branco')).toEqual({
+      tipo: 'comando',
+      comando: { type: 'SELECIONAR_PEAO', peaoId: 'peao-branco' },
+    })
+    // Espectador: o MESMO clique sobre o estado broadcast não emite nada —
+    // inclusive no peão que o Ativo tem selecionado (seleção alheia vigente).
+    const espectador = estadoBase({
+      peaoSelecionadoId: 'peao-vermelho',
+      donoDoCiclo: false,
+    })
+    expect(mapearCliqueNoPeao(espectador, 'peao-branco')).toBeNull()
+    expect(mapearCliqueNoPeao(espectador, 'peao-vermelho')).toBeNull()
+  })
+
+  // ── Desseleção: nem comando, nem rejeição com som (H9/H10) ──
+
+  it('desseleção: dono sem pendências desseleciona; espectador é mudo', () => {
+    const dono = estadoBase({ peaoSelecionadoId: 'peao-branco', donoDoCiclo: true })
+    expect(mapearDesselecaoDePeao(dono)).toEqual({
+      tipo: 'comando',
+      comando: { type: 'DESELECIONAR_PEAO', peaoId: 'peao-branco' },
+    })
+    const espectador = estadoBase({
+      peaoSelecionadoId: 'peao-branco',
+      donoDoCiclo: false,
+    })
+    expect(mapearDesselecaoDePeao(espectador)).toBeNull()
+  })
+
+  it('desseleção com pendências: dono recebe rejeição (som); espectador recebe null (sem som, H9)', () => {
+    const comPendencias = {
+      peaoSelecionadoId: 'peao-branco',
+      recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', null, null)],
+    } satisfies Partial<EstadoInteracaoPeoes>
+    const dono = estadoBase({ ...comPendencias, donoDoCiclo: true })
+    expect(mapearDesselecaoDePeao(dono)).toEqual({
+      tipo: 'rejeicao',
+      rejeicao: { motivo: 'pendencia_nao_resolvida' },
+    })
+    const espectador = estadoBase({ ...comPendencias, donoDoCiclo: false })
+    expect(mapearDesselecaoDePeao(espectador)).toBeNull()
+  })
+
+  // ── Roteador de célula: MOVER/POSICIONAR/ESCOLHER_VAGA calados fora da vez ──
+
+  it('roteador: destino conectado — dono emite MOVER_PEAO; espectador null (sem recusa do servidor)', () => {
+    const dono = estadoComMock({ donoDoCiclo: true })
+    const tabuleiro = tabuleiroSanitizado(dono)
+    expect(rotearCliqueDeCelula(dono, tabuleiro, { linha: 3, coluna: 4 })).toEqual({
+      ciclo: { type: 'MOVER_PEAO', peaoId: 'peao-1-branco', celula: { linha: 3, coluna: 4 } },
+    })
+    const espectador = estadoComMock({ donoDoCiclo: false })
+    expect(rotearCliqueDeCelula(espectador, tabuleiroSanitizado(espectador), {
+      linha: 3,
+      coluna: 4,
+    })).toBeNull()
+  })
+
+  it('roteador: escolha de vaga com puxada — dono escolhe; espectador null', () => {
+    const base: Partial<EstadoInteracaoPeoes> = {
+      recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', null, null)],
+      recebidaPuxadaId: 'r1',
+    }
+    const dono = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { ...base, donoDoCiclo: true },
+    )
+    expect(rotearCliqueDeCelula(dono, tabuleiroSanitizado(dono), VAGA_NORTE)).toEqual({
+      ciclo: { type: 'ESCOLHER_VAGA_DA_PECA_RECEBIDA', recebidaId: 'r1', borda: 'norte' },
+    })
+    const espectador = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { ...base, donoDoCiclo: false },
+    )
+    expect(rotearCliqueDeCelula(espectador, tabuleiroSanitizado(espectador), VAGA_NORTE)).toBeNull()
+  })
+
+  it('roteador: encaixe na célula-alvo em foco — dono posiciona; espectador null', () => {
+    const base: Partial<EstadoInteracaoPeoes> = {
+      recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', 'leste', VAGA_LESTE)],
+      pecaSelecionadaId: 'reta-1',
+    }
+    const dono = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { ...base, donoDoCiclo: true },
+    )
+    expect(rotearCliqueDeCelula(dono, tabuleiroSanitizado(dono), VAGA_LESTE)).toEqual({
+      ciclo: { type: 'POSICIONAR_PECA', pecaId: 'reta-1', celula: VAGA_LESTE },
+    })
+    const espectador = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { ...base, donoDoCiclo: false },
+    )
+    expect(rotearCliqueDeCelula(espectador, tabuleiroSanitizado(espectador), VAGA_LESTE)).toBeNull()
+  })
+
+  // ── OK da Recebida (Espaço/Enter no preview) ──
+
+  it('mapearFinalizarRecebida: dono finaliza; espectador null (teclado inerte, H8)', () => {
+    const base: Partial<EstadoInteracaoPeoes> = {
+      recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', 'leste', VAGA_LESTE)],
+      pecaSelecionadaId: 'reta-1',
+    }
+    const dono = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { ...base, donoDoCiclo: true },
+    )
+    expect(mapearFinalizarRecebida(dono)).toEqual({
+      type: 'POSICIONAR_PECA',
+      pecaId: 'reta-1',
+      celula: VAGA_LESTE,
+    })
+    const espectador = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { ...base, donoDoCiclo: false },
+    )
+    expect(mapearFinalizarRecebida(espectador)).toBeNull()
+  })
+
+  // ── Preview provisório (H3): fonte única de cena, overlay e espelho ──
+
+  it('previewsProvisorios: dono vê o preview; espectador vê []', () => {
+    const base: Partial<EstadoInteracaoPeoes> = {
+      recebidasPendentes: [pendencia('r1', 'reta-1', 'reta', 'norte', VAGA_NORTE)],
+      pecaSelecionadaId: 'reta-1',
+    }
+    const dono = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { ...base, donoDoCiclo: true },
+    )
+    expect(previewsProvisorios(dono)).toHaveLength(1)
+    const espectador = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { ...base, donoDoCiclo: false },
+    )
+    expect(previewsProvisorios(espectador)).toEqual([])
+  })
+
+  // ── Clique em Inicial da mesa (SELECIONAR_PECA — ST-09 do ciclo) ──
+
+  it('mapearCliqueNaPecaDaMesa: dono seleciona; espectador null', () => {
+    const dono = estadoBase({ donoDoCiclo: true })
+    expect(mapearCliqueNaPecaDaMesa(dono, tabuleiroSanitizado(dono), 'inicial-2')).toEqual({
+      type: 'SELECIONAR_PECA',
+      pecaId: 'inicial-2',
+    })
+    const espectador = estadoBase({ donoDoCiclo: false })
+    expect(mapearCliqueNaPecaDaMesa(espectador, tabuleiroSanitizado(espectador), 'inicial-2')).toBeNull()
+  })
+
+  // ── Despacho ponta a ponta (cena/espelho): nenhum callback de comando ──
+
+  it('despacho com ciclo ALHEU ativo (seleção broadcast): espectador não emite nada nem cai no ST-09', () => {
+    // O Ativo tem o peão selecionado (estado broadcast); o espectador clica
+    // numa célula qualquer: roteador calado (gate #433) e ciclo ativo suprime
+    // o fallback ST-09 — nenhum comando ao canal.
+    const espectador = comPeaoSelecionado(
+      [pecaPosicionada('inicial-1', 'inicial', 0, 3, 3)],
+      { donoDoCiclo: false },
+    )
+    const comandos: unknown[] = []
+    const comandosPeao: unknown[] = []
+    despacharCliqueDeCelula(espectador, tabuleiroSanitizado(espectador), VAGA_LESTE, {
+      onComando: (c) => comandos.push(c),
+      onComandoPeao: (c) => comandosPeao.push(c),
+    })
+    expect(comandos).toEqual([])
+    expect(comandosPeao).toEqual([])
+  })
+
+  it('despacho com ciclo inativo: ST-09 silenciado pela sanitização do estadoInteracao (acoplamento #433)', () => {
+    // Sem seleção/pendências broadcast, o fallback ST-09 roda sobre o
+    // estadoInteracao; a PartidaPage o entrega sanitizado para o espectador
+    // (pecaSelecionadaId null) e o mapeador ST-09 não tem o que emitir.
+    const espectador = estadoBase({ peaoSelecionadoId: null, donoDoCiclo: false })
+    const emitidos: unknown[] = []
+    despacharCliqueDeCelula(espectador, tabuleiroSanitizado(espectador), { linha: 5, coluna: 5 }, {
+      onComando: (c) => {
+        if (c !== null) emitidos.push(c)
+      },
+      onComandoPeao: () => {},
+    })
+    expect(emitidos).toEqual([])
+    // Contraprova do acoplamento: SEM a sanitização (pecaSelecionadaId
+    // broadcast vazando para o espectador), o ST-09 emitiria POSICIONAR_PECA
+    // — é a filtragem na página que cala esta rota, não o roteador.
+    const naoSanitizado: EstadoInteracaoTabuleiro = {
+      ...tabuleiroSanitizado(espectador),
+      pecaSelecionadaId: 'inicial-2',
+    }
+    const vazariam: unknown[] = []
+    despacharCliqueDeCelula(espectador, naoSanitizado, { linha: 5, coluna: 5 }, {
+      onComando: (c) => {
+        if (c !== null) vazariam.push(c)
+      },
+      onComandoPeao: () => {},
+    })
+    expect(vazariam).toEqual([
+      { type: 'POSICIONAR_PECA', pecaId: 'inicial-2', celula: { linha: 5, coluna: 5 } },
+    ])
+  })
+})
