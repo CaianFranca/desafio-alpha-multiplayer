@@ -1,9 +1,19 @@
-import { useMemo } from 'react'
+import { Suspense, useMemo } from 'react'
 import { useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import mesaTopoUrl from '../assets/mesa_topo.jpg'
 import mesaTopoNormalUrl from '../assets/mesa_topo-normal-map.jpg'
 import mesaTopoRoughnessUrl from '../assets/mesa_topo-roughness-map.jpg'
+import {
+  ABERTURA_DO_FUNDO,
+  ALTURA_DO_FUNDO,
+  ESCALA_DO_FUNDO,
+  INCLINACAO_DO_FUNDO,
+  INICIO_THETA_DO_FUNDO,
+  POSICAO_DO_FUNDO,
+  RAIO_DO_FUNDO,
+  TEXTURA_DO_FUNDO,
+} from '../ambiente/ceu'
 import {
   COR_FUNDO,
   COR_LATERAIS_MESA,
@@ -15,6 +25,8 @@ import { aspectoVisivel, nevoaParaAspecto } from '../ambiente/cameraLimites'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
 import { DecoracoesDaMesa } from '../tabuleiro/Decoracoes'
+import { NevoaDaMesa } from '../tabuleiro/Nevoa'
+import { LimiteDeErroDoModelo } from '../tabuleiro/LimiteDeErroDoModelo'
 import { ManipulacaoOverlay } from './ManipulacaoOverlay'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
@@ -113,6 +125,59 @@ function Mesa() {
       <meshStandardMaterial attach="material-3" color={COR_LATERAIS_MESA} />
       <meshStandardMaterial attach="material-4" color={COR_LATERAIS_MESA} />
       <meshStandardMaterial attach="material-5" color={COR_LATERAIS_MESA} />
+    </mesh>
+  )
+}
+
+/**
+ * Fundo da partida (trecho de cilindro côncavo ao fundo do tabuleiro): o
+ * panorama INTEIRO distribuído pelo arco, na proporção exata do arquivo —
+ * sem o estiramento de polo da esfera e sem deformação de perspectiva do
+ * plano. Visto por dentro (`BackSide`), espelhado no eixo X (`scale` com X
+ * negativo, receita oficial de panorama — sem isso a imagem sai invertida),
+ * com inclinação e escala do seam (`INCLINACAO_DO_FUNDO`, `ESCALA_DO_FUNDO`). Sem
+ * responder à névoa (`fog={false}`: a distância apagaria a imagem).
+ * Estático e compatível com `frameloop="demand"`; o clique borbulha ao grupo
+ * da cena e desseleciona, como o clique direto na Mesa. Enquanto carrega ou
+ * se falhar, o fundo segue a cor sólida (`<color attach="background">`) —
+ * a cena nunca quebra.
+ */
+function Fundo() {
+  const texturaCarregada = useLoader(THREE.TextureLoader, TEXTURA_DO_FUNDO)
+  // Cópia com espaço de cor sRGB: o fundo é cor, não dado linear. Clonar
+  // evita mutar a textura cacheada pelo useLoader.
+  const textura = useMemo(() => {
+    const copia = texturaCarregada.clone()
+    copia.colorSpace = THREE.SRGBColorSpace
+    copia.needsUpdate = true
+    return copia
+  }, [texturaCarregada])
+
+  const [x, y, z] = POSICAO_DO_FUNDO
+  const s = ESCALA_DO_FUNDO
+  return (
+    <mesh
+      position={[x, y, z]}
+      rotation={[INCLINACAO_DO_FUNDO, 0, 0]}
+      scale={[-s, s, s]}
+    >      <cylinderGeometry
+        args={[
+          RAIO_DO_FUNDO,
+          RAIO_DO_FUNDO,
+          ALTURA_DO_FUNDO,
+          64,
+          1,
+          true,
+          INICIO_THETA_DO_FUNDO,
+          ABERTURA_DO_FUNDO,
+        ]}
+      />
+      <meshBasicMaterial
+        map={textura}
+        side={THREE.BackSide}
+        toneMapped={false}
+        fog={false}
+      />
     </mesh>
   )
 }
@@ -258,6 +323,12 @@ export function AmbienteCena({
       */}
       <group onClick={onDesselecionar}>
         <Mesa />
+        <NevoaDaMesa />
+        <LimiteDeErroDoModelo resetKey={TEXTURA_DO_FUNDO} fallback={null}>
+          <Suspense fallback={null}>
+            <Fundo />
+          </Suspense>
+        </LimiteDeErroDoModelo>
         <DecoracoesDaMesa />
         {estadoExibicao ? (
           <>
