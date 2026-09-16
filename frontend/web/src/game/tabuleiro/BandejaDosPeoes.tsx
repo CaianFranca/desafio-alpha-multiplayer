@@ -63,6 +63,7 @@ export function BandejaDosPeoes() {
               ajuste={AJUSTE_DA_BANDEJA_DOS_PEOES}
               url={url}
               mapUrl={TEXTURA_OBSCURO_DA_CESTA}
+              semNormalMap
             />
           </group>
         </Suspense>

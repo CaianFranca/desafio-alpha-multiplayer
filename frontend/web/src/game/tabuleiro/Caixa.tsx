@@ -101,6 +101,12 @@ interface ModeloNormalizadoProps {
    * do modelo, preservando normal/roughness dele. `undefined` = cor do GLB.
    */
   mapUrl?: string
+  /**
+   * Desliga o `normalMap` do GLB (só a bandeja dos peões): o relevo
+   * embutido deforma sob o esticamento — sem ele a calha sai lisa.
+   * `false` (padrão) preserva o normal do modelo.
+   */
+  semNormalMap?: boolean
 }
 
 /**
@@ -164,6 +170,7 @@ export function ModeloNormalizado({
   ajuste,
   url,
   mapUrl,
+  semNormalMap = false,
 }: ModeloNormalizadoProps) {
   const gltf = useLoader(GLTFLoader, url)
   // Puro no memo: clona a hierarquia, mede o `Box3` e deriva escala
@@ -195,13 +202,32 @@ export function ModeloNormalizado({
   // `useLayoutEffect` roda antes do paint: o primeiro frame já sai correto.
   useLayoutEffect(() => {
     const materiaisDoClone = prepararMeshesDoClone(objeto)
+    if (semNormalMap) {
+      // Relevo desligado: os materiais já são clones isolados (sem tocar no
+      // cache) — remover o mapa exige recompilar o shader (`needsUpdate`).
+      objeto.traverse((filho) => {
+        if (!(filho instanceof THREE.Mesh)) return
+        const lista = Array.isArray(filho.material)
+          ? filho.material
+          : [filho.material]
+        for (const material of lista) {
+          if (
+            material instanceof THREE.MeshStandardMaterial &&
+            material.normalMap !== null
+          ) {
+            material.normalMap = null
+            material.needsUpdate = true
+          }
+        }
+      })
+    }
     return () => {
       // B1: descarta os materiais clonados no unmount/troca. As geometrias
       // seguem compartilhadas com o cache do `useLoader` — sem `dispose`
       // (não tocar no cache).
       for (const material of materiaisDoClone) material.dispose()
     }
-  }, [objeto])
+  }, [objeto, semNormalMap])
 
   return (
     <group scale={[escala, escala, escala]} rotation={[0, ajuste.rotacaoY, 0]}>
