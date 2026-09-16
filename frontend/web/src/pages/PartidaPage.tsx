@@ -2113,6 +2113,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           jogadorLocalId={jogadorId}
           geradoresLigados={modelo.geradoresLigados}
           cartaoDeAcessoObtido={modelo.cartaoDeAcessoObtido}
+          pecasRestantesNaCaixa={modelo.pecasRestantesNaCaixa}
           emAndamento={estadoEmAndamento}
           emResultado={emResultado}
           iniciadaEm={modelo.iniciadaEm}
