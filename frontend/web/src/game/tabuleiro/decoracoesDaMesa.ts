@@ -77,7 +77,7 @@ export const VELA_PROFUNDIDADE = 1.2
  * noroeste = x menor, z menor), fora do tabuleiro central (11.2×11.2) e
  * dentro da Mesa 20×20.
  */
-export const POSICAO_VELA: readonly [number, number, number] = [4.9, 0, -7.4]
+export const POSICAO_VELA: readonly [number, number, number] = [4.79, 0, -7.4]
 
 /** Posições das decorações (base em y = 0, plano superior da Mesa). */
 export const POSICOES_DAS_DECORACOES: Record<
@@ -85,6 +85,70 @@ export const POSICOES_DAS_DECORACOES: Record<
   readonly [number, number, number]
 > = {
   vela: POSICAO_VELA,
+}
+
+/**
+ * Ponto de luz da chama, por decoração (só a vela tem): `pointLight` quente
+ * e contido no topo do modelo — simula o brilho da chama sem lavar a cena.
+ * Ponto único de calibragem via screenshot:
+ * - `cor`: amarelo quente da chama.
+ * - `intensidade`: perceptível na base da vela e na Caixa vizinha
+ *   (unidades físicas do three atual, decaimento 2 — a poça de luz cai
+ *   com o quadrado da distância).
+ * - `distancia`: corte do alcance — cobre a base da vela e a Caixa (~4
+ *   unidades), sem atravessar a cena.
+ * - `folgaAcimaDoTopo`: altura da lâmpada acima do topo do bounding box
+ *   normalizado (o topo deriva da escala — acompanha `AJUSTES` sozinho).
+ * - `sombra`: sombra projetada (`null` = luz sem sombra).
+ */
+export interface LuzDaChama {
+  readonly cor: string
+  readonly intensidade: number
+  readonly distancia: number
+  readonly decaimento: number
+  readonly folgaAcimaDoTopo: number
+  readonly sombra: SombraDaChama | null
+}
+
+/**
+ * Sombra projetada do ponto de luz (`pointLight.shadow`, cube map): a chama
+ * passa a reagir aos elementos ao redor — Caixa, peças e peões projetam
+ * sombra sob a luz da vela. Sem passes extras além do re-render sob demanda.
+ * - `tamanhoDoMapa`: resolução por face do cubo (qualidade × custo — cada
+ *   re-render desenha a cena 6 vezes para este mapa).
+ * - `near`: a chama/pavio colados na lâmpada não projetam (sem artefato).
+ * - `far`: alcance da sombra — acompanha `distancia` da luz.
+ * - `bias`: conservador contra acne, no padrão da direcional da cena.
+ */
+export interface SombraDaChama {
+  readonly tamanhoDoMapa: number
+  readonly near: number
+  readonly far: number
+  readonly bias: number
+}
+
+export const LUZ_DA_CHAMA_POR_DECORACAO: Record<
+  NomeDaDecoracao,
+  LuzDaChama | null
+> = {
+  vela: {
+    cor: '#ffc46b',
+    intensidade: 18,
+    distancia: 10,
+    decaimento: 1,
+    folgaAcimaDoTopo: 0.2,
+    sombra: {
+      tamanhoDoMapa: 1024,
+      near: 0.3,
+      far: 15,
+      bias: -0.004,
+    },
+  },
+}
+
+/** Config do ponto de luz da chama (`null` = decoração sem chama). */
+export function luzDaChama(nome: NomeDaDecoracao): LuzDaChama | null {
+  return LUZ_DA_CHAMA_POR_DECORACAO[nome]
 }
 
 /**

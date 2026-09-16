@@ -8,8 +8,10 @@ import {
   VELA_LARGURA,
   VELA_PROFUNDIDADE,
   escalaEfetivaDaDecoracao,
+  luzDaChama,
   modeloDaDecoracao,
   type AjusteDaDecoracao,
+  type LuzDaChama,
   type NomeDaDecoracao,
 } from './decoracoesDaMesa'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
@@ -64,20 +66,28 @@ interface DecoracaoNormalizadaProps {
   profundidade: number
   ajuste: AjusteDaDecoracao
   url: string
+  /** Ponto de luz da chama (`null` = sem chama). */
+  luz: LuzDaChama | null
 }
 
 /**
  * GLB normalizado na pegada (bounding box → escala uniforme de encaixe em
  * `largura × profundidade`, centralizado em XZ, base em y = 0 do grupo).
+ * Com `luz`, um `pointLight` estático nasce acima do topo do modelo (a altura
+ * deriva de `tamanho.y × escala`, então acompanha `AJUSTES` sozinha) e, com
+ * `luz.sombra`, projeta a sombra dos elementos ao redor (cube map, no padrão
+ * das props de sombra da direcional em `AmbienteCena`). Sem raycast — luz não
+ * intercepta clique. Estático: compatível com `frameloop="demand"`.
  */
 function DecoracaoNormalizada({
   largura,
   profundidade,
   ajuste,
   url,
+  luz,
 }: DecoracaoNormalizadaProps) {
   const gltf = useLoader(GLTFLoader, url)
-  const { objeto, escala, deslocamento } = useMemo(() => {
+  const { objeto, escala, deslocamento, topo } = useMemo(() => {
     const objeto = gltf.scene.clone(true)
     const caixa = new THREE.Box3().setFromObject(objeto)
     const tamanho = caixa.getSize(new THREE.Vector3())
@@ -93,7 +103,10 @@ function DecoracaoNormalizada({
       -caixa.min.y,
       -centro.z,
     ]
-    return { objeto, escala, deslocamento }
+    // Topo do modelo em unidades de mundo (base em y = 0): a lâmpada fica
+    // `folgaAcimaDoTopo` acima dele — fora da geometria, sem ajuste manual.
+    const topo = tamanho.y * escala
+    return { objeto, escala, deslocamento, topo }
   }, [gltf, largura, profundidade, ajuste])
 
   useLayoutEffect(() => {
@@ -103,10 +116,39 @@ function DecoracaoNormalizada({
     }
   }, [objeto])
 
+  // Props de sombra do cube map (só com `luz.sombra`): a chama passa a
+  // reagir aos elementos ao redor — Caixa, peças e peões projetam sombra sob
+  // ela. `castShadow` desligado sem config: luz sem sombra, sem custo.
+  const sombraProps =
+    luz?.sombra != null
+      ? {
+          castShadow: true as const,
+          'shadow-mapSize': [
+            luz.sombra.tamanhoDoMapa,
+            luz.sombra.tamanhoDoMapa,
+          ] as [number, number],
+          'shadow-camera-near': luz.sombra.near,
+          'shadow-camera-far': luz.sombra.far,
+          'shadow-bias': luz.sombra.bias,
+        }
+      : {}
+
   return (
-    <group scale={[escala, escala, escala]} rotation={[0, ajuste.rotacaoY, 0]}>
-      <primitive object={objeto} position={deslocamento} />
-    </group>
+    <>
+      <group scale={[escala, escala, escala]} rotation={[0, ajuste.rotacaoY, 0]}>
+        <primitive object={objeto} position={deslocamento} />
+      </group>
+      {luz ? (
+        <pointLight
+          position={[0, topo + luz.folgaAcimaDoTopo, 0]}
+          color={luz.cor}
+          intensity={luz.intensidade}
+          distance={luz.distancia}
+          decay={luz.decaimento}
+          {...sombraProps}
+        />
+      ) : null}
+    </>
   )
 }
 
@@ -134,6 +176,7 @@ function Decoracao({
             profundidade={profundidade}
             ajuste={AJUSTES_DAS_DECORACOES[nome]}
             url={url}
+            luz={luzDaChama(nome)}
           />
         </Suspense>
       </LimiteDeErroDoModelo>
