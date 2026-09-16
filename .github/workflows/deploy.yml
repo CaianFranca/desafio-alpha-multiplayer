@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality gates (typecheck + migrations)
+    name: Quality gates (auditoria + typecheck + migrations)
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -84,8 +84,12 @@ jobs:
       # normal. O gate é high/critical nas dependências de produção dos três
       # roots npm (raiz/workspaces, db e frontend); exceções em
       # dependency-audit-allowlist.json só valem sem correção disponível.
+      # `!inputs.sha` cobre os dois disparos do gate: no `push` o input não
+      # existe (`inputs.sha` é null) e no `workflow_dispatch` vazio ele é `''` —
+      # ambos falsy, então o step roda. Com um `sha` (rollback), `!inputs.sha`
+      # é falso e o gate é isento (republica-se um commit antigo já conhecido).
       - name: Auditoria de dependências de produção (workspaces + db + frontend)
-        if: inputs.sha == ''
+        if: ${{ !inputs.sha }}
         run: node scripts/audit-dependencies.mjs
 
       - name: Migrations (db não é workspace da raiz)
