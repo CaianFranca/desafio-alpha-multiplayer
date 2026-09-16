@@ -866,6 +866,113 @@ test('amedrontado é pulado sem falta e sem turno', () => {
   assert.equal(apos.jogadorAtivoId, 'bruno');
 });
 
+// Expiry bloqueado pelo período de graça (issue #171): a falta persiste com o
+// turno mantido — sucesso parcial só com falta_registrada, sem
+// turno_encerrado; 4 expirys seguidos convertem em Desistência com causa
+// 'tempo'. Distingue-se pela ausência de turno_encerrado (mesmo precedente do
+// aviso final: sucesso sem avanço de turno).
+test('graça bloqueando permanência: falta com turno mantido; 4 expirys viram desistência', () => {
+  let estado = partidaEmTurnoNormal();
+  const origem = estado.pecaDoInicioDoTurnoId;
+  assert.ok(origem !== null);
+  estado = { ...estado, pecasEmPeriodoDeGraca: [origem] };
+
+  const primeiro = resolverExpiracaoDoTurno(estado);
+  assert.equal(primeiro.sucesso, true);
+  if (!primeiro.sucesso) {
+    throw new Error('expiry bloqueado deveria persistir a falta');
+  }
+  assert.deepEqual(tipos(primeiro.eventos), ['falta_registrada']);
+  assert.equal(faltaDe(primeiro.eventos, 'ana').totalDeFaltas, 1);
+  assert.equal(primeiro.estado.jogadorAtivoId, 'ana');
+  assert.equal(primeiro.estado.rodada, estado.rodada);
+  assert.deepEqual(primeiro.estado.faltasPorJogador, { ana: 1 });
+  assert.equal(primeiro.estado.resultado, null);
+
+  let atual = primeiro.estado;
+  for (const total of [2, 3]) {
+    const seguinte = resolverExpiracaoDoTurno(atual);
+    assert.equal(seguinte.sucesso, true);
+    if (!seguinte.sucesso) {
+      throw new Error('expiry bloqueado deveria persistir a falta');
+    }
+    assert.deepEqual(tipos(seguinte.eventos), ['falta_registrada']);
+    assert.equal(faltaDe(seguinte.eventos, 'ana').totalDeFaltas, total);
+    assert.equal(seguinte.estado.jogadorAtivoId, 'ana');
+    assert.deepEqual(seguinte.estado.faltasPorJogador, { ana: total });
+    atual = seguinte.estado;
+  }
+
+  const quarto = resolverExpiracaoDoTurno(atual);
+  assert.equal(quarto.sucesso, true);
+  if (!quarto.sucesso) {
+    throw new Error('4º expiry bloqueado deveria desistir');
+  }
+  const ordem = tipos(quarto.eventos);
+  assert.equal(ordem[0], 'falta_registrada');
+  assert.equal(faltaDe(quarto.eventos, 'ana').totalDeFaltas, 4);
+  const desistencia = quarto.eventos.find(
+    (evento) => evento.tipo === 'desistencia_registrada',
+  );
+  assert.ok(desistencia && desistencia.tipo === 'desistencia_registrada');
+  assert.equal(desistencia.jogadorId, 'ana');
+  assert.equal(desistencia.causa, 'tempo');
+  assert.ok(!quarto.estado.jogadores.some((jogador) => jogador.jogadorId === 'ana'));
+  assert.equal(quarto.estado.jogadorAtivoId, 'bruno');
+  assert.deepEqual(quarto.estado.faltasPorJogador, { ana: 4 });
+  assert.deepEqual(quarto.estado.resultado, { tipo: 'derrota', motivo: 'desistencia' });
+  assert.equal(ordem[ordem.length - 1], 'partida_terminada');
+});
+
+// 4ª falta com travessia aberta e aposta posicionada: queima a aposta antes
+// da Desistência — lote [falta_registrada, pecas_queimadas(aposta),
+// desistencia_registrada(tempo)] e a aposta fora de posicionadas.
+test('4ª falta com travessia aberta queima a aposta posicionada antes da desistência', () => {
+  let estado = comBaixa(partidaEmTurnoNormal(), 'ana');
+  const livre = celulaLivre(estado);
+  estado = {
+    ...estado,
+    faltasPorJogador: { ana: 3 },
+    atravessouNoTurno: true,
+    pecaDaTravessiaId: 'trav-4falta',
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        peca('trav-4falta', 'reta', livre.linha, livre.coluna),
+      ],
+    },
+  };
+
+  const { estado: apos, eventos } = resolver(estado);
+  const ordem = tipos(eventos);
+
+  assert.equal(ordem[0], 'falta_registrada');
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 4);
+  const queima = eventos.find((evento) => evento.tipo === 'pecas_queimadas');
+  assert.ok(queima && queima.tipo === 'pecas_queimadas');
+  assert.ok(queima.pecaIds.includes('trav-4falta'));
+  const desistencia = eventos.find(
+    (evento) => evento.tipo === 'desistencia_registrada',
+  );
+  assert.ok(desistencia && desistencia.tipo === 'desistencia_registrada');
+  assert.equal(desistencia.jogadorId, 'ana');
+  assert.equal(desistencia.causa, 'tempo');
+  // A queima da aposta precede a Desistência no lote.
+  assert.ok(
+    ordem.indexOf('falta_registrada') < ordem.indexOf('pecas_queimadas'),
+  );
+  assert.ok(
+    ordem.indexOf('pecas_queimadas') < ordem.indexOf('desistencia_registrada'),
+  );
+  assert.ok(!apos.tabuleiro.posicionadas.some((item) => item.pecaId === 'trav-4falta'));
+  assert.ok(!apos.jogadores.some((jogador) => jogador.jogadorId === 'ana'));
+  assert.equal(apos.jogadorAtivoId, 'bruno');
+  assert.deepEqual(apos.faltasPorJogador, { ana: 4 });
+  assert.deepEqual(apos.resultado, { tipo: 'derrota', motivo: 'desistencia' });
+  assert.equal(ordem[ordem.length - 1], 'partida_terminada');
+});
+
 // Partida terminada recusa a resolução com o código próprio.
 test('partida terminada recusa a expiração com PARTIDA_TERMINADA', () => {
   const estado = partidaEmTurnoNormal();

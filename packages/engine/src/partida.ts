@@ -1981,22 +1981,39 @@ function resolverExpiracaoComFalta(
     totalDeFaltas,
   };
   if (totalDeFaltas >= LIMITE_FALTAS_PARA_DESISTENCIA) {
-    const queima = queimarRecebidasPendentes(comFalta);
-    const saida = desistirDaPartida(queima.estado, ativo.jogadorId, 'tempo');
+    const queimaRecebidas = queimarRecebidasPendentes(comFalta);
+    let estadoQueimado = queimaRecebidas.estado;
+    const eventosQueima: EventoDaPartida[] = [...queimaRecebidas.eventos];
+    // Travessia aberta na 4ª falta: a aposta posicionada queima no mesmo
+    // funil da Desistência, antes dela — mesmo helper do expiry normal.
+    if (comFalta.atravessouNoTurno ?? false) {
+      const queimaAposta = queimarApostaDaTravessia(
+        estadoQueimado,
+        estadoQueimado.pecaDaTravessiaId ?? null,
+        ativo.peaoId,
+      );
+      estadoQueimado = queimaAposta.estado;
+      eventosQueima.push(...queimaAposta.eventos);
+    }
+    const saida = desistirDaPartida(estadoQueimado, ativo.jogadorId, 'tempo');
     if (!saida.sucesso) {
       return saida;
     }
     return funilarAvaliacaoDoTermino(
       sucessoDaPartida(saida.estado, [
         falta,
-        ...queima.eventos,
+        ...eventosQueima,
         ...saida.eventos,
       ]),
     );
   }
   const resolvido = resolver(comFalta);
   if (!resolvido.sucesso) {
-    return resolvido;
+    // Expiry bloqueado (ex.: Permanência sob período de graça, issue #171):
+    // a falta persiste com o turno mantido — sem turno_encerrado, no mesmo
+    // precedente do aviso final (sucesso sem avanço). A garantia de conclusão
+    // vem da 4ª falta → Desistência.
+    return funilarAvaliacaoDoTermino(sucessoDaPartida(comFalta, [falta]));
   }
   return funilarAvaliacaoDoTermino(
     sucessoDaPartida(resolvido.estado, [falta, ...resolvido.eventos]),
@@ -2030,8 +2047,8 @@ function queimarEEncerrarNoExpiry(
 // 9): peão parado permanece direto; peão movido volta à Peça do início do
 // turno e permanece — ataque avaliado como permanência normal, sem novo
 // Recebimento. Sob período de graça que bloqueie a Permanência (issue #171),
-// o erro propaga sem fallback — a garantia de conclusão vem da 4ª falta →
-// Desistência.
+// a moldura de faltas persiste a falta com o turno mantido — a garantia de
+// conclusão vem da 4ª falta → Desistência.
 function voltarEPermanecerNoExpiry(
   base: EstadoDaPartida,
   jogadorId: string,
@@ -2073,6 +2090,61 @@ function voltarEPermanecerNoExpiry(
 // permanência — a queima aborta a travessia antes da Permanência (a aposta
 // queimada recalcula a Iluminação e aplica a Limpeza no mesmo funil da
 // Desistência), que segue a via comum.
+// Queima da aposta da travessia (Apêndice item 11): a peça posicionada da
+// travessia (quando o peão ainda não a ocupa) sai de circulação no mesmo
+// funil da Desistência — recalcula a Iluminação e aplica a Limpeza. Sem
+// semântica própria além do filtro + pecas_queimadas + funil; no-op quando
+// não há aposta posicionada, quando o peão já a ocupa ou sem travessiaId.
+function queimarApostaDaTravessia(
+  estado: EstadoDaPartida,
+  travessiaId: string | null,
+  peaoId: string,
+): { estado: EstadoDaPartida; eventos: EventoDaPartida[] } {
+  const eventos: EventoDaPartida[] = [];
+  let estadoQueimado = estado;
+  const apostaPosicionada =
+    travessiaId !== null &&
+    estadoQueimado.tabuleiro.posicionadas.some(
+      (peca) => peca.pecaId === travessiaId,
+    );
+  const peaoSobreAposta =
+    estadoQueimado.tabuleiro.peoes.find((item) => item.peaoId === peaoId)
+      ?.pecaId === travessiaId;
+  if (apostaPosicionada && !peaoSobreAposta && travessiaId !== null) {
+    const tabuleiroSemAposta: EstadoDoTabuleiro = {
+      ...estadoQueimado.tabuleiro,
+      posicionadas: estadoQueimado.tabuleiro.posicionadas.filter(
+        (peca) => peca.pecaId !== travessiaId,
+      ),
+      pecaSelecionadaId:
+        estadoQueimado.tabuleiro.pecaSelecionadaId === travessiaId
+          ? null
+          : estadoQueimado.tabuleiro.pecaSelecionadaId,
+      pecaEmManipulacaoId:
+        estadoQueimado.tabuleiro.pecaEmManipulacaoId === travessiaId
+          ? null
+          : estadoQueimado.tabuleiro.pecaEmManipulacaoId,
+    };
+    eventos.push({ tipo: 'pecas_queimadas', pecaIds: [travessiaId] });
+    // A queima da aposta é ponto definitivo da Iluminação (mesmo funil da
+    // Desistência): recalcula e aplica a Limpeza antes da Permanência.
+    const iluminacao = recalcularIluminacaoEAplicarLimpeza(
+      estadoQueimado,
+      tabuleiroSemAposta,
+      eventos,
+    );
+    estadoQueimado = {
+      ...estadoQueimado,
+      tabuleiro: {
+        ...tabuleiroSemAposta,
+        posicionadas: iluminacao.posicionadas,
+      },
+      celulasIluminadas: iluminacao.celulasIluminadas,
+    };
+  }
+  return { estado: estadoQueimado, eventos };
+}
+
 function resolverTravessiaAbertaNoExpiry(
   base: EstadoDaPartida,
   jogadorId: string,
@@ -2132,46 +2204,13 @@ function resolverTravessiaAbertaNoExpiry(
     estadoQueimado = queima.estado;
     eventos.push(...queima.eventos);
   }
-  const apostaPosicionada =
-    travessiaId !== null &&
-    estadoQueimado.tabuleiro.posicionadas.some(
-      (peca) => peca.pecaId === travessiaId,
-    );
-  const peaoSobreAposta =
-    estadoQueimado.tabuleiro.peoes.find((item) => item.peaoId === ator.peaoId)
-      ?.pecaId === travessiaId;
-  if (apostaPosicionada && !peaoSobreAposta && travessiaId !== null) {
-    const tabuleiroSemAposta: EstadoDoTabuleiro = {
-      ...estadoQueimado.tabuleiro,
-      posicionadas: estadoQueimado.tabuleiro.posicionadas.filter(
-        (peca) => peca.pecaId !== travessiaId,
-      ),
-      pecaSelecionadaId:
-        estadoQueimado.tabuleiro.pecaSelecionadaId === travessiaId
-          ? null
-          : estadoQueimado.tabuleiro.pecaSelecionadaId,
-      pecaEmManipulacaoId:
-        estadoQueimado.tabuleiro.pecaEmManipulacaoId === travessiaId
-          ? null
-          : estadoQueimado.tabuleiro.pecaEmManipulacaoId,
-    };
-    eventos.push({ tipo: 'pecas_queimadas', pecaIds: [travessiaId] });
-    // A queima da aposta é ponto definitivo da Iluminação (mesmo funil da
-    // Desistência): recalcula e aplica a Limpeza antes da Permanência.
-    const iluminacao = recalcularIluminacaoEAplicarLimpeza(
-      estadoQueimado,
-      tabuleiroSemAposta,
-      eventos,
-    );
-    estadoQueimado = {
-      ...estadoQueimado,
-      tabuleiro: {
-        ...tabuleiroSemAposta,
-        posicionadas: iluminacao.posicionadas,
-      },
-      celulasIluminadas: iluminacao.celulasIluminadas,
-    };
-  }
+  const aposta = queimarApostaDaTravessia(
+    estadoQueimado,
+    travessiaId,
+    ator.peaoId,
+  );
+  estadoQueimado = aposta.estado;
+  eventos.push(...aposta.eventos);
   // A queima aborta a travessia: a Permanência segue a via comum.
   const semTravessia: EstadoDaPartida = {
     ...estadoQueimado,
