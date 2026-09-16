@@ -1,0 +1,15 @@
+# security-headers-static.snippet — headers completos para conteúdo estático
+# (locations / e /media/): base + CSP restritiva. Ponto único de definição
+# da CSP (antes copiada em 4 pontos entre nginx.conf e nginx.prod.conf).
+# connect-src 'self' cobre o WS same-origin (/ws/lobby, /ws/game/* — ver
+# frontend/web/src/hooks/useSalaWebSocket.ts:resolverWsUrl); sem wildcards
+# ws:/wss: (smoke Sala→Partida não registrou nenhuma violação de WS).
+# `blob:` é exigido pelo three.js (issue #415, validado no smoke): o
+# GLTFLoader cria object URLs para texturas embutidas no .glb e as carrega
+# via ImageBitmapLoader → fetch(blob:…) (connect-src); no fallback sem
+# createImageBitmap (Safari <17, Firefox <98) ele usa <img src=blob:…>
+# (img-src). blob: é same-origin opaco (sem exfiltração de rede).
+# data: mantido para fallbacks inline. script-src 'self' é pragmático para
+# o bundle Vite estático (sem injeção de nonce para strict-dynamic).
+include /etc/nginx/conf.d/security-headers.snippet;
+add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; media-src 'self'; connect-src 'self' blob:;" always;
