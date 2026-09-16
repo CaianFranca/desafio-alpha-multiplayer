@@ -94,8 +94,8 @@ describe('decorações da Mesa', () => {
     expect(luzDaChama('algemas')).toBeNull()
   })
 
-  it('algemas nascem contidas (×1, sem giro) para calibrar via screenshot', () => {
-    expect(AJUSTES_DAS_DECORACOES.algemas.escala).toBe(1)
-    expect(AJUSTES_DAS_DECORACOES.algemas.rotacaoY).toBe(0)
+  it('algemas calibradas via screenshot (×3, giro 1)', () => {
+    expect(AJUSTES_DAS_DECORACOES.algemas.escala).toBe(3)
+    expect(AJUSTES_DAS_DECORACOES.algemas.rotacaoY).toBe(1)
   })
 })

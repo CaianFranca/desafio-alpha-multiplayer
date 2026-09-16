@@ -17,6 +17,7 @@ import {
   type NomeDaDecoracao,
 } from './decoracoesDaMesa'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
+import { DocumentosDaMesa } from './Documentos'
 
 /**
  * Primitiva da vela enquanto o GLB carrega ou se falhar: a cena nunca quebra.
@@ -218,6 +219,7 @@ export function DecoracoesDaMesa() {
         largura={ALGEMAS_LARGURA}
         profundidade={ALGEMAS_PROFUNDIDADE}
       />
+      <DocumentosDaMesa />
     </group>
   )
 }

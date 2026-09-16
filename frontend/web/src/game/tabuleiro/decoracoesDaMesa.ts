@@ -246,3 +246,123 @@ export function validarPosicaoDasAlgemas(): string | null {
   }
   return null
 }
+
+// ── Documentos largados na Mesa (páginas 3D via textura, sem GLB) ─────────
+// Uma página é uma lâmina fina com a textura no topo (+y); as dimensões
+// seguem a proporção exata dos arquivos (medida nos assets):
+// - `documento.jpg`: 1295×816 (horizontal) → 7.0 × 4.42 (dobro do vertical).
+// - `documento-vertical.jpg`: 880×1206 (vertical) → 2.55 × 3.5.
+
+export type TipoDocumento = 'vertical' | 'horizontal'
+
+function textura(nomeDoArquivo: string): string {
+  return `${baseAssets()}assets/textures/${nomeDoArquivo}`
+}
+
+/** Texturas das páginas (topo da lâmina, em sRGB fiel ao arquivo). */
+export const TEXTURAS_DOS_DOCUMENTOS: Record<TipoDocumento, string> = {
+  vertical: textura('documento-vertical.jpg'),
+  horizontal: textura('documento.jpg'),
+}
+
+/** Documentos com montagem própria (ordem de montagem na cena). */
+export const TIPOS_DE_DOCUMENTO: readonly TipoDocumento[] = [
+  'vertical',
+  'horizontal',
+]
+
+/** Resolve a URL da textura de um documento. */
+export function texturaDoDocumento(tipo: TipoDocumento): string {
+  return TEXTURAS_DOS_DOCUMENTOS[tipo]
+}
+
+/** Proporção largura/profundidade da página (espelha o arquivo de textura). */
+export const PROPORCAO_DOS_DOCUMENTOS: Record<TipoDocumento, number> = {
+  vertical: 880 / 1206,
+  horizontal: 1295 / 816,
+}
+
+/** Dimensões da lâmina sobre a Mesa (horizontal em dobro: 7.0 de lado). */
+export const DIMENSOES_DOS_DOCUMENTOS: Record<
+  TipoDocumento,
+  { readonly largura: number; readonly profundidade: number }
+> = {
+  vertical: { largura: 2.55, profundidade: 3.5 },
+  horizontal: { largura: 5.0, profundidade: 3.5 },
+}
+
+/** Espessura da folha (lâmina fina assentada no plano da Mesa). */
+export const ESPESSURA_DO_DOCUMENTO = 0.01
+
+/** Tom das bordas/corte do papel (topo recebe a textura). */
+export const COR_BORDA_DO_PAPEL = '#b8b0a0'
+
+/**
+ * Páginas espalhadas pela Mesa (ponto único de calibragem via screenshot):
+ * cada instância tem tipo, centro e giro próprios — a página "largada" não
+ * alinha com os eixos. O `y` empilha folhas sobrepostas (pilha no canto
+ * superior esquerdo) sem z-fighting: base em y = 0 só no `y` mínimo.
+ */
+export interface InstanciaDeDocumento {
+  readonly tipo: TipoDocumento
+  readonly posicao: readonly [number, number, number]
+  readonly rotacaoY: number
+}
+
+export const INSTANCIAS_DOS_DOCUMENTOS: readonly InstanciaDeDocumento[] = [
+  // Canto superior esquerdo (−x, −z): pilha de 3 verticais.
+  // Alturas todas distintas (passo 0.004): folhas sobrepostas nunca têm
+  // faces coplanares — sem z-fighting. O passo supera a precisão do depth
+  // buffer nessa distância (~0.0002) sem flutuação visível.
+  { tipo: 'vertical', posicao: [-7.4, 0.01, -7.2], rotacaoY: 0.35 },
+  { tipo: 'vertical', posicao: [-5.1, 0.014, -7.7], rotacaoY: -0.2 },
+  { tipo: 'vertical', posicao: [-7.6, 0.018, -5.9], rotacaoY: 0.55 },
+  // Sob as algemas: bordas espiando por baixo do modelo.
+  { tipo: 'vertical', posicao: [-5.8, 0.022, 8], rotacaoY: 0.2 },
+  // Horizontais em dobro (7.0 de lado): só cabem nas faixas norte/sul no
+  // sentido do comprimento, giro 0 — a borda escorrega ~0.03 para baixo da
+  // borda do tabuleiro (efeito intencional, ver tolerância no validador).
+  { tipo: 'horizontal', posicao: [-7, 0.026, 7.78], rotacaoY: -1 },
+  { tipo: 'horizontal', posicao: [4.5, 0.03, 9.2], rotacaoY: -0.5 },
+  { tipo: 'vertical', posicao: [8.5, 0.034, 7.6], rotacaoY: -0.15 },
+]
+
+/**
+ * Invariante de layout: páginas dentro da Mesa e fora do tabuleiro.
+ *
+ * Usa a caixa girada real de cada instância (extensão dos eixos após o
+ * `rotacaoY`), não uma margem única: folhas grandes em giro 0 usam a
+ * pegada exata. Tolera até 0.05 de escorregão para baixo da borda do
+ * tabuleiro (efeito intencional das folhas grandes — a borda some sob a
+ * base das peças, como papel enfiado sob o tabuleiro).
+ */
+export function validarPosicaoDosDocumentos(): string | null {
+  const TOLERANCIA_ESCORREGAO = 0.05
+  for (const [indice, instancia] of INSTANCIAS_DOS_DOCUMENTOS.entries()) {
+    const [x, y, z] = instancia.posicao
+    const { largura, profundidade } = DIMENSOES_DOS_DOCUMENTOS[instancia.tipo]
+    const cosseno = Math.abs(Math.cos(instancia.rotacaoY))
+    const seno = Math.abs(Math.sin(instancia.rotacaoY))
+    const meiaExtensaoX = (largura * cosseno + profundidade * seno) / 2
+    const meiaExtensaoZ = (largura * seno + profundidade * cosseno) / 2
+    if (
+      Math.abs(x) + meiaExtensaoX > LARGURA_MESA / 2 ||
+      Math.abs(z) + meiaExtensaoZ > PROFUNDIDADE_MESA / 2
+    ) {
+      return `Documento ${indice} deve ficar dentro da Mesa`
+    }
+    if (
+      Math.abs(x) - meiaExtensaoX < LARGURA_TABULEIRO / 2 - TOLERANCIA_ESCORREGAO &&
+      Math.abs(z) - meiaExtensaoZ < PROFUNDIDADE_TABULEIRO / 2 - TOLERANCIA_ESCORREGAO
+    ) {
+      return `Documento ${indice} deve ficar fora do tabuleiro`
+    }
+    if (y < ESPESSURA_DO_DOCUMENTO / 2) {
+      return `Documento ${indice} deve ficar sobre o plano da Mesa`
+    }
+    if (!Number.isFinite(instancia.rotacaoY)) {
+      return `Documento ${indice} deve ter giro válido`
+    }
+  }
+  return null
+}
