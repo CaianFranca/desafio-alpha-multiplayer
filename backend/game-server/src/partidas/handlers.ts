@@ -63,6 +63,18 @@ import { obterPartida, type PartidaPreparada } from './partidas.ts';
 import type { AvisoDeRetorno, AvisoDeDesistencia } from '../retorno/cliente.ts';
 import { sleep } from '../utils/sleep.ts';
 import { obterConexoes } from '../ws/conexao.ts';
+import { securityEvents, securityLogger as sharedSecurityLogger } from '@flicker/shared/server';
+import type { Logger } from 'pino';
+
+let securityLogger: Logger = sharedSecurityLogger as unknown as Logger;
+
+export function __setPartidaSecurityLoggerForTests(logger: Logger): void {
+  securityLogger = logger;
+}
+
+export function __resetPartidaSecurityLogger(): void {
+  securityLogger = sharedSecurityLogger as unknown as Logger;
+}
 
 // Chat de Partida (issue #390): 1 mensagem a cada 2s por Jogador não-bot e
 // teto de 300 caracteres após a normalização (trim com quebras colapsadas em
@@ -98,6 +110,8 @@ export interface PartidaHandlersDeps {
   readonly tetoDesvinculoMs?: number;
   /** Stream de debug (issue #340). Opcional: sem o campo, nenhuma linha é espelhada. */
   readonly debug?: DebugStreamDaPartida;
+  /** Logger estruturado de segurança (issue #411). Injetável para testes com sink. */
+  readonly securityLogger?: Logger;
 }
 
 export class PartidaHandlers {
@@ -109,6 +123,7 @@ export class PartidaHandlers {
   private readonly notificarDesistencia?: (aviso: AvisoDeDesistencia) => Promise<void>;
   private readonly tetoDesvinculoMs: number;
   private readonly debug?: DebugStreamDaPartida;
+  private readonly logger: Logger;
   // Serialização mononodo: uma cadeia de promessas por partidaId.
   private readonly cadeiasPorPartida: Map<string, Promise<unknown>> = new Map();
   private readonly retornosPendentes: Map<string, Promise<void>> = new Map();
@@ -130,6 +145,7 @@ export class PartidaHandlers {
     this.notificarDesistencia = deps.notificarDesistencia;
     this.tetoDesvinculoMs = deps.tetoDesvinculoMs ?? 5000;
     this.debug = deps.debug;
+    this.logger = (deps.securityLogger as unknown as Logger) ?? (securityLogger as unknown as Logger);
   }
 
   /**
@@ -146,8 +162,21 @@ export class PartidaHandlers {
     partidaId: string,
     sessaoJogadorId: string,
     mensagem: unknown,
+    contexto?: { connectionId?: string; requestId?: string },
   ): Promise<void> {
     if (!ehComandoDaPartida(mensagem)) {
+      try {
+        this.logger.warn({
+          event: securityEvents.WS_MESSAGE_REJECTED,
+          reason: 'invalid_command',
+          partidaId,
+          jogadorId: sessaoJogadorId,
+          connectionId: contexto?.connectionId,
+          requestId: contexto?.requestId,
+        });
+      } catch (e) {
+        console.error('[securityLogger] falha ao emitir ws.message_rejected:', e);
+      }
       this.broadcaster.enviarParaSocket(socket, {
         type: 'ERRO_DO_TABULEIRO',
         codigo: 'DADOS_INVALIDOS',
@@ -546,7 +575,7 @@ export class PartidaHandlers {
                   try {
                     partidaReagendada = await obterPartida(this.redis, partidaId);
                     if (partidaReagendada !== null) break;
-                  } catch {}
+                  } catch (e) { console.error('[partida] falha ao obter partida para reagendamento:', e); }
                   if (partidaReagendada === null && tentativa < 2) {
                     await sleep(100 * 2 ** tentativa);
                   }
@@ -562,7 +591,7 @@ export class PartidaHandlers {
                       let partidaReagendada2: PartidaPreparada | null = null;
                       try {
                         partidaReagendada2 = await obterPartida(this.redis, partidaId);
-                      } catch {}
+                      } catch (e) { console.error('[partida] falha ao obter partida para reagendamento (2):', e); }
                       if (partidaReagendada2 === null && partidaPrevia !== null) {
                         partidaReagendada2 = partidaPrevia;
                       }

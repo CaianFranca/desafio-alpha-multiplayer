@@ -2,7 +2,8 @@
  * Painel de chat da Partida (issue #389).
  *
  * Botão discreto no HUD com badge de não lidas (`role="status"`) e painel
- * expansível ancorado à direita sob o sistema do HUD: histórico rolável com
+ * expansível ancorado no canto inferior esquerdo, acima do card do jogador
+ * local (inf-esq do HUD): histórico rolável com
  * hora HH:MM e apelido na cor do peão por mensagem (humanas e de bot
  * renderizadas igual — a cor vem do roster `jogadorPorId`, a identidade do
  * bot também vive lá; id fora do roster cai em branco como fallback de
@@ -22,7 +23,7 @@
  * badge zera ao abrir.
  *
  * Em viewport compacto de paisagem (#230) o painel vira drawer ancorado na
- * faixa entre o sistema sup-dir e o Turno inf-dir — mesma moldura do modal
+ * faixa esquerda entre o topo e o jogador local inf-esq — mesma moldura do modal
  * de saída. No compacto o backdrop fica ABAIXO do HUD (drawer, critério [5]
  * da #389: o HUD essencial segue clicável), no integral segue modal
  * (backdrop acima de tudo). O jogo segue rolando por baixo em ambos.
@@ -178,20 +179,26 @@ export function ChatDaPartida({
         ref={raizRef}
         data-testid="chat-da-partida"
         data-compacto={emModoCompacto ? 'true' : 'false'}
-        className="pointer-events-auto absolute z-50"
+        className="pointer-events-auto absolute z-50 flex flex-col-reverse"
         style={
-          emModoCompacto && aberto
-            ? {
-                right: 0,
-                top: 'calc(4.5rem + env(safe-area-inset-top))',
-                bottom: 'calc(5.5rem + env(safe-area-inset-bottom))',
-                width: 'min(21.25rem, calc(100vw - 1.5rem))',
-                display: 'flex',
-                flexDirection: 'column',
-              }
+          emModoCompacto
+            ? aberto
+              ? {
+                  left: 0,
+                  top: 'calc(4.5rem + env(safe-area-inset-top))',
+                  bottom: 'calc(5.5rem + env(safe-area-inset-bottom))',
+                  width: 'min(21.25rem, calc(100vw - 1.5rem))',
+                  display: 'flex',
+                  flexDirection: 'column-reverse',
+                }
+              : {
+                  left: 'calc(1.5rem + env(safe-area-inset-left))',
+                  bottom: 'calc(5.5rem + env(safe-area-inset-bottom))',
+                  width: '21.25rem',
+                }
             : {
-                right: 'calc(1.5rem + env(safe-area-inset-right))',
-                top: 'calc(4.5rem + env(safe-area-inset-top))',
+                left: 'calc(1.5rem + env(safe-area-inset-left))',
+                bottom: 'calc(12rem + env(safe-area-inset-bottom))',
                 width: '21.25rem',
               }
         }
@@ -246,7 +253,7 @@ export function ChatDaPartida({
           <div
             id="chat-painel"
             data-testid="chat-painel"
-            className={`flex w-full flex-col border border-t-0 border-[#504533] bg-[linear-gradient(180deg,rgba(28,25,23,0.95),rgba(20,18,16,0.97))] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_32px_rgba(0,0,0,0.6)] ${
+            className={`flex w-full flex-col border border-b-0 border-[#504533] bg-[linear-gradient(180deg,rgba(28,25,23,0.95),rgba(20,18,16,0.97))] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_32px_rgba(0,0,0,0.6)] ${
               emModoCompacto ? 'min-h-0 flex-1' : 'h-[15.875rem]'
             }`}
           >

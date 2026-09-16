@@ -124,7 +124,8 @@ export async function verificarExpiracaoSeNecessario(
   let ttl: number;
   try {
     ttl = await redis.ttl(chaveReconexaoEmAndamento(partidaId, jogadorId));
-  } catch {
+  } catch (e) {
+    console.warn('[reconexao-em-andamento] falha ao verificar TTL da janela:', e);
     return false;
   }
   if (ttl > 0) {
@@ -144,7 +145,7 @@ export async function verificarExpiracaoSeNecessario(
   const converteu = await conversor(partidaId, jogadorId);
   try {
     await limparJanelaDeReconexao(redis, partidaId, jogadorId);
-  } catch {}
+  } catch (e) { console.warn('[reconexao-em-andamento] falha ao limpar janela:', e); }
   return converteu;
 }
 
@@ -164,7 +165,7 @@ async function janelaExpiradaValida(
   if (partida === null) {
     try {
       await limparJanelaDeReconexao(redis, partidaId, jogadorId);
-    } catch {}
+    } catch (e) { console.warn('[reconexao-em-andamento] falha ao limpar janela:', e); }
     return false;
   }
   // Guarda da preparada (#295): janela/conversão só em `em_andamento` — o
@@ -172,27 +173,27 @@ async function janelaExpiradaValida(
   if (partida.estado !== 'em_andamento') {
     try {
       await limparJanelaDeReconexao(redis, partidaId, jogadorId);
-    } catch {}
+    } catch (e) { console.warn('[reconexao-em-andamento] falha ao limpar janela:', e); }
     return false;
   }
   const membro = partida.roster.find((m) => m.jogadorId === jogadorId);
   if (membro === undefined || membro.presenca !== 'em_reconexao') {
     try {
       await limparJanelaDeReconexao(redis, partidaId, jogadorId);
-    } catch {}
+    } catch (e) { console.warn('[reconexao-em-andamento] falha ao limpar janela:', e); }
     return false;
   }
   const estado = await obterEstadoDaPartida(redis, partidaId);
   if (estado === null || estado.resultado !== null) {
     try {
       await limparJanelaDeReconexao(redis, partidaId, jogadorId);
-    } catch {}
+    } catch (e) { console.warn('[reconexao-em-andamento] falha ao limpar janela:', e); }
     return false;
   }
   if (!estado.jogadores.some((j) => j.jogadorId === jogadorId)) {
     try {
       await limparJanelaDeReconexao(redis, partidaId, jogadorId);
-    } catch {}
+    } catch (e) { console.warn('[reconexao-em-andamento] falha ao limpar janela:', e); }
     return false;
   }
   return true;
@@ -253,7 +254,7 @@ export async function rearmarReconexaoEmAndamentoAposRestart(redis: Redis): Prom
           const delayMs = Math.max(0, linha.ttl * 1000) + jitterAte(JITTER_REARME_MS);
           agendarExpiracaoDeReconexao(partidaId, jogadorId, delayMs, redis);
           reagendadas += 1;
-        } catch {}
+        } catch (e) { console.warn('[reconexao-em-andamento] falha ao limpar janela:', e); }
       }
       await new Promise<void>((resolve) => setImmediate(resolve));
     } while (cursor !== '0');

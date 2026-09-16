@@ -49,6 +49,8 @@ export interface Config {
   wsLimiteMensagens: number;
   /** Janela em ms do rate limit geral por conexão (issue #409). */
   wsJanelaLimiteMensagensMs: number;
+  /** Intervalo em ms da revalidação da Sessão das conexões WS abertas (issue #410). */
+  wsSessaoRevalidacaoMs: number;
 }
 
 // Alinhado com .env.example e docker-compose.yml (1234), como o lobby faz com a 3001.
@@ -57,6 +59,7 @@ const DEFAULT_LOBBY_SERVER_PORT = 3001;
 const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
 const DEFAULT_JWT_REFRESH_SECRET = 'dev_jwt_refresh_change_me';
 const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
+export const DEFAULT_REDIS_PASSWORD = 'flicker_redis_dev_password';
 const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
@@ -88,6 +91,14 @@ export const MAX_WS_LIMITE_MENSAGENS = 10000;
 export const DEFAULT_WS_JANELA_LIMITE_MENSAGENS_MS = 10000;
 export const MIN_WS_JANELA_LIMITE_MENSAGENS_MS = 100;
 export const MAX_WS_JANELA_LIMITE_MENSAGENS_MS = 600000;
+// Revalidação da Sessão das conexões WS abertas (issue #410). O teto (60s)
+// limita a janela em que o game-server ainda aceita comandos de uma Sessão
+// revogada: o lobby encerra na hora e o game-server, em até o intervalo. O
+// teto fica abaixo do TTL do marcador de rotação (sessionAccessTtlSeconds =
+// 900s), para o refresh não perder o rastro da Sessão rotacionada.
+export const DEFAULT_WS_SESSAO_REVALIDACAO_MS = 30000;
+export const MIN_WS_SESSAO_REVALIDACAO_MS = 1000;
+export const MAX_WS_SESSAO_REVALIDACAO_MS = 60000;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -282,6 +293,16 @@ function parseWsJanelaLimiteMensagensMs(raw: string | undefined): number {
     'WS_JANELA_LIMITE_MENSAGENS_MS',
     MIN_WS_JANELA_LIMITE_MENSAGENS_MS,
     MAX_WS_JANELA_LIMITE_MENSAGENS_MS,
+  );
+}
+
+function parseWsSessaoRevalidacaoMs(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_SESSAO_REVALIDACAO_MS,
+    'WS_SESSAO_REVALIDACAO_MS',
+    MIN_WS_SESSAO_REVALIDACAO_MS,
+    MAX_WS_SESSAO_REVALIDACAO_MS,
   );
 }
 
@@ -499,6 +520,9 @@ export function getConfig(): Config {
   const wsJanelaLimiteMensagensMs = parseWsJanelaLimiteMensagensMs(
     process.env.WS_JANELA_LIMITE_MENSAGENS_MS as string | undefined,
   );
+  const wsSessaoRevalidacaoMs = parseWsSessaoRevalidacaoMs(
+    process.env.WS_SESSAO_REVALIDACAO_MS as string | undefined,
+  );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
@@ -517,6 +541,13 @@ export function getConfig(): Config {
     poolMax,
   };
 
+  const rawRedisPassword = process.env.REDIS_PASSWORD?.trim();
+  const redis = {
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parsePort(process.env.REDIS_PORT as string | undefined, 6379),
+    password: rawRedisPassword && rawRedisPassword.length > 0 ? rawRedisPassword : DEFAULT_REDIS_PASSWORD,
+  };
+
   if (isProduction) {
     if (!jwtSecret || jwtSecret === DEFAULT_JWT_SECRET) {
       throw new Error('JWT_SECRET deve ser definido em produção');
@@ -526,6 +557,9 @@ export function getConfig(): Config {
     }
     if (!postgres.password || postgres.password === DEFAULT_POSTGRES_PASSWORD) {
       throw new Error('POSTGRES_PASSWORD deve ser definido em produção');
+    }
+    if (!redis.password || redis.password === DEFAULT_REDIS_PASSWORD) {
+      throw new Error('REDIS_PASSWORD deve ser definido em produção');
     }
     if (process.env.LOBBY_PUBLIC_URL === undefined) {
       throw new Error('LOBBY_PUBLIC_URL deve ser definido em produção');
@@ -543,12 +577,6 @@ export function getConfig(): Config {
       throw new Error(`TRUST_PROXY_HOPS inválido em produção: "${trustProxyHopsBruto}"`);
     }
   }
-
-  const redis = {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: parsePort(process.env.REDIS_PORT as string | undefined, 6379),
-    password: process.env.REDIS_PASSWORD ?? undefined,
-  };
 
   let gameServerHeartbeatIntervalMs = parsePositiveInt(
     process.env.GAME_SERVER_HEARTBEAT_INTERVAL_MS as string | undefined,
@@ -606,6 +634,7 @@ export function getConfig(): Config {
     wsMaxPayloadBytes,
     wsLimiteMensagens,
     wsJanelaLimiteMensagensMs,
+    wsSessaoRevalidacaoMs,
   };
 }
 

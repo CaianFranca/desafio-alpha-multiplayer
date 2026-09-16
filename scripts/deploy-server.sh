@@ -20,6 +20,7 @@ ROOT=/opt/flicker
 RELEASES="$ROOT/releases"
 CURRENT="$ROOT/current"
 ENV_FILE="$ROOT/env"
+REDIS_CONF="${REDIS_CONF:-/etc/redis/redis.conf}"
 KEEP_RELEASES=3
 HEALTH_TIMEOUT=60
 
@@ -58,6 +59,64 @@ chmod o+x "$ROOT" "$RELEASES"
 log "rodando migrations"
 set -a; . "$ENV_FILE"; set +a
 export NODE_ENV=production
+[ -n "${REDIS_PASSWORD:-}" ] || die "REDIS_PASSWORD vazio no env ($ENV_FILE) — defina PROD_REDIS_PASSWORD no workflow"
+# Normaliza senha (trim) para não divergir do getConfig() que faz trim
+REDIS_PASSWORD="$(printf '%s' "$REDIS_PASSWORD" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+[ -n "$REDIS_PASSWORD" ] || die "REDIS_PASSWORD vazia após trim — verifique o secret"
+# Garante requirepass no Redis nativo — fail-closed se conf ausente ou redis-cli ausente
+if [ ! -f "$REDIS_CONF" ]; then
+  die "redis.conf ausente em $REDIS_CONF — instale redis-server e garanta requirepass"
+fi
+if ! command -v redis-cli >/dev/null 2>&1; then
+  die "redis-cli ausente — instale redis-tools para validar requirepass"
+fi
+log "garantindo requirepass em $REDIS_CONF"
+tmp_conf="$(mktemp)"
+tmp_conf2="${tmp_conf}.2"
+new_conf="${REDIS_CONF}.deploy.new"
+cleanup_conf() { rm -f "$tmp_conf" "$tmp_conf2" "$new_conf" 2>/dev/null || true; }
+# Preserva permissões/dono do arquivo original
+orig_stat="$(stat -c '%a %u %g' "$REDIS_CONF" 2>/dev/null || echo '640 0 0')"
+# shellcheck disable=SC2206
+orig_perm=($orig_stat)
+grep -vE '^\s*requirepass\s+' "$REDIS_CONF" > "$tmp_conf" || true
+# Também remove linha comentada # requirepass para evitar duplicidade
+grep -vE '^\s*#\s*requirepass\s+' "$tmp_conf" > "$tmp_conf2" && mv "$tmp_conf2" "$tmp_conf" || true
+printf 'requirepass %s\n' "$REDIS_PASSWORD" >> "$tmp_conf"
+# Só substitui se mudou (evita restart desnecessário)
+if ! cmp -s "$tmp_conf" "$REDIS_CONF"; then
+  # Backup único, legível só pelo root (contém a senha em plaintext); remove legados .bak.<ts>
+  rm -f "${REDIS_CONF}".bak.* 2>/dev/null || true
+  ( umask 077; cp "$REDIS_CONF" "${REDIS_CONF}.bak" ) 2>/dev/null || true
+  # Escrita atômica: monta o conf novo no mesmo filesystem e renomeia (rename é atômico)
+  cp "$tmp_conf" "$new_conf" 2>/dev/null || die "não foi possível preparar $new_conf — verifique espaço/permissões"
+  chmod "${orig_perm[0]}" "$new_conf" 2>/dev/null || chmod 640 "$new_conf" 2>/dev/null || true
+  if [ "${#orig_perm[@]}" -ge 3 ]; then
+    chown "${orig_perm[1]}:${orig_perm[2]}" "$new_conf" 2>/dev/null || chown redis:redis "$new_conf" 2>/dev/null || true
+  fi
+  mv -f "$new_conf" "$REDIS_CONF"
+  log "requirepass atualizado — reiniciando redis"
+  systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
+  # Aguarda redis ficar pronto com a nova senha (fail-closed: aborta deploy se não subir)
+  # Usa REDISCLI_AUTH para não expor a senha em /proc/cmdline
+  for i in $(seq 1 10); do
+    if REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping 2>/dev/null | grep -q PONG; then
+      log "redis pronto com requirepass (tentativa $i)"
+      break
+    fi
+    if [ "$i" -eq 10 ]; then
+      log "ERRO: redis não respondeu PONG após requirepass — restaurando backup"
+      if [ -f "${REDIS_CONF}.bak" ]; then
+        cp "${REDIS_CONF}.bak" "$REDIS_CONF"
+        systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
+      fi
+      cleanup_conf
+      die "redis com requirepass não subiu — verifique $REDIS_CONF"
+    fi
+    sleep 1
+  done
+fi
+cleanup_conf
 ( cd "$RELEASE_DIR/db" && ./node_modules/.bin/knex migrate:latest --knexfile dist/knexfile.js )
 
 # ── 4. Instalar units systemd + conf nginx ──────────────────────────────────
@@ -67,6 +126,13 @@ cp "$RELEASE_DIR/infra/systemd/"*.service /etc/systemd/system/ 2>/dev/null \
 systemctl daemon-reload
 cp "$RELEASE_DIR/infra/nginx/nginx.prod.conf" /etc/nginx/sites-available/flicker
 ln -sfn /etc/nginx/sites-available/flicker /etc/nginx/sites-enabled/flicker
+# Snippets incluídos por nginx.prod.conf via caminho absoluto
+# /etc/nginx/conf.d/*.snippet (extensão .snippet = fora do auto-include
+# `conf.d/*.conf` do Debian, só carregados pelo include explícito).
+for snippet in hsts-map security-headers security-headers-static; do
+  cp "$RELEASE_DIR/infra/nginx/$snippet.snippet" "/etc/nginx/conf.d/$snippet.snippet" \
+    || die "snippet nginx ausente no tarball: infra/nginx/$snippet.snippet"
+done
 # Vhost de borda (:80, default_server) que recebe /server01 do proxy do admin e
 # faz strip do prefixo rumo ao nginx do app em 127.0.0.1:8080.
 cp "$RELEASE_DIR/infra/nginx/nginx.edge.conf" /etc/nginx/sites-available/flicker-edge

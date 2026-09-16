@@ -6,6 +6,10 @@ export interface ConexaoDoJogador {
   readonly jogadorId: string;
   readonly apelido: string;
   readonly partidaId: PartidaId;
+  /** Sessão que autenticou a conexão (issue #410); migra na rotação do refresh. */
+  sessaoId: string;
+  /** Bots são isentos da revalidação de Sessão (issue #410). */
+  readonly isBot: boolean;
 }
 
 // Registro único por Jogador dentro de cada Partida (issue #155): uma nova
@@ -55,4 +59,15 @@ export function removerConexao(conexao: ConexaoDoJogador): boolean {
 /** Conexões vigentes da Partida, indexadas por `jogadorId`. */
 export function obterConexoes(partidaId: PartidaId): ReadonlyMap<string, ConexaoDoJogador> {
   return conexoesPorPartida.get(partidaId) ?? new Map();
+}
+
+/** Todas as conexões vigentes registradas — a revalidação de Sessão as varre (issue #410). */
+export function listarConexoes(): ConexaoDoJogador[] {
+  const conexoes: ConexaoDoJogador[] = [];
+  for (const porJogador of conexoesPorPartida.values()) {
+    for (const conexao of porJogador.values()) {
+      conexoes.push(conexao);
+    }
+  }
+  return conexoes;
 }

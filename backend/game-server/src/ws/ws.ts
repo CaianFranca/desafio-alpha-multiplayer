@@ -27,12 +27,14 @@
 // `conectado` porque o registro já aponta para a nova conexão (checagem de
 // vigência em `removerConexao`).
 
+import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Redis } from 'ioredis';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { getConfig } from '@flicker/config';
-import { origemPermitida, LimiteDeMensagensPorConexao } from '@flicker/shared/server';
+import { origemPermitida, LimiteDeMensagensPorConexao, securityEvents, securityLogger as sharedSecurityLogger, primeiroValor } from '@flicker/shared/server';
+import type { Logger } from 'pino';
 import type {
   ServerMessage,
   PartidaId,
@@ -75,6 +77,30 @@ function segurancaDoConfig(): SegurancaWs {
 
 // Só o que o `ws.ts` consome do canal de Partida: o `PartidaHandlers` já
 // carrega a própria referência ao Redis. Deixar `redis` aqui seria peso morto.
+
+const REQUEST_ID_RE = /^[A-Za-z0-9-]{1,128}$/;
+
+function sanitizarRequestId(valor: string | string[] | undefined): string | null {
+  const raw = primeiroValor(valor);
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!REQUEST_ID_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+function extrairIpParaLog(req: IncomingMessage): string | undefined {
+  const raw = primeiroValor(req.headers['x-forwarded-for'] as string | string[] | undefined);
+  const trustHops = getConfig().trustProxyHops;
+  if (trustHops > 0 && typeof raw === 'string' && raw.trim().length > 0) {
+    const partes = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    const idx = partes.length - trustHops;
+    if (idx >= 0 && idx < partes.length) {
+      return partes[idx] || (req.socket.remoteAddress ?? undefined);
+    }
+  }
+  return req.socket.remoteAddress ?? undefined;
+}
 export interface PartidaWsDeps {
   readonly broadcaster: PartidaBroadcaster;
   readonly handlers: PartidaHandlers;
@@ -82,8 +108,19 @@ export interface PartidaWsDeps {
   readonly debug?: import('./debug-stream.ts').DebugStreamDaPartida;
 }
 
+let securityLogger: Logger = sharedSecurityLogger as unknown as Logger;
+
+export function __setGameWsSecurityLoggerForTests(logger: Logger): void {
+  securityLogger = logger;
+}
+
+export function __resetGameWsSecurityLogger(): void {
+  securityLogger = sharedSecurityLogger as unknown as Logger;
+}
+
 export interface WebSocketServerDeps {
   readonly partida?: PartidaWsDeps;
+  readonly securityLogger?: Logger;
 }
 
 interface UpgradeResultado {
@@ -296,14 +333,27 @@ export function criarWebSocketServer(
   // fluxo de admissão) para evitar shadowing: `depsPartida` são as deps do
   // canal de Partida, `partida` é a partida persistida.
   const depsPartida = deps?.partida;
+  const logger = deps?.securityLogger ?? securityLogger;
 
   server.on('upgrade', (request, socket, head) => {
+    const connectionId = randomUUID();
+    const requestId = sanitizarRequestId(request.headers['x-request-id'] as string | string[] | undefined) ?? connectionId;
     // Endurecimento do WS (issue #409): recusa por Origem ANTES de qualquer
     // validação de token/partida — o 403 (e não o 401 de sessão) prova a
     // precedência. Origem ausente (bot/serviço) é aceita. Nunca loga
     // token/cookie: só a origem.
     if (!origemPermitida(request.headers.origin, seguranca.origensPermitidas)) {
-      console.warn('[ws] handshake recusado por origem', { origin: request.headers.origin });
+      try {
+        logger.warn({
+          event: securityEvents.WS_HANDSHAKE_REJECTED,
+          reason: 'origin_not_allowed',
+          origin: request.headers.origin ?? null,
+          ip: extrairIpParaLog(request),
+          connectionId,
+          requestId,
+        });
+      } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+      // Evento estruturado já emitido (pino JSON); console.warn removido para não duplicar
       enviarErroNoSocket(socket, 403, erroRejeitada('ORIGEM_NAO_PERMITIDA', 'origem não permitida'));
       return;
     }
@@ -326,7 +376,19 @@ export function criarWebSocketServer(
     void (async () => {
       // Bots autenticados por Service Token não dependem de sessão no Redis
       if (!sessao.isBot) {
-        const sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
+        // `validarSessaoNoRedis` propaga erro de Redis (issue #410, B1). O
+        // handshake segue fail-closed: sem conseguir confirmar a Sessão, não
+        // admite — recusa com o mesmo 401 SESSAO_INVALIDA de antes. O `catch`
+        // local evita que o erro suba ao catch global do IIFE e vire 500.
+        let sessaoValida = false;
+        try {
+          sessaoValida = await validarSessaoNoRedis(contexto.redis, sessao.sessaoId, sessao.jogadorId);
+        } catch (erro) {
+          console.error(
+            '[ws] falha ao validar sessão no handshake:',
+            erro instanceof Error ? erro.message : String(erro),
+          );
+        }
         if (!sessaoValida) {
           enviarErroNoSocket(socket, 401, erroRejeitada('SESSAO_INVALIDA', 'sessão revogada ou inexistente'));
           return;
@@ -382,6 +444,8 @@ export function criarWebSocketServer(
             jogadorId: sessao.jogadorId,
             apelido: sessao.apelido,
             partidaId,
+            sessaoId: sessao.sessaoId,
+            isBot: sessao.isBot ?? false,
           };
           // Substituição (#155): a nova conexão entra no registro ANTES da
           // transição de presença e de a antiga ser encerrada —
@@ -405,7 +469,7 @@ export function criarWebSocketServer(
             limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior, depsPartida?.broadcaster);
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
-            } catch {}
+            } catch (e) { console.error('[ws] falha ao enviar erro interno:', e); }
             ws.close(1011, 'ERRO_INTERNO');
             return;
           }
@@ -550,6 +614,16 @@ export function criarWebSocketServer(
             if (!sessao.isBot && !limiteDeMensagens.registrar()) {
               if (!encerradoPorRateLimit) {
                 encerradoPorRateLimit = true;
+                try {
+                  logger.warn({
+                    event: securityEvents.WS_RATE_LIMIT_EXCEEDED,
+                    partidaId,
+                    jogadorId: sessao.jogadorId,
+                    connectionId,
+                    requestId,
+                    ip: extrairIpParaLog(request),
+                  });
+                } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
                 ws.close(1008, 'RATE_LIMIT');
               }
               return;
@@ -557,6 +631,17 @@ export function criarWebSocketServer(
 
             const parsed = parsearMensagem(data);
             if (parsed === null) {
+              try {
+                logger.warn({
+                  event: securityEvents.WS_MESSAGE_REJECTED,
+                  reason: 'invalid_json',
+                  partidaId,
+                  jogadorId: sessao.jogadorId,
+                  connectionId,
+                  requestId,
+                  ip: extrairIpParaLog(request),
+                });
+              } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
               return;
             }
 
@@ -587,10 +672,23 @@ export function criarWebSocketServer(
             // nunca o `jogadorId` autodeclarado no wire: o handler injeta a
             // sessão como ator (#155) mesmo quando o `jogadorId` do wire
             // diverge — o campo segue obrigatório só pela guarda de forma.
-            void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed);
+            // Issue #411: propaga connectionId/requestId para correlação nos logs.
+            void depsPartida.handlers.aplicarMensagem(ws, partidaId, sessao.jogadorId, parsed, { connectionId, requestId });
           });
 
-          ws.on('close', () => {
+          ws.on('close', (code: number) => {
+            if (code === 1009) {
+              try {
+                logger.warn({
+                  event: securityEvents.WS_PAYLOAD_TOO_LARGE,
+                  partidaId,
+                  jogadorId: sessao.jogadorId,
+                  connectionId,
+                  requestId,
+                  ip: extrairIpParaLog(request),
+                });
+              } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+            }
             console.info('[ws] jogador desconectado', {
               jogadorId: sessao.jogadorId,
               partidaId,
@@ -628,8 +726,8 @@ export function criarWebSocketServer(
           }
           try {
             ws.send(erroRejeitada('ERRO_INTERNO', 'falha na admissão da partida'));
-          } catch {}
-          try { ws.close(1011, 'ERRO_INTERNO'); } catch {}
+          } catch (e) { console.error('[ws] falha ao enviar erro interno na admissão:', e); }
+          try { ws.close(1011, 'ERRO_INTERNO'); } catch (e) { console.error('[ws] falha ao fechar socket na admissão:', e); }
         });
       });
     })().catch((error: unknown) => {

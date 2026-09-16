@@ -192,24 +192,27 @@ jobs:
       - name: Gerar env de produção (valores nunca logados)
         env:
           PROD_POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          PROD_REDIS_PASSWORD: ${{ secrets.PROD_REDIS_PASSWORD }}
           PROD_JWT_SECRET: ${{ secrets.PROD_JWT_SECRET }}
           PROD_JWT_REFRESH_SECRET: ${{ secrets.PROD_JWT_REFRESH_SECRET }}
           LOBBY_PUBLIC_URL: ${{ vars.PROD_LOBBY_PUBLIC_URL }}
         run: |
+          [ -n "${PROD_REDIS_PASSWORD:-}" ] || { echo "::error::PROD_REDIS_PASSWORD secret vazio — configure em Settings → Secrets" >&2; exit 1; }
           {
             echo 'NODE_ENV=production'
             echo 'POSTGRES_HOST=127.0.0.1'
             echo 'POSTGRES_USER=flicker'
             echo 'POSTGRES_DB=flicker'
-            echo "POSTGRES_PASSWORD=${PROD_POSTGRES_PASSWORD}"
+            printf 'POSTGRES_PASSWORD=%s\n' "$PROD_POSTGRES_PASSWORD"
             echo 'REDIS_HOST=127.0.0.1'
             echo 'REDIS_PORT=6379'
+            printf 'REDIS_PASSWORD=%s\n' "$PROD_REDIS_PASSWORD"
             # Lobby e game-server coabitam o mesmo host em prod nativa: o
             # hostname default `game-server` só resolve na rede Docker Compose.
             echo 'GAME_SERVER_ADVERTISE_HOST=127.0.0.1'
-            echo "JWT_SECRET=${PROD_JWT_SECRET}"
-            echo "JWT_REFRESH_SECRET=${PROD_JWT_REFRESH_SECRET}"
-            echo "LOBBY_PUBLIC_URL=${LOBBY_PUBLIC_URL}"
+            printf 'JWT_SECRET=%s\n' "$PROD_JWT_SECRET"
+            printf 'JWT_REFRESH_SECRET=%s\n' "$PROD_JWT_REFRESH_SECRET"
+            printf 'LOBBY_PUBLIC_URL=%s\n' "$LOBBY_PUBLIC_URL"
             # Produção nativa tem 3 hops até o lobby (admin TLS → nginx edge →
             # nginx app → lobby); o default do config (1) é só para dev/Docker Compose.
             echo 'TRUST_PROXY_HOPS=3'
