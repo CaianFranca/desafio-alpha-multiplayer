@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test, { describe } from 'node:test';
 import { Redis } from 'ioredis';
-import { GAME_SERVERS_PREFIX } from '@flicker/config';
+import { DEFAULT_REDIS_PASSWORD, GAME_SERVERS_PREFIX } from '@flicker/config';
 import { estaDisponivel, listarGameServersDisponiveis } from '@flicker/shared/server';
 import { anunciar, iniciarHeartbeat, pararHeartbeat, removerRegistro } from './registro.ts';
 
 function criarRedis(): Redis | null {
   const host = process.env.REDIS_HOST ?? 'localhost';
   const port = Number(process.env.REDIS_PORT ?? 6379);
-  const password = process.env.REDIS_PASSWORD ?? undefined;
+  const password = process.env.REDIS_PASSWORD ?? DEFAULT_REDIS_PASSWORD;
   // Se Redis não estiver disponível, o teste será skipado
   return new Redis({ host, port, password, lazyConnect: true, maxRetriesPerRequest: 1, connectTimeout: 1000 });
 }

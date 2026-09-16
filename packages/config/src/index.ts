@@ -59,6 +59,7 @@ const DEFAULT_LOBBY_SERVER_PORT = 3001;
 const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
 const DEFAULT_JWT_REFRESH_SECRET = 'dev_jwt_refresh_change_me';
 const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
+export const DEFAULT_REDIS_PASSWORD = 'flicker_redis_dev_password';
 const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
@@ -540,6 +541,13 @@ export function getConfig(): Config {
     poolMax,
   };
 
+  const rawRedisPassword = process.env.REDIS_PASSWORD?.trim();
+  const redis = {
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parsePort(process.env.REDIS_PORT as string | undefined, 6379),
+    password: rawRedisPassword && rawRedisPassword.length > 0 ? rawRedisPassword : DEFAULT_REDIS_PASSWORD,
+  };
+
   if (isProduction) {
     if (!jwtSecret || jwtSecret === DEFAULT_JWT_SECRET) {
       throw new Error('JWT_SECRET deve ser definido em produção');
@@ -549,6 +557,9 @@ export function getConfig(): Config {
     }
     if (!postgres.password || postgres.password === DEFAULT_POSTGRES_PASSWORD) {
       throw new Error('POSTGRES_PASSWORD deve ser definido em produção');
+    }
+    if (!redis.password || redis.password === DEFAULT_REDIS_PASSWORD) {
+      throw new Error('REDIS_PASSWORD deve ser definido em produção');
     }
     if (process.env.LOBBY_PUBLIC_URL === undefined) {
       throw new Error('LOBBY_PUBLIC_URL deve ser definido em produção');
@@ -566,12 +577,6 @@ export function getConfig(): Config {
       throw new Error(`TRUST_PROXY_HOPS inválido em produção: "${trustProxyHopsBruto}"`);
     }
   }
-
-  const redis = {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: parsePort(process.env.REDIS_PORT as string | undefined, 6379),
-    password: process.env.REDIS_PASSWORD ?? undefined,
-  };
 
   let gameServerHeartbeatIntervalMs = parsePositiveInt(
     process.env.GAME_SERVER_HEARTBEAT_INTERVAL_MS as string | undefined,
