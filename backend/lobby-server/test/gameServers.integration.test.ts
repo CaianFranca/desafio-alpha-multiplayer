@@ -7,7 +7,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import jwt from 'jsonwebtoken';
-import { getConfig } from '@flicker/config';
+import { getConfig, SESSION_ISS, SESSION_ACCESS_AUDIENCE } from '@flicker/config';
 import { GAME_SERVERS_PREFIX } from '@flicker/shared/server';
 import { createApp } from '../src/app.ts';
 import { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../src/middleware/serviceToken.ts';
@@ -235,8 +235,12 @@ test('GET /api/game-servers guard fora de produção: sem token / lixo / secret 
     });
     assert.equal(res.status, 401);
 
-    // JWT válido de Jogador (sem audience de serviço) → 401
-    const tokenJogador = jwt.sign({ sub: 'x' }, jwtSecret, { expiresIn: '1h' });
+    // access token de Jogador válido (iss/aud de access) → 401, pois só service token com aud de serviço passa
+    const tokenJogador = jwt.sign(
+      { sub: 'jogador-x', apelido: 'Jogador X', sessaoId: 'sessao-x' },
+      jwtSecret,
+      { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE },
+    );
     res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
       headers: { authorization: `Bearer ${tokenJogador}` },
     });
@@ -302,9 +306,13 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
       });
       assert.equal(res.status, 401);
 
-      // JWT válido de Jogador (sem audience de serviço) → 401
+      // access token de Jogador válido (iss/aud de access) → 401, pois só service token com aud de serviço passa
       // R1: assinatura válida não basta — só token de serviço com aud correto passa.
-      const tokenJogador = jwt.sign({ sub: 'x' }, jwtSecret, { expiresIn: '1h' });
+      const tokenJogador = jwt.sign(
+        { sub: 'jogador-x', apelido: 'Jogador X', sessaoId: 'sessao-x' },
+        jwtSecret,
+        { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE },
+      );
       res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
         headers: { authorization: `Bearer ${tokenJogador}` },
       });
