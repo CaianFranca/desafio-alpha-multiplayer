@@ -1,10 +1,13 @@
 /**
  * Tutorial da Partida em carrossel (issue #434).
  *
- * Modal central sobre a Partida com 7 slides (base de 5 da spec, com o
- * desmembramento autorizado: Especiais em 2 slides e Monstros em Vulto +
- * Espectro, pela legibilidade no modo compacto): Posicionar Peça de Caminho,
- * Movimentar Peão, Especiais 1/2, Especiais 2/2, Vulto, Espectro e Objetivo.
+ * Modal central sobre a Partida com 13 slides, 1 mídia por slide (base de 5
+ * da spec, com o desmembramento autorizado: posicionar em 2 slides,
+ * Especiais em 5 slides, Vulto em 2 slides e Espectro em 2 slides com Perda
+ * de Sanidade, pela legibilidade no modo compacto): Posicionar Peça de
+ * Caminho, Conexão obrigatória, Movimentar Peão, Gerador, Sala do Diretor,
+ * Sala Médica, Proteção, Portão de Saída, Vulto, Baixa Iluminação, Espectro,
+ * Perda de Sanidade e Objetivo.
  * A ordem dos tópicos e a cobertura seguem a spec, sem desbloqueio
  * progressivo — todos os slides existem desde o início, sem badge.
  *

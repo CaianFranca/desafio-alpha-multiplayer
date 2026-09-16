@@ -28,11 +28,17 @@ const JOGADORES_BASE: EstadoDaPartidaSnapshot['jogadores'] = [
 
 const TITULOS_ESPERADOS = [
   'Posicione Peças de Caminho',
+  'Conexão obrigatória',
   'Mova seu Peão',
-  'Peças Especiais: Gerador e Sala do Diretor',
-  'Peças Especiais: Sala Médica e Portão de Saída',
+  'Peça Especial: Gerador',
+  'Peça Especial: Sala do Diretor',
+  'Peça Especial: Sala Médica',
+  'Proteção contra o próximo Ataque',
+  'Peça Especial: Portão de Saída',
   'Monstro: O Vulto',
+  'Baixa Iluminação',
   'Monstro: O Espectro',
+  'Perda de Sanidade',
   'Objetivo: vença ou perca em equipe',
 ]
 
@@ -145,11 +151,12 @@ describe('Tutorial da Partida — auto-abertura uma vez por aba (issues #434 [1]
     expect(dialogo).toHaveAttribute('aria-modal', 'true')
     expect(dialogo).toHaveAttribute('aria-label', 'Tutorial da Partida')
     expect(screen.getByTestId('tutorial-titulo')).toHaveTextContent(TITULOS_ESPERADOS[0]!)
-    // Carrossel dentro do teto autorizado (5 da spec, até 10): 7 slides.
+    // Carrossel com 13 slides, 1 mídia por slide (teto de 10 extrapolado
+    // para 13 com autorização explícita).
     const slide = screen.getByTestId('tutorial-slide')
     const total = Number(slide.getAttribute('data-total'))
-    expect(total).toBeGreaterThanOrEqual(5)
-    expect(total).toBeLessThanOrEqual(10)
+    expect(total).toBe(13)
+    expect(total).toBe(TITULOS_ESPERADOS.length)
     expect(slide).toHaveAttribute('data-indice', '0')
     expect(window.sessionStorage.getItem(CHAVE_SESSAO_TUTORIAL_DA_PARTIDA)).not.toBeNull()
   })
@@ -179,7 +186,7 @@ describe('Tutorial da Partida — auto-abertura uma vez por aba (issues #434 [1]
 })
 
 describe('Tutorial da Partida — carrossel com mídia (issues #434 [2][3][4][5][6][7][8])', () => {
-  it('navega pelos 7 slides com setas, indicadores e Próximo; cada slide tem mídia com alt', async () => {
+  it('navega pelos 13 slides com setas, indicadores e Próximo; cada slide tem exatamente 1 mídia com alt', async () => {
     await partidaComSnapshot(criarSnapshotBase())
     await abrirTutorialPeloHud()
 
@@ -190,7 +197,7 @@ describe('Tutorial da Partida — carrossel com mídia (issues #434 [2][3][4][5]
       const slide = screen.getByTestId('tutorial-slide')
       expect(slide).toHaveAttribute('data-indice', String(i))
       const midias = within(slide).getAllByTestId('tutorial-midia')
-      expect(midias.length).toBeGreaterThanOrEqual(1)
+      expect(midias).toHaveLength(1)
       for (const midia of midias) {
         expect(midia.getAttribute('src')).toContain('/media/tutorial/')
         expect(midia.getAttribute('alt')?.trim().length).toBeGreaterThan(0)
