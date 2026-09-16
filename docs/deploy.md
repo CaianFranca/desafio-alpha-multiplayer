@@ -321,8 +321,10 @@ Detalhes relevantes:
     `cloudflared` conecta) podem sobrescrever `$remote_addr`, então um acesso
     direto à `:80` com header forjado é ignorado. O snippet `rate-limit.snippet`
     (contexto `http`) define as zonas e o `map` que escopa o `limit_req` por IP
-    a `/server01/api|ws/`, `/api/` e `/ws/`; assets do SPA ficam fora (chave
-    vazia não é contabilizada pelo `limit_req_zone`). Valores:
+    a `/server01/api|ws`, `/api` e `/ws` — de forma case-insensitive e
+    aceitando a forma sem barra final (ex.: `/API/`, `/server01/api`); assets
+    do SPA ficam fora (chave vazia não é contabilizada pelo `limit_req_zone`).
+    Valores:
     `rate=10r/s`, `burst=20 nodelay`, `limit_req_status 429`; `limit_conn` de
     20 conexões por IP (excesso responde `503`); `client_max_body_size 256k`
     (excesso responde `413`). Se o `cloudflared` passar a rodar em container,
