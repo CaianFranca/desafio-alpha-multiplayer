@@ -185,6 +185,13 @@ curl -fsS http://127.0.0.1:8080/         # nginx do app
   admin). O host interno na porta **8080** é `http` e deve ser tratado como
   loopback/interno.
 
+### 3.5 Sessões ativas após o deploy (corte seco #416)
+
+Os tokens de access e refresh passaram a carregar `iss`/`aud` próprios e a
+verificação os exige no lobby e no game-server. Tokens emitidos antes desta
+mudança são recusados: após o deploy, todas as Sessões ativas exigem novo
+login — não há janela de graça. O corte é intencional (hardening #416).
+
 ---
 
 ## 4. Rollback
