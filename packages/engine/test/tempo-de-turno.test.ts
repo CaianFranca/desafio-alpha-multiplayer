@@ -8,6 +8,7 @@ import {
   estadoInicialDaPartida,
   LIMITE_FALTAS_PARA_DESISTENCIA,
   resolverExpiracaoDoTurno,
+  sortearDaCaixa,
   type ComandoDePartida,
   type EstadoDaPartida,
   type EventoDaPartida,
@@ -231,6 +232,24 @@ function celulaLivre(estado: EstadoDaPartida): { linha: number; coluna: number }
   throw new Error('grade sem célula livre para o fixture');
 }
 
+// Última célula vazia da grade 7x7 (varredura reversa) — ponto de apoio para
+// peças-fantasma da Limpeza, longe da Iluminação do fixture.
+function celulaLivreDistante(estado: EstadoDaPartida): { linha: number; coluna: number } {
+  const ocupadas = new Set(
+    estado.tabuleiro.posicionadas.map(
+      (peca) => `${peca.celula.linha},${peca.celula.coluna}`,
+    ),
+  );
+  for (let linha = 6; linha >= 0; linha--) {
+    for (let coluna = 6; coluna >= 0; coluna--) {
+      if (!ocupadas.has(`${linha},${coluna}`)) {
+        return { linha, coluna };
+      }
+    }
+  }
+  throw new Error('grade sem célula livre para o fixture');
+}
+
 const peca = (
   pecaId: string,
   tipo: PecaPosicionada['tipo'],
@@ -258,7 +277,7 @@ function faltaDe(
 }
 
 // Constantes nomeadas e ajustáveis da regra pura.
-test('constantes do tempo de turno: 4 faltas removem; carência do aviso final é 30s', () => {
+test('constantes do tempo de turno: 4 faltas convertem em Desistência; carência do aviso final é 30s', () => {
   assert.equal(LIMITE_FALTAS_PARA_DESISTENCIA, 4);
   assert.equal(CARENCIA_AVISO_FINAL_SEGUNDOS, 30);
 });
@@ -293,9 +312,9 @@ test('item 2: peão não colocado gera aviso final sem falta', () => {
   assert.equal(apos.jogadorAtivoId, 'ana');
 });
 
-// Aviso final consumido + etapa ainda incompleta: remoção (abandono) com causa
+// Aviso final consumido + etapa ainda incompleta: Desistência com causa
 // 'tempo' — mesmo efeito e eventos da Desistência.
-test('aviso consumido e etapa incompleta: remoção com causa tempo e passagem imediata', () => {
+test('aviso consumido e etapa incompleta: desistência com causa tempo e passagem imediata', () => {
   const base = partidaIniciadaCom(['ana', 'bruno']);
   const comAviso: EstadoDaPartida = {
     ...base,
@@ -311,7 +330,7 @@ test('aviso consumido e etapa incompleta: remoção com causa tempo e passagem i
   assert.ok(desistencia && desistencia.tipo === 'desistencia_registrada');
   assert.equal(desistencia.jogadorId, 'ana');
   assert.equal(desistencia.causa, 'tempo');
-  // Passagem imediata do Ativo removido + derrota do quórum reavaliada.
+  // Passagem imediata do Ativo desistente + derrota do quórum reavaliada.
   assert.ok(tipos(eventos).includes('turno_encerrado'));
   assert.ok(tipos(eventos).includes('turno_iniciado'));
   assert.deepEqual(apos.resultado, { tipo: 'derrota', motivo: 'desistencia' });
@@ -448,6 +467,58 @@ test('item 7: recebida pendente em turno normal queima e encerra com 1 falta', (
   assert.ok(tipos(eventos).includes('turno_encerrado'));
   assert.ok(tipos(eventos).includes('turno_iniciado'));
   assert.equal(apos.jogadorAtivoId, 'bruno');
+});
+
+// Queima sem retorno à Caixa: o único Portão de Saída pendente é queimado no
+// expiry e o Esgotamento conta a Caixa vazia sem ele — derrota por
+// caixa_esgotada no funil e sorteio seguinte com CAIXA_ESGOTADA.
+test('queima sem retorno: Esgotamento com queimadas prova CAIXA_ESGOTADA', () => {
+  let estado = partidaEmTurnoNormal();
+  estado = {
+    ...estado,
+    posicaoConfirmada: true,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      caixa: [],
+      recebidas: [
+        {
+          recebidaId: 'rec-esg-1',
+          pecaId: 'queima-esg-1',
+          tipo: 'portao_de_saida',
+          orientacao: 0,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  };
+
+  const { estado: apos, eventos } = resolver(estado);
+
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  const queima = eventos.find((evento) => evento.tipo === 'pecas_queimadas');
+  assert.ok(queima && queima.tipo === 'pecas_queimadas');
+  assert.deepEqual(queima.pecaIds, ['queima-esg-1']);
+  // Sem retorno à Caixa: continua vazia, sem recebidas e sem a queimada.
+  assert.equal(apos.tabuleiro.caixa.length, 0);
+  assert.ok(
+    !apos.tabuleiro.caixa.some((item) => item.pecaId === 'queima-esg-1'),
+  );
+  assert.deepEqual(apos.tabuleiro.recebidas, []);
+  assert.ok(
+    !apos.tabuleiro.posicionadas.some((item) => item.pecaId === 'queima-esg-1'),
+  );
+  // Sorteio seguinte esgota: a Caixa vazia rejeita com CAIXA_ESGOTADA.
+  const sorteio = sortearDaCaixa(apos.tabuleiro);
+  assert.equal(sorteio.sucesso, false);
+  if (!sorteio.sucesso) {
+    assert.equal(sorteio.erro.codigo, 'CAIXA_ESGOTADA');
+  }
+  // Esgotamento contável: sem o Portão queimado em mãos, os objetivos faltam
+  // com a Caixa vazia — derrota por caixa_esgotada no funil.
+  assert.deepEqual(apos.resultado, { tipo: 'derrota', motivo: 'caixa_esgotada' });
+  const ultimo = eventos[eventos.length - 1];
+  assert.equal(ultimo.tipo, 'partida_terminada');
 });
 
 // Apêndice item 8 — tudo feito sem encerrar: encerra forçado + 1 falta.
@@ -614,7 +685,55 @@ test('item 11c: travessia com aposta monstro queima e fecha por permanência', (
   assert.equal(apos.jogadorAtivoId, 'bruno');
 });
 
-// Apêndice item 12 — Baixa tudo feito sem encerrar: encerra + 1 falta.
+// Apêndice item 11 — aposta queimada no mesmo funil da Desistência: a queima
+// recalcula a Iluminação e aplica a Limpeza antes da Permanência.
+test('item 11d: travessia com aposta queimada recalcula Iluminação e aplica Limpeza', () => {
+  let estado = comBaixa(partidaEmTurnoNormal(), 'ana');
+  const origem = estado.pecaDoInicioDoTurnoId;
+  assert.ok(origem !== null);
+  const aposta = celulaLivre(estado);
+  estado = {
+    ...estado,
+    atravessouNoTurno: true,
+    pecaDaTravessiaId: 'trav-ilum',
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        peca('trav-ilum', 'reta', aposta.linha, aposta.coluna),
+      ],
+    },
+  };
+  const sombra = celulaLivreDistante(estado);
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: [
+        ...estado.tabuleiro.posicionadas,
+        peca('sombra-ilum', 'reta', sombra.linha, sombra.coluna),
+      ],
+    },
+  };
+  // Peão movido por fixture direto: a Iluminação vigente fica defasada e o
+  // recálculo da queima a republica antes da Permanência.
+  estado = teleportarPeao(estado, 'peao-branco', 'inicial-2');
+
+  const { estado: apos, eventos } = resolver(estado);
+
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  assert.ok(
+    !apos.tabuleiro.posicionadas.some((item) => item.pecaId === 'trav-ilum'),
+  );
+  assert.ok(tipos(eventos).includes('celulas_iluminadas'));
+  const limpeza = eventos.find((evento) => evento.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza && limpeza.tipo === 'limpeza_aplicada');
+  assert.ok(limpeza.pecasRemovidas.includes('sombra-ilum'));
+  assert.ok(tipos(eventos).includes('peao_permaneceu'));
+  const peao = apos.tabuleiro.peoes.find((item) => item.peaoId === 'peao-branco');
+  assert.equal(peao?.pecaId, origem);
+  assert.equal(apos.jogadorAtivoId, 'bruno');
+});
 test('item 12: baixa com posição confirmada encerra forçado com 1 falta', () => {
   let estado = comBaixa(partidaEmTurnoNormal(), 'ana');
   estado = { ...estado, posicaoConfirmada: true };
@@ -626,8 +745,8 @@ test('item 12: baixa com posição confirmada encerra forçado com 1 falta', () 
   assert.equal(apos.jogadorAtivoId, 'bruno');
 });
 
-// Faltas: expiries abaixo do limite acumulam sem remover.
-test('faltas acumulam por expiry sem remover abaixo do limite', () => {
+// Faltas: expiries abaixo do limite acumulam sem Desistência.
+test('faltas acumulam por expiry sem Desistência abaixo do limite', () => {
   let estado = partidaEmTurnoNormal();
   estado = {
     ...estado,
@@ -663,7 +782,7 @@ test('4ª falta converte em desistência com causa tempo, passagem e término', 
   assert.ok(desistencia && desistencia.tipo === 'desistencia_registrada');
   assert.equal(desistencia.jogadorId, 'ana');
   assert.equal(desistencia.causa, 'tempo');
-  // Mesmo efeito da Desistência: peão removido, vez fora da ordem e Passagem
+  // Mesmo efeito da Desistência: peão excluído, vez fora da ordem e Passagem
   // imediata do Ativo com recálculo de Iluminação e Limpeza no ato.
   assert.ok(!apos.jogadores.some((jogador) => jogador.jogadorId === 'ana'));
   assert.ok(!apos.tabuleiro.peoes.some((peao) => peao.peaoId === 'peao-branco'));
@@ -672,6 +791,57 @@ test('4ª falta converte em desistência com causa tempo, passagem e término', 
   assert.equal(apos.jogadorAtivoId, 'bruno');
   assert.deepEqual(apos.faltasPorJogador, { ana: 4 });
   // Vitória reavaliada: N=2→1 termina em derrota por desistência.
+  assert.deepEqual(apos.resultado, { tipo: 'derrota', motivo: 'desistencia' });
+  assert.equal(ordem[ordem.length - 1], 'partida_terminada');
+});
+
+// 4ª falta com recebidas pendentes: queima antes da Desistência — o lote abre
+// com [falta_registrada, pecas_queimadas, desistencia_registrada(tempo)].
+test('4ª falta com recebidas queima antes da desistência com causa tempo', () => {
+  let estado = partidaEmTurnoNormal();
+  estado = {
+    ...estado,
+    faltasPorJogador: { ana: 3 },
+    tabuleiro: {
+      ...estado.tabuleiro,
+      recebidas: [
+        {
+          recebidaId: 'rec-falta-4',
+          pecaId: 'queima-falta-4',
+          tipo: 'reta',
+          orientacao: 0,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  };
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  const { estado: apos, eventos } = resolver(estado);
+  const ordem = tipos(eventos);
+
+  assert.equal(ordem[0], 'falta_registrada');
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 4);
+  const queima = eventos.find((evento) => evento.tipo === 'pecas_queimadas');
+  assert.ok(queima && queima.tipo === 'pecas_queimadas');
+  assert.deepEqual(queima.pecaIds, ['queima-falta-4']);
+  assert.deepEqual(ordem.slice(0, 3), [
+    'falta_registrada',
+    'pecas_queimadas',
+    'desistencia_registrada',
+  ]);
+  const desistencia = eventos.find(
+    (evento) => evento.tipo === 'desistencia_registrada',
+  );
+  assert.ok(desistencia && desistencia.tipo === 'desistencia_registrada');
+  assert.equal(desistencia.jogadorId, 'ana');
+  assert.equal(desistencia.causa, 'tempo');
+  assert.deepEqual(apos.tabuleiro.recebidas, []);
+  assert.equal(apos.tabuleiro.caixa.length, caixaAntes);
+  assert.ok(!apos.jogadores.some((jogador) => jogador.jogadorId === 'ana'));
+  assert.equal(apos.jogadorAtivoId, 'bruno');
+  assert.deepEqual(apos.faltasPorJogador, { ana: 4 });
   assert.deepEqual(apos.resultado, { tipo: 'derrota', motivo: 'desistencia' });
   assert.equal(ordem[ordem.length - 1], 'partida_terminada');
 });

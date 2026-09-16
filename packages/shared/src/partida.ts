@@ -40,7 +40,7 @@
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #289/ADR-0013, consumida na #288)
-//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId, causa? } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez); causa #295 ('desistencia'|'expiracao', ausente = desistencia implícita) + 'tempo' pela #429 (remoção automática do relógio do turno: 4ª falta ou 2º expiry do Primeiro Turno incompleto)
+//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId, causa? } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez); causa #295 ('desistencia'|'expiracao', ausente = desistencia implícita) + 'tempo' pela #429 (Desistência automática do relógio do turno: 4ª falta ou 2º expiry do Primeiro Turno incompleto)
 //   shared type:'JOGADOR_EM_RECONEXAO' { jogadorId } — sem par no engine (#295, spec #292 história 2): anúncio de presença da entrada na janela, broadcast só em `em_andamento` (a `preparada` nunca emite)
 //   shared type:'JOGADOR_RECONECTADO' { jogadorId } — sem par no engine (#295): anúncio de presença da volta dentro da janela, broadcast só na re-admissão em `em_andamento` (exclui as admissões iniciais)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
@@ -261,7 +261,8 @@ export interface TurnoAviso30sEvento {
 }
 
 // Tempo de turno (issue #429, spec #405): aviso final do Primeiro Turno com a
-// etapa da Peça Inicial ou do peão incompleta ("jogue ou será removido") —
+// etapa da Peça Inicial ou do peão incompleta ("jogue ou a Desistência é
+// automática") —
 // evento próprio com destaque no HUD (ticket 3/3); o relógio estende aquele
 // turno em +30s únicos (flag por Jogador, uma vez por Partida, no engine).
 // `segundosExtras` viaja no evento para o cliente não fixar a carência.
@@ -564,8 +565,8 @@ export interface ResgateRealizadoWireEvento {
 // mesmo lote). Shape 1:1 com DesistenciaRegistradaEvento do domínio.
 // Causa (issue #295): ausente = 'desistencia' implícita (compat com binários
 // antigos); 'expiracao' = conversão automática da janela de reconexão.
-// Causa (issue #429, spec #405): 'tempo' = remoção automática do relógio do
-// turno (4ª falta ou 2º expiry do Primeiro Turno ainda incompleto), com o
+// Causa (issue #429, spec #405): 'tempo' = Desistência automática do relógio
+// do turno (4ª falta ou 2º expiry do Primeiro Turno ainda incompleto), com o
 // mesmo efeito e eventos da Desistência.
 // Alias local por pacote: mesmo shape do `CausaDesistencia` do engine — sync
 // manual entre os dois (o shared não pode depender do engine).

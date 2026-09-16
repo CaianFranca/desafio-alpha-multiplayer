@@ -154,14 +154,14 @@ export interface EstadoDaPartida {
   readonly pecasEmPeriodoDeGraca: readonly string[];
   // Tempo de turno (issue #429, spec #405): faltas por Jogador — cada turno
   // encerrado por expiry soma 1; na 4ª (LIMITE_FALTAS_PARA_DESISTENCIA) o
-  // Jogador é removido com causa 'tempo'. Retrocompatível: estados antigos
+  // Jogador desiste com causa 'tempo'. Retrocompatível: estados antigos
   // persistem sem o campo (acesso via ?? {}).
   readonly faltasPorJogador: Readonly<Record<string, number>>;
   // Tempo de turno (issue #429): aviso final do Primeiro Turno, uma única vez
   // por Jogador por Partida — primeiro expiry com a etapa da Peça Inicial ou
   // do peão incompleta emite o aviso (+30s do relógio, ticket 2/3); jogou
   // dentro do acréscimo → segue sem falta, com a flag consumida; segundo
-  // expiry ainda incompleto → remoção. Retrocompatível (acesso via ?? {}).
+  // expiry ainda incompleto → Desistência. Retrocompatível (acesso via ?? {}).
   readonly avisoFinalConsumidoPorJogador: Readonly<Record<string, boolean>>;
 }
 
@@ -266,9 +266,9 @@ export interface ResgateRealizadoEvento {
 // limpeza_aplicada e da Passagem de Vez (quando o desistente era o Ativo).
 // Causa (issue #295): 'desistencia' = ato explícito do Jogador,
 // 'expiracao' = conversão automática da janela de reconexão em andamento.
-// Causa (issue #429, spec #405): 'tempo' = remoção automática do relógio do
-// turno — 4ª falta ou 2º expiry do Primeiro Turno ainda incompleto — com o
-// mesmo efeito e eventos da Desistência.
+// Causa (issue #429, spec #405): 'tempo' = Desistência automática do relógio
+// do turno — 4ª falta ou 2º expiry do Primeiro Turno ainda incompleto — com
+// o mesmo efeito e eventos da Desistência.
 // Ausente = 'desistencia' implícita (compat com payloads/binários antigos).
 // Alias local por pacote: o shared declara o próprio alias com o mesmo shape
 // — sync manual entre os dois (o shared não pode depender do engine).
@@ -283,7 +283,7 @@ export interface DesistenciaRegistradaEvento {
 
 // Tempo de turno (issue #429, spec #405): resolução forçada do expiry.
 // Falta somada a cada turno encerrado pelo relógio — 1 por expiry, exceto o
-// aviso final jogado dentro do acréscimo; na 4ª, a remoção viaja como
+// aviso final jogado dentro do acréscimo; na 4ª, a Desistência viaja como
 // desistencia_registrada com causa 'tempo'.
 export interface FaltaRegistradaEvento {
   readonly tipo: 'falta_registrada';
@@ -302,8 +302,10 @@ export interface AvisoFinalDoPrimeiroTurnoEvento {
 
 // Tempo de turno (issue #429): queima — peças pendentes do Recebimento (e a
 // peça da aposta da Travessia, quando posicionada) saem de circulação SEM
-// retorno à Caixa (o sorteio consome sem reposição; a contagem de Esgotamento
-// da Caixa as trata como fora de circulação por construção).
+// retorno à Caixa (o sorteio consome sem reposição). Verificado: a queima
+// esvazia as recebidas sem repor a Caixa, e caixaEsgotadaSemObjetivos conta
+// só caixa vazia + posicionadas/recebidas — a queimada não conta em nenhum
+// dos dois lados (tempo-de-turno.test.ts: Esgotamento com queimadas).
 export interface PecasQueimadasEvento {
   readonly tipo: 'pecas_queimadas';
   readonly pecaIds: readonly string[];
@@ -1835,7 +1837,7 @@ function encerrarTurnoDaPartida(
 // de Iluminação e Limpeza, vitória reavaliada pelo funil do dispatch).
 // Cobertura por etapa (Apêndice, itens 1–12 + 15):
 //   Primeiro Turno incompleto (inicial ou peão, item 1–2) → aviso final na 1ª
-//   vez (sem falta, sem avanço; a inicial nunca é queimada), remoção na 2ª;
+//   vez (sem falta, sem avanço; a inicial nunca é queimada), Desistência na 2ª;
 //   Primeiro Turno com recebida pendente (item 3) → queima + encerra + 1 falta;
 //   Primeiro Turno tudo feito (item 4) → encerra + 1 falta;
 //   Turno normal: parado (item 5) → permanência forçada; movido (item 6) →
@@ -1894,7 +1896,7 @@ export function resolverExpiracaoDoTurno(
           ],
         );
       }
-      // Segunda vez ainda incompleto: remoção (abandono) com causa 'tempo'.
+      // Segunda vez ainda incompleto: Desistência com causa 'tempo'.
       return funilarAvaliacaoDoTermino(
         desistirDaPartida(estado, ativo.jogadorId, 'tempo'),
       );
@@ -1960,8 +1962,8 @@ function primeiroTurnoIncompletoNoExpiry(
 }
 
 // Moldura de faltas: soma 1 falta ao Jogador Ativo e resolve o caminho; na 4ª
-// falta converte em Desistência automática com causa 'tempo'. A
-// falta_registrada abre o lote.
+// falta queima antes as recebidas pendentes e converte em Desistência
+// automática com causa 'tempo'. A falta_registrada abre o lote.
 function resolverExpiracaoComFalta(
   estado: EstadoDaPartida,
   ativo: JogadorDaPartida,
@@ -1979,12 +1981,17 @@ function resolverExpiracaoComFalta(
     totalDeFaltas,
   };
   if (totalDeFaltas >= LIMITE_FALTAS_PARA_DESISTENCIA) {
-    const saida = desistirDaPartida(comFalta, ativo.jogadorId, 'tempo');
+    const queima = queimarRecebidasPendentes(comFalta);
+    const saida = desistirDaPartida(queima.estado, ativo.jogadorId, 'tempo');
     if (!saida.sucesso) {
       return saida;
     }
     return funilarAvaliacaoDoTermino(
-      sucessoDaPartida(saida.estado, [falta, ...saida.eventos]),
+      sucessoDaPartida(saida.estado, [
+        falta,
+        ...queima.eventos,
+        ...saida.eventos,
+      ]),
     );
   }
   const resolvido = resolver(comFalta);
@@ -2022,9 +2029,9 @@ function queimarEEncerrarNoExpiry(
 // Volta + permanência (Apêndice itens 6 e 10) e permanência forçada (itens 5 e
 // 9): peão parado permanece direto; peão movido volta à Peça do início do
 // turno e permanece — ataque avaliado como permanência normal, sem novo
-// Recebimento. Sob período de graça que bloqueie a Permanência, o fallback é
-// confirmar na origem + encerrar (a Confirmação sem mudança de Peça fecha sem
-// sorteio, issue #375).
+// Recebimento. Sob período de graça que bloqueie a Permanência (issue #171),
+// o erro propaga sem fallback — a garantia de conclusão vem da 4ª falta →
+// Desistência.
 function voltarEPermanecerNoExpiry(
   base: EstadoDaPartida,
   jogadorId: string,
@@ -2044,62 +2051,28 @@ function voltarEPermanecerNoExpiry(
     peaoId: ator.peaoId,
   };
   if (parado || origemId === null) {
-    const direto = permanecerNaPartida(base, permanecerComando, ator);
-    if (direto.sucesso || origemId === null) {
-      return direto;
-    }
-  } else {
-    const recuado: EstadoDaPartida = {
-      ...base,
-      tabuleiro: {
-        ...base.tabuleiro,
-        peoes: base.tabuleiro.peoes.map((item) =>
-          item.peaoId === ator.peaoId ? { ...item, pecaId: origemId } : item,
-        ),
-        peaoSelecionadoId: ator.peaoId,
-      },
-    };
-    const permanencia = permanecerNaPartida(recuado, permanecerComando, ator);
-    if (permanencia.sucesso) {
-      return permanencia;
-    }
+    return permanecerNaPartida(base, permanecerComando, ator);
   }
-  // Fallback sob período de graça: confirmar na origem + encerrar.
-  const confirmarComando: ConfirmarPosicaoDoPeaoComando = {
-    tipo: 'confirmar_posicao_do_peao',
-    peaoId: ator.peaoId,
+  const recuado: EstadoDaPartida = {
+    ...base,
+    tabuleiro: {
+      ...base.tabuleiro,
+      peoes: base.tabuleiro.peoes.map((item) =>
+        item.peaoId === ator.peaoId ? { ...item, pecaId: origemId } : item,
+      ),
+      peaoSelecionadoId: ator.peaoId,
+    },
   };
-  const confirmado = confirmarPosicaoDoPeao(base, confirmarComando, ator);
-  if (!confirmado.sucesso) {
-    return confirmarPosicaoDoPeao(
-      {
-        ...base,
-        tabuleiro: {
-          ...base.tabuleiro,
-          peoes: base.tabuleiro.peoes.map((item) =>
-            item.peaoId === ator.peaoId && origemId !== null
-              ? { ...item, pecaId: origemId }
-              : item,
-          ),
-        },
-      },
-      confirmarComando,
-      ator,
-    );
-  }
-  const atorPosConfirm = atorEmEstado(confirmado.estado, jogadorId);
-  if (!atorPosConfirm) {
-    return confirmado;
-  }
-  return encerrarTurnoDaPartida(confirmado.estado, atorPosConfirm);
+  return permanecerNaPartida(recuado, permanecerComando, ator);
 }
 
 // Travessia aberta (Apêndice item 11): queima da peça da aposta + conclusão.
 // Confirmado sem pendências (item 12) encerra; aposta posicionada com o peão
 // sobre ela confirma (mover compulsório + confirmação) e encerra; Monstro (que
 // não aceita peão) ou pendência da aposta queimam e fecham por volta +
-// permanência — a queima aborta a travessia antes da Permanência, que segue a
-// via comum.
+// permanência — a queima aborta a travessia antes da Permanência (a aposta
+// queimada recalcula a Iluminação e aplica a Limpeza no mesmo funil da
+// Desistência), que segue a via comum.
 function resolverTravessiaAbertaNoExpiry(
   base: EstadoDaPartida,
   jogadorId: string,
@@ -2168,24 +2141,36 @@ function resolverTravessiaAbertaNoExpiry(
     estadoQueimado.tabuleiro.peoes.find((item) => item.peaoId === ator.peaoId)
       ?.pecaId === travessiaId;
   if (apostaPosicionada && !peaoSobreAposta && travessiaId !== null) {
+    const tabuleiroSemAposta: EstadoDoTabuleiro = {
+      ...estadoQueimado.tabuleiro,
+      posicionadas: estadoQueimado.tabuleiro.posicionadas.filter(
+        (peca) => peca.pecaId !== travessiaId,
+      ),
+      pecaSelecionadaId:
+        estadoQueimado.tabuleiro.pecaSelecionadaId === travessiaId
+          ? null
+          : estadoQueimado.tabuleiro.pecaSelecionadaId,
+      pecaEmManipulacaoId:
+        estadoQueimado.tabuleiro.pecaEmManipulacaoId === travessiaId
+          ? null
+          : estadoQueimado.tabuleiro.pecaEmManipulacaoId,
+    };
+    eventos.push({ tipo: 'pecas_queimadas', pecaIds: [travessiaId] });
+    // A queima da aposta é ponto definitivo da Iluminação (mesmo funil da
+    // Desistência): recalcula e aplica a Limpeza antes da Permanência.
+    const iluminacao = recalcularIluminacaoEAplicarLimpeza(
+      estadoQueimado,
+      tabuleiroSemAposta,
+      eventos,
+    );
     estadoQueimado = {
       ...estadoQueimado,
       tabuleiro: {
-        ...estadoQueimado.tabuleiro,
-        posicionadas: estadoQueimado.tabuleiro.posicionadas.filter(
-          (peca) => peca.pecaId !== travessiaId,
-        ),
-        pecaSelecionadaId:
-          estadoQueimado.tabuleiro.pecaSelecionadaId === travessiaId
-            ? null
-            : estadoQueimado.tabuleiro.pecaSelecionadaId,
-        pecaEmManipulacaoId:
-          estadoQueimado.tabuleiro.pecaEmManipulacaoId === travessiaId
-            ? null
-            : estadoQueimado.tabuleiro.pecaEmManipulacaoId,
+        ...tabuleiroSemAposta,
+        posicionadas: iluminacao.posicionadas,
       },
+      celulasIluminadas: iluminacao.celulasIluminadas,
     };
-    eventos.push({ tipo: 'pecas_queimadas', pecaIds: [travessiaId] });
   }
   // A queima aborta a travessia: a Permanência segue a via comum.
   const semTravessia: EstadoDaPartida = {
