@@ -1,0 +1,4 @@
+{
+  "policy": "Exceções de auditoria de dependências de produção. Uma entrada SÓ é aceita para advisory high/critical SEM correção disponível (fixAvailable === false no relatório do npm audit); advisory com correção disponível REPROVA o pipeline e deve ser corrigido, não listado aqui. A decisão de fixAvailable é feita no nível do pacote: o npm não expõe o campo por advisory, então quando um pacote tem múltiplos advisories todas as vias herdam o flag do pacote (fail-closed). Cada exceção exige justificativa não-vazia explicando o risco aceito e o plano de mitigação. Entradas não utilizadas são reportadas como aviso e devem ser removidas. Auditoria rodada por scripts/audit-dependencies.mjs no job `quality` do CI; a isenção vale apenas para deploys normais (rollback por workflow_dispatch com `sha` não é gateado).",
+  "allowlist": []
+}

@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:audit": "node --test scripts/audit-dependencies.test.mjs",
     "dev": "npm run dev --workspace=@flicker/game-server",
     "test": "npm run test --workspace=@flicker/game-server",
     "test:all": "npm run test --workspaces --if-present",

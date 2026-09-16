@@ -347,7 +347,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP Authentication Cheat Sheet (seção *Logging and Monitoring*); OWASP WebSocket Security Cheat Sheet (seção *Security Monitoring and Logging*); OWASP Nodejs Security Cheat Sheet (seção *Perform application activity logging*); OWASP Top 10:2021 A09 *Security Logging and Monitoring Failures*.
 
 **Medida J5 — Auditoria de dependências no pipeline.**
-*Status:* **ausente** — o job `quality` não roda `npm audit` (`docs/deploy.md:26`), embora use `npm ci` e lockfile.
+*Status:* **feito** — o job `quality` roda `scripts/audit-dependencies.mjs`, que executa `npm audit --omit=dev --package-lock-only` nos três roots npm (raiz/workspaces, `db` e `frontend`) e reprova (exit 1) em qualquer advisory high/critical; exceções em `dependency-audit-allowlist.json` só valem para advisory sem correção disponível (`fixAvailable === false`) e exigem justificativa. O rollback (`workflow_dispatch` com `sha`) é isento do gate.
 *Fonte:* Express Security Best Practices (seção *Ensure your dependencies are secure*); Node.js Security Best Practices (seção *Malicious Third-Party Modules*); OWASP Top 10:2021 A06 *Vulnerable and Outdated Components*.
 
 **Medida J6 — Health checks sem autenticação, mas só em loopback.**
@@ -375,7 +375,7 @@ Prioridade baseada no risco real para o jogo: exposição a CSWSH/roubo de Sess�
 | Média | Sem limite de senha de 72 bytes do bcrypt (trunca em silêncio) | Autenticação | ausente | Password Storage CS (Input Limits of bcrypt); bcrypt.js |
 | Média | Sem logging estruturado/eventos de segurança (auth, rate-limit, validação) | Observabilidade | ausente | Authentication CS (Logging); WebSocket Security CS; A09:2021 |
 | Média | Bypass de autorização de serviço quando `NODE_ENV !== 'production'` | Autorização | parcial | API5:2023; API8:2023 |
-| Média | Sem `npm audit`/auditoria de dependências no CI | Supply chain | ausente | Express Security; Node.js Security; A06:2021 |
+| Média | Sem `npm audit`/auditoria de dependências no CI | Supply chain | feito | Express Security; Node.js Security; A06:2021 |
 | Baixa | Sem token CSRF (só `SameSite=Strict`) | Sessão/CSRF | parcial | CSRF Prevention CS; Session Management CS |
 | Baixa | Cookies sem prefixo `__Host-` | Sessão | parcial | Session Management CS (Cookie Name Prefixes) |
 | Baixa | Sem `Permissions-Policy`/COOP/COEP/CORP | Headers | ausente | HTTP Headers CS |
