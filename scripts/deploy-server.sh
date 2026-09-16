@@ -20,6 +20,7 @@ ROOT=/opt/flicker
 RELEASES="$ROOT/releases"
 CURRENT="$ROOT/current"
 ENV_FILE="$ROOT/env"
+REDIS_CONF="${REDIS_CONF:-/etc/redis/redis.conf}"
 KEEP_RELEASES=3
 HEALTH_TIMEOUT=60
 
@@ -63,37 +64,37 @@ export NODE_ENV=production
 REDIS_PASSWORD="$(printf '%s' "$REDIS_PASSWORD" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 [ -n "$REDIS_PASSWORD" ] || die "REDIS_PASSWORD vazia após trim — verifique o secret"
 # Garante requirepass no Redis nativo — fail-closed se conf ausente ou redis-cli ausente
-if [ ! -f /etc/redis/redis.conf ]; then
-  die "redis.conf ausente em /etc/redis/redis.conf — instale redis-server e garanta requirepass"
+if [ ! -f "$REDIS_CONF" ]; then
+  die "redis.conf ausente em $REDIS_CONF — instale redis-server e garanta requirepass"
 fi
 if ! command -v redis-cli >/dev/null 2>&1; then
   die "redis-cli ausente — instale redis-tools para validar requirepass"
 fi
-log "garantindo requirepass em /etc/redis/redis.conf"
+log "garantindo requirepass em $REDIS_CONF"
 tmp_conf="$(mktemp)"
 tmp_conf2="${tmp_conf}.2"
+new_conf="${REDIS_CONF}.deploy.new"
+cleanup_conf() { rm -f "$tmp_conf" "$tmp_conf2" "$new_conf" 2>/dev/null || true; }
 # Preserva permissões/dono do arquivo original
-orig_stat="$(stat -c '%a %u %g' /etc/redis/redis.conf 2>/dev/null || echo '640 0 0')"
+orig_stat="$(stat -c '%a %u %g' "$REDIS_CONF" 2>/dev/null || echo '640 0 0')"
 # shellcheck disable=SC2206
 orig_perm=($orig_stat)
-grep -vE '^\s*requirepass\s+' /etc/redis/redis.conf > "$tmp_conf" || true
+grep -vE '^\s*requirepass\s+' "$REDIS_CONF" > "$tmp_conf" || true
 # Também remove linha comentada # requirepass para evitar duplicidade
 grep -vE '^\s*#\s*requirepass\s+' "$tmp_conf" > "$tmp_conf2" && mv "$tmp_conf2" "$tmp_conf" || true
 printf 'requirepass %s\n' "$REDIS_PASSWORD" >> "$tmp_conf"
 # Só substitui se mudou (evita restart desnecessário)
-if ! cmp -s "$tmp_conf" /etc/redis/redis.conf; then
-  cp --preserve=mode,ownership /etc/redis/redis.conf "/etc/redis/redis.conf.bak.$(date +%s)" 2>/dev/null || cp /etc/redis/redis.conf /etc/redis/redis.conf.bak 2>/dev/null || true
-  # Escrita atômica via install para preservar permissões sem truncar in-place
-  if command -v install >/dev/null 2>&1; then
-    install -m "${orig_perm[0]}" -o "${orig_perm[1]}" -g "${orig_perm[2]}" "$tmp_conf" /etc/redis/redis.conf 2>/dev/null || cat "$tmp_conf" > /etc/redis/redis.conf
-  else
-    cat "$tmp_conf" > /etc/redis/redis.conf
-  fi
-  # Garante dono/permissões mesmo com fallback cat
-  chmod "${orig_perm[0]}" /etc/redis/redis.conf 2>/dev/null || chmod 640 /etc/redis/redis.conf 2>/dev/null || true
+if ! cmp -s "$tmp_conf" "$REDIS_CONF"; then
+  # Backup único, legível só pelo root (contém a senha em plaintext); remove legados .bak.<ts>
+  rm -f "${REDIS_CONF}".bak.* 2>/dev/null || true
+  ( umask 077; cp "$REDIS_CONF" "${REDIS_CONF}.bak" ) 2>/dev/null || true
+  # Escrita atômica: monta o conf novo no mesmo filesystem e renomeia (rename é atômico)
+  cp "$tmp_conf" "$new_conf" 2>/dev/null || die "não foi possível preparar $new_conf — verifique espaço/permissões"
+  chmod "${orig_perm[0]}" "$new_conf" 2>/dev/null || chmod 640 "$new_conf" 2>/dev/null || true
   if [ "${#orig_perm[@]}" -ge 3 ]; then
-    chown "${orig_perm[1]}:${orig_perm[2]}" /etc/redis/redis.conf 2>/dev/null || chown redis:redis /etc/redis/redis.conf 2>/dev/null || true
+    chown "${orig_perm[1]}:${orig_perm[2]}" "$new_conf" 2>/dev/null || chown redis:redis "$new_conf" 2>/dev/null || true
   fi
+  mv -f "$new_conf" "$REDIS_CONF"
   log "requirepass atualizado — reiniciando redis"
   systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
   # Aguarda redis ficar pronto com a nova senha (fail-closed: aborta deploy se não subir)
@@ -105,18 +106,17 @@ if ! cmp -s "$tmp_conf" /etc/redis/redis.conf; then
     fi
     if [ "$i" -eq 10 ]; then
       log "ERRO: redis não respondeu PONG após requirepass — restaurando backup"
-      latest_bak="$(ls -t /etc/redis/redis.conf.bak* 2>/dev/null | head -n1 || true)"
-      if [ -n "$latest_bak" ]; then
-        cat "$latest_bak" > /etc/redis/redis.conf
+      if [ -f "${REDIS_CONF}.bak" ]; then
+        cp "${REDIS_CONF}.bak" "$REDIS_CONF"
         systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
       fi
-      rm -f "$tmp_conf" "$tmp_conf2" 2>/dev/null || true
-      die "redis com requirepass não subiu — verifique /etc/redis/redis.conf"
+      cleanup_conf
+      die "redis com requirepass não subiu — verifique $REDIS_CONF"
     fi
     sleep 1
   done
 fi
-rm -f "$tmp_conf" "$tmp_conf2" 2>/dev/null || true
+cleanup_conf
 ( cd "$RELEASE_DIR/db" && ./node_modules/.bin/knex migrate:latest --knexfile dist/knexfile.js )
 
 # ── 4. Instalar units systemd + conf nginx ──────────────────────────────────
