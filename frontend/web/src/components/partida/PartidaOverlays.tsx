@@ -1,3 +1,4 @@
+import { DotsDeCarregamento } from '../loading/DotsDeCarregamento'
 import type {
   EstadoDaTela,
   MotivoDeDerrota,
@@ -24,6 +25,10 @@ interface PartidaOverlaysProps {
 }
 
 const baseClasses = 'absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/80'
+
+// Loading (carregando/aguardando): fundo sólido com o background do app —
+// os dots substituem a tela de carregamento, sem vazar o cenário 3D.
+const loadingClasses = 'absolute inset-0 z-10 flex items-center justify-center bg-background'
 
 // O overlay de resultado fica ACIMA do HUD (z-40 > hud z-30) para a leitura
 // do desfecho; os demais overlays seguem abaixo da moldura/HUD (issue #226).
@@ -107,18 +112,19 @@ export function PartidaOverlays({
 
   if (estado === 'carregando') {
     return (
-      <div data-testid="overlay-carregando" role="status" className={baseClasses}>
-        <p className="text-white text-[length:var(--hud-titulo,1.125rem)] leading-7">Carregando...</p>
+      <div data-testid="overlay-carregando" role="status" aria-label="Carregando" className={loadingClasses}>
+        <div className="encaminhamento-carregando">
+          <DotsDeCarregamento rotuloVisivel="Carregando..." />
+        </div>
       </div>
     )
   }
 
   if (estado === 'aguardando') {
     return (
-      <div data-testid="overlay-aguardando" role="status" className={baseClasses}>
-        <div className="flex flex-col items-center gap-2">
-          <p className="text-white text-[length:var(--hud-titulo,1.125rem)] leading-7">Aguardando partida</p>
-          <p className="text-zinc-400 text-[length:var(--hud-corpo,0.875rem)] leading-5">Partida preparada</p>
+      <div data-testid="overlay-aguardando" role="status" aria-label="Aguardando partida" className={loadingClasses}>
+        <div className="encaminhamento-carregando">
+          <DotsDeCarregamento />
         </div>
       </div>
     )

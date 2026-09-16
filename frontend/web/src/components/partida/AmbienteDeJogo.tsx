@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import {
   FOV_CAMERA,
@@ -7,6 +7,7 @@ import {
   descreverCameraFixa,
 } from '../../game/ambiente/contrato'
 import { AmbienteCena } from '../../game/scenes/AmbienteCena'
+import { PrecarregadorDeAssets } from '../../game/assets/PrecarregadorDeAssets'
 import { useCameraInterativa } from '../../hooks/useCameraInterativa'
 import type { EstadoExibicaoTabuleiro, PecaCorrente } from '../../game/tabuleiro/contrato'
 import type { EstadoInteracaoTabuleiro } from '../../game/tabuleiro/interacao'
@@ -340,6 +341,10 @@ export function AmbienteDeJogo({
       className="absolute inset-0 h-full w-full"
       style={{ touchAction: 'none' }}
     >
+      {/* Boundary do loading 3D: suspende só o Canvas (fallback nulo);
+          a página e o overlay de dots seguem montados sem reiniciar —
+          a suspensão nunca mais vaza até o Suspense do App. */}
+      <Suspense fallback={null}>
       <Canvas
         camera={{ fov: FOV_CAMERA, position: cameraFixa.posicao }}
         frameloop="demand"
@@ -358,6 +363,10 @@ export function AmbienteDeJogo({
           />
         }
       >
+        {/* Preload total antes da revelação: dispara os downloads de todas as
+            texturas/GLBs no cache do useLoader (em paralelo com a espera do
+            WS); o gate da página só revela quando tudo assentar. */}
+        <PrecarregadorDeAssets />
         <CameraRig bordaPx={bordaPx} />
         <AmbienteCena
           bordaPx={bordaPx}
@@ -389,6 +398,7 @@ export function AmbienteDeJogo({
           estadoVisualDoAtaque={estadoVisualDoAtaque}
         />
       </Canvas>
+      </Suspense>
       {estadoExibicao ? (
         <TabuleiroMirrorDOM
           todasCelulas={todasCelulas}

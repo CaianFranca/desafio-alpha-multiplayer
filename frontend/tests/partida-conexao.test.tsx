@@ -131,7 +131,9 @@ describe('partida conectada ao game-server (issue #85)', () => {
     )
 
     expect(await screen.findByTestId('tabuleiro')).toBeInTheDocument()
-    expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument()
+    // Gate da cena (useCenaPronta): o overlay segura até o quiet dos assets
+    // (400ms sem loader real no jsdom) e só então revela.
+    await waitFor(() => expect(screen.queryByTestId('overlay-carregando')).not.toBeInTheDocument())
   })
 
   it('evento de posicionamento atualiza o espelho DOM sem recarregar', async () => {

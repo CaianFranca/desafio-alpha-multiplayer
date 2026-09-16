@@ -448,6 +448,92 @@
     );
   }
 
+  /* Encaminhamento: loading-dots com as texturas das peças (issue #387).
+     Coluna centralizada (mensagem acima dos dots); dots com bordas
+     arredondadas e `background-image` via TSX (`texturaDaPeca()`).
+     Loop de 4s: entrada sequencial por dot + hold + flick final no
+     container + reinício. Base visível para o primeiro quadro ser
+     legível (redirect em 1,5s < loop de 4s). */
+  .encaminhamento-carregando {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    text-align: center;
+    max-width: 100%;
+  }
+  .encaminhamento-carregando__mensagem {
+    margin: 0;
+    color: var(--color-text);
+    font-size: var(--hud-destaque, 1rem);
+    letter-spacing: 0.08em;
+  }
+  .encaminhamento-carregando__mensagem--pequena {
+    font-size: var(--hud-corpo, 0.875rem);
+  }
+  /* Variante mini: header Conectando da Sala e overlay aguardando. */
+  .encaminhamento-carregando__dots--mini {
+    gap: 0.4rem;
+  }
+  .encaminhamento-carregando__dots--mini > .encaminhamento-carregando__dot {
+    width: 1rem;
+    height: 1rem;
+  }
+  .encaminhamento-carregando__dots {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    animation: encaminhamento-dots-flick 4s ease-in-out infinite;
+    will-change: opacity, filter;
+  }
+  .encaminhamento-carregando__dot {
+    width: 2.5rem;
+    height: 2.5rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    border: 1px solid color-mix(in srgb, var(--color-text) 28%, transparent);
+    background-color: var(--color-surface);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 1;
+    animation: encaminhamento-dot-entrada 4s ease-out infinite;
+    will-change: opacity, transform, filter;
+  }
+  .encaminhamento-carregando__dots > .encaminhamento-carregando__dot:nth-child(1) {
+    animation-delay: 0s;
+  }
+  .encaminhamento-carregando__dots > .encaminhamento-carregando__dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .encaminhamento-carregando__dots > .encaminhamento-carregando__dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  .encaminhamento-carregando__dots > .encaminhamento-carregando__dot:nth-child(4) {
+    animation-delay: 0.6s;
+  }
+
+  /* Proporção em tela pequena e paisagem baixa. */
+  @media (max-width: 380px) {
+    .encaminhamento-carregando__dots {
+      gap: 0.5rem;
+    }
+    .encaminhamento-carregando__dot {
+      width: 2rem;
+      height: 2rem;
+    }
+  }
+  @media (max-height: 500px) {
+    .encaminhamento-carregando {
+      gap: 0.75rem;
+    }
+    .encaminhamento-carregando__dot {
+      width: 2rem;
+      height: 2rem;
+    }
+  }
   /* Ataque dos monstros (issue #385): tremor do atingido e brilho do escudo
      do protegido — sem equivalente 1:1 em utilities, ficam no CSS. O pulo da
      peça sem peão usa `animate-bounce` no TSX; o stagger da onda do Vulto
@@ -505,6 +591,67 @@
   64% { opacity: 0.65; }
   82% { opacity: 0.95; }
   100% { opacity: 1; }
+}
+
+/* Encaminhamento (#387): loop de 4s — entrada sequencial por dot
+   (stagger via `animation-delay` no TSX/nth-child) + hold + flick
+   final sincronizado no container + reinício. Dots nunca zeram no
+   primeiro quadro (0% em 0.25, base `opacity: 1`). */
+@keyframes encaminhamento-dot-entrada {
+  0% {
+    opacity: 0.25;
+    transform: scale(0.8);
+    filter: brightness(0.75);
+  }
+  12.5% {
+    opacity: 1;
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+@keyframes encaminhamento-dots-flick {
+  0%, 80% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  84% {
+    opacity: 0.45;
+    filter: brightness(0.6);
+  }
+  88% {
+    opacity: 1;
+    filter: brightness(1.25);
+  }
+  92% {
+    opacity: 0.7;
+    filter: brightness(0.85);
+  }
+  96%, 100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+/* Reduced-motion (#387): fade suave único de opacidade, sem flicker,
+   sem loop e sem rotação/transform. */
+@keyframes encaminhamento-dots-fade-suave {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -603,6 +750,13 @@
   }
   .auth-submit:hover {
     transform: none;
+  }
+  .encaminhamento-carregando__dots,
+  .encaminhamento-carregando__dot {
+    animation: encaminhamento-dots-fade-suave 0.6s ease-out both !important;
+    transform: none !important;
+    filter: none !important;
+    will-change: opacity;
   }
   .foundation-scope *,
   .foundation-scope *::before,

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { buildGameRedirectHref, REDIRECT_DELAY_MS } from '../../api/encaminhamento'
+import { DotsDeCarregamento } from '../loading/DotsDeCarregamento'
 import type { EstadoDoEncaminhamento } from '../../hooks/useSalaWebSocket'
 
 interface Props {
@@ -49,19 +50,15 @@ export function EncaminhamentoOverlay({ encaminhamento, href: hrefProp, codigoDe
       // Dialog sem nome acessível proposital: o anúncio vai só na região status
       // "Carregando partida" para não duplicar o live-region (spec #386).
       data-testid="encaminhamento-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background p-6"
     >
       <div
         data-testid="encaminhamento-carregando"
         role="status"
         aria-label="Carregando partida"
-        className="flex items-center justify-center"
+        className="encaminhamento-carregando"
       >
-        <span
-          aria-hidden="true"
-          className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-white/20 border-t-white"
-        />
-        <span className="sr-only">Carregando partida</span>
+        <DotsDeCarregamento />
       </div>
     </div>
   )

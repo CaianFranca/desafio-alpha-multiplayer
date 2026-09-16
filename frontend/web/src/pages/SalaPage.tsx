@@ -7,6 +7,7 @@ import { AvisosDoLobby } from '../components/sala/AvisosDoLobby'
 import { ChatDoLobby } from '../components/sala/ChatDoLobby'
 import { ControlesDoAnfitriao } from '../components/sala/ControlesDoAnfitriao'
 import { EncaminhamentoOverlay } from '../components/sala/EncaminhamentoOverlay'
+import { DotsDeCarregamento } from '../components/loading/DotsDeCarregamento'
 import { AvisoEncaminhamento } from '../components/sala/AvisoEncaminhamento'
 import { AuthContext } from '../state/auth-context'
 import { useSalaWebSocketContext } from '../state/sala-web-socket-context'
@@ -235,7 +236,7 @@ export function SalaPage() {
               <h2 className="text-2xl font-light tracking-[0.2em] uppercase text-white">Ponto de Encontro</h2>
               {conectando ? (
                 <span className="flex items-center gap-2 text-sm tracking-widest uppercase text-yellow-400">
-                  <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" aria-hidden /> Conectando...
+                  <DotsDeCarregamento tamanho="mini" /> Conectando...
                 </span>
               ) : (
                 <span className="flex items-center gap-2 text-sm tracking-widest uppercase text-green-400">
