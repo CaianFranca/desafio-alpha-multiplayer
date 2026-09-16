@@ -2,6 +2,8 @@ import { useMemo } from 'react'
 import { useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import mesaTopoUrl from '../assets/mesa_topo.jpg'
+import mesaTopoNormalUrl from '../assets/mesa_topo-normal-map.jpg'
+import mesaTopoRoughnessUrl from '../assets/mesa_topo-roughness-map.jpg'
 import {
   COR_FUNDO,
   COR_LATERAIS_MESA,
@@ -70,26 +72,44 @@ function Iluminacao() {
 
 /**
  * Mesa: box com o plano superior em y = 0 (origem do ambiente; ver
- * ambiente/contrato.ts). Face +y (índice de material 2) recebe a textura
- * aprovada; as demais faces são sólidas escuras, fundindo com o vazio.
+ * ambiente/contrato.ts). Face +y (índice de material 2) recebe o trio PBR
+ * aprovado — `map` (cor) + `normalMap` (relevo sob a luz rasante) +
+ * `roughnessMap` (verniz × fosco). O `roughnessMap` assume o trabalho de
+ * variação de brilho do `specular-map` anterior (no modelo PBR não há slot
+ * de `specularMap`: brilho = 1 − roughness — o arquivo segue no disco, fora
+ * de uso). As demais faces são sólidas escuras, fundindo com o vazio.
  */
 function Mesa() {
   const texturaCarregada = useLoader(THREE.TextureLoader, mesaTopoUrl)
-  // Cópia com espaço de cor sRGB: o topo da Mesa é cor, não dado linear.
-  // Clonar evita mutar a textura cacheada pelo useLoader.
-  const textura = useMemo(() => {
-    const copia = texturaCarregada.clone()
-    copia.colorSpace = THREE.SRGBColorSpace
-    copia.needsUpdate = true
-    return copia
-  }, [texturaCarregada])
+  const normalCarregado = useLoader(THREE.TextureLoader, mesaTopoNormalUrl)
+  const roughnessCarregado = useLoader(THREE.TextureLoader, mesaTopoRoughnessUrl)
+  // Cópias sem mutar o cache do useLoader: o topo da Mesa é cor (sRGB);
+  // normal e roughness são dados lineares (sem espaço de cor).
+  const { textura, normal, roughness } = useMemo(() => {
+    const textura = texturaCarregada.clone()
+    textura.colorSpace = THREE.SRGBColorSpace
+    textura.needsUpdate = true
+    const normal = normalCarregado.clone()
+    normal.needsUpdate = true
+    const roughness = roughnessCarregado.clone()
+    roughness.needsUpdate = true
+    return { textura, normal, roughness }
+  }, [texturaCarregada, normalCarregado, roughnessCarregado])
 
   return (
     <mesh position={[0, -ESPESSURA_MESA / 2, 0]} receiveShadow>
       <boxGeometry args={[LARGURA_MESA, ESPESSURA_MESA, PROFUNDIDADE_MESA]} />
       <meshStandardMaterial attach="material-0" color={COR_LATERAIS_MESA} />
       <meshStandardMaterial attach="material-1" color={COR_LATERAIS_MESA} />
-      <meshStandardMaterial attach="material-2" map={textura} />
+      <meshStandardMaterial
+        attach="material-2"
+        map={textura}
+        normalMap={normal}
+        normalScale={[0.5, 0.5]}
+        roughnessMap={roughness}
+        roughness={1}
+        metalness={0}
+      />
       <meshStandardMaterial attach="material-3" color={COR_LATERAIS_MESA} />
       <meshStandardMaterial attach="material-4" color={COR_LATERAIS_MESA} />
       <meshStandardMaterial attach="material-5" color={COR_LATERAIS_MESA} />
