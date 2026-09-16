@@ -25,7 +25,7 @@ O pipeline tem três jobs encadeados (`quality` → `build` → `deploy`):
 
 | Job | O que faz | Timeout |
 | --- | --- | --- |
-| `quality` | Auditoria de dependências de produção (`npm audit --omit=dev` nos três roots npm; high/critical reprova — seção 3.6) + typecheck dos workspaces (`npm run typecheck`) + migrations do `db/` contra um Postgres 17 limpo (service container). **NÃO roda testes** — decisão do time (2026-09-05): a suíte de integração e frontend não é mantida e os testes de frontend se mostraram flaky no runner do Actions. Validação de comportamento é feita localmente antes do merge. | 10 min |
+| `quality` | Auditoria de dependências de produção (`npm audit --omit=dev --package-lock-only` nos três roots npm; high/critical reprova — seção 3.6) + typecheck dos workspaces (`npm run typecheck`) + migrations do `db/` contra um Postgres 17 limpo (service container). **NÃO roda testes** — decisão do time (2026-09-05): a suíte de integração e frontend não é mantida e os testes de frontend se mostraram flaky no runner do Actions. Validação de comportamento é feita localmente antes do merge. | 10 min |
 | `build` | Executa `scripts/build-release.sh <sha-curto>`, que empacota o tarball `release/flicker-<sha>.tar.gz` e o publica como artifact `flicker-<sha>` (retenção de 14 dias). | 15 min |
 | `deploy` | Conecta ao servidor de produção via **OpenVPN + SSH**, instala o env de produção, prepara o Postgres (idempotente) e executa `scripts/deploy-server.sh` no servidor. | 15 min |
 
@@ -103,8 +103,9 @@ Acompanhe em **Actions → Deploy — Flicker of Sanity**.
 
 **`quality`** — checkout (do SHA de rollback se houver, senão do HEAD da
 `prod`), Node 24, auditoria de dependências de produção (seção 3.6) —
-`npm audit --omit=dev` nos três roots npm (raiz, `db` e `frontend`), reprovando
-em high/critical sem exceção justificada —, `npm ci` + typecheck na raiz; em
+`npm audit --omit=dev --package-lock-only` nos três roots npm (raiz, `db` e
+`frontend`), reprovando em high/critical sem exceção justificada —,
+`npm ci` + typecheck na raiz; em
 `db/`, `npm ci` + `knex migrate:latest` contra o Postgres 17 do service
 container (env de teste, nenhum secret real). Garante que o schema migra de
 zero sem erro.
