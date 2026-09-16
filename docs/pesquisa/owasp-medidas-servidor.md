@@ -267,11 +267,11 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 
 **Medida G2 — Content Security Policy.**
 *Status:* **ausente** — nenhum `Content-Security-Policy` em `infra/nginx/` nem nos serviços. Sem CSP, um XSS rouba o controle do frontend (ainda que os cookies sejam `HttpOnly`); com CSP estrita (`script-src 'nonce-…' 'strict-dynamic'`), o impacto cai muito.
-*Onde aplicar:* `infra/nginx/nginx.prod.conf` (HTML do docroot) e, se possível, o proxy do admin.
+*Onde aplicar:* `infra/nginx/nginx.prod.conf` (HTML do docroot) e, se possível, o Cloudflare Quick Tunnel.
 *Fonte:* OWASP Content Security Policy Cheat Sheet — https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html; OWASP HTTP Headers Cheat Sheet (*Content-Security-Policy*).
 
 **Medida G3 — HSTS.**
-*Status:* **ausente** — o TLS é terminado no proxy do admin e nenhum nível interno emite `Strict-Transport-Security`.
+*Status:* **ausente** — o TLS é terminado no Cloudflare Quick Tunnel e nenhum nível interno emite `Strict-Transport-Security`.
 *Fonte:* OWASP HTTP Headers Cheat Sheet (*Strict-Transport-Security*); OWASP Transport Layer Security Cheat Sheet (seção *Use HTTP Strict Transport Security*) — https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html.
 
 **Medida G4 — `Permissions-Policy`, COOP/COEP/CORP.**
@@ -317,7 +317,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 ### 3.9 Transporte/TLS e proxy
 
 **Medida I1 — TLS na exposição pública e loopback no interno.**
-*Status:* **feito** — o TLS é terminado no proxy do admin e o host interno `:8080` é HTTP/loopback (`docs/deploy.md:50-54,184-186`); apps/PG/Redis ficam em `127.0.0.1` (`infra/nginx/nginx.prod.conf:3,9-16`).
+*Status:* **feito** — o TLS é terminado no Cloudflare Quick Tunnel e o host interno `:8080` é HTTP/loopback (`docs/deploy.md:50-54,184-186`); apps/PG/Redis ficam em `127.0.0.1` (`infra/nginx/nginx.prod.conf:3,9-16`).
 *Fonte:* OWASP Transport Layer Security Cheat Sheet (seções *Use TLS For All Pages*, *Only Support Strong Protocols*); Express Security Best Practices (seção *Use TLS*).
 
 **Medida I2 — Propagar `X-Forwarded-Proto` para cookies/redirects.**
@@ -325,7 +325,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP Transport Layer Security Cheat Sheet (seção *Use the "Secure" Cookie Flag*); OWASP Session Management Cheat Sheet (seção *Transport Layer Security*).
 
 **Medida I3 — Política de TLS (protocolos/cifras) e HSTS sob controle.**
-*Status:* **parcial/fora de controle** — a terminação é do proxy do admin; o repositório não define protocolos/cifras nem HSTS (ver G3). A OWASP exige TLS 1.3 (TLS 1.2 por compatibilidade) e desabilita TLS 1.0/1.1.
+*Status:* **parcial/fora de controle** — a terminação é do Cloudflare Quick Tunnel; o repositório não define protocolos/cifras nem HSTS (ver G3). A OWASP exige TLS 1.3 (TLS 1.2 por compatibilidade) e desabilita TLS 1.0/1.1.
 *Fonte:* OWASP Transport Layer Security Cheat Sheet (seções *Only Support Strong Protocols*, *Only Support Strong Ciphers*, *Use HTTP Strict Transport Security*).
 
 ### 3.10 Infra (Redis/Postgres/systemd/nginx) e observabilidade

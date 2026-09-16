@@ -299,7 +299,7 @@ Detalhes relevantes:
   hardening (`NoNewPrivileges`, `ProtectSystem=strict`, `IPAddressDeny=any`
   com `IPAddressAllow=localhost` — os dois services são loopback-only; o
   nginx do app (`:8080`) é quem fala com eles, e o único serviço exposto é o
-  vhost de borda do nginx na porta 80, atrás do TLS do proxy do admin).
+  vhost de borda do nginx na porta 80, atrás do TLS do Cloudflare Quick Tunnel).
 - **nginx** — duas camadas:
   - `infra/nginx/nginx.prod.conf` (app, `listen 8080`): serve o frontend de
     `/var/www/html` (symlink para `<release>/frontend/dist`) e `media/` via
@@ -461,13 +461,20 @@ nativa estão afetadas por este bug — ver a issue #252 para status.
 
 ### d) WebSocket do lobby retorna 404 (`Cannot GET /ws/lobby`)
 
-O browser não consegue abrir `wss://…/server01/ws/lobby` e recebe `404`;
-nenhuma linha `[ws] upgrade:` aparece no journal. Não é
-rota ausente: o **proxy do admin** reproxa a requisição como HTTP/1.0 sem os
-headers `Upgrade`/`Connection` (hop-by-hop), então o Node nunca emite o evento
-`upgrade` e o `GET` cai no Express (404). Borda, nginx do app e lobby aceitam o
-handshake normalmente. O diagnóstico completo, as evidências e o snippet de
-correção do proxy do admin estão em
+**Histórico — causa específica do antigo proxy do admin.** Sob o antigo proxy do
+admin, o browser não conseguia abrir `wss://…/server01/ws/lobby` e recebia
+`404`; nenhuma linha `[ws] upgrade:` aparecia no journal. Não era rota ausente:
+o **proxy do admin** reproxava a requisição como HTTP/1.0 sem os headers
+`Upgrade`/`Connection` (hop-by-hop), então o Node nunca emitia o evento
+`upgrade` e o `GET` caía no Express (404). Borda, nginx do app e lobby aceitavam
+o handshake normalmente.
+
+Esse proxy não existe mais: a exposição pública passou a ser um **Cloudflare
+Quick Tunnel** (`cloudflared` no host → borda `:80`). A causa acima era
+específica daquele salto e **não se aplica** à topologia atual; se o `404`
+reaparecer, trate como um caso novo (log do `cloudflared` e journal dos
+services — ver seção 7b). O diagnóstico completo, as evidências e o snippet de
+correção do antigo proxy do admin ficam registrados em
 [`docs/diagnostico-websocket-server01.md`](diagnostico-websocket-server01.md).
 
 ### e) Redis `NOAUTH` / `LOADING` no health check
