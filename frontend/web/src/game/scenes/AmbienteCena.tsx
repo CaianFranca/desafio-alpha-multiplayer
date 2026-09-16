@@ -12,6 +12,7 @@ import {
 import { aspectoVisivel, nevoaParaAspecto } from '../ambiente/cameraLimites'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
+import { DecoracoesDaMesa } from '../tabuleiro/Decoracoes'
 import { ManipulacaoOverlay } from './ManipulacaoOverlay'
 import type { EstadoInteracaoTabuleiro } from '../tabuleiro/interacao'
 import type { EstadoInteracaoPeoes, ComandoDePeaoDoDespacho, MotivoDeRejeicaoLocal } from '../tabuleiro/interacaoPeoes'
@@ -237,6 +238,7 @@ export function AmbienteCena({
       */}
       <group onClick={onDesselecionar}>
         <Mesa />
+        <DecoracoesDaMesa />
         {estadoExibicao ? (
           <>
             <Tabuleiro
