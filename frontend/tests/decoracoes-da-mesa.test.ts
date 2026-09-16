@@ -13,28 +13,35 @@ import {
   POSICAO_LIVRO,
   POSICAO_LIVRO_EMPILHADO,
   POSICAO_VELA,
+  POSICAO_VELA_LESTE,
+  POSICAO_VELA_SUDOESTE,
   escalaEfetivaDaDecoracao,
   luzDaChama,
   modeloDaDecoracao,
   validarPosicaoDaVela,
   validarPosicaoDasAlgemas,
+  validarPosicaoDasVelasPequenas,
   validarPosicaoDoLivro,
 } from '../web/src/game/tabuleiro/decoracoesDaMesa'
 import { POSICAO_CAIXA } from '../web/src/game/tabuleiro/contrato'
 
 describe('decorações da Mesa', () => {
-  it('vela, algemas e livros resolvem URLs sob assets/3d-models/*.glb', () => {
+  it('velas, algemas e livros resolvem URLs sob assets/3d-models/*.glb', () => {
     expect([...NOMES_DAS_DECORACOES].sort()).toEqual([
       'algemas',
       'livro',
       'livroEmpilhado',
       'vela',
+      'velaLeste',
+      'velaSudoeste',
     ])
     expect(Object.keys(MODELOS_DAS_DECORACOES).sort()).toEqual([
       'algemas',
       'livro',
       'livroEmpilhado',
       'vela',
+      'velaLeste',
+      'velaSudoeste',
     ])
     for (const nome of NOMES_DAS_DECORACOES) {
       const url = modeloDaDecoracao(nome)
@@ -47,6 +54,10 @@ describe('decorações da Mesa', () => {
     expect(MODELOS_DAS_DECORACOES.livro).toContain('livro.glb')
     expect(modeloDaDecoracao('livroEmpilhado')).toBe(
       modeloDaDecoracao('livro'),
+    )
+    expect(MODELOS_DAS_DECORACOES.velaSudoeste).toContain('vela-pequena.glb')
+    expect(modeloDaDecoracao('velaLeste')).toBe(
+      modeloDaDecoracao('velaSudoeste'),
     )
   })
 
@@ -141,5 +152,30 @@ describe('decorações da Mesa', () => {
       AJUSTES_DAS_DECORACOES.livro.rotacaoY,
     )
     expect(luzDaChama('livroEmpilhado')).toBeNull()
+  })
+
+  it('velas pequenas com a mesma chama da vela pré-existente', () => {
+    expect(validarPosicaoDasVelasPequenas()).toBeNull()
+    const [sx, sy, sz] = POSICAO_VELA_SUDOESTE
+    const [lx, , lz] = POSICAO_LIVRO
+    expect(sx).toBeLessThan(lx)
+    expect(sz).toBeGreaterThan(lz)
+    expect(sy).toBe(0)
+    const [ex, ey, ez] = POSICAO_VELA_LESTE
+    expect(ez).toBeLessThan(0)
+    expect(ex).toBeGreaterThan(-3.5)
+    expect(ex).toBeLessThan(POSICAO_VELA[0])
+    expect(ey).toBe(0)
+    // Mesma config, por referência: um ajuste afina as três chamas.
+    expect(luzDaChama('velaSudoeste')).toBe(luzDaChama('vela'))
+    expect(luzDaChama('velaLeste')).toBe(luzDaChama('vela'))
+    expect(luzDaChama('velaSudoeste')).not.toBeNull()
+  })
+
+  it('velas pequenas nascem contidas (×1, sem giro) para calibrar depois', () => {
+    expect(AJUSTES_DAS_DECORACOES.velaSudoeste.escala).toBe(1)
+    expect(AJUSTES_DAS_DECORACOES.velaSudoeste.rotacaoY).toBe(0)
+    expect(AJUSTES_DAS_DECORACOES.velaLeste.escala).toBe(1)
+    expect(AJUSTES_DAS_DECORACOES.velaLeste.rotacaoY).toBe(0)
   })
 })

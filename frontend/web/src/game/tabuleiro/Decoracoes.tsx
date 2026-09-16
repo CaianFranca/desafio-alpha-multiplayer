@@ -10,6 +10,8 @@ import {
   LIVRO_PROFUNDIDADE,
   POSICOES_DAS_DECORACOES,
   VELA_LARGURA,
+  VELA_PEQUENA_LARGURA,
+  VELA_PEQUENA_PROFUNDIDADE,
   VELA_PROFUNDIDADE,
   escalaEfetivaDaDecoracao,
   luzDaChama,
@@ -230,6 +232,16 @@ export function DecoracoesDaMesa() {
         nome="livroEmpilhado"
         largura={LIVRO_LARGURA}
         profundidade={LIVRO_PROFUNDIDADE}
+      />
+      <Decoracao
+        nome="velaSudoeste"
+        largura={VELA_PEQUENA_LARGURA}
+        profundidade={VELA_PEQUENA_PROFUNDIDADE}
+      />
+      <Decoracao
+        nome="velaLeste"
+        largura={VELA_PEQUENA_LARGURA}
+        profundidade={VELA_PEQUENA_PROFUNDIDADE}
       />
       <DocumentosDaMesa />
     </group>

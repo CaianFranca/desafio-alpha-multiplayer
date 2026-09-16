@@ -1,7 +1,7 @@
 /**
  * Decorações da Mesa (objetos 3D puramente visuais, sem regra).
  *
- * Seam puro: `vela | algemas | livro → URL` dos GLBs commitados em
+ * Seam puro: `vela | algemas | livro | velas pequenas → URL` dos GLBs commitados em
  * `web/public/assets/3d-models/` (servido sob
  * `import.meta.env.BASE_URL + assets/3d-models/…`, empacotado no `dist` via
  * `publicDir` — ver `frontend/vite.config.ts`). Sem three.js/DOM: só URLs,
@@ -22,7 +22,13 @@ import {
   POSICAO_CAIXA,
 } from './contrato'
 
-export type NomeDaDecoracao = 'vela' | 'algemas' | 'livro' | 'livroEmpilhado'
+export type NomeDaDecoracao =
+  | 'vela'
+  | 'algemas'
+  | 'livro'
+  | 'livroEmpilhado'
+  | 'velaSudoeste'
+  | 'velaLeste'
 
 function baseAssets(): string {
   const base = import.meta.env.BASE_URL ?? '/'
@@ -39,6 +45,8 @@ export const MODELOS_DAS_DECORACOES: Record<NomeDaDecoracao, string> = {
   algemas: modelo('algemas.glb'),
   livro: modelo('livro.glb'),
   livroEmpilhado: modelo('livro.glb'),
+  velaSudoeste: modelo('vela-pequena.glb'),
+  velaLeste: modelo('vela-pequena.glb'),
 }
 
 /** Decorações com visual próprio (ordem de montagem na cena). */
@@ -47,6 +55,8 @@ export const NOMES_DAS_DECORACOES: readonly NomeDaDecoracao[] = [
   'algemas',
   'livro',
   'livroEmpilhado',
+  'velaSudoeste',
+  'velaLeste',
 ]
 
 /** Resolve a URL do GLB de uma decoração da Mesa. */
@@ -83,6 +93,10 @@ export const AJUSTES_DAS_DECORACOES: Record<
   // Segundo livro, em cima do primeiro: mesma escala e mesma base, só o
   // giro muda um pouco (pilha levemente desalinhada, natural).
   livroEmpilhado: { escala: 2.2, rotacaoY: -0.15 },
+  // Velas pequenas: ponto de partida contido (×1, sem giro) — escala e luz
+  // ficam para calibragem posterior via screenshot.
+  velaSudoeste: { escala: 1, rotacaoY: 0 },
+  velaLeste: { escala: 1, rotacaoY: 0 },
 }
 
 /** Pegada de normalização da vela sobre a Mesa (contida, sem excedente). */
@@ -96,6 +110,10 @@ export const ALGEMAS_PROFUNDIDADE = 1.6
 /** Pegada de normalização do livro sobre a Mesa (contida, sem excedente). */
 export const LIVRO_LARGURA = 2.0
 export const LIVRO_PROFUNDIDADE = 2.0
+
+/** Pegada de normalização das velas pequenas (contida, sem excedente). */
+export const VELA_PEQUENA_LARGURA = 1.0
+export const VELA_PEQUENA_PROFUNDIDADE = 1.0
 
 /**
  * Posição da base da vela sobre a Mesa (centro da pegada, y = 0 no plano
@@ -142,6 +160,23 @@ export const POSICAO_LIVRO_EMPILHADO: readonly [number, number, number] = [
   POSICAO_LIVRO[2],
 ]
 
+/**
+ * Velas pequenas, mesmo modelo (`vela-pequena.glb`), com a mesma chama da
+ * vela pré-existente (`LUZ_DA_VELA`):
+ * - `velaSudoeste`: a sudoeste dos livros (−x, +z em relação a eles).
+ * - `velaLeste`: na faixa norte, entre as páginas e a vela pré-existente.
+ */
+export const POSICAO_VELA_SUDOESTE: readonly [number, number, number] = [
+  -8.9,
+  0,
+  -3.9,
+]
+export const POSICAO_VELA_LESTE: readonly [number, number, number] = [
+  3.4,
+  0,
+  -8.4,
+]
+
 /** Posições das decorações (base em y = 0 no plano superior da Mesa). */
 export const POSICOES_DAS_DECORACOES: Record<
   NomeDaDecoracao,
@@ -151,11 +186,14 @@ export const POSICOES_DAS_DECORACOES: Record<
   algemas: POSICAO_ALGEMAS,
   livro: POSICAO_LIVRO,
   livroEmpilhado: POSICAO_LIVRO_EMPILHADO,
+  velaSudoeste: POSICAO_VELA_SUDOESTE,
+  velaLeste: POSICAO_VELA_LESTE,
 }
 
 /**
- * Ponto de luz da chama, por decoração (só a vela tem): `pointLight` quente
- * e contido no topo do modelo — simula o brilho da chama sem lavar a cena.
+ * Ponto de luz da chama, por decoração (as três velas compartilham
+ * `LUZ_DA_VELA`): `pointLight` quente e contido no topo do modelo — simula
+ * o brilho da chama sem lavar a cena.
  * Ponto único de calibragem via screenshot:
  * - `cor`: amarelo quente da chama.
  * - `intensidade`: perceptível na base da vela e na Caixa vizinha
@@ -193,27 +231,38 @@ export interface SombraDaChama {
   readonly bias: number
 }
 
+/**
+ * Chama compartilhada das velas (ponto único de calibragem): a vela
+ * pré-existente e as duas pequenas usam a mesma config — um ajuste aqui
+ * afina as três chamas de uma vez. A altura da lâmpada deriva do topo de
+ * cada modelo, então acompanha a escala de cada vela sozinha.
+ */
+export const LUZ_DA_VELA: LuzDaChama = {
+  cor: '#ffc46b',
+  intensidade: 18,
+  distancia: 10,
+  decaimento: 1,
+  folgaAcimaDoTopo: 0.2,
+  sombra: {
+    tamanhoDoMapa: 1024,
+    near: 0.3,
+    far: 15,
+    bias: -0.004,
+  },
+}
+
 export const LUZ_DA_CHAMA_POR_DECORACAO: Record<
   NomeDaDecoracao,
   LuzDaChama | null
 > = {
-  vela: {
-    cor: '#ffc46b',
-    intensidade: 18,
-    distancia: 10,
-    decaimento: 1,
-    folgaAcimaDoTopo: 0.2,
-    sombra: {
-      tamanhoDoMapa: 1024,
-      near: 0.3,
-      far: 15,
-      bias: -0.004,
-    },
-  },
+  vela: LUZ_DA_VELA,
   // Sem chama: sem ponto de luz.
   algemas: null,
   livro: null,
   livroEmpilhado: null,
+  // Mesma chama da vela pré-existente: um ponto único para as três.
+  velaSudoeste: LUZ_DA_VELA,
+  velaLeste: LUZ_DA_VELA,
 }
 
 /** Config do ponto de luz da chama (`null` = decoração sem chama). */
@@ -259,6 +308,48 @@ export function validarPosicaoDaVela(): string | null {  const [x, , z] = POSICA
   const [caixaX, , caixaZ] = POSICAO_CAIXA
   if (!(x < caixaX && z < caixaZ)) {
     return 'Vela deve ficar a noroeste da Caixa'
+  }
+  return null
+}
+
+/** Invariante de layout: velas pequenas dentro da Mesa e fora do tabuleiro. */
+export function validarPosicaoDasVelasPequenas(): string | null {
+  const posicoes: ReadonlyArray<{
+    nome: string
+    posicao: readonly [number, number, number]
+  }> = [
+    { nome: 'Vela sudoeste', posicao: POSICAO_VELA_SUDOESTE },
+    { nome: 'Vela leste', posicao: POSICAO_VELA_LESTE },
+  ]
+  for (const { nome, posicao } of posicoes) {
+    const [x, y, z] = posicao
+    if (
+      Math.abs(x) + VELA_PEQUENA_LARGURA / 2 > LARGURA_MESA / 2 ||
+      Math.abs(z) + VELA_PEQUENA_PROFUNDIDADE / 2 > PROFUNDIDADE_MESA / 2
+    ) {
+      return `${nome} deve ficar dentro da Mesa`
+    }
+    if (
+      Math.abs(x) - VELA_PEQUENA_LARGURA / 2 < LARGURA_TABULEIRO / 2 &&
+      Math.abs(z) - VELA_PEQUENA_PROFUNDIDADE / 2 < PROFUNDIDADE_TABULEIRO / 2
+    ) {
+      return `${nome} deve ficar fora do tabuleiro`
+    }
+    if (y < 0) {
+      return `${nome} deve ficar sobre o plano da Mesa`
+    }
+  }
+  // Relativo aos marcos: sudoeste fica a sudoeste dos livros; leste fica
+  // na faixa norte (−z), entre as páginas e a vela pré-existente.
+  const [lx, , lz] = POSICAO_LIVRO
+  const [sx, , sz] = POSICAO_VELA_SUDOESTE
+  if (!(sx < lx && sz > lz)) {
+    return 'Vela sudoeste deve ficar a sudoeste dos livros'
+  }
+  const [vx] = POSICAO_VELA
+  const [ex, , ez] = POSICAO_VELA_LESTE
+  if (!(ez < 0 && ex > -3.5 && ex < vx)) {
+    return 'Vela leste deve ficar na faixa norte, entre as páginas e a vela'
   }
   return null
 }
@@ -378,7 +469,7 @@ export const DIMENSOES_DOS_DOCUMENTOS: Record<
 export const ESPESSURA_DO_DOCUMENTO = 0.01
 
 /** Tom das bordas/corte do papel (topo recebe a textura). */
-export const COR_BORDA_DO_PAPEL = '#b8b0a0'
+export const COR_BORDA_DO_PAPEL = '#414138'
 
 /**
  * Páginas espalhadas pela Mesa (ponto único de calibragem via screenshot):
@@ -462,7 +553,7 @@ export const TEXTURA_DO_CARTAO = textura('cartao.jpg')
 export const PROPORCAO_DO_CARTAO = 648 / 391
 
 /** Dimensões da lâmina do cartão sobre a Mesa. */
-export const DIMENSOES_DO_CARTAO = { largura: 2.1, profundidade: 1.245 } as const
+export const DIMENSOES_DO_CARTAO = { largura: 2.1, profundidade: 1.267 } as const
 
 /** Espessura do cartão (plástico rígido, mais grosso que o papel). */
 export const ESPESSURA_DO_CARTAO = 0.012
@@ -479,7 +570,7 @@ export const ROTACAO_DO_CARTAO = 0.45
  * (sem z-fighting no encosto).
  */
 export const POSICAO_DO_CARTAO: readonly [number, number, number] = [
-  6.2,
+  5.1,
   0.045,
   7.9,
 ]
