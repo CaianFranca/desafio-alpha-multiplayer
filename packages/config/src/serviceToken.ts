@@ -3,6 +3,14 @@ import jwt from 'jsonwebtoken';
 export const SERVICE_TOKEN_AUDIENCE = 'flicker-service';
 export const BOT_TOKEN_AUDIENCE = 'flicker-bot';
 
+// Sessão do Jogador (issue #416): `iss` comum identifica o emissor
+// (lobby); `aud` distinto por tipo impede access↔refresh trocados.
+// Corte seco — tokens emitidos antes da mudança (sem `iss`/`aud`)
+// são rejeitados e exigem novo login; sem fallback/grace-period.
+export const SESSION_ISS = 'flicker-lobby';
+export const SESSION_ACCESS_AUDIENCE = 'flicker-access';
+export const SESSION_REFRESH_AUDIENCE = 'flicker-refresh';
+
 export interface PayloadBotToken {
   sub: string;
   apelido: string;

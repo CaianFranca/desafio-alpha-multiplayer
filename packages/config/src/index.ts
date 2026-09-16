@@ -641,6 +641,9 @@ export function getConfig(): Config {
 export {
   SERVICE_TOKEN_AUDIENCE,
   BOT_TOKEN_AUDIENCE,
+  SESSION_ISS,
+  SESSION_ACCESS_AUDIENCE,
+  SESSION_REFRESH_AUDIENCE,
   assinarServiceToken,
   assinarBotToken,
   verificarBotToken,

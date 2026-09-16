@@ -1,9 +1,11 @@
 // Helpers de JWT para a Sessão do lobby-server.
-// Tokens HS256 com segredos separados (access: JWT_SECRET, refresh: JWT_REFRESH_SECRET).
+// Tokens HS256 com segredos separados (access: JWT_SECRET, refresh: JWT_REFRESH_SECRET)
+// + `iss` comum (`flicker-lobby`) e `aud` distinto por tipo (issue #416).
+// Corte seco: verificação exige `iss`/`aud` — token antigo sem os campos é rejeitado.
 // Falhas de verificação viram `null` — middleware traduz para 401.
 
 import jwt from 'jsonwebtoken';
-import { getConfig } from '@flicker/config';
+import { getConfig, SESSION_ISS, SESSION_ACCESS_AUDIENCE, SESSION_REFRESH_AUDIENCE } from '@flicker/config';
 import { assinarServiceToken as assinarServiceTokenComSegredo } from '@flicker/config';
 import type { Jogador } from '@flicker/shared';
 
@@ -29,7 +31,7 @@ export function assinarAccess(jogador: Jogador, sessaoId: string): string {
       sessaoId,
     },
     jwtSecret,
-    { algorithm: 'HS256', expiresIn: sessionAccessTtlSeconds },
+    { algorithm: 'HS256', expiresIn: sessionAccessTtlSeconds, issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE },
   );
 }
 
@@ -41,14 +43,14 @@ export function assinarRefresh(jogador: Jogador, sessaoId: string): string {
       sessaoId,
     },
     jwtRefreshSecret,
-    { algorithm: 'HS256', expiresIn: sessionRefreshTtlSeconds },
+    { algorithm: 'HS256', expiresIn: sessionRefreshTtlSeconds, issuer: SESSION_ISS, audience: SESSION_REFRESH_AUDIENCE },
   );
 }
 
 export function verificarAccess(token: string): PayloadAccess | null {
   const { jwtSecret } = getConfig();
   try {
-    const decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] }) as Record<string, unknown>;
+    const decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'], issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE }) as Record<string, unknown>;
     if (
       typeof decoded.sub !== 'string'
       || typeof decoded.sessaoId !== 'string'
@@ -71,7 +73,7 @@ export function verificarAccess(token: string): PayloadAccess | null {
 export function verificarRefresh(token: string): PayloadRefresh | null {
   const { jwtRefreshSecret } = getConfig();
   try {
-    const decoded = jwt.verify(token, jwtRefreshSecret, { algorithms: ['HS256'] }) as Record<string, unknown>;
+    const decoded = jwt.verify(token, jwtRefreshSecret, { algorithms: ['HS256'], issuer: SESSION_ISS, audience: SESSION_REFRESH_AUDIENCE }) as Record<string, unknown>;
     if (typeof decoded.sub !== 'string' || typeof decoded.sessaoId !== 'string') {
       return null;
     }

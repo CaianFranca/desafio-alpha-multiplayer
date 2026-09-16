@@ -1,6 +1,6 @@
 import type { Redis } from 'ioredis';
 import jwt from 'jsonwebtoken';
-import { verificarBotToken } from '@flicker/config';
+import { verificarBotToken, SESSION_ISS, SESSION_ACCESS_AUDIENCE } from '@flicker/config';
 
 export interface SessaoDoJogador {
   readonly jogadorId: string;
@@ -25,9 +25,11 @@ export function validarTokenDeSessao(token: string, secret: string): SessaoDoJog
     };
   }
 
-  // 2. Valida como token de jogador regular
+  // 2. Valida como token de jogador regular (issue #416): exige `iss`/`aud`
+  // de access — token antigo sem os campos, com `aud` errada ou refresh
+  // trocado por access é rejeitado (corte seco). Bot-token acima inalterado.
   try {
-    const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] });
+    const decoded = jwt.verify(token, secret, { algorithms: ['HS256'], issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE });
     if (typeof decoded === 'string') {
       return null;
     }

@@ -26,7 +26,7 @@ import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
-import { criarClienteRedis, assinarBotToken } from '@flicker/config';
+import { criarClienteRedis, assinarBotToken, SESSION_ISS, SESSION_ACCESS_AUDIENCE } from '@flicker/config';
 import type {
   AceiteDoEncaminhamento,
   MembroDaSala,
@@ -82,7 +82,7 @@ async function subirServidor(ttlSegundos: number): Promise<ServidorEfemero> {
 }
 
 function criarJwt(jogadorId: string, apelido: string, sessaoId: string): string {
-  return jwt.sign({ sub: jogadorId, apelido, sessaoId }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
+  return jwt.sign({ sub: jogadorId, apelido, sessaoId }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE });
 }
 
 async function criarSessaoNoRedis(sessaoId: string, jogadorId: string): Promise<void> {

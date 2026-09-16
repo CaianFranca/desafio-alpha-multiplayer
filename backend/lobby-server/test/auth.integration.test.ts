@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import http from 'node:http';
 import { type AddressInfo } from 'node:net';
-import { criarClienteRedis } from '@flicker/config';
+import jwt from 'jsonwebtoken';
+import { criarClienteRedis, getConfig, SESSION_ISS, SESSION_ACCESS_AUDIENCE, SESSION_REFRESH_AUDIENCE } from '@flicker/config';
 import { createApp } from '../src/app.ts';
 import { pool } from '../src/config/pg.ts';
 import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
@@ -637,6 +638,98 @@ test('refresh com refresh_token forjado (assinatura inválida): 401', async () =
       {},
       { refresh_token: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmYWtlIn0.assinatura_invalida' },
     );
+    assert.equal(res.status, 401);
+  });
+});
+
+// --- 22b. Sessão com iss/aud (issue #416): corte seco + tipo trocado ---
+
+test('sessao: access e refresh carregam iss/aud distintos por tipo', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    const access = jwt.decode(cookies.access_token!) as Record<string, unknown>;
+    const refresh = jwt.decode(cookies.refresh_token!) as Record<string, unknown>;
+    assert.equal(access.iss, SESSION_ISS);
+    assert.equal(access.aud, SESSION_ACCESS_AUDIENCE);
+    assert.equal(refresh.iss, SESSION_ISS);
+    assert.equal(refresh.aud, SESSION_REFRESH_AUDIENCE);
+    assert.notEqual(access.aud, refresh.aud);
+  });
+});
+
+test('/me com access sem iss/aud (token antigo): 401 — corte seco', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    const { jwtSecret } = getConfig();
+    // Re-assina o MESMO payload/sessão sem iss/aud: sem o corte seco,
+    // passaria (sessão existe no Redis); com iss/aud exigido, cai no 401.
+    const payload = jwt.decode(cookies.access_token!) as Record<string, unknown>;
+    const legado = jwt.sign(
+      { sub: payload.sub, apelido: payload.apelido, email: payload.email, sessaoId: payload.sessaoId },
+      jwtSecret,
+      { algorithm: 'HS256', expiresIn: '1h' },
+    );
+    const res = await getAuth(servidor.baseUrl, '/api/auth/me', { access_token: legado });
+    assert.equal(res.status, 401);
+  });
+});
+
+test('/me com access de aud errada (refresh) ou iss errado: 401', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    const { jwtSecret } = getConfig();
+    const payload = jwt.decode(cookies.access_token!) as Record<string, unknown>;
+    const base = { sub: payload.sub, apelido: payload.apelido, email: payload.email, sessaoId: payload.sessaoId };
+
+    const audErrada = jwt.sign(base, jwtSecret, {
+      algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_REFRESH_AUDIENCE,
+    });
+    assert.equal((await getAuth(servidor.baseUrl, '/api/auth/me', { access_token: audErrada })).status, 401);
+
+    const issErrado = jwt.sign(base, jwtSecret, {
+      algorithm: 'HS256', expiresIn: '1h', issuer: 'outro-emissor', audience: SESSION_ACCESS_AUDIENCE,
+    });
+    assert.equal((await getAuth(servidor.baseUrl, '/api/auth/me', { access_token: issErrado })).status, 401);
+  });
+});
+
+test('sessao: access como refresh e refresh como access → 401 (tipo trocado)', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    assert.ok(cookies.access_token);
+    assert.ok(cookies.refresh_token);
+
+    // refresh usado como access → 401 no /me
+    const me = await getAuth(servidor.baseUrl, '/api/auth/me', { access_token: cookies.refresh_token });
+    assert.equal(me.status, 401);
+
+    // access usado como refresh → 401 no /refresh
+    const refresh = await postJson(servidor.baseUrl, '/api/auth/refresh', {}, { refresh_token: cookies.access_token });
+    assert.equal(refresh.status, 401);
+  });
+});
+
+test('/refresh com refresh de aud errada (access): 401', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    const { jwtRefreshSecret } = getConfig();
+    const payload = jwt.decode(cookies.refresh_token!) as Record<string, unknown>;
+    const forjado = jwt.sign(
+      { sub: payload.sub, sessaoId: payload.sessaoId },
+      jwtRefreshSecret,
+      { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE },
+    );
+    const res = await postJson(servidor.baseUrl, '/api/auth/refresh', {}, { refresh_token: forjado });
     assert.equal(res.status, 401);
   });
 });
