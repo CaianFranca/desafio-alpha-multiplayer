@@ -67,6 +67,13 @@ cp "$RELEASE_DIR/infra/systemd/"*.service /etc/systemd/system/ 2>/dev/null \
 systemctl daemon-reload
 cp "$RELEASE_DIR/infra/nginx/nginx.prod.conf" /etc/nginx/sites-available/flicker
 ln -sfn /etc/nginx/sites-available/flicker /etc/nginx/sites-enabled/flicker
+# Snippets incluídos por nginx.prod.conf via caminho absoluto
+# /etc/nginx/conf.d/*.snippet (extensão .snippet = fora do auto-include
+# `conf.d/*.conf` do Debian, só carregados pelo include explícito).
+for snippet in hsts-map security-headers security-headers-static; do
+  cp "$RELEASE_DIR/infra/nginx/$snippet.snippet" "/etc/nginx/conf.d/$snippet.snippet" \
+    || die "snippet nginx ausente no tarball: infra/nginx/$snippet.snippet"
+done
 # Vhost de borda (:80, default_server) que recebe /server01 do proxy do admin e
 # faz strip do prefixo rumo ao nginx do app em 127.0.0.1:8080.
 cp "$RELEASE_DIR/infra/nginx/nginx.edge.conf" /etc/nginx/sites-available/flicker-edge

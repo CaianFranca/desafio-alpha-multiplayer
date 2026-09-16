@@ -85,6 +85,11 @@ mkdir -p "$STAGING/infra/systemd" "$STAGING/infra/nginx"
 cp infra/systemd/*.service "$STAGING/infra/systemd/"
 cp infra/nginx/nginx.prod.conf "$STAGING/infra/nginx/nginx.prod.conf"
 cp infra/nginx/nginx.edge.conf "$STAGING/infra/nginx/nginx.edge.conf"
+# Snippets incluídos por nginx.prod.conf (deploy-server.sh instala em
+# /etc/nginx/conf.d/ — mesma extensão .snippet, sem auto-carregamento).
+cp infra/nginx/hsts-map.snippet "$STAGING/infra/nginx/hsts-map.snippet"
+cp infra/nginx/security-headers.snippet "$STAGING/infra/nginx/security-headers.snippet"
+cp infra/nginx/security-headers-static.snippet "$STAGING/infra/nginx/security-headers-static.snippet"
 
 # ── 7. Empacotar ─────────────────────────────────────────────────────────────
 log "empacotando $TARBALL"
