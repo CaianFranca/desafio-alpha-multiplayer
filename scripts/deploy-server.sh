@@ -60,8 +60,11 @@ set -a; . "$ENV_FILE"; set +a
 export NODE_ENV=production
 [ -n "${REDIS_PASSWORD:-}" ] || die "REDIS_PASSWORD vazio no env ($ENV_FILE) — defina PROD_REDIS_PASSWORD no workflow"
 # Garante requirepass no Redis nativo (se o serviço existir); idempotente.
-if command -v redis-cli >/dev/null 2>&1 && [ -f /etc/redis/redis.conf ]; then
-  log "garantindo requirepass em /etc/redis/redis.conf"
+if [ -f /etc/redis/redis.conf ]; then
+  if ! command -v redis-cli >/dev/null 2>&1; then
+    log "aviso: redis-cli ausente — não foi possível garantir requirepass automaticamente; configure /etc/redis/redis.conf manualmente"
+  else
+    log "garantindo requirepass em /etc/redis/redis.conf"
   tmp_conf="$(mktemp)"
   tmp_conf2="${tmp_conf}.2"
   # Preserva permissões/dono do arquivo original
@@ -84,8 +87,9 @@ if command -v redis-cli >/dev/null 2>&1 && [ -f /etc/redis/redis.conf ]; then
     log "requirepass atualizado — reiniciando redis"
     systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
     # Aguarda redis ficar pronto com a nova senha (fail-closed: aborta deploy se não subir)
+    # Usa REDISCLI_AUTH para não expor a senha em /proc/cmdline
     for i in $(seq 1 10); do
-      if redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then
+      if REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping 2>/dev/null | grep -q PONG; then
         log "redis pronto com requirepass (tentativa $i)"
         break
       fi
@@ -102,8 +106,9 @@ if command -v redis-cli >/dev/null 2>&1 && [ -f /etc/redis/redis.conf ]; then
       fi
       sleep 1
     done
+    rm -f "$tmp_conf" "$tmp_conf2" 2>/dev/null || true
+    fi
   fi
-  rm -f "$tmp_conf" "$tmp_conf2" 2>/dev/null || true
 fi
 ( cd "$RELEASE_DIR/db" && ./node_modules/.bin/knex migrate:latest --knexfile dist/knexfile.js )
 

@@ -173,7 +173,7 @@ docker compose up -d --build  # reproduz o ambiente do zero (após down -v)
 - `up -d --build` após `down -v` recompila as imagens (`lobby-server`,
   `game-server`, `db-migrate`, `nginx`) e recria o volume limpo — fluxo
   reproduzível para um novo dev.
-- Redis é sempre volátil (`redis-server --save "" --appendonly no` no
+- Redis é sempre volátil (`redis-server --save "" --appendonly no --requirepass ${REDIS_PASSWORD}` no
   `docker-compose.yml`): Sessões e estado em memória somem a cada `down`,
   mesmo sem `-v`. Não há migração do volume criado pela configuração anterior
   em `infra/`.

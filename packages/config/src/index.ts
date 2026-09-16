@@ -518,10 +518,11 @@ export function getConfig(): Config {
     poolMax,
   };
 
+  const rawRedisPassword = process.env.REDIS_PASSWORD?.trim();
   const redis = {
     host: process.env.REDIS_HOST ?? 'localhost',
     port: parsePort(process.env.REDIS_PORT as string | undefined, 6379),
-    password: process.env.REDIS_PASSWORD ?? DEFAULT_REDIS_PASSWORD,
+    password: rawRedisPassword && rawRedisPassword.length > 0 ? rawRedisPassword : DEFAULT_REDIS_PASSWORD,
   };
 
   if (isProduction) {
@@ -534,7 +535,7 @@ export function getConfig(): Config {
     if (!postgres.password || postgres.password === DEFAULT_POSTGRES_PASSWORD) {
       throw new Error('POSTGRES_PASSWORD deve ser definido em produção');
     }
-    if (!redis.password || redis.password.trim().length === 0 || redis.password.trim() === DEFAULT_REDIS_PASSWORD) {
+    if (!redis.password || redis.password === DEFAULT_REDIS_PASSWORD) {
       throw new Error('REDIS_PASSWORD deve ser definido em produção');
     }
     if (process.env.LOBBY_PUBLIC_URL === undefined) {

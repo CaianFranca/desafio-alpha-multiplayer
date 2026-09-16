@@ -98,3 +98,17 @@ test('produção: REDIS_PASSWORD válida é aceita', () => {
     assert.equal(getConfig().redis.password, 'prod_redis_segura_123');
   });
 });
+
+test('produção: REDIS_PASSWORD com espaços/newline é trimada', () => {
+  comProducao('3', () => {
+    process.env.REDIS_PASSWORD = '  prod_redis_segura_123 \n';
+    assert.equal(getConfig().redis.password, 'prod_redis_segura_123');
+  });
+});
+
+test('produção: REDIS_PASSWORD só espaços/newline lança no boot', () => {
+  comProducao('3', () => {
+    process.env.REDIS_PASSWORD = '  \n  ';
+    assert.throws(() => getConfig(), /REDIS_PASSWORD/);
+  });
+});

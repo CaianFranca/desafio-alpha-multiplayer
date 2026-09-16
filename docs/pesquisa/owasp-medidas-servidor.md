@@ -298,8 +298,8 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP Secrets Management Cheat Sheet (seções *Centralize and Standardize*, *Access Control*, *CI/CD*).
 
 **Medida H3 — Autenticar o Redis.**
-*Status:* **ausente** — `REDIS_PASSWORD` não consta no env de produção (`docs/deploy.md:298-314`) e o default é sem senha (`packages/config/src/index.ts:378-382`; `docker-compose.yml:34-45`). A mitigação atual é o loopback + `protected mode`, mas a própria OWASP/Redis recomendam exigir autenticação como camada redundante.
-*Onde aplicar:* env de produção (`/opt/flicker/env`) + `redis.conf`.
+*Status:* **feito (#427)** — `REDIS_PASSWORD` consta no env de produção (`docs/deploy.md:298-322`; `.github/workflows/deploy.yml:195,208`) com `requirepass` em `docker-compose.yml:37` e `packages/config/src/index.ts:60,524` (`DEFAULT_REDIS_PASSWORD` + `trim()` no boot). A mitigação de loopback + `protected mode` foi complementada com autenticação redundante.
+*Onde aplicar:* env de produção (`/opt/flicker/env`) + `redis.conf` (`scripts/deploy-server.sh:62`).
 *Fonte:* OWASP Secrets Management Cheat Sheet (seção *General Secrets Management*); Redis security (seções *Network security*, *Protected mode* e *Authentication*).
 
 **Medida H4 — Rotação de segredos.**
