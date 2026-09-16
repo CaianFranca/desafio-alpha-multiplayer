@@ -14,7 +14,7 @@ Esta pesquisa mapeia os controles OWASP que encaixam na superfície real do serv
 
 **Atores.** *Visitante* (sem autenticação), *Jogador* autenticado, bot (Cadastro efêmero), atacante externo e atacante interno (já autenticado, tentando escalar ou abusar).
 
-**Fronteiras de confiança.** Borda nginx `:80` (`nginx.edge.conf`) → nginx do app `:8080` (`nginx.prod.conf`) → loopback (`127.0.0.1`) → lobby/game-server → loopback → Redis/Postgres. Os dois services systemd são `IPAddressDeny=any` + `IPAddressAllow=localhost` (`infra/systemd/flicker-lobby.service:20-22`, `infra/systemd/flicker-game.service:20-22`). O TLS é terminado no proxy do admin; os saltos internos são HTTP.
+**Fronteiras de confiança.** Borda nginx `:80` (`nginx.edge.conf`) → nginx do app `:8080` (`nginx.prod.conf`) → loopback (`127.0.0.1`) → lobby/game-server → loopback → Redis/Postgres. Os dois services systemd são `IPAddressDeny=any` + `IPAddressAllow=localhost` (`infra/systemd/flicker-lobby.service:20-22`, `infra/systemd/flicker-game.service:20-22`). O TLS é terminado no **Cloudflare Quick Tunnel** (o `cloudflared` roda no próprio host e conecta ao nginx de borda via loopback); os saltos internos são HTTP, com o IP do cliente restaurado de `CF-Connecting-IP` na borda.
 
 **Vetores principais.** Cross-Site WebSocket Hijacking (CSWSH) no handshake por cookie sem validação de `Origin` (`backend/lobby-server/src/ws/ws.ts:38-62`, `backend/game-server/src/ws/ws.ts:112-132`); roubo de token via XSS (cookies `HttpOnly` mitigam, CSP ausente agrava); enumeração/força bruta em `/api/auth/*` sem throttling; flood de WebSocket/chat (só o chat tem rate limit); injeção (SQL mitificada por queries parametrizadas; Redis usa protocolo length-prefixed); vazamento de segredos (Redis sem senha; `X-Powered-By` exposto); exposição de `/internal/` (bloqueado na borda, sem rotas correspondentes hoje).
 
@@ -244,7 +244,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* Express Security Best Practices (seção *Prevent brute-force attacks against authorization*); OWASP Authentication Cheat Sheet (*Login Throttling*).
 
 **Medida F3 — Rate limit na borda nginx.**
-*Status:* **ausente** — não há `limit_req`/`limit_conn` em `infra/nginx/` (busca não encontra) nem `client_max_body_size` explícito.
+*Status:* **feito (#418)** — a borda aplica `limit_req` por IP (`rate=10r/s`, `burst=20 nodelay`, `limit_req_status 429`), `limit_conn` de 20 conexões por IP e `client_max_body_size 256k` (`infra/nginx/nginx.edge.conf`), com zonas e escopo em `infra/nginx/rate-limit.snippet` e o IP real restaurado de `CF-Connecting-IP` em `infra/nginx/cloudflare-realip.snippet`. O `map` por `$uri` limita só `/server01/api|ws/`, `/api/` e `/ws/`; assets do SPA passam livres.
 *Fonte:* OWASP Denial of Service Cheat Sheet (seções *Network Design Concepts* e *Rate limiting*); OWASP Nodejs Security Cheat Sheet (seção *Monitor the event loop*).
 
 **Medida F4 — Limite de corpo de requisição.**
@@ -367,7 +367,7 @@ Prioridade baseada no risco real para o jogo: exposição a CSWSH/roubo de Sess�
 | Alta | Sem `maxPayload` no `ws` (default 100 MiB) | WebSocket | ausente | WebSocket Security CS (Input Validation, DoS); ws docs |
 | Alta | Redis sem `requirepass` em produção | Segredos/Infra | ausente | Secrets Management CS; Redis security (Authentication) |
 | Alta | Sem `Content-Security-Policy` | Headers/CSP | ausente | Content Security Policy CS; HTTP Headers CS |
-| Média | Sem rate limit geral de mensagens WS nem na borda nginx | Rate limiting | ausente | WebSocket Security CS (DoS); Denial of Service CS (Rate limiting) |
+| Média | Sem rate limit geral de mensagens WS (borda nginx coberta pela F3, #418) | Rate limiting | parcial | WebSocket Security CS (DoS); Denial of Service CS (Rate limiting) |
 | Média | `X-Powered-By` exposto e `server_tokens` ligado (fingerprint) | Headers | ausente | HTTP Headers CS (X-Powered-By, Server); Express Security |
 | Média | Sessão/WS não é revalidada em conexões longas nem fechada no logout | Sessão/WebSocket | parcial | WebSocket Security CS (Session Management) |
 | Média | Sem HSTS | Transporte | ausente | HTTP Headers CS (HSTS); TLS CS |

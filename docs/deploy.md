@@ -46,12 +46,16 @@ selecionando a branch `prod`.
 
 O bootstrap do servidor **já foi executado** e não faz parte da rotina de
 deploy. O servidor (referência de lab: hostname `c041`) é alcançado pela rede privada
-via **VPN** para SSH/deploy — a exposição pública é
-feita pelo proxy do admin, que termina o TLS e encaminha
-`https://lab.alphaedtech.org.br/server01` para a porta **80** deste host,
-removendo o prefixo `/server01`. O vhost de borda serve o app tanto na raiz
-(pass-through) quanto em `/server01/` (strip), então funciona independente de o
-proxy remover ou preservar o prefixo.
+via **VPN** para SSH/deploy — a exposição pública é feita por um **Cloudflare
+Quick Tunnel**: o `cloudflared` roda no mesmo host
+(`cloudflared tunnel --no-autoupdate --url http://127.0.0.1:80`) e publica o
+prefixo `/server01` numa URL efêmera
+`https://<nome-aleatorio>.trycloudflare.com/server01`, com o TLS terminado no
+Cloudflare. O prefixo `/server01/` é preservado ponta a ponta (o SPA referencia
+`/server01/assets/...`); o vhost de borda também aceita a raiz (pass-through),
+caso o prefixo chegue removido. A rede privada/VPN e o acesso direto à `:8080`
+são zona **confiável** — o limite de borda mira o tráfego público via
+Cloudflare, não esses acessos.
 
 Estado esperado do servidor:
 
@@ -67,7 +71,9 @@ Estado esperado do servidor:
 - **nginx** instalado. O deploy instala a conf do app (`:8080`) em
   `sites-available/flicker` e o vhost de borda (`:80`, `default_server`) em
   `sites-available/flicker-edge`, e remove o site `default` do Debian de
-  `sites-enabled/` (ele também seria `default_server` em `:80`).
+  `sites-enabled/` (ele também seria `default_server` em `:80`). A borda
+  restaura o IP real do cliente (`CF-Connecting-IP`) e aplica os limites de
+  requisição/conexão/corpo (detalhes na seção 6).
 - **Docroot** `/var/www/html` — symlink para `<release>/frontend/dist`,
   publicado pelo `deploy-server.sh` a cada deploy.
 - Usuário de sistema **`flicker`** (dono das releases; user dos services).
@@ -154,7 +160,10 @@ Ordem exata do script:
 4. **Instalar units systemd + conf nginx**: copia `infra/systemd/*.service`
    para `/etc/systemd/system/` + `daemon-reload`; copia `nginx.prod.conf` para
    `/etc/nginx/sites-available/flicker` + symlink em `sites-enabled/flicker`;
-   copia `nginx.edge.conf` para `sites-available/flicker-edge` + symlink em
+   instala os snippets (`hsts-map`, `security-headers`,
+   `security-headers-static`, `rate-limit`, `cloudflare-realip`) em
+   `/etc/nginx/conf.d/`; copia `nginx.edge.conf` para
+   `sites-available/flicker-edge` + symlink em
    `sites-enabled/flicker-edge`; remove `sites-enabled/default`; `nginx -t`
    valida antes de aplicar.
 5. **Flip do symlink** (atômico): `/opt/flicker/current` → release nova e
@@ -183,10 +192,11 @@ curl -fsS http://127.0.0.1:1234/health   # game
 curl -fsS http://127.0.0.1:8080/         # nginx do app
 ```
 
-- No navegador: o app responde publicamente em
-  **`https://lab.alphaedtech.org.br/server01/`** (TLS terminado no proxy do
-  admin). O host interno na porta **8080** é `http` e deve ser tratado como
-  loopback/interno.
+- No navegador: o app responde publicamente na URL do Cloudflare Quick Tunnel,
+  `https://<nome-aleatorio>.trycloudflare.com/server01/` — URL **efêmera**,
+  muda a cada reinício do `cloudflared`; o TLS é terminado no Cloudflare. O
+  host interno na porta **8080** é `http` e deve ser tratado como
+  loopback/interno; a rede privada/VPN é zona confiável e pode acessá-lo direto.
 
 ### 3.5 Sessões ativas após o deploy (corte seco #416)
 
@@ -247,7 +257,7 @@ issues, PRs ou logs).
 
 | Nome | Propósito |
 | --- | --- |
-| `PROD_LOBBY_PUBLIC_URL` | URL pública usada nos links compartilháveis emitidos pelo lobby. Obrigatória em produção (a config lança erro se `LOBBY_PUBLIC_URL` não estiver definida). Lab: `https://lab.alphaedtech.org.br/server01`. |
+| `PROD_LOBBY_PUBLIC_URL` | URL pública usada nos links compartilháveis emitidos pelo lobby. Obrigatória em produção (a config lança erro se `LOBBY_PUBLIC_URL` não estiver definida). Lab: a URL do Cloudflare Quick Tunnel, `https://<nome-aleatorio>.trycloudflare.com/server01` — como o túnel é efêmero, a variable precisa ser atualizada quando a URL mudar e o deploy rodado de novo. |
 
 Rotação de qualquer valor: basta editar o secret/variable na UI e rodar um
 novo deploy (o env de produção é regravado a cada deploy em
@@ -298,15 +308,30 @@ Detalhes relevantes:
   - `infra/nginx/nginx.edge.conf` (borda, `listen 80 default_server`), com
     três locations: (`1`) redireciona `/server01` → `/server01/` (301);
     (`2`) `/server01/` faz `proxy_pass http://127.0.0.1:8080/` para o nginx do
-    app, **removendo o prefixo `/server01/`** (barra final do `proxy_pass`),
-    usado quando o admin preserva o prefixo; (`3`) `/` faz pass-through com
-    `proxy_pass http://127.0.0.1:8080/` (barra final), que usa o URI
-    **normalizado** (colapsa barras repetidas: `//api/...` → `/api/...`) antes
-    de entregar ao nginx do app, usado quando o admin remove o prefixo e
-    entrega a raiz. Em todos os casos
-    encaminha Upgrade/Connection (WebSocket) e
+    app, **removendo o prefixo `/server01/`** (barra final do `proxy_pass`) —
+    é o caminho do Cloudflare Quick Tunnel, que preserva o prefixo; (`3`) `/`
+    faz pass-through com `proxy_pass http://127.0.0.1:8080/` (barra final), que
+    usa o URI **normalizado** (colapsa barras repetidas: `//api/...` →
+    `/api/...`) antes de entregar ao nginx do app, usado se o prefixo chegar
+    removido. Em todos os casos encaminha Upgrade/Connection (WebSocket) e
     `X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`.
-  - Há **3 proxies** entre o cliente e o lobby (proxy admin TLS → nginx edge:80
+  - **Borda — IP real e limites (#418).** No `server` da borda, o snippet
+    `cloudflare-realip.snippet` restaura o IP do cliente a partir de
+    `CF-Connecting-IP`; só pares confiáveis (`127.0.0.1`/`::1`, de onde o
+    `cloudflared` conecta) podem sobrescrever `$remote_addr`, então um acesso
+    direto à `:80` com header forjado é ignorado. O snippet `rate-limit.snippet`
+    (contexto `http`) define as zonas e o `map` que escopa o `limit_req` por IP
+    a `/server01/api|ws/`, `/api/` e `/ws/`; assets do SPA ficam fora (chave
+    vazia não é contabilizada pelo `limit_req_zone`). Valores:
+    `rate=10r/s`, `burst=20 nodelay`, `limit_req_status 429`; `limit_conn` de
+    20 conexões por IP (excesso responde `503`); `client_max_body_size 256k`
+    (excesso responde `413`). Se o `cloudflared` passar a rodar em container,
+    acrescente a faixa do bridge ao `set_real_ip_from` do snippet.
+  - **Zona confiável.** A rede privada (VPN) e o acesso direto a `:8080` são
+    legítimos e **não** passam pelo rate limit de borda — ele mira o tráfego
+    público que entra pelo Cloudflare. Não feche essas portas nem altere
+    firewall por causa dos limites.
+  - Há **3 proxies** entre o cliente e o lobby (Cloudflare TLS → nginx edge:80
     → nginx app:8080 → lobby), portanto em produção usa-se
     `TRUST_PROXY_HOPS=3`; dev/Docker Compose (cliente→nginx→lobby) usa 1.
 - **Env de produção** (`/opt/flicker/env`) é gerado pelo workflow a cada
@@ -341,8 +366,8 @@ TRUST_PROXY_HOPS=3
 > no registro do Redis; o default (`game-server`, em `packages/config`) só
 > resolve na rede Docker Compose.
 
-> **`COOKIE_SECURE=true`**: o acesso público é HTTPS (TLS terminado no proxy
-> do admin), então o navegador envia os cookies `Secure` normalmente. O default
+> **`COOKIE_SECURE=true`**: o acesso público é HTTPS (TLS terminado no
+> Cloudflare), então o navegador envia os cookies `Secure` normalmente. O default
 > em `packages/config` já é `Secure=true` quando `NODE_ENV=production`; o env
 > apenas o torna explícito. O nginx do app repassa `X-Forwarded-Proto` recebido
 > da borda para que redirects/cookies sejam gerados como `https`.

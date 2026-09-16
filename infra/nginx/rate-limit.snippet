@@ -1,0 +1,14 @@
+# rate-limit.snippet — zonas e escopo dos limites de borda (contexto http).
+# Incluído por nginx.edge.conf. Só /api/ e o handshake WS entram no limit_req:
+# chave vazia não é contabilizada (doc do limit_req_zone), então assets
+# estáticos do SPA passam livres. O map cobre o prefixo preservado
+# (/server01/...) e o removido (/api/, /ws/).
+map $uri $limit_req_key {
+    default               "";
+    ~^/server01/(api|ws)/ $binary_remote_addr;
+    ~^/api/               $binary_remote_addr;
+    ~^/ws/                $binary_remote_addr;
+}
+
+limit_req_zone $limit_req_key zone=perip_req:10m rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=perip_conn:10m;
