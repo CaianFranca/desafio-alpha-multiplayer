@@ -6,6 +6,11 @@
 // Exceção só é aceita para advisory SEM correção disponível (fixAvailable
 // estritamente false) e exige justificativa em dependency-audit-allowlist.json.
 //
+// A policy de `fixAvailable` é decidida NO NÍVEL DO PACOTE: o npm não expõe o
+// campo por advisory, então quando um pacote tem múltiplos advisories todas as
+// vias herdam o flag do pacote. É fail-closed de propósito — só ganha exceção o
+// advisory cujo pacote inteiro está sem correção disponível.
+//
 // Uso: node scripts/audit-dependencies.mjs [--roots .,db,frontend] [--allowlist <path>]
 //   --roots      roots npm relativos à raiz do repo (default: .,db,frontend)
 //   --allowlist  caminho da allowlist (default: <repo>/dependency-audit-allowlist.json)
@@ -15,9 +20,9 @@
 // Usado pelo job `quality` do CI (.github/workflows/deploy.yml) em deploys
 // normais; o rollback (workflow_dispatch com input `sha`) é isento do gate.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOTS_PADRAO = ['.', 'db', 'frontend'];
@@ -30,9 +35,11 @@ const erro = (msg) => console.error(`[audit-deps] ERRO: ${msg}`);
 
 // Extrai a chave estável de um advisory: GHSA id da url (MAIÚSCULO) ou, na
 // ausência dela, o `source` numérico do npm (com aviso — a chave fica frágil).
-function extrairChave(advisory) {
+// A regex do GHSA é estrita (4/4/4+ alfanuméricos): evita casar fragmentos
+// soltos na url e aceitar chaves truncadas que nunca bateriam com a allowlist.
+export function extrairChave(advisory) {
   const url = typeof advisory.url === 'string' ? advisory.url : '';
-  const ghsa = url.match(/GHSA-[0-9a-z-]+/i);
+  const ghsa = url.match(/GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4,}/i);
   if (ghsa) return { chave: ghsa[0].toUpperCase(), aviso: null };
   if (advisory.source !== undefined && advisory.source !== null) {
     return {
@@ -41,6 +48,27 @@ function extrairChave(advisory) {
     };
   }
   return { chave: null, aviso: `advisory sem GHSA e sem source (${url || 'url ausente'}); ignorado` };
+}
+
+// Agrupa itens com a mesma chave, acumulando os pacotes afetados. Preserva um
+// `pacotes` já existente no item (segunda passada de dedup, ex.: agregação entre
+// roots), para não perder os pacotes acumulados pela primeira passada.
+export function deduplicar(itens, chaveDe) {
+  const porChave = new Map();
+  for (const item of itens) {
+    const chave = chaveDe(item);
+    const pacotesDoItem =
+      Array.isArray(item.pacotes) && item.pacotes.length > 0 ? item.pacotes : item.pacote ? [item.pacote] : [];
+    const existente = porChave.get(chave);
+    if (existente) {
+      for (const pacote of pacotesDoItem) {
+        if (!existente.pacotes.includes(pacote)) existente.pacotes.push(pacote);
+      }
+    } else {
+      porChave.set(chave, { ...item, pacotes: [...pacotesDoItem] });
+    }
+  }
+  return [...porChave.values()];
 }
 
 // Normaliza a allowlist aceitando tanto o objeto persistido ({ policy, allowlist })
@@ -100,15 +128,30 @@ export function avaliarRelatorio(report, allowlist) {
       const excecao = porAdvisory.get(chave);
       if (!excecao) {
         pendencias.push({ ...pendencia, motivo: 'sem-excecao' });
-      } else if (fixAvailable === false) {
-        permitidos.push({ ...pendencia, justificativa: excecao.justification });
       } else {
-        pendencias.push({ ...pendencia, motivo: 'com-correcao', justificativa: excecao.justification });
+        if (excecao.package && excecao.package !== pendencia.pacote) {
+          avisos.push(
+            `${nomePacote}: allowlist de ${chave} declara package "${excecao.package}", mas o advisory afeta "${pendencia.pacote}" — confira a entrada`,
+          );
+        }
+        if (fixAvailable === false) {
+          permitidos.push({ ...pendencia, justificativa: excecao.justification });
+        } else {
+          pendencias.push({ ...pendencia, motivo: 'com-correcao', justificativa: excecao.justification });
+        }
       }
     }
   }
 
-  return { pendencias, permitidos, avisos };
+  // Deduplica dentro do relatório: o mesmo GHSA pode aparecer em várias vias
+  // (pacotes). `motivo` entra na chave para preservar o fail-closed quando o
+  // mesmo GHSA cai em pacotes com fixAvailable diferente (um vira permitido, o
+  // outro continua pendência).
+  return {
+    pendencias: deduplicar(pendencias, (p) => `${p.advisory.toUpperCase()}::${p.motivo}`),
+    permitidos: deduplicar(permitidos, (p) => p.advisory.toUpperCase()),
+    avisos,
+  };
 }
 
 // Lê e valida a allowlist. Formato: { policy: <string>, allowlist: [ { advisory,
@@ -176,42 +219,58 @@ function parseArgs(argv) {
 
 // Roda `npm audit` em um root. Nunca decide aprovação: devolve { report } ou
 // { erro }. Lê o stdout mesmo com exit ≠ 0 (npm sinaliza vulnerabilidade com
-// exit 1 e o relatório vem no stdout).
+// exit 1 e o relatório vem no stdout). Repete até 2 vezes apenas quando NÃO há
+// stdout (spawn falhou ou saída vazia — instabilidade de rede/registry); com
+// stdout presente nunca repete. JSON inválido e `report.error` são erro
+// operacional definitivo, sem retry.
 function auditarRoot(rootAbs) {
   log(`auditando ${rootAbs}`);
-  const res = spawnSync('npm', ['audit', '--omit=dev', '--package-lock-only', '--json'], {
-    cwd: rootAbs,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const MAX_TENTATIVAS = 2;
+  let ultimoErro;
 
-  if (res.error) return { erro: `falha ao executar npm audit em ${rootAbs}: ${res.error.message}` };
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+    const res = spawnSync('npm', ['audit', '--omit=dev', '--package-lock-only', '--json'], {
+      cwd: rootAbs,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
 
-  const stdout = (res.stdout || '').trim();
-  if (!stdout) {
-    const stderr = (res.stderr || '').trim();
-    return { erro: `saída vazia do npm audit em ${rootAbs}${stderr ? ` (stderr: ${stderr})` : ''}` };
+    if (!res.error) {
+      const stdout = (res.stdout || '').trim();
+      if (stdout) {
+        let report;
+        try {
+          report = JSON.parse(stdout);
+        } catch {
+          return { erro: `JSON inválido do npm audit em ${rootAbs}` };
+        }
+
+        // Formato de erro operacional (ex.: {"error":{"code":"ENOLOCK"}}) —
+        // nunca é "há vulnerabilidades", então não pode virar exit 1.
+        if (report && typeof report === 'object' && report.error) {
+          const { code, summary } = report.error;
+          return { erro: `npm audit em ${rootAbs} falhou: ${code || 'erro'}${summary ? ` — ${summary}` : ''}` };
+        }
+
+        return { report };
+      }
+      const stderr = (res.stderr || '').trim();
+      ultimoErro = `saída vazia do npm audit em ${rootAbs}${stderr ? ` (stderr: ${stderr})` : ''}`;
+    } else {
+      ultimoErro = `falha ao executar npm audit em ${rootAbs}: ${res.error.message}`;
+    }
+
+    if (tentativa < MAX_TENTATIVAS) {
+      warn(`${ultimoErro}; tentando novamente (${tentativa + 1}/${MAX_TENTATIVAS})`);
+    }
   }
 
-  let report;
-  try {
-    report = JSON.parse(stdout);
-  } catch {
-    return { erro: `JSON inválido do npm audit em ${rootAbs}` };
-  }
-
-  // Formato de erro operacional (ex.: {"error":{"code":"ENOLOCK"}}) — nunca é
-  // "há vulnerabilidades", então não pode virar exit 1.
-  if (report && typeof report === 'object' && report.error) {
-    const { code, summary } = report.error;
-    return { erro: `npm audit em ${rootAbs} falhou: ${code || 'erro'}${summary ? ` — ${summary}` : ''}` };
-  }
-
-  return { report };
+  return { erro: ultimoErro };
 }
 
 function imprimirPendencia(pendencia) {
-  console.error(`  - ${pendencia.pacote} (${pendencia.severidade}) ${pendencia.advisory}`);
+  const pacotes = pendencia.pacotes?.join(', ') || pendencia.pacote;
+  console.error(`  - ${pacotes} (${pendencia.severidade}) ${pendencia.advisory}`);
   console.error(`      título: ${pendencia.titulo}`);
   console.error(`      url: ${pendencia.url || '(sem url)'}`);
   console.error(`      range: ${pendencia.range || '(sem range)'}`);
@@ -224,12 +283,26 @@ function imprimirPendencia(pendencia) {
   }
 }
 
+// Anexa um resumo em Markdown ao step summary do GitHub Actions, quando o
+// runner disponibiliza o arquivo. Fora do CI (ou sem permissão) é no-op com
+// aviso — nunca interfere no exit code.
+function escreverSummary(markdown) {
+  const caminho = process.env.GITHUB_STEP_SUMMARY;
+  if (!caminho) return;
+  try {
+    appendFileSync(caminho, markdown.endsWith('\n') ? markdown : `${markdown}\n`);
+  } catch (e) {
+    warn(`não foi possível escrever o step summary: ${e.message}`);
+  }
+}
+
 function main() {
   let args;
   try {
     args = parseArgs(process.argv.slice(2));
   } catch (e) {
     erro(e.message);
+    escreverSummary(`## Auditoria de dependências de produção\n\n**ERRO OPERACIONAL**\n\n- ${e.message}`);
     return 2;
   }
 
@@ -238,15 +311,18 @@ function main() {
     allowlist = carregarAllowlist(args.allowlist);
   } catch (e) {
     erro(`allowlist inválida (${args.allowlist}): ${e.message}`);
+    escreverSummary(
+      `## Auditoria de dependências de produção\n\n**ERRO OPERACIONAL**\n\n- allowlist inválida (${args.allowlist}): ${e.message}`,
+    );
     return 2;
   }
   log(`allowlist: ${args.allowlist} (${allowlist.allowlist.length} entrada(s))`);
 
   const erros = [];
-  const pendencias = [];
+  const pendenciasBrutas = [];
+  const permitidosBrutos = [];
   const avisos = [];
   const advisoriesTratados = new Set();
-  let excecoesAplicadas = 0;
 
   for (const root of args.roots) {
     const rootAbs = isAbsolute(root) ? root : resolve(REPO_ROOT, root);
@@ -258,14 +334,22 @@ function main() {
     const avaliacao = avaliarRelatorio(resultado.report, allowlist);
     for (const aviso of avaliacao.avisos) avisos.push(`${root}: ${aviso}`);
     for (const item of avaliacao.permitidos) {
-      excecoesAplicadas++;
       advisoriesTratados.add(item.advisory.toUpperCase());
-      log(`[allow] ${item.advisory} (${item.pacote}) — ${item.justificativa}`);
+      permitidosBrutos.push({ ...item, root });
     }
     for (const item of avaliacao.pendencias) {
       advisoriesTratados.add(item.advisory.toUpperCase());
-      pendencias.push({ ...item, root });
+      pendenciasBrutas.push({ ...item, root });
     }
+  }
+
+  // Deduplica entre roots: uma exceção vale em QUALQUER root (o mesmo advisory
+  // agrupa os pacotes afetados) e um root repetido não duplica pendência.
+  const permitidos = deduplicar(permitidosBrutos, (p) => p.advisory.toUpperCase());
+  const pendencias = deduplicar(pendenciasBrutas, (p) => `${p.root}::${p.advisory.toUpperCase()}::${p.motivo}`);
+  const excecoesAplicadas = permitidos.length;
+  for (const item of permitidos) {
+    log(`[allow] ${item.advisory} (${item.pacotes.join(', ') || item.pacote}) — ${item.justificativa}`);
   }
 
   // "Não utilizada" é global: uma exceção vale se casar em QUALQUER root.
@@ -279,6 +363,11 @@ function main() {
   if (erros.length > 0) {
     for (const e of erros) erro(e);
     erro('auditoria interrompida por erro operacional — pipeline REPROVADO');
+    escreverSummary(
+      `## Auditoria de dependências de produção\n\n**ERRO OPERACIONAL**\n\n${erros
+        .map((e) => `- ${e}`)
+        .join('\n')}`,
+    );
     return 2;
   }
 
@@ -289,15 +378,39 @@ function main() {
       imprimirPendencia(p);
     }
     erro('pipeline REPROVADO — corrija as dependências ou registre exceção apenas sem correção');
+    escreverSummary(
+      [
+        '## Auditoria de dependências de produção',
+        '',
+        '**REPROVADO — high/critical pendente**',
+        '',
+        ...pendencias.map(
+          (p) => `- [${p.root}] ${p.pacotes.join(', ') || p.pacote} (${p.severidade}) ${p.advisory} — ${p.titulo}`,
+        ),
+      ].join('\n'),
+    );
     return 1;
   }
 
   log(`OK — nenhuma vulnerabilidade high/critical pendente (${excecoesAplicadas} exceção(ões) aplicada(s))`);
+  escreverSummary(
+    `## Auditoria de dependências de produção\n\n**OK** — nenhuma vulnerabilidade high/critical pendente (${excecoesAplicadas} exceção(ões) aplicada(s)).`,
+  );
   return 0;
 }
 
 // Só executa quando chamado direto; `import` apenas expõe as funções puras.
-const executadoDireto = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (executadoDireto) {
+// `realpathSync` cobre chamadas via symlink, onde `argv[1]` difere do caminho
+// real do módulo.
+function foiExecutadoDireto() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (foiExecutadoDireto()) {
   process.exitCode = main();
 }
