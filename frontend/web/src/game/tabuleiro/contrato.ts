@@ -9,6 +9,7 @@
  */
 
 import { LARGURA_MESA } from '../ambiente/contrato'
+import type { AjusteDoModeloDaCaixa } from './modelosDaCaixa'
 
 export const LADO_DA_GRADE = 7
 
@@ -246,11 +247,68 @@ export const HEX_COR_PEAO: Record<CorDoPeao, string> = {
 export const PEAO_Y = PECA_Y + 0.14
 
 /**
- * Fileira dos peões não posicionados sobre a Mesa: lado oposto à zona da
- * Caixa (-X; Caixa fica em +X). Altura y = 0 (plano superior da Mesa). O
- * espaçamento usa o padrão compartilhado `ESPACAMENTO_ENTRE_PECAS_MESA`.
+ * Fileira dos peões não posicionados: lado oposto à zona da Caixa (-X;
+ * Caixa fica em +X), repousando sobre a bandeja dos peões (não mais no
+ * tampo). O espaçamento usa o padrão compartilhado
+ * `ESPACAMENTO_ENTRE_PECAS_MESA`.
  */
 export const OFFSET_FILEIRA_PEOES_X = -8.0
+
+// ── Bandeja dos Peões sobre a Mesa ──────────────────────────────────────
+// Duplicata esticada da cesta (`serving_tray` + albedo `obscuro`) sob a
+// fileira de peões não posicionados: os peões repousam sobre ela em vez do
+// tampo. O esticamento é não-uniforme em Z (fator sobre a normalização
+// uniforme) para cobrir a fileira N=2..4.
+export const POSICAO_BANDEJA_PEOES: readonly [number, number, number] = [
+  OFFSET_FILEIRA_PEOES_X,
+  ALTURA_ZONA_CAIXA,
+  0.0,
+]
+export const BANDEJA_PEOES_LARGURA = 0.9
+export const BANDEJA_PEOES_PROFUNDIDADE = 2.4
+/** Esticamento em Z sobre a pegada (ponto único de calibragem). */
+export const FATOR_ESTICAR_BANDEJA_PEOES = 5.7
+
+/**
+ * Ajuste próprio da bandeja dos peões (ponto único de calibragem via
+ * screenshot) — INDEPENDENTE da bandeja original da Caixa: escala e giro
+ * aqui não tocam na zona da Caixa.
+ */
+export const AJUSTE_DA_BANDEJA_DOS_PEOES: AjusteDoModeloDaCaixa = {
+  escala: 2,
+  rotacaoY: 0,
+}
+
+/**
+ * Altura da base do peão sobre a bandeja (topo do modelo esticado —
+ * ponto único de calibragem via screenshot: se o peão flutuar ou afundar,
+ * ajuste aqui).
+ */
+export const ALTURA_BASE_PEAO_NA_BANDEJA = 0.1
+
+/** Invariante: bandeja dos peões dentro da Mesa e cobrindo a fileira N=4. */
+export function validarBandejaDosPeoes(): string | null {
+  const [x, , z] = POSICAO_BANDEJA_PEOES
+  const meiaLargura = BANDEJA_PEOES_LARGURA / 2
+  const meiaProfundidade =
+    (BANDEJA_PEOES_PROFUNDIDADE * FATOR_ESTICAR_BANDEJA_PEOES) / 2
+  if (
+    Math.abs(x) + meiaLargura > LARGURA_MESA / 2 ||
+    Math.abs(z) + meiaProfundidade > LARGURA_MESA / 2
+  ) {
+    return 'Bandeja dos peões deve ficar dentro da Mesa'
+  }
+  if (x >= 0) {
+    return 'Bandeja dos peões deve ficar no lado oposto à Caixa (−X)'
+  }
+  // Cobre a fileira cheia (N=4: z ±2.55 + raio do peão).
+  const pontaDaFileira =
+    ((QUANTIDADE_PEOES - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA + 0.5
+  if (meiaProfundidade < pontaDaFileira) {
+    return 'Bandeja dos peões deve cobrir a fileira'
+  }
+  return null
+}
 
 // ── Composição inicial das Peças Iniciais na mesa (issue #143) ──
 // Espelha `estadoInicialDoTabuleiro()` do engine: as 4 iniciais (`inicial-1`
@@ -658,9 +716,9 @@ export function destinosConectadosDoPeao(
   return destinos
 }
 
-/** Posição mundo da fileira de peões sobre a Mesa (índice = posição em `peoes`, quantidade = N). */
+/** Posição mundo da fileira de peões sobre a bandeja dos peões (índice = posição em `peoes`, quantidade = N). */
 export function peaoMesaParaMundo(indice: number, quantidadeDePeoes: number = QUANTIDADE_PEOES): [number, number, number] {
   const n = quantidadeValidaDeJogadores(quantidadeDePeoes)
   const z = (indice - (n - 1) / 2) * ESPACAMENTO_ENTRE_PECAS_MESA
-  return [OFFSET_FILEIRA_PEOES_X, 0, z]
+  return [OFFSET_FILEIRA_PEOES_X, ALTURA_BASE_PEAO_NA_BANDEJA, z]
 }

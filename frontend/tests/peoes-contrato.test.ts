@@ -1,8 +1,14 @@
 import {
+  AJUSTE_DA_BANDEJA_DOS_PEOES,
+  ALTURA_BASE_PEAO_NA_BANDEJA,
+  BANDEJA_PEOES_LARGURA,
+  BANDEJA_PEOES_PROFUNDIDADE,
   CORES_DOS_PEOES,
+  FATOR_ESTICAR_BANDEJA_PEOES,
   HEX_COR_PEAO,
   LADO_DA_GRADE,
   PEAO_Y,
+  POSICAO_BANDEJA_PEOES,
   QUANTIDADE_PEOES,
   destinosConectadosDoPeao,
   encontrarPecaNaCelula,
@@ -10,6 +16,7 @@ import {
   normalizarCelula,
   peaoMesaParaMundo,
   selecionarPeaoNaExibicao,
+  validarBandejaDosPeoes,
   vizinhasConectadas,
 } from '../web/src/game/tabuleiro/contrato'
 import type {
@@ -17,6 +24,7 @@ import type {
   PecaPosicionada,
 } from '../web/src/game/tabuleiro/contrato'
 import { LARGURA_MESA } from '../web/src/game/ambiente/contrato'
+import { AJUSTES_DOS_MODELOS_DA_CAIXA } from '../web/src/game/tabuleiro/modelosDaCaixa'
 import { criarEstadoExibicaoMock } from './helpers/mockExibicao'
 
 // ── Helpers ──
@@ -345,13 +353,40 @@ describe('peões no contrato de exibição (issue #90)', () => {
     expect(new Set(pos.map((p) => p.join(','))).size).toBe(QUANTIDADE_PEOES)
     for (const [x, y, z] of pos) {
       expect(x).toBeLessThan(0) // oposto à zona da Caixa (+X)
-      expect(y).toBe(0) // plano superior da Mesa
+      expect(y).toBe(ALTURA_BASE_PEAO_NA_BANDEJA) // repousa na bandeja dos peões
       expect(Math.abs(x)).toBeLessThanOrEqual(LARGURA_MESA / 2)
       expect(Math.abs(z)).toBeLessThanOrEqual(LARGURA_MESA / 2)
     }
     // fileira simétrica em z em torno do centro
     expect(pos[0][2]).toBeCloseTo(-pos[3][2])
     expect(pos[1][2]).toBeCloseTo(-pos[2][2])
+  })
+
+  it('bandeja dos peões: duplicata esticada no lado oposto à Caixa, cobrindo a fileira', () => {
+    expect(validarBandejaDosPeoes()).toBeNull()
+    const [x, , z] = POSICAO_BANDEJA_PEOES
+    expect(x).toBeLessThan(0)
+    expect(z).toBe(0)
+    // Esticada em Z para a calha cobrir a fileira cheia.
+    expect(FATOR_ESTICAR_BANDEJA_PEOES).toBeGreaterThan(1)
+    expect(BANDEJA_PEOES_LARGURA).toBeGreaterThan(0)
+    expect(BANDEJA_PEOES_PROFUNDIDADE).toBeGreaterThan(0)
+    // A fileira (y da base) coincide com o topo da bandeja.
+    expect(ALTURA_BASE_PEAO_NA_BANDEJA).toBeGreaterThan(0)
+    for (let i = 0; i < QUANTIDADE_PEOES; i++) {
+      const [, , pz] = peaoMesaParaMundo(i)
+      expect(Math.abs(pz)).toBeLessThanOrEqual(
+        (BANDEJA_PEOES_PROFUNDIDADE * FATOR_ESTICAR_BANDEJA_PEOES) / 2,
+      )
+    }
+  })
+
+  it('bandeja dos peões tem escala e giro próprios (fora da Caixa)', () => {
+    // Independente da bandeja original: calibrar aqui não toca na zona da Caixa.
+    expect(AJUSTE_DA_BANDEJA_DOS_PEOES.escala).toBe(2)
+    expect(AJUSTES_DOS_MODELOS_DA_CAIXA.cesta.escala).toBe(2)
+    expect(AJUSTE_DA_BANDEJA_DOS_PEOES.rotacaoY).toBe(0)
+    expect(AJUSTES_DOS_MODELOS_DA_CAIXA.cesta.rotacaoY).not.toBe(0)
   })
 
   // ── Invariantes do mock ──

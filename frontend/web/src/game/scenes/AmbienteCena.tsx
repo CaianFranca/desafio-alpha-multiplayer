@@ -24,6 +24,7 @@ import {
 import { aspectoVisivel, nevoaParaAspecto } from '../ambiente/cameraLimites'
 import { Tabuleiro } from '../tabuleiro/Tabuleiro'
 import { Caixa } from '../tabuleiro/Caixa'
+import { BandejaDosPeoes } from '../tabuleiro/BandejaDosPeoes'
 import { DecoracoesDaMesa } from '../tabuleiro/Decoracoes'
 import { NevoaDaMesa } from '../tabuleiro/Nevoa'
 import { LimiteDeErroDoModelo } from '../tabuleiro/LimiteDeErroDoModelo'
@@ -372,6 +373,7 @@ export function AmbienteCena({
               onPuxar={onPuxarPecaDaBandeja}
             />
             <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
+            <BandejaDosPeoes />
             {peoesNaMesa.map((peao) => {
               // Voo ativo (#242): o peão voador não renderiza estático na Mesa
               // (Primeiro Turno: origem mesa→Peça Inicial) — só o overlay voa.

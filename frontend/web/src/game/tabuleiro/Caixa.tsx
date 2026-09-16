@@ -157,7 +157,7 @@ function prepararMeshesDoClone(objeto: THREE.Object3D): THREE.Material[] {
  * o multiplicador sai exato, sem clamp — o excedente sobre a pegada é
  * intencional para coerência em tela (decisão do PO). Não reduzir.
  */
-function ModeloNormalizado({
+export function ModeloNormalizado({
   largura,
   profundidade,
   alturaMaxima,
