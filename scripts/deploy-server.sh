@@ -133,8 +133,10 @@ for snippet in hsts-map security-headers security-headers-static rate-limit clou
   cp "$RELEASE_DIR/infra/nginx/$snippet.snippet" "/etc/nginx/conf.d/$snippet.snippet" \
     || die "snippet nginx ausente no tarball: infra/nginx/$snippet.snippet"
 done
-# Vhost de borda (:80, default_server) que recebe /server01 do proxy do admin e
-# faz strip do prefixo rumo ao nginx do app em 127.0.0.1:8080.
+# Vhost de borda (:80, default_server) que recebe as requisições do Cloudflare
+# Quick Tunnel (TLS terminado no Cloudflare; cloudflared conecta de 127.0.0.1),
+# com o prefixo /server01 vindo da URL pública, e faz strip do prefixo rumo ao
+# nginx do app em 127.0.0.1:8080.
 cp "$RELEASE_DIR/infra/nginx/nginx.edge.conf" /etc/nginx/sites-available/flicker-edge
 ln -sfn /etc/nginx/sites-available/flicker-edge /etc/nginx/sites-enabled/flicker-edge
 # O site default do Debian também é default_server em :80 e conflitaria com a
