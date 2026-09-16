@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import jwt from 'jsonwebtoken';
 import type { Redis } from 'ioredis';
 import WebSocket from 'ws';
-import { criarClienteRedis } from '@flicker/config';
+import { criarClienteRedis, SESSION_ISS, SESSION_ACCESS_AUDIENCE, SESSION_REFRESH_AUDIENCE } from '@flicker/config';
 import type {
   MembroDaSala,
   PartidaId,
@@ -42,7 +42,7 @@ function membro(n: number, sobrescreve: Partial<MembroDaSala> = {}): MembroDaSal
 }
 
 function criarJwt(jogadorId: string, apelido: string, sessaoId?: string, opcoes: Partial<jwt.SignOptions> = {}): string {
-  return jwt.sign({ sub: jogadorId, apelido, sessaoId }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h', ...opcoes });
+  return jwt.sign({ sub: jogadorId, apelido, sessaoId }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE, ...opcoes });
 }
 
 async function criarSessaoNoRedis(sessaoId: string, jogadorId: string): Promise<void> {
@@ -436,8 +436,9 @@ test('JWT inválido/expirado é recusado', async () => {
     assert.equal(msgErrado.type, 'ADMISSAO_REJEITADA');
     assert.equal(msgErrado.codigo, 'SESSAO_INVALIDA');
 
-    // Token sem campos obrigatórios no payload
-    const tokenSemJogador = jwt.sign({ sessaoId: 'x' }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
+    // Token sem campos obrigatórios no payload (com iss/aud válidos —
+    // exercita a validação de payload, não a de iss/aud)
+    const tokenSemJogador = jwt.sign({ sessaoId: 'x' }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE });
     const resultadoSemJogador = await fazerUpgradeHttp(servidor.port, tokenSemJogador, partidaId);
     assert.equal(resultadoSemJogador.status, 401);
     const msgSemJogador = JSON.parse(resultadoSemJogador.texto);
@@ -451,6 +452,63 @@ test('JWT inválido/expirado é recusado', async () => {
     const msgExpirado = JSON.parse(resultadoExpirado.texto);
     assert.equal(msgExpirado.type, 'ADMISSAO_REJEITADA');
     assert.equal(msgExpirado.codigo, 'SESSAO_INVALIDA');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('JWT de sessão sem iss/aud (token antigo) é recusado — corte seco #416', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaNoRedis(partidaId, roster);
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-1');
+
+    // Mesmo payload/sessão válidos, mas sem iss/aud: sem o corte seco,
+    // seria admitido; com iss/aud exigido, cai em SESSAO_INVALIDA.
+    const legado = jwt.sign({ sub: 'jogador-1', apelido: 'Jogador 1', sessaoId }, JWT_SECRET, {
+      algorithm: 'HS256',
+      expiresIn: '1h',
+    });
+    const resultado = await fazerUpgradeHttp(servidor.port, legado, partidaId);
+    assert.equal(resultado.status, 401);
+    assert.equal((JSON.parse(resultado.texto) as { codigo: string }).codigo, 'SESSAO_INVALIDA');
+  } finally {
+    await servidor.fechar();
+  }
+});
+
+test('JWT de sessão com aud errada (refresh) ou iss errado é recusado (#416)', async () => {
+  const servidor = await subirServidor();
+  try {
+    const partidaId = crypto.randomUUID() as PartidaId;
+    const roster: MembroDaSala[] = [membro(1), membro(2), membro(3), membro(4)];
+    await criarPartidaNoRedis(partidaId, roster);
+    const sessaoId = crypto.randomUUID();
+    await criarSessaoNoRedis(sessaoId, 'jogador-1');
+    const base = { sub: 'jogador-1', apelido: 'Jogador 1', sessaoId };
+
+    const audErrada = jwt.sign(base, JWT_SECRET, {
+      algorithm: 'HS256',
+      expiresIn: '1h',
+      issuer: SESSION_ISS,
+      audience: SESSION_REFRESH_AUDIENCE,
+    });
+    const resultadoAud = await fazerUpgradeHttp(servidor.port, audErrada, partidaId);
+    assert.equal(resultadoAud.status, 401);
+    assert.equal((JSON.parse(resultadoAud.texto) as { codigo: string }).codigo, 'SESSAO_INVALIDA');
+
+    const issErrado = jwt.sign(base, JWT_SECRET, {
+      algorithm: 'HS256',
+      expiresIn: '1h',
+      issuer: 'outro-emissor',
+      audience: SESSION_ACCESS_AUDIENCE,
+    });
+    const resultadoIss = await fazerUpgradeHttp(servidor.port, issErrado, partidaId);
+    assert.equal(resultadoIss.status, 401);
+    assert.equal((JSON.parse(resultadoIss.texto) as { codigo: string }).codigo, 'SESSAO_INVALIDA');
   } finally {
     await servidor.fechar();
   }

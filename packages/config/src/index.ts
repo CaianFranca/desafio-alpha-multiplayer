@@ -17,6 +17,10 @@ export interface Config {
   partidaNaoInicioSegundos: number;
   partidaReconexaoEmAndamentoSegundos: number;
   partidaChatHistoricoMaximo: number;
+  trustProxyHops: number;
+  authRateLimitJanelaSegundos: number;
+  authRateLimitMaxPorIp: number;
+  authRateLimitMaxPorCadastro: number;
   lobbyRetornoCallbackUrl: string;
   lobbyDesistenciaCallbackUrl: string;
   postgres: {
@@ -37,6 +41,16 @@ export interface Config {
   gameServerId: string | undefined;
   /** Host que o game-server anuncia no registro do Redis, consumido pelo lobby no encaminhamento. */
   gameServerAdvertiseHost: string;
+  /** Origens exatas autorizadas a abrir o WS (issue #409); sem wildcard. */
+  wsOrigensPermitidas: string[];
+  /** Teto de bytes por mensagem WS (issue #409). */
+  wsMaxPayloadBytes: number;
+  /** Máximo de mensagens por conexão dentro da janela do rate limit (issue #409). */
+  wsLimiteMensagens: number;
+  /** Janela em ms do rate limit geral por conexão (issue #409). */
+  wsJanelaLimiteMensagensMs: number;
+  /** Intervalo em ms da revalidação da Sessão das conexões WS abertas (issue #410). */
+  wsSessaoRevalidacaoMs: number;
 }
 
 // Alinhado com .env.example e docker-compose.yml (1234), como o lobby faz com a 3001.
@@ -45,12 +59,19 @@ const DEFAULT_LOBBY_SERVER_PORT = 3001;
 const DEFAULT_JWT_SECRET = 'dev_jwt_secret_change_me';
 const DEFAULT_JWT_REFRESH_SECRET = 'dev_jwt_refresh_change_me';
 const DEFAULT_POSTGRES_PASSWORD = 'flicker_dev_password';
+export const DEFAULT_REDIS_PASSWORD = 'flicker_redis_dev_password';
 const DEFAULT_PG_POOL_MAX = 10;
 const MAX_PG_POOL_MAX = 100;
 const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
 const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
+const DEFAULT_TRUST_PROXY_HOPS = 1;
+const MINIMO_TRUST_PROXY_HOPS = 0;
+const MAXIMO_TRUST_PROXY_HOPS = 10;
+const DEFAULT_AUTH_RATE_LIMIT_JANELA_SEGUNDOS = 900;
+const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_IP = 30;
+const DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CADASTRO = 10;
 /**
  * Teto do histórico de chat por Partida (issue #388): fonte única do default
  * 50 (faixa 1..200). `historico-chat.ts` importa este default em vez de
@@ -59,6 +80,25 @@ const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
 export const DEFAULT_PARTIDA_CHAT_HISTORICO_MAXIMO = 50;
 export const MINIMO_PARTIDA_CHAT_HISTORICO_MAXIMO = 1;
 export const MAXIMO_PARTIDA_CHAT_HISTORICO_MAXIMO = 200;
+// Defaults e faixas do endurecimento do WS (issue #409): teto de payload e
+// rate limit geral por conexão. Exportados para reuso em testes e backends.
+export const DEFAULT_WS_MAX_PAYLOAD_BYTES = 65536;
+export const MIN_WS_MAX_PAYLOAD_BYTES = 1024;
+export const MAX_WS_MAX_PAYLOAD_BYTES = 1048576;
+export const DEFAULT_WS_LIMITE_MENSAGENS = 100;
+export const MIN_WS_LIMITE_MENSAGENS = 1;
+export const MAX_WS_LIMITE_MENSAGENS = 10000;
+export const DEFAULT_WS_JANELA_LIMITE_MENSAGENS_MS = 10000;
+export const MIN_WS_JANELA_LIMITE_MENSAGENS_MS = 100;
+export const MAX_WS_JANELA_LIMITE_MENSAGENS_MS = 600000;
+// Revalidação da Sessão das conexões WS abertas (issue #410). O teto (60s)
+// limita a janela em que o game-server ainda aceita comandos de uma Sessão
+// revogada: o lobby encerra na hora e o game-server, em até o intervalo. O
+// teto fica abaixo do TTL do marcador de rotação (sessionAccessTtlSeconds =
+// 900s), para o refresh não perder o rastro da Sessão rotacionada.
+export const DEFAULT_WS_SESSAO_REVALIDACAO_MS = 30000;
+export const MIN_WS_SESSAO_REVALIDACAO_MS = 1000;
+export const MAX_WS_SESSAO_REVALIDACAO_MS = 60000;
 const DEFAULT_SESSION_ACCESS_TTL_SECONDS = 900; // 15 minutos
 const DEFAULT_SESSION_REFRESH_TTL_SECONDS = 604800; // 7 dias
 const DEFAULT_GAME_SERVER_HEARTBEAT_INTERVAL_MS = 5000;
@@ -153,8 +193,8 @@ function parsePartidaTerminadaTtlSegundos(raw: string | undefined): number {
 /**
  * Parser inteiro genérico dos TTLs de partida com faixa mínima/máxima:
  * devolve o valor quando inteiro dentro da faixa, senão o fallback (com warn
- * só quando a env veio definida mas inválida — ausente cai silenciosamente no
- * default, como os demais parsers deste módulo).
+ * só quando a env veio definida mas inválida — inclusive vazia; ausente cai
+ * silenciosamente no default, como os demais parsers deste módulo).
  */
 function parseInteiroComLimites(
   raw: string | undefined,
@@ -163,8 +203,9 @@ function parseInteiroComLimites(
   minimo: number,
   maximo?: number,
 ): number {
+  const vazio = raw !== undefined && raw.trim() === '';
   const parsed = Number(raw ?? fallback);
-  if (Number.isInteger(parsed) && parsed >= minimo && (maximo === undefined || parsed <= maximo)) {
+  if (!vazio && Number.isInteger(parsed) && parsed >= minimo && (maximo === undefined || parsed <= maximo)) {
     return parsed;
   }
   if (raw !== undefined) {
@@ -195,6 +236,123 @@ function parsePartidaChatHistoricoMaximo(raw: string | undefined): number {
     MINIMO_PARTIDA_CHAT_HISTORICO_MAXIMO,
     MAXIMO_PARTIDA_CHAT_HISTORICO_MAXIMO,
   );
+}
+
+function parseTrustProxyHops(raw: string | undefined): number {
+  return parseInteiroComLimites(raw, DEFAULT_TRUST_PROXY_HOPS, 'TRUST_PROXY_HOPS', MINIMO_TRUST_PROXY_HOPS, MAXIMO_TRUST_PROXY_HOPS);
+}
+
+function parseAuthRateLimitJanelaSegundos(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_AUTH_RATE_LIMIT_JANELA_SEGUNDOS,
+    'AUTH_RATE_LIMIT_JANELA_SEGUNDOS',
+    1,
+    86400,
+  );
+}
+
+function parseAuthRateLimitMaxPorIp(raw: string | undefined): number {
+  return parseInteiroComLimites(raw, DEFAULT_AUTH_RATE_LIMIT_MAX_POR_IP, 'AUTH_RATE_LIMIT_MAX_POR_IP', 1, 100000);
+}
+
+function parseAuthRateLimitMaxPorCadastro(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_AUTH_RATE_LIMIT_MAX_POR_CADASTRO,
+    'AUTH_RATE_LIMIT_MAX_POR_CADASTRO',
+    1,
+    100000,
+  );
+}
+
+function parseWsMaxPayloadBytes(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_MAX_PAYLOAD_BYTES,
+    'WS_MAX_PAYLOAD_BYTES',
+    MIN_WS_MAX_PAYLOAD_BYTES,
+    MAX_WS_MAX_PAYLOAD_BYTES,
+  );
+}
+
+function parseWsLimiteMensagens(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_LIMITE_MENSAGENS,
+    'WS_LIMITE_MENSAGENS',
+    MIN_WS_LIMITE_MENSAGENS,
+    MAX_WS_LIMITE_MENSAGENS,
+  );
+}
+
+function parseWsJanelaLimiteMensagensMs(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_JANELA_LIMITE_MENSAGENS_MS,
+    'WS_JANELA_LIMITE_MENSAGENS_MS',
+    MIN_WS_JANELA_LIMITE_MENSAGENS_MS,
+    MAX_WS_JANELA_LIMITE_MENSAGENS_MS,
+  );
+}
+
+function parseWsSessaoRevalidacaoMs(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_WS_SESSAO_REVALIDACAO_MS,
+    'WS_SESSAO_REVALIDACAO_MS',
+    MIN_WS_SESSAO_REVALIDACAO_MS,
+    MAX_WS_SESSAO_REVALIDACAO_MS,
+  );
+}
+
+/**
+ * Origens exatas autorizadas no WS (issue #409). O `Origin` de navegador é
+ * sempre `scheme://host:port` e nunca carrega subpath, por isso o default
+ * deriva `.origin` de `lobbyPublicUrl` (tolerando deploy sob base path, ex.:
+ * VITE_BASE_PATH=/server01). Sem env em desenvolvimento, libera as portas
+ * padrão do Vite para o frontend local.
+ */
+function parseWsOrigensPermitidas(
+  raw: string | undefined,
+  lobbyPublicUrl: string,
+  isProduction: boolean,
+): string[] {
+  if (raw === undefined || raw.trim().length === 0) {
+    const origens = new Set<string>([new URL(lobbyPublicUrl).origin]);
+    if (!isProduction) {
+      origens.add('http://localhost:5173');
+      origens.add('http://127.0.0.1:5173');
+    }
+    return [...origens];
+  }
+
+  const origens = new Set<string>();
+  for (const entrada of raw.split(',')) {
+    const valor = entrada.trim();
+    if (valor.length === 0) {
+      continue;
+    }
+    if (valor.includes('*')) {
+      throw new Error('WS_ORIGENS_PERMITIDAS não aceita wildcard — informe origens exatas');
+    }
+    let url: URL;
+    try {
+      url = new URL(valor);
+    } catch {
+      throw new Error(`WS_ORIGENS_PERMITIDAS deve conter origens HTTP(S) absolutas: "${valor}"`);
+    }
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      url.pathname !== '/' ||
+      url.search !== '' ||
+      url.hash !== ''
+    ) {
+      throw new Error(`WS_ORIGENS_PERMITIDAS deve conter origens HTTP(S) absolutas: "${valor}"`);
+    }
+    origens.add(url.origin);
+  }
+  return [...origens];
 }
 
 function parseLobbyRetornoCallbackUrl(raw: string | undefined, fallback: string): string {
@@ -342,6 +500,29 @@ export function getConfig(): Config {
   const partidaChatHistoricoMaximo = parsePartidaChatHistoricoMaximo(
     process.env.PARTIDA_CHAT_HISTORICO_MAXIMO as string | undefined,
   );
+  const trustProxyHops = parseTrustProxyHops(process.env.TRUST_PROXY_HOPS as string | undefined);
+  const authRateLimitJanelaSegundos = parseAuthRateLimitJanelaSegundos(
+    process.env.AUTH_RATE_LIMIT_JANELA_SEGUNDOS as string | undefined,
+  );
+  const authRateLimitMaxPorIp = parseAuthRateLimitMaxPorIp(
+    process.env.AUTH_RATE_LIMIT_MAX_POR_IP as string | undefined,
+  );
+  const authRateLimitMaxPorCadastro = parseAuthRateLimitMaxPorCadastro(
+    process.env.AUTH_RATE_LIMIT_MAX_POR_CADASTRO as string | undefined,
+  );
+  const wsOrigensPermitidas = parseWsOrigensPermitidas(
+    process.env.WS_ORIGENS_PERMITIDAS as string | undefined,
+    lobbyPublicUrl,
+    isProduction,
+  );
+  const wsMaxPayloadBytes = parseWsMaxPayloadBytes(process.env.WS_MAX_PAYLOAD_BYTES as string | undefined);
+  const wsLimiteMensagens = parseWsLimiteMensagens(process.env.WS_LIMITE_MENSAGENS as string | undefined);
+  const wsJanelaLimiteMensagensMs = parseWsJanelaLimiteMensagensMs(
+    process.env.WS_JANELA_LIMITE_MENSAGENS_MS as string | undefined,
+  );
+  const wsSessaoRevalidacaoMs = parseWsSessaoRevalidacaoMs(
+    process.env.WS_SESSAO_REVALIDACAO_MS as string | undefined,
+  );
   const lobbyRetornoCallbackUrl = parseLobbyRetornoCallbackUrl(
     process.env.LOBBY_RETORNO_CALLBACK_URL as string | undefined,
     `http://localhost:${lobbyServerPort}/api/retorno`,
@@ -360,6 +541,13 @@ export function getConfig(): Config {
     poolMax,
   };
 
+  const rawRedisPassword = process.env.REDIS_PASSWORD?.trim();
+  const redis = {
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parsePort(process.env.REDIS_PORT as string | undefined, 6379),
+    password: rawRedisPassword && rawRedisPassword.length > 0 ? rawRedisPassword : DEFAULT_REDIS_PASSWORD,
+  };
+
   if (isProduction) {
     if (!jwtSecret || jwtSecret === DEFAULT_JWT_SECRET) {
       throw new Error('JWT_SECRET deve ser definido em produção');
@@ -370,16 +558,25 @@ export function getConfig(): Config {
     if (!postgres.password || postgres.password === DEFAULT_POSTGRES_PASSWORD) {
       throw new Error('POSTGRES_PASSWORD deve ser definido em produção');
     }
+    if (!redis.password || redis.password === DEFAULT_REDIS_PASSWORD) {
+      throw new Error('REDIS_PASSWORD deve ser definido em produção');
+    }
     if (process.env.LOBBY_PUBLIC_URL === undefined) {
       throw new Error('LOBBY_PUBLIC_URL deve ser definido em produção');
     }
+    const trustProxyHopsBruto = process.env.TRUST_PROXY_HOPS;
+    if (trustProxyHopsBruto === undefined || trustProxyHopsBruto.trim().length === 0) {
+      throw new Error('TRUST_PROXY_HOPS deve ser definido explicitamente em produção');
+    }
+    const trustProxyHopsNumero = Number(trustProxyHopsBruto);
+    if (
+      !Number.isInteger(trustProxyHopsNumero)
+      || trustProxyHopsNumero < MINIMO_TRUST_PROXY_HOPS
+      || trustProxyHopsNumero > MAXIMO_TRUST_PROXY_HOPS
+    ) {
+      throw new Error(`TRUST_PROXY_HOPS inválido em produção: "${trustProxyHopsBruto}"`);
+    }
   }
-
-  const redis = {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: parsePort(process.env.REDIS_PORT as string | undefined, 6379),
-    password: process.env.REDIS_PASSWORD ?? undefined,
-  };
 
   let gameServerHeartbeatIntervalMs = parsePositiveInt(
     process.env.GAME_SERVER_HEARTBEAT_INTERVAL_MS as string | undefined,
@@ -421,6 +618,10 @@ export function getConfig(): Config {
     partidaNaoInicioSegundos,
     partidaReconexaoEmAndamentoSegundos,
     partidaChatHistoricoMaximo,
+    trustProxyHops,
+    authRateLimitJanelaSegundos,
+    authRateLimitMaxPorIp,
+    authRateLimitMaxPorCadastro,
     lobbyRetornoCallbackUrl,
     lobbyDesistenciaCallbackUrl,
     postgres,
@@ -429,12 +630,20 @@ export function getConfig(): Config {
     gameServerHeartbeatTtlMs,
     gameServerId,
     gameServerAdvertiseHost,
+    wsOrigensPermitidas,
+    wsMaxPayloadBytes,
+    wsLimiteMensagens,
+    wsJanelaLimiteMensagensMs,
+    wsSessaoRevalidacaoMs,
   };
 }
 
 export {
   SERVICE_TOKEN_AUDIENCE,
   BOT_TOKEN_AUDIENCE,
+  SESSION_ISS,
+  SESSION_ACCESS_AUDIENCE,
+  SESSION_REFRESH_AUDIENCE,
   assinarServiceToken,
   assinarBotToken,
   verificarBotToken,

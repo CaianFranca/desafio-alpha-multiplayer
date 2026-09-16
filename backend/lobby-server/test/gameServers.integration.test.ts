@@ -7,7 +7,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import http from 'node:http';
 import { type AddressInfo } from 'node:net';
 import jwt from 'jsonwebtoken';
-import { getConfig } from '@flicker/config';
+import { DEFAULT_REDIS_PASSWORD, getConfig, SESSION_ISS, SESSION_ACCESS_AUDIENCE } from '@flicker/config';
 import { GAME_SERVERS_PREFIX } from '@flicker/shared/server';
 import { createApp } from '../src/app.ts';
 import { SERVICE_TOKEN_AUDIENCE, assinarServiceToken } from '../src/middleware/serviceToken.ts';
@@ -24,7 +24,7 @@ interface ServidorEfemero {
 const redis = new Redis({
   host: process.env.REDIS_HOST ?? 'localhost',
   port: Number(process.env.REDIS_PORT ?? 6379),
-  password: process.env.REDIS_PASSWORD ?? undefined,
+  password: process.env.REDIS_PASSWORD ?? DEFAULT_REDIS_PASSWORD,
   lazyConnect: true,
   maxRetriesPerRequest: 1,
   connectTimeout: 1000,
@@ -139,7 +139,9 @@ test('wiring: createApp monta /api/game-servers (router com GET /)', () => {
 test('GET /api/game-servers wiring: 200 [] quando nenhum game-server registrado (dev)', async (t) => {
   if (!(await exigeRedis(t))) return;
   await comServidor(async (servidor) => {
-    const res = await fetch(`${servidor.baseUrl}/api/game-servers`);
+    const res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: `Bearer ${assinarServiceToken()}` },
+    });
     assert.equal(res.status, 200, `esperava 200, veio ${res.status} body=${await res.clone().text()}`);
     const body = (await res.json()) as unknown[];
     assert.ok(Array.isArray(body));
@@ -156,7 +158,9 @@ test('GET /api/game-servers lista game-server anunciado via SET PX', async (t) =
     const payload = JSON.stringify({ serverId, url: 'http://game-server:1234', atualizadoEm: new Date().toISOString() });
     await redis.set(`${GAME_SERVERS_PREFIX}${serverId}`, payload, 'PX', 15000);
 
-    const res = await fetch(`${servidor.baseUrl}/api/game-servers`);
+    const res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: `Bearer ${assinarServiceToken()}` },
+    });
     assert.equal(res.status, 200);
     const body = (await res.json()) as Array<{ serverId: string; url: string }>;
     const encontrado = body.find((g) => g.serverId === serverId);
@@ -176,13 +180,17 @@ test('GET /api/game-servers não lista após DEL (expirado)', async (t) => {
     const payload = JSON.stringify({ serverId, url: 'http://game-server:1234', atualizadoEm: new Date().toISOString() });
     await redis.set(`${GAME_SERVERS_PREFIX}${serverId}`, payload, 'PX', 15000);
 
-    let res = await fetch(`${servidor.baseUrl}/api/game-servers`);
+    let res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: `Bearer ${assinarServiceToken()}` },
+    });
     let body = (await res.json()) as Array<{ serverId: string }>;
     assert.ok(body.find((g) => g.serverId === serverId));
 
     await redis.del(`${GAME_SERVERS_PREFIX}${serverId}`);
 
-    res = await fetch(`${servidor.baseUrl}/api/game-servers`);
+    res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: `Bearer ${assinarServiceToken()}` },
+    });
     body = (await res.json()) as Array<{ serverId: string }>;
     assert.equal(body.find((g) => g.serverId === serverId), undefined);
   });
@@ -190,20 +198,83 @@ test('GET /api/game-servers não lista após DEL (expirado)', async (t) => {
 
 // --- 4. guard JWT em produção ---
 
+// --- 4b. guard JWT fora de produção (corte seco #412: sem bypass por NODE_ENV) ---
+
+test('GET /api/game-servers guard fora de produção: sem token / lixo / secret errado / expirado / JWT de jogador → 401, service token → 200', async (t) => {
+  if (!(await exigeRedis(t))) return;
+  assert.notEqual(process.env.NODE_ENV, 'production', 'este teste deve rodar fora de produção (sem fixar NODE_ENV=production)');
+  // garante app no env corrente (dev/teste) — sem trocar NODE_ENV
+  appServidor = createApp();
+  await comServidor(async (servidor) => {
+    const { jwtSecret } = getConfig();
+
+    // sem header → 401 com corpo padrão
+    let res = await fetch(`${servidor.baseUrl}/api/game-servers`);
+    assert.equal(res.status, 401);
+    assert.deepEqual(await res.json(), { error: 'não autorizado' });
+
+    // Bearer lixo → 401
+    res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: 'Bearer lixo.com.lixo' },
+    });
+    assert.equal(res.status, 401);
+    assert.deepEqual(await res.json(), { error: 'não autorizado' });
+
+    // secret errado → 401
+    const tokenErrado = jwt.sign({ sub: 'x' }, 'secret-errado', { expiresIn: '1h' });
+    res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: `Bearer ${tokenErrado}` },
+    });
+    assert.equal(res.status, 401);
+
+    // expirado → 401
+    const tokenExpirado = jwt.sign({ sub: 'x' }, jwtSecret, { expiresIn: '1ms' });
+    await new Promise((r) => setTimeout(r, 10));
+    res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: `Bearer ${tokenExpirado}` },
+    });
+    assert.equal(res.status, 401);
+
+    // access token de Jogador válido (iss/aud de access) → 401, pois só service token com aud de serviço passa
+    const tokenJogador = jwt.sign(
+      { sub: 'jogador-x', apelido: 'Jogador X', sessaoId: 'sessao-x' },
+      jwtSecret,
+      { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE },
+    );
+    res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: `Bearer ${tokenJogador}` },
+    });
+    assert.equal(res.status, 401);
+    assert.deepEqual(await res.json(), { error: 'não autorizado' });
+
+    // service token válido → 200
+    const tokenServico = assinarServiceToken();
+    res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
+      headers: { authorization: `Bearer ${tokenServico}` },
+    });
+    assert.equal(res.status, 200);
+  });
+});
+
 test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret errado / expirado / JWT de jogador → 401, service token → 200', async (t) => {
   if (!(await exigeRedis(t))) return;
   const secretOrig = process.env.JWT_SECRET;
   const nodeEnvOrig = process.env.NODE_ENV;
   const refreshOrig = process.env.JWT_REFRESH_SECRET;
   const pgOrig = process.env.POSTGRES_PASSWORD;
+  const redisOrig = process.env.REDIS_PASSWORD;
   const lobbyOrig = process.env.LOBBY_PUBLIC_URL;
+  const trustProxyOrig = process.env.TRUST_PROXY_HOPS;
   // Usa secrets temporários para não depender do .env do dev. Em produção,
-  // getConfig() valida JWT_REFRESH_SECRET / POSTGRES_PASSWORD / LOBBY_PUBLIC_URL
-  // (packages/config/src/index.ts:219-232); sem eles o teste falha em checkout limpo.
+  // getConfig() valida JWT_REFRESH_SECRET / POSTGRES_PASSWORD / LOBBY_PUBLIC_URL /
+  // TRUST_PROXY_HOPS (packages/config/src/index.ts); sem eles o teste falha em
+  // checkout limpo.
   process.env.JWT_SECRET = `test-secret-${Date.now()}`;
   process.env.JWT_REFRESH_SECRET = `test-refresh-${Date.now()}`;
   process.env.POSTGRES_PASSWORD = `test-pg-${Date.now()}`;
+  process.env.REDIS_PASSWORD = `test-redis-${Date.now()}`;
   process.env.LOBBY_PUBLIC_URL = 'http://localhost:3000';
+  process.env.TRUST_PROXY_HOPS = '1';
   process.env.NODE_ENV = 'production';
   // força recriação do app com novo NODE_ENV
   appServidor = createApp();
@@ -237,9 +308,13 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
       });
       assert.equal(res.status, 401);
 
-      // JWT válido de Jogador (sem audience de serviço) → 401
+      // access token de Jogador válido (iss/aud de access) → 401, pois só service token com aud de serviço passa
       // R1: assinatura válida não basta — só token de serviço com aud correto passa.
-      const tokenJogador = jwt.sign({ sub: 'x' }, jwtSecret, { expiresIn: '1h' });
+      const tokenJogador = jwt.sign(
+        { sub: 'jogador-x', apelido: 'Jogador X', sessaoId: 'sessao-x' },
+        jwtSecret,
+        { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE },
+      );
       res = await fetch(`${servidor.baseUrl}/api/game-servers`, {
         headers: { authorization: `Bearer ${tokenJogador}` },
       });
@@ -260,8 +335,12 @@ test('GET /api/game-servers guard JWT em produção: sem token / lixo / secret e
     else process.env.JWT_REFRESH_SECRET = refreshOrig;
     if (pgOrig === undefined) delete process.env.POSTGRES_PASSWORD;
     else process.env.POSTGRES_PASSWORD = pgOrig;
+    if (redisOrig === undefined) delete process.env.REDIS_PASSWORD;
+    else process.env.REDIS_PASSWORD = redisOrig;
     if (lobbyOrig === undefined) delete process.env.LOBBY_PUBLIC_URL;
     else process.env.LOBBY_PUBLIC_URL = lobbyOrig;
+    if (trustProxyOrig === undefined) delete process.env.TRUST_PROXY_HOPS;
+    else process.env.TRUST_PROXY_HOPS = trustProxyOrig;
     if (nodeEnvOrig === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = nodeEnvOrig;
     appServidor = createApp();

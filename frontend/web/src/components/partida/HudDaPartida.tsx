@@ -54,7 +54,7 @@ export interface HudDaPartidaProps {
   iniciadaEm?: number | null
   /**
    * Foto por jogador (jogadorId → URL); ausente/null mantém as iniciais.
-   * Ainda sem fonte no snapshot — prop pronta para quando o servidor expor.
+   * Alimentada pela PartidaPage via cor do peão → foto do avatar (#404).
    */
   imagemPorJogador?: Readonly<Record<string, string | null | undefined>>
   /** Desistência da Partida (issue #290): envia DESISTIR_DA_PARTIDA e sai à principal. */
@@ -102,7 +102,13 @@ function ConteudoDoAvatar({
   cor: CorDoPeao
   imagemUrl?: string | null
 }) {
-  if (imagemUrl) {
+  // Falha de carregamento (issue #404): a URL com erro volta às iniciais na
+  // cor do peão. Guarda a URL que falhou (não um booleano) para resetar
+  // automaticamente quando `imagemUrl` trocar. Retorno a URL já falha mantém
+  // o fallback sem retentar (cache negativo intencional, evita loop de erro).
+  const [urlComFalha, setUrlComFalha] = useState<string | null>(null)
+  const comFalha = imagemUrl != null && imagemUrl === urlComFalha
+  if (imagemUrl && !comFalha) {
     return (
       <img
         src={imagemUrl}
@@ -110,6 +116,7 @@ function ConteudoDoAvatar({
         aria-hidden="true"
         draggable={false}
         className="h-full w-full object-cover"
+        onError={() => setUrlComFalha(imagemUrl)}
       />
     )
   }
@@ -261,6 +268,7 @@ export function HudDaPartida({
                   aria-hidden="true"
                   data-testid="hud-anel-sanidade"
                   data-jogador-id={jogadorId}
+                  data-cor={dados.cor}
                   data-sanidade={String(dados.sanidade)}
                   className="absolute inset-0 h-full w-full"
                 >
@@ -278,9 +286,10 @@ export function HudDaPartida({
                       strokeDasharray={`${ARCO_ANEL_SANIDADE - FOLGA_ANEL_SANIDADE} ${CIRC_ANEL_SANIDADE - ARCO_ANEL_SANIDADE + FOLGA_ANEL_SANIDADE}`}
                       strokeDashoffset={-(indice * ARCO_ANEL_SANIDADE)}
                       transform="rotate(-90 28 28)"
+                      style={indice < dados.sanidade ? { stroke: HEX_COR_PEAO[dados.cor] } : undefined}
                       className={
                         indice < dados.sanidade
-                          ? 'stroke-amber-400'
+                          ? ''
                           : dados.amedrontado
                             ? 'stroke-red-900'
                             : 'stroke-zinc-600'
@@ -302,12 +311,8 @@ export function HudDaPartida({
                 title={emReconexao ? 'Reconectando' : dados.apelido}
                   data-compacto={emModoCompacto ? 'true' : undefined}
                   className={`flex items-center justify-center overflow-hidden rounded-full bg-zinc-950 font-display font-semibold shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all duration-500 ${emModoCompacto ? 'h-8 w-8 text-xs' : 'h-12 w-12 text-base'} ${
-                    dados.amedrontado
-                      ? 'opacity-70 grayscale'
-                      : dados.emBaixaIluminacao
-                        ? 'brightness-75 saturate-50'
-                        : ''
-                  } ${emReconexao ? 'ring-2 ring-amber-400/70' : ''}`}
+                    emReconexao ? 'ring-2 ring-amber-400/70' : ''
+                  }`}
                 >
                   <ConteudoDoAvatar
                     apelido={dados.apelido}
@@ -326,19 +331,28 @@ export function HudDaPartida({
                   </span>
                 ) : null}
               </div>
-              <div className="flex flex-col gap-0.5" aria-hidden="true">
+              <div className="flex flex-col gap-0.5">
+                <span
+                  data-testid="hud-nome-adversario"
+                  data-jogador-id={jogadorId}
+                  style={{ color: HEX_COR_PEAO[dados.cor] }}
+                  className="max-w-[7rem] truncate text-sm font-semibold leading-5"
+                >
+                  {dados.apelido}
+                </span>
+                <div aria-hidden="true" className="flex flex-col items-start gap-0.5">
                 {dados.emBaixaIluminacao ? (
-                  <span data-testid="hud-estado-baixa-iluminacao" title="Baixa Iluminação" className="rounded border border-amber-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none text-amber-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
+                  <span data-testid="hud-estado-baixa-iluminacao" title="Baixa Iluminação" style={{ borderColor: HEX_COR_PEAO[dados.cor], color: HEX_COR_PEAO[dados.cor] }} className="inline-flex w-fit self-start rounded border bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none shadow-[0_0_8px_rgba(0,0,0,0.7)]">
                     ◐
                   </span>
                 ) : null}
                 {dados.amedrontado ? (
-                  <span data-testid="hud-estado-amedrontado" title="Amedrontado" className="rounded border border-red-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none text-red-400 shadow-[0_0_8px_rgba(248,113,113,0.35)]">
+                  <span data-testid="hud-estado-amedrontado" title="Amedrontado" style={{ borderColor: HEX_COR_PEAO[dados.cor], color: HEX_COR_PEAO[dados.cor] }} className="inline-flex w-fit self-start rounded border bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none shadow-[0_0_8px_rgba(248,113,113,0.35)]">
                     ⚠
                   </span>
                 ) : null}
                 {dados.protegido ? (
-                  <span data-testid="hud-estado-protecao" title="Proteção" className="rounded border border-cyan-500/30 bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none text-cyan-300 shadow-[0_0_8px_rgba(0,0,0,0.7)]">
+                  <span data-testid="hud-estado-protecao" title="Proteção" style={{ borderColor: HEX_COR_PEAO[dados.cor], color: HEX_COR_PEAO[dados.cor] }} className="inline-flex w-fit self-start rounded border bg-zinc-950/90 px-1.5 py-0.5 text-[length:var(--hud-corpo,0.875rem)] leading-none shadow-[0_0_8px_rgba(0,0,0,0.7)]">
                     🛡
                   </span>
                 ) : null}
@@ -351,6 +365,7 @@ export function HudDaPartida({
                     <span aria-hidden="true">⟳</span> reconectando
                   </span>
                 ) : null}
+                </div>
               </div>
             </div>
           )
@@ -552,7 +567,8 @@ export function HudDaPartida({
                   data-testid="hud-sanidade-segmento"
                   data-preenchido={indice < jogadorLocal.dados.sanidade ? 'true' : 'false'}
                   aria-hidden="true"
-                  className={`h-2 rounded-sm ${emModoCompacto ? 'w-5' : 'w-8'} ${indice < jogadorLocal.dados.sanidade ? 'bg-amber-400' : 'bg-zinc-700'}`}
+                  style={indice < jogadorLocal.dados.sanidade ? { backgroundColor: HEX_COR_PEAO[jogadorLocal.dados.cor] } : undefined}
+                  className={`h-2 rounded-sm ${emModoCompacto ? 'w-5' : 'w-8'} ${indice < jogadorLocal.dados.sanidade ? '' : 'bg-zinc-700'}`}
                 />
               ))}
             </div>

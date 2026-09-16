@@ -107,7 +107,7 @@ O prefixo `__Host-` amarra o cookie a `Secure`, sem `Domain` e com `Path=/`, imp
 *Fonte:* OWASP Session Management Cheat Sheet (seção *Session Expiration* → *Idle Timeout* / *Absolute Timeout*).
 
 **Medida B9 — Registro de `iss`/`aud` nos tokens de Sessão.**
-*Status:* **ausente** — `assinarAccess`/`assinarRefresh` não emitem `iss` nem `aud` (`backend/lobby-server/src/jwt.ts:22-46`); `aud` existe apenas para tokens de serviço e de bot (`packages/config/src/serviceToken.ts:13-35`).
+*Status:* **feito** — `assinarAccess`/`assinarRefresh` emitem `iss` comum (`SESSION_ISS`) e `aud` distinto por tipo (`SESSION_ACCESS_AUDIENCE`/`SESSION_REFRESH_AUDIENCE`), e a verificação os exige (`backend/lobby-server/src/jwt.ts:34,46,53,76`; constantes em `packages/config/src/serviceToken.ts:10-12`); o game-server valida `iss`/`aud` de access (`backend/game-server/src/auth.ts:32`). Corte seco: token antigo sem `iss`/`aud` é recusado e exige novo login.
 *Fonte:* OWASP JSON Web Token Cheat Sheet (seção *Claims*).
 
 **Medida B10 — Revogação imediata no logout e ao remover Cadastro.**
@@ -298,8 +298,8 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP Secrets Management Cheat Sheet (seções *Centralize and Standardize*, *Access Control*, *CI/CD*).
 
 **Medida H3 — Autenticar o Redis.**
-*Status:* **ausente** — `REDIS_PASSWORD` não consta no env de produção (`docs/deploy.md:298-314`) e o default é sem senha (`packages/config/src/index.ts:378-382`; `docker-compose.yml:34-45`). A mitigação atual é o loopback + `protected mode`, mas a própria OWASP/Redis recomendam exigir autenticação como camada redundante.
-*Onde aplicar:* env de produção (`/opt/flicker/env`) + `redis.conf`.
+*Status:* **feito (#427)** — `REDIS_PASSWORD` consta no env de produção (`docs/deploy.md:298-322`; `.github/workflows/deploy.yml:195,208`) com `requirepass` em `docker-compose.yml:37` e `packages/config/src/index.ts:60,521` (`DEFAULT_REDIS_PASSWORD` + `trim()` no boot). A mitigação de loopback + `protected mode` foi complementada com autenticação redundante.
+*Onde aplicar:* env de produção (`/opt/flicker/env`) + `redis.conf` (`scripts/deploy-server.sh:63`).
 *Fonte:* OWASP Secrets Management Cheat Sheet (seção *General Secrets Management*); Redis security (seções *Network security*, *Protected mode* e *Authentication*).
 
 **Medida H4 — Rotação de segredos.**
@@ -371,7 +371,7 @@ Prioridade baseada no risco real para o jogo: exposição a CSWSH/roubo de Sess�
 | Média | `X-Powered-By` exposto e `server_tokens` ligado (fingerprint) | Headers | ausente | HTTP Headers CS (X-Powered-By, Server); Express Security |
 | Média | Sessão/WS não é revalidada em conexões longas nem fechada no logout | Sessão/WebSocket | parcial | WebSocket Security CS (Session Management) |
 | Média | Sem HSTS | Transporte | ausente | HTTP Headers CS (HSTS); TLS CS |
-| Média | Sem `iss`/`aud` nos tokens de Sessão | Sessão/JWT | ausente | JSON Web Token CS (Claims) |
+| Média | Sem `iss`/`aud` nos tokens de Sessão | Sessão/JWT | feito | JSON Web Token CS (Claims) |
 | Média | Sem limite de senha de 72 bytes do bcrypt (trunca em silêncio) | Autenticação | ausente | Password Storage CS (Input Limits of bcrypt); bcrypt.js |
 | Média | Sem logging estruturado/eventos de segurança (auth, rate-limit, validação) | Observabilidade | ausente | Authentication CS (Logging); WebSocket Security CS; A09:2021 |
 | Média | Bypass de autorização de serviço quando `NODE_ENV !== 'production'` | Autorização | parcial | API5:2023; API8:2023 |

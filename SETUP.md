@@ -130,7 +130,7 @@ diretas no host para desenvolvimento:
 | `3001` (`LOBBY_SERVER_PORT`)       | `3001` (`LOBBY_SERVER_PORT`) | lobby-server | mesma porta no host e no container              |
 | `1234` (`GAME_SERVER_PORT`)        | `1234` (`GAME_SERVER_PORT`)  | game-server  | mesma porta no host e no container              |
 | `5432` (`POSTGRES_PORT`)           | `5432`                       | postgres     | volume `postgres_data`                          |
-| `6379` (`REDIS_PORT`)              | `6379`                       | redis        | volátil (`--save "" --appendonly no`)           |
+| `6379` (`REDIS_PORT`)              | `6379`                       | redis        | volátil (`--save "" --appendonly no --requirepass $REDIS_PASSWORD`) — exige senha (`REDIS_PASSWORD`, default `flicker_redis_dev_password`) |
 
 Rotas via NGINX (`infra/nginx/nginx.conf`):
 
@@ -173,7 +173,7 @@ docker compose up -d --build  # reproduz o ambiente do zero (após down -v)
 - `up -d --build` após `down -v` recompila as imagens (`lobby-server`,
   `game-server`, `db-migrate`, `nginx`) e recria o volume limpo — fluxo
   reproduzível para um novo dev.
-- Redis é sempre volátil (`redis-server --save "" --appendonly no` no
+- Redis é sempre volátil (`redis-server --save "" --appendonly no --requirepass ${REDIS_PASSWORD}` no
   `docker-compose.yml`): Sessões e estado em memória somem a cada `down`,
   mesmo sem `-v`. Não há migração do volume criado pela configuração anterior
   em `infra/`.
@@ -203,7 +203,7 @@ curl -i http://localhost:8080/media/inexistente.png
 curl -i -X POST http://localhost:8080/api/auth/register \
   -H 'content-type: application/json' \
   -d '{"apelido":"Smoke","email":"smoke@example.local","senha":"senha_development_123"}'
-# esperado: HTTP/1.1 201 + content-type: application/json + X-Powered-By: Express
+# esperado: HTTP/1.1 201 + content-type: application/json
 # corpo: { id, apelido, email } + Set-Cookie: access_token=...; refresh_token=...
 
 curl -i -X POST http://localhost:8080/api/auth/login \

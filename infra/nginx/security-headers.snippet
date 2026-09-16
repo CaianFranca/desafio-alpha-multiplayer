@@ -1,0 +1,12 @@
+# security-headers.snippet — headers base de hardening, ponto único entre
+# nginx.conf (perfil Docker full) e nginx.prod.conf (nativo).
+# Incluído nos contextos server, location / e location /media/ (a herança do
+# add_header exige repetição nos locations que definem headers próprios —
+# o include elimina o drift entre os pontos).
+# /api/, /ws/* e /internal/ herdam estes 4 do server, sem CSP
+# (intencional — CSP só em conteúdo estático, ver
+# security-headers-static.snippet).
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Strict-Transport-Security $hsts_header always;

@@ -4,6 +4,7 @@ import type { ServerId } from '@flicker/shared';
 import { createApp } from './app.ts';
 import { criarWebSocketServer } from './ws/ws.ts';
 import { DebugStreamDaPartida } from './ws/debug-stream.ts';
+import { iniciarRevalidacaoDeSessao, type HandleRevalidacao } from './ws/revalidacao-de-sessao.ts';
 import { redisClient } from './config/redis.ts';
 import { PartidaBroadcaster } from './partidas/broadcast.ts';
 import { PartidaHandlers } from './partidas/handlers.ts';
@@ -39,6 +40,11 @@ const {
   gameServerId: configServerId,
   gameServerAdvertiseHost,
   jwtSecret,
+  wsOrigensPermitidas,
+  wsMaxPayloadBytes,
+  wsLimiteMensagens,
+  wsJanelaLimiteMensagensMs,
+  wsSessaoRevalidacaoMs,
 } = getConfig();
 const serverId: ServerId = resolverServerId(configServerId) as ServerId;
 const contexto: ContextoDoGameServer = {
@@ -52,6 +58,12 @@ const contexto: ContextoDoGameServer = {
   partidaChatHistoricoMaximo,
   lobbyRetornoCallbackUrl,
   lobbyDesistenciaCallbackUrl,
+  wsSeguranca: {
+    origensPermitidas: wsOrigensPermitidas,
+    maxPayloadBytes: wsMaxPayloadBytes,
+    limiteMensagens: wsLimiteMensagens,
+    janelaLimiteMensagensMs: wsJanelaLimiteMensagensMs,
+  },
 };
 const app = createApp(contexto);
 
@@ -91,6 +103,7 @@ criarWebSocketServer(server, contexto, {
 
 let heartbeatHandle: HeartbeatHandle | undefined;
 let registroRetry: NodeJS.Timeout | undefined;
+let revalidacaoDeSessao: HandleRevalidacao | undefined;
 let encerrando = false;
 
 function criarMeta(): GameServerRegistro {
@@ -132,6 +145,12 @@ async function iniciarRegistro(): Promise<void> {
   const meta = criarMeta();
   heartbeatHandle = iniciarHeartbeat(redisClient, meta, gameServerHeartbeatIntervalMs, gameServerHeartbeatTtlMs, criarMeta);
   console.log(`[game-server] heartbeat iniciado interval=${gameServerHeartbeatIntervalMs}ms`);
+  // Revalidação da Sessão das conexões WS abertas (issue #410). Só inicia uma
+  // vez: `iniciarRegistro` pode ser reexecutado pelo retry de conexão.
+  if (revalidacaoDeSessao === undefined) {
+    revalidacaoDeSessao = iniciarRevalidacaoDeSessao({ intervaloMs: wsSessaoRevalidacaoMs, redis: redisClient });
+    console.log(`[game-server] revalidacao de sessao WS ativa interval=${wsSessaoRevalidacaoMs}ms`);
+  }
   void rearmarNaoInicioAposRestart(redisClient).catch((err: unknown) =>
     console.warn('[game-server] falha ao rearmar não-início:', (err as Error).message),
   );
@@ -165,6 +184,10 @@ async function encerrar(signal: string): Promise<void> {
   if (heartbeatHandle) {
     pararHeartbeat(heartbeatHandle);
     heartbeatHandle = undefined;
+  }
+  if (revalidacaoDeSessao) {
+    revalidacaoDeSessao.parar();
+    revalidacaoDeSessao = undefined;
   }
   let finalizado = false;
   const finalizar = (): void => {

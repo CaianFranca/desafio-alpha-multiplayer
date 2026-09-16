@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import http from 'node:http';
 import { type AddressInfo } from 'node:net';
-import { criarClienteRedis } from '@flicker/config';
+import jwt from 'jsonwebtoken';
+import { criarClienteRedis, getConfig, SESSION_ISS, SESSION_ACCESS_AUDIENCE, SESSION_REFRESH_AUDIENCE } from '@flicker/config';
 import { createApp } from '../src/app.ts';
 import { pool } from '../src/config/pg.ts';
 import { registrarArquivoDeTeste, finalizarArquivoDeTeste } from './teardown.ts';
@@ -41,11 +42,8 @@ const redis = criarClienteRedis();
 let appServidor: ReturnType<typeof createApp> | null = null;
 let contador = 0;
 
-async function subirServidor(): Promise<ServidorEfemero> {
-  if (appServidor === null) {
-    appServidor = createApp();
-  }
-  const server = http.createServer(appServidor);
+async function subirServidorCom(app: ReturnType<typeof createApp>): Promise<ServidorEfemero> {
+  const server = http.createServer(app);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => resolve());
@@ -58,6 +56,13 @@ async function subirServidor(): Promise<ServidorEfemero> {
         server.close((err) => (err === undefined ? resolve() : reject(err)));
       }),
   };
+}
+
+async function subirServidor(): Promise<ServidorEfemero> {
+  if (appServidor === null) {
+    appServidor = createApp();
+  }
+  return subirServidorCom(appServidor);
 }
 
 async function comServidor<T>(executar: (servidor: ServidorEfemero) => Promise<T>): Promise<T> {
@@ -114,11 +119,21 @@ function headerDeCookies(cookies: Cookies): string {
   return partes.join('; ');
 }
 
-function postJson(baseUrl: string, path: string, corpo: unknown, cookies?: Cookies): Promise<Response> {
+function postJson(
+  baseUrl: string,
+  path: string,
+  corpo: unknown,
+  cookies?: Cookies,
+  ip?: string,
+): Promise<Response> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   const cookieHeader = headerDeCookies(cookies ?? {});
   if (cookieHeader.length > 0) {
     headers.cookie = cookieHeader;
+  }
+  if (ip !== undefined) {
+    // Com `trust proxy` = 1, o Express usa o primeiro IP do XFF como req.ip.
+    headers['x-forwarded-for'] = ip;
   }
   return fetch(`${baseUrl}${path}`, {
     method: 'POST',
@@ -126,6 +141,30 @@ function postJson(baseUrl: string, path: string, corpo: unknown, cookies?: Cooki
     body: typeof corpo === 'string' ? corpo : JSON.stringify(corpo),
   });
 }
+
+// Executa com variáveis de ambiente de rate limit sobrescritas e as restaura
+// ao final, mesmo em caso de falha — `getConfig()` lê `process.env` a cada
+// chamada, então a rota enxerga os valores vigentes no momento do request.
+async function comEnv<T>(valores: Record<string, string>, executar: () => Promise<T>): Promise<T> {
+  const anteriores = new Map<string, string | undefined>();
+  for (const [chave, valor] of Object.entries(valores)) {
+    anteriores.set(chave, process.env[chave]);
+    process.env[chave] = valor;
+  }
+  try {
+    return await executar();
+  } finally {
+    for (const [chave, anterior] of anteriores) {
+      if (anterior === undefined) {
+        delete process.env[chave];
+      } else {
+        process.env[chave] = anterior;
+      }
+    }
+  }
+}
+
+const CORPO_EXCESSO = { erros: [{ mensagem: 'Muitas tentativas. Tente novamente mais tarde.' }] };
 
 function getAuth(baseUrl: string, path: string, cookies?: Cookies): Promise<Response> {
   const headers: Record<string, string> = {};
@@ -603,6 +642,98 @@ test('refresh com refresh_token forjado (assinatura inválida): 401', async () =
   });
 });
 
+// --- 22b. Sessão com iss/aud (issue #416): corte seco + tipo trocado ---
+
+test('sessao: access e refresh carregam iss/aud distintos por tipo', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    const access = jwt.decode(cookies.access_token!) as Record<string, unknown>;
+    const refresh = jwt.decode(cookies.refresh_token!) as Record<string, unknown>;
+    assert.equal(access.iss, SESSION_ISS);
+    assert.equal(access.aud, SESSION_ACCESS_AUDIENCE);
+    assert.equal(refresh.iss, SESSION_ISS);
+    assert.equal(refresh.aud, SESSION_REFRESH_AUDIENCE);
+    assert.notEqual(access.aud, refresh.aud);
+  });
+});
+
+test('/me com access sem iss/aud (token antigo): 401 — corte seco', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    const { jwtSecret } = getConfig();
+    // Re-assina o MESMO payload/sessão sem iss/aud: sem o corte seco,
+    // passaria (sessão existe no Redis); com iss/aud exigido, cai no 401.
+    const payload = jwt.decode(cookies.access_token!) as Record<string, unknown>;
+    const legado = jwt.sign(
+      { sub: payload.sub, apelido: payload.apelido, email: payload.email, sessaoId: payload.sessaoId },
+      jwtSecret,
+      { algorithm: 'HS256', expiresIn: '1h' },
+    );
+    const res = await getAuth(servidor.baseUrl, '/api/auth/me', { access_token: legado });
+    assert.equal(res.status, 401);
+  });
+});
+
+test('/me com access de aud errada (refresh) ou iss errado: 401', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    const { jwtSecret } = getConfig();
+    const payload = jwt.decode(cookies.access_token!) as Record<string, unknown>;
+    const base = { sub: payload.sub, apelido: payload.apelido, email: payload.email, sessaoId: payload.sessaoId };
+
+    const audErrada = jwt.sign(base, jwtSecret, {
+      algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_REFRESH_AUDIENCE,
+    });
+    assert.equal((await getAuth(servidor.baseUrl, '/api/auth/me', { access_token: audErrada })).status, 401);
+
+    const issErrado = jwt.sign(base, jwtSecret, {
+      algorithm: 'HS256', expiresIn: '1h', issuer: 'outro-emissor', audience: SESSION_ACCESS_AUDIENCE,
+    });
+    assert.equal((await getAuth(servidor.baseUrl, '/api/auth/me', { access_token: issErrado })).status, 401);
+  });
+});
+
+test('sessao: access como refresh e refresh como access → 401 (tipo trocado)', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    assert.ok(cookies.access_token);
+    assert.ok(cookies.refresh_token);
+
+    // refresh usado como access → 401 no /me
+    const me = await getAuth(servidor.baseUrl, '/api/auth/me', { access_token: cookies.refresh_token });
+    assert.equal(me.status, 401);
+
+    // access usado como refresh → 401 no /refresh
+    const refresh = await postJson(servidor.baseUrl, '/api/auth/refresh', {}, { refresh_token: cookies.access_token });
+    assert.equal(refresh.status, 401);
+  });
+});
+
+test('/refresh com refresh de aud errada (access): 401', async () => {
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido());
+    assert.equal(reg.status, 201);
+    const cookies = extrairCookies(reg);
+    const { jwtRefreshSecret } = getConfig();
+    const payload = jwt.decode(cookies.refresh_token!) as Record<string, unknown>;
+    const forjado = jwt.sign(
+      { sub: payload.sub, sessaoId: payload.sessaoId },
+      jwtRefreshSecret,
+      { algorithm: 'HS256', expiresIn: '1h', issuer: SESSION_ISS, audience: SESSION_ACCESS_AUDIENCE },
+    );
+    const res = await postJson(servidor.baseUrl, '/api/auth/refresh', {}, { refresh_token: forjado });
+    assert.equal(res.status, 401);
+  });
+});
+
 // --- 23. concorrência em criarSessao mantém apenas 1 sessão por jogador ---
 
 test('concorrência: N logins paralelos mantêm apenas 1 sessão ativa por jogador', async () => {
@@ -671,5 +802,224 @@ test('concorrência: 2 refreshes paralelos com o mesmo refresh — exatamente 1 
     const falhas = refreshes.filter((r) => r.status === 401).length;
     assert.equal(sucessos, 1, `esperava 1 sucesso, encontrei ${sucessos}`);
     assert.equal(falhas, N - 1, `esperava ${N - 1} falhas, encontrei ${falhas}`);
+  });
+});
+
+// --- 25. login: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP ---
+
+test('login: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP', async () => {
+  await comEnv(
+    {
+      AUTH_RATE_LIMIT_MAX_POR_IP: '2',
+      AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '100',
+      AUTH_RATE_LIMIT_JANELA_SEGUNDOS: '900',
+    },
+    async () => {
+      await comServidor(async (servidor) => {
+        const ip = '203.0.113.10';
+        const credenciais = { email: emailUnico('limite-ip'), senha: 'senha_dev_123' };
+
+        const primeira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+        const segunda = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+        const terceira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+
+        assert.equal(primeira.status, 401);
+        assert.equal(segunda.status, 401);
+        assert.equal(terceira.status, 429);
+        const retryAfter = terceira.headers.get('retry-after');
+        assert.ok(retryAfter !== null, 'esperava header Retry-After');
+        assert.ok(Number.isInteger(Number(retryAfter)) && Number(retryAfter) > 0, `Retry-After inválido: ${retryAfter}`);
+        assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+      });
+    },
+  );
+});
+
+// --- 26. login: 429 por Cadastro com IPs distintos ---
+
+test('login: 429 por Cadastro quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_CADASTRO', async () => {
+  await comEnv(
+    { AUTH_RATE_LIMIT_MAX_POR_IP: '100', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '2' },
+    async () => {
+      await comServidor(async (servidor) => {
+        const credenciais = { email: emailUnico('limite-cadastro'), senha: 'senha_dev_123' };
+
+        const primeira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, '203.0.113.21');
+        const segunda = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, '203.0.113.22');
+        const terceira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, '203.0.113.23');
+
+        assert.equal(primeira.status, 401);
+        assert.equal(segunda.status, 401);
+        assert.equal(terceira.status, 429);
+        assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+      });
+    },
+  );
+});
+
+// --- 27. register: 429 por IP ---
+
+test('register: 429 por IP após exceder AUTH_RATE_LIMIT_MAX_POR_IP', async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '2', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '100' }, async () => {
+    await comServidor(async (servidor) => {
+      const ip = '203.0.113.31';
+      const primeira = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido(), undefined, ip);
+      const segunda = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido(), undefined, ip);
+      const terceira = await postJson(servidor.baseUrl, '/api/auth/register', cadastroValido(), undefined, ip);
+
+      assert.equal(primeira.status, 201);
+      assert.equal(segunda.status, 201);
+      assert.equal(terceira.status, 429);
+      assert.ok(terceira.headers.get('retry-after') !== null, 'esperava header Retry-After');
+      assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+    });
+  });
+});
+
+// --- 28. register: 429 por Cadastro com IPs distintos ---
+
+test('register: 429 por Cadastro quando IPs distintos excedem AUTH_RATE_LIMIT_MAX_POR_CADASTRO', async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '100', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '2' }, async () => {
+    await comServidor(async (servidor) => {
+      const corpo = {
+        apelido: apelidoUnico('jogador'),
+        email: emailUnico('limite-cadastro-reg'),
+        senha: 'senha_dev_123',
+      };
+      const primeira = await postJson(servidor.baseUrl, '/api/auth/register', corpo, undefined, '203.0.113.41');
+      const segunda = await postJson(servidor.baseUrl, '/api/auth/register', corpo, undefined, '203.0.113.42');
+      const terceira = await postJson(servidor.baseUrl, '/api/auth/register', corpo, undefined, '203.0.113.43');
+
+      assert.equal(primeira.status, 201);
+      assert.equal(segunda.status, 409);
+      assert.equal(terceira.status, 429);
+      assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+    });
+  });
+});
+
+// --- 29. 429 não distingue Cadastro existente de inexistente ---
+
+test('login: 429 não distingue Cadastro existente de inexistente', async () => {
+  const existente = cadastroValido();
+  await comServidor(async (servidor) => {
+    const reg = await postJson(servidor.baseUrl, '/api/auth/register', existente);
+    assert.equal(reg.status, 201);
+  });
+
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '1', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '1' }, async () => {
+    const respostaExistente = await comServidor(async (servidor) => {
+      const ip = '203.0.113.51';
+      const credenciais = { email: existente.email, senha: 'senha_errada_999' };
+      await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      return postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+    });
+
+    await redis.flushdb();
+
+    const respostaInexistente = await comServidor(async (servidor) => {
+      const ip = '203.0.113.52';
+      const credenciais = { email: emailUnico('inexistente-limite'), senha: 'senha_dev_123' };
+      await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      return postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+    });
+
+    assert.equal(respostaExistente.status, 429);
+    assert.equal(respostaInexistente.status, 429);
+    assert.equal(
+      respostaExistente.headers.get('retry-after') !== null,
+      respostaInexistente.headers.get('retry-after') !== null,
+    );
+    assert.deepEqual(await respostaExistente.json(), await respostaInexistente.json());
+  });
+});
+
+// --- 30. contador sobrevive a nova instância da aplicação (mesmo Redis) ---
+
+test('rate limit: contador persiste em nova instância da aplicação', async () => {
+  await comEnv({ AUTH_RATE_LIMIT_MAX_POR_IP: '1', AUTH_RATE_LIMIT_MAX_POR_CADASTRO: '100' }, async () => {
+    const ip = '203.0.113.61';
+    const credenciais = { email: emailUnico('persistente'), senha: 'senha_dev_123' };
+
+    await comServidor(async (servidor) => {
+      const primeira = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      const segunda = await postJson(servidor.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      assert.equal(primeira.status, 401);
+      assert.equal(segunda.status, 429);
+    });
+
+    const novaInstancia = await subirServidorCom(createApp());
+    try {
+      const terceira = await postJson(novaInstancia.baseUrl, '/api/auth/login', credenciais, undefined, ip);
+      assert.equal(terceira.status, 429, 'nova instância deve enxergar o contador no Redis');
+      assert.deepEqual(await terceira.json(), CORPO_EXCESSO);
+    } finally {
+      await novaInstancia.fechar();
+    }
+  });
+});
+
+// --- 31. register: senha acima de 72 bytes (UTF-8) é recusada ---
+
+test('register: 400 com campo=senha para senha acima de 72 bytes', async () => {
+  await comServidor(async (servidor) => {
+    const ascii = await postJson(servidor.baseUrl, '/api/auth/register', {
+      apelido: apelidoUnico('jogador'),
+      email: emailUnico('senha-73'),
+      senha: 'a'.repeat(73),
+    });
+    assert.equal(ascii.status, 400);
+    const bodyAscii = (await ascii.json()) as ErroResponse;
+    const erroAscii = bodyAscii.erros.find((e) => e.campo === 'senha');
+    assert.ok(erroAscii, 'esperava erro de campo=senha');
+    assert.equal(erroAscii!.mensagem, 'A senha excede o limite de 72 bytes (UTF-8).');
+
+    const multibyte = await postJson(servidor.baseUrl, '/api/auth/register', {
+      apelido: apelidoUnico('jogador'),
+      email: emailUnico('senha-74'),
+      senha: 'é'.repeat(37), // 37 × 2 bytes = 74 bytes
+    });
+    assert.equal(multibyte.status, 400);
+    const bodyMultibyte = (await multibyte.json()) as ErroResponse;
+    const erroMultibyte = bodyMultibyte.erros.find((e) => e.campo === 'senha');
+    assert.ok(erroMultibyte, 'esperava erro de campo=senha multibyte');
+    assert.equal(erroMultibyte!.mensagem, 'A senha excede o limite de 72 bytes (UTF-8).');
+  });
+});
+
+// --- 32. register: senha de exatamente 72 bytes (UTF-8) é aceita ---
+
+test('register: 201 para senha de exatamente 72 bytes', async () => {
+  await comServidor(async (servidor) => {
+    const ascii = await postJson(servidor.baseUrl, '/api/auth/register', {
+      apelido: apelidoUnico('jogador'),
+      email: emailUnico('senha-72'),
+      senha: 'a'.repeat(72),
+    });
+    assert.equal(ascii.status, 201);
+
+    const multibyte = await postJson(servidor.baseUrl, '/api/auth/register', {
+      apelido: apelidoUnico('jogador'),
+      email: emailUnico('senha-72mb'),
+      senha: 'é'.repeat(36), // 36 × 2 bytes = 72 bytes
+    });
+    assert.equal(multibyte.status, 201);
+  });
+});
+
+// --- 33. respostas não expõem X-Powered-By (medida OWASP G5) ---
+
+test('respostas não expõem X-Powered-By', async () => {
+  await comServidor(async (servidor) => {
+    // Resposta de sucesso conhecida.
+    const health = await getAuth(servidor.baseUrl, '/health');
+    assert.equal(health.status, 200);
+    assert.equal(health.headers.get('x-powered-by'), null);
+
+    // Resposta 404 gerada pelo handler default do Express — o vetor do
+    // vazamento observado em produção (issue #413).
+    const inexistente = await getAuth(servidor.baseUrl, '/api/nao-existe');
+    assert.equal(inexistente.status, 404);
+    assert.equal(inexistente.headers.get('x-powered-by'), null);
   });
 });

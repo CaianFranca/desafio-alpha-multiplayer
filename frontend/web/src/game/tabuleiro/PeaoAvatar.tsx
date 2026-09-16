@@ -93,6 +93,15 @@ function normalizarModeloDoAvatar(original: THREE.Object3D): THREE.Object3D {
   }
   paraRemover.length = 0
 
+  // O peão reage às luzes gerando sombra (direcional + chamas das velas):
+  // todos os meshes restantes projetam e recebem. O anel de seleção e a
+  // hitbox invisível nascem depois, fora daqui — seguem sem sombra.
+  cena.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return
+    obj.castShadow = true
+    obj.receiveShadow = true
+  })
+
   cena.updateMatrixWorld(true)
   const bounds = new THREE.Box3().setFromObject(cena)
   const tamanho = bounds.getSize(new THREE.Vector3())

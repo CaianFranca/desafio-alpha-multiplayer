@@ -1,23 +1,51 @@
+import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
+import { getConfig } from '@flicker/config';
+import { origemPermitida, LimiteDeMensagensPorConexao, securityEvents, securityLogger as sharedSecurityLogger, primeiroValor } from '@flicker/shared/server';
 import type { ServerMessage } from '@flicker/shared';
+import type { Logger } from 'pino';
 import { NOME_ACCESS_COOKIE } from '../cookies.ts';
 import { parseCookies } from '../middleware/cookie.ts';
 import { verificarAccess } from '../jwt.ts';
 import { obterSessao } from '../sessoes.ts';
 import { ehSalaComando } from '../salas/handlers.ts';
 import { tipoDeComandoDeDebug } from './debug-stream.ts';
+import { RegistroDeConexoes, registroDeConexoes } from './registro-de-conexoes.ts';
 import type { SalasContexto } from '../salas/index.ts';
+
+let securityLogger: Logger = sharedSecurityLogger as unknown as Logger;
+
+export function __setWsSecurityLoggerForTests(logger: Logger): void {
+  securityLogger = logger;
+}
+
+export function __resetWsSecurityLogger(): void {
+  securityLogger = sharedSecurityLogger as unknown as Logger;
+}
 
 export interface WsAuthData {
   jogadorId: string;
   sessaoId: string;
   apelido: string;
   email: string;
+  /** Bots internos (`@bot.teste`) são isentos de rate limit e revalidação. */
+  isBot: boolean;
 }
 
 export type AuthenticatedWebSocket = WebSocket & { data: WsAuthData };
+
+/** Endurecimento do WS (issue #409) — ver `getConfig()` para os defaults. */
+export interface SegurancaWs {
+  origensPermitidas: readonly string[];
+  maxPayloadBytes: number;
+  limiteMensagens: number;
+  janelaLimiteMensagensMs: number;
+}
+
+/** Domínio reservado de bots (ver `routes/auth.ts`): conexões de bot não consomem o rate limit. */
+const DOMINIO_BOT = '@bot.teste';
 
 export interface WsDeps {
   verificarAccess?: typeof verificarAccess;
@@ -29,6 +57,56 @@ export interface WsDeps {
    * compatibilidade com testes que não montam contexto de Salas).
    */
   contextoSalas?: SalasContexto;
+  /**
+   * Endurecimento do WS (issue #409): allowlist de Origem, teto de payload e
+   * rate limit geral por conexão. Quando ausente, deriva de `getConfig()`.
+   */
+  seguranca?: SegurancaWs;
+  securityLogger?: Logger;
+  /**
+   * Registro das conexões autenticadas (issue #410). Quando ausente, usa o
+   * singleton compartilhado com as rotas de auth e a revalidação de Sessão.
+   */
+  registroConexoes?: RegistroDeConexoes;
+}
+
+function segurancaDoConfig(): SegurancaWs {
+  const config = getConfig();
+  return {
+    origensPermitidas: config.wsOrigensPermitidas,
+    maxPayloadBytes: config.wsMaxPayloadBytes,
+    limiteMensagens: config.wsLimiteMensagens,
+    janelaLimiteMensagensMs: config.wsJanelaLimiteMensagensMs,
+  };
+}
+
+function ehConexaoDeBot(socket: AuthenticatedWebSocket): boolean {
+  return socket.data.isBot === true;
+}
+
+const REQUEST_ID_RE = /^[A-Za-z0-9-]{1,128}$/;
+
+function sanitizarRequestId(valor: string | string[] | undefined): string | null {
+  const raw = primeiroValor(valor);
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (!REQUEST_ID_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+function extrairIpParaLog(req: IncomingMessage): string | undefined {
+  const raw = primeiroValor(req.headers['x-forwarded-for'] as string | string[] | undefined);
+  const trustHops = getConfig().trustProxyHops;
+  if (trustHops > 0 && typeof raw === 'string' && raw.trim().length > 0) {
+    // Semântica Express trust proxy: conta da direita (cliente real = len - trustHops)
+    const partes = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    const idx = partes.length - trustHops;
+    if (idx >= 0 && idx < partes.length) {
+      return partes[idx] || (req.socket.remoteAddress ?? undefined);
+    }
+  }
+  return req.socket.remoteAddress ?? undefined;
 }
 
 async function autenticarRequest(
@@ -58,6 +136,7 @@ async function autenticarRequest(
     sessaoId: payload.sessaoId,
     apelido: payload.apelido,
     email: payload.email,
+    isBot: payload.email.endsWith(DOMINIO_BOT),
   };
 }
 
@@ -67,11 +146,49 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
     obterSessao: deps.obterSessao ?? obterSessao,
   };
   const contextoSalas = deps.contextoSalas;
+  const seguranca = deps.seguranca ?? segurancaDoConfig();
+  const logger = deps.securityLogger ?? securityLogger;
+  const registro = deps.registroConexoes ?? registroDeConexoes;
 
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({
+    server,
+    maxPayload: seguranca.maxPayloadBytes,
+    verifyClient: (info, callback) => {
+      const origin = info.req.headers.origin;
+      // Recusa no handshake, ANTES de qualquer leitura de sessão. Loga só a
+      // origem — nunca cookie/token.
+      if (!origemPermitida(origin, seguranca.origensPermitidas)) {
+        const connectionId = randomUUID();
+        const requestId = sanitizarRequestId(info.req.headers['x-request-id'] as string | string[] | undefined) ?? connectionId;
+        const ip = extrairIpParaLog(info.req);
+        try {
+          logger.warn({
+            event: securityEvents.WS_HANDSHAKE_REJECTED,
+            reason: 'origin_not_allowed',
+            origin: origin ?? null,
+            ip,
+            connectionId,
+            requestId,
+          });
+        } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+        // Evento estruturado já emitido acima (pino JSON); console.warn removido para não duplicar
+        // Se precisar de visibilidade em dev, use DEBUG=* ou log do pino
+        callback(false, 403, 'Forbidden');
+        return;
+      }
+      callback(true);
+    },
+  });
 
   wss.on('connection', (socket, request) => {
+    // Log de diagnóstico não-estruturado mantido apenas para correlação local (sem segredo)
     console.log(`[ws] upgrade: ${request.method} ${request.url} ${request.socket.remoteAddress}`);
+    const connectionId = randomUUID();
+    // WS upgrade não passa pelo middleware Express, então X-Request-Id raramente vem do cliente/proxy.
+    // Usa connectionId como fallback para garantir correlação (spec exige id de requisição/conexão).
+    const requestId = sanitizarRequestId(request.headers['x-request-id'] as string | string[] | undefined) ?? connectionId;
+    // Guarda connectionId no socket para uso em logs posteriores (inclui disconnect).
+    (socket as unknown as Record<string, unknown>).__connectionId = connectionId;
     // O listener de 'message' é registrado IMEDIATAMENTE após o
     // 'connection' — antes do `await autenticarRequest`. Sem isso, o
     // `EventEmitter` do Node descarta silenciosamente mensagens que
@@ -83,6 +200,34 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
     const mensagensAguardandoAuth: RawData[] = [];
     const LIMITE_BUFFER_PRE_AUTH = 32;
     let autenticado = false;
+    // Rate limit geral por conexão (issue #409), aplicado a partir da autenticação:
+    // mensagens pré-auth bufferizadas não consomem cota antes do aceite, mas contam
+    // ao serem drenadas. Bots (@bot.teste) são isentos.
+    const limiteDeMensagens = new LimiteDeMensagensPorConexao(
+      seguranca.limiteMensagens,
+      seguranca.janelaLimiteMensagensMs,
+    );
+    let encerradoPorRateLimit = false;
+
+    const processarMensagem = (data: RawData): void => {
+      if (!ehConexaoDeBot(authSocket) && !limiteDeMensagens.registrar()) {
+        if (!encerradoPorRateLimit) {
+          encerradoPorRateLimit = true;
+          try {
+            logger.warn({
+              event: securityEvents.WS_RATE_LIMIT_EXCEEDED,
+              connectionId,
+              requestId,
+              ip: extrairIpParaLog(request),
+              jogadorId: (authSocket as unknown as { data?: WsAuthData }).data?.jogadorId,
+            });
+          } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+          socket.close(1008, 'RATE_LIMIT');
+        }
+        return;
+      }
+      void handleMessage(data, authSocket, contextoSalas, logger, connectionId, requestId);
+    };
 
     socket.on('error', (error) => {
       console.error('[ws] error:', error.message);
@@ -90,7 +235,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
 
     socket.on('message', (data) => {
       if (autenticado) {
-        void handleMessage(data, authSocket, contextoSalas);
+        processarMensagem(data);
       } else if (mensagensAguardandoAuth.length < LIMITE_BUFFER_PRE_AUTH) {
         mensagensAguardandoAuth.push(data);
       }
@@ -98,8 +243,23 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
       // malicioso que envia milhares de mensagens pré-autenticação).
     });
 
-    socket.on('close', () => {
+    socket.on('close', (code: number) => {
+      if (code === 1009) {
+        try {
+          logger.warn({
+            event: securityEvents.WS_PAYLOAD_TOO_LARGE,
+            connectionId,
+            requestId,
+            ip: extrairIpParaLog(request),
+          });
+        } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
+      }
+      // Limpa marca de correlação para GC
+      try { delete (socket as unknown as Record<string, unknown>).__connectionId; } catch {}
       console.log('[ws] disconnect');
+      // Registro de conexões (issue #410): a saída do socket o remove dos
+      // índices antes de qualquer outra limpeza.
+      registro.desregistrar(socket);
       // Stream de debug (issue #340): desconexão encerra o registro do
       // cliente de debug antes do fechamento das Salas.
       contextoSalas?.debug?.desconectar(authSocket);
@@ -123,6 +283,9 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
 
         authSocket.data = auth;
         autenticado = true;
+        // Registro de conexões (issue #410): guarda o mesmo objeto de `data`
+        // para que a migração de `sessaoId` na rotação alcance o socket.
+        registro.registrar(socket, auth);
         console.log(`[ws] auth: ${auth.jogadorId} (${auth.apelido})`);
         console.log(`[ws] connect: ${request.socket.remoteAddress} jogador=${auth.jogadorId}`);
 
@@ -138,7 +301,7 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
 
         // Drena o buffer de mensagens que chegaram antes da autenticação.
         for (const data of mensagensAguardandoAuth.splice(0)) {
-          void handleMessage(data, authSocket, contextoSalas);
+          processarMensagem(data);
         }
       } catch {
         try {
@@ -146,13 +309,13 @@ export function createWebSocketServer(server: Server, deps: WsDeps = {}): WebSoc
         } catch {
           try {
             socket.terminate();
-          } catch {}
+          } catch (e) { console.error('[ws] falha ao encerrar socket após erro interno:', e); }
         }
       }
     })().catch(() => {
       try {
         socket.terminate();
-      } catch {}
+      } catch (e) { console.error('[ws] falha ao encerrar socket:', e); }
     });
   });
 
@@ -163,13 +326,26 @@ async function handleMessage(
   data: RawData,
   socket: AuthenticatedWebSocket,
   contextoSalas: SalasContexto | undefined,
+  loggerParam?: Logger,
+  connectionId?: string,
+  requestId?: string,
 ): Promise<void> {
+  const secLogger = loggerParam ?? securityLogger;
   // Parseia uma única vez; o despacho abaixo decide entre Salas e
   // PING/PONG sem custo extra de reparseamento.
   let parsed: unknown;
   try {
     parsed = JSON.parse(data.toString());
   } catch {
+    try {
+      secLogger.warn({
+        event: securityEvents.WS_MESSAGE_REJECTED,
+        reason: 'invalid_json',
+        connectionId,
+        requestId,
+        jogadorId: (socket as unknown as { data?: WsAuthData }).data?.jogadorId,
+      });
+    } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
     return;
   }
 
@@ -193,8 +369,21 @@ async function handleMessage(
   if (isPingMessage(parsed)) {
     try {
       socket.send(JSON.stringify({ type: 'PONG' }));
-    } catch {}
+    } catch (e) { console.error('[ws] falha ao enviar PONG:', e); }
+    return;
   }
+
+  // Mensagem fora do contrato (não é sala nem debug nem PING) — rejeição estruturada.
+  // Evita logar payload cru — só razão e ids.
+  try {
+    secLogger.warn({
+      event: securityEvents.WS_MESSAGE_REJECTED,
+      reason: 'invalid_command',
+      connectionId,
+      requestId,
+      jogadorId: (socket as unknown as { data?: WsAuthData }).data?.jogadorId,
+    });
+  } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
 }
 
 function isPingMessage(value: unknown): boolean {
