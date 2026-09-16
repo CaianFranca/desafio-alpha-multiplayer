@@ -479,6 +479,7 @@ export function PecaPlaceholder({
   emDisparo = false,
   cursor = 'default',
   onClick,
+  semRelevoEEmissao = false,
 }: PecaPlaceholderProps) {
   const corpo: CorpoProps = {
     tipo,
@@ -488,6 +489,7 @@ export function PecaPlaceholder({
     emTelegraph,
     cursor,
     onClick,
+    semRelevoEEmissao,
   }
   const fallback = <CorpoFallback {...corpo} />
   // Movimento reduzido: pulo/tremor não deslocam (`GrupoDaReacao` estático) —

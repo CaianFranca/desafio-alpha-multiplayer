@@ -33,7 +33,7 @@ import { DocumentosDaMesa } from './Documentos'
  */
 function VelaFallback() {
   return (
-    <mesh position={[0, 0.25, 0]} castShadow receiveShadow>
+    <mesh position={[0, 0.25, 0]} castShadow receiveShadow raycast={() => null}>
       <cylinderGeometry args={[0.22, 0.26, 0.5, 12]} />
       <meshStandardMaterial color="#2a2320" />
     </mesh>
@@ -46,7 +46,7 @@ function VelaFallback() {
  */
 function DecoracaoGenericaFallback() {
   return (
-    <mesh position={[0, 0.08, 0]} castShadow receiveShadow>
+    <mesh position={[0, 0.08, 0]} castShadow receiveShadow raycast={() => null}>
       <boxGeometry args={[0.9, 0.16, 0.6]} />
       <meshStandardMaterial color="#241f1c" />
     </mesh>

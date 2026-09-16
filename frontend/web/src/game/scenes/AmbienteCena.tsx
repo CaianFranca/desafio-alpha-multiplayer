@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react'
+import { Suspense, useLayoutEffect, useMemo } from 'react'
 import { useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import mesaTopoUrl from '../assets/mesa_topo.jpg'
@@ -87,10 +87,9 @@ function Iluminacao() {
  * Mesa: box com o plano superior em y = 0 (origem do ambiente; ver
  * ambiente/contrato.ts). Face +y (índice de material 2) recebe o trio PBR
  * aprovado — `map` (cor) + `normalMap` (relevo sob a luz rasante) +
- * `roughnessMap` (verniz × fosco). O `roughnessMap` assume o trabalho de
- * variação de brilho do `specular-map` anterior (no modelo PBR não há slot
- * de `specularMap`: brilho = 1 − roughness — o arquivo segue no disco, fora
- * de uso). As demais faces são sólidas escuras, fundindo com o vazio.
+ * `roughnessMap` (verniz × fosco). No modelo PBR não há slot de
+ * `specularMap`: brilho = 1 − roughness, e o `roughnessMap` assume a
+ * variação de brilho. As demais faces são sólidas escuras, fundindo com o vazio.
  */
 function Mesa() {
   const texturaCarregada = useLoader(THREE.TextureLoader, mesaTopoUrl)
@@ -108,6 +107,16 @@ function Mesa() {
     roughness.needsUpdate = true
     return { textura, normal, roughness }
   }, [texturaCarregada, normalCarregado, roughnessCarregado])
+
+  // Descarta os clones no unmount/troca (o cache do `useLoader` segue
+  // intacto) — sem isso cada mount vaza 3 texturas GPU.
+  useLayoutEffect(() => {
+    return () => {
+      textura.dispose()
+      normal.dispose()
+      roughness.dispose()
+    }
+  }, [textura, normal, roughness])
 
   return (
     <mesh position={[0, -ESPESSURA_MESA / 2, 0]} receiveShadow>
@@ -153,6 +162,13 @@ function Fundo() {
     copia.needsUpdate = true
     return copia
   }, [texturaCarregada])
+
+  // Descarta o clone no unmount/troca (o cache do `useLoader` segue intacto).
+  useLayoutEffect(() => {
+    return () => {
+      textura.dispose()
+    }
+  }, [textura])
 
   const [x, y, z] = POSICAO_DO_FUNDO
   const s = ESCALA_DO_FUNDO

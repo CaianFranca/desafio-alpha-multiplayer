@@ -19,7 +19,7 @@ import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
  */
 function CalhaDosPeoesFallback() {
   return (
-    <mesh position={[0, 0.15, 0]} castShadow receiveShadow>
+    <mesh position={[0, 0.15, 0]} castShadow receiveShadow raycast={() => null}>
       <boxGeometry
         args={[
           BANDEJA_PEOES_LARGURA,
