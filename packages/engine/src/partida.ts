@@ -1874,6 +1874,10 @@ export function resolverExpiracaoDoTurno(
     return funilarAvaliacaoDoTermino(avancarVez(estado, []));
   }
   if (ativo.primeiroTurnoPendente) {
+    // Defesa (R4 da #429, sonda P2): a Travessia do Escuro é recusada no
+    // Primeiro Turno (MOVIMENTO_INDISPONIVEL em atravessarOEscuroDaPartida) —
+    // atravessouNoTurno com primeiroTurnoPendente é inalcançável por comandos
+    // legítimos, então este ramo não trata travessia aberta.
     if (primeiroTurnoIncompletoNoExpiry(estado, ativo)) {
       const consumido =
         (estado.avisoFinalConsumidoPorJogador ?? {})[ativo.jogadorId] ?? false;
@@ -1896,7 +1900,10 @@ export function resolverExpiracaoDoTurno(
           ],
         );
       }
-      // Segunda vez ainda incompleto: Desistência com causa 'tempo'.
+      // Segunda vez ainda incompleto: Desistência com causa 'tempo' — sem
+      // falta_registrada por intenção (R2 da #429): os itens 1–2 do Apêndice
+      // não pedem falta, em assimetria com a 4ª falta (que abre o lote com
+      // falta_registrada antes da Desistência).
       return funilarAvaliacaoDoTermino(
         desistirDaPartida(estado, ativo.jogadorId, 'tempo'),
       );
@@ -1917,6 +1924,13 @@ export function resolverExpiracaoDoTurno(
       resolverTravessiaAbertaNoExpiry(base, ativo.jogadorId),
     );
   }
+  // Ordem intencional (R3 da #429, sonda P1): recebidas > 0 precede
+  // posicaoConfirmada porque em fluxo real recebidas ⇒ posicaoConfirmada
+  // (a Confirmada só fecha sem pendências) — o estado combinado (peão movido
+  // sem confirmar + recebida pendente) é artificial e, sem Confirmação, o
+  // encerrar falha e a moldura persiste só a falta, com o turno mantido até
+  // a 4ª falta → Desistência. Sem reordenação: o Apêndice não define ordem
+  // para o estado combinado.
   if (estado.tabuleiro.recebidas.length > 0) {
     return resolverExpiracaoComFalta(estado, ativo, (base) =>
       queimarEEncerrarNoExpiry(base, ativo.jogadorId),

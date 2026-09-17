@@ -6,7 +6,7 @@
 // Peões (issues #80 e #88) e os do ciclo de Turnos do ST-11. A saída é
 // `SalaServerMessage`, pois os eventos chegam pelo mesmo canal da partida.
 
-import type { EventoDaPartida } from '@flicker/engine';
+import { CARENCIA_AVISO_FINAL_SEGUNDOS, type EventoDaPartida } from '@flicker/engine';
 import type { SalaServerMessage } from '@flicker/shared';
 
 export function traduzirEventos(
@@ -211,6 +211,25 @@ export function traduzirEventos(
           emBaixaIluminacao: evento.emBaixaIluminacao,
           sanidade: evento.sanidade,
         });
+        break;
+      // Tempo de turno (issue #429, ticket 1/3 regra pura): o aviso final do
+      // Primeiro Turno tem par no wire — PRIMEIRO_TURNO_AVISO_FINAL com
+      // segundosExtras = CARENCIA_AVISO_FINAL_SEGUNDOS (o relógio do ticket
+      // 2/3 estende aquele turno em +30s únicos).
+      case 'aviso_final_do_primeiro_turno':
+        saida.push({
+          type: 'PRIMEIRO_TURNO_AVISO_FINAL',
+          jogadorId: evento.jogadorId,
+          segundosExtras: CARENCIA_AVISO_FINAL_SEGUNDOS,
+        });
+        break;
+      // Tempo de turno (issue #429, ticket 1/3 regra pura):
+      // falta_registrada e pecas_queimadas NÃO têm par no wire neste ticket
+      // — filtro explícito (sem evento próprio; F1 da #429 reserva a decisão
+      // de contrato ao ticket 2/3, que decide como o cliente aprende da
+      // queima ao vivo).
+      case 'falta_registrada':
+      case 'pecas_queimadas':
         break;
       default: {
         const _exaustivo: never = evento;

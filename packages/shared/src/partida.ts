@@ -26,9 +26,9 @@
 //   o snapshot `EstadoDaPartidaSnapshot.deadlineDoTurnoEm?` espelha o mesmo marco.)
 //   shared type:'TURNO_AVISO_30S' { jogadorId, segundosRestantes } — sem par no
 //   engine (#429): aviso único do relógio aos 30s restantes (urgência + bipes no HUD).
-//   shared type:'PRIMEIRO_TURNO_AVISO_FINAL' { jogadorId, segundosExtras } — sem
-//   par no engine (#429): o engine emite `aviso_final_do_primeiro_turno` no domínio
-//   e o relógio estende aquele turno em +30s únicos.
+//   shared type:'PRIMEIRO_TURNO_AVISO_FINAL' { jogadorId, segundosExtras } <-> engine
+//   tipo:'aviso_final_do_primeiro_turno' { jogadorId } (#429): o relógio estende
+//   aquele turno em +30s únicos (segundosExtras = CARENCIA_AVISO_FINAL_SEGUNDOS).
 //   shared type:'TURNO_ENCERRADO' { jogadorId } <-> engine tipo:'turno_encerrado' { jogadorId }
 //   shared type:'POSICAO_CONFIRMADA' { jogadorId, peaoId, pecaId, protegido } <-> engine tipo:'posicao_confirmada' idem — protegido (issue #227) é o estado RESULTANTE do ator no fim do gatilho completo (concessão da Sala Médica, consumo pelo ataque do MESMO gatilho e Proteção prévia não consumida incluídos).
 //   shared type:'PECA_SORTEADA' { pecaId, tipoDaPeca, orientacao } <-> engine tipo:'peca_sorteada' idem — emitido pelo Recebimento da #138 (e pelo sorteio unitário da Caixa)
