@@ -1590,21 +1590,22 @@ function confirmarPosicaoDoPeao(
   // (espelha a ordem computada: cura antes do gatilho).
   eventos.push(...resgate.eventos);
   const tabuleiro = { ...sorteio.estado, recebidas: sorteio.recebidas };
-  // Limpeza e Ataque (issues #172/#236) na mesma ordem do Primeiro Turno:
-  // Iluminação → Limpeza → Ataque → atualização do snapshot do Alcance. A
-  // avaliação é centrada no atuante: Peça do início do turno (antes) vs Peça
-  // confirmada (depois).
-  const iluminacao = recalcularIluminacaoEAplicarLimpeza(estadoPosResgate, tabuleiro, eventos);
-  const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
+  // PATCH LOCAL DE TESTE (Opção A, sem commit): Iluminação → Ataque → Limpeza.
+  // Inverte o funil padrão só para teste manual: o Ataque resolve sobre o
+  // tabuleiro PRÉ-limpeza (monstro removido ainda ataca) e a Limpeza roda
+  // depois. Espelha a poda de permanenciaEmMonstro (ADR-0018).
   const ataque = resolverAtaqueNoGatilho(
     estadoPosResgate,
-    tabuleiroPosLimpeza,
+    tabuleiro,
     eventos,
     // ?? null: defensivo para estados persistidos sem o campo (binário
     // anterior) — sem Peça do início, o "antes" avalia como fora.
     estado.pecaDoInicioDoTurnoId ?? null,
     peca.pecaId,
   );
+  const estadoPosAtaque = { ...estadoPosResgate, jogadores: ataque.jogadores };
+  const iluminacao = recalcularIluminacaoEAplicarLimpeza(estadoPosAtaque, tabuleiro, eventos);
+  const tabuleiroPosLimpeza = { ...tabuleiro, posicionadas: iluminacao.posicionadas };
   const { celulasIluminadas, posicionadas: posicionadasPosAtaque } =
     reaplicarIluminacaoSeBaixaNova(
       estadoPosResgate,
@@ -1685,11 +1686,24 @@ function confirmarPosicaoDoPeao(
           : jogador,
       )
     : ataque.jogadores;
-  const pecasEmPeriodoDeGraca = resgate.pecaEmGraca
+  const pecasEmPeriodoDeGracaBase = resgate.pecaEmGraca
     ? (estado.pecasEmPeriodoDeGraca ?? []).includes(peca.pecaId)
       ? (estado.pecasEmPeriodoDeGraca ?? [])
       : [...(estado.pecasEmPeriodoDeGraca ?? []), peca.pecaId]
     : (estado.pecasEmPeriodoDeGraca ?? []);
+  // PATCH LOCAL DE TESTE: poda pós-limpeza (espelho de permanenciaEmMonstro).
+  // O Ataque rodou pré-limpeza, então o snapshot pode citar monstros varridos.
+  const posicionadasVivas = new Set(posicionadasPosAtaque.map((item) => item.pecaId));
+  const peoesNoAlcancePodado: Record<string, readonly string[]> = {};
+  for (const [pecaId, peaoIds] of Object.entries(ataque.peoesNoAlcance)) {
+    if (!posicionadasVivas.has(pecaId)) {
+      continue;
+    }
+    peoesNoAlcancePodado[pecaId] = peaoIds;
+  }
+  const pecasEmPeriodoDeGraca = pecasEmPeriodoDeGracaBase.filter((pecaId) =>
+    posicionadasVivas.has(pecaId),
+  );
   // Proteção do ator no fim do gatilho completo (issue #227): true quando a
   // Sala Médica acabou de conceder (sobrevive ao ataque do MESMO gatilho) ou
   // quando uma Proteção prévia não foi consumida; false quando não havia
@@ -1705,7 +1719,7 @@ function confirmarPosicaoDoPeao(
       tabuleiro: tabuleiroFinal,
       posicaoConfirmada: true,
       celulasIluminadas,
-      peoesNoAlcance: ataque.peoesNoAlcance,
+      peoesNoAlcance: peoesNoAlcancePodado,
       geradoresLigados,
       cartaoDeAcessoObtido,
       jogadores,
