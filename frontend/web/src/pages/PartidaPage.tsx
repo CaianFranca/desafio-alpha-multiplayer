@@ -6,6 +6,7 @@ import { useViewportCompacto } from '../hooks/useViewportCompacto'
 import { PartidaMoldura } from '../components/partida/PartidaMoldura'
 import { PartidaOverlays } from '../components/partida/PartidaOverlays'
 import { usePartidaTela } from '../components/partida/usePartidaTela'
+import { useMusicaDeFundo } from '../components/partida/useMusicaDeFundo'
 import type { EstadoDaTela } from '../components/partida/partidaTelaMachine'
 import {
   motivoDeRecusaDoEvento,
@@ -423,6 +424,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   }, [partidaId])
 
   const estadoEmAndamento = temAlvo && estado === 'disponivel'
+  // Música de fundo em loop (issue #403): só em andamento — começa ao
+  // entrar (ou no primeiro gesto se o autoplay bloquear), para ao
+  // terminar/sair/desmontar. Sem botão nesta entrega.
+  useMusicaDeFundo(estadoEmAndamento)
   const emResultado = estado === 'resultado'
   const emResultadoRef = useRef(emResultado)
   useEffect(() => {

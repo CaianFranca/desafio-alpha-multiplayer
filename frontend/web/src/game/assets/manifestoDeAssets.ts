@@ -50,6 +50,7 @@ import {
   SOM_CAMINHO_CLIQUE_PEAO,
 } from '../tabuleiro/vooDoPeao'
 import { CAMINHO_SOM_DE_RECUSA } from '../../components/partida/somDeRecusa'
+import { CAMINHO_MUSICA_DE_FUNDO } from '../../components/partida/musicaDeFundo'
 
 /** Textura do topo da Mesa (mesma URL do bundler usada em `AmbienteCena`). */
 export const URL_DA_MESA: string = mesaTopoUrl
@@ -102,9 +103,10 @@ export const PARES_DE_AVATARES_POR_SLOT: ReadonlyArray<
 
 /**
  * Sons da partida (duto `/media/`): carta do giro, toque enigmático do
- * movimento, som sombrio da limpeza, slide da caixa, clique/baque do peão e
- * som de recusa. Sem duplicatas. (Um caminho pode não ter arquivo commitado
- * — ex.: slide da caixa — e assenta como falha silenciosa no aquecimento.)
+ * movimento, som sombrio da limpeza, slide da caixa, clique/baque do peão,
+ * som de recusa e música de fundo em loop. Sem duplicatas. (Um caminho pode
+ * não ter arquivo commitado — ex.: slide da caixa — e assenta como falha
+ * silenciosa no aquecimento.)
  */
 export const SONS_DA_PARTIDA: readonly string[] = [
   ...new Set([
@@ -115,5 +117,6 @@ export const SONS_DA_PARTIDA: readonly string[] = [
     SOM_CAMINHO_CLIQUE_PEAO,
     SOM_CAMINHO_BAQUE_PEAO,
     CAMINHO_SOM_DE_RECUSA,
+    CAMINHO_MUSICA_DE_FUNDO,
   ]),
 ]

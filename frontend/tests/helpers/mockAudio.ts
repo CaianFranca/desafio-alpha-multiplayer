@@ -2,19 +2,39 @@
 //
 // O ponto de som de recusa (`tocarSomDeRecusa`) instancia `new Audio(...)` e
 // chama `play()` — jsdom não implementa áudio de verdade. Este mock grava
-// cada toque (src + volume no momento do play) para asserções externas
-// (tocou/não tocou, com qual asset e volume), sem rede nem som real.
+// cada toque (src + volume no momento do play + flag loop) para asserções
+// externas (tocou/não tocou, com qual asset e volume), sem rede nem som real.
 //
-// Instalado globalmente via tests/setup.ts; o array é limpo antes de cada
+// A música de fundo em loop (issue #403) também passa por aqui — com
+// `loop: true` — e toca na montagem de toda Partida em andamento. Testes de
+// SFX que montam a PartidaPage afirmam sobre `toquesDeEfeito()` (recorte sem
+// a música) para não acoplarem à música; o comportamento próprio da música
+// vive em `musica-de-fundo.test.ts`. `pausasDeAudio` grava cada `pause()`
+// (só a música pausa hoje).
+//
+// Instalado globalmente via tests/setup.ts; os arrays são limpos antes de cada
 // teste (hook global no setup). Para simular falha de `play()`, o teste
 // sobrescreve `falhaDoProximoPlay` / `playLancaExcecao`.
 
 export interface ToqueDeAudioGravado {
   readonly src: string
   readonly volume: number
+  readonly loop: boolean
 }
 
 export const toquesDeAudio: ToqueDeAudioGravado[] = []
+
+/** Pausas gravadas (src de cada `pause()` — música de fundo, issue #403). */
+export const pausasDeAudio: string[] = []
+
+/**
+ * Recorte de SFX (sem a música de fundo em loop da issue #403): toques com
+ * `loop: false`. Testes que montam a PartidaPage em andamento afirmam sobre
+ * este recorte — a música toca na montagem por contrato e não é SFX.
+ */
+export function toquesDeEfeito(): ToqueDeAudioGravado[] {
+  return toquesDeAudio.filter((toque) => !toque.loop)
+}
 
 /** Quando true, o próximo `play()` retorna Promise rejeitada (autoplay bloqueado). */
 export let falhaDoProximoPlay = false
@@ -24,6 +44,7 @@ export let playLancaExcecao = false
 
 export function limparToquesDeAudio(): void {
   toquesDeAudio.length = 0
+  pausasDeAudio.length = 0
   registrosDeBlipDoChat.length = 0
   falhaDoProximoPlay = false
   playLancaExcecao = false
@@ -86,6 +107,7 @@ globalThis.AudioContext = AudioContextMock as unknown as typeof AudioContext
 class AudioMock {
   src: string
   volume = 1
+  loop = false
 
   constructor(src = '') {
     this.src = src
@@ -96,7 +118,7 @@ class AudioMock {
       playLancaExcecao = false
       throw new Error('play lançou exceção (mock)')
     }
-    toquesDeAudio.push({ src: this.src, volume: this.volume })
+    toquesDeAudio.push({ src: this.src, volume: this.volume, loop: this.loop })
     if (falhaDoProximoPlay) {
       falhaDoProximoPlay = false
       return Promise.reject(new Error('play rejeitado (mock)'))
@@ -104,11 +126,14 @@ class AudioMock {
     return Promise.resolve()
   }
 
-  pause(): void {}
+  pause(): void {
+    pausasDeAudio.push(this.src)
+  }
 }
 
 // Sobrescreve o construtor global (tipos compatíveis em runtime; o mock
-// expõe só o subconjunto usado pelo ponto de som: src, volume, play).
+// expõe só o subconjunto usado pelos pontos de som: src, volume, loop,
+// play, pause).
 globalThis.Audio = AudioMock as unknown as typeof Audio
 
 export function armarFalhaNoProximoPlay(): void {
