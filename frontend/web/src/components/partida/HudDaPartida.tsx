@@ -43,6 +43,8 @@ export interface HudDaPartidaProps {
   geradoresLigados: readonly string[]
   /** Cartão de Acesso obtido (Sala do Diretor). */
   cartaoDeAcessoObtido: boolean
+  /** Peças restantes na Caixa (issue #439): null oculta o chip. */
+  pecasRestantesNaCaixa?: number | null
   /** Partida em andamento (cronômetro conta). */
   emAndamento: boolean
   /** Partida em resultado (cronômetro congela). */
@@ -191,6 +193,7 @@ export function HudDaPartida({
   jogadorLocalId,
   geradoresLigados,
   cartaoDeAcessoObtido,
+  pecasRestantesNaCaixa = null,
   emAndamento,
   emResultado,
   iniciadaEm = null,
@@ -637,13 +640,13 @@ export function HudDaPartida({
         )}
       </div>
 
-      {/* ── inf-centro: conquistas soltas abaixo do girar (Geradores + Cartão; só ícones no compacto) ── */}
+      {/* ── inf-centro: conquistas soltas abaixo do girar (Geradores | Caixa | Cartão; só ícones no compacto) ── */}
       <div
         data-testid="hud-conquistas"
         aria-label="Conquistas"
         data-compacto={emModoCompacto ? 'true' : undefined}
         style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
-        className={`absolute bottom-4 left-1/2 flex origin-bottom -translate-x-1/2 items-start lg:scale-100 ${emModoCompacto ? 'scale-75 gap-2' : 'scale-90 gap-4'}`}
+        className={`absolute bottom-4 left-1/2 flex origin-bottom -translate-x-1/2 items-center lg:scale-100 ${emModoCompacto ? 'scale-75 gap-2' : 'scale-90 gap-4'}`}
       >
         <div className="flex flex-col items-center gap-1">
           <div className="flex items-center gap-2">
@@ -675,6 +678,26 @@ export function HudDaPartida({
           </span>
           )}
         </div>
+        {pecasRestantesNaCaixa !== null ? (
+          <>
+            <div data-testid="hud-divisor-caixa" aria-hidden="true" className="w-px self-stretch bg-zinc-700/60 mx-1" />
+            <div className="flex flex-col items-center gap-1">
+              <div
+                data-testid="hud-caixa-contador"
+                data-valor={String(pecasRestantesNaCaixa)}
+                role="status"
+                aria-label={`Caixa com ${pecasRestantesNaCaixa} peças restantes`}
+                className={`flex items-center justify-center rounded-md border border-zinc-700 bg-zinc-900/80 tabular-nums text-zinc-100 ${emModoCompacto ? 'h-8 min-w-8 px-2 text-xs' : 'h-10 min-w-10 px-2.5 text-sm'}`}
+              >
+                {pecasRestantesNaCaixa}
+              </div>
+              {emModoCompacto ? null : (
+                <span className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-400">Caixa</span>
+              )}
+            </div>
+            <div data-testid="hud-divisor-caixa" aria-hidden="true" className="w-px self-stretch bg-zinc-700/60 mx-1" />
+          </>
+        ) : null}
         <div className="flex flex-col items-center gap-1">
           <div
             data-testid="hud-conquista-cartao"
