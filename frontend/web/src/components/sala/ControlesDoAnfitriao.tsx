@@ -137,7 +137,7 @@ export function ControlesDoAnfitriao({
           <button
             type="button"
             onClick={confirmarEncerramento}
-            className="border border-white/30 px-4 py-2 text-sm tracking-wider uppercase text-white/85 cursor-pointer hover:text-white hover:border-white/40 transition-colors disabled:cursor-not-allowed"
+            className="border border-white/30 px-4 py-2 text-sm tracking-wider uppercase text-white/85 cursor-pointer hover:text-white hover:border-white/40 transition-colors"
           >
             Encerrar Sala
           </button>
@@ -190,7 +190,7 @@ export function ControlesDoAnfitriao({
                 <button
                   type="button"
                   onClick={() => aoDesbloquearJogador(jogador.jogadorId)}
-                  className="border border-[#c9a86a]/60 text-[#c9a86a] px-3 py-1 text-sm font-bold tracking-wider uppercase cursor-pointer hover:bg-[#c9a86a] hover:text-black transition-colors disabled:cursor-not-allowed"
+                  className="border border-[#c9a86a]/60 text-[#c9a86a] px-3 py-1 text-sm font-bold tracking-wider uppercase cursor-pointer hover:bg-[#c9a86a] hover:text-black transition-colors"
                 >
                   Desbloquear
                 </button>
