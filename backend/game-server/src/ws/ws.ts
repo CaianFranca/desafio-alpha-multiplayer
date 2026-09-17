@@ -51,6 +51,10 @@ import {
   definirJanelaDeReconexao,
   limparJanelaDeReconexao,
 } from '../partidas/reconexao-em-andamento.ts';
+import {
+  pausarRelogioDoTurnoSeAtivo,
+  retomarRelogioDoTurnoSeAtivo,
+} from '../partidas/relogio-do-turno.ts';
 import { obterEstadoDaPartida } from '../partidas/estado.ts';
 import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
@@ -246,6 +250,9 @@ function limparAdmissaoFalha(
     adicionarConexao(conexaoAnterior);
   } else if (eraVigente) {
     marcarDesconexaoEArmarJanela(redis, partidaId, jogadorId, undefined, broadcaster);
+    // Relógio do turno (issue #431): sem conexão vigente, o turno do ausente
+    // (se era o Ativo) congela junto com a presença.
+    void pausarRelogioDoTurnoSeAtivo(redis, partidaId, jogadorId);
   }
 }
 
@@ -485,6 +492,12 @@ export function criarWebSocketServer(
               console.error('[ws] falha ao limpar janela de reconexão:', err instanceof Error ? err.message : String(err)),
             );
             anunciarVoltaSeReadmissao(depsPartida?.broadcaster, partidaId, sessao.jogadorId, transicao);
+            // Relógio do turno (issue #431): retoma o restante pausado — ou
+            // arma o prazo cheio quando não há relógio (N-ésima admissão que
+            // inicia a partida; vão de restart com chave expirada). Aguardado
+            // aqui para que snapshot + TURNO_INICIADO abaixo já carreguem o
+            // deadline; nunca lança (retorna false sem relógio).
+            await retomarRelogioDoTurnoSeAtivo(contexto.redis, partidaId, sessao.jogadorId);
           }
 
           ws.send(JSON.stringify({
@@ -530,6 +543,9 @@ export function criarWebSocketServer(
                     transicao.estado,
                     transicao.iniciadaEm,
                     atomico.historico,
+                    // Deadline do turno (issue #431): null ≡ sem relógio —
+                    // vira chave ausente no snapshot.
+                    atomico.deadlineDoTurnoEm ?? undefined,
                   );
                   depsPartida.broadcaster.enviarParaSocket(ws, {
                     type: 'ESTADO_DA_PARTIDA',
@@ -715,6 +731,10 @@ export function criarWebSocketServer(
               verificarNaoInicioAposDesconexao(r, p),
               depsPartida?.broadcaster,
             );
+            // Relógio do turno (issue #431): se quem caiu era o Jogador Ativo,
+            // o turno congela (a janela de 60s da #295 segue mandando) — a
+            // readmissão retoma o restante.
+            void pausarRelogioDoTurnoSeAtivo(contexto.redis, partidaId, sessao.jogadorId);
           });
         })().catch((error: unknown) => {
           console.error('[ws] falha na transição pós-upgrade:', error instanceof Error ? error.message : String(error));

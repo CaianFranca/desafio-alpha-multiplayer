@@ -357,11 +357,23 @@ test('desistência no próprio turno passa a vez ao seguinte sem travar', async 
     'TURNO_ENCERRADO',
     'TURNO_INICIADO',
   ]);
-  assert.deepEqual(sockets.get('jogador-2')!.mensagens[2], {
-    type: 'TURNO_INICIADO',
-    jogadorId: 'jogador-2',
-    rodada: 1,
-  });
+  // Relógio do turno (issue #431): a Passagem arma o deadline de parede e ele
+  // viaja no TURNO_INICIADO (default 180s do módulo sem fiação de config).
+  const turnoIniciado = sockets.get('jogador-2')!.mensagens[2] as {
+    type: string;
+    jogadorId: string;
+    rodada: number;
+    deadlineDoTurnoEm: unknown;
+  };
+  assert.equal(turnoIniciado.type, 'TURNO_INICIADO');
+  assert.equal(turnoIniciado.jogadorId, 'jogador-2');
+  assert.equal(turnoIniciado.rodada, 1);
+  assert.ok(typeof turnoIniciado.deadlineDoTurnoEm === 'number', 'Passagem arma deadline numérico');
+  assert.ok(
+    turnoIniciado.deadlineDoTurnoEm > Date.now()
+      && turnoIniciado.deadlineDoTurnoEm <= Date.now() + 180_000 + 5_000,
+    'deadline dentro do prazo de 180s',
+  );
 
   // A vez é mesmo do seguinte: fora-da-vez para o terceiro prova o destrave.
   await handlers.aplicarMensagem(
