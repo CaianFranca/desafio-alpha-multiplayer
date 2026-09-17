@@ -502,8 +502,9 @@ export class PartidaHandlers {
               partidaId,
               serverId: partida.serverId,
               jogadorId: evento.jogadorId,
-              // Causa informativa (#295): distingue o ato explícito
-              // (`desistencia`) da conversão (`expiracao`) sem mudar o detach.
+              // Causa informativa (#295 + #429): distingue o ato explícito
+              // (`desistencia`), a conversão (`expiracao`) e o relógio (`tempo`)
+              // sem mudar o detach.
               ...(evento.causa === undefined ? {} : { causa: evento.causa }),
             }).catch((erro: unknown) => {
               console.error('[partida] callback de desistência terminou com erro', { partidaId, erro });
@@ -889,10 +890,11 @@ export class PartidaHandlers {
     }
     const naPartida = new Set(jogadoresNaPartida);
     const desistentes = partida.roster.map((m) => m.jogadorId).filter((id) => !naPartida.has(id));
-    // Causa informativa por desistente (#295): o lote carrega a origem de
-    // cada saída (explícita `desistencia` vs conversão `expiracao`); fora do
-    // lote (reagendamentos degradados) a causa é omitida, sem mudar o detach.
-    const causas = new Map<string, 'desistencia' | 'expiracao'>();
+    // Causa informativa por desistente (#295 + #429): o lote carrega a origem de
+    // cada saída (explícita `desistencia` vs conversão `expiracao` vs relógio
+    // `tempo`); fora do lote (reagendamentos degradados) a causa é omitida,
+    // sem mudar o detach.
+    const causas = new Map<string, 'desistencia' | 'expiracao' | 'tempo'>();
     for (const evento of desistenciasNoLote) {
       if (evento.tipo === 'desistencia_registrada' && evento.causa !== undefined) {
         causas.set(evento.jogadorId, evento.causa);
