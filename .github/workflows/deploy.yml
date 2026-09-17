@@ -166,15 +166,22 @@ jobs:
           printf '%s\n' "$VPN_CONFIG" | sudo tee /tmp/vpn/client.ovpn > /dev/null
           sudo openvpn --config /tmp/vpn/client.ovpn --daemon \
             --log /tmp/vpn/openvpn.log --writepid /tmp/vpn/openvpn.pid
+          # O deploy depende de SSH, então o gate é TCP/22 (não só ICMP): um
+          # ping pode passar enquanto o firewall/fail2ban filtra TCP/22.
           for i in $(seq 1 60); do
-            if ping -c 1 -W 2 "$SERVER_HOST" > /dev/null 2>&1; then
-              echo "VPN ativa: $SERVER_HOST alcançável (tentativa $i)"
+            if timeout 3 bash -c "exec 3<>/dev/tcp/$SERVER_HOST/22" 2>/dev/null; then
+              echo "VPN ativa: $SERVER_HOST:22 acessível (tentativa $i)"
               exit 0
             fi
             sleep 1
           done
-          echo "::error::Servidor $SERVER_HOST inalcançável após 60s com a VPN ativa"
+          echo "::error::Porta 22 de $SERVER_HOST inacessível após 60s com a VPN ativa"
           echo '--- Diagnóstico de rota ---'
+          if ping -c 1 -W 2 "$SERVER_HOST" > /dev/null 2>&1; then
+            echo 'ICMP ok: o host responde a ping, mas TCP/22 não abriu → firewall/fail2ban ou sshd parado.'
+          else
+            echo 'Host não responde nem a ICMP: túnel/rota até o servidor falhou.'
+          fi
           if curl -fsS -m 5 https://api.github.com > /dev/null 2>&1; then
             echo 'Internet OK: o túnel subiu, mas a rota até o servidor falhou.'
           else
@@ -197,9 +204,40 @@ jobs:
           chmod 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$SERVER_HOST" > ~/.ssh/known_hosts 2>/dev/null
-          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
-            "$SERVER_USER@$SERVER_HOST" 'echo "conectado: $(hostname)"'
+
+          # ssh-keyscan com retry. NUNCA silenciar o stderr: é nele que aparece
+          # o motivo real (timeout/porta fechada) quando a conexão falha.
+          known_hosts_ok=0
+          for i in $(seq 1 3); do
+            if ssh-keyscan -T 5 -H "$SERVER_HOST" > ~/.ssh/known_hosts \
+              && [ -s ~/.ssh/known_hosts ]; then
+              known_hosts_ok=1
+              break
+            fi
+            echo "ssh-keyscan falhou (tentativa $i/3)" >&2
+            sleep $((i * 3))
+          done
+
+          ssh_opts=(-i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10)
+          if [ "$known_hosts_ok" -eq 1 ]; then
+            ssh_opts+=(-o StrictHostKeyChecking=yes)
+          else
+            echo '::warning::ssh-keyscan não retornou chaves; usando StrictHostKeyChecking=accept-new' >&2
+            ssh_opts+=(-o StrictHostKeyChecking=accept-new)
+          fi
+
+          # Retry/backoff: o sshd pode levar alguns instantes para aceitar após
+          # a VPN subir, ou recusar transitoriamente.
+          for attempt in $(seq 1 5); do
+            if ssh "${ssh_opts[@]}" \
+              "$SERVER_USER@$SERVER_HOST" 'echo "conectado: $(hostname)"'; then
+              exit 0
+            fi
+            echo "SSH falhou (tentativa $attempt/5)" >&2
+            sleep $((attempt * 5))
+          done
+          echo '::error::SSH inacessível após 5 tentativas' >&2
+          exit 1
 
       - name: Gerar env de produção (valores nunca logados)
         env:
