@@ -8,7 +8,7 @@
  * desbloqueio no primeiro gesto, limpeza) vive no `useMusicaDeFundo`; aqui
  * ficam só as constantes e as operações sobre uma instância de `Audio`.
  *
- * Volume base 0.2 (VOLUME_BASE_MUSICA_DE_FUNDO): abaixo dos SFX (recusa/
+ * Volume base 0.1 (VOLUME_BASE_MUSICA_DE_FUNDO): abaixo dos SFX (recusa/
  * clique em 0.3), confortável ao fundo. O futuro botão de volume controlará
  * este ponto sem recostura via `masterVolume * VOLUME_BASE`.
  * `play()` com `catch` silencioso como defensivo (no-op se falhar, ex.:
@@ -26,7 +26,7 @@ export const CAMINHO_MUSICA_DE_FUNDO = comBase('/media/musica-de-fundo.mp3')
  * ADR-0007: `audio.volume = master * VOLUME_BASE_MUSICA_DE_FUNDO`, com
  * master em [0, 1]).
  */
-export const VOLUME_BASE_MUSICA_DE_FUNDO = 0.2
+export const VOLUME_BASE_MUSICA_DE_FUNDO = 0.1
 
 /**
  * Cria a instância da música de fundo: loop contínuo, volume

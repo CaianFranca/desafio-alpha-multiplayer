@@ -28,7 +28,7 @@ describe('música de fundo — constantes (issue #403)', () => {
   })
 
   it('volume base é confortável, abaixo dos SFX', () => {
-    expect(VOLUME_BASE_MUSICA_DE_FUNDO).toBe(0.2)
+    expect(VOLUME_BASE_MUSICA_DE_FUNDO).toBe(0.1)
     expect(VOLUME_BASE_MUSICA_DE_FUNDO).toBeLessThan(VOLUME_BASE_SOM_DE_RECUSA)
   })
 
