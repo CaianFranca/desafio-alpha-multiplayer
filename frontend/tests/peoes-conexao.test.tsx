@@ -500,6 +500,13 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
+    // Issue #433: o clique na mesa é gesto do ciclo — só o dono (Jogador
+    // Ativo) emite; antes o teste rodava como espectador (vazamento calado
+    // pelo gate fora-da-vez). Vez do jogador local:
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
+
     await user.click(pecaDaMesa('inicial-3'))
     expect(ultimoComando(ws)).toEqual({
       type: 'SELECIONAR_PECA',
@@ -533,6 +540,13 @@ describe('partida conectada — Caixa, bandeja e ciclo (#91/#143)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
+    // Issue #433: a rejeição local (com som) é o feedback de quem OPERA o
+    // ciclo — o teste roda com o jogador local no assento Ativo; o
+    // espectador correspondente fica mudo (gate donoDoCiclo, coberto em
+    // peoes-interacao.test.ts e nos testes de página #433).
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
     act(() => {
       ws.simulateMessage({ type: 'PEAO_SELECIONADO', peaoId: 'peao-branco' })
       ws.simulateMessage({

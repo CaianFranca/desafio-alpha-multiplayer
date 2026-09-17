@@ -58,6 +58,18 @@
  * Peão fica silencioso; o caminho canônico de encerrar após mover é
  * confirmar → encerrar, e o botão Permanecer (faseDoTurno da PartidaPage)
  * vale ANTES de mover ou com o peão de volta na Peça do início do turno.
+ *
+ * Gate "fora da vez" (issue #433): o espectador (`donoDoCiclo === false`) não
+ * opera o ciclo do Jogador Ativo. Além do pull (revisão #199), os mapeadores
+ * de interação (`mapearDesselecaoDePeao`, `mapearCliqueNoPeao`), o roteador de
+ * célula (`rotearCliqueDeCelula`), o clique em peça da mesa
+ * (`mapearCliqueNaPecaDaMesa`), o OK da Manipulação (`mapearFinalizarRecebida`)
+ * e os previews (`previewsProvisorios`) ficam silenciosos para quem não é o
+ * dono do ciclo — sem comando ao servidor, sem rejeição local com som (o
+ * servidor recusaria com FORA_DA_VEZ; o espelho de estado compartilhado segue
+ * broadcast e é filtrado na montagem pela PartidaPage). `undefined` = gate não
+ * avaliado (unidades puras sem identidade local — comportamento
+ * legado preservado).
  */
 
 import { mapearCliqueNaCelula, mapearCliqueNaPecaPosicionada } from './interacao'
@@ -295,6 +307,10 @@ export function podeSelecionarPeao(
 export function mapearDesselecaoDePeao(
   estado: EstadoInteracaoPeoes,
 ): ResultadoDeInteracaoDePeao {
+  // Gate "fora da vez" (#433): o espectador não desseleciona o Peão do
+  // Jogador Ativo — clique na área vazia fica silencioso (o servidor
+  // recusaria com FORA_DA_VEZ; a desseleção é gesto exclusivo do dono).
+  if (estado.donoDoCiclo === false) return null
   const peaoId = estado.peaoSelecionadoId
   if (peaoId === null) return null
   if (haRecebidasPendentes(estado)) {
@@ -325,6 +341,10 @@ export function mapearCliqueNoPeao(
   estado: EstadoInteracaoPeoes,
   peaoId: string,
 ): ResultadoDeCliqueNoPeao {
+  // Gate "fora da vez" (#433): o espectador não seleciona Peão — clique
+  // silencioso em QUALQUER peão (inclusive o do Ativo, cuja seleção é
+  // exclusiva do dono do ciclo; o servidor recusaria com FORA_DA_VEZ).
+  if (estado.donoDoCiclo === false) return null
   const peao = estado.peoes.find((p) => p.peaoId === peaoId)
   if (!peao) return null
   if (peao.peaoId === estado.peaoSelecionadoId) {
@@ -677,6 +697,10 @@ export interface PecaProvisoria {
 export function previewsProvisorios(
   estado: EstadoInteracaoPeoes,
 ): readonly PecaProvisoria[] {
+  // Gate "fora da vez" (#433): o espectador não monta previews — a
+  // pré-visualização é controle do turno do Jogador Ativo (fonte única da
+  // cena, do overlay de Manipulação e do espelho DOM; todos caem aqui).
+  if (estado.donoDoCiclo === false) return []
   const posicionadasPorId = new Set(
     estado.posicionadas.map((p) => p.pecaId),
   )
@@ -704,6 +728,11 @@ export function previewsProvisorios(
 export function mapearFinalizarRecebida(
   estado: EstadoInteracaoPeoes,
 ): TabuleiroComandoDoCliente | null {
+  // Gate "fora da vez" (#433): o OK do preview é gesto exclusivo do dono do
+  // ciclo — Espaço/Enter do espectador não finaliza Recebida alheia (o
+  // servidor recusaria com FORA_DA_VEZ; com o gate do roteador e da página o
+  // teclado do espectador fica inerte e silencioso).
+  if (estado.donoDoCiclo === false) return null
   const pecaId = estado.pecaSelecionadaId
   if (pecaId === null) return null
   const pendencia = estado.recebidasPendentes.find(
@@ -1017,6 +1046,13 @@ export function rotearCliqueDeCelula(
   _estadoInteracao: EstadoInteracaoTabuleiro,
   celula: Celula,
 ): ResultadoDeCliqueEmCelula {
+  // Gate "fora da vez" (#433): o espectador não roteia comandos pelo ciclo do
+  // Jogador Ativo — MOVER/POSICIONAR/ESCOLHER_VAGA/ATRAVESSAR ficam
+  // silenciosos (o servidor recusaria com FORA_DA_VEZ). O null aqui cai no
+  // fallback de `despacharCliqueDeCelula`, que já suprime o ST-09 com ciclo
+  // ativo (seleção/pendências broadcast); sem ciclo ativo a sanitização da
+  // PartidaPage (estadoInteracao filtrado fora da vez) mantém o ST-09 mudo.
+  if (estadoPeoes.donoDoCiclo === false) return null
   if (haRecebidasPendentes(estadoPeoes)) {
     const temVagaPendente = estadoPeoes.recebidasPendentes.some(
       (r) => r.vaga === null,
@@ -1195,6 +1231,9 @@ export function mapearCliqueNaPecaDaMesa(
   estadoInteracao: EstadoInteracaoTabuleiro,
   pecaId: string,
 ): TabuleiroComandoDoCliente | null {
+  // Gate "fora da vez" (#433): SELECIONAR_PECA da Inicial na mesa é gesto do
+  // ciclo — o espectador não envia (o servidor recusaria com FORA_DA_VEZ).
+  if (estadoPeoes?.donoDoCiclo === false) return null
   if (
     estadoPeoes !== null &&
     (haRecebidasPendentes(estadoPeoes) || estadoPeoes.posicaoConfirmadaNoTurno)

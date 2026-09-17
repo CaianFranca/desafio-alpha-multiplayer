@@ -1361,7 +1361,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     if (estado === 'disponivel' && cenaPronta && !cenaRevelada) setCenaRevelada(true)
   }, [estado, cenaPronta, cenaRevelada])
   const estadoEfetivo = estado === 'disponivel' && !cenaRevelada ? 'carregando' : estado
-  const estadoInteracao: EstadoDoTabuleiroNoCliente | null =
+  // Bruto do modelo (broadcast) — a sanitização para o espectador deriva
+  // abaixo, depois de `minhaVez` (gate de montagem da vez, issue #433).
+  const estadoInteracaoCru: EstadoDoTabuleiroNoCliente | null =
     estadoEmAndamento ? modelo : null
 
   const voltarASala = useCallback(() => {
@@ -1525,6 +1527,28 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
 
   // ── Vez (issue #118): derivada uma vez; consome o gate do pull (#199) ──
   const minhaVez = !emResultado && !emNaoInicio && jogadorId !== null && modelo.jogadorAtivoId === jogadorId
+
+  // ── Gate de montagem da vez (issue #433): espectador não monta nem opera
+  // os controles do turno do Jogador Ativo ──
+  // Sanitização pós-derivação do estado bruto: zera os ids de foco da peça
+  // (seleção/manipulação) fora da vez — os demais campos (posicionadas,
+  // iniciais, etc.) continuam broadcast e preservados. Consumidores
+  // interativos (teclado R/E/Espaço/Enter, props do AmbienteDeJogo, overlay
+  // de Manipulação, espelho DOM) veem apenas esta projeção. Acoplamento
+  // documentado: o fallback ST-09 de `despacharCliqueDeCelula` (célula sem
+  // ciclo ativo) lê `pecaSelecionadaId`/`pecaEmManipulacaoId` daqui; com os
+  // dois zerados, o espectador não tem o que despachar e a célula fica muda
+  // (os guards `donoDoCiclo === false` de `interacaoPeoes.ts` completam o
+  // silêncio das rotas do ciclo). useMemo: identidade estável entre renders
+  // (o teclado/efeitos abaixo têm o objeto nas deps; para o dono a referência
+  // continua sendo o próprio modelo).
+  const estadoInteracao: EstadoDoTabuleiroNoCliente | null = useMemo(
+    () =>
+      estadoInteracaoCru !== null && !minhaVez
+        ? { ...estadoInteracaoCru, pecaSelecionadaId: null, pecaEmManipulacaoId: null }
+        : estadoInteracaoCru,
+    [estadoInteracaoCru, minhaVez],
+  )
 
   // ── Percepção mínima de Sanidade e estados (ST-15, issue #174) ──
   // Sem controles completos; apenas indicadores no Ambiente de Jogo derivados
@@ -1984,7 +2008,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onComando={onComando}
         onComandoPeao={onComandoPeao}
         onRejeicaoPeao={onRejeicaoPeao}
-        peaoSelecionadoIdServidor={modelo.peaoSelecionadoId}
+        // Gate de montagem (#433): o destaque de seleção na cena/espelho é
+        // parte dos controles do turno — o espectador não o monta (em
+        // cascata, destinosSet/resgateSet ficam vazios); peaoAtivoId segue
+        // para todos (indicação do Jogador Ativo, #118).
+        peaoSelecionadoIdServidor={minhaVez ? modelo.peaoSelecionadoId : null}
         peaoAtivoId={peaoAtivoId}
         sanidadePorPeao={sanidadePorPeao}
         vooPendente={vooPendente}

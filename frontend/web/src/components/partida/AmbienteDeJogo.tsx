@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import {
   FOV_CAMERA,
@@ -165,7 +165,12 @@ export function AmbienteDeJogo({
   // única exibida na bandeja de slot único. Vagas disponíveis derivam do
   // mesmo roteador puro (`vagasDisponiveisDoPeao`) e destacam as células
   // enquanto há pendência sem vaga — fonte única cena + espelho DOM.
-  const recebidasPendentes = estadoInteracaoPeoes?.recebidasPendentes ?? []
+  // useMemo: identidade estável do array entre renders (é dep do efeito de
+  // pull abaixo — sem o memo o lint marca "logical expression in deps").
+  const recebidasPendentes = useMemo(
+    () => estadoInteracaoPeoes?.recebidasPendentes ?? [],
+    [estadoInteracaoPeoes],
+  )
 
   // ── Pull da bandeja (fluxo aprovado na revisão #199) ──
   // Estado visual LOCAL, fora do modelo autoritativo: clicar a corrente
@@ -181,6 +186,16 @@ export function AmbienteDeJogo({
   // sai da lista e o pull automático da corrente travada da Travessia rodam
   // em efeito, após o commit — mesmo comportamento, sem update-de-render.
   useEffect(() => {
+    // Gate "fora da vez" (#433): o pull é estado LOCAL do dono do ciclo — o
+    // auto-pull da corrente travada da Travessia (abaixo) é parte dos
+    // controles do turno do Jogador Ativo e não contamina o espectador. Fora
+    // da vez também reseta qualquer resíduo local (a vez virou no meio de um
+    // pull), preservando o invariante "espectador nunca puxa, logo nunca vê
+    // vaga destacada" que gated `vagasSet`/`vagasPontilhadasSet` abaixo.
+    if (estadoInteracaoPeoes?.donoDoCiclo === false) {
+      if (recebidaPuxadaId !== null) setRecebidaPuxadaId(null)
+      return
+    }
     if (
       recebidaPuxadaId !== null &&
       !recebidasPendentes.some((r) => r.recebidaId === recebidaPuxadaId)
@@ -199,7 +214,7 @@ export function AmbienteDeJogo({
     if (correnteTravada !== null && recebidaPuxadaId !== correnteTravada.recebidaId) {
       setRecebidaPuxadaId(correnteTravada.recebidaId)
     }
-  }, [recebidasPendentes, recebidaPuxadaId])
+  }, [estadoInteracaoPeoes, recebidasPendentes, recebidaPuxadaId])
   // Estado do ciclo com o pull mesclado (issue #249): roteador, cena e
   // espelho veem a mesma fonte — o modelo autoritativo + pull local; a
   // seleção vem do servidor (snapshot/eventos), nunca de espelho divergente.
@@ -209,11 +224,17 @@ export function AmbienteDeJogo({
       ? { ...estadoInteracaoPeoes, recebidaPuxadaId }
       : null
 
+  // Gate de montagem da vez (#433): o destaque da célula-alvo pré-encaixe é
+  // parte da pré-visualização do turno do Jogador Ativo — fora da vez o
+  // conjunto fica vazio (mesma regra dos guards `donoDoCiclo` do ciclo; as
+  // pendências em si seguem públicas no espelho `recebida-pendente`).
   const alvosPendentesSet = new Set<string>(
-    recebidasPendentes
-      // Sem vaga escolhida, célula-alvo é null — sem alvo a destacar.
-      .map((r) => (r.celulaAlvo !== null ? chaveCelula(r.celulaAlvo) : null))
-      .filter((k): k is string => k !== null),
+    estadoInteracaoPeoes?.donoDoCiclo === false
+      ? []
+      : recebidasPendentes
+          // Sem vaga escolhida, célula-alvo é null — sem alvo a destacar.
+          .map((r) => (r.celulaAlvo !== null ? chaveCelula(r.celulaAlvo) : null))
+          .filter((k): k is string => k !== null),
   )
   const corrente: PendenciaNoCliente | null =
     recebidasPendentes.find((r) => r.vaga === null) ?? null
