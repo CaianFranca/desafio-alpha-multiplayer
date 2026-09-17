@@ -1,10 +1,12 @@
 # rate-limit.snippet — zonas e escopo dos limites de borda (contexto http).
-# Incluído por nginx.edge.conf. Só /api/ e o handshake WS entram no limit_req:
-# chave vazia não é contabilizada (doc do limit_req_zone), então assets
-# estáticos do SPA passam livres. O map cobre o prefixo preservado
-# (/server01/...) e o removido (/api/, /ws/), de forma case-insensitive e
-# aceitando também a forma sem barra final (ex.: /API/, /server01/api):
-# variantes que ainda chegam à stack não podem escapar do controle.
+# Incluído por nginx.edge.conf.
+#
+# limit_req: só /api/ e o handshake WS entram. Chave vazia não é
+# contabilizada (doc do limit_req_zone), então assets estáticos do SPA
+# passam livres. O map cobre o prefixo preservado (/server01/...) e o
+# removido (/api/, /ws/), de forma case-insensitive e aceitando também a
+# forma sem barra final (ex.: /API/, /server01/api): variantes que ainda
+# chegam à stack não podem escapar do controle.
 map $uri $limit_req_key {
     default                    "";
     ~*^/server01/(api|ws)(/|$) $binary_remote_addr;
@@ -12,5 +14,15 @@ map $uri $limit_req_key {
     ~*^/ws([/?]|$)             $binary_remote_addr;
 }
 
+# limit_conn: conta todas as conexões por IP EXCETO assets/media. A chave
+# vazia não é contabilizada (doc do limit_conn_zone), então o preload da
+# Partida — dezenas de texturas/GLBs/sons em paralelo — não estoura o teto
+# e deixa de receber 503. O WebSocket continua contando, por ser conexão
+# longa (o limit_conn limita conexões simultâneas, não a taxa).
+map $uri $limit_conn_key {
+    default                          $binary_remote_addr;
+    ~*^(/server01)?/(assets|media)/  "";
+}
+
 limit_req_zone $limit_req_key zone=perip_req:10m rate=10r/s;
-limit_conn_zone $binary_remote_addr zone=perip_conn:10m;
+limit_conn_zone $limit_conn_key zone=perip_conn:10m;

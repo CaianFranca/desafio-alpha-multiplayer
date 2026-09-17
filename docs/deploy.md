@@ -366,13 +366,18 @@ Detalhes relevantes:
     `CF-Connecting-IP`; só pares confiáveis (`127.0.0.1`/`::1`, de onde o
     `cloudflared` conecta) podem sobrescrever `$remote_addr`, então um acesso
     direto à `:80` com header forjado é ignorado. O snippet `rate-limit.snippet`
-    (contexto `http`) define as zonas e o `map` que escopa o `limit_req` por IP
-    a `/server01/api|ws`, `/api` e `/ws` — de forma case-insensitive e
-    aceitando a forma sem barra final (ex.: `/API/`, `/server01/api`); assets
-    do SPA ficam fora (chave vazia não é contabilizada pelo `limit_req_zone`).
+    (contexto `http`) define as zonas e os `map`s: o `limit_req` por IP vale só
+    para `/server01/api|ws`, `/api` e `/ws` — case-insensitive e aceitando a
+    forma sem barra final (ex.: `/API/`, `/server01/api`) —, então assets do
+    SPA ficam fora (chave vazia não é contabilizada pelo `limit_req_zone`); o
+    `limit_conn` por IP conta todas as conexões **exceto** estáticos
+    (`/assets/` e `/media/`, com ou sem o prefixo `/server01/`), porque o
+    preload da Partida baixa dezenas de texturas/GLBs/sons em paralelo e
+    estouraria um teto baixo (chave vazia também não é contabilizada pelo
+    `limit_conn_zone`). O WebSocket continua contando (conexão longa).
     Valores:
     `rate=10r/s`, `burst=20 nodelay`, `limit_req_status 429`; `limit_conn` de
-    20 conexões por IP (excesso responde `503`); `client_max_body_size 256k`
+    50 conexões por IP (excesso responde `503`); `client_max_body_size 256k`
     (excesso responde `413`). Se o `cloudflared` passar a rodar em container,
     acrescente a faixa do bridge ao `set_real_ip_from` do snippet.
   - **Zona confiável.** A rede privada (VPN) e o acesso direto a `:8080` são
