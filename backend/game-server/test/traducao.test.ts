@@ -320,6 +320,30 @@ test('traduzirEventos anexa deadlineDoTurnoEm ao TURNO_INICIADO com contexto (#4
   ]);
 });
 
+// Tempo de turno (issue #431, bloqueante da PR): o aviso final do Primeiro Turno
+// carrega o deadline estendido quando o lote o informa; sem contexto, o shape
+// antigo é preservado (campo opcional/aditivo, clientes antigos ignoram).
+test('traduzirEventos anexa deadlineDoTurnoEm ao PRIMEIRO_TURNO_AVISO_FINAL com contexto (#431)', () => {
+  const eventos = [
+    { tipo: 'aviso_final_do_primeiro_turno', jogadorId: 'jogador-1' },
+  ] as const satisfies readonly EventoDaPartida[];
+  assert.deepEqual(traduzirEventos(eventos), [
+    {
+      type: 'PRIMEIRO_TURNO_AVISO_FINAL',
+      jogadorId: 'jogador-1',
+      segundosExtras: CARENCIA_AVISO_FINAL_SEGUNDOS,
+    },
+  ]);
+  assert.deepEqual(traduzirEventos(eventos, { deadlineDoTurnoEm: 9876543210 }), [
+    {
+      type: 'PRIMEIRO_TURNO_AVISO_FINAL',
+      jogadorId: 'jogador-1',
+      segundosExtras: CARENCIA_AVISO_FINAL_SEGUNDOS,
+      deadlineDoTurnoEm: 9876543210,
+    },
+  ]);
+});
+
 // Tempo de turno (issue #429, B1): a causa 'tempo' viaja viva no
 // DESISTENCIA_REGISTRADA (4ª falta ou 2º expiry do Primeiro Turno).
 test('traduzirEventos propaga causa tempo no DESISTENCIA_REGISTRADA (#429)', () => {

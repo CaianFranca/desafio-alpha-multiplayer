@@ -277,6 +277,12 @@ export interface PrimeiroTurnoAvisoFinalEvento {
   readonly type: 'PRIMEIRO_TURNO_AVISO_FINAL';
   readonly jogadorId: string;
   readonly segundosExtras: number;
+  // Tempo de turno (issue #431, ticket 2/3 relógio): deadline estendido do turno
+  // (epoch ms, agora + segundosExtras, autoridade do game-server) — o HUD
+  // reconcilia o cronômetro sem derivar do relógio local. Opcional/defensivo no
+  // padrão do `TURNO_INICIADO`: payloads de binário anterior omitem o campo e o
+  // cliente normaliza ausente para null (segue contando para o deadline antigo).
+  readonly deadlineDoTurnoEm?: number | null;
 }
 
 export interface PosicaoConfirmadaEvento {

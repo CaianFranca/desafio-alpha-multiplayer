@@ -22,7 +22,13 @@
 // - Pausa enquanto o Jogador Ativo está em `em_reconexao` (a janela de 60s da
 //   #295 manda); na readmissão retoma o restante. Pausar anuncia TURNO_INICIADO
 //   sem deadline (cronômetro some) e retomar re-anuncia com o novo deadline —
-//   replay seguro (mesmo jogador + rodada, padrão da #258).
+//   replay seguro e INTENCIONAL (item 4 da #431, fixado sem pendência): mesmo
+//   jogador + rodada, padrão da #258; nenhum evento dedicado de pausa existe
+//   para não quebrar o contrato do HUD (ticket 3/3 deriva tudo do TURNO_INICIADO).
+// - Nome histórico `TURNO_AVISO_30S` (item 4 da #431, fixado sem pendência):
+//   contrato já publicado, NÃO renomear — o valor efetivo viaja em
+//   `segundosRestantes` (o "30s" é o default de `PARTIDA_TURNO_AVISO_SEGUNDOS`,
+//   configurável por partida nos testes).
 // - No estouro, o resolvedor (fiação do `PartidaHandlers`, como o conversor da
 //   #295) roda a mutação serializada com `resolverExpiracaoDoTurno`.
 // - Sem relógio para Jogador Amedrontado (turno pulado — `avancarVez` o pula
@@ -516,12 +522,13 @@ function anunciarTurnoSemDeadline(partidaId: string, jogadorId: string, rodada: 
 }
 
 /**
- * Retomada na readmissão (issue #431): se o relógio estava pausado para este
- * Jogador, retoma o restante com novo deadline e re-anuncia TURNO_INICIADO; se
- * não há relógio mas a partida segue com Ativo não-Amedrontado, arma um prazo
- * cheio (cobre o início da partida na N-ésima admissão e o vão de um restart
- * com chave expirada — leniente por decisão: nunca pune com falta imediata o
- * que pode ser queda do servidor). Nunca lança.
+ * Retomada na readmissão (issue #431, item 4 fixado sem pendência): se o relógio
+ * estava pausado para este Jogador, retoma o restante com novo deadline e
+ * re-anuncia TURNO_INICIADO; se não há relógio mas a partida segue com Ativo
+ * não-Amedrontado, arma um prazo cheio (leniente por decisão documentada: cobre
+ * o início da partida na N-ésima admissão e o vão de um restart com chave
+ * expirada — nunca pune com falta imediata o que pode ser queda do servidor).
+ * Nunca lança.
  */
 export async function retomarRelogioDoTurnoSeAtivo(
   redis: Redis,

@@ -12,6 +12,9 @@ import type { SalaServerMessage } from '@flicker/shared';
 /**
  * Contexto do relógio do turno (issue #431): o engine é puro e sem timers, então
  * o `turno_iniciado` do domínio não carrega deadline — o game-server o anexa aqui.
+ * O `aviso_final_do_primeiro_turno` recebe o mesmo anexo (deadline estendido de
+ * +30s, bloqueante da PR #431): o lote de expiração já calcula e persiste o novo
+ * marco, só a tradução o descartava.
  * Só `number` viaja (ausente ≡ sem relógio: o cliente normaliza ausente para null,
  * no mesmo padrão defensivo do snapshot): sem contexto, o shape antigo é preservado.
  */
@@ -237,6 +240,13 @@ export function traduzirEventos(
           type: 'PRIMEIRO_TURNO_AVISO_FINAL',
           jogadorId: evento.jogadorId,
           segundosExtras: CARENCIA_AVISO_FINAL_SEGUNDOS,
+          // Deadline estendido do relógio (issue #431, bloqueante da PR): o lote
+          // de expiração já entrega o contexto (handlers.ts:916-927 e :280-291)
+          // — só number viaja, ausente ≡ binário antigo (mesmo spread defensivo
+          // do TURNO_INICIADO acima).
+          ...(typeof contexto?.deadlineDoTurnoEm === 'number'
+            ? { deadlineDoTurnoEm: contexto.deadlineDoTurnoEm }
+            : {}),
         });
         break;
       // Tempo de turno (issue #431, ticket 2/3 relógio — contrato ao vivo

@@ -2,9 +2,9 @@
 //
 // Comportamento externo via `PartidaHandlers` + módulo `relogio-do-turno` +
 // Redis em memória (get/set/ttl/del/scan/pipeline/eval/lrange) + broadcaster
-// real. Durações curtas via `duracaoMs`/`avisoEmMs` do armar e `sleep` real
-// (mesmo padrão de tempo do `reconexao-em-andamento.test.ts` — sem fake
-// timers, só prazos de ms):
+// real. Tempo falso via `t.mock.timers` (Date + setTimeout) nos testes de
+// aviso/pausa — determinísticos, sem sleeps; 2 testes de integração mantêm
+// tempo real contra flake (pausa→estouro ponta a ponta e rearme vencido):
 //
 // - deadline fixo: a Passagem arma e o TURNO_INICIADO carrega deadlineDoTurnoEm
 // - giro/seleção/chat nunca renovam o deadline
@@ -391,7 +391,7 @@ test('Passagem arma o relógio e o TURNO_INICIADO carrega deadlineDoTurnoEm', as
   }
 });
 
-test('giro, seleção e chat nunca renovam o deadline', async () => {
+test('giro, seleção, posicionamento e chat nunca renovam o deadline', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
   try {
     await montada.handlers.aplicarMensagem(
@@ -430,6 +430,15 @@ test('giro, seleção e chat nunca renovam o deadline', async () => {
     );
     assert.equal(obterDeadlineDoTurno(montada.partidaId), deadline, 'chat não renova');
 
+    // Posicionamento válido sem Passagem mantém o deadline original.
+    await montada.handlers.aplicarMensagem(
+      montada.sockets.get('jogador-2')!.comoWebSocket(),
+      montada.partidaId,
+      'jogador-2',
+      { type: 'POSICIONAR_PECA', jogadorId: 'jogador-2', pecaId: 'inicial-2', celula: { linha: 0, coluna: 0 } },
+    );
+    assert.equal(obterDeadlineDoTurno(montada.partidaId), deadline, 'posicionamento não renova');
+
     // Nenhum TURNO_INICIADO extra no canal.
     const turnos = montada.sockets.get('jogador-2')!.mensagens.filter((m) => m.type === 'TURNO_INICIADO');
     assert.equal(turnos.length, 1);
@@ -438,30 +447,90 @@ test('giro, seleção e chat nunca renovam o deadline', async () => {
   }
 });
 
+// PING/debug nunca chegam ao `aplicarMensagem` por construção (interceptados em
+// `ws.ts:664-675` antes do dispatch — a guarda do contrato os recusaria como
+// DADOS_INVALIDOS); aqui a caracterização passa pelo handler para provar que,
+// mesmo no caminho degradado, o relógio não é tocado.
+test('PING e debug não tocam o deadline', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
+  try {
+    await montada.handlers.aplicarMensagem(
+      montada.sockets.get('jogador-1')!.comoWebSocket(),
+      montada.partidaId,
+      'jogador-1',
+      { type: 'DESISTIR_DA_PARTIDA', jogadorId: 'jogador-1' },
+    );
+    const deadline = obterDeadlineDoTurno(montada.partidaId);
+    assert.ok(typeof deadline === 'number');
+    const nAntes = montada.sockets.get('jogador-2')!.mensagens.length;
+
+    const origem = criarSocketFalso();
+    await montada.handlers.aplicarMensagem(
+      origem.comoWebSocket(),
+      montada.partidaId,
+      'jogador-2',
+      { type: 'PING', jogadorId: 'jogador-2' },
+    );
+    assert.equal(obterDeadlineDoTurno(montada.partidaId), deadline, 'PING não renova');
+    assert.deepEqual(origem.mensagens[0], {
+      type: 'ERRO_DO_TABULEIRO',
+      codigo: 'DADOS_INVALIDOS',
+      mensagem: 'Comando fora do escopo da partida.',
+    });
+
+    const origemDebug = criarSocketFalso();
+    await montada.handlers.aplicarMensagem(
+      origemDebug.comoWebSocket(),
+      montada.partidaId,
+      'jogador-2',
+      { type: 'ATIVAR_DEBUG' },
+    );
+    assert.equal(obterDeadlineDoTurno(montada.partidaId), deadline, 'debug não renova');
+
+    assert.equal(
+      montada.sockets.get('jogador-2')!.mensagens.length,
+      nAntes,
+      'sem broadcast no canal',
+    );
+  } finally {
+    await limparPartida(montada);
+  }
+});
+
 // ─── Aviso único ───
 
-test('TURNO_AVISO_30S dispara uma única vez por turno', async () => {
+test('TURNO_AVISO_30S dispara uma única vez por turno (tempo falso)', async (t) => {
+  // Nome histórico (item 4 da #431, sem pendência): o "30S" é o default de
+  // PARTIDA_TURNO_AVISO_SEGUNDOS — o valor efetivo viaja em `segundosRestantes`.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
   const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
   try {
     await armarRelogioDoTurno(
       montada.partidaId,
       { jogadorAtivoId: 'jogador-1', rodada: 1 },
-      { redis: montada.redis.comoRedis(), duracaoMs: 400, avisoEmMs: 100 },
+      { redis: montada.redis.comoRedis(), duracaoMs: 60_000, avisoEmMs: 30_000 },
     );
-    await dormir(250);
+    t.mock.timers.tick(30_000);
+    // O fire do aviso é async (persiste + broadcast): cede o event loop real
+    // (setImmediate não é mockado) para o flush antes do assert.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const avisos = montada.sockets.get('jogador-1')!.mensagens.filter((m) => m.type === 'TURNO_AVISO_30S');
     assert.equal(avisos.length, 1);
     assert.equal(avisos[0]!.jogadorId, 'jogador-1');
     assert.ok(typeof avisos[0]!.segundosRestantes === 'number');
 
     // Passado o dobro do prazo do aviso, continua único.
-    await dormir(300);
+    t.mock.timers.tick(30_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(
       montada.sockets.get('jogador-1')!.mensagens.filter((m) => m.type === 'TURNO_AVISO_30S').length,
       1,
       'aviso único mesmo após o prazo',
     );
   } finally {
+    t.mock.timers.reset();
     await limparPartida(montada);
   }
 });
@@ -499,6 +568,31 @@ test('1º estouro do Primeiro Turno: aviso final com +30s, sem falta e sem avan�
       (estendido as number) >= antes + 30_000 && (estendido as number) <= depois + 30_000,
       'deadline ≈ agora + 30s',
     );
+
+    // Bloqueante da PR (#431): o broadcast do aviso final carrega o deadline
+    // estendido (wire aditivo para o HUD do #430) e o snapshot subsequente bate.
+    const avisoFinal = montada.sockets.get('jogador-1')!.mensagens.find(
+      (m) => m.type === 'PRIMEIRO_TURNO_AVISO_FINAL',
+    );
+    assert.ok(avisoFinal !== undefined, 'aviso final com deadline no broadcast');
+    assert.equal(avisoFinal.deadlineDoTurnoEm, estendido);
+    assert.ok(
+      (avisoFinal.deadlineDoTurnoEm as number) >= antes + 30_000
+        && (avisoFinal.deadlineDoTurnoEm as number) <= depois + 30_000,
+      'broadcast ≈ agora + 30s',
+    );
+    const atomico = await montada.handlers.lerSnapshotAtomico(montada.partidaId);
+    assert.ok(atomico !== null);
+    assert.equal(atomico.deadlineDoTurnoEm, estendido, 'snapshot consistente com o broadcast');
+    const snapshot = paraSnapshotWire(
+      atomico.estado,
+      [membro(1), membro(2), membro(3)],
+      'em_andamento',
+      Date.now(),
+      atomico.historico,
+      atomico.deadlineDoTurnoEm ?? undefined,
+    );
+    assert.equal(snapshot.deadlineDoTurnoEm, estendido);
   } finally {
     await limparPartida(montada);
   }
@@ -620,6 +714,49 @@ test('4ª falta: Desistência causa tempo com término 2→1 e Retorno', async (
 
 // ─── Pausa na reconexão ───
 
+// Caracterização dos shapes (item 4 da #431, sem pendência): pausar anuncia
+// TURNO_INICIADO sem deadline (cronômetro some) e retomar re-anuncia com o novo
+// deadline — replay intencional, sem evento dedicado de pausa.
+test('pausa esconde o deadline e a retomada re-anuncia com o novo marco (tempo falso)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
+    estado: estadoEmTurnoNormal(),
+  });
+  try {
+    await armarRelogioDoTurno(
+      montada.partidaId,
+      { jogadorAtivoId: 'jogador-1', rodada: 2 },
+      { redis: montada.redis.comoRedis(), duracaoMs: 60_000, avisoEmMs: 30_000 },
+    );
+    assert.equal(await pausarRelogioDoTurnoSeAtivo(montada.redis.comoRedis(), montada.partidaId, 'jogador-1'), true);
+    assert.equal(obterDeadlineDoTurno(montada.partidaId), null, 'pausado: sem deadline vigente');
+
+    // O deadline estouraria aqui — pausado, nada resolve nem avisa.
+    t.mock.timers.tick(65_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.ok(!tiposDe(montada.sockets.get('jogador-1')!).includes('FALTA_REGISTRADA'));
+    assert.ok(!tiposDe(montada.sockets.get('jogador-1')!).includes('TURNO_AVISO_30S'));
+
+    const antes = Date.now();
+    assert.equal(await retomarRelogioDoTurnoSeAtivo(montada.redis.comoRedis(), montada.partidaId, 'jogador-1'), true);
+    const retomado = obterDeadlineDoTurno(montada.partidaId);
+    assert.ok(typeof retomado === 'number');
+    // Restante congelado ≈ 60s (tolerância de 2s para o tick virtual).
+    assert.ok((retomado as number) >= antes + 58_000 && (retomado as number) <= antes + 60_000);
+    const reanuncios = montada.sockets.get('jogador-2')!.mensagens.filter((m) => m.type === 'TURNO_INICIADO');
+    assert.equal(reanuncios.length, 2);
+    assert.ok(!('deadlineDoTurnoEm' in reanuncios[0]!), 'pausa esconde o cronômetro');
+    assert.equal(reanuncios[1]!.jogadorId, 'jogador-1');
+    assert.equal(reanuncios[1]!.deadlineDoTurnoEm, retomado);
+  } finally {
+    t.mock.timers.reset();
+    await limparPartida(montada);
+  }
+});
+
+// Integração com tempo real (1/2, mantida contra flake): pausa→estouro ponta a
+// ponta com o fire real do timer.
 test('pausa no turno do Ativo ausente e retoma o restante na volta', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
     estado: estadoEmTurnoNormal(),
@@ -665,6 +802,23 @@ test('pausa no turno do Ativo ausente e retoma o restante na volta', async () =>
     await dormir(2600);
     assert.ok(tiposDe(montada.sockets.get('jogador-1')!).includes('FALTA_REGISTRADA'));
     assert.equal((await lerEstado(montada)).jogadorAtivoId, 'jogador-2');
+  } finally {
+    await limparPartida(montada);
+  }
+});
+
+// Caracterização da leniência (item 4 da #431, sem pendência): sem relógio mas
+// com a partida em andamento e Ativo presente, a retomada arma um prazo cheio
+// em vez de punir com falta imediata (cobre N-ésima admissão e vão de restart).
+test('retomada sem relógio arma prazo cheio leniente', async () => {
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3']);
+  try {
+    assert.equal(obterDeadlineDoTurno(montada.partidaId), null);
+    const antes = Date.now();
+    assert.equal(await retomarRelogioDoTurnoSeAtivo(montada.redis.comoRedis(), montada.partidaId, 'jogador-1'), true);
+    const deadline = obterDeadlineDoTurno(montada.partidaId);
+    assert.ok(typeof deadline === 'number');
+    assert.ok((deadline as number) >= antes + 180_000 && (deadline as number) <= Date.now() + 180_000);
   } finally {
     await limparPartida(montada);
   }
@@ -721,6 +875,8 @@ test('rearme: relógio vivo reagenda o restante exato', async () => {
   }
 });
 
+// Integração com tempo real (2/2, mantida contra flake): o jitter do rearme
+// vencido só existe no relógio real.
 test('rearme: deadline vencido no downtime resolve no próprio lote', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
     estado: estadoEmTurnoNormal(),
