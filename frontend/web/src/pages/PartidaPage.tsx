@@ -2185,7 +2185,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
                 data-testid="botao-permanecer"
                 onClick={permanecerNoTurno}
                 disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
-                className="relative min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
+                className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
               >
                 Permanecer
               </button>
@@ -2204,7 +2204,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
                 data-testid="botao-confirmar-posicao"
                 onClick={confirmarPosicaoNoTurno}
                 disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
-                className="relative min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
+                className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
               >
                 Confirmar Posição
               </button>
@@ -2223,7 +2223,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
                 data-testid="botao-encerrar-turno"
                 onClick={encerrarTurno}
                 disabled={entradaBloqueadaPeloAtaque}
-                className="relative min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
+                className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
               >
                 Encerrar Turno
               </button>

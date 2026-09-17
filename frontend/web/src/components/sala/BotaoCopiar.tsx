@@ -10,7 +10,7 @@ export function BotaoCopiar({ rotulo, copiado, aoClicar }: Props) {
       type="button"
       onClick={aoClicar}
       aria-label={`Copiar ${rotulo}`}
-      className="border border-white/20 w-8 h-8 flex items-center justify-center text-white/70 hover:text-white hover:border-white/40 transition-colors shrink-0"
+      className="border border-white/20 w-8 h-8 flex items-center justify-center text-white/70 cursor-pointer hover:text-white hover:border-white/40 transition-colors shrink-0"
     >
       <span aria-hidden>
         {copiado ? (

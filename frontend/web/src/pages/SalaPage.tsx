@@ -143,7 +143,7 @@ export function SalaPage() {
                     type="button"
                     onClick={criarSala}
                     disabled={conectando}
-                    className="w-fit border border-white/40 px-8 py-3 text-sm tracking-[0.18em] uppercase text-white hover:bg-white hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white"
+                    className="w-fit border border-white/40 px-8 py-3 text-sm tracking-[0.18em] uppercase text-white cursor-pointer hover:bg-white hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white"
                   >
                     Criar Sala →
                   </button>
@@ -168,7 +168,7 @@ export function SalaPage() {
                           if (codigo) entrarNaSala(codigo)
                         }}
                         disabled={conectando}
-                        className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-sm font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#c9a86a]"
+                        className="border border-[#c9a86a] text-[#c9a86a] px-4 py-2 text-sm font-bold tracking-wider uppercase cursor-pointer hover:bg-[#c9a86a] hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[#c9a86a]"
                       >
                         Entrar na Sala
                       </button>
@@ -183,14 +183,14 @@ export function SalaPage() {
                   <button
                     type="button"
                     onClick={alternarProntidao}
-                    className="w-fit border border-[#c9a86a] bg-[#c9a86a]/10 text-[#c9a86a] px-8 py-3 text-sm tracking-[0.18em] uppercase hover:bg-[#c9a86a] hover:text-black transition-colors"
+                    className="w-fit border border-[#c9a86a] bg-[#c9a86a]/10 text-[#c9a86a] px-8 py-3 text-sm tracking-[0.18em] uppercase cursor-pointer hover:bg-[#c9a86a] hover:text-black transition-colors"
                   >
                     Alternar Prontidão
                   </button>
                   <button
                     type="button"
                     onClick={sairDaSalaEComecarDeNovo}
-                    className="w-fit border border-white/20 px-8 py-3 text-sm tracking-[0.18em] uppercase text-white/85 hover:text-white hover:border-white/40 transition-colors"
+                    className="w-fit border border-white/20 px-8 py-3 text-sm tracking-[0.18em] uppercase text-white/85 cursor-pointer hover:text-white hover:border-white/40 transition-colors"
                   >
                     Sair da Sala
                   </button>

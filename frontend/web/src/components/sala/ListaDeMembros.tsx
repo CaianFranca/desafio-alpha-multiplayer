@@ -71,7 +71,7 @@ export function ListaDeMembros({ sala, jogadorIdLocal, ehAnfitriao, onExpulsar }
                 <button
                   type="button"
                   onClick={() => onExpulsar(membro.id)}
-                  className="border border-white/30 px-3 py-1 text-sm font-bold tracking-wider uppercase text-white/80 hover:text-red-400 hover:border-red-400/60 transition-colors shrink-0"
+                  className="border border-white/30 px-3 py-1 text-sm font-bold tracking-wider uppercase text-white/80 cursor-pointer hover:text-red-400 hover:border-red-400/60 transition-colors shrink-0"
                 >
                   Expulsar
                 </button>
