@@ -750,8 +750,8 @@ export function HudDaPartida({
           é anunciada no próprio nó vivo (role=status), sem som ── */}
       {etapaDoGuiaTexto !== null ? (
         <div
-          style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}
-          className={`pointer-events-none absolute left-1/2 -translate-x-1/2 ${emModoCompacto ? 'bottom-16' : 'bottom-24'}`}
+          style={{ bottom: emModoCompacto ? 'calc(5rem + env(safe-area-inset-bottom))' : 'calc(7rem + env(safe-area-inset-bottom))' }}
+          className="pointer-events-none absolute left-1/2 -translate-x-1/2"
         >
           <div
             data-testid="guia-de-turno"
