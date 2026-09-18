@@ -14,7 +14,9 @@
 *  Trata apenas `ADMISSAO_ACEITA`
  *  (sinaliza que a partida ficou disponível) e eventos da partida
  *  (`EventoDoCanalDaPartida` via callback — tabuleiro, peões/ciclo, turnos
- *  (ST-11), iluminação/limpeza da issue #151 e chat da Partida #390/#389);
+ *  (ST-11), avisos de tempo de turno (issue #430 — TURNO_AVISO_30S e
+ *  PRIMEIRO_TURNO_AVISO_FINAL),
+ *  iluminação/limpeza da issue #151 e chat da Partida #390/#389);
  *  mensagens desconhecidas são
  * ignoradas (o socket pode receber PING/PONG ou eventos fora do escopo da
  * ST-09/10/11 sem quebrar o cliente).
@@ -30,6 +32,8 @@ import type {
   PosicaoConfirmadaEvento,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
+  TurnoAviso30sEvento,
+  PrimeiroTurnoAvisoFinalEvento,
   CelulasIluminadasWireEvento,
   LimpezaAplicadaWireEvento,
   MensagemDeChatDaPartidaEvento,
@@ -70,6 +74,8 @@ export type EventoDoCanalDaPartida =
   | PeaoEventoDoServidor
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
+  | TurnoAviso30sEvento
+  | PrimeiroTurnoAvisoFinalEvento
   | PosicaoConfirmadaEvento
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
@@ -349,6 +355,8 @@ export function usePartidaWebSocket({
         case 'ATRAVESSOU_O_ESCURO':
         case 'TURNO_INICIADO':
         case 'TURNO_ENCERRADO':
+        case 'TURNO_AVISO_30S':
+        case 'PRIMEIRO_TURNO_AVISO_FINAL':
         case 'POSICAO_CONFIRMADA':
         case 'PARTIDA_INICIADA':
         case 'ESTADO_DA_PARTIDA':

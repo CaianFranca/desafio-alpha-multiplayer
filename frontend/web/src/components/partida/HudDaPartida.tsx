@@ -26,7 +26,7 @@ import { useMemo, useState } from 'react'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS, type CorDoPeao } from '../../game/tabuleiro/contrato'
 import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
 import type { PresencaNaPartidaWire } from '@flicker/shared'
-import { useCronometroDaPartida } from './useCronometroDaPartida'
+import { useCronometroDaPartida, useContagemRegressivaDoTurno } from './useCronometroDaPartida'
 import { useViewportCompacto } from '../../hooks/useViewportCompacto'
 import { ModalDeVolume } from './ModalDeVolume'
 
@@ -55,6 +55,18 @@ export interface HudDaPartidaProps {
    * do cronômetro. `null`/ausente mantém o tempo em `00:00`.
    */
   iniciadaEm?: number | null
+  /**
+   * Deadline absoluto do turno vigente (epoch ms, autoridade do game-server,
+   * issue #430), baseline da contagem regressiva do indicador de vez.
+   * `null`/ausente = sem relógio (pausa de reconexão, Amedrontado, entre
+   * turnos) — o indicador some.
+   */
+  deadlineDoTurnoEm?: number | null
+  /**
+   * Destaque do aviso final do Primeiro Turno (issue #430): "jogue ou será
+   * removido" com a contagem dos +30s.
+   */
+  avisoFinalDoPrimeiroTurno?: boolean
   /**
    * Foto por jogador (jogadorId → URL); ausente/null mantém as iniciais.
    * Alimentada pela PartidaPage via cor do peão → foto do avatar (#404).
@@ -159,6 +171,80 @@ function ordenarCircularPorAtivo(
 }
 
 /**
+ * Limiar de urgência do cronômetro de turno (issue #430): nos 30s finais o
+ * indicador entra em estado visual de urgência (apenas visual — o som do
+ * aviso viaja no evento TURNO_AVISO_30S, uma única vez por turno).
+ */
+const LIMIAR_URGENCIA_SEGUNDOS = 30
+
+/**
+ * Indicador de vez com cronômetro regressivo (issue #430, spec #405) —
+ * feedback de tempo de turno visível a todos, abaixo do nome do jogo no topo
+ * central: "É o seu turno · MM:SS" para o Jogador do turno, "Turno do
+ * <apelido> · MM:SS" para os demais, contagem derivada do deadline absoluto
+ * (sem eventos por segundo do servidor). O aviso final do Primeiro Turno tem
+ * destaque próprio ("jogue ou será removido · MM:SS" com os +30s).
+ *
+ * Oculto quando não há vez a exibir: fora da Partida, em resultado, sem
+ * deadline (pausa de reconexão), entre turnos ou com o Jogador Ativo
+ * Amedrontado (vez pulada, sem relógio). Tick isolado como o CronometroDoHud.
+ */
+function IndicadorDeVez({
+  emAndamento,
+  emResultado,
+  jogadorAtivoId,
+  jogadorLocalId,
+  apelidoDoAtivo,
+  ativoAmedrontado,
+  deadlineDoTurnoEm = null,
+  avisoFinal = false,
+}: {
+  emAndamento: boolean
+  emResultado: boolean
+  jogadorAtivoId: string | null
+  jogadorLocalId: string | null
+  apelidoDoAtivo: string
+  ativoAmedrontado: boolean
+  deadlineDoTurnoEm?: number | null
+  avisoFinal?: boolean
+}) {
+  const { texto, restantes } = useContagemRegressivaDoTurno({
+    emAndamento,
+    emResultado,
+    deadlineDoTurnoEm,
+  })
+  if (!emAndamento || emResultado) return null
+  if (jogadorAtivoId === null) return null
+  if (deadlineDoTurnoEm === null || deadlineDoTurnoEm === undefined) return null
+  if (ativoAmedrontado) return null
+  const propria = jogadorLocalId !== null && jogadorAtivoId === jogadorLocalId
+  const urgente = restantes <= LIMIAR_URGENCIA_SEGUNDOS
+  const textoDoIndicador = avisoFinal
+    ? `jogue ou será removido · ${texto}`
+    : propria
+      ? `É o seu turno · ${texto}`
+      : `Turno do ${apelidoDoAtivo} · ${texto}`
+  return (
+    <span
+      data-testid="hud-indicador-de-vez"
+      data-propria={propria ? 'true' : 'false'}
+      data-urgente={urgente ? 'true' : 'false'}
+      data-aviso-final={avisoFinal ? 'true' : 'false'}
+      role="timer"
+      aria-label={textoDoIndicador}
+      className={`rounded px-3 py-1 text-[length:var(--hud-corpo,1.81rem)] leading-8 font-semibold tabular-nums ${
+        avisoFinal
+          ? 'animate-pulse border border-amber-300/70 bg-amber-500/15 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.5)]'
+          : urgente
+            ? 'border border-red-400/70 bg-red-950/70 text-red-200'
+            : 'bg-zinc-900/80 text-zinc-100'
+      }`}
+    >
+      {textoDoIndicador}
+    </span>
+  )
+}
+/**
  * Cronômetro isolado do resto do HUD (revisão PR #279): o tick de 1×/s fica
  * confinado a este subcomponente, então re-renderiza só o texto do cronômetro
  * — as 6 regiões não reconciliam a cada segundo.
@@ -204,6 +290,8 @@ export function HudDaPartida({
   emAndamento,
   emResultado,
   iniciadaEm = null,
+  deadlineDoTurnoEm = null,
+  avisoFinalDoPrimeiroTurno = false,
   imagemPorJogador = {},
   onSair,
   saindo = false,
@@ -391,12 +479,32 @@ export function HudDaPartida({
         <div className="absolute left-1/2 top-6 -translate-x-1/2">
           <h1
             data-testid="hud-titulo"
-            className="font-display text-sm font-semibold uppercase tracking-[0.28em] text-zinc-100"
+            className="font-display text-[1.05rem] font-semibold uppercase tracking-[0.28em] text-zinc-100"
           >
             Flicker of Sanity
           </h1>
         </div>
       )}
+
+      {/* ── sup-centro, abaixo do título: indicador de vez (issue #430) ── */}
+      <div
+        className={`pointer-events-none absolute left-1/2 -translate-x-1/2 ${emModoCompacto ? 'top-[calc(0.75rem+env(safe-area-inset-top))] scale-75' : 'top-14'}`}
+      >
+        <IndicadorDeVez
+          emAndamento={emAndamento}
+          emResultado={emResultado}
+          jogadorAtivoId={jogadorAtivoId}
+          jogadorLocalId={jogadorLocalId}
+          apelidoDoAtivo={
+            (jogadorAtivoId !== null ? jogadorPorId[jogadorAtivoId]?.apelido : undefined) ?? '???'
+          }
+          ativoAmedrontado={
+            jogadorAtivoId !== null ? (jogadorPorId[jogadorAtivoId]?.amedrontado ?? false) : false
+          }
+          deadlineDoTurnoEm={deadlineDoTurnoEm}
+          avisoFinal={avisoFinalDoPrimeiroTurno}
+        />
+      </div>
 
       {/* ── sup-dir: cronômetro + volume visual + SAIR (sistema integral no compacto) ── */}
       <div

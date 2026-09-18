@@ -14,6 +14,11 @@ import { MockWebSocket } from './helpers/mockWebSocket'
 import { SalaWebSocketContext } from '../web/src/state/sala-web-socket-context'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 import type { UseSalaWebSocketReturn } from '../web/src/hooks/useSalaWebSocket'
+import { toquesDeEfeito } from './helpers/mockAudio'
+import {
+  CAMINHO_SOM_DE_AVISO_DO_TURNO,
+  VOLUME_BASE_SOM_DE_AVISO_DO_TURNO,
+} from '../web/src/components/partida/somDoAvisoDoTurno'
 
 // HUD base da Partida sem Proteção (issue #226, spec pai #224): suíte de
 // comportamento externo com snapshot mockado injetado via MockWebSocket —
@@ -1810,3 +1815,194 @@ describe('HUD da Partida — modal de volume (#438)', () => {
     }
   })
 })
+
+describe('HUD da Partida — indicador de vez e cronômetro de turno (#430)', () => {
+  const JOGADORES_VEZ: Record<string, PercepcaoDeJogador> = {
+    [MEU_JOGADOR_ID]: { apelido: 'JogadorTeste', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 1, protegido: false },
+    ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
+  }
+
+  // Marco fixo para os testes com fake timers (mesmo padrão do cronômetro #259).
+  const T0 = new Date('2026-09-11T12:00:00.000Z').getTime()
+
+  function propsVez(overrides: Record<string, unknown> = {}) {
+    return {
+      jogadorPorId: JOGADORES_VEZ,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      emAndamento: true,
+      emResultado: false,
+      deadlineDoTurnoEm: T0 + 150_000,
+      onSair: () => {},
+      ...overrides,
+    }
+  }
+
+  it('própria vez: "É o seu turno · MM:SS" com regressivo do deadline absoluto', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    try {
+      const { unmount } = render(<HudDaPartida {...propsVez()} />)
+      try {
+        const indicador = screen.getByTestId('hud-indicador-de-vez')
+        expect(indicador).toHaveTextContent('É o seu turno · 02:30')
+        expect(indicador).toHaveAttribute('data-propria', 'true')
+        expect(indicador).toHaveAttribute('data-urgente', 'false')
+        expect(indicador).toHaveAttribute('data-aviso-final', 'false')
+        // Regressivo derivado do deadline (sem eventos por segundo): 60s depois.
+        act(() => {
+          vi.advanceTimersByTime(60_000)
+        })
+        expect(screen.getByTestId('hud-indicador-de-vez')).toHaveTextContent('É o seu turno · 01:30')
+      } finally {
+        unmount()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('vez alheia: "Turno do <apelido> · MM:SS"', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    try {
+      const { unmount } = render(<HudDaPartida {...propsVez({ jogadorAtivoId: 'jogador-2' })} />)
+      try {
+        const indicador = screen.getByTestId('hud-indicador-de-vez')
+        expect(indicador).toHaveTextContent('Turno do Ana · 02:30')
+        expect(indicador).toHaveAttribute('data-propria', 'false')
+      } finally {
+        unmount()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('urgência visual só nos 30s finais (apenas visual, sem som extra)', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    try {
+      const { unmount } = render(<HudDaPartida {...propsVez()} />)
+      try {
+        // 02:30 → fora da urgência.
+        expect(screen.getByTestId('hud-indicador-de-vez')).toHaveAttribute('data-urgente', 'false')
+        // 00:31 → ainda fora.
+        act(() => {
+          vi.advanceTimersByTime(119_000)
+        })
+        expect(screen.getByTestId('hud-indicador-de-vez')).toHaveTextContent('00:31')
+        expect(screen.getByTestId('hud-indicador-de-vez')).toHaveAttribute('data-urgente', 'false')
+        // 00:30 → urgência.
+        act(() => {
+          vi.advanceTimersByTime(1_000)
+        })
+        const indicador = screen.getByTestId('hud-indicador-de-vez')
+        expect(indicador).toHaveTextContent('00:30')
+        expect(indicador).toHaveAttribute('data-urgente', 'true')
+      } finally {
+        unmount()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('aviso final do Primeiro Turno tem destaque próprio com os +30s', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(T0)
+    try {
+      const { unmount } = render(
+        <HudDaPartida {...propsVez({ avisoFinalDoPrimeiroTurno: true, deadlineDoTurnoEm: T0 + 30_000 })} />,
+      )
+      try {
+        const indicador = screen.getByTestId('hud-indicador-de-vez')
+        expect(indicador).toHaveTextContent('jogue ou será removido · 00:30')
+        expect(indicador).toHaveAttribute('data-aviso-final', 'true')
+      } finally {
+        unmount()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('nada para Amedrontado, sem deadline (pausa), entre turnos, em resultado ou fora da Partida', () => {
+    const amedrontados: Record<string, PercepcaoDeJogador> = {
+      [MEU_JOGADOR_ID]: { ...JOGADORES_VEZ[MEU_JOGADOR_ID] },
+      ['jogador-2']: { ...JOGADORES_VEZ['jogador-2'], sanidade: 0, amedrontado: true },
+    }
+    // Turno do Amedrontado (vez pulada, sem relógio).
+    const { unmount: u1 } = render(
+      <HudDaPartida {...propsVez({ jogadorPorId: amedrontados, jogadorAtivoId: 'jogador-2' })} />,
+    )
+    expect(screen.queryByTestId('hud-indicador-de-vez')).not.toBeInTheDocument()
+    u1()
+    // Pausa de reconexão (TURNO_INICIADO sem deadline).
+    const { unmount: u2 } = render(<HudDaPartida {...propsVez({ deadlineDoTurnoEm: null })} />)
+    expect(screen.queryByTestId('hud-indicador-de-vez')).not.toBeInTheDocument()
+    u2()
+    // Entre turnos.
+    const { unmount: u3 } = render(<HudDaPartida {...propsVez({ jogadorAtivoId: null })} />)
+    expect(screen.queryByTestId('hud-indicador-de-vez')).not.toBeInTheDocument()
+    u3()
+    // Resultado (sem vez após o término).
+    const { unmount: u4 } = render(<HudDaPartida {...propsVez({ emResultado: true })} />)
+    expect(screen.queryByTestId('hud-indicador-de-vez')).not.toBeInTheDocument()
+    u4()
+    // Fora da Partida.
+    const { unmount: u5 } = render(<HudDaPartida {...propsVez({ emAndamento: false })} />)
+    expect(screen.queryByTestId('hud-indicador-de-vez')).not.toBeInTheDocument()
+    u5()
+  })
+
+  it('integração: snapshot projeta o deadline; TURNO_AVISO_30S toca os bipes 1x; pausa esconde', async () => {
+    const deadline = Date.now() + 150_000
+    const ws = await partidaComSnapshot(criarSnapshotBase({ deadlineDoTurnoEm: deadline }))
+    expect(screen.getByTestId('hud-indicador-de-vez')).toHaveTextContent(/É o seu turno ·/)
+
+    // Aviso do relógio: 3 bipes uma única vez (asset + volume do contrato).
+    act(() =>
+      ws.simulateMessage({ type: 'TURNO_AVISO_30S', jogadorId: MEU_JOGADOR_ID, segundosRestantes: 30 }),
+    )
+    const bipes = () => toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_DE_AVISO_DO_TURNO)
+    expect(bipes()).toHaveLength(1)
+    expect(bipes()[0]!.volume).toBe(VOLUME_BASE_SOM_DE_AVISO_DO_TURNO)
+
+    // Reexibição (snapshot de re-admissão) não re-toca.
+    act(() =>
+      ws.simulateMessage({ type: 'ESTADO_DA_PARTIDA', snapshot: criarSnapshotBase({ deadlineDoTurnoEm: deadline }) }),
+    )
+    expect(bipes()).toHaveLength(1)
+    expect(screen.getByTestId('hud-indicador-de-vez')).toHaveTextContent(/É o seu turno ·/)
+
+    // Pausa de reconexão: TURNO_INICIADO sem deadline esconde o cronômetro.
+    // (TURNO_* coalesce no lote atômico via microtask — exige act assíncrono.)
+    await act(async () => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 2 })
+    })
+    expect(screen.queryByTestId('hud-indicador-de-vez')).not.toBeInTheDocument()
+  })
+
+  it('integração: PRIMEIRO_TURNO_AVISO_FINAL liga o destaque com o deadline estendido', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase({}))
+    // Sem deadline no snapshot: sem indicador.
+    expect(screen.queryByTestId('hud-indicador-de-vez')).not.toBeInTheDocument()
+
+    const estendido = Date.now() + 30_000
+    act(() =>
+      ws.simulateMessage({
+        type: 'PRIMEIRO_TURNO_AVISO_FINAL',
+        jogadorId: MEU_JOGADOR_ID,
+        segundosExtras: 30,
+        deadlineDoTurnoEm: estendido,
+      }),
+    )
+    const indicador = screen.getByTestId('hud-indicador-de-vez')
+    expect(indicador).toHaveAttribute('data-aviso-final', 'true')
+    expect(indicador).toHaveTextContent(/jogue ou será removido ·/)
+  })
+})
+

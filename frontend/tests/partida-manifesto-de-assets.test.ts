@@ -36,6 +36,7 @@ import {
   SOM_CAMINHO_CLIQUE_PEAO,
 } from '../web/src/game/tabuleiro/vooDoPeao'
 import { CAMINHO_SOM_DE_RECUSA } from '../web/src/components/partida/somDeRecusa'
+import { CAMINHO_SOM_DE_AVISO_DO_TURNO } from '../web/src/components/partida/somDoAvisoDoTurno'
 import { CAMINHO_MUSICA_DE_FUNDO } from '../web/src/components/partida/musicaDeFundo'
 
 describe('manifesto de assets da Partida (preload total)', () => {
@@ -80,7 +81,7 @@ describe('manifesto de assets da Partida (preload total)', () => {
     )
   })
 
-  it('sons cobrem os 8 caminhos dos pontos de áudio, sem duplicatas', () => {
+  it('sons cobrem os 9 caminhos dos pontos de áudio, sem duplicatas', () => {
     expect([...SONS_DA_PARTIDA].sort()).toEqual(
       [
         CAMINHO_SOM_CARTA,
@@ -90,6 +91,7 @@ describe('manifesto de assets da Partida (preload total)', () => {
         SOM_CAMINHO_CLIQUE_PEAO,
         SOM_CAMINHO_BAQUE_PEAO,
         CAMINHO_SOM_DE_RECUSA,
+        CAMINHO_SOM_DE_AVISO_DO_TURNO,
         CAMINHO_MUSICA_DE_FUNDO,
       ].sort(),
     )

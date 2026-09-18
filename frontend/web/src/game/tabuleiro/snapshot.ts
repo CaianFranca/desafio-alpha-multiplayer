@@ -207,6 +207,11 @@ export function aplicarSnapshot(
     // Marco autoritativo do início (issue #259): baseline do cronômetro do
     // HUD; `?? null` normaliza snapshots de binário anterior sem o campo.
     iniciadaEm: snapshot.iniciadaEm ?? null,
+    deadlineDoTurnoEm: snapshot.deadlineDoTurnoEm ?? null,
+    // Deadline do turno vigente (issue #430): baseline do regressivo do
+    // HUD; `?? null` no mesmo padrão (ausente ≡ sem relógio). O snapshot
+    // não carrega o destaque do aviso final — a retomada mostra a contagem
+    // estendida sem o destaque até o próximo aviso.
     // A wire do snapshot não carrega a fase de movimento do turno: re-
     // sincronizar não pode sobrescrever o que os deltas já aprenderam
     // (late-join no meio do turno perderia a fase 'confirmar'). Exceção
@@ -216,6 +221,9 @@ export function aplicarSnapshot(
     // contraditório (confirmada sem movimento) na retomada.
     movimentouNoTurno: snapshot.posicaoConfirmada ? true : estado.movimentouNoTurno,
     posicaoConfirmadaNoTurno: snapshot.posicaoConfirmada,
+    // O wire do snapshot não carrega o destaque do aviso final (#430):
+    // a retomada parte sem destaque (só a contagem estendida).
+    avisoFinalDoPrimeiroTurno: false,
     // ADR-0017: a fase da travessia é carregada no wire do snapshot (a
     // readmissão não re-aprende por deltas — ESTADO_DA_PARTIDA é a única
     // mensagem da retomada). Sem isso, recarregar/reconectar/HMR no meio do

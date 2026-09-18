@@ -12,6 +12,81 @@ export function formatarCronometroDaPartida(totalSegundos: number): string {
   return horas > 0 ? `${horas}:${mmss}` : mmss
 }
 
+/**
+ * Segundos restantes até o deadline absoluto (issue #430): teto da fração
+ * (o display só zera quando o marco passa de fato) com piso em 0 (deadline
+ * estourado mostra 00:00 até o servidor encerrar a vez). Deadline ausente,
+ * não finito ou não positivo = 0 (sem origem inventada — o chamador esconde
+ * o indicador nesses casos).
+ */
+export function segundosRestantesPara(
+  deadlineDoTurnoEm: number | null | undefined,
+  agora: number = agoraAtual(),
+): number {
+  if (
+    deadlineDoTurnoEm === null ||
+    deadlineDoTurnoEm === undefined ||
+    !Number.isFinite(deadlineDoTurnoEm) ||
+    deadlineDoTurnoEm <= 0
+  ) {
+    return 0
+  }
+  return Math.max(0, Math.ceil((deadlineDoTurnoEm - agora) / 1000))
+}
+
+interface ContagemRegressivaDoTurnoOptions {
+  /** A partida está em andamento (a contagem corre). */
+  emAndamento: boolean
+  /** A partida terminou (o indicador some — sem vez após o término). */
+  emResultado: boolean
+  /**
+   * Deadline absoluto do turno vigente (epoch ms, autoridade do
+   * game-server, issue #430), vindo do TURNO_INICIADO / aviso final / snapshot.
+   * `null`/ausente = sem relógio (pausa, Amedrontado, entre turnos).
+   */
+  deadlineDoTurnoEm?: number | null
+}
+
+/**
+ * Contagem regressiva do turno (issue #430): deriva do deadline absoluto do
+ * servidor, recomputada a cada segundo de `Date.now()`. Como todos os
+ * Jogadores partilham o mesmo deadline, o HUD mostra o mesmo MM:SS sem
+ * eventos por segundo do servidor; reload/re-admissão reconciliam pelo
+ * snapshot (sem reiniciar, sem re-tocar bipes — a unicidade do som é do
+ * evento TURNO_AVISO_30S, não daqui). Somente leitura de tela.
+ */
+export function useContagemRegressivaDoTurno({
+  emAndamento,
+  emResultado,
+  deadlineDoTurnoEm = null,
+}: ContagemRegressivaDoTurnoOptions): {
+  texto: string
+  restantes: number
+} {
+  const contando = emAndamento && !emResultado
+  // Mesma assinatura de relógio do cronômetro crescente: refresh imediato na
+  // entrada (deadline pode chegar depois do mount) + intervalo de 1s.
+  const [agora, setAgora] = useState(agoraAtual)
+
+  useEffect(() => {
+    if (!contando) return
+    const refreshId = window.setTimeout(() => {
+      setAgora(agoraAtual())
+    }, 0)
+    const id = window.setInterval(() => {
+      setAgora(agoraAtual())
+    }, 1000)
+    return () => {
+      window.clearTimeout(refreshId)
+      window.clearInterval(id)
+    }
+  }, [contando, deadlineDoTurnoEm])
+
+  const restantes = segundosRestantesPara(deadlineDoTurnoEm, agora)
+
+  return { texto: formatarCronometroDaPartida(restantes), restantes }
+}
+
 interface CronometroDaPartidaOptions {
   /** A partida entrou em andamento (inicia a contagem). */
   emAndamento: boolean

@@ -93,6 +93,8 @@ import type {
   PartidaIniciadaEvento,
   TurnoEncerradoEvento,
   TurnoIniciadoEvento,
+  TurnoAviso30sEvento,
+  PrimeiroTurnoAvisoFinalEvento,
   JogadorEmReconexaoWireEvento,
   JogadorReconectadoWireEvento,
   PresencaNaPartidaWire,
@@ -154,6 +156,8 @@ export type EventoDoJogoNoCliente =
   | PeaoEventoDoServidor
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
+  | TurnoAviso30sEvento
+  | PrimeiroTurnoAvisoFinalEvento
   | PosicaoConfirmadaEvento
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
@@ -197,6 +201,20 @@ export interface EstadoDoTabuleiroNoCliente {
    * cronômetro. `null` enquanto a Partida não iniciou/sem snapshot.
    */
   readonly iniciadaEm: number | null
+  /**
+   * Deadline absoluto do turno vigente (epoch ms, issue #430, spec #405):
+   * autoridade do game-server, viajando no TURNO_INICIADO, no
+   * PRIMEIRO_TURNO_AVISO_FINAL e no snapshot — o HUD deriva a contagem
+   * regressiva MM:SS sem eventos por segundo. `null` = sem relógio (pausa de
+   * reconexão, turno de Amedrontado ou entre turnos) — nesses, nada a exibir.
+   */
+  readonly deadlineDoTurnoEm: number | null
+  /**
+   * Destaque do aviso final do Primeiro Turno (issue #430): setado pelo
+   * PRIMEIRO_TURNO_AVISO_FINAL ("jogue ou será removido" com +30s), limpo no
+   * TURNO_INICIADO seguinte (troca real) e no TURNO_ENCERRADO.
+   */
+  readonly avisoFinalDoPrimeiroTurno: boolean
   /** O peão do Jogador Ativo já se moveu neste turno (PEAO_MOVIDO). */
   readonly movimentouNoTurno: boolean
   /** A posição do peão do Jogador Ativo já foi confirmada (POSICAO_CONFIRMADA). */
@@ -304,6 +322,9 @@ export function criarEstadoInicialDoCliente(quantidadeDeJogadores: number = 4): 
     rodada: null,
     // Sem marco de início até o snapshot/PARTIDA_INICIADA (issue #259).
     iniciadaEm: null,
+    // Sem relógio de turno até o primeiro TURNO_INICIADO com deadline (#430).
+    deadlineDoTurnoEm: null,
+    avisoFinalDoPrimeiroTurno: false,
     movimentouNoTurno: false,
     posicaoConfirmadaNoTurno: false,
     atravessouNoTurno: false,
@@ -402,12 +423,25 @@ export function atualizarOrdemDeChegada(
 }
 
 /**
+ * Normaliza o deadline absoluto do turno (issue #430): epoch ms finito e
+ * positivo vira relógio; ausente/nulo/inválido vira null (sem relógio —
+ * pausa de reconexão, turno de Amedrontado ou entre turnos). Mesmo padrão
+ * defensivo do `iniciadaEm` do snapshot.
+ */
+function normalizarDeadlineDoTurno(deadline: number | null | undefined): number | null {
+  if (deadline === null || deadline === undefined) return null
+  if (!Number.isFinite(deadline) || deadline <= 0) return null
+  return deadline
+}
+
+/**
  * Aplica um evento do servidor ao estado do cliente, produzindo um novo
  * estado imutável. Eventos desconhecidos ou erro retornam o estado inalterado.
  *
  * Aceita eventos de tabuleiro (ST-09), de peões/ciclo (ST-10), de turno
- * (ST-11), de iluminação/limpeza (issue #151) e de monstros/estados
- * (ST-15, #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO).
+ * (ST-11), de iluminação/limpeza (issue #151), de monstros/estados
+ * (ST-15, #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO) e de tempo de turno
+ * (issue #430 — TURNO_AVISO_30S/PRIMEIRO_TURNO_AVISO_FINAL, só projeção;
  */
 export function reduzirEvento(
   estado: EstadoDoTabuleiroNoCliente,
@@ -647,7 +681,15 @@ export function reduzirEvento(
         estado.rodada !== null &&
         evento.rodada === estado.rodada
       if (mesmoTurno) {
-        return { ...estado, jogadorAtivoId: evento.jogadorId, rodada: evento.rodada }
+        // Replay pós-snapshot confirma a vez sem apagar seleção/pendências —
+        // mas o deadline é reconciliado (a retomada da reconexão re-anuncia o
+        // mesmo turno COM o novo deadline; a pausa, SEM — issue #430).
+        return {
+          ...estado,
+          jogadorAtivoId: evento.jogadorId,
+          rodada: evento.rodada,
+          deadlineDoTurnoEm: normalizarDeadlineDoTurno(evento.deadlineDoTurnoEm),
+        }
       }
       // Zona da origem (espelho de partida.ts:1689/1710): a Peça sob o Peão
       // do novo Jogador Ativo no início do turno. Peão na Mesa (Primeiro
@@ -668,6 +710,11 @@ export function reduzirEvento(
         ...estado,
         jogadorAtivoId: evento.jogadorId,
         rodada: evento.rodada,
+        // Relógio do turno (issue #430): deadline do anúncio; ausente ≡ sem
+        // relógio (pausa de reconexão — o HUD esconde o cronômetro). Troca
+        // real sempre limpa o destaque do aviso final anterior.
+        deadlineDoTurnoEm: normalizarDeadlineDoTurno(evento.deadlineDoTurnoEm),
+        avisoFinalDoPrimeiroTurno: false,
         movimentouNoTurno: false,
         posicaoConfirmadaNoTurno: false,
         atravessouNoTurno: false,
@@ -683,6 +730,8 @@ export function reduzirEvento(
       return {
         ...estado,
         jogadorAtivoId: null,
+        deadlineDoTurnoEm: null,
+        avisoFinalDoPrimeiroTurno: false,
         movimentouNoTurno: false,
         posicaoConfirmadaNoTurno: false,
         atravessouNoTurno: false,
@@ -693,6 +742,23 @@ export function reduzirEvento(
         pecaEmManipulacaoId: null,
         recebidasPendentes: [],
       }
+    case 'TURNO_AVISO_30S':
+      // Aviso dos 30s finais (issue #430): sem projeção de estado — o HUD
+      // deriva a urgência do deadline e a PartidaPage toca os bipes na
+      // chegada do evento (one-shot; a unicidade vem do servidor).
+      return estado
+    case 'PRIMEIRO_TURNO_AVISO_FINAL': {
+      // Aviso final do Primeiro Turno (issue #430): liga o destaque e
+      // reconcilia o cronômetro com o deadline estendido (+30s). Degradado
+      // (sem deadline — relógio perdido no caminho): mantém a contagem no
+      // deadline anterior em vez de zerar.
+      const estendido = normalizarDeadlineDoTurno(evento.deadlineDoTurnoEm)
+      return {
+        ...estado,
+        avisoFinalDoPrimeiroTurno: true,
+        ...(estendido !== null ? { deadlineDoTurnoEm: estendido } : null),
+      }
+    }
     case 'POSICAO_CONFIRMADA': {
       // A Confirmação de Posição trava o peão do Jogador Ativo neste turno e
       // é o ÚNICO ponto onde o engine confere conquistas (issue #145, espelho

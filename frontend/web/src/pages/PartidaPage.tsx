@@ -14,6 +14,7 @@ import {
   tocarSomDeRecusa,
 } from '../components/partida/somDeRecusa'
 import { tocarConquistasDaConfirmacao } from '../components/partida/somDaConquista'
+import { tocarSomDeAvisoDoTurno } from '../components/partida/somDoAvisoDoTurno'
 import { TransicaoAtaque } from '../components/partida/TransicaoAtaque'
 import { useFilaDeAtaque } from '../components/partida/useFilaDeAtaque'
 import type { FatiaDoAtaque } from '../game/tabuleiro/ataque'
@@ -1310,6 +1311,11 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         // aprovação, sorteio, confirmação, limpeza e turnos em silêncio (null).
         const motivo = motivoDeRecusaDoEvento(evento)
         if (motivo !== null) tocarRecusa(motivo)
+        // Som do aviso de tempo de turno (issue #430): 3 bipes uma única
+        // vez na chegada de TURNO_AVISO_30S (o relógio do game-server o
+        // emite 1x por turno); snapshots, reloads, re-admissões e retornos
+        // nunca re-tocam — a unicidade vem do evento, não daqui.
+        if (evento.type === 'TURNO_AVISO_30S') tocarSomDeAvisoDoTurno()
       },
       // `jogadorId` entra em deps (só troca em login/logout — o hook guarda o
       // callback em ref, sem reabrir o socket).
@@ -2217,6 +2223,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           emAndamento={estadoEmAndamento}
           emResultado={emResultado}
           iniciadaEm={modelo.iniciadaEm}
+          deadlineDoTurnoEm={modelo.deadlineDoTurnoEm}
+          avisoFinalDoPrimeiroTurno={modelo.avisoFinalDoPrimeiroTurno}
           imagemPorJogador={imagemPorJogador}
           onSair={desistirEIrParaPrincipal}
           saindo={saindo}
