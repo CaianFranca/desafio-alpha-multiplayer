@@ -2006,3 +2006,72 @@ describe('HUD da Partida — indicador de vez e cronômetro de turno (#430)', ()
   })
 })
 
+describe('HUD da Partida — projeção da falta/queima do relógio (#429)', () => {
+  const TABULEIRO_COM_RECEBIDA = {
+    posicionadas: [],
+    iniciais: [],
+    peoes: [
+      { peaoId: 'peao-branco', cor: 'branco', pecaId: null },
+      { peaoId: 'peao-vermelho', cor: 'vermelho', pecaId: null },
+      { peaoId: 'peao-azul', cor: 'azul', pecaId: null },
+      { peaoId: 'peao-amarelo', cor: 'amarelo', pecaId: null },
+    ],
+    recebidas: [
+      { recebidaId: 'r1', pecaId: 'reta-1', tipo: 'reta', orientacao: 0, vaga: null, celulaAlvo: null },
+    ],
+    pecaSelecionadaId: 'reta-1',
+    pecaEmManipulacaoId: null,
+    peaoSelecionadoId: null,
+    pecasRestantesNaCaixa: 82,
+  } as const
+
+  it('lote do estouro limpa a Bandeja e as pendências (sem fantasmas, sem crash)', async () => {
+    const ws = await partidaComSnapshot(
+      criarSnapshotBase({ tabuleiro: { ...TABULEIRO_COM_RECEBIDA } }),
+    )
+    // Pré-queima: corrente na Bandeja + pendência no espelho.
+    expect(
+      screen.getByTestId('caixa-peca-sorteada'),
+    ).toHaveAttribute('data-peca-id', 'reta-1')
+    expect(
+      screen.getByTestId('recebida-pendente'),
+    ).toHaveAttribute('data-peca-id', 'reta-1')
+
+    // Falta abre o lote sem projeção visual (sem crash, sem sumiço).
+    act(() =>
+      ws.simulateMessage({ type: 'FALTA_REGISTRADA', jogadorId: MEU_JOGADOR_ID, totalDeFaltas: 1 }),
+    )
+    expect(
+      screen.getByTestId('caixa-peca-sorteada'),
+    ).toHaveAttribute('data-peca-id', 'reta-1')
+
+    // Queima: Bandeja esvazia e a pendência some (era fantasma antes do fix).
+    act(() => ws.simulateMessage({ type: 'PECAS_QUEIMADAS', pecaIds: ['reta-1'] }))
+    expect(screen.queryByTestId('caixa-peca-sorteada')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('recebida-pendente')).not.toBeInTheDocument()
+    // HUD segue montado; contagem da Caixa intacta (queima não devolve).
+    expect(screen.getByTestId('hud-da-partida')).toBeInTheDocument()
+    expect(screen.getByTestId('hud-caixa-contador')).toHaveAttribute('data-valor', '82')
+  })
+
+  it('queima da aposta posicionada remove a peça do tabuleiro', async () => {
+    const ws = await partidaComSnapshot(
+      criarSnapshotBase({
+        tabuleiro: {
+          ...TABULEIRO_COM_RECEBIDA,
+          recebidas: [],
+          pecaSelecionadaId: null,
+          posicionadas: [
+            { pecaId: 'vulto-1', tipo: 'vulto', orientacao: 0, celula: { linha: 3, coluna: 3 } },
+          ],
+        },
+      }),
+    )
+    expect(
+      screen.getByTestId('peca-posicionada'),
+    ).toHaveAttribute('data-peca-id', 'vulto-1')
+
+    act(() => ws.simulateMessage({ type: 'PECAS_QUEIMADAS', pecaIds: ['vulto-1'] }))
+    expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument()
+  })
+})

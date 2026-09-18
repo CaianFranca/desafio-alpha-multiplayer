@@ -352,9 +352,10 @@ test('aviso jogado dentro do acréscimo: turno conclui sem falta e a flag fica c
   assert.equal(ana?.primeiroTurnoPendente, false);
 });
 
-// Apêndice item 3 — Primeiro Turno com peça + peão OK e recebida pendente:
-// queima + encerra + 1 falta, sem retorno à Caixa.
-test('item 3: recebida pendente no primeiro turno queima, encerra e soma 1 falta', () => {
+// Apêndice item 3 (emenda ADR-0019) — Primeiro Turno com peça + peão OK e
+// recebida pendente: aviso final na 1ª vez (sem falta, sem avanço, sem
+// queima), como nos itens 1–2; tudo pronto sem encerrar cai no item 4.
+test('item 3: recebida pendente no primeiro turno avisa sem falta e sem avanço', () => {
   let estado = partidaIniciadaCom(['ana', 'bruno']);
   estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
   estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
@@ -362,29 +363,47 @@ test('item 3: recebida pendente no primeiro turno queima, encerra e soma 1 falta
   estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
   assert.ok(estado.tabuleiro.recebidas.length > 0);
   const pendentes = estado.tabuleiro.recebidas.map((item) => item.pecaId);
-  const caixaAntes = estado.tabuleiro.caixa.length;
 
   const { estado: apos, eventos } = resolver(estado);
 
-  const falta = faltaDe(eventos, 'ana');
-  assert.equal(falta.totalDeFaltas, 1);
-  const queima = eventos.find((evento) => evento.tipo === 'pecas_queimadas');
-  assert.ok(queima && queima.tipo === 'pecas_queimadas');
-  assert.deepEqual([...queima.pecaIds].sort(), [...pendentes].sort());
-  assert.deepEqual(apos.tabuleiro.recebidas, []);
-  // Sem retorno à Caixa: o tamanho não cresce e as queimadas não estão nela.
-  assert.equal(apos.tabuleiro.caixa.length, caixaAntes);
-  const idsNaCaixa = new Set(apos.tabuleiro.caixa.map((item) => item.pecaId));
-  for (const queimada of pendentes) {
-    assert.ok(!idsNaCaixa.has(queimada));
-    assert.ok(!apos.tabuleiro.posicionadas.some((item) => item.pecaId === queimada));
-  }
-  assert.deepEqual(apos.faltasPorJogador, { ana: 1 });
+  assert.deepEqual(tipos(eventos), ['aviso_final_do_primeiro_turno']);
+  assert.deepEqual(apos.faltasPorJogador, {});
+  assert.deepEqual(apos.avisoFinalConsumidoPorJogador, { ana: true });
+  assert.equal(apos.jogadorAtivoId, 'ana');
+  assert.equal(apos.rodada, 1);
+  // Nada queimado nem encerrado: as recebidas seguem para o acréscimo.
+  assert.deepEqual(
+    apos.tabuleiro.recebidas.map((item) => item.pecaId),
+    pendentes,
+  );
+  assert.ok(apos.tabuleiro.posicionadas.some((item) => item.pecaId === 'inicial-1'));
+});
+
+// Item 3 com aviso consumido: segundo expiry ainda pendente remove com causa
+// 'tempo' (peão removido + Limpeza, como a Desistência normal).
+test('item 3: aviso consumido e recebidas pendentes remove com causa tempo', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  estado = aplicar(estado, selecionarPeao('peao-branco'), 'ana');
+  estado = aplicar(estado, posicionarPeao('peao-branco', 3, 3), 'ana');
+  assert.ok(estado.tabuleiro.recebidas.length > 0);
+  const comAviso: EstadoDaPartida = {
+    ...estado,
+    avisoFinalConsumidoPorJogador: { ana: true },
+  };
+
+  const { estado: apos, eventos } = resolver(comAviso);
+
+  assert.equal(apos.jogadores.length, 1);
   assert.equal(apos.jogadorAtivoId, 'bruno');
-  const ana = apos.jogadores.find((jogador) => jogador.jogadorId === 'ana');
-  assert.equal(ana?.primeiroTurnoPendente, false);
-  assert.ok(tipos(eventos).includes('turno_encerrado'));
-  assert.ok(tipos(eventos).includes('turno_iniciado'));
+  const desistencia = eventos.find(
+    (evento) => evento.tipo === 'desistencia_registrada',
+  );
+  assert.ok(desistencia && desistencia.tipo === 'desistencia_registrada');
+  assert.equal(desistencia.jogadorId, 'ana');
+  assert.equal(desistencia.causa, 'tempo');
+  assert.ok(!tipos(eventos).includes('falta_registrada'));
 });
 
 // Apêndice item 4 — Primeiro Turno tudo feito, sem encerrar: encerra + 1 falta.
@@ -421,7 +440,7 @@ test('item 5: peão parado em turno normal sofre permanência forçada com 1 fal
   assert.deepEqual(apos.faltasPorJogador, { ana: 1 });
 });
 
-// Apêndice item 6 — peão movido sem confirmar: volta à origem + permanece + 1 falta.
+// Apêndice item 6 — peão movido sem confirmar: volta à origem e permanece com 1 falta.
 test('item 6: peão movido sem confirmar volta à origem e permanece com 1 falta', () => {
   let estado = partidaEmTurnoNormal();
   const origem = estado.pecaDoInicioDoTurnoId;
@@ -431,6 +450,15 @@ test('item 6: peão movido sem confirmar volta à origem e permanece com 1 falta
   const { estado: apos, eventos } = resolver(estado);
 
   assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  // Recuo audível: o lote carrega o mover de volta antes da permanência —
+  // sem ele o cliente mantém o peão na peça nova até o reload.
+  const recuo = eventos.find((evento) => evento.tipo === 'peao_movido');
+  assert.ok(recuo && recuo.tipo === 'peao_movido');
+  assert.equal(recuo.pecaIdDe, 'inicial-2');
+  assert.equal(recuo.pecaIdPara, origem);
+  assert.ok(
+    tipos(eventos).indexOf('peao_movido') < tipos(eventos).indexOf('peao_permaneceu'),
+  );
   assert.ok(tipos(eventos).includes('peao_permaneceu'));
   const peao = apos.tabuleiro.peoes.find((item) => item.peaoId === 'peao-branco');
   assert.equal(peao?.pecaId, origem);
@@ -438,8 +466,10 @@ test('item 6: peão movido sem confirmar volta à origem e permanece com 1 falta
   assert.deepEqual(apos.faltasPorJogador, { ana: 1 });
 });
 
-// Apêndice item 7 — recebida pendente em turno normal: queima + encerra + 1 falta.
-test('item 7: recebida pendente em turno normal queima e encerra com 1 falta', () => {
+// Apêndice item 7 (emenda ADR-0019, opção B) — confirmado com recebida
+// pendente: desfaz (queima as sobras, peão já na origem) + permanece +
+// avança com 1 falta, em vez de queimar e manter.
+test('item 7: confirmado com pendente desfaz, permanece e avança com 1 falta', () => {
   let estado = partidaEmTurnoNormal();
   const pendente = {
     recebidaId: 'rec-expiry-1',
@@ -464,6 +494,7 @@ test('item 7: recebida pendente em turno normal queima e encerra com 1 falta', (
   assert.deepEqual(queima.pecaIds, ['queima-1']);
   assert.deepEqual(apos.tabuleiro.recebidas, []);
   assert.equal(apos.tabuleiro.caixa.length, caixaAntes);
+  assert.ok(tipos(eventos).includes('peao_permaneceu'));
   assert.ok(tipos(eventos).includes('turno_encerrado'));
   assert.ok(tipos(eventos).includes('turno_iniciado'));
   assert.equal(apos.jogadorAtivoId, 'bruno');
@@ -582,6 +613,10 @@ test('item 10: baixa com peão movido volta à origem e permanece', () => {
   const { estado: apos, eventos } = resolver(estado);
 
   assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  const recuo = eventos.find((evento) => evento.tipo === 'peao_movido');
+  assert.ok(recuo && recuo.tipo === 'peao_movido');
+  assert.equal(recuo.pecaIdDe, 'inicial-2');
+  assert.equal(recuo.pecaIdPara, origem);
   assert.ok(tipos(eventos).includes('peao_permaneceu'));
   const peao = apos.tabuleiro.peoes.find((item) => item.peaoId === 'peao-branco');
   assert.equal(peao?.pecaId, origem);
@@ -985,4 +1020,256 @@ test('partida terminada recusa a expiração com PARTIDA_TERMINADA', () => {
   if (!resultado.sucesso) {
     assert.equal(resultado.erro.codigo, 'PARTIDA_TERMINADA');
   }
+});
+
+// Emenda ADR-0019 — estado combinado (moveu sem confirmar + pendências):
+// desfaz (recua + descarta + permanece + avança) com 1 falta, em vez de
+// segurar o turno.
+test('combinado: moveu + pendente + colocada recua, queima tudo, permanece e avança', () => {
+  let estado = partidaEmTurnoNormal();
+  const origem = estado.pecaDoInicioDoTurnoId;
+  assert.ok(origem !== null);
+  estado = teleportarPeao(estado, 'peao-branco', 'inicial-2');
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      recebidas: [
+        {
+          recebidaId: 'rec-u1',
+          pecaId: 'queima-u1',
+          tipo: 'reta' as const,
+          orientacao: 0 as Orientacao,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+      posicionadas: [...estado.tabuleiro.posicionadas, peca('colocada-u1', 'reta', 2, 2)],
+    },
+    pecasPosicionadasNoTurno: ['colocada-u1'],
+  };
+  const caixaAntes = estado.tabuleiro.caixa.length;
+
+  const { estado: apos, eventos } = resolver(estado);
+
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  const queima = eventos.find((evento) => evento.tipo === 'pecas_queimadas');
+  assert.ok(queima && queima.tipo === 'pecas_queimadas');
+  assert.deepEqual([...queima.pecaIds].sort(), ['colocada-u1', 'queima-u1']);
+  // Recuo audível antes da permanência (ordem do lote).
+  const ordem = tipos(eventos);
+  assert.ok(ordem.indexOf('pecas_queimadas') < ordem.indexOf('peao_movido'));
+  const recuo = eventos.find((evento) => evento.tipo === 'peao_movido');
+  assert.ok(recuo && recuo.tipo === 'peao_movido');
+  assert.equal(recuo.pecaIdDe, 'inicial-2');
+  assert.equal(recuo.pecaIdPara, origem);
+  assert.ok(ordem.indexOf('peao_movido') < ordem.indexOf('peao_permaneceu'));
+  assert.ok(ordem.indexOf('peao_permaneceu') < ordem.indexOf('turno_encerrado'));
+  // Peão de volta à origem, como Permanência após nunca ter movido.
+  const peao = apos.tabuleiro.peoes.find((item) => item.peaoId === 'peao-branco');
+  assert.equal(peao?.pecaId, origem);
+  assert.ok(tipos(eventos).includes('peao_permaneceu'));
+  // Vez avançada e lista do turno zerada.
+  assert.ok(tipos(eventos).includes('turno_encerrado'));
+  assert.ok(tipos(eventos).includes('turno_iniciado'));
+  assert.equal(apos.jogadorAtivoId, 'bruno');
+  assert.deepEqual(apos.tabuleiro.recebidas, []);
+  assert.ok(!apos.tabuleiro.posicionadas.some((item) => item.pecaId === 'colocada-u1'));
+  assert.deepEqual(apos.pecasPosicionadasNoTurno, []);
+  // Sem retorno à Caixa.
+  assert.equal(apos.tabuleiro.caixa.length, caixaAntes);
+});
+
+// Combinado sem colocadas rastreadas: recua + queima as recebidas + avança.
+test('combinado: moveu + pendente sem colocadas recua e avança com 1 falta', () => {
+  let estado = partidaEmTurnoNormal();
+  const origem = estado.pecaDoInicioDoTurnoId;
+  estado = teleportarPeao(estado, 'peao-branco', 'inicial-2');
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      recebidas: [
+        {
+          recebidaId: 'rec-u2',
+          pecaId: 'queima-u2',
+          tipo: 'reta' as const,
+          orientacao: 0 as Orientacao,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  };
+
+  const { estado: apos, eventos } = resolver(estado);
+
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  const queima = eventos.find((evento) => evento.tipo === 'pecas_queimadas');
+  assert.ok(queima && queima.tipo === 'pecas_queimadas');
+  assert.deepEqual(queima.pecaIds, ['queima-u2']);
+  const peao = apos.tabuleiro.peoes.find((item) => item.peaoId === 'peao-branco');
+  assert.equal(peao?.pecaId, origem);
+  assert.equal(apos.jogadorAtivoId, 'bruno');
+});
+
+// Rastreamento: posicionar anota no turno; o avanço zera a lista.
+test('rastreio: posicionar anota a peça no turno e o avanço zera', () => {
+  let estado = partidaIniciadaCom(['ana', 'bruno']);
+  estado = aplicar(estado, selecionarPeca('inicial-1'), 'ana');
+  estado = aplicar(estado, posicionarPeca('inicial-1', 3, 3), 'ana');
+  assert.deepEqual(estado.pecasPosicionadasNoTurno, ['inicial-1']);
+
+  // Completa o Primeiro Turno sem reposicionar a inicial.
+  const jogador = jogadorAtivo(estado);
+  estado = aplicar(estado, selecionarPeao(jogador.peaoId), 'ana');
+  estado = aplicar(estado, posicionarPeao(jogador.peaoId, 3, 3), 'ana');
+  estado = resolverRecebidas(estado, 'ana');
+  estado = aplicar(estado, encerrarTurno(), 'ana');
+  assert.deepEqual(estado.pecasPosicionadasNoTurno, []);
+});
+
+// Parado com pendências sem confirmação (opção B): desfaz e avança com
+// falta — o estouro sempre resolve a vez (recuo no-op, queima, permanece).
+test('parado com pendências: desfaz, permanece e avança com 1 falta', () => {
+  let estado = partidaEmTurnoNormal();
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      recebidas: [
+        {
+          recebidaId: 'rec-hold-1',
+          pecaId: 'queima-hold-1',
+          tipo: 'reta' as const,
+          orientacao: 0 as Orientacao,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  };
+
+  const { estado: apos, eventos } = resolver(estado);
+
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  const queima = eventos.find((evento) => evento.tipo === 'pecas_queimadas');
+  assert.ok(queima && queima.tipo === 'pecas_queimadas');
+  assert.deepEqual(queima.pecaIds, ['queima-hold-1']);
+  assert.deepEqual(apos.tabuleiro.recebidas, []);
+  // Parado: sem recuo a anunciar (o peão já está na origem).
+  assert.ok(!tipos(eventos).includes('peao_movido'));
+  assert.ok(tipos(eventos).includes('peao_permaneceu'));
+  assert.ok(tipos(eventos).includes('turno_encerrado'));
+  assert.ok(tipos(eventos).includes('turno_iniciado'));
+  assert.equal(apos.jogadorAtivoId, 'bruno');
+});
+
+// Retrocompatibilidade: estado persistido sem o campo novo desfaz igual.
+test('retrocompat: sem pecasPosicionadasNoTurno o desfazer funciona', () => {
+  let estado = partidaEmTurnoNormal();
+  const semCampo: EstadoDaPartida = { ...estado };
+  delete (semCampo as { pecasPosicionadasNoTurno?: readonly string[] })
+    .pecasPosicionadasNoTurno;
+  estado = teleportarPeao(semCampo, 'peao-branco', 'inicial-2');
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      recebidas: [
+        {
+          recebidaId: 'rec-rt-1',
+          pecaId: 'queima-rt-1',
+          tipo: 'reta' as const,
+          orientacao: 0 as Orientacao,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  };
+
+  const { estado: apos, eventos } = resolver(estado);
+
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  const peao = apos.tabuleiro.peoes.find((item) => item.peaoId === 'peao-branco');
+  assert.equal(peao?.pecaId, 'inicial-1');
+  assert.equal(apos.jogadorAtivoId, 'bruno');
+});
+
+// Emenda ADR-0019 — desfazer restaura os estados do início do turno (dano,
+// Baixa e curas do turno voltam) mas mantém conquistas (monotônicas).
+test('desfazer: restaura sanidade e estados, mantém conquistas', () => {
+  let estado = partidaEmTurnoNormal();
+  estado = teleportarPeao(estado, 'peao-branco', 'inicial-2');
+  estado = {
+    ...estado,
+    posicaoConfirmada: true,
+    jogadores: estado.jogadores.map((jogador) =>
+      jogador.jogadorId === 'ana'
+        ? {
+            ...jogador,
+            sanidade: 1,
+            emBaixaIluminacao: true,
+            protegido: true,
+          }
+        : jogador,
+    ),
+    geradoresLigados: ['gen-1'],
+    tabuleiro: {
+      ...estado.tabuleiro,
+      recebidas: [
+        {
+          recebidaId: 'rec-rs-1',
+          pecaId: 'queima-rs-1',
+          tipo: 'reta' as const,
+          orientacao: 0 as Orientacao,
+          vaga: null,
+          celulaAlvo: null,
+        },
+      ],
+    },
+  };
+
+  const { estado: apos, eventos } = resolver(estado);
+
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  assert.equal(apos.jogadorAtivoId, 'bruno');
+  const ana = apos.jogadores.find((jogador) => jogador.jogadorId === 'ana');
+  // Estados do gatilho revertidos ao retrato do início do turno.
+  assert.equal(ana?.sanidade, 3);
+  assert.equal(ana?.emBaixaIluminacao, false);
+  assert.equal(ana?.amedrontado, false);
+  // Conquistas ficam (invariante #145, igual à Limpeza que não revoga).
+  assert.deepEqual(apos.geradoresLigados, ['gen-1']);
+  assert.equal(ana?.protegido, true);
+  // O retrato é refeito a cada avanço (turno seguinte).
+  assert.deepEqual(apos.estadosNoInicioDoTurno?.['bruno'], {
+    sanidade: 3,
+    emBaixaIluminacao: false,
+    amedrontado: false,
+  });
+});
+
+// Recuo sem célula conhecida: origem varrida pela Limpeza no turno — pula o
+// evento (sem fantasma no wire), mantendo falta + avanço.
+test('recuo: origem varrida pula o evento sem quebrar a resolução', () => {
+  let estado = partidaEmTurnoNormal();
+  estado = teleportarPeao(estado, 'peao-branco', 'inicial-2');
+  estado = {
+    ...estado,
+    tabuleiro: {
+      ...estado.tabuleiro,
+      posicionadas: estado.tabuleiro.posicionadas.filter(
+        (item) => item.pecaId !== 'inicial-1',
+      ),
+    },
+  };
+
+  const { estado: apos, eventos } = resolver(estado);
+
+  assert.equal(faltaDe(eventos, 'ana').totalDeFaltas, 1);
+  assert.ok(!tipos(eventos).includes('peao_movido'));
+  assert.ok(tipos(eventos).includes('peao_permaneceu'));
+  assert.equal(apos.jogadorAtivoId, 'bruno');
 });

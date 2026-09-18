@@ -95,6 +95,8 @@ import type {
   TurnoIniciadoEvento,
   TurnoAviso30sEvento,
   PrimeiroTurnoAvisoFinalEvento,
+  FaltaRegistradaWireEvento,
+  PecasQueimadasWireEvento,
   JogadorEmReconexaoWireEvento,
   JogadorReconectadoWireEvento,
   PresencaNaPartidaWire,
@@ -158,6 +160,8 @@ export type EventoDoJogoNoCliente =
   | TurnoEncerradoEvento
   | TurnoAviso30sEvento
   | PrimeiroTurnoAvisoFinalEvento
+  | FaltaRegistradaWireEvento
+  | PecasQueimadasWireEvento
   | PosicaoConfirmadaEvento
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
@@ -442,6 +446,8 @@ function normalizarDeadlineDoTurno(deadline: number | null | undefined): number 
  * (ST-11), de iluminação/limpeza (issue #151), de monstros/estados
  * (ST-15, #174 — ATAQUE_RESOLVIDO/RESGATE_REALIZADO) e de tempo de turno
  * (issue #430 — TURNO_AVISO_30S/PRIMEIRO_TURNO_AVISO_FINAL, só projeção;
+ * issue #429 — FALTA_REGISTRADA sem projeção de estado,
+ * PECAS_QUEIMADAS limpando as queimadas do modelo).
  */
 export function reduzirEvento(
   estado: EstadoDoTabuleiroNoCliente,
@@ -747,6 +753,41 @@ export function reduzirEvento(
       // deriva a urgência do deadline e a PartidaPage toca os bipes na
       // chegada do evento (one-shot; a unicidade vem do servidor).
       return estado
+    case 'FALTA_REGISTRADA':
+      // Falta do relógio (issue #429): sem projeção de estado — as faltas
+      // vivem no servidor (contam a 4ª falta → Desistência causa 'tempo') e
+      // o HUD não as exibe; o evento só abre o lote da resolução.
+      return estado
+    case 'PECAS_QUEIMADAS': {
+      // Queima do relógio (issue #429): espelho de
+      // `queimarRecebidasPendentes` + `queimarApostaDaTravessia` do engine —
+      // os ids saem das pendentes, do mapa de recebimento, das posicionadas
+      // (aposta da Travessia, quando posicionada) e da seleção/manipulação
+      // quando atingidas. Sem isso o cliente mantém peças fantasmas na
+      // Bandeja e todo comando seguinte é recusado (soft block). A contagem
+      // da Caixa não muda (queima não devolve — o Sorteio já descontou); a
+      // Iluminação/Limpeza chegam no mesmo lote pelos eventos próprios.
+      const queimadas = new Set(evento.pecaIds)
+      if (queimadas.size === 0) return estado
+      const pecasDeRecebimento: Record<string, TipoDaPeca> = { ...estado.pecasDeRecebimento }
+      for (const pecaId of queimadas) {
+        delete pecasDeRecebimento[pecaId]
+      }
+      return {
+        ...estado,
+        recebidasPendentes: estado.recebidasPendentes.filter((r) => !queimadas.has(r.pecaId)),
+        pecasDeRecebimento,
+        posicionadas: estado.posicionadas.filter((p) => !queimadas.has(p.pecaId)),
+        pecaSelecionadaId:
+          estado.pecaSelecionadaId !== null && queimadas.has(estado.pecaSelecionadaId)
+            ? null
+            : estado.pecaSelecionadaId,
+        pecaEmManipulacaoId:
+          estado.pecaEmManipulacaoId !== null && queimadas.has(estado.pecaEmManipulacaoId)
+            ? null
+            : estado.pecaEmManipulacaoId,
+      }
+    }
     case 'PRIMEIRO_TURNO_AVISO_FINAL': {
       // Aviso final do Primeiro Turno (issue #430): liga o destaque e
       // reconcilia o cronômetro com o deadline estendido (+30s). Degradado

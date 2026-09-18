@@ -163,6 +163,30 @@ export interface EstadoDaPartida {
   // dentro do acréscimo → segue sem falta, com a flag consumida; segundo
   // expiry ainda incompleto → Desistência. Retrocompatível (acesso via ?? {}).
   readonly avisoFinalConsumidoPorJogador: Readonly<Record<string, boolean>>;
+  // Tempo de turno (emenda ADR-0019): pecaIds posicionados neste turno pelo
+  // Jogador Ativo — base do desfazer no estouro do estado combinado (moveu
+  // sem confirmar + pendências): recua o peão, queima as colocadas + as
+  // recebidas restantes, permanece e avança. Opcional retrocompatível
+  // (estados antigos persistem sem o campo — acesso via ?? []); zerado no
+  // avanço da vez junto da fase do turno.
+  readonly pecasPosicionadasNoTurno?: readonly string[];
+  // Tempo de turno (emenda ADR-0019): retrato de estados no início do turno
+  // do Jogador Ativo — sanidade/Baixa/Amedrontado por jogador — para o
+  // desfazer no estouro restaurar o pré-turno (o turno desfeito é como se
+  // não tivesse acontecido nesses estados). Conquistas (Geradores, Cartão,
+  // Proteção) ficam de fora de propósito: monotônicas por invariante (#145,
+  // igual à Limpeza que não revoga). Opcional retrocompatível (estados
+  // antigos persistem sem o campo — acesso via ?? {}); refeito a cada avanço.
+  readonly estadosNoInicioDoTurno?: Readonly<
+    Record<
+      string,
+      {
+        readonly sanidade: number;
+        readonly emBaixaIluminacao: boolean;
+        readonly amedrontado: boolean;
+      }
+    >
+  >;
 }
 
 export interface ConfirmarPosicaoDoPeaoComando {
@@ -291,17 +315,20 @@ export interface FaltaRegistradaEvento {
   readonly totalDeFaltas: number;
 }
 
-// Tempo de turno (issue #429): aviso final do Primeiro Turno — primeiro expiry
-// com a etapa da Peça Inicial ou do peão incompleta. Não consome falta nem
-// avança a vez; o relógio (ticket 2/3) estende aquele turno em +30s únicos. A
-// Peça Inicial nunca é queimada.
+// Tempo de turno (issue #429, emenda ADR-0019 incluindo o item 3): aviso
+// final do Primeiro Turno — primeiro expiry com a etapa da Peça Inicial, do
+// peão ou das recebidas incompleta. Não consome falta nem avança a vez; o
+// relógio (ticket 2/3) estende aquele turno em +30s únicos. A Peça Inicial
+// nunca é queimada.
 export interface AvisoFinalDoPrimeiroTurnoEvento {
   readonly tipo: 'aviso_final_do_primeiro_turno';
   readonly jogadorId: string;
 }
 
-// Tempo de turno (issue #429): queima — peças pendentes do Recebimento (e a
-// peça da aposta da Travessia, quando posicionada) saem de circulação SEM
+// Tempo de turno (issue #429, emenda ADR-0019 incluindo as colocadas-no-
+// turno no desfazer): queima — peças pendentes do Recebimento, as
+// posicionadas no turno descartadas no desfazer (e a peça da aposta da
+// Travessia, quando posicionada) saem de circulação SEM
 // retorno à Caixa (o sorteio consome sem reposição). Verificado: a queima
 // esvazia as recebidas sem repor a Caixa, e caixaEsgotadaSemObjetivos conta
 // só caixa vazia + posicionadas/recebidas — a queimada não conta em nenhum
@@ -459,6 +486,17 @@ export function estadoInicialDaPartida(
     pecasEmPeriodoDeGraca: [],
     faltasPorJogador: {},
     avisoFinalConsumidoPorJogador: {},
+    pecasPosicionadasNoTurno: [],
+    estadosNoInicioDoTurno: Object.fromEntries(
+      jogadores.map((jogador) => [
+        jogador.jogadorId,
+        {
+          sanidade: jogador.sanidade,
+          emBaixaIluminacao: jogador.emBaixaIluminacao,
+          amedrontado: jogador.amedrontado,
+        },
+      ]),
+    ),
   };
   return sucessoDaPartida(estado, [
     { tipo: 'turno_iniciado', jogadorId: jogadores[0].jogadorId, rodada: 1 },
@@ -644,6 +682,89 @@ function selecionarPecaDaPartida(
   return delegarAoTabuleiro(estado, comando);
 }
 
+/**
+ * Retrato de estados no início do turno (emenda ADR-0019): sanidade, Baixa
+ * Iluminação e Amedrontado por jogador — o desfazer no estouro restaura o
+ * pré-turno. Tirado no avanço (estado vigente = início do turno seguinte).
+ */
+function retratoDeEstados(
+  estado: EstadoDaPartida,
+): Record<
+  string,
+  { sanidade: number; emBaixaIluminacao: boolean; amedrontado: boolean }
+> {
+  return Object.fromEntries(
+    estado.jogadores.map((jogador) => [
+      jogador.jogadorId,
+      {
+        sanidade: jogador.sanidade,
+        emBaixaIluminacao: jogador.emBaixaIluminacao ?? false,
+        amedrontado: jogador.amedrontado ?? jogador.sanidade === 0,
+      },
+    ]),
+  );
+}
+
+/**
+ * Restaura o retrato do início do turno (emenda ADR-0019): o turno desfeito
+ * é como se não tivesse acontecido nesses estados — dano/Baixa do gatilho
+ * da confirmação e curas de Resgate do turno voltam. Conquistas
+ * (Geradores, Cartão, Proteção) não entram no retrato e ficam (invariante
+ * #145). Sem retrato (binário anterior) é no-op.
+ */
+function restaurarEstadosDoInicioDoTurno(
+  estado: EstadoDaPartida,
+): EstadoDaPartida {
+  const retrato = estado.estadosNoInicioDoTurno ?? {};
+  if (Object.keys(retrato).length === 0) {
+    return estado;
+  }
+  return {
+    ...estado,
+    jogadores: estado.jogadores.map((jogador) => {
+      const foto = retrato[jogador.jogadorId];
+      if (!foto) {
+        return jogador;
+      }
+      return {
+        ...jogador,
+        sanidade: foto.sanidade,
+        emBaixaIluminacao: foto.emBaixaIluminacao,
+        amedrontado: foto.amedrontado,
+      };
+    }),
+  };
+}
+
+/**
+ * Anota a peça posicionada na lista do turno (emenda ADR-0019): só quando o
+ * resultado traz `peca_posicionada` para o pecaId do comando, sem duplicatas.
+ * No-op em falha ou sem posicionamento.
+ */
+function anotarPosicionadaNoTurno(
+  estado: EstadoDaPartida,
+  resultado: ResultadoDaPartida,
+  pecaId: string,
+): ResultadoDaPartida {
+  if (!resultado.sucesso) {
+    return resultado;
+  }
+  const posicionou = resultado.eventos.some(
+    (evento) => evento.tipo === 'peca_posicionada' && evento.pecaId === pecaId,
+  );
+  if (!posicionou) {
+    return resultado;
+  }
+  const anotadas = estado.pecasPosicionadasNoTurno ?? [];
+  if (anotadas.includes(pecaId)) {
+    return resultado;
+  }
+  return sucessoDaPartida(
+    { ...resultado.estado, pecasPosicionadasNoTurno: [...anotadas, pecaId] },
+    resultado.eventos,
+  );
+}
+
 function posicionarPecaDaPartida(
   estado: EstadoDaPartida,
   comando: PosicionarPecaComando,
@@ -680,12 +801,22 @@ function posicionarPecaDaPartida(
         ) ?? null)
       : null;
   const resultado = delegarAoTabuleiro(estado, comando);
-  if (!resultado.sucesso || travessiaPendente === null) {
+  if (!resultado.sucesso) {
     return resultado;
   }
+  // Emenda ADR-0019: anota a peça posicionada no turno — base do desfazer no
+  // estouro do estado combinado. Só posicionar_peca anota (a Travessia tem
+  // resolução própria e nunca cai no desfazer); reset no avanço da vez.
+  const anotado = anotarPosicionadaNoTurno(estado, resultado, comando.pecaId);
+  if (!anotado.sucesso) {
+    return anotado;
+  }
+  if (travessiaPendente === null) {
+    return anotado;
+  }
   return sucessoDaPartida(
-    { ...resultado.estado, pecaDaTravessiaId: comando.pecaId },
-    resultado.eventos,
+    { ...anotado.estado, pecaDaTravessiaId: comando.pecaId },
+    anotado.eventos,
   );
 }
 
@@ -1849,15 +1980,18 @@ function encerrarTurnoDaPartida(
 // resolução converte em Desistência automática com causa 'tempo' — mesmo
 // efeito e eventos da Desistência (Passagem imediata se era o Ativo, recálculo
 // de Iluminação e Limpeza, vitória reavaliada pelo funil do dispatch).
-// Cobertura por etapa (Apêndice, itens 1–12 + 15):
-//   Primeiro Turno incompleto (inicial ou peão, item 1–2) → aviso final na 1ª
-//   vez (sem falta, sem avanço; a inicial nunca é queimada), Desistência na 2ª;
-//   Primeiro Turno com recebida pendente (item 3) → queima + encerra + 1 falta;
+// Cobertura por etapa (Apêndice, itens 1–12 + 15, com emenda ADR-0019):
+//   Primeiro Turno incompleto (inicial ou peão, item 1–2, ou recebidas
+//   pendentes com peça + peão OK, item 3) → aviso final na 1ª vez (sem falta,
+//   sem avanço, sem queima; a inicial nunca é queimada), Desistência na 2ª;
 //   Primeiro Turno tudo feito (item 4) → encerra + 1 falta;
-//   Turno normal: parado (item 5) → permanência forçada; movido (item 6) →
-//   volta à origem + permanece (ataque como permanência normal, sem novo
-//   Recebimento); recebida pendente (item 7) → queima + encerra; tudo feito
-//   (item 8) → encerra;
+//   Turno normal: recebidas pendentes → desfaz (recua à origem + descarta
+//   as colocadas-no-turno + queima as recebidas + restaura os estados do
+//   início do turno) + permanece + avança + 1 falta (ataque como permanência
+//   normal, sem novo Recebimento); sem pendências e confirmado (item 8) →
+//   encerra + 1 falta; sem pendências e parado (item 5) → permanência
+//   forçada + 1 falta; sem pendências, movido sem confirmar (item 6) →
+//   volta à origem + permanece + 1 falta;
 //   Baixa Iluminação: nada feito (item 9) → permanência; moveu iluminado sem
 //   confirmar (item 10) → volta + permanece; travessia aberta (item 11) →
 //   queima da aposta + conclusão (mover compulsório + confirmação, ou volta +
@@ -1893,39 +2027,15 @@ export function resolverExpiracaoDoTurno(
     // atravessouNoTurno com primeiroTurnoPendente é inalcançável por comandos
     // legítimos, então este ramo não trata travessia aberta.
     if (primeiroTurnoIncompletoNoExpiry(estado, ativo)) {
-      const consumido =
-        (estado.avisoFinalConsumidoPorJogador ?? {})[ativo.jogadorId] ?? false;
-      // Primeira vez: aviso final — sem falta, sem avanço; o relógio estende o
-      // turno em +30s únicos (CARENCIA_AVISO_FINAL_SEGUNDOS).
-      if (!consumido) {
-        return sucessoDaPartida(
-          {
-            ...estado,
-            avisoFinalConsumidoPorJogador: {
-              ...(estado.avisoFinalConsumidoPorJogador ?? {}),
-              [ativo.jogadorId]: true,
-            },
-          },
-          [
-            {
-              tipo: 'aviso_final_do_primeiro_turno',
-              jogadorId: ativo.jogadorId,
-            },
-          ],
-        );
-      }
-      // Segunda vez ainda incompleto: Desistência com causa 'tempo' — sem
-      // falta_registrada por intenção (R2 da #429): os itens 1–2 do Apêndice
-      // não pedem falta, em assimetria com a 4ª falta (que abre o lote com
-      // falta_registrada antes da Desistência).
-      return funilarAvaliacaoDoTermino(
-        desistirDaPartida(estado, ativo.jogadorId, 'tempo'),
-      );
+      return avisoOuRemocaoNoPrimeiroTurno(estado, ativo);
+    }
+    if (estado.tabuleiro.recebidas.length > 0) {
+      // Emenda ADR-0019: recebidas pendentes com peça + peão OK também avisam
+      // antes de remover (antes: o item 3 queimava + encerrava + 1 falta sem
+      // aviso). Tudo pronto sem encerrar cai no encerrar + falta abaixo.
+      return avisoOuRemocaoNoPrimeiroTurno(estado, ativo);
     }
     return resolverExpiracaoComFalta(estado, ativo, (base) => {
-      if (base.tabuleiro.recebidas.length > 0) {
-        return queimarEEncerrarNoExpiry(base, ativo.jogadorId);
-      }
       // ?? ativo: a moldura de faltas preserva o roster — a releitura só cai
       // no fallback em estado artesanal.
       const atorNoEstado = atorEmEstado(base, ativo.jogadorId) ?? ativo;
@@ -1938,16 +2048,13 @@ export function resolverExpiracaoDoTurno(
       resolverTravessiaAbertaNoExpiry(base, ativo.jogadorId),
     );
   }
-  // Ordem intencional (R3 da #429, sonda P1): recebidas > 0 precede
-  // posicaoConfirmada porque em fluxo real recebidas ⇒ posicaoConfirmada
-  // (a Confirmada só fecha sem pendências) — o estado combinado (peão movido
-  // sem confirmar + recebida pendente) é artificial e, sem Confirmação, o
-  // encerrar falha e a moldura persiste só a falta, com o turno mantido até
-  // a 4ª falta → Desistência. Sem reordenação: o Apêndice não define ordem
-  // para o estado combinado.
+  // Ordem intencional (emenda ADR-0019, opção B): qualquer recebida
+  // pendente desfaz e avança (recua + descarta + permanece) — com ou sem
+  // movimento, com ou sem confirmação. O estouro sempre resolve a vez; só a
+  // graça da #171 segura (Permanência rejeitada → falta com turno mantido).
   if (estado.tabuleiro.recebidas.length > 0) {
     return resolverExpiracaoComFalta(estado, ativo, (base) =>
-      queimarEEncerrarNoExpiry(base, ativo.jogadorId),
+      desfazerEEncerrarNoExpiry(base, ativo.jogadorId),
     );
   }
   if (estado.posicaoConfirmada) {
@@ -1965,7 +2072,7 @@ export function resolverExpiracaoDoTurno(
 // inicial-<ordem> fora do Tabuleiro (não selecionada, só selecionada, ainda
 // não posicionada), posicionada com a Manipulação aberta (girando), ou o peão
 // ainda sobre a Mesa. Recebidas pendentes com peça + peão OK NÃO entram aqui —
-// deságuam na queima (item 3).
+// deságuam no aviso do item 3 (emenda ADR-0019).
 function primeiroTurnoIncompletoNoExpiry(
   estado: EstadoDaPartida,
   ator: JogadorDaPartida,
@@ -1987,6 +2094,42 @@ function primeiroTurnoIncompletoNoExpiry(
     return true;
   }
   return false;
+}
+
+// Aviso final do Primeiro Turno (itens 1–3 do Apêndice, emenda ADR-0019
+// incluindo o item 3): primeira vez com qualquer incompletude — sem falta,
+// sem avanço, sem queima; o relógio estende o turno em +30s únicos
+// (CARENCIA_AVISO_FINAL_SEGUNDOS, flag única por Jogador por Partida).
+// Segunda vez ainda incompleto: Desistência com causa 'tempo' — sem
+// falta_registrada por intenção (R2 da #429): os itens 1–3 do Apêndice
+// não pedem falta, em assimetria com a 4ª falta (que abre o lote com
+// falta_registrada antes da Desistência).
+function avisoOuRemocaoNoPrimeiroTurno(
+  estado: EstadoDaPartida,
+  ativo: JogadorDaPartida,
+): ResultadoDaPartida {
+  const consumido =
+    (estado.avisoFinalConsumidoPorJogador ?? {})[ativo.jogadorId] ?? false;
+  if (!consumido) {
+    return sucessoDaPartida(
+      {
+        ...estado,
+        avisoFinalConsumidoPorJogador: {
+          ...(estado.avisoFinalConsumidoPorJogador ?? {}),
+          [ativo.jogadorId]: true,
+        },
+      },
+      [
+        {
+          tipo: 'aviso_final_do_primeiro_turno',
+          jogadorId: ativo.jogadorId,
+        },
+      ],
+    );
+  }
+  return funilarAvaliacaoDoTermino(
+    desistirDaPartida(estado, ativo.jogadorId, 'tempo'),
+  );
 }
 
 // Moldura de faltas: soma 1 falta ao Jogador Ativo e resolve o caminho; na 4ª
@@ -2048,29 +2191,6 @@ function resolverExpiracaoComFalta(
   );
 }
 
-// Queima + encerramento (Apêndice itens 3 e 7): as pendentes saem de circulação
-// sem retorno à Caixa — o sorteio já consumiu sem reposição — e o turno
-// encerra (a posição já estava confirmada no item 7; no item 3 o Primeiro
-// Turno exige só o peão posicionado). A Passagem descarta seleção/manipulação.
-function queimarEEncerrarNoExpiry(
-  base: EstadoDaPartida,
-  jogadorId: string,
-): ResultadoDaPartida {
-  const queima = queimarRecebidasPendentes(base);
-  const ator = atorEmEstado(queima.estado, jogadorId);
-  if (!ator) {
-    return rejeitarDaPartida(
-      'JOGADOR_NAO_NA_PARTIDA',
-      'O Jogador Ativo não está na Partida.',
-    );
-  }
-  const fim = encerrarTurnoDaPartida(queima.estado, ator);
-  if (!fim.sucesso) {
-    return fim;
-  }
-  return sucessoDaPartida(fim.estado, [...queima.eventos, ...fim.eventos]);
-}
-
 // Volta + permanência (Apêndice itens 6 e 10) e permanência forçada (itens 5 e
 // 9): peão parado permanece direto; peão movido volta à Peça do início do
 // turno e permanece — ataque avaliado como permanência normal, sem novo
@@ -2098,7 +2218,26 @@ function voltarEPermanecerNoExpiry(
   if (parado || origemId === null) {
     return permanecerNaPartida(base, permanecerComando, ator);
   }
-  const recuado: EstadoDaPartida = {
+  const recuo = recuarPeaoParaOrigem(base, ator);
+  const fim = permanecerNaPartida(recuo.estado, permanecerComando, ator);
+  if (!fim.sucesso) {
+    return fim;
+  }
+  return sucessoDaPartida(fim.estado, [...recuo.eventos, ...fim.eventos]);
+}
+
+// Recuo audível do peão à Peça do início do turno: move de volta EMITINDO
+// `peao_movido` — sem o evento, o cliente mantém o peão na peça nova até o
+// reload (só o snapshot reconcilia), travando a leitura da origem no turno
+// seguinte. Sem movimento (parado ou origem null) ou sem célula conhecida
+// da origem (varrida pela Limpeza no turno): sem evento, só o estado.
+function recuarPeaoParaOrigem(
+  base: EstadoDaPartida,
+  ator: JogadorDaPartida,
+): { estado: EstadoDaPartida; eventos: EventoDaPartida[] } {
+  const origemId = base.pecaDoInicioDoTurnoId;
+  const peao = base.tabuleiro.peoes.find((item) => item.peaoId === ator.peaoId);
+  const estado = {
     ...base,
     tabuleiro: {
       ...base.tabuleiro,
@@ -2108,7 +2247,95 @@ function voltarEPermanecerNoExpiry(
       peaoSelecionadoId: ator.peaoId,
     },
   };
-  return permanecerNaPartida(recuado, permanecerComando, ator);
+  const de = peao?.pecaId ?? null;
+  const origem =
+    origemId !== null
+      ? base.tabuleiro.posicionadas.find((item) => item.pecaId === origemId)
+      : undefined;
+  if (origemId === null || de === null || de === origemId || origem === undefined) {
+    return { estado, eventos: [] };
+  }
+  return {
+    estado,
+    eventos: [
+      {
+        tipo: 'peao_movido',
+        peaoId: ator.peaoId,
+        pecaIdDe: de,
+        pecaIdPara: origemId,
+        celula: origem.celula,
+      },
+    ],
+  };
+}
+
+// Desfazer + encerramento (emenda ADR-0019, opção B — qualquer recebida
+// pendente no estouro): recua o peão à Peça do início do turno (no-op se
+// parado), descarta as peças posicionadas no turno + queima as recebidas
+// restantes (tudo num único `pecas_queimadas`, sem retorno à Caixa),
+// restaura os estados do início do turno, permanece e avança — como
+// Permanência após nunca ter movido. A Passagem descarta
+// seleção/manipulação. Colocadas já varridas pela Limpeza no turno não
+// entram no evento (só o que está no tabuleiro é descartado). Conquistas
+// (Geradores, Cartão, Proteção) ficam — monotônicas por invariante.
+function desfazerEEncerrarNoExpiry(
+  base: EstadoDaPartida,
+  jogadorId: string,
+): ResultadoDaPartida {
+  const ator = atorEmEstado(base, jogadorId);
+  if (!ator) {
+    return rejeitarDaPartida(
+      'JOGADOR_NAO_NA_PARTIDA',
+      'O Jogador Ativo não está na Partida.',
+    );
+  }
+  const rastreadas = new Set(base.pecasPosicionadasNoTurno ?? []);
+  const queimadas = new Set(
+    base.tabuleiro.posicionadas
+      .filter((peca) => rastreadas.has(peca.pecaId))
+      .map((peca) => peca.pecaId),
+  );
+  for (const recebida of base.tabuleiro.recebidas) {
+    queimadas.add(recebida.pecaId);
+  }
+  const selecao = base.tabuleiro.pecaSelecionadaId;
+  const manipulacao = base.tabuleiro.pecaEmManipulacaoId;
+  const semColocadas: EstadoDaPartida = {
+    ...base,
+    posicaoConfirmada: false,
+    tabuleiro: {
+      ...base.tabuleiro,
+      posicionadas: base.tabuleiro.posicionadas.filter(
+        (peca) => !queimadas.has(peca.pecaId),
+      ),
+      recebidas: [],
+      pecaSelecionadaId:
+        selecao !== null && queimadas.has(selecao) ? null : selecao,
+      pecaEmManipulacaoId:
+        manipulacao !== null && queimadas.has(manipulacao) ? null : manipulacao,
+    },
+    pecasPosicionadasNoTurno: [],
+  };
+  // O turno desfeito é como se não tivesse acontecido nesses estados
+  // (dano/Baixa/curas do turno voltam; conquistas ficam) — e a Permanência
+  // abaixo avalia o próprio gatilho sobre o revertido.
+  const comEstados = restaurarEstadosDoInicioDoTurno(semColocadas);
+  const recuo = recuarPeaoParaOrigem(comEstados, ator);
+  const eventos: EventoDaPartida[] = [
+    ...(queimadas.size > 0
+      ? [{ tipo: 'pecas_queimadas', pecaIds: [...queimadas] } as const]
+      : []),
+    ...recuo.eventos,
+  ];
+  const permanecerComando: PermanecerComando = {
+    tipo: 'permanecer',
+    peaoId: ator.peaoId,
+  };
+  const fim = permanecerNaPartida(recuo.estado, permanecerComando, ator);
+  if (!fim.sucesso) {
+    return fim;
+  }
+  return sucessoDaPartida(fim.estado, [...eventos, ...fim.eventos]);
 }
 
 // Travessia aberta (Apêndice item 11): queima da peça da aposta + conclusão.
@@ -2604,6 +2831,8 @@ function avancarVez(
       pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
       faltasPorJogador: estado.faltasPorJogador ?? {},
       avisoFinalConsumidoPorJogador: estado.avisoFinalConsumidoPorJogador ?? {},
+      pecasPosicionadasNoTurno: [],
+      estadosNoInicioDoTurno: retratoDeEstados(estado),
     };
     const eventosFinais: readonly EventoDaPartida[] = [
       ...eventos,
@@ -2633,11 +2862,13 @@ function avancarVez(
     geradoresLigados: estado.geradoresLigados,
     cartaoDeAcessoObtido: estado.cartaoDeAcessoObtido,
     peoesNoAlcance: estado.peoesNoAlcance,
-    pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
-    faltasPorJogador: estado.faltasPorJogador ?? {},
-    avisoFinalConsumidoPorJogador: estado.avisoFinalConsumidoPorJogador ?? {},
-  };
-  const eventosFinais: readonly EventoDaPartida[] = [
+      pecasEmPeriodoDeGraca: estado.pecasEmPeriodoDeGraca ?? [],
+      faltasPorJogador: estado.faltasPorJogador ?? {},
+      avisoFinalConsumidoPorJogador: estado.avisoFinalConsumidoPorJogador ?? {},
+      pecasPosicionadasNoTurno: [],
+      estadosNoInicioDoTurno: retratoDeEstados(estado),
+    };
+    const eventosFinais: readonly EventoDaPartida[] = [
     ...eventos,
     ...fechamentoDaManipulacao,
     { tipo: 'turno_iniciado', jogadorId: alvo.jogadorId, rodada: rodadaAlvo },
