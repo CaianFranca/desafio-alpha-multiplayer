@@ -19,6 +19,7 @@ import {
 } from '../../game/tabuleiro/contrato'
 import type { PeaoId } from '../../game/tabuleiro/contrato'
 import type { EstadoVisualDoAtaque } from '../../game/tabuleiro/ataque'
+import type { AlvoDoGuiaDeTurno } from '../../game/tabuleiro/guiaDeTurno'
 import { TabuleiroMirrorDOM } from './TabuleiroMirrorDOM'
 import {
   celulasDaTravessiaDoEscuro,
@@ -100,6 +101,14 @@ interface AmbienteDeJogoProps {
    * slot ativo (a cena 3D e o espelho DOM apagam sem marcas).
    */
   estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
+  /**
+   * Guia de turno (issue #441): alvo atual + restrições ao próprio
+   * (peça Inicial/destino e peão do dono do turno). Repassado ao espelho
+   * DOM como `data-guia` (só visual); `null` = sem destaque.
+   */
+  guiaAlvo?: AlvoDoGuiaDeTurno | null
+  guiaPecaId?: string | null
+  guiaPeaoId?: string | null
 }
 
 export function AmbienteDeJogo({
@@ -121,6 +130,9 @@ export function AmbienteDeJogo({
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   quantidadeDeJogadores,
   estadoVisualDoAtaque = null,
+  guiaAlvo = null,
+  guiaPecaId = null,
+  guiaPeaoId = null,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -448,6 +460,9 @@ export function AmbienteDeJogo({
           sanidadePorPeao={sanidadePorPeao}
           encaixeTrigger={encaixeTrigger}
           estadoVisualDoAtaque={estadoVisualDoAtaque}
+          guiaAlvo={guiaAlvo}
+          guiaPecaId={guiaPecaId}
+          guiaPeaoId={guiaPeaoId}
         />
       ) : null}
     </div>

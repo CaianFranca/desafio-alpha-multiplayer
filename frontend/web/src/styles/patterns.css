@@ -352,4 +352,13 @@
       justify-content: center;
     }
   }
+
+  /* Guia de turno (issue #441): destaque inédito sobre alvos acionáveis —
+     contorno tracejado ciano, distinto da seleção e da vez. Só visual:
+     nunca altera layout nem intercepta cliques. */
+  [data-guia="true"] {
+    outline: 2px dashed rgba(34, 211, 238, 0.9);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
 }
