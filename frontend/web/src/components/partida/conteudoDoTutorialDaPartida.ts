@@ -93,7 +93,7 @@ export const SLIDES_DO_TUTORIAL_DA_PARTIDA: readonly SlideDoTutorial[] = [
   {
     titulo: 'Peça Especial: Portão de Saída',
     texto:
-      'O Portão de Saída é a fuga: a vitória exige os N peões da Partida reunidos nele.',
+      'O Portão de Saída é a fuga: a vitória exige os peões da Partida reunidos nele.',
     midias: [
       midia('peca_portao_saida.png', 'Peça Especial do Portão de Saída'),
     ],
@@ -133,7 +133,7 @@ export const SLIDES_DO_TUTORIAL_DA_PARTIDA: readonly SlideDoTutorial[] = [
   {
     titulo: 'Objetivo: vença ou perca em equipe',
     texto:
-      'Vitória (Objetivo Global): 3 Geradores ligados + Cartão de Acesso + os N peões reunidos no Portão de Saída. Derrota: a equipe toda Amedrontada, ou a Caixa esgotada sem cumprir os objetivos.',
+      'Vitória (Objetivo Global): 3 Geradores ligados + Cartão de Acesso + os peões reunidos no Portão de Saída. Derrota: a equipe toda Amedrontada, ou a Caixa esgotada sem cumprir os objetivos.',
     midias: [
       midia('sinalizacao_objetivo.png', 'Sinalização do objetivo da partida'),
     ],
