@@ -40,11 +40,13 @@ export interface AvisoDeDesistencia {
   readonly jogadorId: string;
   /**
    * Causa informativa da saída (issue #295): `desistencia` no ato explícito,
-   * `expiracao` na conversão automática da janela de reconexão. Opcional:
+   * `expiracao` na conversão automática da janela de reconexão; `tempo` na
+   * Desistência automática do relógio do turno (issue #429: 4ª falta ou 2º
+   * expiry do Primeiro Turno incompleto). Opcional:
    * avisos de binário anterior omitem o campo e o lobby trata ausente como
-   * explícita. Não viaja decisão — o detach é idêntico nas duas origens.
+   * explícita. Não viaja decisão — o detach é idêntico nas três origens.
    */
-  readonly causa?: 'desistencia' | 'expiracao';
+  readonly causa?: 'desistencia' | 'expiracao' | 'tempo';
 }
 
 export interface DesistenciaClienteConfig {

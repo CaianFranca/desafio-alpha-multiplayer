@@ -379,6 +379,12 @@ describe('encaixe na tela — voo, sons e estado final (issue #241)', () => {
     const ws = await partidaDisponivel()
     const user = userEvent.setup()
 
+    // Issue #433: clique na mesa é gesto do ciclo — o teste roda com o
+    // jogador local como Jogador Ativo (espectador fica mudo fora da vez).
+    act(() => {
+      ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: JOGADOR_ID, rodada: 2 })
+    })
+
     act(() =>
       ws.simulateMessage({
         type: 'PECA_POSICIONADA',

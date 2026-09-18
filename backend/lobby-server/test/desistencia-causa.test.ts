@@ -1,8 +1,8 @@
-// Rota de desistência — causa informativa (issue #295).
+// Rota de desistência — causa informativa (issues #295/#429).
 //
 // Unitário, sem PG/Redis: monta o router com um contexto falso e exercita a
-// aceitação/validação da `causa` sem mudar o detach — `desistencia` e
-// `expiracao` desvinculam igual ao sem causa; valor estranho é 400.
+// aceitação/validação da `causa` sem mudar o detach — `desistencia`,
+// `expiracao` e `tempo` desvinculam igual ao sem causa; valor estranho é 400.
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -73,16 +73,16 @@ const BASE = {
   jogadorId: 'jogador-2',
 };
 
-test('causa desistencia e expiracao desvinculam igual ao sem causa', async () => {
+test('causa desistencia, expiracao e tempo desvinculam igual ao sem causa (#295/#429)', async () => {
   const remocoes: string[] = [];
   await comApp(remocoes, async (baseUrl) => {
-    for (const causa of [undefined, 'desistencia', 'expiracao'] as const) {
+    for (const causa of [undefined, 'desistencia', 'expiracao', 'tempo'] as const) {
       const r = await post(baseUrl, causa === undefined ? BASE : { ...BASE, causa });
       assert.equal(r.status, 200);
       assert.deepEqual(r.corpo, { desvinculado: true });
     }
   });
-  assert.deepEqual(remocoes, ['sala-1:jogador-2', 'sala-1:jogador-2', 'sala-1:jogador-2']);
+  assert.deepEqual(remocoes, ['sala-1:jogador-2', 'sala-1:jogador-2', 'sala-1:jogador-2', 'sala-1:jogador-2']);
 });
 
 test('causa estranha é 400 sem desvincular', async () => {
