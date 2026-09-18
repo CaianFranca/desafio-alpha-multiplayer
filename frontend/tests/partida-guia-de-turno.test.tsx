@@ -762,4 +762,80 @@ describe('Guia de turno — região viva e compacto (issues #441 [15,16])', () =
     expect(screen.getByTestId('guia-de-turno-vivo')).toHaveTextContent('Seu turno — veja a ordem do turno.')
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-guia', 'true')
   })
+
+  it('bandeja pós-peão: card Puxe + ciano na corrente com ids das três pontas, depois vagas', async () => {
+    // Instante exato pós-peão na Inicial + recebida na bandeja (cenário [8→9]
+    // do seam acima): peão próprio posicionado, sem manipulação/preview, com
+    // 1 pendência sem vaga — fase null (rodada 1 com pendência), sem confirmar.
+    // Log do instante: etapa guia-inicial-bandeja/bandeja, fase null,
+    // 1 pendência, posicaoConfirmada false, corrente peca-rec-1, guiaPecaId
+    // peca-rec-1, correnteEmGuia true (pendência presente + ids iguais —
+    // sem faseamento nem igualdade a corrigir, só cobertura do instante).
+    const recebidasPendentes = [{ recebidaId: 'rec-1', pecaId: 'peca-rec-1', vaga: null, celulaAlvo: null }]
+    const etapaBandeja = etapaDoGuiaDeTurno(
+      entradaBase({
+        inicialPropriaNaMesa: false,
+        inicialPropriaPosicionada: true,
+        peaoProprioPosicionado: true,
+        peaoSelecionadoEhProprio: true,
+        movimentouNoTurno: true,
+        temRecebidaPendente: true,
+        faseDoTurno: null,
+        ensinados: new Set(['guia-inicial-turno']),
+      }),
+    )
+    expect(etapaBandeja?.id).toBe('guia-inicial-bandeja')
+    expect(etapaBandeja?.texto).toBe('Puxe a peça sorteada da bandeja.')
+    expect(etapaBandeja?.alvo).toBe('bandeja')
+    // Três pontas (PartidaPage → AmbienteDeJogo/Caixa → espelho): a peça do
+    // passo (recebidas[0], PartidaPage:2107-2109) iguala a corrente da bandeja
+    // (primeira sem vaga, sem manipulação) — predicado da Caixa:356-360 e do
+    // espelho:242 acende.
+    const guiaPecaId = etapaBandeja?.alvo === 'bandeja' ? (recebidasPendentes[0]?.pecaId ?? null) : null
+    const corrente = recebidasPendentes.find((r) => r.vaga === null) ?? null
+    const pecaCorrenteNaBandeja =
+      corrente !== null
+        ? { recebidaId: corrente.recebidaId, pecaId: corrente.pecaId, tipo: 'reta', orientacao: 0 }
+        : null
+    expect(guiaPecaId).toBe('peca-rec-1')
+    expect(pecaCorrenteNaBandeja?.pecaId).toBe(guiaPecaId)
+    const { TabuleiroMirrorDOM } = await import('../web/src/components/partida/TabuleiroMirrorDOM')
+    const { chaveCelula } = await import('../web/src/game/tabuleiro/contrato')
+    const celula = { linha: 3, coluna: 3 }
+    const chave = chaveCelula(celula)
+    const { unmount } = render(
+      <TabuleiroMirrorDOM
+        todasCelulas={[celula]}
+        ocupadasSet={new Set()}
+        iniciais={[]}
+        pecaCorrente={pecaCorrenteNaBandeja as never}
+        posicionadas={[]}
+        peoes={[]}
+        peaoSelecionadoId={null}
+        destinosSet={new Set()}
+        vagasSet={new Set([chave])}
+        guiaAlvo="bandeja"
+        guiaPecaId={guiaPecaId}
+      />,
+    )
+    const sorteada = screen.getByTestId('caixa-peca-sorteada')
+    expect(sorteada).toHaveAttribute('data-peca-id', 'peca-rec-1')
+    expect(sorteada).toHaveAttribute('data-guia', 'true')
+    unmount()
+    // Depois: bandeja ensinada cede às vagas (mesmo instante, 1 ciclo).
+    const etapaVagas = etapaDoGuiaDeTurno(
+      entradaBase({
+        inicialPropriaNaMesa: false,
+        inicialPropriaPosicionada: true,
+        peaoProprioPosicionado: true,
+        peaoSelecionadoEhProprio: true,
+        movimentouNoTurno: true,
+        temRecebidaPendente: true,
+        faseDoTurno: null,
+        ensinados: new Set(['guia-inicial-turno', 'guia-inicial-bandeja']),
+      }),
+    )
+    expect(etapaVagas?.texto).toBe('Puxe a peça da bandeja e encaixe nas vagas.')
+    expect(etapaVagas?.alvo).toBe('vagas')
+  })
 })

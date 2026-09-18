@@ -233,6 +233,21 @@ export function passoDeAvancoImediato(id: string): boolean {
 
 const CHAVE_GUIA_LIGADO = 'guia-do-jogador:ligado'
 
+/**
+ * Acesso único ao `localStorage` do guia (issue #441): devolve o
+ * armazenamento ou null quando indisponível (sem `window`, sem
+ * `localStorage`, modo privado/congelado). Centraliza os guards de ambiente
+ * — as três funções abaixo não repetem `try/catch` de acesso.
+ */
+function armazenamentoDoGuia(): Storage | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
 function chaveEnsinados(partidaId: string): string {
   return `guia-de-turno-ensinados:${partidaId}`
 }
@@ -244,10 +259,11 @@ function chaveNormalConcluido(partidaId: string): string {
 /** Expira as chaves legadas por Partida (migração: memória agora é só sessão). */
 export function expirarMemoriaLegadaDoGuia(partidaId: string | null): void {
   if (partidaId === null) return
+  const armazenamento = armazenamentoDoGuia()
+  if (armazenamento === null) return
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return
-    window.localStorage.removeItem(chaveEnsinados(partidaId))
-    window.localStorage.removeItem(chaveNormalConcluido(partidaId))
+    armazenamento.removeItem(chaveEnsinados(partidaId))
+    armazenamento.removeItem(chaveNormalConcluido(partidaId))
   } catch {
     // Sem armazenamento, nada a expirar.
   }
@@ -255,17 +271,20 @@ export function expirarMemoriaLegadaDoGuia(partidaId: string | null): void {
 
 /** Switch "Guia do Jogador" (default ligado). */
 export function lerGuiaLigado(): boolean {
+  const armazenamento = armazenamentoDoGuia()
+  if (armazenamento === null) return true
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return true
-    return window.localStorage.getItem(CHAVE_GUIA_LIGADO) !== '0'
+    return armazenamento.getItem(CHAVE_GUIA_LIGADO) !== '0'
   } catch {
     return true
   }
 }
 
 export function salvarGuiaLigado(ligado: boolean): void {
+  const armazenamento = armazenamentoDoGuia()
+  if (armazenamento === null) return
   try {
-    window.localStorage.setItem(CHAVE_GUIA_LIGADO, ligado ? '1' : '0')
+    armazenamento.setItem(CHAVE_GUIA_LIGADO, ligado ? '1' : '0')
   } catch {
     // Armazenamento indisponível (privado/congelado): o switch segue em
     // memória na sessão — sem quebrar a Partida.
