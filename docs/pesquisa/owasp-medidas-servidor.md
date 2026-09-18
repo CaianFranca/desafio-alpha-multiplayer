@@ -35,7 +35,7 @@ No cadastro e no login a senha nunca é armazenada em claro: usa-se `bcrypt` (al
 **Medida A2 — Limite de entrada de senha compatível com o bcrypt (72 bytes).**
 O bcrypt trunca a entrada em 72 bytes; a aplicação deve rejeitar senhas maiores (ou pré-processá-las de forma segura) para não truncar em silêncio.
 *Onde aplicar:* `routes/auth.ts` (`validarSenha`) + doc do contrato.
-*Status:* **ausente** — `validarSenha` só impõe mínimo de 8 (`backend/lobby-server/src/routes/auth.ts:32,95-103`); não há checagem de máximo nem uso de `bcrypt.truncates`.
+*Status:* **feito (#408)** — `SENHA_MAX_BYTES = 72` e rejeição em `validarSenha` (`backend/lobby-server/src/routes/auth.ts:55,126-127`, mensagem `A senha excede o limite de 72 bytes (UTF-8).`); senha de até 72 bytes segue aceita. Coberto por `backend/lobby-server/test/auth.integration.test.ts:964,992`.
 *Fonte:* OWASP Password Storage Cheat Sheet (seções *Input Limits of bcrypt* e *Pre-hashing*); bcrypt.js — https://github.com/dcodeIO/bcrypt.js.
 
 **Medida A3 — Mensagens de erro genéricas no login (anti-enumeração).**
@@ -55,7 +55,7 @@ Comprimento mínimo (a OWASP recomenda 15 sem MFA e 8 com MFA), sem regras de co
 
 **Medida A6 — Proteção contra ataques automatizados (throttling/lockout).**
 Login e cadastro devem ter limite de tentativas para conter brute force, credential stuffing e password spraying.
-*Status:* **ausente** — não há rate limit, atraso progressivo nem lockout em `/api/auth/login` e `/api/auth/register` (`backend/lobby-server/src/routes/auth.ts:160,246`); nenhuma dependência de rate limiting no `package.json`.
+*Status:* **feito (#408)** — rate limit por IP e por Cadastro em `/api/auth/login` e `/api/auth/register` via `consumirTentativas` (`backend/lobby-server/src/routes/auth.ts:146-206,266,390`; `backend/lobby-server/src/rate-limit/limitador.ts:23,54`), com contadores no Redis (INCR+EXPIRE atômicos via Lua) que sobrevivem a restart e valem entre instâncias; limiares/janelas configuráveis por env com defaults 30/IP, 10/Cadastro e 900 s (`packages/config/src/index.ts:72-74`). Recusa `429` + `Retry-After` com mensagem genérica (`:56,170-173`), sem distinguir Cadastro existente de inexistente. Coberto por `backend/lobby-server/test/auth.integration.test.ts:810-939` e `packages/config/test/auth-rate-limit.test.ts`; confirmado em produção.
 *Fonte:* OWASP Authentication Cheat Sheet (seção *Protect Against Automated Attacks*); OWASP Nodejs Security Cheat Sheet (seção *Take precautions against brute-forcing*) — https://cheatsheetseries.owasp.org/cheatsheets/Nodejs_Security_Cheat_Sheet.html; Express Security Best Practices (seção *Prevent brute-force attacks against authorization*) — https://expressjs.com/en/advanced/best-practice-security.html.
 
 **Medida A7 — Verificação de posse do email e recuperação de senha.**
@@ -127,12 +127,12 @@ O prefixo `__Host-` amarra o cookie a `Secure`, sem `Domain` e com `Path=/`, imp
 **Medida C2 — Validar o header `Origin` no handshake (anti-CSWSH).**
 O navegador envia cookies automaticamente no handshake de WebSocket; sem validar `Origin` contra uma allowlist, um site malicioso abre uma conexão autenticada em nome da vítima. A OWASP é explícita: allowlist de origens, nunca denylist, jamais wildcard/substring.
 *Onde aplicar:* `createWebSocketServer` (lobby e game-server), no evento `connection`/`upgrade`.
-*Status:* **ausente** — não há leitura de `request.headers.origin`/`referer` em nenhum dos servidores (busca no backend não encontra `origin`/`referer` no código de produção) e não se usa `verifyClient`.
+*Status:* **feito (#409)** — allowlist exata (sem wildcard) derivada de `LOBBY_PUBLIC_URL` ou de `WS_ORIGENS_PERMITIDAS`, validada no handshake **antes** de ler a sessão: `origemPermitida` em `packages/shared/src/segurancaWs.ts:10`, usada em `backend/lobby-server/src/ws/ws.ts:160` (`verifyClient` → 403) e `backend/game-server/src/ws/ws.ts:345`. `Origin` ausente (bot/serviço) é aceito; vazio, `"null"` ou fora da allowlist é recusado. Coberto por `backend/lobby-server/test/ws-seguranca.integration.test.ts:320-393`, `backend/game-server/test/ws-seguranca.test.ts:292-379` e `packages/config/test/ws-seguranca.test.ts:97-157`; confirmado em produção (403/101).
 *Fonte:* OWASP WebSocket Security Cheat Sheet (seções *Cross-Site WebSocket Hijacking (CSWSH)*, *Origin Header Validation*, *Additional CSWSH Protections*); RFC 6455, seções 1.3 (*Opening Handshake* — o `Origin` "is used to protect against unauthorized cross-origin use of a WebSocket server"), 1.6 (*Security Model*) e 10.2 (*Origin Considerations*) — https://datatracker.ietf.org/doc/html/rfc6455.
 
 **Medida C3 — Limite de tamanho de mensagem WebSocket (`maxPayload`).**
 A OWASP recomenda teto de mensagem (tipicamente ≤ 64 KB) para evitar exaustão de recursos.
-*Status:* **ausente** — `new WebSocketServer({ server })` (`backend/lobby-server/src/ws/ws.ts:71`) e `new WebSocketServer({ noServer: true })` (`backend/game-server/src/ws/ws.ts:277`) não passam `maxPayload`, então vale o default de 100 MiB da lib. (O corpo HTTP tem teto de 10 kb, mas isso não limita frames WS.)
+*Status:* **feito (#409)** — `maxPayload: seguranca.maxPayloadBytes` nos dois servidores (`backend/lobby-server/src/ws/ws.ts:155`, `backend/game-server/src/ws/ws.ts:331`), default 65536 bytes configurável por `WS_MAX_PAYLOAD_BYTES` (1024–1048576) em `packages/config/src/index.ts:85-87`. Frame acima do teto fecha com 1009. Coberto por `ws-seguranca.integration.test.ts:416` e `ws-seguranca.test.ts:403`; confirmado em produção.
 *Fonte:* OWASP WebSocket Security Cheat Sheet (seções *Input Validation* e *Denial-of-Service Protection*); `ws` docs (`maxPayload`, default 104857600) — https://github.com/websockets/ws/blob/master/doc/ws.md.
 
 **Medida C4 — Desabilitar compressão `permessage-deflate`.**
@@ -141,12 +141,12 @@ Compressão combinada com segredo pode vazar informação (classe CRIME/BREACH).
 *Fonte:* OWASP WebSocket Security Cheat Sheet (seção *Compression security*); `ws` docs (`perMessageDeflate` desabilitado quando `false`, o default).
 
 **Medida C5 — Rate limiting de mensagens WebSocket.**
-*Status:* **parcial** — há rate limit de chat de 1 mensagem a cada 2 s por Jogador não-bot (`backend/game-server/src/partidas/handlers.ts:67-68,332-353`), mas nenhum limite geral de mensagens no lobby nem para os 14 comandos de Partida.
+*Status:* **feito (#409)** — rate limit geral por conexão com janela deslizante em `LimiteDeMensagensPorConexao` (`packages/shared/src/segurancaWs.ts:21`), default 100 mensagens/10 s configurável (`WS_LIMITE_MENSAGENS`/`WS_JANELA_LIMITE_MENSAGENS_MS`), aplicado no lobby (`backend/lobby-server/src/ws/ws.ts:206,213`) e no game-server (`backend/game-server/src/ws/ws.ts:436,614`); estouro → close 1008 + evento `ws.rate_limit_exceeded`; bots isentos. O chat de Partida mantém 1 msg/2 s (F1). Coberto por `ws-seguranca.integration.test.ts:432,464` e `ws-seguranca.test.ts:424,465`; confirmado em produção.
 *Fonte:* OWASP WebSocket Security Cheat Sheet (seção *Denial-of-Service Protection* — "implement rate limiting to prevent message flooding"); OWASP Denial of Service Cheat Sheet (seção *Rate limiting*) — https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html.
 
 **Medida C6 — Revalidar a Sessão/logout em conexões de longa duração.**
 Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e fechar no logout/expiração.
-*Status:* **parcial** — a Sessão é validada só no handshake (`backend/lobby-server/src/ws/ws.ts:53`, `backend/game-server/src/ws/ws.ts:302`); não há re-validação periódica nem fechamento das conexões do Jogador quando ele dá logout.
+*Status:* **feito (#410)** — revalidação periódica das conexões abertas (default 30 s, `WS_SESSAO_REVALIDACAO_MS` em `packages/config/src/index.ts:99-101`) em `backend/lobby-server/src/ws/revalidacao-de-sessao.ts` + `registro-de-conexoes.ts` e `backend/game-server/src/ws/revalidacao-de-sessao.ts`; logout e troca de Sessão encerram as conexões vigentes com close 4401 (`SESSAO_ENCERRADA`/`SESSAO_SUBSTITUIDA`/`SESSAO_INVALIDA`). Coberto por `sessao-ws.integration.test.ts:82-125` e `sessao-ws.test.ts:266-390`; confirmado em produção (close 4401 ao remover a chave `sessao:<id>`).
 *Fonte:* OWASP WebSocket Security Cheat Sheet (seção *Session Management*).
 
 **Medida C7 — Uma Conexão à Partida vigente por Jogador.**
@@ -176,7 +176,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP JSON Web Token Cheat Sheet (seções *Claims* e *Secret management*).
 
 **Medida D5 — Não afrouxar a autorização de serviço fora de produção.**
-*Status:* **parcial (risco em dev)** — `requireServiceToken` libera tudo quando `NODE_ENV !== 'production'` (`backend/lobby-server/src/middleware/serviceToken.ts:16-19`). Em produção o guard vale, mas qualquer ambiente que se declare não-produção fica sem controle.
+*Status:* **feito (#412)** — `requireServiceToken` exige Bearer válido em todos os ambientes; o ramo `NODE_ENV !== 'production'` foi removido (`backend/lobby-server/src/middleware/serviceToken.ts:14`). Coberto por `backend/lobby-server/test/gameServers.integration.test.ts:203,259` (guard fora e em produção), `desistencia.integration.test.ts:233` e `retorno.integration.test.ts:256`; confirmado em produção (401 sem token).
 *Fonte:* OWASP API Security Top 10:2023 *API5:2023*; OWASP HTTP Headers Cheat Sheet (*Reduce fingerprinting*).
 
 **Medida D6 — Token de bot com `aud` dedicada e `bot: true`.**
@@ -240,7 +240,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP API Security Top 10:2023 *API4:2023 Unrestricted Resource Consumption*; OWASP Denial of Service Cheat Sheet (seção *Rate limiting*).
 
 **Medida F2 — Rate limit nas rotas HTTP de autenticação.**
-*Status:* **ausente** — sem limitador em `/api/auth/*` (ver A6). O Express recomenda combinar tentativas falhas por usuário+IP e por IP num período longo.
+*Status:* **feito (#408)** — mesmo limitador de A6 aplicado a `/api/auth/login` e `/api/auth/register` (por IP e por Cadastro). Ver A6 para evidência e testes.
 *Fonte:* Express Security Best Practices (seção *Prevent brute-force attacks against authorization*); OWASP Authentication Cheat Sheet (*Login Throttling*).
 
 **Medida F3 — Rate limit na borda nginx.**
@@ -266,12 +266,12 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP HTTP Headers Cheat Sheet (*X-Frame-Options*, *X-Content-Type-Options*, *Referrer-Policy*).
 
 **Medida G2 — Content Security Policy.**
-*Status:* **ausente** — nenhum `Content-Security-Policy` em `infra/nginx/` nem nos serviços. Sem CSP, um XSS rouba o controle do frontend (ainda que os cookies sejam `HttpOnly`); com CSP estrita (`script-src 'nonce-…' 'strict-dynamic'`), o impacto cai muito.
+*Status:* **feito (#415)** — CSP restritiva em `infra/nginx/security-headers-static.snippet:15` (`default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; script-src 'self'; connect-src 'self' blob:; ...`), aplicada apenas em conteúdo estático (`location /` e `/media/`); `blob:` é exigido pelo three.js (validado no smoke Sala→Partida). Confirmado em produção no `/server01/`.
 *Onde aplicar:* `infra/nginx/nginx.prod.conf` (HTML do docroot) e, se possível, o Cloudflare Quick Tunnel.
 *Fonte:* OWASP Content Security Policy Cheat Sheet — https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html; OWASP HTTP Headers Cheat Sheet (*Content-Security-Policy*).
 
 **Medida G3 — HSTS.**
-*Status:* **ausente** — o TLS é terminado no Cloudflare Quick Tunnel e nenhum nível interno emite `Strict-Transport-Security`.
+*Status:* **feito (#415)** — HSTS condicional via `map $http_x_forwarded_proto $hsts_header` (`infra/nginx/hsts-map.snippet:10`), emitido por `infra/nginx/security-headers.snippet:12`; só quando o TLS foi terminado na borda (`X-Forwarded-Proto` começando com `https`), com `max-age=2592000` (ramp-up) e **sem** `includeSubDomains`. Confirmado em produção (http sem header; https com header).
 *Fonte:* OWASP HTTP Headers Cheat Sheet (*Strict-Transport-Security*); OWASP Transport Layer Security Cheat Sheet (seção *Use HTTP Strict Transport Security*) — https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html.
 
 **Medida G4 — `Permissions-Policy`, COOP/COEP/CORP.**
@@ -279,7 +279,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP HTTP Headers Cheat Sheet (*Permissions-Policy*, *Cross-Origin-Opener-Policy*, *Cross-Origin-Embedder-Policy*, *Cross-Origin-Resource-Policy*).
 
 **Medida G5 — Remover `X-Powered-By` e `Server` informativo.**
-*Status:* **ausente** — o Express 5 não tem `app.disable('x-powered-by')` (busca no backend não encontra) e o 404 de WS em produção já expôs `X-Powered-By: Express` (`docs/deploy.md:389-390`); o `server_tokens` do nginx não é desligado.
+*Status:* **feito (#413/#415)** — `app.disable('x-powered-by')` no lobby (`backend/lobby-server/src/app.ts:29`) e no game-server (`backend/game-server/src/app.ts:10`); `server_tokens off` nos três nginx (`infra/nginx/nginx.edge.conf:46`, `infra/nginx/nginx.prod.conf:27`, `infra/nginx/nginx.conf:25`). Coberto por `auth.integration.test.ts:1012` e `encaminhamento.test.ts:382`; confirmado em produção (sem `X-Powered-By`; `Server: nginx` sem versão).
 *Onde aplicar:* `createApp` (ambos) e `infra/nginx/`.
 *Fonte:* OWASP HTTP Headers Cheat Sheet (*X-Powered-By*, *Server*); Express Security Best Practices (seção *Reduce fingerprinting*); OWASP Nodejs Security Cheat Sheet (seção *Use appropriate security headers*).
 
@@ -325,7 +325,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP Transport Layer Security Cheat Sheet (seção *Use the "Secure" Cookie Flag*); OWASP Session Management Cheat Sheet (seção *Transport Layer Security*).
 
 **Medida I3 — Política de TLS (protocolos/cifras) e HSTS sob controle.**
-*Status:* **parcial/fora de controle** — a terminação é do Cloudflare Quick Tunnel; o repositório não define protocolos/cifras nem HSTS (ver G3). A OWASP exige TLS 1.3 (TLS 1.2 por compatibilidade) e desabilita TLS 1.0/1.1.
+*Status:* **parcial/fora de controle** — a terminação é do Cloudflare Quick Tunnel; o repositório aplica HSTS condicional (G3, `infra/nginx/hsts-map.snippet`), mas não define protocolos/cifras. A OWASP exige TLS 1.3 (TLS 1.2 por compatibilidade) e desabilita TLS 1.0/1.1.
 *Fonte:* OWASP Transport Layer Security Cheat Sheet (seções *Only Support Strong Protocols*, *Only Support Strong Ciphers*, *Use HTTP Strict Transport Security*).
 
 ### 3.10 Infra (Redis/Postgres/systemd/nginx) e observabilidade
@@ -335,7 +335,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP Nodejs Security Cheat Sheet (seção *Permissions* — modelo de privilégio/least privilege); Node.js Security Best Practices (seção *Node.js Permission Model*).
 
 **Medida J2 — Isolamento de rede de Redis e Postgres.**
-*Status:* **parcial** — ambos escutam em loopback e o firewall de processo protege o Redis de outros processos, mas o Redis não tem `requirepass` (ver H3) e o `appendonly no` perde estado a cada restart (`docs/deploy.md:62-63,76-79`).
+*Status:* **parcial** — ambos escutam em loopback e o firewall de processo protege o Redis de outros processos; o `requirepass` do Redis foi fechado em H3 (#407/#414). Permanece o `appendonly no`, que perde estado a cada restart (`docs/deploy.md:62-63,76-79`).
 *Fonte:* Redis security (seções *Network security* e *Code security*).
 
 **Medida J3 — Senha obrigatória do Postgres em produção.**
@@ -343,7 +343,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* OWASP Secrets Management Cheat Sheet; OWASP SQL Injection Prevention Cheat Sheet (seção *Least Privilege*).
 
 **Medida J4 — Logging estruturado e eventos de segurança.**
-*Status:* **ausente/parcial** — o código usa `console.*` sem logger estruturado e sem registro dedicado de falhas de autenticação, rate-limit violado ou validação recusada (ex.: `backend/lobby-server/src/ws/ws.ts:74,115,126`; `backend/game-server/src/ws/ws.ts:501-505`). O código evita logar `cookie`/`authorization` (`backend/lobby-server/src/index.ts:20-29`), o que é positivo.
+*Status:* **feito (#411)** — logger pino JSON em `packages/shared/src/securityLogger.ts` com redação (`redact` + `redact` nativo do pino) e `hashEmail`; eventos `auth.login_success`/`auth.login_failure`/`auth.register_success`/`auth.register_conflict`/`auth.rate_limit_exceeded`/`auth.session_reuse`/`ws.handshake_rejected`/`ws.rate_limit_exceeded`/`ws.message_rejected`/`ws.payload_too_large`, todos com `requestId`/`connectionId` (`securityLogger.ts:8-21`; usos em `routes/auth.ts`, `ws/ws.ts` e `partidas/handlers.ts`). Confirmado em produção via journald (JSON com `emailHash`, sem senha/token/cookie em claro). **Cobertura automatizada pendente:** os setters `__set*SecurityLoggerForTests` existem e não são exercitados por nenhum teste (`ws-seguranca`/`auth.integration` cobrem os efeitos, não os eventos) — débito registrado.
 *Fonte:* OWASP Authentication Cheat Sheet (seção *Logging and Monitoring*); OWASP WebSocket Security Cheat Sheet (seção *Security Monitoring and Logging*); OWASP Nodejs Security Cheat Sheet (seção *Perform application activity logging*); OWASP Top 10:2021 A09 *Security Logging and Monitoring Failures*.
 
 **Medida J5 — Auditoria de dependências no pipeline.**
@@ -362,20 +362,20 @@ Prioridade baseada no risco real para o jogo: exposição a CSWSH/roubo de Sess�
 
 | Prioridade | Lacuna | Área | Status | Referência OWASP |
 | --- | --- | --- | --- | --- |
-| Alta | Handshake WebSocket não valida `Origin` (CSWSH) | WebSocket | ausente | WebSocket Security CS (Origin Header Validation, CSWSH); RFC 6455 §1.3/1.6/10.2 |
-| Alta | Sem rate limit/lockout em `/api/auth/login` e `/api/auth/register` (brute force, credential stuffing) | Autenticação | ausente | Authentication CS (Protect Against Automated Attacks); Express Security |
-| Alta | Sem `maxPayload` no `ws` (default 100 MiB) | WebSocket | ausente | WebSocket Security CS (Input Validation, DoS); ws docs |
-| Alta | Redis sem `requirepass` em produção | Segredos/Infra | ausente | Secrets Management CS; Redis security (Authentication) |
-| Alta | Sem `Content-Security-Policy` | Headers/CSP | ausente | Content Security Policy CS; HTTP Headers CS |
-| Média | Sem rate limit geral de mensagens WS (borda nginx coberta pela F3, #418) | Rate limiting | parcial | WebSocket Security CS (DoS); Denial of Service CS (Rate limiting) |
-| Média | `X-Powered-By` exposto e `server_tokens` ligado (fingerprint) | Headers | ausente | HTTP Headers CS (X-Powered-By, Server); Express Security |
-| Média | Sessão/WS não é revalidada em conexões longas nem fechada no logout | Sessão/WebSocket | parcial | WebSocket Security CS (Session Management) |
-| Média | Sem HSTS | Transporte | ausente | HTTP Headers CS (HSTS); TLS CS |
-| Média | Sem `iss`/`aud` nos tokens de Sessão | Sessão/JWT | feito | JSON Web Token CS (Claims) |
-| Média | Sem limite de senha de 72 bytes do bcrypt (trunca em silêncio) | Autenticação | ausente | Password Storage CS (Input Limits of bcrypt); bcrypt.js |
-| Média | Sem logging estruturado/eventos de segurança (auth, rate-limit, validação) | Observabilidade | ausente | Authentication CS (Logging); WebSocket Security CS; A09:2021 |
-| Média | Bypass de autorização de serviço quando `NODE_ENV !== 'production'` | Autorização | parcial | API5:2023; API8:2023 |
-| Média | Sem `npm audit`/auditoria de dependências no CI | Supply chain | feito | Express Security; Node.js Security; A06:2021 |
+| Alta | Handshake WebSocket não valida `Origin` (CSWSH) | WebSocket | feito (#409) | WebSocket Security CS (Origin Header Validation, CSWSH); RFC 6455 §1.3/1.6/10.2 |
+| Alta | Sem rate limit/lockout em `/api/auth/login` e `/api/auth/register` (brute force, credential stuffing) | Autenticação | feito (#408) | Authentication CS (Protect Against Automated Attacks); Express Security |
+| Alta | Sem `maxPayload` no `ws` (default 100 MiB) | WebSocket | feito (#409) | WebSocket Security CS (Input Validation, DoS); ws docs |
+| Alta | Redis sem `requirepass` em produção | Segredos/Infra | feito (#407/#414) | Secrets Management CS; Redis security (Authentication) |
+| Alta | Sem `Content-Security-Policy` | Headers/CSP | feito (#415) | Content Security Policy CS; HTTP Headers CS |
+| Média | Sem rate limit geral de mensagens WS (borda nginx coberta pela F3, #418) | Rate limiting | feito (#409) | WebSocket Security CS (DoS); Denial of Service CS (Rate limiting) |
+| Média | `X-Powered-By` exposto e `server_tokens` ligado (fingerprint) | Headers | feito (#413/#415) | HTTP Headers CS (X-Powered-By, Server); Express Security |
+| Média | Sessão/WS não é revalidada em conexões longas nem fechada no logout | Sessão/WebSocket | feito (#410) | WebSocket Security CS (Session Management) |
+| Média | Sem HSTS | Transporte | feito (#415) | HTTP Headers CS (HSTS); TLS CS |
+| Média | Sem `iss`/`aud` nos tokens de Sessão | Sessão/JWT | feito (#416) | JSON Web Token CS (Claims) |
+| Média | Sem limite de senha de 72 bytes do bcrypt (trunca em silêncio) | Autenticação | feito (#408) | Password Storage CS (Input Limits of bcrypt); bcrypt.js |
+| Média | Sem logging estruturado/eventos de segurança (auth, rate-limit, validação) | Observabilidade | feito (#411) | Authentication CS (Logging); WebSocket Security CS; A09:2021 |
+| Média | Bypass de autorização de serviço quando `NODE_ENV !== 'production'` | Autorização | feito (#412) | API5:2023; API8:2023 |
+| Média | Sem `npm audit`/auditoria de dependências no CI | Supply chain | feito (#417) | Express Security; Node.js Security; A06:2021 |
 | Baixa | Sem token CSRF (só `SameSite=Strict`) | Sessão/CSRF | parcial | CSRF Prevention CS; Session Management CS |
 | Baixa | Cookies sem prefixo `__Host-` | Sessão | parcial | Session Management CS (Cookie Name Prefixes) |
 | Baixa | Sem `Permissions-Policy`/COOP/COEP/CORP | Headers | ausente | HTTP Headers CS |
