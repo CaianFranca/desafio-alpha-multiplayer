@@ -346,7 +346,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     apelido: string
     restantes: number
     ordemTexto: string
-    causa: 'desistencia' | 'expiracao'
+    causa: CausaDesistencia
   } | null>(null)
   const avisoDesistenciaIdRef = useRef(0)
   const avisoDesistenciaTimerRef = useRef<number | null>(null)
@@ -371,7 +371,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // seria falso ("Um jogador desistiu") — enfileira e re-emite pós-snapshot
   // com a ordem/restantes autoritativos. Snapshot reconcilia o modelo; a fila
   // reconcilia o anúncio. Dedupe por jogadorId (replay/reconexão é no-op).
-  const desistenciasPreSnapshotRef = useRef<Array<{ jogadorId: string; peaoId: string; causa: 'desistencia' | 'expiracao' }>>([])
+  const desistenciasPreSnapshotRef = useRef<Array<{ jogadorId: string; peaoId: string; causa: CausaDesistencia }>>([])
 
   // ── Aviso de reconexão (issue #294, spec #292) ──
   // Evento-driven: JOGADOR_EM_RECONEXAO / JOGADOR_RECONECTADO
@@ -2056,7 +2056,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         (desistência, nova ordem e fim). Permanece em resultado (derrota-
         quando-sobra-1) até o auto-dismiss de 8s — o fim chega também via
         PARTIDA_TERMINADA com motivo desistencia no overlay de resultado.
-        Causa (issue #294): expiracao exibe "expirou e foi removido" vs "desistiu".
+        Causa (issue #294, #429): expiracao exibe "expirou e foi removido",
+        tempo exibe "estourou o tempo e foi removido", o resto "desistiu".
       */}
       {avisoDesistencia !== null && (estadoEmAndamento || emResultado) ? (
         <div
@@ -2068,7 +2069,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         >
           {avisoDesistencia.causa === 'expiracao'
             ? `${avisoDesistencia.apelido} expirou e foi removido. Nova ordem: ${avisoDesistencia.ordemTexto || '—'}.`
-            : `${avisoDesistencia.apelido} desistiu. Nova ordem: ${avisoDesistencia.ordemTexto || '—'}.`}
+            : avisoDesistencia.causa === 'tempo'
+              ? `${avisoDesistencia.apelido} estourou o tempo e foi removido. Nova ordem: ${avisoDesistencia.ordemTexto || '—'}.`
+              : `${avisoDesistencia.apelido} desistiu. Nova ordem: ${avisoDesistencia.ordemTexto || '—'}.`}
         </div>
       ) : null}
       <div
@@ -2085,7 +2088,9 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         {avisoDesistencia !== null
           ? avisoDesistencia.causa === 'expiracao'
             ? `${avisoDesistencia.apelido} expirou e foi removido da partida por expiração. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por expiração.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
-            : `${avisoDesistencia.apelido} desistiu da partida. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por desistência.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
+            : avisoDesistencia.causa === 'tempo'
+              ? `${avisoDesistencia.apelido} estourou o tempo e foi removido da partida. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por tempo esgotado.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
+              : `${avisoDesistencia.apelido} desistiu da partida. Nova ordem: ${avisoDesistencia.ordemTexto || 'sem jogadores restantes'}. ${avisoDesistencia.restantes <= 1 ? 'Partida terminada em derrota por desistência.' : `${avisoDesistencia.restantes} jogadores restantes.`}`
           : ''}
       </div>
       {/*

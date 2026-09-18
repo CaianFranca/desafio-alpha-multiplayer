@@ -983,6 +983,23 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     )
   })
 
+  it('F4-tempo: desistência por tempo exibe causa própria no toast e no SR (#429)', async () => {
+    const ws = await partidaComSnapshot(criarSnapshotBase())
+    act(() =>
+      ws.simulateMessage({
+        type: 'DESISTENCIA_REGISTRADA',
+        jogadorId: 'jogador-4',
+        peaoId: 'peao-amarelo',
+        causa: 'tempo',
+      }),
+    )
+    await screen.findByTestId('aviso-desistencia')
+    expect(screen.getByTestId('aviso-desistencia')).toHaveAttribute('data-causa', 'tempo')
+    expect(screen.getByTestId('aviso-desistencia')).toHaveTextContent(/estourou o tempo/i)
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveAttribute('data-causa', 'tempo')
+    expect(screen.getByTestId('anuncio-desistencia')).toHaveTextContent(/estourou o tempo/i)
+  })
+
   it('F4-silencio: DESISTENCIA pré-snapshot projeta sem toast/SR (sem inventar dados)', async () => {
     const ws = await partidaDisponivel()
     expect(screen.queryByTestId('hud-da-partida')).not.toBeInTheDocument()
