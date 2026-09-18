@@ -18,7 +18,7 @@ import { TransicaoAtaque } from '../components/partida/TransicaoAtaque'
 import { useFilaDeAtaque } from '../components/partida/useFilaDeAtaque'
 import type { FatiaDoAtaque } from '../game/tabuleiro/ataque'
 import type { EstadoVisualDoAtaque } from '../game/tabuleiro/ataque'
-import { CAMINHO_SOM_SOMBRIO_LIMPEZA } from '../game/tabuleiro/animacao'
+import { tocarSomSombrioDaLimpeza } from '../components/partida/somDaLimpeza'
 import {
   origemDoEncaixe,
   tocarSomDeMovimentoDoEncaixe,
@@ -28,7 +28,6 @@ import type { EncaixeTrigger } from '../game/tabuleiro/encaixe'
 import { deveReduzirMovimento, usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 import { useCenaPronta } from '../hooks/useCenaPronta'
 import { useSonsProntos } from '../hooks/useSonsProntos'
-import { tocarSom } from '../game/audio/sons'
 import type { MotivoDeRecusa } from '../components/partida/somDeRecusa'
 import {
   deveLimparVooNoSnapshot,
@@ -503,7 +502,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       if (evento.pecasRemovidas.length > 0) {
         limpezaKeyRef.current += 1
         setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
-        tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
+        tocarSomSombrioDaLimpeza()
       }
       despacharEvento(evento as Parameters<typeof reduzirEvento>[1])
     },
@@ -978,7 +977,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           if (evento.type === 'LIMPEZA_APLICADA' && evento.pecasRemovidas.length > 0) {
             limpezaKeyRef.current += 1
             setLimpezaTrigger({ pecasRemovidas: evento.pecasRemovidas, key: limpezaKeyRef.current })
-            tocarSom(CAMINHO_SOM_SOMBRIO_LIMPEZA)
+            tocarSomSombrioDaLimpeza()
           }
           // Toast/SR da desistência é síncrono (não espera o flush): usa o
           // modelo pré-lote como antes; o despacho vai no flush em ordem.

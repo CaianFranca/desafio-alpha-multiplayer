@@ -16,10 +16,12 @@
 
 import { useEffect, useRef } from 'react'
 import {
+  atualizarVolumeDaMusicaDeFundo,
   criarMusicaDeFundo,
   pararMusicaDeFundo,
   tocarMusicaDeFundo,
 } from './musicaDeFundo'
+import { EVENTO_VOLUME_CAMADA } from './volumesDasCamadas'
 
 export function useMusicaDeFundo(emAndamento: boolean): void {
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -38,6 +40,29 @@ export function useMusicaDeFundo(emAndamento: boolean): void {
     }
   }, [])
 
+  // Reage a mudanças da camada de música na mesma aba e cross-tab —
+  // atualiza o volume do loop já tocando sem recriar ou pausar.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const aoMudarVolume = (evento: Event): void => {
+      const detalhe = (evento as CustomEvent<{ camada: string }>).detail
+      if (detalhe !== undefined && detalhe.camada !== 'musica') return
+      const audio = audioRef.current
+      if (audio !== null) atualizarVolumeDaMusicaDeFundo(audio)
+    }
+    const aoMudarVolumeStorage = (evento: StorageEvent): void => {
+      if (evento.key !== null && evento.key !== 'flicker:volume:musica') return
+      const audio = audioRef.current
+      if (audio !== null) atualizarVolumeDaMusicaDeFundo(audio)
+    }
+    window.addEventListener(EVENTO_VOLUME_CAMADA, aoMudarVolume)
+    window.addEventListener('storage', aoMudarVolumeStorage)
+    return () => {
+      window.removeEventListener(EVENTO_VOLUME_CAMADA, aoMudarVolume)
+      window.removeEventListener('storage', aoMudarVolumeStorage)
+    }
+  }, [])
+
   // Toca em andamento, pausa fora dele; retry único no primeiro gesto.
   useEffect(() => {
     const audio = audioRef.current
@@ -46,6 +71,8 @@ export function useMusicaDeFundo(emAndamento: boolean): void {
       pararMusicaDeFundo(audio)
       return
     }
+    // Garante volume atual antes de tocar (pode ter mudado com emAndamento=false).
+    atualizarVolumeDaMusicaDeFundo(audio)
     tocarMusicaDeFundo(audio)
     if (typeof window === 'undefined') return
     const tentarNoPrimeiroGesto = (): void => {

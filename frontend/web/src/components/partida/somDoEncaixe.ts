@@ -7,15 +7,16 @@
  * enigmático no início do voo do Encaixe (Peça viajando da mesa à Célula) —
  * sons distintos do THUD de recusa (`somDeRecusa.ts`, intacto) e do som
  * sombrio da limpeza. Só coordenação entre os pontos: gatilhos opostos
- * (aprovação vs. recusa), mesma infra futura de volume.
+ * (aprovação vs. recusa), mesma camada de efeitos do modal de volume
+ * (issue #438).
  *
  * Duto canônico de mídia: `frontend/web/media/` → servido em `/media/` via
  * proxy/nginx (mesmo duto do som de recusa). Sem arquivo = no-op silencioso
  * (`new Audio(...)` + `play()` com `catch`, espelhando `somDeRecusa.ts`).
  *
  * Volumes base próprios (VOLUME_BASE_SOM_DE_GIRO, VOLUME_BASE_SOM_DE_MOVIMENTO):
- * o futuro botão de volume controlará estes pontos sem recostura via
- * `master * VOLUME_BASE_*` (contrato da ADR-0007) — não reutilizam a base
+ * a camada de efeitos do modal de volume (issue #438) controla estes pontos
+ * via `camada × VOLUME_BASE_*` (contrato da ADR-0007) — não reutilizam a base
  * 0.3 da recusa.
  *
  * Puro onde dá: `origemDoEncaixe` é 100% pura (estado anterior → mesa ou
@@ -25,6 +26,7 @@
 
 import { CAMINHO_SOM_CARTA, CAMINHO_TOQUE_ENIGMATICO } from '../../game/tabuleiro/animacao'
 import { tocarAsset } from '../../game/audio/sons'
+import { obterVolumeDeEfeitos } from './volumesDasCamadas'
 import type { OrigemDoEncaixe } from '../../game/tabuleiro/encaixe'
 import type { EstadoDoTabuleiroNoCliente } from '../../game/tabuleiro/reducao'
 
@@ -83,9 +85,9 @@ export function origemDoEncaixe(
 }
 
 function tocarAssetDoEncaixe(caminho: string, volumeBase: number): void {
-  // Sem mestre (assinatura preservada): o futuro botão de volume aplica
-  // `audio.volume = master * VOLUME_BASE_*` — hoje, master 1.
-  tocarAsset(caminho, volumeBase)
+  // Camada de efeitos (issue #438, ADR-0007): `audio.volume = camada ×
+  // VOLUME_BASE_*`, com a camada lida no momento do toque.
+  tocarAsset(caminho, volumeBase, obterVolumeDeEfeitos())
 }
 
 /**

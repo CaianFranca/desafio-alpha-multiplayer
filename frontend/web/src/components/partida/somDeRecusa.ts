@@ -12,8 +12,8 @@
  *
  * O motivo do disparo sobrevive como identificador (string), preparando sons
  * distintos futuros — hoje o mapa abaixo aponta todos para o mesmo asset.
- * Volume base 0.3 (VOLUME_BASE_SOM_DE_RECUSA): o futuro botão de volume
- * controlará este ponto sem recostura via `masterVolume * VOLUME_BASE`.
+ * Volume base 0.3 (VOLUME_BASE_SOM_DE_RECUSA): a camada de efeitos do modal
+ * de volume (issue #438) controla este ponto via `camada × VOLUME_BASE`.
  * `play()` com `catch` silencioso como defensivo (no-op se falhar).
  *
  * Puro onde dá: `motivoDeRecusaDoEvento` é 100% puro (evento → motivo | null,
@@ -23,8 +23,7 @@
 
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
 import { comBase } from '../../api/basePath'
-import { VOLUME_MASTER_PARTIDA } from './volumeMaster'
-import { tocarAsset } from '../../game/audio/sons'
+import { obterVolumeDeEfeitos } from './volumesDasCamadas'
 
 /** Asset de recusa (web/media → servido em /media/), já com o subpath do build. */
 export const CAMINHO_SOM_DE_RECUSA = comBase('/media/bumpintowall.mp3')
@@ -114,9 +113,9 @@ export function motivoDeRecusaDoEvento(
 export function tocarSomDeRecusa(motivo: MotivoDeRecusa): void {
   try {
     const audio = new Audio(SOM_POR_MOTIVO[motivo])
-    // Contrato de volume (ADR-0007): `audio.volume = master * VOLUME_BASE`;
-    // o futuro botão de volume controla só o master (`volumeMaster`).
-    audio.volume = VOLUME_MASTER_PARTIDA * VOLUME_BASE_SOM_DE_RECUSA
+    // Contrato de volume (ADR-0007 + issue #438): `audio.volume = camada de
+    // efeitos × VOLUME_BASE`, lida no momento do toque (slider do modal).
+    audio.volume = obterVolumeDeEfeitos() * VOLUME_BASE_SOM_DE_RECUSA
     const tocando: unknown = audio.play()
     // jsdom não implementa play(): retorna undefined em vez de Promise.
     if (

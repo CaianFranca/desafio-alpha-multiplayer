@@ -28,6 +28,7 @@ import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
 import type { PresencaNaPartidaWire } from '@flicker/shared'
 import { useCronometroDaPartida } from './useCronometroDaPartida'
 import { useViewportCompacto } from '../../hooks/useViewportCompacto'
+import { ModalDeVolume } from './ModalDeVolume'
 
 // Re-export para compatibilidade com testes que importam de HudDaPartida
 export { deveUsarHudCompacto } from '../../hooks/useViewportCompacto'
@@ -212,6 +213,9 @@ export function HudDaPartida({
   onAbrirTutorial,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
+  // Modal de volume (issue #438): abre pelo botão de som, fecha por
+  // X/backdrop/ESC (o fechar vive no ModalDeVolume).
+  const [volumeAberto, setVolumeAberto] = useState(false)
   // Trava local anti-duplo-clique no Confirmar (#290): o gate de rede vive na
   // página, mas o modal segue aberto até o navigate assíncrono.
   const [saidaEnviada, setSaidaEnviada] = useState(false)
@@ -404,12 +408,15 @@ export function HudDaPartida({
         className={`absolute right-6 top-6 flex origin-top-right items-center gap-3 rounded bg-zinc-900/80 lg:scale-100 ${emModoCompacto ? 'scale-75 px-2 py-1' : 'scale-90 px-3 py-1.5'}`}
       >
         <CronometroDoHud emAndamento={emAndamento} emResultado={emResultado} iniciadaEm={iniciadaEm} />
-        <span
+        <button
+          type="button"
           data-testid="hud-volume"
-          role="img"
           aria-label="Volume"
+          aria-haspopup="dialog"
+          aria-expanded={volumeAberto}
           title="Volume"
-          className="text-zinc-300"
+          onClick={() => setVolumeAberto(true)}
+          className="pointer-events-auto rounded p-1 text-zinc-300 hover:text-white focus-visible:outline-2 focus-visible:outline-amber-500"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path
@@ -420,7 +427,7 @@ export function HudDaPartida({
             />
             <path d="M10 5.5a3.5 3.5 0 0 1 0 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
-        </span>
+        </button>
         {/*
           Tutorial da Partida (issue #434): entre volume e sair, no padrão de
           alvo e foco do SAIR, integral e compacto (sem badge — todos os
@@ -523,6 +530,7 @@ export function HudDaPartida({
           </div>
         </div>
       ) : null}
+      {volumeAberto ? <ModalDeVolume aoFechar={() => setVolumeAberto(false)} /> : null}
 
       {/* ── inf-esq: jogador local (retrato + Apelido + Sanidade + estados) ── */}
       <div
