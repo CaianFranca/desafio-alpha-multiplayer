@@ -244,7 +244,7 @@ Conexões WS sobrevivem à Sessão; a OWASP recomenda revalidar periodicamente e
 *Fonte:* Express Security Best Practices (seção *Prevent brute-force attacks against authorization*); OWASP Authentication Cheat Sheet (*Login Throttling*).
 
 **Medida F3 — Rate limit na borda nginx.**
-*Status:* **feito (#418)** — a borda aplica `limit_req` por IP (`rate=10r/s`, `burst=20 nodelay`, `limit_req_status 429`), `limit_conn` de 20 conexões por IP e `client_max_body_size 256k` (`infra/nginx/nginx.edge.conf`), com zonas e escopo em `infra/nginx/rate-limit.snippet` e o IP real restaurado de `CF-Connecting-IP` em `infra/nginx/cloudflare-realip.snippet`. O `map` por `$uri` limita só `/server01/api|ws/`, `/api/` e `/ws/`; assets do SPA passam livres.
+*Status:* **feito (#418)** — a borda aplica `limit_req` por IP (`rate=10r/s`, `burst=20 nodelay`, `limit_req_status 429`), `limit_conn` de 50 conexões por IP e `client_max_body_size 256k` (`infra/nginx/nginx.edge.conf`), com zonas e escopo em `infra/nginx/rate-limit.snippet` (mapas `$limit_req_key` e `$limit_conn_key`) e o IP real restaurado de `CF-Connecting-IP` em `infra/nginx/cloudflare-realip.snippet`. O `map` do `limit_req` limita só `/server01/api|ws/`, `/api/` e `/ws/`; assets do SPA passam livres. O `map` do `limit_conn` exclui `/assets/` e `/media/` (com ou sem o prefixo `/server01/`), então o preload da Partida não conta no teto de conexões; o WebSocket continua contando.
 *Fonte:* OWASP Denial of Service Cheat Sheet (seções *Network Design Concepts* e *Rate limiting*); OWASP Nodejs Security Cheat Sheet (seção *Monitor the event loop*).
 
 **Medida F4 — Limite de corpo de requisição.**
