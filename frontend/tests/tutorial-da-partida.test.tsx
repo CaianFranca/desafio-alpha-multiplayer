@@ -186,11 +186,19 @@ describe('Tutorial da Partida — auto-abertura uma vez por aba (issues #434 [1]
 })
 
 describe('Tutorial da Partida — carrossel com mídia (issues #434 [2][3][4][5][6][7][8])', () => {
-  it('navega pelos 13 slides com setas, indicadores e Próximo; cada slide tem exatamente 1 mídia com alt', async () => {
+  it('navega pelos 13 slides com ANTERIOR/PRÓXIMO do rodapé e indicadores, sem setas laterais; cada slide tem exatamente 1 mídia com alt', async () => {
     await partidaComSnapshot(criarSnapshotBase())
     await abrirTutorialPeloHud()
 
     expect(screen.getAllByTestId('tutorial-indicador')).toHaveLength(TITULOS_ESPERADOS.length)
+    // Setas laterais removidas: só os dots centralizados permanecem.
+    expect(screen.queryByTestId('tutorial-proxima')).not.toBeInTheDocument()
+    expect(screen.queryByText('‹')).not.toBeInTheDocument()
+    expect(screen.queryByText('›')).not.toBeInTheDocument()
+
+    // Rodapé: ANTERIOR desabilitado no primeiro slide, no padrão do PRÓXIMO.
+    expect(screen.getByTestId('tutorial-anterior')).toHaveTextContent(/← ANTERIOR/)
+    expect(screen.getByTestId('tutorial-anterior')).toBeDisabled()
 
     for (let i = 0; i < TITULOS_ESPERADOS.length; i++) {
       expect(screen.getByTestId('tutorial-titulo')).toHaveTextContent(TITULOS_ESPERADOS[i]!)
@@ -216,7 +224,7 @@ describe('Tutorial da Partida — carrossel com mídia (issues #434 [2][3][4][5]
     expect(screen.getByTestId('tutorial-proximo')).toHaveTextContent(/Começar a jogar/i)
     await userEvent.click(screen.getByTestId('tutorial-anterior'))
     expect(screen.getByTestId('tutorial-titulo')).toHaveTextContent(TITULOS_ESPERADOS[TITULOS_ESPERADOS.length - 2]!)
-    await userEvent.click(screen.getByTestId('tutorial-proxima'))
+    await userEvent.click(screen.getByTestId('tutorial-proximo'))
     expect(screen.getByTestId('tutorial-titulo')).toHaveTextContent(TITULOS_ESPERADOS[TITULOS_ESPERADOS.length - 1]!)
     const indicadores = screen.getAllByTestId('tutorial-indicador')
     await userEvent.click(indicadores[0]!)

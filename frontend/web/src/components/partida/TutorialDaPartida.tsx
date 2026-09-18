@@ -19,7 +19,9 @@
  * de Posição.
  *
  * Variante escura da referência (`como_tutorial_deve_ser.jpeg`, ModalTutorial2):
- * fundo escuro, título central, botão "Próximo →" âmbar. Mídias servidas pelo
+ * fundo escuro, título central, rodapé com "← ANTERIOR" e "Próximo →" âmbar
+ * (ANTERIOR desabilitado no primeiro slide) e fileira de dots centralizada
+ * sem setas laterais. Mídias servidas pelo
  * duto canônico (`frontend/web/media/tutorial/` → `/media/tutorial/`, via
  * `comBase`), cada uma com texto alternativo.
  *
@@ -197,17 +199,7 @@ export function TutorialDaPartida({
         >
           {`Slide ${indiceSeguro + 1} de ${total}: ${slide.titulo}`}
         </div>
-        <div className="flex items-center justify-between gap-2 border-t border-[#504533] bg-[rgba(0,0,0,0.6)] px-4 py-2.5">
-          <button
-            type="button"
-            data-testid="tutorial-anterior"
-            onClick={irParaAnterior}
-            disabled={indiceSeguro === 0}
-            aria-label="Slide anterior"
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded px-3 text-lg leading-none text-zinc-200 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500"
-          >
-            <span aria-hidden="true">‹</span>
-          </button>
+        <div className="flex items-center justify-center gap-2 border-t border-[#504533] bg-[rgba(0,0,0,0.6)] px-4 py-2.5">
           <div
             data-testid="tutorial-indicadores"
             role="group"
@@ -234,18 +226,18 @@ export function TutorialDaPartida({
               </button>
             ))}
           </div>
+        </div>
+        <div className="flex items-center justify-between gap-2 px-4 pb-4">
           <button
             type="button"
-            data-testid="tutorial-proxima"
-            onClick={irParaProximo}
-            disabled={ehUltimo}
-            aria-label="Próximo slide"
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded px-3 text-lg leading-none text-zinc-200 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500"
+            data-testid="tutorial-anterior"
+            onClick={irParaAnterior}
+            disabled={indiceSeguro === 0}
+            aria-label="Slide anterior"
+            className="min-h-[44px] rounded bg-amber-500 px-6 py-2 text-sm font-semibold uppercase tracking-[0.14em] text-zinc-900 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500"
           >
-            <span aria-hidden="true">›</span>
+            ← ANTERIOR
           </button>
-        </div>
-        <div className="flex justify-center px-4 pb-4">
           <button
             type="button"
             data-testid="tutorial-proximo"
