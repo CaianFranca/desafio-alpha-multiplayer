@@ -3,9 +3,10 @@ import { getBordaMolduraPxViaEstilo } from '../../game/ambiente/cameraLimites'
 
 interface PartidaMolduraProps {
   onBordaChange?: (bordaPx: number) => void
+  pulsoAtivo?: boolean
 }
 
-export function PartidaMoldura({ onBordaChange }: PartidaMolduraProps) {
+export function PartidaMoldura({ onBordaChange, pulsoAtivo = false }: PartidaMolduraProps) {
   const bordaRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -42,8 +43,14 @@ export function PartidaMoldura({ onBordaChange }: PartidaMolduraProps) {
       className="pointer-events-none absolute inset-0 z-20"
     >
       {/* Moldura visual removida (tela cheia limpa): o medidor segue ativo e
-          reporta 0px, então a câmera/névoa usam a área visível integral. */}
+           reporta 0px, então a câmera/névoa usam a área visível integral. */}
       <div ref={bordaRef} className="absolute inset-0 border-0" />
+      <div
+        data-testid="moldura-brilho"
+        data-pulso={pulsoAtivo ? 'true' : 'false'}
+        aria-hidden="true"
+        className={`moldura-brilho${pulsoAtivo ? ' moldura-pulso-vermelho' : ''}`}
+      />
     </div>
   )
 }

@@ -541,6 +541,14 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     [ataqueExibido, pecaIdEmTelegraph],
   )
 
+  // Moldura (#436): pulso vermelho só durante ataque com penalidade real —
+  // reuso do sinal já existente (ataque_com_penalidade = estadosAplicados>0),
+  // só no estágio 'ataque' (telegraph e ataque defendido não disparam).
+  const pulsoDaMoldura =
+    ataqueExibido !== null &&
+    ataqueExibido.estagio === 'ataque' &&
+    ataqueExibido.item.fatia.estadosAplicados.length > 0
+
   // Ref do ponto único de injeção do jogadorId (#91): o `onEvento` do canal
   // é declarado antes do `enviarComJogador` (useCallback abaixo), então usa a
   // ref para quebrar o TDZ e manter o callback do socket estável (mesmo
@@ -2272,7 +2280,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       ) : null}
       </div>
       {requerModoPaisagem ? <OverlayModoPaisagem /> : null}
-      <PartidaMoldura onBordaChange={setBordaPx} />
+      <PartidaMoldura onBordaChange={setBordaPx} pulsoAtivo={pulsoDaMoldura} />
     </div>
   )
 }
