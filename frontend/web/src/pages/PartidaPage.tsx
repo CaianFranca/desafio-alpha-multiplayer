@@ -593,22 +593,28 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const aoMudarAberturaDoTutorial = useCallback((aberto: boolean) => {
     tutorialAbertoRef.current = aberto
     setTutorialAbertoParaInert(aberto)
+    // A abertura é a fonte única da verdade da flag "uma vez por aba": só
+    // grava quando o modal confirma que abriu. Se o painel ainda não montou
+    // (ref nula, primeira entrada em andamento), o `abrir()` abaixo vira
+    // no-op SEM queimar a flag — o jogador não perde o tutorial da aba.
+    if (aberto) marcarTutorialComoVistoNaAba()
   }, [])
   const abrirTutorial = useCallback(() => {
     painelDeTutorialRef.current?.abrir()
   }, [])
   // Auto-abertura uma vez por aba (histórias 1 e 15): a primeira Partida EM
-  // ANDAMENTO abre o modal; Partidas seguintes na mesma aba já começam
+  // ANDAMENTO tenta abrir o modal; Partidas seguintes na mesma aba já começam
   // minimizadas (sessionStorage, sem persistência por usuário); nova aba
   // exibe de novo. Só em andamento — nunca resultado, não-início ou
-  // carregamento (o painel nem monta fora de andamento/resultado).
+  // carregamento (o painel nem monta fora de andamento/resultado). A flag é
+  // gravada na confirmação de abertura (`aoMudarAberturaDoTutorial`), nunca
+  // aqui — ver comentário acima.
   const tentativaAutoTutorialRef = useRef(false)
   useEffect(() => {
     if (!estadoEmAndamento) return
     if (tentativaAutoTutorialRef.current) return
     tentativaAutoTutorialRef.current = true
     if (tutorialJaVistoNaAba()) return
-    marcarTutorialComoVistoNaAba()
     painelDeTutorialRef.current?.abrir()
   }, [estadoEmAndamento])
 
