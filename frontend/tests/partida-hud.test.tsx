@@ -1765,15 +1765,15 @@ describe('HUD da Partida — modal de volume (#438)', () => {
     expect(screen.queryByTestId('volume-modal')).not.toBeInTheDocument()
   })
 
-  it('slider de música desabilitado sem a faixa, com hint; valor persiste mesmo disabled', async () => {
+  it('slider de música habilitado com a faixa, valor persiste e respeita camada', async () => {
     window.localStorage.setItem('flicker:volume:musica', '0.3')
     await partidaComSnapshot(criarSnapshotBase())
     await userEvent.click(screen.getByRole('button', { name: /volume/i }))
 
     const sliderMusica = screen.getByTestId('volume-slider-musica') as HTMLInputElement
-    expect(sliderMusica).toBeDisabled()
+    expect(sliderMusica).toBeEnabled()
     expect(sliderMusica.value).toBe('0.3')
-    expect(screen.getByText(/faixa ainda não foi publicada/i)).toBeInTheDocument()
+    expect(screen.queryByText(/faixa ainda não foi publicada/i)).not.toBeInTheDocument()
   })
 
   it('cada slider ajusta só sua camada e o valor sobrevive a reload', () => {
@@ -1804,7 +1804,7 @@ describe('HUD da Partida — modal de volume (#438)', () => {
       expect(screen.getByTestId('volume-modal')).toBeInTheDocument()
       expect(screen.getByTestId('volume-slider-efeitos')).toBeEnabled()
       expect(screen.getByTestId('volume-slider-monstros')).toBeEnabled()
-      expect(screen.getByTestId('volume-slider-musica')).toBeDisabled()
+      expect(screen.getByTestId('volume-slider-musica')).toBeEnabled()
     } finally {
       unmount()
     }

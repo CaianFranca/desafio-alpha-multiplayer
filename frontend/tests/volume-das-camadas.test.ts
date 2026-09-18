@@ -87,8 +87,8 @@ describe('camadas de volume — persistência (issue #438)', () => {
     expect(obterVolumeDaCamada('monstros')).toBe(1)
   })
 
-  it('música indisponível sem a faixa (#403 OPEN), mas o valor persiste', () => {
-    expect(MUSICA_DE_FUNDO_DISPONIVEL).toBe(false)
+  it('música disponível com a faixa (#403 CLOSED), valor persiste e escala', () => {
+    expect(MUSICA_DE_FUNDO_DISPONIVEL).toBe(true)
     definirVolumeDaCamada('musica', 0.4)
     expect(obterVolumeDeMusica()).toBe(0.4)
   })

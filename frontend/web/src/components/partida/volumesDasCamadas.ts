@@ -13,11 +13,10 @@
  * `VOLUME_MASTER_PARTIDA` (const 1) é legado removido: os mestres agora são
  * estas três camadas.
  *
- * Música desabilitada (issue #403 OPEN, sem `musica-de-fundo.mp3` na main):
- * `MUSICA_DE_FUNDO_DISPONIVEL = false` mantém o slider visível mas disabled
- * com hint; o valor persiste mesmo disabled. Quando a #403 pousar (asset +
- * player), esta constante vira `true` e o player lê `obterVolumeDeMusica()`
- * sem recostura dos pontos de som.
+ * Música habilitada (issue #403 CLOSED, `musica-de-fundo.mp3` em
+ * `frontend/web/media/`): `MUSICA_DE_FUNDO_DISPONIVEL = true` deixa o slider
+ * operável; o player lê `obterVolumeDeMusica()` sem recostura dos pontos
+ * de som.
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -36,11 +35,11 @@ export const CHAVE_VOLUME_POR_CAMADA: Record<CamadaDeVolume, string> = {
 export const VOLUME_PADRAO_DA_CAMADA = 1
 
 /**
- * Música de fundo disponível? Falso até a #403 pousar (asset
- * `musica-de-fundo.mp3` + player). Seam único: o modal desabilita o slider
- * de música enquanto falso; o player futuro lê `obterVolumeDeMusica()`.
+ * Música de fundo disponível? Verdadeiro desde a #403 (asset
+ * `musica-de-fundo.mp3` + player já na main). O modal habilita o slider
+ * de música; o player lê `obterVolumeDeMusica()`.
  */
-export const MUSICA_DE_FUNDO_DISPONIVEL = false
+export const MUSICA_DE_FUNDO_DISPONIVEL = true
 
 /** Prende o volume em [0, 1]; NaN/não-numérico volta ao padrão. */
 export function prenderVolumeDaCamada(valor: number): number {
