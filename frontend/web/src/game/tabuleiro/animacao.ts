@@ -30,6 +30,17 @@ export const CAMINHO_TOQUE_ENIGMATICO = comBase('/media/scary-sound.mp3')
 export const CAMINHO_SOM_SOMBRIO_LIMPEZA = comBase('/media/toque-sombrio-limpeza.mp3')
 export const CAMINHO_SOM_SLIDE_CAIXA = comBase('/media/som-slide-caixa.mp3')
 
+/**
+ * Volumes base do som sombrio da limpeza e do slide da caixa (contrato com o
+ * modal de volume, ADR-0007 + issue #438: `audio.volume = camada de efeitos
+ * × VOLUME_BASE_*`, com a camada lida no momento do toque).
+ * A limpeza preserva os 0.7 efetivos do duto antigo (`tocarSom` fixo);
+ * o slide ainda não tem arquivo commitado — base inicial a afinar por escuta
+ * quando o asset pousar.
+ */
+export const VOLUME_BASE_SOM_SOMBRIO_LIMPEZA = 0.7
+export const VOLUME_BASE_SOM_SLIDE_CAIXA = 0.4
+
 // ── Ataque dos monstros (issue #385) ──
 // Mapeamento confirmado pelo usuário: uivo do Vulto → vulto-uivo.mp3, trovão
 // do Espectro → trovao.mp3, tremor → impacto.mp3, defesa → defesa.mp3.

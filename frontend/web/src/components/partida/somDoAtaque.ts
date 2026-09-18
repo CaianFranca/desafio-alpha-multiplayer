@@ -8,9 +8,9 @@
  * genérico; a penalidade do ataque usa estes sons, nunca o genérico).
  *
  * Sem arquivo = no-op silencioso (`new Audio(...)` + `play()` com `catch`,
- * espelhando `somDoEncaixe.ts`). Volumes base próprios (contrato da ADR-0007:
- * `audio.volume = master × VOLUME_BASE_*`, com master em [0, 1] padrão 1 —
- * sem novo controle de volume nesta issue).
+ * espelhando `somDoEncaixe.ts`). Volumes base próprios (contrato da ADR-0007
+ * + issue #438: `audio.volume = camada de monstros × VOLUME_BASE_*`, com a
+ * camada lida no momento do toque via slider do modal de volume).
  */
 
 import {
@@ -24,6 +24,7 @@ import {
   VOLUME_BASE_SOM_VULTO,
 } from '../../game/tabuleiro/animacao'
 import { tocarAsset } from '../../game/audio/sons'
+import { obterVolumeDeMonstros } from './volumesDasCamadas'
 
 /** Tipo do monstro atacante — decide entre uivo (Vulto) e trovão (Espectro). */
 export type TipoDeMonstroAtacante = 'vulto' | 'espectro'
@@ -31,8 +32,9 @@ export type TipoDeMonstroAtacante = 'vulto' | 'espectro'
 /**
  * Toca o som do monstro no gesto de disparo — sempre, mesmo sem vítimas
  * (só monstro). Habilitado por padrão, no-op silencioso se falhar.
+ * Sem mestre explícito, lê a camada de monstros no momento do toque.
  */
-export function tocarSomDoMonstro(tipo: TipoDeMonstroAtacante, mestre = 1): void {
+export function tocarSomDoMonstro(tipo: TipoDeMonstroAtacante, mestre = obterVolumeDeMonstros()): void {
   if (tipo === 'vulto') {
     tocarAsset(CAMINHO_SOM_VULTO, VOLUME_BASE_SOM_VULTO, mestre)
   } else {
@@ -43,16 +45,18 @@ export function tocarSomDoMonstro(tipo: TipoDeMonstroAtacante, mestre = 1): void
 /**
  * Toca o tremor na chegada ao alvo — só com atingido (nunca sem vítimas,
  * nunca no protegido). Habilitado por padrão, no-op silencioso se falhar.
+ * Sem mestre explícito, lê a camada de monstros no momento do toque.
  */
-export function tocarTremorDoAtaque(mestre = 1): void {
+export function tocarTremorDoAtaque(mestre = obterVolumeDeMonstros()): void {
   tocarAsset(CAMINHO_SOM_TREMOR_ATAQUE, VOLUME_BASE_SOM_TREMOR_ATAQUE, mestre)
 }
 
 /**
  * Toca a defesa no protegido — só com alvo protegido na chegada (sem tremor
  * e sem debilitação: só brilho de escudo + este som). Habilitado por padrão,
- * no-op silencioso se falhar.
+ * no-op silencioso se falhar. Sem mestre explícito, lê a camada de monstros
+ * no momento do toque.
  */
-export function tocarDefesaDoAtaque(mestre = 1): void {
+export function tocarDefesaDoAtaque(mestre = obterVolumeDeMonstros()): void {
   tocarAsset(CAMINHO_SOM_DEFESA_ATAQUE, VOLUME_BASE_SOM_DEFESA_ATAQUE, mestre)
 }

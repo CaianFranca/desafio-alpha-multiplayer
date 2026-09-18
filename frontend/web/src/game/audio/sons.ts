@@ -1,40 +1,21 @@
 /**
- * Duto de áudio — limpeza com som único (issue #239, spec #238).
+ * Duto de áudio da Partida — ponto único de asset com volume (issue #385,
+ * follow-up — zera a duplicação dos helpers `tocarAsset*` de
+ * `somDoAtaque`/`somDaConquista`/`somDoEncaixe`/`somDeRecusa`; issue #438
+ * removeu o duto antigo de volume fixo `tocarSom`).
  *
- * Sem arquivo = no-op silencioso. O Audio falha em 404 ou por autoplay; o
- * catch silencioso evita throw. Caminho vem dos tokens centralizados
- * (`game/tabuleiro/animacao.ts`), nunca hardcoded no chamador.
- */
-
-export async function tocarSom(caminho: string): Promise<void> {
-  if (typeof window === 'undefined' || typeof Audio === 'undefined') return
-  try {
-    const audio = new Audio(caminho)
-    audio.volume = 0.7
-    await audio.play().catch(() => {
-      // sem asset ou autoplay bloqueado → silêncio
-    })
-  } catch {
-    // no-op silencioso
-  }
-}
-
-/**
- * Duto único de asset com volume (issue #385, follow-up — zera a duplicação
- * dos helpers `tocarAsset*` de `somDoAtaque`/`somDaConquista`/`somDoEncaixe`/
- * `somDeRecusa`).
- *
- * Contrato de volume (ADR-0007): `audio.volume = master × volumeBase`, com
- * master preso a [0, 1] (padrão 1 — sem novo controle de volume). Sem
- * arquivo = no-op silencioso (`new Audio(...)` + `play()` com `catch`,
- * com guarda para o jsdom, que não implementa `play()`). Nunca julga regra,
- * só revela.
+ * Contrato de volume (ADR-0007 + issue #438): `audio.volume = camada ×
+ * volumeBase`, com a camada (`volumesDasCamadas.ts`) presa a [0, 1] pelo
+ * chamador no momento do toque (slider do modal de volume). Sem arquivo =
+ * no-op silencioso (`new Audio(...)` + `play()` com `catch`, com guarda para
+ * o jsdom, que não implementa `play()`). Nunca julga regra, só revela.
  */
 export function tocarAsset(caminho: string, volumeBase: number, mestre = 1): void {
   try {
     const audio = new Audio(caminho)
-    // Contrato de volume (ADR-0007): base fixa do ponto vezes o mestre
-    // (futuro botão de volume), preso a [0, 1].
+    // Contrato de volume (ADR-0007 + issue #438): base fixa do ponto vezes a
+    // camada (o chamador lê `volumesDasCamadas.ts` no momento do toque),
+    // presa a [0, 1].
     const mestrePreso = Math.min(1, Math.max(0, mestre))
     audio.volume = mestrePreso * volumeBase
     const tocando: unknown = audio.play()
