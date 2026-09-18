@@ -434,7 +434,7 @@ describe('HUD da Partida — Turno em fila circular a partir do ativo (#226 [4])
     // A leitura começa no ativo (Beto) e segue a ordem de entrada com wrap.
     expect(ordemDosSlots()).toEqual(['jogador-3', 'jogador-4', MEU_JOGADOR_ID, 'jogador-2'])
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-3')
-    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('aria-label', 'Vez de Beto')
+    expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('aria-label', 'Turno de Beto')
 
     // A vez passa para o Cara: a fila rotaciona para abrir nele.
     act(() =>
@@ -597,7 +597,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
         onSair={() => {}}
       />,
     )
-    const retrato = screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' })
+    const retrato = screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' })
     expect(retrato.querySelector('img')).toHaveAttribute('src', 'https://exemplo.test/eu.png')
     expect(retrato).not.toHaveTextContent('JO')
     // Adversário sem URL mantém as iniciais.
@@ -625,7 +625,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     )
     // Retrato local.
     expect(
-      screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+      screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' }).querySelector('img'),
     ).toHaveAttribute('src', 'https://exemplo.test/eu.png')
     // Adversários (sup-esq).
     expect(screen.getByTestId('hud-avatar-adversario').querySelector('img')).toHaveAttribute(
@@ -658,7 +658,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
         onSair={() => {}}
       />,
     )
-    const retrato = screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' })
+    const retrato = screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' })
     const img = retrato.querySelector('img')!
     expect(img).toHaveAttribute('src', 'https://exemplo.test/quebrada.png')
     fireEvent.error(img)
@@ -694,7 +694,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
     )
     // Retrato local = Diretor; adversários seguem a ordem de entrada.
     expect(
-      screen.getByRole('img', { name: 'Retrato de Um, com a vez' }).querySelector('img'),
+      screen.getByRole('img', { name: 'Retrato de Um, no turno' }).querySelector('img'),
     ).toHaveAttribute('src', '/base/assets/avatars/diretor.png')
     const adversarios = screen.getAllByTestId('hud-avatar-adversario')
     expect(adversarios).toHaveLength(3)
@@ -738,7 +738,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
       screen.getAllByTestId('hud-avatar-adversario')[0].querySelector('img'),
     ).toHaveAttribute('src', '/base/assets/avatars/enfermeira.png')
     expect(
-      screen.getByRole('img', { name: 'Retrato de Um, com a vez' }).querySelector('img'),
+      screen.getByRole('img', { name: 'Retrato de Um, no turno' }).querySelector('img'),
     ).toHaveAttribute('src', '/base/assets/avatars/diretor.png')
     unmount()
 
@@ -788,7 +788,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
       />,
     )
     expect(
-      screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+      screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' }).querySelector('img'),
     ).toHaveAttribute('src', 'https://exemplo.test/eu.png')
     expect(screen.getByTestId('hud-avatar-adversario').querySelector('img')).toHaveAttribute(
       'src',
@@ -810,7 +810,7 @@ describe('HUD da Partida — cronômetro, SAIR e resultado (#226 [6])', () => {
       <HudDaPartida {...base} emAndamento emResultado={false} />,
     )
     expect(screen.getByTestId('hud-anel-da-vez')).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' })).toHaveClass(
+    expect(screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' })).toHaveClass(
       'rounded-full',
     )
     unmount()
@@ -1576,7 +1576,7 @@ describe('HUD da Partida — foto por estado nos 3 pontos (extra PR #421)', () =
     const { unmount } = render(<HudDaPartida {...propsComVariante(JOGADORES_VARIANTE)} />)
     try {
       expect(
-        screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+        screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' }).querySelector('img'),
       ).toHaveAttribute('src', expect.stringMatching(/diretor\.png$/))
       expect(screen.getByTestId('hud-avatar-adversario').querySelector('img')).toHaveAttribute(
         'src',
@@ -1603,7 +1603,7 @@ describe('HUD da Partida — foto por estado nos 3 pontos (extra PR #421)', () =
     const { unmount } = render(<HudDaPartida {...propsComVariante(jogadores)} />)
     try {
       expect(
-        screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+        screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' }).querySelector('img'),
       ).toHaveAttribute('src', expect.stringMatching(/diretor_amedrontado\.png$/))
       const adversario = screen.getByTestId('hud-avatar-adversario')
       expect(adversario.querySelector('img')).toHaveAttribute(
@@ -1634,7 +1634,7 @@ describe('HUD da Partida — foto por estado nos 3 pontos (extra PR #421)', () =
     const { unmount } = render(<HudDaPartida {...propsComVariante(jogadores)} />)
     try {
       expect(
-        screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+        screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' }).querySelector('img'),
       ).toHaveAttribute('src', expect.stringMatching(/diretor_baixa\.png$/))
       const adversario = screen.getByTestId('hud-avatar-adversario')
       expect(adversario.querySelector('img')).toHaveAttribute(
@@ -1673,7 +1673,7 @@ describe('HUD da Partida — foto por estado nos 3 pontos (extra PR #421)', () =
         expect.stringMatching(/enfermeira_baixa\.png$/),
       )
       expect(
-        screen.getByRole('img', { name: 'Retrato de JogadorTeste, com a vez' }).querySelector('img'),
+        screen.getByRole('img', { name: 'Retrato de JogadorTeste, no turno' }).querySelector('img'),
       ).toHaveAttribute('src', expect.stringMatching(/diretor_baixa\.png$/))
       expect(screen.getByTestId('hud-turno-proximo').querySelector('img')).toHaveAttribute(
         'src',

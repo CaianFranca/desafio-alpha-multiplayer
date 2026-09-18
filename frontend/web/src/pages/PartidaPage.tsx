@@ -65,7 +65,6 @@ import { bordaDaTravessiaPendente, inicialDaCorDoPeao, mapearFinalizarRecebida }
 import {
   etapaDoGuiaDeTurno,
   expirarMemoriaLegadaDoGuia,
-  ID_BANDEJA,
   lerGuiaLigado,
   passoDeAvancoImediato,
   passoDeExibicaoUnica,
@@ -1989,16 +1988,26 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   // ── Guia de turno (issue #441): switch persistido + memória por Partida ──
   // Só frontend, só dono do turno, nunca espectador, Amedrontado sem guia.
   // A memória vive em estado local (só sessão/montagem, zerada por Partida);
-  // só o switch global persiste. Passo de avanço imediato (vez, permanecer)
-  // entra ao exibir e cede ao seguinte no mesmo ciclo; giro/confirmação,
-  // bandeja e vagas entram ao concluir (quando a etapa muda); o fim do meu
-  // turno seguinte conclui o fluxo normal (o guia termina depois dele).
+  // só o switch global persiste. Passo de avanço imediato (turno, permanecer)
+  // entra ao exibir e cede ao seguinte no mesmo ciclo; giro/confirmação
+  // entram ao concluir (quando a etapa muda); bandeja e vagas alternam pela
+  // ação real de puxar (`correntePuxada`, espelho do pull local da cena); o
+  // fim do meu turno seguinte conclui o fluxo normal (o guia termina depois
+  // dele).
   const [memoriaDoGuia, setMemoriaDoGuia] = useState<MemoriaDoGuia>(() => carregarMemoriaDoGuia(partidaId))
   const [guiaLigado, setGuiaLigado] = useState<boolean>(() => lerGuiaLigado())
   const [guiaModalAberto, setGuiaModalAberto] = useState(false)
   const mudarGuiaLigado = useCallback((ligado: boolean) => {
     salvarGuiaLigado(ligado)
     setGuiaLigado(ligado)
+  }, [])
+  // Pull da bandeja espelhado para o guia (issue #441): o estado segue local
+  // no AmbienteDeJogo; aqui só o booleano vigente alimenta `correntePuxada`
+  // da máquina (bandeja exige `false`, vagas exige `true`). Reset volta a
+  // `false` via o próprio callback da cena.
+  const [guiaCorrentePuxada, setGuiaCorrentePuxada] = useState(false)
+  const aoPuxadaDaBandejaMudar = useCallback((puxada: boolean) => {
+    setGuiaCorrentePuxada(puxada)
   }, [])
   // Peça Inicial própria (issue #441): derivada só da cor do peão próprio
   // (`peao-branco` → `inicial-1`, mesma fonte do gate "Inicial primeiro").
@@ -2030,11 +2039,12 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       movimentouNoTurno: modelo.movimentouNoTurno,
       atravessouNoTurno: modelo.atravessouNoTurno,
       temRecebidaPendente: modelo.recebidasPendentes.length > 0,
+      correntePuxada: guiaCorrentePuxada,
       faseDoTurno,
       ensinados: memoriaDoGuia.ensinados,
       fluxoNormalConcluido: memoriaDoGuia.normalConcluido,
     })
-  }, [estadoEmAndamento, emResultado, emNaoInicio, minhaVez, jogadorId, modelo, guiaLigado, minhaInicialId, temPreviewDoGuiaEmFoco, peaoProprioId, peaoProprioPosicionado, faseDoTurno, memoriaDoGuia])
+  }, [estadoEmAndamento, emResultado, emNaoInicio, minhaVez, jogadorId, modelo, guiaLigado, minhaInicialId, temPreviewDoGuiaEmFoco, peaoProprioId, peaoProprioPosicionado, faseDoTurno, memoriaDoGuia, guiaCorrentePuxada])
   // Memória "já ensinado" do guia (issue #441): avanço em efeito após o
   // commit, nunca no render — `setState` durante o render quebra a
   // renderização concorrente. A memória é zerada por Partida (só
@@ -2049,13 +2059,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     expirarMemoriaLegadaDoGuia(partidaId)
   }, [partidaId])
   useEffect(() => {
-    const bandejaPendenteDe1Ciclo =
-      etapaDoGuiaId === ID_BANDEJA &&
-      memoriaDoGuia.partidaId === partidaId &&
-      memoriaDoGuia.etapaAnteriorId === ID_BANDEJA &&
-      !memoriaDoGuia.ensinados.has(ID_BANDEJA)
     if (
-      !bandejaPendenteDe1Ciclo &&
       memoriaDoGuia.partidaId === partidaId &&
       memoriaDoGuia.etapaAnteriorId === etapaDoGuiaId &&
       (minhaVez || !memoriaDoGuia.turnoNormalVisto) &&
@@ -2073,16 +2077,8 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     if (anterior !== null && anterior !== idAtual && passoDeExibicaoUnica(anterior) && !base.ensinados.has(anterior)) {
       idsEnsinar.add(anterior)
     }
-    // Bandeja fixa 1 ciclo (HU8): exibição única sem avanço imediato — entra
-    // após 1 ciclo inteiro exibida (anterior == atual), antes das vagas.
-    if (
-      idAtual !== null &&
-      idAtual === ID_BANDEJA &&
-      anterior === ID_BANDEJA &&
-      !base.ensinados.has(ID_BANDEJA)
-    ) {
-      idsEnsinar.add(ID_BANDEJA)
-    }
+    // Bandeja/vagas (HU8): exibição única sem avanço imediato — a troca
+    // entre elas segue o puxar (`correntePuxada`), sem temporizador de ciclo.
     const normalTerminou = !minhaVez && base.turnoNormalVisto
     const proxima: MemoriaDoGuia = {
       partidaId: base.partidaId,
@@ -2198,6 +2194,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         guiaAlvo={guiaAlvo}
         guiaPecaId={guiaPecaId}
         guiaPeaoId={peaoProprioId}
+        onPuxadaDaBandejaMudou={aoPuxadaDaBandejaMudar}
       />
       </div>
       {/*

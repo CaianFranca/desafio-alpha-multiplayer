@@ -9,7 +9,8 @@
 // (15), compacto (16), Amedrontado (17) e espectador (18). Turno e
 // permanecer avançam ao exibir (transitórios por desenho): no seam assentam
 // no passo seguinte e a exibição é provada pela memória "já ensinado" +
-// unidade pura. Giro é só texto; bandeja fixa 1 ciclo antes das vagas.
+// unidade pura. Giro é só texto; bandeja persiste até o puxar e vagas só
+// aparecem após a puxada (ação real, sem temporizador).
 
 import { act, render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -168,6 +169,7 @@ function entradaBase(overrides: Partial<EntradaDoGuiaDeTurno> = {}): EntradaDoGu
     movimentouNoTurno: false,
     atravessouNoTurno: false,
     temRecebidaPendente: false,
+    correntePuxada: false,
     faseDoTurno: null,
     ensinados: new Set(),
     fluxoNormalConcluido: false,
@@ -208,7 +210,7 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
     expect(inicial?.alvo).toBe('inicial-propria')
   })
 
-  it('giro é só texto (sem alvo), bandeja fixa 1 ciclo antes das vagas', () => {
+  it('giro é só texto (sem alvo); bandeja persiste até o puxar, vagas só após', () => {
     const estadoManipulando = {
       inicialPropriaNaMesa: false,
       inicialPropriaPosicionada: true,
@@ -227,16 +229,44 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
         inicialPropriaPosicionada: true,
         peaoProprioPosicionado: true,
         temRecebidaPendente: true,
+        correntePuxada: false,
         ensinados: new Set(['guia-inicial-turno']),
       }),
     )
+    expect(bandeja?.id).toBe('guia-inicial-bandeja')
     expect(bandeja?.alvo).toBe('bandeja')
+    // Sem puxar, a bandeja persiste (segundo ciclo ainda é bandeja).
+    const bandejaPersiste = etapaDoGuiaDeTurno(
+      entradaBase({
+        inicialPropriaNaMesa: false,
+        inicialPropriaPosicionada: true,
+        peaoProprioPosicionado: true,
+        temRecebidaPendente: true,
+        correntePuxada: false,
+        ensinados: new Set(['guia-inicial-turno']),
+      }),
+    )
+    expect(bandejaPersiste?.id).toBe('guia-inicial-bandeja')
+    // Pull resetado volta a `false`: com memória ainda não ensinada, a
+    // bandeja retorna (sem temporizador a reinterpretar).
+    const bandejaAposReset = etapaDoGuiaDeTurno(
+      entradaBase({
+        inicialPropriaNaMesa: false,
+        inicialPropriaPosicionada: true,
+        peaoProprioPosicionado: true,
+        temRecebidaPendente: true,
+        correntePuxada: false,
+        ensinados: new Set(['guia-inicial-turno']),
+      }),
+    )
+    expect(bandejaAposReset?.id).toBe('guia-inicial-bandeja')
     const vagas = etapaDoGuiaDeTurno(
       entradaBase({
         inicialPropriaNaMesa: false,
         inicialPropriaPosicionada: true,
         peaoProprioPosicionado: true,
         temRecebidaPendente: true,
+        correntePuxada: true,
         ensinados: new Set(['guia-inicial-turno', 'guia-inicial-bandeja']),
       }),
     )
@@ -247,13 +277,14 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
         inicialPropriaPosicionada: true,
         peaoProprioPosicionado: true,
         temRecebidaPendente: true,
+        correntePuxada: true,
         ensinados: new Set(['guia-inicial-turno', 'guia-inicial-bandeja', 'guia-inicial-vagas']),
       }),
     )
     expect(depoisDasVagas).toBeNull()
   })
 
-  it('bandeja é exibição única sem avanço imediato (fixa 1 ciclo)', () => {
+  it('bandeja é exibição única sem avanço imediato (persiste até o puxar)', () => {
     expect(passoDeExibicaoUnica('guia-inicial-bandeja')).toBe(true)
     expect(passoDeAvancoImediato('guia-inicial-bandeja')).toBe(false)
     expect(passoDeAvancoImediato('guia-inicial-turno')).toBe(true)
@@ -407,9 +438,9 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     expect(screen.getByTestId('guia-de-turno').className).toContain('pointer-events-none')
     expect(sondaDaCena()).toEqual({ alvo: 'botao-encerrar', pecaId: null, peaoId: 'peao-branco' })
 
-    // [8→9] recebida na bandeja: bandeja fixa 1 ciclo com ciano na corrente,
-    // depois vagas assentam (ordem pura provada acima; no seam o flush assenta
-    // em vagas, com a corrente ainda presente para o pull).
+    // [8→9] recebida na bandeja em 3 tempos (ação real de puxar, sem ciclo):
+    // tempo 1 sem pull → bandeja persistente com ciano na corrente; tempo 2
+    // puxar → vagas; tempo 3 encaixe → encerrar.
     act(() =>
       ws.simulateMessage({
         type: 'ESTADO_DA_PARTIDA',
@@ -430,14 +461,18 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
         }),
       }),
     )
-    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Puxe a peça da bandeja e encaixe nas vagas.')
-    expect(screen.getByTestId('caixa-peca-sorteada')).toBeInTheDocument()
-    // Cena 3D real: passo das vagas (a bandeja de 1 ciclo cedeu; a ordem
-    // bandeja→vagas vive na unidade pura + no ciano da corrente abaixo).
-    expect(sondaDaCena()).toEqual({ alvo: 'vagas', pecaId: null, peaoId: 'peao-branco' })
+    // Tempo 1: sem pull, a bandeja persiste (ciano fixo na corrente).
+    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Puxe a peça sorteada da bandeja.')
+    const sorteada = screen.getByTestId('caixa-peca-sorteada')
+    expect(sorteada).toHaveAttribute('data-peca-id', 'peca-rec-1')
+    expect(sorteada).toHaveAttribute('data-guia', 'true')
+    // Cena 3D real: passo da bandeja com a peça da corrente.
+    expect(sondaDaCena()).toEqual({ alvo: 'bandeja', pecaId: 'peca-rec-1', peaoId: 'peao-branco' })
 
-    // Puxar revela as vagas vizinhas com o destaque do guia.
+    // Tempo 2: puxar revela as vagas vizinhas com o destaque do guia.
     await userEvent.click(screen.getByTestId('caixa-peca-sorteada'))
+    expect(await screen.findByTestId('guia-de-turno')).toHaveTextContent('Puxe a peça da bandeja e encaixe nas vagas.')
+    expect(sondaDaCena()).toEqual({ alvo: 'vagas', pecaId: null, peaoId: 'peao-branco' })
     const vagasComGuia = await screen.findAllByTestId('tabuleiro-celula', undefined, { timeout: 2000 }).then((celulas) =>
       celulas.filter((el) => el.getAttribute('data-vaga') === 'true' && el.getAttribute('data-guia') === 'true'),
     )
@@ -780,6 +815,7 @@ describe('Guia de turno — região viva e compacto (issues #441 [15,16])', () =
         peaoSelecionadoEhProprio: true,
         movimentouNoTurno: true,
         temRecebidaPendente: true,
+        correntePuxada: false,
         faseDoTurno: null,
         ensinados: new Set(['guia-inicial-turno']),
       }),
@@ -822,7 +858,7 @@ describe('Guia de turno — região viva e compacto (issues #441 [15,16])', () =
     expect(sorteada).toHaveAttribute('data-peca-id', 'peca-rec-1')
     expect(sorteada).toHaveAttribute('data-guia', 'true')
     unmount()
-    // Depois: bandeja ensinada cede às vagas (mesmo instante, 1 ciclo).
+    // Depois do puxar: bandeja ensinada cede às vagas (ação real, sem ciclo).
     const etapaVagas = etapaDoGuiaDeTurno(
       entradaBase({
         inicialPropriaNaMesa: false,
@@ -831,6 +867,7 @@ describe('Guia de turno — região viva e compacto (issues #441 [15,16])', () =
         peaoSelecionadoEhProprio: true,
         movimentouNoTurno: true,
         temRecebidaPendente: true,
+        correntePuxada: true,
         faseDoTurno: null,
         ensinados: new Set(['guia-inicial-turno', 'guia-inicial-bandeja']),
       }),

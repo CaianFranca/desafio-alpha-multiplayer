@@ -8,7 +8,9 @@
  *
  * Fluxos (decisão da #441):
  * - Primeiro Turno (rodada 1): turno → Inicial → tabuleiro → giro/OK
- *   (só texto) → peão → destino → bandeja (1 ciclo) → vagas → encerrar. O
+ *   (só texto) → peão → destino → bandeja → vagas → encerrar. A troca
+ *   bandeja→vagas segue a ação real de puxar (`correntePuxada`): o ciano
+ *   fixa na corrente até o puxar, e as vagas só aparecem após a puxada. O
  *   passo de confirmação do peão (`guia-inicial-confirmar`) é global — no
  *   Primeiro Turno o faseamento leva direto a encerrar, então ele surge
  *   quando há confirmação pendente (fase `confirmar`, em geral após a
@@ -25,8 +27,9 @@
  * condição com o passo seguinte e cedem a ele no mesmo ciclo — o card
  * seguinte carrega a mesma informação para nada se perder). Giro,
  * confirmação e vagas fixam enquanto a condição vale e entram ao concluir;
- * a bandeja fixa 1 ciclo antes das vagas. Os demais repetem enquanto a
- * condição do modelo valer (ex.: encerrar reaparece após o encaixe).
+ * bandeja e vagas alternam pela ação de puxar (sem temporizador). Os demais
+ * repetem enquanto a condição do modelo valer (ex.: encerrar reaparece
+ * após o encaixe).
  * Amedrontado nunca tem guia (o turno é pulado) e fora do turno nunca há
  * guia (espectador).
  *
@@ -72,6 +75,13 @@ export interface EntradaDoGuiaDeTurno {
   readonly movimentouNoTurno: boolean
   readonly atravessouNoTurno: boolean
   readonly temRecebidaPendente: boolean
+  /**
+   * Corrente da bandeja já puxada (gesto local do dono do ciclo, espelho de
+   * `puxadaVigenteNaBandeja`): a bandeja exige `false`, as vagas exigem
+   * `true` — a mesma condição que libera `vagasSet` na cena. Resetado volta
+   * a `false` (pendência saiu da lista ou turno trocou).
+   */
+  readonly correntePuxada: boolean
   readonly faseDoTurno: FaseDoTurnoDoGuia
   /** Passos de exibição única já mostrados nesta Partida. */
   readonly ensinados: ReadonlySet<string>
@@ -115,8 +125,9 @@ const PASSOS_DE_EXIBICAO_UNICA: ReadonlySet<string> = new Set([
  * Subconjunto que avança ao exibir (turno, permanecer): dividem a condição
  * com o passo seguinte e cedem a ele no mesmo ciclo — o card seguinte
  * carrega a mesma informação (turno → Inicial; permanecer → movimentação),
- * então nada se perde. A bandeja fixa 1 ciclo inteiro (exibição única, sem
- * avanço imediato): o ciano acende na corrente antes das vagas.
+ * então nada se perde. Bandeja e vagas são exibição única sem avanço
+ * imediato: a alternância entre elas segue o puxar (`correntePuxada`), com
+ * o ciano fixo na corrente até a puxada.
  */
 const PASSOS_DE_AVANCO_IMEDIATO: ReadonlySet<string> = new Set([
   ID_TURNO,
@@ -181,10 +192,22 @@ export function etapaDoGuiaDeTurno(entrada: EntradaDoGuiaDeTurno): EtapaDoGuiaDe
     ) {
       return { id: 'guia-inicial-destino', texto: TEXTO_DESTINO, alvo: 'destino-proprio' }
     }
-    if (entrada.temRecebidaPendente && !entrada.temManipulacao && !entrada.temPreviewEmFoco && !jaEnsinado(ID_BANDEJA)) {
+    if (
+      entrada.temRecebidaPendente &&
+      !entrada.correntePuxada &&
+      !entrada.temManipulacao &&
+      !entrada.temPreviewEmFoco &&
+      !jaEnsinado(ID_BANDEJA)
+    ) {
       return { id: ID_BANDEJA, texto: TEXTO_BANDEJA, alvo: 'bandeja' }
     }
-    if (entrada.temRecebidaPendente && !entrada.temManipulacao && !entrada.temPreviewEmFoco && !jaEnsinado(ID_VAGAS)) {
+    if (
+      entrada.temRecebidaPendente &&
+      entrada.correntePuxada &&
+      !entrada.temManipulacao &&
+      !entrada.temPreviewEmFoco &&
+      !jaEnsinado(ID_VAGAS)
+    ) {
       return { id: ID_VAGAS, texto: TEXTO_VAGAS, alvo: 'vagas' }
     }
     if (entrada.faseDoTurno === 'encerrar') {

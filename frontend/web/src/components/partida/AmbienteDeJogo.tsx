@@ -110,6 +110,14 @@ interface AmbienteDeJogoProps {
   guiaAlvo?: AlvoDoGuiaDeTurno | null
   guiaPecaId?: string | null
   guiaPeaoId?: string | null
+  /**
+   * Guia de turno (issue #441): saída opcional do pull local da bandeja.
+   * O estado segue local (sem transferir a posse); o pai só espelha o
+   * booleano vigente (`puxadaVigenteNaBandeja`) para alimentar
+   * `correntePuxada` da máquina. Reset (pendência saiu da lista, turno
+   * trocou) volta a `false`.
+   */
+  onPuxadaDaBandejaMudou?: (puxada: boolean) => void
 }
 
 export function AmbienteDeJogo({
@@ -134,6 +142,7 @@ export function AmbienteDeJogo({
   guiaAlvo = null,
   guiaPecaId = null,
   guiaPeaoId = null,
+  onPuxadaDaBandejaMudou,
 }: AmbienteDeJogoProps) {
   // ── Seleção de peão: o servidor é a autoridade total (issue #249) ──
   // Sem espelho local divergente: o highlight e o roteamento derivam da prop
@@ -236,6 +245,14 @@ export function AmbienteDeJogo({
     estadoInteracaoPeoes !== null
       ? { ...estadoInteracaoPeoes, recebidaPuxadaId }
       : null
+  // Guia de turno (issue #441): espelho vigente do pull para o pai — mesma
+  // derivação que libera `vagasSet` abaixo; o pai alimenta `correntePuxada`
+  // da máquina sem mover o estado.
+  const puxadaVigenteDaBandeja =
+    estadoPeoesComPuxada !== null && puxadaVigenteNaBandeja(estadoPeoesComPuxada)
+  useEffect(() => {
+    onPuxadaDaBandejaMudou?.(puxadaVigenteDaBandeja)
+  }, [puxadaVigenteDaBandeja, onPuxadaDaBandejaMudou])
 
   // Gate de montagem da vez (#433): o destaque da célula-alvo pré-encaixe é
   // parte da pré-visualização do turno do Jogador Ativo — fora da vez o

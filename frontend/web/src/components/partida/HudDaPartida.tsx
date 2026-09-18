@@ -36,7 +36,7 @@ export { deveUsarHudCompacto } from '../../hooks/useViewportCompacto'
 export interface HudDaPartidaProps {
   /** Projeção jogadorId → dados de exibição (snapshot + deltas, somente leitura). */
   jogadorPorId: Readonly<Record<string, PercepcaoDeJogador>>
-  /** Jogador com a vez (null entre turnos). */
+  /** Jogador em turno (null entre turnos). */
   jogadorAtivoId: string | null
   /** Jogador local (Sessão autenticada); null quando desconhecido. */
   jogadorLocalId: string | null
@@ -624,7 +624,7 @@ export function HudDaPartida({
             ) : null}
             <div
               role="img"
-              aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMeuTurno ? ', com a vez' : ''}`}
+              aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMeuTurno ? ', no turno' : ''}`}
               data-compacto={emModoCompacto ? 'true' : undefined}
               className={`flex items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display font-semibold transition-colors duration-500 ${emModoCompacto ? 'h-12 w-12 text-base' : 'h-20 w-20 text-2xl'} ${
                 ehMeuTurno ? 'border-amber-300/40' : 'border-zinc-700'
@@ -895,7 +895,7 @@ export function HudDaPartida({
                     data-presenca={emReconexaoTurno ? 'em_reconexao' : undefined}
                     data-guia={ehAtivo && guiaAlvo === 'turno' ? 'true' : undefined}
                     role="img"
-                    aria-label={`${ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}${emReconexaoTurno ? ', reconectando' : ''}`}
+                    aria-label={`${ehAtivo ? `Turno de ${dados.apelido}` : `Próximo: ${dados.apelido}`}${emReconexaoTurno ? ', reconectando' : ''}`}
                     title={emReconexaoTurno ? `${dados.apelido} — reconectando` : dados.apelido}
                     data-compacto={emModoCompacto ? 'true' : undefined}
                     className={`flex items-center justify-center overflow-hidden rounded-lg border font-display text-xs transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${
