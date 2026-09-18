@@ -24,6 +24,7 @@ import {
   puxadaVigenteNaBandeja,
 } from './interacaoPeoes'
 import type { TabuleiroComandoDoCliente } from '@flicker/shared'
+import type { AlvoDoGuiaDeTurno } from './guiaDeTurno'
 import {
   AJUSTES_DOS_MODELOS_DA_CAIXA,
   TEXTURA_OBSCURO_DA_CESTA,
@@ -50,6 +51,13 @@ interface CaixaProps {
    * (issue #228): nenhum feedback visual nem sonoro.
    */
   onPuxar?: (recebidaId: string) => void
+  /**
+   * Guia de turno (issue #441): alvo atual + ids do dono do turno (mesma
+   * fonte do espelho DOM). Inicial própria e corrente da bandeja ganham o
+   * contorno ciano — só visual, nunca bloqueia cliques.
+   */
+  guiaAlvo?: AlvoDoGuiaDeTurno | null
+  guiaPecaId?: string | null
 }
 
 /**
@@ -330,6 +338,8 @@ export function Caixa({
   onComando,
   estadoPeoes = null,
   onPuxar,
+  guiaAlvo = null,
+  guiaPecaId = null,
 }: CaixaProps) {
   // A corrente exibida é puxável? O MESMO mapeador puro do clique decide
   // (inclui gate de espectador); o cursor espelha a clicabilidade na cena.
@@ -340,6 +350,14 @@ export function Caixa({
     pecaCorrente !== null &&
     estadoPeoes !== null &&
     puxadaVigenteNaBandeja(estadoPeoes)
+  // Guia de turno (issue #441): corrente da bandeja no passo da bandeja —
+  // restringe à peça do passo (`guiaPecaId` validado no pai contra a
+  // corrente); contorno ciano sobre o pull, sem bloquear o gesto de puxar.
+  const correnteEmGuia =
+    guiaAlvo === 'bandeja' &&
+    pecaCorrente !== null &&
+    guiaPecaId !== null &&
+    pecaCorrente.pecaId === guiaPecaId
 
   return (
     <group>
@@ -379,6 +397,7 @@ export function Caixa({
             orientacao={pecaCorrente.orientacao}
             position={[0, 0.02, 0]}
             destacada={puxada}
+            emGuia={correnteEmGuia}
             cursor={correntePuxavel ? 'pointer' : 'default'}
             onClick={
               onPuxar
@@ -415,6 +434,12 @@ export function Caixa({
         {iniciais.map((peca, indice) => {
           const [lx, , lz] = inicialIndiceParaLocal(indice)
           const destacada = estadoInteracao.pecaSelecionadaId === peca.pecaId
+          // Guia de turno (issue #441): só a Inicial própria no passo da
+          // Inicial — restringe pelo id do passo, como o espelho DOM.
+          const emGuia =
+            guiaAlvo === 'inicial-propria' &&
+            guiaPecaId !== null &&
+            peca.pecaId === guiaPecaId
           return (
             <PecaPlaceholder
               key={peca.pecaId}
@@ -422,6 +447,7 @@ export function Caixa({
               orientacao={peca.orientacao}
               position={[lx, 0.02, lz]}
               destacada={destacada}
+              emGuia={emGuia}
               cursor="pointer"
               onClick={() => {
                 // Clique em Inicial na mesa → SELECIONAR_PECA (roteador puro,

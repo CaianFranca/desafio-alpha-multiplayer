@@ -23,6 +23,7 @@ import type {
 import type { SanidadePorPeao } from '../../game/tabuleiro/reducao'
 import type { EncaixeTrigger } from '../../game/tabuleiro/encaixe'
 import type { EstadoVisualDoAtaque } from '../../game/tabuleiro/ataque'
+import type { AlvoDoGuiaDeTurno } from '../../game/tabuleiro/guiaDeTurno'
 
 interface TabuleiroMirrorDOMProps {
   todasCelulas: readonly Celula[]
@@ -82,6 +83,15 @@ interface TabuleiroMirrorDOMProps {
    * nova ao leitor de tela). Null fora do slot ativo.
    */
   estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
+  /**
+   * Guia de turno (issue #441): alvo atual a destacar com `data-guia="true"`
+   * (contorno tracejado ciano, só visual — nunca bloqueia cliques). `null` =
+   * sem destaque. `guiaPecaId` restringe Inicial/destino próprios;
+   * `guiaPeaoId` restringe o peão próprio.
+   */
+  guiaAlvo?: AlvoDoGuiaDeTurno | null
+  guiaPecaId?: string | null
+  guiaPeaoId?: string | null
 }
 
 /**
@@ -125,6 +135,9 @@ export function TabuleiroMirrorDOM({
   sanidadePorPeao = {},
   encaixeTrigger = null,
   estadoVisualDoAtaque = null,
+  guiaAlvo = null,
+  guiaPecaId = null,
+  guiaPeaoId = null,
 }: TabuleiroMirrorDOMProps) {
   // Mesma derivação pura usada pela cena: resolve a peça sob o peão selecionado
   // (null quando o peão está sobre a Mesa ou sem peça → sem conexões destacadas).
@@ -163,6 +176,7 @@ export function TabuleiroMirrorDOM({
       data-testid="tabuleiro"
       aria-hidden="true"
       className="pointer-events-none absolute inset-0"
+      data-guia={guiaAlvo === 'tabuleiro' ? 'true' : undefined}
       onClick={aoDesselecionar}
     >
       {todasCelulas.map((celula) => {
@@ -185,6 +199,7 @@ export function TabuleiroMirrorDOM({
             data-vaga-pontilhada={vagaPontilhada ? 'true' : undefined}
             data-travessia={travessiaSet.has(chave) ? 'true' : undefined}
             data-iluminada={iluminada ? 'true' : undefined}
+            data-guia={guiaAlvo === 'vagas' && vaga ? 'true' : undefined}
             onClick={(e) => {
               aoClicarCelula(celula, e)
             }}
@@ -224,6 +239,7 @@ export function TabuleiroMirrorDOM({
                   ? 'true'
                   : 'false'
               }
+              data-guia={guiaAlvo === 'bandeja' && guiaPecaId !== null && pecaCorrente.pecaId === guiaPecaId ? 'true' : undefined}
               onClick={(e) => {
                 // stopPropagation: a raiz desseleciona ao clicar área inerte.
                 e.stopPropagation()
@@ -241,6 +257,7 @@ export function TabuleiroMirrorDOM({
               data-testid="mesa-peca-inicial"
               data-tipo={peca.tipo}
               data-peca-id={peca.pecaId}
+              data-guia={guiaAlvo === 'inicial-propria' && peca.pecaId === guiaPecaId ? 'true' : undefined}
               onClick={(e) => {
                 e.stopPropagation()
                 aoClicarPecaDaMesa(peca.pecaId)
@@ -281,6 +298,13 @@ export function TabuleiroMirrorDOM({
             estadoInteracao && estadoInteracao.pecaEmManipulacaoId === p.pecaId
               ? 'true'
               : undefined
+          }
+          data-guia={
+            guiaAlvo === 'destino-proprio' && p.pecaId === guiaPecaId
+              ? 'true'
+              : guiaAlvo === 'destino' && destinosSet.has(p.pecaId)
+                ? 'true'
+                : undefined
           }
           onClick={(e) => {
             aoClicarCelula(p.celula, e)
@@ -331,6 +355,7 @@ export function TabuleiroMirrorDOM({
               data-sanidade={percepcao ? String(percepcao.sanidade) : undefined}
               data-em-baixa={percepcao?.emBaixaIluminacao ? 'true' : undefined}
               data-amedrontado={percepcao?.amedrontado ? 'true' : undefined}
+              data-guia={guiaAlvo === 'peao-proprio' && peao.peaoId === guiaPeaoId ? 'true' : undefined}
               onClick={(e) => {
                 // stopPropagation: não deixar o clique chegar ao "clique fora"
                 // da raiz, que desselecionaria na sequência.

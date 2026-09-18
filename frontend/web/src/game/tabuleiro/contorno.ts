@@ -18,6 +18,14 @@ export const COR_CONTORNO_PADRAO = '#ffe08a'
 /** Branco do contorno do peão selecionado (legível sobre qualquer cor). */
 export const COR_CONTORNO_PEAO_SELECIONADO = '#ffffff'
 
+/**
+ * Ciano do contorno do guia de turno (issue #441): linguagem inédita sobre
+ * alvos acionáveis — tracejado ciano no DOM (`patterns.css`), casca chapada
+ * ciano na cena 3D — distinta da seleção (branco) e da vez (âmbar). Só
+ * visual: nunca altera layout nem intercepta cliques.
+ */
+export const COR_CONTORNO_GUIA = '#22d3ee'
+
 /** Azul-claro do escudo do ataque (peça protegida reagindo, issue #385). */
 export const COR_CONTORNO_ESCUDO_ATAQUE = '#7dd3fc'
 

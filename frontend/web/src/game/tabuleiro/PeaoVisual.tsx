@@ -15,6 +15,11 @@ interface PeaoVisualProps {
   escala?: number
   /** Destaque por contorno branco quando este peão é o selecionado. */
   selecionado?: boolean
+  /**
+   * Guia de turno (issue #441): destaque ciano sobre o peão acionável do
+   * passo atual — repassado ao avatar/placeholder; nunca bloqueia cliques.
+   */
+  emGuia?: boolean
   /** Destaque emissivo suave quando este peão é o do Jogador Ativo (#118). */
   ativo?: boolean
   /**
@@ -86,6 +91,7 @@ export function PeaoVisual({
   position,
   escala = 1,
   selecionado = false,
+  emGuia = false,
   ativo = false,
   emBaixaIluminacao = false,
   aoClicar,
@@ -98,6 +104,7 @@ export function PeaoVisual({
       position={position}
       escala={escala}
       selecionado={selecionado}
+      emGuia={emGuia}
       ativo={ativo}
       aoClicar={aoClicar}
     />
@@ -112,6 +119,7 @@ export function PeaoVisual({
         position={position}
         escala={escala}
         selecionado={selecionado}
+        emGuia={emGuia}
         emBaixaIluminacao={emBaixaIluminacao}
         aoClicar={aoClicar}
       />

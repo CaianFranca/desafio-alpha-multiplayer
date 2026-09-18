@@ -66,7 +66,16 @@ import {
 import type { EstadoDoTabuleiroNoCliente, SanidadePorPeao } from '../game/tabuleiro/reducao'
 import { mapearFinalizarManipulacao, mapearGiro } from '../game/tabuleiro/interacao'
 import type { ComandoDePeaoDoDespacho, EstadoInteracaoPeoes } from '../game/tabuleiro/interacaoPeoes'
-import { bordaDaTravessiaPendente, mapearFinalizarRecebida } from '../game/tabuleiro/interacaoPeoes'
+import { bordaDaTravessiaPendente, inicialDaCorDoPeao, mapearFinalizarRecebida } from '../game/tabuleiro/interacaoPeoes'
+import {
+  etapaDoGuiaDeTurno,
+  expirarMemoriaLegadaDoGuia,
+  lerGuiaLigado,
+  passoDeAvancoImediato,
+  passoDeExibicaoUnica,
+  salvarGuiaLigado,
+} from '../game/tabuleiro/guiaDeTurno'
+import type { AlvoDoGuiaDeTurno } from '../game/tabuleiro/guiaDeTurno'
 import type { PeaoId } from '../game/tabuleiro/contrato'
 import { giroAlteraConexao, quantidadeValidaDeJogadores, ehPecaDeMonstro } from '../game/tabuleiro/contrato'
 import { montarImagemPorJogador } from '../game/tabuleiro/avatares'
@@ -170,6 +179,29 @@ function limparDesistenciaPendente(partidaId: string | null): void {
     window.localStorage.removeItem(chaveDesistenciaPendente(partidaId))
   } catch {
     // Sem armazenamento, nada a limpar.
+  }
+}
+
+/**
+ * Memória do guia de turno (issue #441): switch global à parte; aqui só o
+ * zerado por Partida (ensinados + fim do fluxo normal + etapa anterior).
+ */
+interface MemoriaDoGuia {
+  partidaId: string | null
+  ensinados: ReadonlySet<string>
+  normalConcluido: boolean
+  turnoNormalVisto: boolean
+  etapaAnteriorId: string | null
+}
+
+function carregarMemoriaDoGuia(id: string | null): MemoriaDoGuia {
+  // Zerada por Partida: só sessão/montagem — sem leitura de armazenamento.
+  return {
+    partidaId: id,
+    ensinados: new Set(),
+    normalConcluido: false,
+    turnoNormalVisto: false,
+    etapaAnteriorId: null,
   }
 }
 
@@ -2004,6 +2036,128 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
     (faseDoTurno === 'encerrar' ? true : peaoProprioId !== null)
   const brilhoDoBotaoAnimado = botaoDeTurnoAcionavel && !prefereMovimentoReduzido
 
+  // ── Guia de turno (issue #441): switch persistido + memória por Partida ──
+  // Só frontend, só dono do turno, nunca espectador, Amedrontado sem guia.
+  // A memória vive em estado local (só sessão/montagem, zerada por Partida);
+  // só o switch global persiste. Passo de avanço imediato (turno, permanecer)
+  // entra ao exibir e cede ao seguinte no mesmo ciclo; giro/confirmação
+  // entram ao concluir (quando a etapa muda); bandeja e vagas alternam pela
+  // ação real de puxar (`correntePuxada`, espelho do pull local da cena); o
+  // fim do meu turno seguinte conclui o fluxo normal (o guia termina depois
+  // dele).
+  const [memoriaDoGuia, setMemoriaDoGuia] = useState<MemoriaDoGuia>(() => carregarMemoriaDoGuia(partidaId))
+  const [guiaLigado, setGuiaLigado] = useState<boolean>(() => lerGuiaLigado())
+  const [guiaModalAberto, setGuiaModalAberto] = useState(false)
+  const mudarGuiaLigado = useCallback((ligado: boolean) => {
+    salvarGuiaLigado(ligado)
+    setGuiaLigado(ligado)
+  }, [])
+  // Pull da bandeja espelhado para o guia (issue #441): o estado segue local
+  // no AmbienteDeJogo; aqui só o booleano vigente alimenta `correntePuxada`
+  // da máquina (bandeja exige `false`, vagas exige `true`). Reset volta a
+  // `false` via o próprio callback da cena.
+  const [guiaCorrentePuxada, setGuiaCorrentePuxada] = useState(false)
+  const aoPuxadaDaBandejaMudar = useCallback((puxada: boolean) => {
+    setGuiaCorrentePuxada(puxada)
+  }, [])
+  // Peça Inicial própria (issue #441): derivada só da cor do peão próprio
+  // (`peao-branco` → `inicial-1`, mesma fonte do gate "Inicial primeiro").
+  // Sem chute pela ordem de entrada: sem cor inferível, sem peça do passo.
+  const minhaInicialId =
+    peaoProprioId !== null ? inicialDaCorDoPeao(peaoProprioId) : null
+  // Preview provisório em foco (mesma fonte do espelho/cena, sem o gate de
+  // pull local): pendência com célula-alvo ainda não posicionada.
+  const temPreviewDoGuiaEmFoco =
+    minhaVez &&
+    modelo.recebidasPendentes.some(
+      (r) => r.celulaAlvo !== null && !modelo.posicionadas.some((p) => p.pecaId === r.pecaId),
+    )
+  const etapaDoGuia = useMemo(() => {
+    if (!estadoEmAndamento || emResultado || emNaoInicio) return null
+    return etapaDoGuiaDeTurno({
+      meuTurno: minhaVez,
+      amedrontado: jogadorId !== null ? (modelo.jogadorPorId[jogadorId]?.amedrontado ?? false) : false,
+      guiaLigado,
+      rodada: modelo.rodada,
+      inicialPropriaNaMesa: minhaInicialId !== null && modelo.iniciais.some((p) => p.pecaId === minhaInicialId),
+      inicialPropriaPosicionada: minhaInicialId !== null && modelo.posicionadas.some((p) => p.pecaId === minhaInicialId),
+      inicialPropriaEmFoco: minhaInicialId !== null && modelo.pecaSelecionadaId === minhaInicialId,
+      temManipulacao: modelo.pecaEmManipulacaoId !== null,
+      temPreviewEmFoco: temPreviewDoGuiaEmFoco,
+      peaoSelecionadoEhProprio: peaoProprioId !== null && modelo.peaoSelecionadoId === peaoProprioId,
+      peaoProprioPosicionado,
+      posicaoConfirmadaNoTurno: modelo.posicaoConfirmadaNoTurno,
+      movimentouNoTurno: modelo.movimentouNoTurno,
+      atravessouNoTurno: modelo.atravessouNoTurno,
+      temRecebidaPendente: modelo.recebidasPendentes.length > 0,
+      correntePuxada: guiaCorrentePuxada,
+      faseDoTurno,
+      ensinados: memoriaDoGuia.ensinados,
+      fluxoNormalConcluido: memoriaDoGuia.normalConcluido,
+    })
+  }, [estadoEmAndamento, emResultado, emNaoInicio, minhaVez, jogadorId, modelo, guiaLigado, minhaInicialId, temPreviewDoGuiaEmFoco, peaoProprioId, peaoProprioPosicionado, faseDoTurno, memoriaDoGuia, guiaCorrentePuxada])
+  // Memória "já ensinado" do guia (issue #441): avanço em efeito após o
+  // commit, nunca no render — `setState` durante o render quebra a
+  // renderização concorrente. A memória é zerada por Partida (só
+  // sessão/montagem): ao trocar de `partidaId` o efeito recomeça do zero e
+  // expira as chaves legadas; nenhum write de ensinados vai ao
+  // `localStorage` (só o switch global persiste). Todos os writes vivem
+  // neste efeito, nunca no render.
+  const etapaDoGuiaId = etapaDoGuia?.id ?? null
+  const rodadaDoModelo = modelo.rodada
+  // Expira o legado persistido ao montar/trocar de Partida (migração).
+  useEffect(() => {
+    expirarMemoriaLegadaDoGuia(partidaId)
+  }, [partidaId])
+  useEffect(() => {
+    if (
+      memoriaDoGuia.partidaId === partidaId &&
+      memoriaDoGuia.etapaAnteriorId === etapaDoGuiaId &&
+      (minhaVez || !memoriaDoGuia.turnoNormalVisto) &&
+      (!minhaVez || rodadaDoModelo === null || rodadaDoModelo === 1 || memoriaDoGuia.turnoNormalVisto)
+    ) {
+      return
+    }
+    const base = memoriaDoGuia.partidaId !== partidaId ? carregarMemoriaDoGuia(partidaId) : memoriaDoGuia
+    const idAtual = base.partidaId === partidaId ? etapaDoGuiaId : null
+    const anterior = base.etapaAnteriorId
+    const idsEnsinar = new Set<string>()
+    if (idAtual !== null && passoDeAvancoImediato(idAtual) && !base.ensinados.has(idAtual)) {
+      idsEnsinar.add(idAtual)
+    }
+    if (anterior !== null && anterior !== idAtual && passoDeExibicaoUnica(anterior) && !base.ensinados.has(anterior)) {
+      idsEnsinar.add(anterior)
+    }
+    // Bandeja/vagas (HU8): exibição única sem avanço imediato — a troca
+    // entre elas segue o puxar (`correntePuxada`), sem temporizador de ciclo.
+    const normalTerminou = !minhaVez && base.turnoNormalVisto
+    const proxima: MemoriaDoGuia = {
+      partidaId: base.partidaId,
+      ensinados: idsEnsinar.size > 0 ? new Set([...base.ensinados, ...idsEnsinar]) : base.ensinados,
+      normalConcluido: normalTerminou ? true : base.normalConcluido,
+      turnoNormalVisto: normalTerminou
+        ? false
+        : minhaVez && rodadaDoModelo !== null && rodadaDoModelo !== 1
+          ? true
+          : base.turnoNormalVisto,
+      etapaAnteriorId: idAtual,
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- avanço da memória "já ensinado" do guia em efeito pós-commit (bloqueante da review: setState no render), com guarda de convergência acima
+    setMemoriaDoGuia(proxima)
+  }, [memoriaDoGuia, partidaId, etapaDoGuiaId, minhaVez, rodadaDoModelo])
+  const guiaAlvo: AlvoDoGuiaDeTurno | null = etapaDoGuia?.alvo ?? null
+  // Peça do passo do guia (issue #441): uma por etapa, validada contra o
+  // modelo — Inicial/destino é a própria Inicial (posicionada ou na mesa);
+  // bandeja é a corrente (`recebidasPendentes[0].pecaId`); giro/OK é só
+  // texto (sem peça, sem chute à manipulação). Demais alvos (peão, botões,
+  // tabuleiro, vagas, texto) não têm peça.
+  const guiaPecaId: string | null =
+    guiaAlvo === 'bandeja'
+      ? (modelo.recebidasPendentes[0]?.pecaId ?? null)
+      : guiaAlvo === 'inicial-propria' || guiaAlvo === 'destino-proprio'
+        ? minhaInicialId
+        : null
+
   // Devolução de foco do overlay bloqueante: rastreia o último foco fora
   // do overlay (via focusin — o auto-focus do filho roda antes do efeito
   // do pai, então salvar na transição já seria tarde) e restaura ao
@@ -2064,7 +2218,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
       */}
       <div
         data-testid="cena-interativa"
-        inert={(chatAbertoParaInert || tutorialAbertoParaInert) && estadoEmAndamento}
+        inert={(chatAbertoParaInert || guiaModalAberto || tutorialAbertoParaInert) && estadoEmAndamento}
       >
       <AmbienteDeJogo
         bordaPx={bordaPx}
@@ -2089,6 +2243,10 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         onFimEncaixe={onFimEncaixe}
         emBaixaIluminacaoPorPeaoId={emBaixaEstavel}
         estadoVisualDoAtaque={estadoVisualDoAtaque}
+        guiaAlvo={guiaAlvo}
+        guiaPecaId={guiaPecaId}
+        guiaPeaoId={peaoProprioId}
+        onPuxadaDaBandejaMudou={aoPuxadaDaBandejaMudar}
       />
       </div>
       {/*
@@ -2223,6 +2381,13 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           onSairMesmoAssim={sairMesmoAssim}
           onCancelarSaida={cancelarSaida}
           compacto={viewportCompacto}
+          etapaDoGuiaTexto={etapaDoGuia?.texto ?? null}
+          guiaAlvo={guiaAlvo}
+          guiaLigado={guiaLigado}
+          onMudarGuiaLigado={mudarGuiaLigado}
+          guiaModalAberto={guiaModalAberto}
+          onAbrirGuiaModal={() => setGuiaModalAberto(true)}
+          onFecharGuiaModal={() => setGuiaModalAberto(false)}
           onAbrirTutorial={abrirTutorial}
         />
       ) : null}
@@ -2270,7 +2435,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
         <div
           data-testid="controles-de-turno"
           data-compacto={viewportCompacto ? 'true' : 'false'}
-          inert={(chatAbertoParaInert || tutorialAbertoParaInert) && estadoEmAndamento}
+          inert={(chatAbertoParaInert || guiaModalAberto || tutorialAbertoParaInert) && estadoEmAndamento}
           style={
             viewportCompacto
               ? {
@@ -2292,6 +2457,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               <button
                 type="button"
                 data-testid="botao-permanecer"
+                data-guia={guiaAlvo === 'botao-permanecer' ? 'true' : undefined}
                 onClick={permanecerNoTurno}
                 disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
                 className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
@@ -2311,6 +2477,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               <button
                 type="button"
                 data-testid="botao-confirmar-posicao"
+                data-guia={guiaAlvo === 'botao-confirmar' ? 'true' : undefined}
                 onClick={confirmarPosicaoNoTurno}
                 disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
                 className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
@@ -2330,6 +2497,7 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
               <button
                 type="button"
                 data-testid="botao-encerrar-turno"
+                data-guia={guiaAlvo === 'botao-encerrar' ? 'true' : undefined}
                 onClick={encerrarTurno}
                 disabled={entradaBloqueadaPeloAtaque}
                 className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"

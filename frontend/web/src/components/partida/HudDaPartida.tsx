@@ -22,9 +22,10 @@
  * `env(safe-area-inset-*)` nas bordas para não cobrir alvos de toque.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { HEX_COR_PEAO, ALVO_GERADORES_LIGADOS, type CorDoPeao } from '../../game/tabuleiro/contrato'
 import type { PercepcaoDeJogador } from '../../game/tabuleiro/reducao'
+import type { AlvoDoGuiaDeTurno } from '../../game/tabuleiro/guiaDeTurno'
 import type { PresencaNaPartidaWire } from '@flicker/shared'
 import { useCronometroDaPartida } from './useCronometroDaPartida'
 import { useViewportCompacto } from '../../hooks/useViewportCompacto'
@@ -36,7 +37,7 @@ export { deveUsarHudCompacto } from '../../hooks/useViewportCompacto'
 export interface HudDaPartidaProps {
   /** Projeção jogadorId → dados de exibição (snapshot + deltas, somente leitura). */
   jogadorPorId: Readonly<Record<string, PercepcaoDeJogador>>
-  /** Jogador com a vez (null entre turnos). */
+  /** Jogador em turno (null entre turnos). */
   jogadorAtivoId: string | null
   /** Jogador local (Sessão autenticada); null quando desconhecido. */
   jogadorLocalId: string | null
@@ -78,6 +79,20 @@ export interface HudDaPartidaProps {
    * ponto mais alto para testes com viewport mockado.
    */
   compacto?: boolean | null
+  /**
+   * Guia de turno (issue #441): texto da etapa atual (null = sem guia).
+   * Card fixo pequeno com blur acima dos objetivos, sem interceptar cliques.
+   */
+  etapaDoGuiaTexto?: string | null
+  /** Alvo atual do guia (só `turno` acende aqui — o resto vive no espelho). */
+  guiaAlvo?: AlvoDoGuiaDeTurno | null
+  /** Switch "Guia do Jogador" (persistido no navegador, default ligado). */
+  guiaLigado?: boolean
+  onMudarGuiaLigado?: (ligado: boolean) => void
+  /** Modal de configurações do guia (foco gerenciado, cena inert no pai). */
+  guiaModalAberto?: boolean
+  onAbrirGuiaModal?: () => void
+  onFecharGuiaModal?: () => void
   /**
    * Abre o Tutorial da Partida (issue #434): modal em carrossel minimizado
    * para este botão. Omitido = sem botão (HUD sem Tutorial). Sem badge —
@@ -210,6 +225,13 @@ export function HudDaPartida({
   onSairMesmoAssim,
   onCancelarSaida,
   compacto = null,
+  etapaDoGuiaTexto = null,
+  guiaAlvo = null,
+  guiaLigado = true,
+  onMudarGuiaLigado,
+  guiaModalAberto = false,
+  onAbrirGuiaModal,
+  onFecharGuiaModal,
   onAbrirTutorial,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
@@ -220,6 +242,28 @@ export function HudDaPartida({
   // página, mas o modal segue aberto até o navigate assíncrono.
   const [saidaEnviada, setSaidaEnviada] = useState(false)
   const emModoCompacto = useViewportCompacto(compacto)
+  // Foco gerenciado do modal do guia (#441): ao abrir, o foco vai ao switch;
+  // Escape fecha; ao fechar, o foco volta ao botão de configurações.
+  const botaoConfigRef = useRef<HTMLButtonElement | null>(null)
+  const switchRef = useRef<HTMLButtonElement | null>(null)
+  const guiaEstavaAbertoRef = useRef(false)
+  useEffect(() => {
+    if (guiaModalAberto) {
+      guiaEstavaAbertoRef.current = true
+      switchRef.current?.focus()
+    } else if (guiaEstavaAbertoRef.current) {
+      guiaEstavaAbertoRef.current = false
+      botaoConfigRef.current?.focus()
+    }
+  }, [guiaModalAberto])
+  useEffect(() => {
+    if (!guiaModalAberto) return
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onFecharGuiaModal?.()
+    }
+    window.addEventListener('keydown', aoTeclar)
+    return () => window.removeEventListener('keydown', aoTeclar)
+  }, [guiaModalAberto, onFecharGuiaModal])
 
   // Ordenação estável: recomputada apenas quando o modelo muda — o cronômetro
   // vive isolado em <CronometroDoHud>, então o tick de 1×/s não re-renderiza
@@ -232,8 +276,8 @@ export function HudDaPartida({
     (jogadorLocalId !== null ? ordenados.find((j) => j.jogadorId === jogadorLocalId) : undefined) ??
     ordenados.find((j) => j.jogadorId === jogadorAtivoId) ??
     ordenados[0]
-  // Anel da vez: só pisca quando a vez é de fato do jogador local.
-  const ehMinhaVez =
+  // Anel do turno: só pisca quando o turno é de fato do jogador local.
+  const ehMeuTurno =
     jogadorLocalId !== null &&
     jogadorLocal.jogadorId === jogadorLocalId &&
     jogadorAtivoId === jogadorLocalId
@@ -447,6 +491,21 @@ export function HudDaPartida({
         ) : null}
         <button
           type="button"
+          ref={botaoConfigRef}
+          data-testid="guia-config-botao"
+          aria-label="Configurações do guia"
+          title="Configurações do guia"
+          aria-expanded={guiaModalAberto}
+          onClick={() => {
+            if (guiaModalAberto) onFecharGuiaModal?.()
+            else onAbrirGuiaModal?.()
+          }}
+          className="pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded border border-zinc-700 px-2 text-zinc-300 hover:border-zinc-400 hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-amber-500"
+        >
+          <span aria-hidden="true">⚙</span>
+        </button>
+        <button
+          type="button"
           data-testid="hud-sair"
           onClick={() => {
             setSaidaEnviada(false)
@@ -530,6 +589,52 @@ export function HudDaPartida({
           </div>
         </div>
       ) : null}
+      {guiaModalAberto ? (
+        <div
+          data-testid="guia-config-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Configurações do guia"
+          style={{
+            right: 'calc(1.5rem + env(safe-area-inset-right))',
+            top: 'calc(5rem + env(safe-area-inset-top))',
+          }}
+          className="pointer-events-auto absolute right-6 top-20 flex max-w-[min(18rem,calc(100vw-3rem))] flex-col gap-3 rounded bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-xl"
+        >
+          <span className="font-display text-[length:var(--hud-rotulo,0.75rem)] leading-4 font-semibold uppercase tracking-[0.28em] text-zinc-300">
+            Guia do Jogador
+          </span>
+          <button
+            type="button"
+            ref={switchRef}
+            data-testid="guia-switch"
+            role="switch"
+            aria-checked={guiaLigado}
+            aria-label="Guia do Jogador"
+            onClick={() => onMudarGuiaLigado?.(!guiaLigado)}
+            className="flex min-h-[44px] items-center justify-between gap-3 rounded border border-zinc-700 px-3 py-2 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+          >
+            <span>Guia do Jogador</span>
+            <span
+              aria-hidden="true"
+              data-ativo={guiaLigado ? 'true' : 'false'}
+              className={`relative h-5 w-9 rounded-full transition-colors ${guiaLigado ? 'bg-cyan-500' : 'bg-zinc-600'}`}
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${guiaLigado ? 'left-[1.125rem]' : 'left-0.5'}`}
+              />
+            </span>
+          </button>
+          <button
+            type="button"
+            data-testid="guia-config-fechar"
+            onClick={() => onFecharGuiaModal?.()}
+            className="min-h-[44px] rounded border border-zinc-600 px-4 py-2 text-[length:var(--hud-rotulo,0.75rem)] leading-4 uppercase tracking-wider text-zinc-200 hover:border-zinc-400 focus-visible:outline-2 focus-visible:outline-amber-500"
+          >
+            Fechar
+          </button>
+        </div>
+      ) : null}
       {volumeAberto ? <ModalDeVolume aoFechar={() => setVolumeAberto(false)} /> : null}
 
       {/* ── inf-esq: jogador local (retrato + Apelido + Sanidade + estados) ── */}
@@ -542,7 +647,7 @@ export function HudDaPartida({
       >
         <div data-testid="hud-jogador-local" data-jogador-id={jogadorLocal.jogadorId} className="flex items-center gap-3">
           <div className={`relative flex items-center justify-center ${emModoCompacto ? 'h-12 w-12' : 'h-20 w-20'}`}>
-            {ehMinhaVez ? (
+            {ehMeuTurno ? (
               <span
                 data-testid="hud-anel-da-vez"
                 aria-hidden="true"
@@ -551,10 +656,10 @@ export function HudDaPartida({
             ) : null}
             <div
               role="img"
-              aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMinhaVez ? ', com a vez' : ''}`}
+              aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMeuTurno ? ', no turno' : ''}`}
               data-compacto={emModoCompacto ? 'true' : undefined}
               className={`flex items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display font-semibold transition-colors duration-500 ${emModoCompacto ? 'h-12 w-12 text-base' : 'h-20 w-20 text-2xl'} ${
-                ehMinhaVez ? 'border-amber-300/40' : 'border-zinc-700'
+                ehMeuTurno ? 'border-amber-300/40' : 'border-zinc-700'
               }`}
             >
               <ConteudoDoAvatar
@@ -672,6 +777,38 @@ export function HudDaPartida({
         )}
       </div>
 
+      {/* ── Guia de turno (#441): card visual fixo pequeno com blur acima
+          dos objetivos (inf-centro conquistas), sem interceptar cliques; a
+          etapa é anunciada num nó vivo `sr-only` separado (o card visual é
+          `aria-hidden` — um único anunciador evita duplo anúncio e
+          re-anúncios de re-render) ── */}
+      {etapaDoGuiaTexto !== null ? (
+        <>
+          <div
+            style={{ bottom: emModoCompacto ? 'calc(5rem + env(safe-area-inset-bottom))' : 'calc(7rem + env(safe-area-inset-bottom))' }}
+            className="pointer-events-none absolute left-1/2 -translate-x-1/2"
+            aria-hidden="true"
+          >
+            <div
+              data-testid="guia-de-turno"
+              data-compacto={emModoCompacto ? 'true' : undefined}
+              className={`pointer-events-none max-w-[16rem] rounded-md border border-cyan-300/40 bg-zinc-950/70 px-3 py-1.5 text-center font-semibold text-cyan-100 shadow-[0_0_16px_rgba(34,211,238,0.25)] backdrop-blur-md ${emModoCompacto ? 'text-xs leading-4' : 'text-sm leading-5'}`}
+            >
+              {etapaDoGuiaTexto}
+            </div>
+          </div>
+          <div
+            data-testid="guia-de-turno-vivo"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only"
+          >
+            {etapaDoGuiaTexto}
+          </div>
+        </>
+      ) : null}
+
       {/* ── inf-centro: conquistas soltas abaixo do girar (Geradores | Caixa | Cartão; só ícones no compacto) ── */}
       <div
         data-testid="hud-conquistas"
@@ -788,8 +925,9 @@ export function HudDaPartida({
                     data-testid={ehAtivo ? 'hud-turno-ativo' : 'hud-turno-proximo'}
                     data-jogador-id={jogadorId}
                     data-presenca={emReconexaoTurno ? 'em_reconexao' : undefined}
+                    data-guia={ehAtivo && guiaAlvo === 'turno' ? 'true' : undefined}
                     role="img"
-                    aria-label={`${ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}${emReconexaoTurno ? ', reconectando' : ''}`}
+                    aria-label={`${ehAtivo ? `Turno de ${dados.apelido}` : `Próximo: ${dados.apelido}`}${emReconexaoTurno ? ', reconectando' : ''}`}
                     title={emReconexaoTurno ? `${dados.apelido} — reconectando` : dados.apelido}
                     data-compacto={emModoCompacto ? 'true' : undefined}
                     className={`flex items-center justify-center overflow-hidden rounded-lg border font-display text-xs transition-all duration-500 ${emModoCompacto ? 'h-8 w-8' : 'h-10 w-10'} ${

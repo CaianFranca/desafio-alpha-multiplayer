@@ -957,7 +957,7 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     // Turno no HUD com a vez da Ana (jogadora ativa do snapshot)
     const turnoAtivo = await screen.findByTestId('hud-turno-ativo')
     expect(turnoAtivo).toHaveAttribute('data-jogador-id', 'jogador-2')
-    expect(turnoAtivo).toHaveAttribute('aria-label', 'Vez de Ana')
+    expect(turnoAtivo).toHaveAttribute('aria-label', 'Turno de Ana')
     // Peão ativo marcado no espelho
     const peaoVermelho = screen.getAllByTestId('peao').find((el) => el.getAttribute('data-peao-id') === 'peao-vermelho')
     expect(peaoVermelho?.getAttribute('data-ativo')).toBe('true')
@@ -1028,7 +1028,7 @@ describe('partida snapshot e admissão por estado (issue #156)', () => {
     await waitFor(() => {
       const ativo = screen.getByTestId('hud-turno-ativo')
       expect(ativo).toHaveAttribute('data-jogador-id', 'jogador-2')
-      expect(ativo).toHaveAttribute('aria-label', 'Vez de Ana')
+      expect(ativo).toHaveAttribute('aria-label', 'Turno de Ana')
       expect(screen.getByTestId('hud-jogador-local')).toHaveAttribute(
         'data-jogador-id',
         '5f0b6d4e-1c2a-4f3e-9a7b-2c8d1e4f6a90',

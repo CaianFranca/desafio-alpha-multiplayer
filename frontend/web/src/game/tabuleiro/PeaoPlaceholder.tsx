@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { HEX_COR_PEAO } from './contrato'
 import type { CorDoPeao } from './contrato'
 import {
+  COR_CONTORNO_GUIA,
   COR_CONTORNO_PEAO_SELECIONADO,
   ESCALA_CONTORNO_PEAO,
   propsDoMaterialDeContorno,
@@ -33,6 +34,12 @@ interface PeaoPlaceholderProps {
   escala?: number
   /** Destaque por contorno branco quando este peão é o selecionado. */
   selecionado?: boolean
+  /**
+   * Guia de turno (issue #441): contorno ciano sobre o peão acionável do
+   * passo atual — mesma casca invertida da seleção, só o tom muda; nunca
+   * intercepta cliques.
+   */
+  emGuia?: boolean
   /** Destaque emissivo suave quando este peão é o do Jogador Ativo (#118). */
   ativo?: boolean
   /** Clique simples seleciona; sem handler, o peão é inerte ao ponteiro. */
@@ -64,12 +71,14 @@ const EMISSIVO_ATIVO = 0.35
  */
 function CascaContorno({
   position,
+  cor = COR_CONTORNO_PEAO_SELECIONADO,
   children,
 }: {
   position: [number, number, number]
+  cor?: string
   children: ReactNode
 }) {
-  const contorno = propsDoMaterialDeContorno(COR_CONTORNO_PEAO_SELECIONADO)
+  const contorno = propsDoMaterialDeContorno(cor)
   return (
     <mesh position={position} scale={ESCALA_CONTORNO_PEAO} raycast={() => null}>
       {children}
@@ -83,6 +92,7 @@ export function PeaoPlaceholder({
   position,
   escala = 1,
   selecionado = false,
+  emGuia = false,
   ativo = false,
   aoClicar,
 }: PeaoPlaceholderProps) {
@@ -178,6 +188,28 @@ export function PeaoPlaceholder({
             />
           </CascaContorno>
           <CascaContorno position={[0, Y_CABECA, 0]}>
+            <sphereGeometry args={[CABECA_RAIO, 20, 16]} />
+          </CascaContorno>
+        </>
+      ) : null}
+      {emGuia ? (
+        <>
+          {/* Cascas do guia: mesma geometria invertida da seleção, no ciano
+              inédito da #441 — coexistem com a seleção sem roubar clique */}
+          <CascaContorno position={[0, Y_BASE, 0]} cor={COR_CONTORNO_GUIA}>
+            <cylinderGeometry args={[BASE_RAIO, BASE_RAIO, BASE_ALTURA, 20]} />
+          </CascaContorno>
+          <CascaContorno position={[0, Y_CORPO, 0]} cor={COR_CONTORNO_GUIA}>
+            <cylinderGeometry
+              args={[CORPO_RAIO_TOPO, CORPO_RAIO_BASE, CORPO_ALTURA, 20]}
+            />
+          </CascaContorno>
+          <CascaContorno position={[0, Y_COLARINHO, 0]} cor={COR_CONTORNO_GUIA}>
+            <cylinderGeometry
+              args={[COLARINHO_RAIO, COLARINHO_RAIO, COLARINHO_ALTURA, 20]}
+            />
+          </CascaContorno>
+          <CascaContorno position={[0, Y_CABECA, 0]} cor={COR_CONTORNO_GUIA}>
             <sphereGeometry args={[CABECA_RAIO, 20, 16]} />
           </CascaContorno>
         </>
