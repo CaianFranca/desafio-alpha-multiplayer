@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "rewriteRelativeImportExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@flicker/config": ["../config/dist/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}

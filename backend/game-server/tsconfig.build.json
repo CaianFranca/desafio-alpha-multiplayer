@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "rewriteRelativeImportExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@flicker/config": ["../../packages/config/dist/index.d.ts"],
+      "@flicker/engine": ["../../packages/engine/dist/index.d.ts"],
+      "@flicker/shared": ["../../packages/shared/dist/index.d.ts"],
+      "@flicker/shared/server": ["../../packages/shared/dist/server.d.ts"]
+    }
+  },
+  "include": ["src"]
+}
