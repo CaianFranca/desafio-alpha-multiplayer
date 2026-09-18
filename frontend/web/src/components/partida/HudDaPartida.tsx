@@ -77,6 +77,12 @@ export interface HudDaPartidaProps {
    * ponto mais alto para testes com viewport mockado.
    */
   compacto?: boolean | null
+  /**
+   * Abre o Tutorial da Partida (issue #434): modal em carrossel minimizado
+   * para este botão. Omitido = sem botão (HUD sem Tutorial). Sem badge —
+   * todos os slides existem desde o início.
+   */
+  onAbrirTutorial?: () => void
 }
 
 interface JogadorOrdenado {
@@ -203,6 +209,7 @@ export function HudDaPartida({
   onSairMesmoAssim,
   onCancelarSaida,
   compacto = null,
+  onAbrirTutorial,
 }: HudDaPartidaProps) {
   const [confirmandoSaida, setConfirmandoSaida] = useState(false)
   // Trava local anti-duplo-clique no Confirmar (#290): o gate de rede vive na
@@ -414,6 +421,23 @@ export function HudDaPartida({
             <path d="M10 5.5a3.5 3.5 0 0 1 0 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
         </span>
+        {/*
+          Tutorial da Partida (issue #434): entre volume e sair, no padrão de
+          alvo e foco do SAIR, integral e compacto (sem badge — todos os
+          slides existem desde o início). Minimizado ≡ este botão.
+        */}
+        {onAbrirTutorial ? (
+          <button
+            type="button"
+            data-testid="hud-tutorial"
+            onClick={onAbrirTutorial}
+            aria-label="Abrir tutorial"
+            title="Tutorial"
+            className="pointer-events-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded border border-zinc-600 px-2 py-2 text-[length:var(--hud-corpo,0.875rem)] leading-5 font-semibold text-zinc-200 hover:border-zinc-400 hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-amber-500"
+          >
+            <span aria-hidden="true">?</span>
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid="hud-sair"
