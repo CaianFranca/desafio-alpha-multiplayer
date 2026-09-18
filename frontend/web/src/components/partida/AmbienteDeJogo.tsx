@@ -103,8 +103,9 @@ interface AmbienteDeJogoProps {
   estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
   /**
    * Guia de turno (issue #441): alvo atual + restrições ao próprio
-   * (peça Inicial/destino e peão do dono do turno). Repassado ao espelho
-   * DOM como `data-guia` (só visual); `null` = sem destaque.
+   * (peça Inicial/destino e peão do dono do turno). Repassado à cena 3D
+   * (contorno ciano nos meshes reais) e ao espelho DOM como `data-guia`
+   * (só visual); `null` = sem destaque.
    */
   guiaAlvo?: AlvoDoGuiaDeTurno | null
   guiaPecaId?: string | null
@@ -429,9 +430,26 @@ export function AmbienteDeJogo({
           onFimEncaixe={onFimEncaixe}
           emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
           estadoVisualDoAtaque={estadoVisualDoAtaque}
+          guiaAlvo={guiaAlvo}
+          guiaPecaId={guiaPecaId}
+          guiaPeaoId={guiaPeaoId}
         />
       </Canvas>
       </Suspense>
+      {/*
+        Sonda do guia para a cena (issue #441): a cena WebGL é caixa-preta
+        no jsdom — esta sonda prova no mesmo seam o que foi entregue ao
+        `AmbienteCena` (alvo + ids do passo). Espelha 1:1 as props da cena;
+        oculta e fora da acessibilidade (sem informação nova).
+      */}
+      <div
+        data-testid="guia-cena"
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 hidden"
+        data-alvo={guiaAlvo ?? undefined}
+        data-peca-id={guiaPecaId ?? undefined}
+        data-peao-id={guiaPeaoId ?? undefined}
+      />
       {estadoExibicao ? (
         <TabuleiroMirrorDOM
           todasCelulas={todasCelulas}

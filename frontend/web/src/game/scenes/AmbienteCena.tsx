@@ -46,6 +46,7 @@ import type {
 } from '../tabuleiro/contrato'
 import type { EstadoVisualDoAtaque } from '../tabuleiro/ataque'
 import type { VooDoPeaoPendente } from '../tabuleiro/vooDoPeao'
+import type { AlvoDoGuiaDeTurno } from '../tabuleiro/guiaDeTurno'
 import { deveSuprimirPeaoNaMesa } from '../tabuleiro/vooDoPeao'
 
 /**
@@ -269,6 +270,15 @@ interface AmbienteCenaProps {
    * slot ativo (apaga sem marcas).
    */
   estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
+  /**
+   * Guia de turno (issue #441): alvo atual + ids do dono do turno, derivados
+   * uma vez no pai (mesma fonte do espelho DOM). A cena aplica o contorno
+   * ciano nos meshes reais (Inicial própria, peão próprio, corrente da
+   * bandeja, peça do giro/OK) — só visual, nunca bloqueia cliques.
+   */
+  guiaAlvo?: AlvoDoGuiaDeTurno | null
+  guiaPecaId?: string | null
+  guiaPeaoId?: PeaoId | null
 }
 
 // Estado/flag nulos: quando a cena é montada sem canal de interação (não-DEV
@@ -310,6 +320,9 @@ export function AmbienteCena({
   onFimEncaixe,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   estadoVisualDoAtaque = null,
+  guiaAlvo = null,
+  guiaPecaId = null,
+  guiaPeaoId = null,
 }: AmbienteCenaProps) {
   // Peões não posicionados (celula === null) ficam em fileira sobre a Mesa,
   // lado oposto à zona da Caixa (-X). Índices preservam a ordem do estado.
@@ -374,6 +387,9 @@ export function AmbienteCena({
               emBaixaIluminacaoPorPeaoId={emBaixaIluminacaoPorPeaoId}
               ordemDeChegadaPorChave={estadoExibicao.ordemDeChegadaPorChave}
               quantidadeDePeoes={estadoExibicao.peoes.length}
+              guiaAlvo={guiaAlvo}
+              guiaPecaId={guiaPecaId}
+              guiaPeaoId={guiaPeaoId}
             />
             <TransicaoEncaixe
               posicionadas={estadoExibicao.posicionadas}
@@ -387,6 +403,8 @@ export function AmbienteCena({
               onComando={onComando ?? noop}
               estadoPeoes={estadoPeoes}
               onPuxar={onPuxarPecaDaBandeja}
+              guiaAlvo={guiaAlvo}
+              guiaPecaId={guiaPecaId}
             />
             <TransicaoLimpeza posicionadas={estadoExibicao.posicionadas} trigger={limpezaTrigger} />
             <BandejaDosPeoes />
@@ -403,6 +421,7 @@ export function AmbienteCena({
                   cor={peao.cor}
                   position={peaoMesaParaMundo(indiceGlobal, estadoExibicao.peoes.length)}
                   selecionado={peao.peaoId === peaoSelecionadoId}
+                  emGuia={guiaAlvo === 'peao-proprio' && guiaPeaoId !== null && peao.peaoId === guiaPeaoId}
                   ativo={peao.peaoId === peaoAtivoId}
                   emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(peao.peaoId)}
                   aoClicar={
@@ -424,6 +443,7 @@ export function AmbienteCena({
         estadoInteracao={estadoInteracao ?? null}
         estadoPeoes={estadoPeoes}
         onComando={onComando ?? noop}
+        emGuia={guiaAlvo === 'manipulacao'}
       />
     </>
   )

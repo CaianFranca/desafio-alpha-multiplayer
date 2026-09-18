@@ -745,25 +745,36 @@ export function HudDaPartida({
         )}
       </div>
 
-      {/* ── Guia de turno (#441): card fixo pequeno com blur acima dos
-          objetivos (inf-centro conquistas), sem interceptar cliques; a etapa
-          é anunciada no próprio nó vivo (role=status), sem som ── */}
+      {/* ── Guia de turno (#441): card visual fixo pequeno com blur acima
+          dos objetivos (inf-centro conquistas), sem interceptar cliques; a
+          etapa é anunciada num nó vivo `sr-only` separado (o card visual é
+          `aria-hidden` — um único anunciador evita duplo anúncio e
+          re-anúncios de re-render) ── */}
       {etapaDoGuiaTexto !== null ? (
-        <div
-          style={{ bottom: emModoCompacto ? 'calc(5rem + env(safe-area-inset-bottom))' : 'calc(7rem + env(safe-area-inset-bottom))' }}
-          className="pointer-events-none absolute left-1/2 -translate-x-1/2"
-        >
+        <>
           <div
-            data-testid="guia-de-turno"
+            style={{ bottom: emModoCompacto ? 'calc(5rem + env(safe-area-inset-bottom))' : 'calc(7rem + env(safe-area-inset-bottom))' }}
+            className="pointer-events-none absolute left-1/2 -translate-x-1/2"
+            aria-hidden="true"
+          >
+            <div
+              data-testid="guia-de-turno"
+              data-compacto={emModoCompacto ? 'true' : undefined}
+              className={`pointer-events-none max-w-[16rem] rounded-md border border-cyan-300/40 bg-zinc-950/70 px-3 py-1.5 text-center font-semibold text-cyan-100 shadow-[0_0_16px_rgba(34,211,238,0.25)] backdrop-blur-md ${emModoCompacto ? 'text-xs leading-4' : 'text-sm leading-5'}`}
+            >
+              {etapaDoGuiaTexto}
+            </div>
+          </div>
+          <div
+            data-testid="guia-de-turno-vivo"
             role="status"
             aria-live="polite"
             aria-atomic="true"
-            data-compacto={emModoCompacto ? 'true' : undefined}
-            className={`pointer-events-none max-w-[16rem] rounded-md border border-cyan-300/40 bg-zinc-950/70 px-3 py-1.5 text-center font-semibold text-cyan-100 shadow-[0_0_16px_rgba(34,211,238,0.25)] backdrop-blur-md ${emModoCompacto ? 'text-xs leading-4' : 'text-sm leading-5'}`}
+            className="sr-only"
           >
             {etapaDoGuiaTexto}
           </div>
-        </div>
+        </>
       ) : null}
 
       {/* ── inf-centro: conquistas soltas abaixo do girar (Geradores | Caixa | Cartão; só ícones no compacto) ── */}

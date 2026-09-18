@@ -7,25 +7,27 @@
  * guia avança sozinho conforme o modelo muda.
  *
  * Fluxos (decisão da #441):
- * - inicial (rodada 1): vez → Inicial → tabuleiro → giro/OK → peão →
+ * - inicial (rodada 1): turno → Inicial → tabuleiro → giro/OK → peão →
  *   destino → bandeja → vagas → encerrar. O passo de confirmação do peão
- *   (`guia-inicial-confirmar`) é global — no turno inicial o faseamento leva
+ *   (`guia-inicial-confirmar`) é global — no Primeiro Turno o faseamento leva
  *   direto a encerrar, então ele surge quando há confirmação pendente
- *   (fase `confirmar`, em geral pós-mover).
- * - normal (primeiro turno seguinte): peão → permanecer → mover; depois o
+ *   (fase `confirmar`, em geral pós-mover) e vence até a travessia
+ *   informativa (ação antes de texto).
+ * - normal (turno seguinte): peão → permanecer → mover; depois o
  *   guia termina (`fluxoNormalConcluido`, zerado por Partida). Permanecer
  *   avança ao exibir (o passo mover fixa no momento da escolha).
- * - travessia: passo automático vira texto informativo, sem alvo.
+ * - travessia: passo automático vira texto informativo transitório, sem
+ *   alvo — nunca memorizado e nunca acima de ação pendente.
  *
  * Memória "já ensinado" (zerada por Partida, chave escopada por partidaId):
- * só os passos de exibição única — vez, giro/OK, confirmação, bandeja,
- * permanecer. Vez, bandeja e permanecer avançam ao exibir (transitórios por
- * condição com o passo seguinte e cedem a ele no mesmo ciclo — o card
- * seguinte carrega a mesma informação para nada se perder). Giro e
- * confirmação fixam enquanto a condição vale e entram ao concluir.
- * Os demais repetem enquanto a condição do modelo valer (ex.: encerrar
- * reaparece após o encaixe; vagas seguem até posicionar). Amedrontado nunca
- * tem guia (o turno é pulado) e fora da vez nunca há guia (espectador).
+ * só os passos de exibição única — turno, giro/OK, confirmação, bandeja,
+ * vagas, permanecer. Turno, bandeja e permanecer avançam ao exibir
+ * (transitórios por condição com o passo seguinte e cedem a ele no mesmo
+ * ciclo — o card seguinte carrega a mesma informação para nada se perder).
+ * Giro, confirmação e vagas fixam enquanto a condição vale e entram ao
+ * concluir. Os demais repetem enquanto a condição do modelo valer (ex.:
+ * encerrar reaparece após o encaixe). Amedrontado nunca tem guia (o turno é
+ * pulado) e fora do turno nunca há guia (espectador).
  *
  * Alvos restritos ao acionável do dono do turno; o destaque é só visual
  * (`data-guia="true"`, contorno tracejado ciano) e nunca bloqueia cliques.
@@ -73,12 +75,12 @@ export interface EntradaDoGuiaDeTurno {
   readonly faseDoTurno: FaseDoTurnoDoGuia
   /** Passos de exibição única já mostrados nesta Partida. */
   readonly ensinados: ReadonlySet<string>
-  /** Primeiro turno seguinte já encerrado (o guia termina depois dele). */
+  /** Turno seguinte (pós-Primeiro Turno) já encerrado (o guia termina depois dele). */
   readonly fluxoNormalConcluido: boolean
 }
 
-const TEXTO_VEZ = 'Sua vez — veja a ordem do turno.'
-const TEXTO_INICIAL = 'Sua vez — selecione sua Peça Inicial.'
+const TEXTO_VEZ = 'Seu turno — veja a ordem do turno.'
+const TEXTO_INICIAL = 'Seu turno — selecione sua Peça Inicial.'
 const TEXTO_TABULEIRO = 'Escolha uma célula livre no tabuleiro.'
 const TEXTO_GIRO = 'Gire a peça e confirme com OK.'
 const TEXTO_PEAO = 'Selecione seu peão.'
@@ -89,28 +91,30 @@ const TEXTO_VAGAS = 'Puxe a peça da bandeja e encaixe nas vagas.'
 const TEXTO_ENCERRAR = 'Encerre seu turno.'
 const TEXTO_NORMAL_PEAO = 'Selecione seu peão para agir.'
 const TEXTO_NORMAL_PERMANECER = 'Ou permaneça para encerrar.'
-const TEXTO_NORMAL_MOVER = 'Mova para uma peça vizinha conectada.'
+const TEXTO_NORMAL_MOVER = 'Desloque seu peão para uma peça vizinha conectada.'
 const TEXTO_TRAVESSIA = 'Travessia feita — continue seu turno.'
 
 export const ID_VEZ = 'guia-inicial-vez'
 export const ID_GIRO = 'guia-inicial-giro'
 export const ID_CONFIRMAR = 'guia-inicial-confirmar'
 export const ID_BANDEJA = 'guia-inicial-bandeja'
+export const ID_VAGAS = 'guia-inicial-vagas'
 export const ID_NORMAL_PERMANECER = 'guia-normal-permanecer'
 
-/** Passos de exibição única por Partida (vez, giro/OK, confirmação, bandeja, permanecer). */
+/** Passos de exibição única por Partida (turno, giro/OK, confirmação, bandeja, vagas, permanecer). */
 const PASSOS_DE_EXIBICAO_UNICA: ReadonlySet<string> = new Set([
   ID_VEZ,
   ID_GIRO,
   ID_CONFIRMAR,
   ID_BANDEJA,
+  ID_VAGAS,
   ID_NORMAL_PERMANECER,
 ])
 
 /**
- * Subconjunto que avança ao exibir (vez, bandeja, permanecer): dividem a
+ * Subconjunto que avança ao exibir (turno, bandeja, permanecer): dividem a
  * condição com o passo seguinte e cedem a ele no mesmo ciclo — o card
- * seguinte carrega a mesma informação (vez → Inicial; bandeja → vagas;
+ * seguinte carrega a mesma informação (turno → Inicial; bandeja → vagas;
  * permanecer → mover), então nada se perde.
  */
 const PASSOS_DE_AVANCO_IMEDIATO: ReadonlySet<string> = new Set([
@@ -127,15 +131,17 @@ export function etapaDoGuiaDeTurno(entrada: EntradaDoGuiaDeTurno): EtapaDoGuiaDe
   if (!entrada.guiaLigado) return null
   if (!entrada.minhaVez) return null
   if (entrada.amedrontado) return null
-  // Travessia (ADR-0017): passo automático vira texto informativo, sem alvo.
-  if (entrada.atravessouNoTurno) {
-    return { id: 'guia-travessia-info', texto: TEXTO_TRAVESSIA, alvo: null }
-  }
   const jaEnsinado = (id: string): boolean => entrada.ensinados.has(id)
   // Confirmação pendente (global): uma vez por Partida, em qualquer rodada —
-  // no turno inicial o faseamento leva direto a encerrar.
+  // no Primeiro Turno o faseamento leva direto a encerrar. Vence a travessia
+  // informativa abaixo: ação pendente antes de texto transitório.
   if (entrada.faseDoTurno === 'confirmar' && !jaEnsinado(ID_CONFIRMAR)) {
     return { id: ID_CONFIRMAR, texto: TEXTO_CONFIRMAR, alvo: 'botao-confirmar' }
+  }
+  // Travessia (ADR-0017): passo automático vira texto informativo
+  // transitório, sem alvo — nunca memorizado, nunca acima de ação.
+  if (entrada.atravessouNoTurno) {
+    return { id: 'guia-travessia-info', texto: TEXTO_TRAVESSIA, alvo: null }
   }
   if (entrada.rodada === 1) {
     if (!entrada.inicialPropriaPosicionada && !entrada.peaoProprioPosicionado && !jaEnsinado(ID_VEZ)) {
@@ -176,15 +182,15 @@ export function etapaDoGuiaDeTurno(entrada: EntradaDoGuiaDeTurno): EtapaDoGuiaDe
     if (entrada.temRecebidaPendente && !entrada.temManipulacao && !entrada.temPreviewEmFoco && !jaEnsinado(ID_BANDEJA)) {
       return { id: ID_BANDEJA, texto: TEXTO_BANDEJA, alvo: 'bandeja' }
     }
-    if (entrada.temRecebidaPendente && !entrada.temManipulacao && !entrada.temPreviewEmFoco) {
-      return { id: 'guia-inicial-vagas', texto: TEXTO_VAGAS, alvo: 'vagas' }
+    if (entrada.temRecebidaPendente && !entrada.temManipulacao && !entrada.temPreviewEmFoco && !jaEnsinado(ID_VAGAS)) {
+      return { id: ID_VAGAS, texto: TEXTO_VAGAS, alvo: 'vagas' }
     }
     if (entrada.faseDoTurno === 'encerrar') {
       return { id: 'guia-inicial-encerrar', texto: TEXTO_ENCERRAR, alvo: 'botao-encerrar' }
     }
     return null
   }
-  // Fluxo normal: só no primeiro turno seguinte — depois o guia termina.
+  // Fluxo normal: só no turno seguinte — depois o guia termina.
   if (entrada.rodada !== 1 && !entrada.fluxoNormalConcluido) {
     if (!entrada.peaoSelecionadoEhProprio && !entrada.movimentouNoTurno && !entrada.posicaoConfirmadaNoTurno) {
       return { id: 'guia-normal-peao', texto: TEXTO_NORMAL_PEAO, alvo: 'peao-proprio' }
@@ -271,7 +277,7 @@ export function salvarEnsinados(partidaId: string, ensinados: ReadonlySet<string
   }
 }
 
-/** Primeiro turno seguinte já encerrado (guia termina depois dele). */
+/** Turno seguinte (pós-Primeiro Turno) já encerrado (guia termina depois dele). */
 export function lerFluxoNormalConcluido(partidaId: string | null): boolean {
   if (partidaId === null) return false
   try {

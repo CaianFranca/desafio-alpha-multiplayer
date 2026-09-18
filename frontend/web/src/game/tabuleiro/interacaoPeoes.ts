@@ -272,6 +272,17 @@ function corDoPeaoId(peaoId: string): string | null {
 }
 
 /**
+ * Peça Inicial do dono do peão (`peao-branco` → `inicial-1`, espelhando
+ * `estadoInicialDaPartida` do engine: ordem ↔ cor ↔ inicial-<ordem>).
+ * Null quando o dono não é inferível (ids sintéticos sem cor canônica).
+ */
+export function inicialDaCorDoPeao(peaoId: string): string | null {
+  const cor = corDoPeaoId(peaoId)
+  if (cor === null) return null
+  return `inicial-${ORDEM_DA_COR_DO_PEAO[cor]}`
+}
+
+/**
  * Gate "Inicial primeiro" (issue #249): SELECIONAR_PEAO do Peão ainda SOBRE
  * a Mesa só é emitido quando a própria Inicial do dono já está posicionada —
  * sem ela em `posicionadas`, a seleção fica silenciosa (null no mapeador,
@@ -289,10 +300,8 @@ export function podeSelecionarPeao(
   estado: Pick<EstadoInteracaoPeoes, 'posicionadas'>,
   peaoId: string,
 ): boolean {
-  const cor = corDoPeaoId(peaoId)
-  if (cor === null) return false
-  const ordem = ORDEM_DA_COR_DO_PEAO[cor]
-  const inicialDoDono = `inicial-${ordem}`
+  const inicialDoDono = inicialDaCorDoPeao(peaoId)
+  if (inicialDoDono === null) return false
   return estado.posicionadas.some((p) => p.pecaId === inicialDoDono)
 }
 

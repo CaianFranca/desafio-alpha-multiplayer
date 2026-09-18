@@ -5,6 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import type { CorDoPeao } from './contrato'
 import { AVATARES_POR_SLOT, slotDoAvatar } from './avatares'
 import {
+  COR_CONTORNO_GUIA,
   COR_CONTORNO_PEAO_SELECIONADO,
   propsDoMaterialDeContorno,
 } from './contorno'
@@ -17,6 +18,12 @@ interface PeaoAvatarProps {
   escala?: number
   /** Destaque branco do selecionado (anel no chão; nunca pinta o corpo). */
   selecionado?: boolean
+  /**
+   * Guia de turno (issue #441): anel ciano sobre o peão acionável do passo
+   * atual — linguagem inédita, fora do raio do anel de seleção para os dois
+   * coexistirem; nunca pinta o corpo nem intercepta cliques.
+   */
+  emGuia?: boolean
   /**
    * Baixa Iluminação do jogador dono do peão (estado do Vulto): troca a
    * renderização para a variante *apagado* do modelo — sinal de perigo.
@@ -47,6 +54,12 @@ const BASE_ALVO = 0.74
  */
 const ANEL_SELECAO_INTERNO = 0.35
 const ANEL_SELECAO_EXTERNO = 0.50
+/**
+ * Anel do guia (issue #441): mesma linguagem do anel de seleção, no ciano
+ * inédito e num raio externo — coexiste com a seleção sem sobrepor.
+ */
+const ANEL_GUIA_INTERNO = 0.56
+const ANEL_GUIA_EXTERNO = 0.68
 /**
  * Clona os materiais da cena: o `useLoader` cacheia o GLTF bruto e o
  * `clone()` do Object3D compartilha materiais — o clone por instância isola
@@ -130,6 +143,7 @@ export function PeaoAvatar({
   position,
   escala = 1,
   selecionado = false,
+  emGuia = false,
   emBaixaIluminacao = false,
   aoClicar,
 }: PeaoAvatarProps) {
@@ -174,6 +188,29 @@ export function PeaoAvatar({
     return anel
   }, [selecionado])
 
+  // Anel do guia: mesmo método do anel de seleção (anel chapado no chão,
+  // sem tone mapping), só o tom ciano e o raio externo mudam — sem duplicar
+  // a técnica, sem animação (compatível com `frameloop="demand"` e com
+  // `prefers-reduced-motion`: estático nos dois modos).
+  const anelDoGuia = useMemo(() => {
+    if (!emGuia) return null
+    const anel = new THREE.Mesh(
+      new THREE.RingGeometry(ANEL_GUIA_INTERNO, ANEL_GUIA_EXTERNO, 64),
+      new THREE.MeshBasicMaterial(
+        propsDoMaterialDeContorno(COR_CONTORNO_GUIA),
+      ),
+    )
+    anel.rotation.x = -Math.PI / 2
+    anel.position.y = 0.005
+    anel.material.side = THREE.FrontSide
+    anel.material.transparent = true
+    anel.material.opacity = 0.9
+    anel.material.depthWrite = false
+    // Nunca rouba clique do corpo selecionável.
+    anel.raycast = () => { }
+    return anel
+  }, [emGuia])
+
   // Só interage ao ponteiro quando há handler de seleção (idêntico ao
   // PeaoPlaceholder): os meshes do modelo borbulham até o grupo pai.
   // Group cuida do cursor via padrão global handlersDeCursor; hitbox cuida do clique (evita double-fire).
@@ -199,6 +236,7 @@ export function PeaoAvatar({
     <group position={position} scale={[escala, escala, escala]} {...groupHandlers}>
       <primitive object={cena} />
       {anelDeSelecao !== null ? <primitive object={anelDeSelecao} /> : null}
+      {anelDoGuia !== null ? <primitive object={anelDoGuia} /> : null}
       {hitboxClick ? (
         <mesh position={[0, 0.46, 0]} onClick={hitboxClick}>
           <cylinderGeometry args={[0.56, 0.56, 0.93, 24]} />

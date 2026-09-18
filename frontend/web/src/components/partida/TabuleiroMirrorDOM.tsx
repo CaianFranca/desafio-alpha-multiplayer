@@ -239,7 +239,7 @@ export function TabuleiroMirrorDOM({
                   ? 'true'
                   : 'false'
               }
-              data-guia={guiaAlvo === 'bandeja' ? 'true' : undefined}
+              data-guia={guiaAlvo === 'bandeja' && guiaPecaId !== null && pecaCorrente.pecaId === guiaPecaId ? 'true' : undefined}
               onClick={(e) => {
                 // stopPropagation: a raiz desseleciona ao clicar área inerte.
                 e.stopPropagation()

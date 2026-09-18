@@ -122,6 +122,17 @@ interface CelulaProps {
   /** Peão do Jogador Ativo da vez: destaque emissivo suave (#118). */
   peaoAtivoId?: PeaoId | null
   /**
+   * Guia de turno (issue #441): peça desta célula é o alvo acionável do
+   * passo atual — contorno ciano (sobrepõe seleção/destino no tom, nunca
+   * no clique).
+   */
+  pecaEmGuia?: boolean
+  /**
+   * Guia de turno (issue #441): peão acionável do passo atual — anel ciano
+   * (coexiste com seleção/vez, nunca bloqueia cliques).
+   */
+  peaoEmGuiaId?: PeaoId | null
+  /**
    * Peões em Baixa Iluminação do dono (issue #297): o avatar 3D troca para a
    * variante apagado — apenas Baixa Iluminação, não Amedrontado (semântica
    * original #297 preservada na co-ocupação).
@@ -404,6 +415,8 @@ export function Celula({
   iluminada = false,
   peaoSelecionadoId = null,
   peaoAtivoId = null,
+  pecaEmGuia = false,
+  peaoEmGuiaId = null,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   onSelecionarPeao,
 }: CelulaProps) {
@@ -496,6 +509,7 @@ export function Celula({
           orientacao={peca.orientacao}
           position={[0, PECA_Y, 0]}
           destacada={pecaDestacada || destinoValido || provisoria}
+          emGuia={pecaEmGuia}
           corDestaque={destinoResgate ? COR_DESTAQUE_RESGATE : undefined}
           emTelegraph={emTelegraph}
           reacaoDoAtaque={reacaoDoAtaque}
@@ -517,6 +531,7 @@ export function Celula({
             cor={peao.cor}
             position={[dx, PEAO_Y, dz]}
             selecionado={peao.peaoId === peaoSelecionadoId}
+            emGuia={peao.peaoId === peaoEmGuiaId}
             ativo={peao.peaoId === peaoAtivoId}
             emBaixaIluminacao={emBaixaIluminacaoPorPeaoId.has(peao.peaoId)}
             tremendo={reacaoDoAtaque === 'tremor'}

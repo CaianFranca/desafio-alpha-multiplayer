@@ -5,6 +5,7 @@ import { TAMANHO_CELULA } from './contrato'
 import type { TipoDaPeca, Orientacao } from './contrato'
 import {
   COR_CONTORNO_ESCUDO_ATAQUE,
+  COR_CONTORNO_GUIA,
   COR_CONTORNO_PULO_ATAQUE,
   COR_CONTORNO_TREMOR_ATAQUE,
   EXPANSAO_CONTORNO_PECA_XZ,
@@ -31,6 +32,11 @@ interface PecaPlaceholderProps {
   position?: [number, number, number]
   /** Destaque visual da peça selecionada/em manipulação. */
   destacada?: boolean
+  /**
+   * Guia de turno (issue #441): contorno ciano sobre o alvo acionável do
+   * passo atual — sobrepõe seleção/destino no tom, nunca no clique.
+   */
+  emGuia?: boolean
   /**
    * Tom do contorno de destaque (default `COR_DESTAQUE` quente). Destino de
    * resgate passa `COR_DESTAQUE_RESGATE` — sóbria, sem arte nova.
@@ -295,23 +301,29 @@ function ContornoDaPeca({
 }
 
 /**
- * Contorno de estado da peça (issue #385, follow-up): ponto único do
- * telegraph vs. destaque nos dois corpos (texturizado e fallback do
+ * Contorno de estado da peça (issue #385, follow-up + #441): ponto único do
+ * telegraph vs. destaque vs. guia nos dois corpos (texturizado e fallback do
  * `Suspense`) — casca invertida, sem handlers e com `raycast` nulo para
- * nunca roubar clique. O telegraph sobrepõe o destaque no tom vermelho
- * (`COR_TELEGRAPH_ATAQUE`, token único do ataque).
+ * nunca roubar clique. O telegraph sobrepõe tudo no tom vermelho
+ * (`COR_TELEGRAPH_ATAQUE`, token único do ataque); o guia ciano sobrepõe a
+ * seleção/destino (linguagem inédita do passo atual, sem bloquear cliques).
  */
 function ContornoDeEstado({
   emTelegraph,
   destacada,
   corDestaque,
+  emGuia = false,
 }: {
   emTelegraph: boolean
   destacada: boolean
   corDestaque: string
+  emGuia?: boolean
 }) {
   if (emTelegraph) {
     return <ContornoTelegraphPulsante corDestaque={COR_TELEGRAPH_ATAQUE} />
+  }
+  if (emGuia) {
+    return <ContornoDaPeca visivel corDestaque={COR_CONTORNO_GUIA} />
   }
   return <ContornoDaPeca visivel={destacada} corDestaque={corDestaque} />
 }
@@ -339,6 +351,7 @@ function CorpoTexturizado({
   orientacao,
   destacada,
   corDestaque,
+  emGuia = false,
   emTelegraph = false,
   cursor,
   onClick,
@@ -427,7 +440,7 @@ function CorpoTexturizado({
         <boxGeometry args={[TAMANHO_CELULA, ESPESSURA_PECA, TAMANHO_CELULA]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      <ContornoDeEstado emTelegraph={emTelegraph} destacada={destacada} corDestaque={corDestaque} />
+      <ContornoDeEstado emTelegraph={emTelegraph} destacada={destacada} corDestaque={corDestaque} emGuia={emGuia} />
     </>
   )
 }
@@ -437,6 +450,7 @@ function CorpoFallback({
   tipo,
   destacada,
   corDestaque,
+  emGuia = false,
   emTelegraph = false,
   cursor,
   onClick,
@@ -462,7 +476,7 @@ function CorpoFallback({
         <boxGeometry args={[TAMANHO_CELULA, ESPESSURA_PECA, TAMANHO_CELULA]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      <ContornoDeEstado emTelegraph={emTelegraph} destacada={destacada} corDestaque={corDestaque} />
+      <ContornoDeEstado emTelegraph={emTelegraph} destacada={destacada} corDestaque={corDestaque} emGuia={emGuia} />
     </>
   )
 }
@@ -472,6 +486,7 @@ export function PecaPlaceholder({
   orientacao,
   position,
   destacada = false,
+  emGuia = false,
   corDestaque = COR_DESTAQUE,
   emTelegraph = false,
   reacaoDoAtaque = null,
@@ -485,6 +500,7 @@ export function PecaPlaceholder({
     tipo,
     orientacao,
     destacada,
+    emGuia,
     corDestaque,
     emTelegraph,
     cursor,

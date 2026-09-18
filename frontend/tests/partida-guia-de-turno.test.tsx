@@ -19,6 +19,7 @@ import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { HudDaPartida } from '../web/src/components/partida/HudDaPartida'
 import { etapaDoGuiaDeTurno } from '../web/src/game/tabuleiro/guiaDeTurno'
+import { inicialDaCorDoPeao } from '../web/src/game/tabuleiro/interacaoPeoes'
 import type { EntradaDoGuiaDeTurno } from '../web/src/game/tabuleiro/guiaDeTurno'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { enviarLote } from './helpers/partida-ws'
@@ -113,6 +114,16 @@ function alvosComGuia(): Element[] {
   return Array.from(document.querySelectorAll('[data-guia="true"]'))
 }
 
+/** Sonda do guia para a cena 3D (issue #441): o que foi entregue ao `AmbienteCena`. */
+function sondaDaCena(): { alvo: string | null; pecaId: string | null; peaoId: string | null } {
+  const sonda = screen.getByTestId('guia-cena')
+  return {
+    alvo: sonda.getAttribute('data-alvo'),
+    pecaId: sonda.getAttribute('data-peca-id'),
+    peaoId: sonda.getAttribute('data-peao-id'),
+  }
+}
+
 let viewportOriginalLargura = 0
 let viewportOriginalAltura = 0
 function mockViewport(largura: number, altura: number): void {
@@ -177,6 +188,19 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
     expect(etapa?.alvo).toBeNull()
   })
 
+  it('confirmação pendente vence a travessia informativa', () => {
+    const etapa = etapaDoGuiaDeTurno(entradaBase({ atravessouNoTurno: true, faseDoTurno: 'confirmar' }))
+    expect(etapa?.alvo).toBe('botao-confirmar')
+  })
+
+  it('Inicial do dono deriva da cor do peão', () => {
+    expect(inicialDaCorDoPeao('peao-branco')).toBe('inicial-1')
+    expect(inicialDaCorDoPeao('peao-vermelho')).toBe('inicial-2')
+    expect(inicialDaCorDoPeao('peao-azul')).toBe('inicial-3')
+    expect(inicialDaCorDoPeao('peao-amarelo')).toBe('inicial-4')
+    expect(inicialDaCorDoPeao('peao-sintetico')).toBeNull()
+  })
+
   it('vez abre o fluxo inicial e cede à Inicial quando ensinada', () => {
     const vez = etapaDoGuiaDeTurno(entradaBase())
     expect(vez?.alvo).toBe('vez')
@@ -184,7 +208,7 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
     expect(inicial?.alvo).toBe('inicial-propria')
   })
 
-  it('giro e bandeja exibem uma vez por Partida', () => {
+  it('giro, bandeja e vagas exibem uma vez por Partida', () => {
     const estadoManipulando = {
       inicialPropriaNaMesa: false,
       inicialPropriaPosicionada: true,
@@ -216,6 +240,16 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
       }),
     )
     expect(vagas?.alvo).toBe('vagas')
+    const depoisDasVagas = etapaDoGuiaDeTurno(
+      entradaBase({
+        inicialPropriaNaMesa: false,
+        inicialPropriaPosicionada: true,
+        peaoProprioPosicionado: true,
+        temRecebidaPendente: true,
+        ensinados: new Set(['guia-inicial-vez', 'guia-inicial-bandeja', 'guia-inicial-vagas']),
+      }),
+    )
+    expect(depoisDasVagas).toBeNull()
   })
 
   it('fluxo normal tem 3 passos e depois termina', () => {
@@ -247,14 +281,15 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
 
     // [1] vez (transitória): exibida uma vez e memorizada; o card assenta na Inicial.
     expect(ensinadosDa(partidaId)).toContain('guia-inicial-vez')
-    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Sua vez — selecione sua Peça Inicial.')
+    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Seu turno — selecione sua Peça Inicial.')
 
-    // [2] só a minha Inicial destaca.
+    // [2] só a minha Inicial destaca — no espelho E na cena 3D real.
     const iniciais = screen.getAllByTestId('mesa-peca-inicial')
     expect(iniciais).toHaveLength(4)
     const comGuia = iniciais.filter((el) => el.getAttribute('data-guia') === 'true')
     expect(comGuia).toHaveLength(1)
     expect(comGuia[0]).toHaveAttribute('data-peca-id', 'inicial-1')
+    expect(sondaDaCena()).toEqual({ alvo: 'inicial-propria', pecaId: 'inicial-1', peaoId: 'peao-branco' })
 
     // [3] Inicial em foco → tabuleiro.
     act(() =>
@@ -267,6 +302,7 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     )
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Escolha uma célula livre no tabuleiro.')
     expect(screen.getByTestId('tabuleiro')).toHaveAttribute('data-guia', 'true')
+    expect(sondaDaCena()).toEqual({ alvo: 'tabuleiro', pecaId: null, peaoId: 'peao-branco' })
 
     // [4] giro/OK na manipulação (só visual, sem bloquear).
     act(() =>
@@ -284,6 +320,8 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     )
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Gire a peça e confirme com OK.')
     expect(screen.getByTestId('peca-posicionada')).toHaveAttribute('data-guia', 'true')
+    // Cena 3D real: peça do giro/OK com o id do passo de manipulação.
+    expect(sondaDaCena()).toEqual({ alvo: 'manipulacao', pecaId: 'inicial-1', peaoId: 'peao-branco' })
 
     // [5] meu peão.
     act(() =>
@@ -304,6 +342,8 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     expect(peoes.filter((el) => el.getAttribute('data-guia') === 'true').map((el) => el.getAttribute('data-peao-id'))).toEqual([
       'peao-branco',
     ])
+    // Cena 3D real: o peão próprio com o id íntegro até a cena.
+    expect(sondaDaCena()).toEqual({ alvo: 'peao-proprio', pecaId: null, peaoId: 'peao-branco' })
 
     // [6] destino próprio com o peão selecionado.
     act(() =>
@@ -321,6 +361,8 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     )
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Coloque o peão na sua peça.')
     expect(screen.getByTestId('peca-posicionada')).toHaveAttribute('data-guia', 'true')
+    // Cena 3D real: destino próprio é a Inicial posicionada.
+    expect(sondaDaCena()).toEqual({ alvo: 'destino-proprio', pecaId: 'inicial-1', peaoId: 'peao-branco' })
 
     // [10] peão posicionado sem pendências → encerrar (sem bloquear o clique).
     act(() =>
@@ -346,6 +388,7 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     const botaoEncerrar = screen.getByTestId('botao-encerrar-turno')
     expect(botaoEncerrar).toHaveAttribute('data-guia', 'true')
     expect(screen.getByTestId('guia-de-turno').className).toContain('pointer-events-none')
+    expect(sondaDaCena()).toEqual({ alvo: 'botao-encerrar', pecaId: null, peaoId: 'peao-branco' })
 
     // [8→9] recebida na bandeja: bandeja exibida uma vez, vagas assentam.
     act(() =>
@@ -371,6 +414,8 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     expect(ensinadosDa(partidaId)).toContain('guia-inicial-bandeja')
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Puxe a peça da bandeja e encaixe nas vagas.')
     expect(screen.getByTestId('caixa-peca-sorteada')).toBeInTheDocument()
+    // Cena 3D real: a corrente da bandeja com o id da recebida do passo.
+    expect(sondaDaCena()).toEqual({ alvo: 'vagas', pecaId: null, peaoId: 'peao-branco' })
 
     // Puxar revela as vagas vizinhas com o destaque do guia.
     await userEvent.click(screen.getByTestId('caixa-peca-sorteada'))
@@ -405,6 +450,8 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Encerre seu turno.')
     await userEvent.click(screen.getByTestId('botao-encerrar-turno'))
     expect(ws.sentMessages.map(String).join(' ')).toMatch(/ENCERRAR_TURNO/)
+    // Vagas de exibição única: ao concluir o passo, entra na memória da Partida.
+    expect(ensinadosDa(partidaId)).toContain('guia-inicial-vagas')
   })
 })
 
@@ -443,7 +490,7 @@ describe('Guia de turno — confirmar e fluxo normal (issues #441 [7,11,12])', (
         celula: { linha: 3, coluna: 4 },
       }),
     )
-    expect(await screen.findByText('Confirme a posição do peão.')).toBeInTheDocument()
+    expect(await screen.findByTestId('guia-de-turno-vivo')).toHaveTextContent('Confirme a posição do peão.')
     expect(screen.getByTestId('botao-confirmar-posicao')).toHaveAttribute('data-guia', 'true')
   })
 
@@ -475,6 +522,7 @@ describe('Guia de turno — confirmar e fluxo normal (issues #441 [7,11,12])', (
     expect(
       screen.getAllByTestId('peao').filter((el) => el.getAttribute('data-guia') === 'true').map((el) => el.getAttribute('data-peao-id')),
     ).toEqual(['peao-branco'])
+    expect(sondaDaCena()).toEqual({ alvo: 'peao-proprio', pecaId: null, peaoId: 'peao-branco' })
 
     // Passo 2→3: permanecer exibido uma vez, mover assenta com o destino.
     act(() =>
@@ -484,12 +532,14 @@ describe('Guia de turno — confirmar e fluxo normal (issues #441 [7,11,12])', (
       }),
     )
     expect(ensinadosDa(partidaId)).toContain('guia-normal-permanecer')
-    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Mova para uma peça vizinha conectada.')
+    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Desloque seu peão para uma peça vizinha conectada.')
     expect(screen.getByTestId('botao-permanecer')).toBeInTheDocument()
     const destinos = screen.getAllByTestId('peca-posicionada')
     expect(destinos.filter((el) => el.getAttribute('data-guia') === 'true').map((el) => el.getAttribute('data-peca-id'))).toEqual([
       'peca-b',
     ])
+    // Cena 3D real: destinos válidos acesos, sem peça restritiva no passo.
+    expect(sondaDaCena()).toEqual({ alvo: 'destino', pecaId: null, peaoId: 'peao-branco' })
 
     // Turno seguinte de outro jogador e depois o meu: guia encerrado.
     await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 })
@@ -510,6 +560,9 @@ describe('Guia de turno — quando some (issues #441 [13,14,17,18])', () => {
       criarSnapshotBase({ jogadorAtivoId: 'jogador-2', rodada: 2 }),
     )
     expect(screen.queryByTestId('guia-de-turno')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('guia-de-turno-vivo')).not.toBeInTheDocument()
+    // Sem alvo não há destaque — o peão próprio segue íntegro até a cena.
+    expect(sondaDaCena()).toEqual({ alvo: null, pecaId: null, peaoId: 'peao-branco' })
     expect(alvosComGuia()).toHaveLength(0)
   })
 
@@ -524,6 +577,9 @@ describe('Guia de turno — quando some (issues #441 [13,14,17,18])', () => {
       }),
     )
     expect(screen.queryByTestId('guia-de-turno')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('guia-de-turno-vivo')).not.toBeInTheDocument()
+    // Sem alvo não há destaque — o peão próprio segue íntegro até a cena.
+    expect(sondaDaCena()).toEqual({ alvo: null, pecaId: null, peaoId: 'peao-branco' })
     expect(alvosComGuia()).toHaveLength(0)
   })
 
@@ -587,10 +643,15 @@ describe('Guia de turno — região viva e compacto (issues #441 [15,16])', () =
   it('etapa anunciada em nó vivo próprio, sem bloquear cliques', async () => {
     await partidaComSnapshot('guia-viva', criarSnapshotBase())
     const card = screen.getByTestId('guia-de-turno')
-    expect(card).toHaveAttribute('role', 'status')
-    expect(card).toHaveAttribute('aria-live', 'polite')
-    expect(card).toHaveAttribute('aria-atomic', 'true')
     expect(card.className).toContain('pointer-events-none')
+    // Anúncio vive em nó `sr-only` separado; o card visual é `aria-hidden`.
+    const vivo = screen.getByTestId('guia-de-turno-vivo')
+    expect(vivo).toHaveAttribute('role', 'status')
+    expect(vivo).toHaveAttribute('aria-live', 'polite')
+    expect(vivo).toHaveAttribute('aria-atomic', 'true')
+    expect(vivo.className).toContain('sr-only')
+    expect(vivo).toHaveTextContent(card.textContent ?? '')
+    expect(card.closest('[aria-hidden="true"]')).not.toBeNull()
   })
 
   it('card e destaques funcionam no compacto', async () => {
@@ -623,11 +684,12 @@ describe('Guia de turno — região viva e compacto (issues #441 [15,16])', () =
         emAndamento
         emResultado={false}
         onSair={() => {}}
-        etapaDoGuiaTexto="Sua vez — veja a ordem do turno."
+        etapaDoGuiaTexto="Seu turno — veja a ordem do turno."
         guiaAlvo="vez"
       />,
     )
-    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Sua vez — veja a ordem do turno.')
+    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Seu turno — veja a ordem do turno.')
+    expect(screen.getByTestId('guia-de-turno-vivo')).toHaveTextContent('Seu turno — veja a ordem do turno.')
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-guia', 'true')
   })
 })

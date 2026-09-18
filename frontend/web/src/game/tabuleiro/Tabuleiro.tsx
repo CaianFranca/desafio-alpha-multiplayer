@@ -33,6 +33,7 @@ import {
 import { peaoMesaParaMundo } from './contrato'
 import type { VooDoPeaoPendente } from './vooDoPeao'
 import type { EstadoVisualDoAtaque } from './ataque'
+import type { AlvoDoGuiaDeTurno } from './guiaDeTurno'
 
 interface TabuleiroProps {
   posicionadas: readonly PecaPosicionada[]
@@ -119,6 +120,14 @@ interface TabuleiroProps {
    * (que segue granular: só a fatia da própria célula).
    */
   estadoVisualDoAtaque?: EstadoVisualDoAtaque | null
+  /**
+   * Guia de turno (issue #441): alvo atual + ids do dono do turno, derivados
+   * uma vez no pai (mesma fonte do espelho DOM). Só visual: contorno/anel
+   * ciano, nunca bloqueia cliques. `null` = sem destaque.
+   */
+  guiaAlvo?: AlvoDoGuiaDeTurno | null
+  guiaPecaId?: PecaId | null
+  guiaPeaoId?: PeaoId | null
   /** Quantidade de peões N=2..4 para posicionar fila da Mesa e voos mesa→peça. */
   quantidadeDePeoes?: number
 }
@@ -148,6 +157,9 @@ export function Tabuleiro({
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   ordemDeChegadaPorChave = {},
   quantidadeDePeoes = peoes.length || 4,
+  guiaAlvo = null,
+  guiaPecaId = null,
+  guiaPeaoId = null,
 }: TabuleiroProps) {
   const posicionadasPorChave = new Map<string, PecaPosicionada>()
   for (const p of posicionadas) {
@@ -263,6 +275,17 @@ export function Tabuleiro({
         const reacoesDoAtaque = estadoVisualDoAtaque?.reacoesDoAtaque ?? null
         const pecaIdEmDisparo = estadoVisualDoAtaque?.pecaIdEmDisparo ?? null
         const reacao = pecaExibida !== null ? (reacoesDoAtaque?.get(pecaExibida.pecaId) ?? null) : null
+        // Guia de turno (issue #441): só alvos acionáveis do dono do turno —
+        // destino próprio/manipulação restringem à peça do passo
+        // (`guiaPecaId`); `destino` acende os destinos válidos já derivados;
+        // peão restringe ao próprio (`guiaPeaoId`). Só visual.
+        const pecaEmGuia =
+          pecaExibida !== null &&
+          (((guiaAlvo === 'destino-proprio' || guiaAlvo === 'manipulacao') &&
+            guiaPecaId !== null &&
+            pecaExibida.pecaId === guiaPecaId) ||
+            (guiaAlvo === 'destino' && peca !== null && destinosSet.has(peca.pecaId)))
+        const peaoEmGuiaId = guiaAlvo === 'peao-proprio' ? guiaPeaoId : null
         return (
           <Celula
             key={chave}
@@ -298,6 +321,8 @@ export function Tabuleiro({
             iluminada={iluminada}
             peaoSelecionadoId={peaoSelecionadoId}
             peaoAtivoId={peaoAtivoId}
+            pecaEmGuia={pecaEmGuia}
+            peaoEmGuiaId={peaoEmGuiaId}
             onSelecionarPeao={onSelecionarPeao}
           />
         )
