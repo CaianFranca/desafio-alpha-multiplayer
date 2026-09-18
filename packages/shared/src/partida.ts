@@ -41,6 +41,13 @@
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #289/ADR-0013, consumida na #288)
 //   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId, causa? } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez); causa #295 ('desistencia'|'expiracao', ausente = desistencia implícita) + 'tempo' pela #429 (Desistência automática do relógio do turno: 4ª falta ou 2º expiry do Primeiro Turno incompleto)
+//   shared type:'FALTA_REGISTRADA' { jogadorId, totalDeFaltas } <-> engine
+//   tipo:'falta_registrada' idem (#431, ticket 2/3 — contrato ao vivo decidido
+//   aqui, reservado pela F1 da #429: abre o lote de cada resolução por expiry,
+//   antes da Passagem/queima/Desistência).
+//   shared type:'PECAS_QUEIMADAS' { pecaIds } <-> engine tipo:'pecas_queimadas'
+//   idem (#431: as pendentes saem de circulação sem retorno à Caixa; a aposta
+//   da Travessia queima no mesmo funil).
 //   shared type:'JOGADOR_EM_RECONEXAO' { jogadorId } — sem par no engine (#295, spec #292 história 2): anúncio de presença da entrada na janela, broadcast só em `em_andamento` (a `preparada` nunca emite)
 //   shared type:'JOGADOR_RECONECTADO' { jogadorId } — sem par no engine (#295): anúncio de presença da volta dentro da janela, broadcast só na re-admissão em `em_andamento` (exclui as admissões iniciais)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
@@ -232,7 +239,7 @@ export type PartidaComandoDoCliente =
 // --- Eventos servidor → cliente (18: Turno/posição/iluminação/limpeza,
 // sorteio+vaga da #138, iniciada+estado, término da #179, ataque #172/#173,
 // resgate #171, desistência #288, presença em reconexão #295, chat #390,
-// avisos de tempo de turno #429) ---
+// avisos de tempo de turno #429, falta/queima #431) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';
@@ -270,6 +277,12 @@ export interface PrimeiroTurnoAvisoFinalEvento {
   readonly type: 'PRIMEIRO_TURNO_AVISO_FINAL';
   readonly jogadorId: string;
   readonly segundosExtras: number;
+  // Tempo de turno (issue #431, ticket 2/3 relógio): deadline estendido do turno
+  // (epoch ms, agora + segundosExtras, autoridade do game-server) — o HUD
+  // reconcilia o cronômetro sem derivar do relógio local. Opcional/defensivo no
+  // padrão do `TURNO_INICIADO`: payloads de binário anterior omitem o campo e o
+  // cliente normaliza ausente para null (segue contando para o deadline antigo).
+  readonly deadlineDoTurnoEm?: number | null;
 }
 
 export interface PosicaoConfirmadaEvento {
@@ -579,6 +592,24 @@ export interface DesistenciaRegistradaWireEvento {
   readonly causa?: CausaDesistencia;
 }
 
+// Tempo de turno (issue #431, spec #405): falta ao vivo — cada turno encerrado
+// pelo relógio soma 1 (exceto o aviso final jogado dentro do acréscimo); na 4ª
+// (LIMITE_FALTAS_PARA_DESISTENCIA do engine) a Desistência causa 'tempo' segue
+// no mesmo lote. Shape 1:1 com FaltaRegistradaEvento do domínio.
+export interface FaltaRegistradaWireEvento {
+  readonly type: 'FALTA_REGISTRADA';
+  readonly jogadorId: string;
+  readonly totalDeFaltas: number;
+}
+
+// Tempo de turno (issue #431): queima ao vivo — peças pendentes do Recebimento
+// (e a aposta da Travessia, quando posicionada) saem de circulação sem retorno
+// à Caixa. Shape 1:1 com PecasQueimadasEvento do domínio.
+export interface PecasQueimadasWireEvento {
+  readonly type: 'PECAS_QUEIMADAS';
+  readonly pecaIds: readonly PecaId[];
+}
+
 // Presença em reconexão (issue #295, spec #292 história 2): a entrada na
 // janela e a volta dentro dela são anunciadas aos restantes para que o
 // cliente projete o indicador "reconectando" (#294) — sem par no engine (o
@@ -629,6 +660,8 @@ export type PartidaEventoDoServidor =
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
   | DesistenciaRegistradaWireEvento
+  | FaltaRegistradaWireEvento
+  | PecasQueimadasWireEvento
   | JogadorEmReconexaoWireEvento
   | JogadorReconectadoWireEvento
   | MensagemDeChatDaPartidaEvento;

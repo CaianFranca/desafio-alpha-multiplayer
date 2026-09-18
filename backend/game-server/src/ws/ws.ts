@@ -51,6 +51,10 @@ import {
   definirJanelaDeReconexao,
   limparJanelaDeReconexao,
 } from '../partidas/reconexao-em-andamento.ts';
+import {
+  pausarRelogioDoTurnoSeAtivo,
+  retomarRelogioDoTurnoSeAtivo,
+} from '../partidas/relogio-do-turno.ts';
 import { obterEstadoDaPartida } from '../partidas/estado.ts';
 import { paraSnapshotWire } from '../partidas/snapshot.ts';
 import { validarTokenDeSessao, validarSessaoNoRedis } from '../auth.ts';
@@ -240,13 +244,22 @@ function limparAdmissaoFalha(
   conexao: ConexaoDoJogador,
   conexaoAnterior: ConexaoDoJogador | null,
   broadcaster?: PartidaBroadcaster,
-): void {
+): Promise<void> {
   const eraVigente = removerConexao(conexao);
   if (conexaoAnterior !== null && conexaoAnterior.socket.readyState === conexaoAnterior.socket.OPEN) {
     adicionarConexao(conexaoAnterior);
-  } else if (eraVigente) {
-    marcarDesconexaoEArmarJanela(redis, partidaId, jogadorId, undefined, broadcaster);
+    return Promise.resolve();
   }
+  if (eraVigente) {
+    marcarDesconexaoEArmarJanela(redis, partidaId, jogadorId, undefined, broadcaster);
+    // Relógio do turno (issue #431, review da PR #450 item 1): sem conexão
+    // vigente, o turno do ausente (se era o Ativo) congela junto com a
+    // presença. Aguardado aqui — e encadeado por partida no módulo do
+    // relógio — para que a retomada no upgrade (`await` em `:500`) nunca leia
+    // antes da pausa persistir. Nunca lança (retorna false).
+    return pausarRelogioDoTurnoSeAtivo(redis, partidaId, jogadorId).then(() => undefined);
+  }
+  return Promise.resolve();
 }
 
 /**
@@ -466,7 +479,7 @@ export function criarWebSocketServer(
           );
 
           if (transicao === null || (transicao.estado !== 'preparada' && transicao.estado !== 'em_andamento')) {
-            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior, depsPartida?.broadcaster);
+            await limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexao, conexaoAnterior, depsPartida?.broadcaster);
             try {
               ws.send(erroRejeitada('ERRO_INTERNO', 'estado da partida inconsistente'));
             } catch (e) { console.error('[ws] falha ao enviar erro interno:', e); }
@@ -485,6 +498,12 @@ export function criarWebSocketServer(
               console.error('[ws] falha ao limpar janela de reconexão:', err instanceof Error ? err.message : String(err)),
             );
             anunciarVoltaSeReadmissao(depsPartida?.broadcaster, partidaId, sessao.jogadorId, transicao);
+            // Relógio do turno (issue #431): retoma o restante pausado — ou
+            // arma o prazo cheio quando não há relógio (N-ésima admissão que
+            // inicia a partida; vão de restart com chave expirada). Aguardado
+            // aqui para que snapshot + TURNO_INICIADO abaixo já carreguem o
+            // deadline; nunca lança (retorna false sem relógio).
+            await retomarRelogioDoTurnoSeAtivo(contexto.redis, partidaId, sessao.jogadorId);
           }
 
           ws.send(JSON.stringify({
@@ -530,6 +549,9 @@ export function criarWebSocketServer(
                     transicao.estado,
                     transicao.iniciadaEm,
                     atomico.historico,
+                    // Deadline do turno (issue #431): null ≡ sem relógio —
+                    // vira chave ausente no snapshot.
+                    atomico.deadlineDoTurnoEm ?? undefined,
                   );
                   depsPartida.broadcaster.enviarParaSocket(ws, {
                     type: 'ESTADO_DA_PARTIDA',
@@ -677,43 +699,61 @@ export function criarWebSocketServer(
           });
 
           ws.on('close', (code: number) => {
-            if (code === 1009) {
-              try {
-                logger.warn({
-                  event: securityEvents.WS_PAYLOAD_TOO_LARGE,
-                  partidaId,
-                  jogadorId: sessao.jogadorId,
-                  connectionId,
-                  requestId,
-                  ip: extrairIpParaLog(request),
-                });
-              } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
-            }
-            console.info('[ws] jogador desconectado', {
-              jogadorId: sessao.jogadorId,
-              partidaId,
-            });
-            // Stream de debug (issue #340): desconexão encerra o registro do
-            // cliente de debug.
-            depsPartida?.debug?.desconectar(ws);
-            // Só marca `em_reconexao` quando a conexão fechada era a vigente do
-            // Jogador: no fechamento por substituição (#155) a vigente já é a
-            // nova conexão, e a presença permanece `conectado`.
-            const eraVigente = removerConexao(conexao);
-            if (depsPartida !== undefined) {
-              depsPartida.broadcaster.remover(ws);
-              // Chat de Partida (issue #390): sem conexões vigentes na
-              // Partida, a entrada do rate-limit fica sem dono — libera.
-              if (obterConexoes(partidaId).size === 0) {
-                depsPartida.handlers.liberarLimiteDeChat(partidaId);
+            // `close` é síncrono no `ws`: a IIFE async permite `await` na pausa
+            // sem mudar a assinatura do listener. A ordem pausa→retomada vem
+            // da cadeia por partida no módulo do relógio (o enfileiramento é
+            // síncrono) — o `await` aqui só garante que a persistência da pausa
+            // assente antes do fim deste fluxo. Nunca lança (pausa retorna
+            // false; o catch cobre o resto do corpo).
+            void (async () => {
+              if (code === 1009) {
+                try {
+                  logger.warn({
+                    event: securityEvents.WS_PAYLOAD_TOO_LARGE,
+                    partidaId,
+                    jogadorId: sessao.jogadorId,
+                    connectionId,
+                    requestId,
+                    ip: extrairIpParaLog(request),
+                  });
+                } catch (e) { console.error('[securityLogger] falha ao emitir evento:', e); }
               }
-            }
-            if (!eraVigente) {
-              return;
-            }
-            marcarDesconexaoEArmarJanela(contexto.redis, partidaId, sessao.jogadorId, (r, p) =>
-              verificarNaoInicioAposDesconexao(r, p),
-              depsPartida?.broadcaster,
+              console.info('[ws] jogador desconectado', {
+                jogadorId: sessao.jogadorId,
+                partidaId,
+              });
+              // Stream de debug (issue #340): desconexão encerra o registro do
+              // cliente de debug.
+              depsPartida?.debug?.desconectar(ws);
+              // Só marca `em_reconexao` quando a conexão fechada era a vigente do
+              // Jogador: no fechamento por substituição (#155) a vigente já é a
+              // nova conexão, e a presença permanece `conectado`.
+              const eraVigente = removerConexao(conexao);
+              if (depsPartida !== undefined) {
+                depsPartida.broadcaster.remover(ws);
+                // Chat de Partida (issue #390): sem conexões vigentes na
+                // Partida, a entrada do rate-limit fica sem dono — libera.
+                if (obterConexoes(partidaId).size === 0) {
+                  depsPartida.handlers.liberarLimiteDeChat(partidaId);
+                }
+              }
+              if (!eraVigente) {
+                return;
+              }
+              marcarDesconexaoEArmarJanela(contexto.redis, partidaId, sessao.jogadorId, (r, p) =>
+                verificarNaoInicioAposDesconexao(r, p),
+                depsPartida?.broadcaster,
+              );
+              // Relógio do turno (issue #431, review da PR #450 item 1): se quem
+              // caiu era o Jogador Ativo, o turno congela (a janela de 60s da
+              // #295 segue mandando) — a readmissão retoma o restante.
+              // Encadeado por partida no módulo do relógio (mesmo padrão do
+              // `enfileirarMutacao`): o enfileiramento é síncrono, então a ordem
+              // pausa→retomada é determinística mesmo com o `close` síncrono
+              // competindo com o `await` da retomada no upgrade. Nunca lança.
+              await pausarRelogioDoTurnoSeAtivo(contexto.redis, partidaId, sessao.jogadorId);
+            })().catch((err: unknown) =>
+              console.error('[ws] falha no close:', err instanceof Error ? err.message : String(err)),
             );
           });
         })().catch((error: unknown) => {
@@ -722,7 +762,9 @@ export function criarWebSocketServer(
           // caminho de falha — sem ela, o socket novo ficaria registrado como
           // vigente (morto) e a conexão antiga desregistrada (review #181).
           if (conexaoRegistrada !== null) {
-            limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexaoRegistrada, conexaoAnterior, depsPartida?.broadcaster);
+            void limparAdmissaoFalha(contexto.redis, partidaId, sessao.jogadorId, conexaoRegistrada, conexaoAnterior, depsPartida?.broadcaster).catch((e: unknown) =>
+              console.error('[ws] falha ao limpar admissão:', e instanceof Error ? e.message : String(e)),
+            );
           }
           try {
             ws.send(erroRejeitada('ERRO_INTERNO', 'falha na admissão da partida'));

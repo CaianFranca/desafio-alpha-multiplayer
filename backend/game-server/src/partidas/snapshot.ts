@@ -19,6 +19,11 @@ export function paraSnapshotWire(
   estadoWire: EstadoDaPartidaWire,
   iniciadaEm: number | null = null,
   historicoDeChat?: readonly MensagemDeChatDaPartidaEvento[],
+  // Tempo de turno (issue #431): deadline absoluto do turno vigente (epoch ms,
+  // autoridade do relógio do game-server). Só number viaja — ausente ≡ sem
+  // relógio (o cliente normaliza ausente para null), no mesmo padrão defensivo
+  // de `historicoDeChat?`: chamadas sem o marco produzem o shape antigo.
+  deadlineDoTurnoEm?: number,
 ): EstadoDaPartidaSnapshot {
   const rosterPorJogadorId = new Map(roster.map((m) => [m.jogadorId, m] as const));
 
@@ -98,6 +103,9 @@ export function paraSnapshotWire(
     jogadores,
     jogadorAtivoId: estado.jogadorAtivoId,
     rodada: estado.rodada,
+    // Deadline do turno vigente (issue #431): espelho do marco do relógio —
+    // só number viaja (ausente ≡ sem relógio).
+    ...(deadlineDoTurnoEm === undefined ? {} : { deadlineDoTurnoEm }),
     pecaDoInicioDoTurnoId: estado.pecaDoInicioDoTurnoId,
     posicaoConfirmada: estado.posicaoConfirmada,
     // Fase da Travessia do Escuro (ADR-0017 / issue #377): carregada no wire

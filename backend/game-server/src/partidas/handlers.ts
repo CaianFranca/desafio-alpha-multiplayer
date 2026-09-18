@@ -40,8 +40,21 @@ import type {
   MensagemDeChatDaPartidaEvento,
 } from '@flicker/shared';
 import { aplicarComandoDePartida, type EventoDaPartida } from '@flicker/engine';
+import {
+  CARENCIA_AVISO_FINAL_SEGUNDOS,
+  resolverExpiracaoDoTurno as resolverExpiracaoDoTurnoDoEngine,
+} from '@flicker/engine';
 import { PartidaBroadcaster } from './broadcast.ts';
 import { traduzirEventos } from './traducao.ts';
+import {
+  armarRelogioDoTurno,
+  cancelarRelogioDoTurno,
+  estenderRelogioDoTurno,
+  lerDeadlineDoTurno,
+  obterDeadlineDoTurno,
+  obterRelogioAgendado,
+  proximoRelogioParaLote,
+} from './relogio-do-turno.ts';
 import type { DebugStreamDaPartida } from '../ws/debug-stream.ts';
 import {
   ehComandoDaPartida,
@@ -261,7 +274,21 @@ export class PartidaHandlers {
           ? { ...evento, causa: 'desistencia' as const }
           : evento,
       );
-      this.broadcaster.enviar(partidaId, ...traduzirEventos(eventosComCausa));
+      // Relógio do turno (issue #431): a Passagem rearma (o deadline viaja no
+      // TURNO_INICIADO), o término cancela e os demais lotes mantêm — giro,
+      // seleção, chat, PING e debug nunca renovam.
+      const deadlineDoTurno = await this.sincronizarRelogioComLote(
+        partidaId,
+        resultado.estado,
+        eventosComCausa,
+      );
+      this.broadcaster.enviar(
+        partidaId,
+        ...traduzirEventos(
+          eventosComCausa,
+          deadlineDoTurno === undefined ? undefined : { deadlineDoTurnoEm: deadlineDoTurno },
+        ),
+      );
 
       await this.processarPosLoteDeDesistencia(
         partidaId,
@@ -747,7 +774,20 @@ export class PartidaHandlers {
           : evento,
       );
       await salvarEstadoDaPartida(this.redis, partidaId, resultado.estado);
-      this.broadcaster.enviar(partidaId, ...traduzirEventos(eventosComCausa));
+      // Relógio do turno (issue #431): a Passagem da conversão rearma para o
+      // novo Ativo; o término cancela.
+      const deadlineDoTurno = await this.sincronizarRelogioComLote(
+        partidaId,
+        resultado.estado,
+        eventosComCausa,
+      );
+      this.broadcaster.enviar(
+        partidaId,
+        ...traduzirEventos(
+          eventosComCausa,
+          deadlineDoTurno === undefined ? undefined : { deadlineDoTurnoEm: deadlineDoTurno },
+        ),
+      );
       this.debug?.emitir(partidaId, 'info', `Expiração de ${jogadorAusente} convertida em desistência`);
 
       await this.processarPosLoteDeDesistencia(
@@ -761,6 +801,143 @@ export class PartidaHandlers {
       console.error('[partida] erro inesperado na conversão por expiração:', erro);
     });
     return converteu;
+  }
+
+  /**
+   * Sincroniza o relógio do turno com o lote (issue #431): término cancela,
+   * Passagem rearma para o novo Ativo (Amedrontado cancela — sem relógio),
+   * aviso final do Primeiro Turno estende +30s únicos e os demais lotes
+   * mantêm. Retorna o deadline para o `TURNO_INICIADO` (`undefined` = sem
+   * anexo: sem Passagem no lote ou sem relógio).
+   */
+  private async sincronizarRelogioComLote(
+    partidaId: string,
+    estadoApos: import('@flicker/engine').EstadoDaPartida,
+    eventos: readonly EventoDaPartida[],
+  ): Promise<number | undefined> {
+    const decisao = proximoRelogioParaLote(estadoApos, eventos);
+    switch (decisao.acao) {
+      case 'cancelar':
+        await cancelarRelogioDoTurno(partidaId, this.redis);
+        return undefined;
+      case 'armar':
+        return armarRelogioDoTurno(
+          partidaId,
+          { jogadorAtivoId: decisao.jogadorAtivoId, rodada: decisao.rodada },
+          { redis: this.redis },
+        );
+      case 'estender':
+        // A flag `avisoFinalConsumidoPorJogador` do engine é a autoridade do
+        // "única vez" — aqui só o reagendamento de +30s.
+        return (await estenderRelogioDoTurno(
+          partidaId,
+          CARENCIA_AVISO_FINAL_SEGUNDOS,
+          this.redis,
+        )) ?? undefined;
+      case 'manter':
+        return undefined;
+    }
+  }
+
+  /**
+   * Resolução do estouro do relógio (issue #431): o fire do timer delega aqui
+   * (fiação via `definirResolvedorDeExpiracaoDoTurno`, como o conversor da
+   * #295). Roda a mutação serializada com `resolverExpiracaoDoTurno` do engine
+   * — falta somada, queima, Passagem de Vez e Desistência `tempo` (4ª falta ou
+   * 2º expiry do Primeiro Turno) viajam no broadcast com o pós-lote de
+   * Desistência/retorno existente. Guardas (mesmo padrão da conversão por
+   * expiração + pausa): partida ausente/terminada, Passagem que venceu a
+   * corrida (jogador/rodada divergem da foto do fire), Ativo em `em_reconexao`
+   * (turno pausado — a retomada reagenda) e Ativo Amedrontado abortam sem mutar
+   * e retornam false; só a resolução efetiva retorna true.
+   */
+  async resolverExpiracaoDoTurno(partidaId: string): Promise<boolean> {
+    const esperado = obterRelogioAgendado(partidaId);
+    let resolveu = false;
+    await this.enfileirarMutacao(partidaId, async () => {
+      const estado = await obterEstadoDaPartida(this.redis, partidaId);
+      if (estado === null) {
+        await cancelarRelogioDoTurno(partidaId, this.redis);
+        return;
+      }
+      if (estado.resultado !== null) {
+        const pendente = await this.lerRetornoPendente(partidaId);
+        if (pendente !== null) {
+          await this.completarRetornoPendenteDentroDaMutacao(partidaId, pendente);
+        }
+        await cancelarRelogioDoTurno(partidaId, this.redis);
+        return;
+      }
+      // Guarda de corrida fire-vs-Passagem: o turno já andou, o novo relógio
+      // (ou o cancelamento do término) é o vigente — não toca em nada.
+      if (
+        esperado !== null
+        && (estado.jogadorAtivoId !== esperado.jogadorAtivoId || estado.rodada !== esperado.rodada)
+      ) {
+        return;
+      }
+      let partidaPrevia: PartidaPreparada | null = null;
+      try {
+        partidaPrevia = await obterPartida(this.redis, partidaId);
+      } catch {
+        partidaPrevia = null;
+      }
+      if (partidaPrevia === null || partidaPrevia.estado !== 'em_andamento') {
+        await cancelarRelogioDoTurno(partidaId, this.redis);
+        return;
+      }
+      // Pausa (issue #431): com o Ativo em reconexão o turno está congelado —
+      // a readmissão retoma o restante; resolver aqui puniria a queda.
+      const membroAtivo = partidaPrevia.roster.find((m) => m.jogadorId === estado.jogadorAtivoId);
+      if (membroAtivo?.presenca === 'em_reconexao') {
+        return;
+      }
+      const ativo = estado.jogadores.find((j) => j.jogadorId === estado.jogadorAtivoId);
+      if (ativo === undefined) {
+        return;
+      }
+      // Defesa: Amedrontado não tem turno nem relógio.
+      if ((ativo.amedrontado ?? ativo.sanidade === 0) === true) {
+        await cancelarRelogioDoTurno(partidaId, this.redis);
+        return;
+      }
+      const resultado = resolverExpiracaoDoTurnoDoEngine(estado);
+      if (!resultado.sucesso) {
+        return;
+      }
+      // Causa do relógio (issue #429): o engine já marca `tempo` nas
+      // Desistências do expiry; ausente (binário antigo) lê-se como `tempo`.
+      const eventosComCausa: readonly EventoDaPartida[] = resultado.eventos.map((evento) =>
+        evento.tipo === 'desistencia_registrada' && evento.causa === undefined
+          ? { ...evento, causa: 'tempo' as const }
+          : evento,
+      );
+      await salvarEstadoDaPartida(this.redis, partidaId, resultado.estado);
+      const deadlineDoTurno = await this.sincronizarRelogioComLote(
+        partidaId,
+        resultado.estado,
+        eventosComCausa,
+      );
+      this.broadcaster.enviar(
+        partidaId,
+        ...traduzirEventos(
+          eventosComCausa,
+          deadlineDoTurno === undefined ? undefined : { deadlineDoTurnoEm: deadlineDoTurno },
+        ),
+      );
+      this.debug?.emitir(partidaId, 'info', `Estouro do turno de ${estado.jogadorAtivoId} resolvido`);
+
+      await this.processarPosLoteDeDesistencia(
+        partidaId,
+        partidaPrevia,
+        eventosComCausa,
+        resultado.estado.jogadores.map((j) => j.jogadorId),
+      );
+      resolveu = true;
+    }).catch((erro: unknown) => {
+      console.error('[partida] erro inesperado na resolução do estouro do turno:', erro);
+    });
+    return resolveu;
   }
 
   /**
@@ -785,10 +962,15 @@ export class PartidaHandlers {
       if (estado.resultado !== null) {
         await this.tentarCompletarRetornoPendente(partidaId);
       }
+      // Deadline do turno (issue #431): memória primeiro, chave persistida
+      // como fallback — só number viaja (ausente ≡ sem relógio).
+      const deadlineDoTurno = obterDeadlineDoTurno(partidaId)
+        ?? (await lerDeadlineDoTurno(this.redis, partidaId));
       this.broadcaster.enviarParaSocket(socket, {
         type: 'TURNO_INICIADO',
         jogadorId: estado.jogadorAtivoId,
         rodada: estado.rodada,
+        ...(deadlineDoTurno === null ? {} : { deadlineDoTurnoEm: deadlineDoTurno }),
       });
       if (estado.celulasIluminadas.length > 0) {
         this.broadcaster.enviarParaSocket(socket, {
@@ -818,6 +1000,9 @@ export class PartidaHandlers {
     estado: import('@flicker/engine').EstadoDaPartida;
     partida: PartidaPreparada;
     historico: MensagemDeChatDaPartidaEvento[];
+    // Deadline do turno (issue #431): lido na mesma cadeia serial —
+    // `null` = sem relógio vigente (pausado, Amedrontado ou terminado).
+    deadlineDoTurnoEm: number | null;
   } | null> {
     return this.enfileirarMutacao(partidaId, async () => {
       const estado = await obterEstadoDaPartida(this.redis, partidaId);
@@ -838,7 +1023,9 @@ export class PartidaHandlers {
         });
         historico = [];
       }
-      return { estado, partida, historico };
+      const deadlineDoTurnoEm = obterDeadlineDoTurno(partidaId)
+        ?? (await lerDeadlineDoTurno(this.redis, partidaId));
+      return { estado, partida, historico, deadlineDoTurnoEm };
     });
   }
 

@@ -16,6 +16,8 @@ export interface Config {
   partidaTerminadaTtlSegundos: number;
   partidaNaoInicioSegundos: number;
   partidaReconexaoEmAndamentoSegundos: number;
+  partidaTurnoSegundos: number;
+  partidaTurnoAvisoSegundos: number;
   partidaChatHistoricoMaximo: number;
   trustProxyHops: number;
   authRateLimitJanelaSegundos: number;
@@ -66,6 +68,19 @@ const DEFAULT_PARTIDA_PREPARADA_TTL_SEGUNDOS = 600;
 const DEFAULT_PARTIDA_TERMINADA_TTL_SEGUNDOS = 3600;
 const DEFAULT_PARTIDA_NAO_INICIO_SEGUNDOS = 90;
 const DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS = 60;
+/**
+ * Tempo de turno (issue #431, spec #405): deadline fixo de parede por turno e
+ * aviso único — fonte única dos defaults (180s de turno, aviso aos 30s
+ * restantes), afináveis por env. `relogio-do-turno.ts` (game-server) importa
+ * estes defaults em vez de triplicar os literais — mudar aqui propaga para
+ * parse + relógio.
+ */
+export const DEFAULT_PARTIDA_TURNO_SEGUNDOS = 180;
+export const MINIMO_PARTIDA_TURNO_SEGUNDOS = 10;
+export const MAXIMO_PARTIDA_TURNO_SEGUNDOS = 3600;
+export const DEFAULT_PARTIDA_TURNO_AVISO_SEGUNDOS = 30;
+export const MINIMO_PARTIDA_TURNO_AVISO_SEGUNDOS = 5;
+export const MAXIMO_PARTIDA_TURNO_AVISO_SEGUNDOS = 300;
 const DEFAULT_TRUST_PROXY_HOPS = 1;
 const MINIMO_TRUST_PROXY_HOPS = 0;
 const MAXIMO_TRUST_PROXY_HOPS = 10;
@@ -225,6 +240,26 @@ function parsePartidaReconexaoEmAndamentoSegundos(raw: string | undefined): numb
     DEFAULT_PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS,
     'PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS',
     1,
+  );
+}
+
+function parsePartidaTurnoSegundos(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_PARTIDA_TURNO_SEGUNDOS,
+    'PARTIDA_TURNO_SEGUNDOS',
+    MINIMO_PARTIDA_TURNO_SEGUNDOS,
+    MAXIMO_PARTIDA_TURNO_SEGUNDOS,
+  );
+}
+
+function parsePartidaTurnoAvisoSegundos(raw: string | undefined): number {
+  return parseInteiroComLimites(
+    raw,
+    DEFAULT_PARTIDA_TURNO_AVISO_SEGUNDOS,
+    'PARTIDA_TURNO_AVISO_SEGUNDOS',
+    MINIMO_PARTIDA_TURNO_AVISO_SEGUNDOS,
+    MAXIMO_PARTIDA_TURNO_AVISO_SEGUNDOS,
   );
 }
 
@@ -497,6 +532,12 @@ export function getConfig(): Config {
   const partidaReconexaoEmAndamentoSegundos = parsePartidaReconexaoEmAndamentoSegundos(
     process.env.PARTIDA_RECONEXAO_EM_ANDAMENTO_SEGUNDOS as string | undefined,
   );
+  const partidaTurnoSegundos = parsePartidaTurnoSegundos(
+    process.env.PARTIDA_TURNO_SEGUNDOS as string | undefined,
+  );
+  const partidaTurnoAvisoSegundos = parsePartidaTurnoAvisoSegundos(
+    process.env.PARTIDA_TURNO_AVISO_SEGUNDOS as string | undefined,
+  );
   const partidaChatHistoricoMaximo = parsePartidaChatHistoricoMaximo(
     process.env.PARTIDA_CHAT_HISTORICO_MAXIMO as string | undefined,
   );
@@ -617,6 +658,8 @@ export function getConfig(): Config {
     partidaTerminadaTtlSegundos,
     partidaNaoInicioSegundos,
     partidaReconexaoEmAndamentoSegundos,
+    partidaTurnoSegundos,
+    partidaTurnoAvisoSegundos,
     partidaChatHistoricoMaximo,
     trustProxyHops,
     authRateLimitJanelaSegundos,

@@ -18,6 +18,13 @@ import {
   rearmarReconexaoEmAndamentoAposRestart,
 } from './partidas/reconexao-em-andamento.ts';
 import {
+  configurarRelogioDoTurno,
+  definirBroadcasterParaRelogioDoTurno,
+  definirRedisParaRelogioDoTurno,
+  definirResolvedorDeExpiracaoDoTurno,
+  rearmarRelogioDoTurnoAposRestart,
+} from './partidas/relogio-do-turno.ts';
+import {
   iniciarHeartbeat,
   pararHeartbeat,
   removerRegistro,
@@ -32,6 +39,8 @@ const {
   partidaTerminadaTtlSegundos,
   partidaNaoInicioSegundos,
   partidaReconexaoEmAndamentoSegundos,
+  partidaTurnoSegundos,
+  partidaTurnoAvisoSegundos,
   partidaChatHistoricoMaximo,
   lobbyRetornoCallbackUrl,
   lobbyDesistenciaCallbackUrl,
@@ -96,6 +105,14 @@ definirRedisParaReconexaoEmAndamento(redisClient);
 definirConversorDeExpiracao((partidaId, jogadorId) =>
   handlers.converterExpiracaoEmDesistencia(partidaId, jogadorId),
 );
+// Relógio do turno (issue #431): deadline fixo de parede + aviso único; no
+// estouro, a mutação serializada resolve via engine com falta/Desistência.
+configurarRelogioDoTurno(partidaTurnoSegundos, partidaTurnoAvisoSegundos);
+definirRedisParaRelogioDoTurno(redisClient);
+definirBroadcasterParaRelogioDoTurno(broadcaster);
+definirResolvedorDeExpiracaoDoTurno((partidaId) =>
+  handlers.resolverExpiracaoDoTurno(partidaId),
+);
 
 criarWebSocketServer(server, contexto, {
   partida: { broadcaster, handlers, debug: streamDeDebug },
@@ -156,6 +173,9 @@ async function iniciarRegistro(): Promise<void> {
   );
   void rearmarReconexaoEmAndamentoAposRestart(redisClient).catch((err: unknown) =>
     console.warn('[game-server] falha ao rearmar reconexão em andamento:', (err as Error).message),
+  );
+  void rearmarRelogioDoTurnoAposRestart(redisClient).catch((err: unknown) =>
+    console.warn('[game-server] falha ao rearmar relógio do turno:', (err as Error).message),
   );
 }
 
