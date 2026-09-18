@@ -86,7 +86,7 @@ export function ChatDoLobby({ mensagens, aoEnviar }: Props) {
           type="submit"
           aria-label="Enviar mensagem"
           disabled={!podeEnviar}
-          className="text-[#c9a86a] hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[#c9a86a]"
+          className="cursor-pointer text-[#c9a86a] hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[#c9a86a]"
         >
           <svg
             width="16"

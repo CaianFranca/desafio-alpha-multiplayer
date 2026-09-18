@@ -24,7 +24,7 @@ import {
   tocarSomDeGiroDoEncaixe,
 } from '../components/partida/somDoEncaixe'
 import type { EncaixeTrigger } from '../game/tabuleiro/encaixe'
-import { deveReduzirMovimento } from '../hooks/usePrefersReducedMotion'
+import { deveReduzirMovimento, usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 import { useCenaPronta } from '../hooks/useCenaPronta'
 import { useSonsProntos } from '../hooks/useSonsProntos'
 import { tocarSom } from '../game/audio/sons'
@@ -1937,6 +1937,16 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
   const requerModoPaisagem = useRequerModoPaisagem()
   const [bordaPx, setBordaPx] = useState(0)
   const viewportCompacto = useViewportCompacto()
+  const prefereMovimentoReduzido = usePrefersReducedMotion()
+  // Brilho do botão de ação do turno (#437): animado só quando realmente
+  // acionável — habilitado, com peão próprio resolvido (quando exigido) e
+  // sem bloqueio de ataque em exibição. Estático/ausente caso contrário,
+  // e sempre estático sob prefers-reduced-motion.
+  const botaoDeTurnoAcionavel =
+    faseDoTurno !== null &&
+    !entradaBloqueadaPeloAtaque &&
+    (faseDoTurno === 'encerrar' ? true : peaoProprioId !== null)
+  const brilhoDoBotaoAnimado = botaoDeTurnoAcionavel && !prefereMovimentoReduzido
 
   // Devolução de foco do overlay bloqueante: rastreia o último foco fora
   // do overlay (via focusin — o auto-focus do filho roda antes do efeito
@@ -2197,37 +2207,61 @@ export function PartidaPage({ estadoInicial, loader }: PartidaPageProps) {
           className={`pointer-events-auto absolute z-30 flex gap-2 ${viewportCompacto ? 'bottom-20 right-4' : 'bottom-32 right-6'}`}
         >
           {faseDoTurno === 'permanecer' ? (
-            <button
-              type="button"
-              data-testid="botao-permanecer"
-              onClick={permanecerNoTurno}
-              disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
-              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
-            >
-              Permanecer
-            </button>
+            <div className="relative">
+              <span
+                data-testid="brilho-botao-turno"
+                data-animado={brilhoDoBotaoAnimado ? 'true' : 'false'}
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-0 rounded border-2 border-amber-300 shadow-[0_0_16px_rgba(251,191,36,0.5)] ${brilhoDoBotaoAnimado ? 'animate-pulse' : ''} ${!botaoDeTurnoAcionavel ? 'opacity-60' : ''}`}
+              />
+              <button
+                type="button"
+                data-testid="botao-permanecer"
+                onClick={permanecerNoTurno}
+                disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
+                className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
+              >
+                Permanecer
+              </button>
+            </div>
           ) : null}
           {faseDoTurno === 'confirmar' ? (
-            <button
-              type="button"
-              data-testid="botao-confirmar-posicao"
-              onClick={confirmarPosicaoNoTurno}
-              disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
-              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
-            >
-              Confirmar Posição
-            </button>
+            <div className="relative">
+              <span
+                data-testid="brilho-botao-turno"
+                data-animado={brilhoDoBotaoAnimado ? 'true' : 'false'}
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-0 rounded border-2 border-amber-300 shadow-[0_0_16px_rgba(251,191,36,0.5)] ${brilhoDoBotaoAnimado ? 'animate-pulse' : ''} ${!botaoDeTurnoAcionavel ? 'opacity-60' : ''}`}
+              />
+              <button
+                type="button"
+                data-testid="botao-confirmar-posicao"
+                onClick={confirmarPosicaoNoTurno}
+                disabled={peaoProprioId === null || entradaBloqueadaPeloAtaque}
+                className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
+              >
+                Confirmar Posição
+              </button>
+            </div>
           ) : null}
           {faseDoTurno === 'encerrar' ? (
-            <button
-              type="button"
-              data-testid="botao-encerrar-turno"
-              onClick={encerrarTurno}
-              disabled={entradaBloqueadaPeloAtaque}
-              className="min-h-[44px] min-w-[44px] rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:opacity-40"
-            >
-              Encerrar Turno
-            </button>
+            <div className="relative">
+              <span
+                data-testid="brilho-botao-turno"
+                data-animado={brilhoDoBotaoAnimado ? 'true' : 'false'}
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-0 rounded border-2 border-amber-300 shadow-[0_0_16px_rgba(251,191,36,0.5)] ${brilhoDoBotaoAnimado ? 'animate-pulse' : ''} ${!botaoDeTurnoAcionavel ? 'opacity-60' : ''}`}
+              />
+              <button
+                type="button"
+                data-testid="botao-encerrar-turno"
+                onClick={encerrarTurno}
+                disabled={entradaBloqueadaPeloAtaque}
+                className="relative min-h-[44px] min-w-[44px] cursor-pointer rounded bg-zinc-800 px-5 py-3 text-[length:var(--hud-corpo,0.875rem)] leading-5 text-white hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:outline-offset-2"
+              >
+                Encerrar Turno
+              </button>
+            </div>
           ) : null}
         </div>
       ) : null}

@@ -655,6 +655,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  [data-testid='brilho-botao-turno'] {
+    animation: none !important;
+  }
   .ataque-tremor,
   .ataque-escudo,
   .ataque-telegraph {

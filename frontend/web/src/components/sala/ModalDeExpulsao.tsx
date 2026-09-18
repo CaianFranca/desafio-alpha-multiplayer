@@ -24,7 +24,7 @@ export function ModalDeExpulsao({ onOk }: ModalDeExpulsaoProps) {
           type="button"
           onClick={onOk}
           autoFocus
-          className="self-end border border-[#c9a86a] bg-[#c9a86a]/10 text-[#c9a86a] px-6 py-2 text-sm font-bold tracking-wider uppercase hover:bg-[#c9a86a] hover:text-black transition-colors"
+          className="self-end border border-[#c9a86a] bg-[#c9a86a]/10 text-[#c9a86a] px-6 py-2 text-sm font-bold tracking-wider uppercase cursor-pointer hover:bg-[#c9a86a] hover:text-black transition-colors"
         >
           OK
         </button>

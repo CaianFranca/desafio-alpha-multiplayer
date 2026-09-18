@@ -23,7 +23,7 @@ export function AvisoEncaminhamento({ encaminhamento, onFechar }: Props) {
           onClick={onFechar}
           aria-label="Fechar aviso"
           data-testid="fechar-aviso"
-          className="shrink-0 rounded-md bg-white px-3 py-1.5 text-sm font-semibold text-amber-900 shadow hover:bg-amber-100"
+          className="shrink-0 cursor-pointer rounded-md bg-white px-3 py-1.5 text-sm font-semibold text-amber-900 shadow hover:bg-amber-100"
         >
           Fechar
         </button>
