@@ -17,7 +17,7 @@ const server = http.createServer(app);
 
 // Diagnóstico temporário do handshake do WebSocket: loga requests em /ws/* que
 // chegam como HTTP comum (sem upgrade). O Node só emite 'request' quando NÃO há
-// upgrade; se o proxy do admin não repassar `Upgrade`/`Connection`, a conexão
+// upgrade; se um proxy a montante não repassar `Upgrade`/`Connection`, a conexão
 // cai aqui como GET e o Express responde 404. Nunca logar `cookie`/
 // `authorization` (carregam tokens de sessão). Remover após a evidência.
 server.on('request', (req) => {

@@ -49,8 +49,9 @@ selecionando a branch `prod`.
 O bootstrap do servidor **já foi executado** e não faz parte da rotina de
 deploy. O servidor (referência de lab: hostname `c041`) é alcançado pela rede privada
 via **VPN** para SSH/deploy — a exposição pública é feita por um **Cloudflare
-Quick Tunnel**: o `cloudflared` roda no mesmo host
-(`cloudflared tunnel --no-autoupdate --url http://127.0.0.1:80`) e publica o
+Quick Tunnel**: o `cloudflared` roda nativamente no mesmo host, sob o unit
+systemd `cloudflared-quick-tunnel.service`
+(`cloudflared tunnel --no-autoupdate --url http://127.0.0.1:80`), e publica o
 prefixo `/server01` numa URL efêmera
 `https://<nome-aleatorio>.trycloudflare.com/server01`, com o TLS terminado no
 Cloudflare. O prefixo `/server01/` é preservado ponta a ponta (o SPA referencia
@@ -400,12 +401,14 @@ Detalhes relevantes:
     Valores:
     `rate=10r/s`, `burst=20 nodelay`, `limit_req_status 429`; `limit_conn` de
     50 conexões por IP (excesso responde `503`); `client_max_body_size 256k`
-    (excesso responde `413`). Se o `cloudflared` passar a rodar em container,
-    acrescente a faixa do bridge ao `set_real_ip_from` do snippet.
-  - **Zona confiável.** A rede privada (VPN) e o acesso direto a `:8080` são
-    legítimos e **não** passam pelo rate limit de borda — ele mira o tráfego
-    público que entra pelo Cloudflare. Não feche essas portas nem altere
-    firewall por causa dos limites.
+    (excesso responde `413`). Hoje o `cloudflared` é nativo (systemd) e conecta
+    do loopback, então `set_real_ip_from 127.0.0.1/::1` basta; se ele passar a
+    rodar em container, acrescente a faixa do bridge (ex.: `172.16.0.0/12`) ao
+    `set_real_ip_from` do snippet.
+  - **Zona confiável.** A rede privada (VPN, lab `10.10.0.0/24`) e o acesso
+    direto a `:8080` são legítimos e **não** passam pelo rate limit de borda —
+    ele mira o tráfego público que entra pelo Cloudflare. Não feche essas portas
+    nem altere firewall por causa dos limites.
   - Há **3 proxies** entre o cliente e o lobby (Cloudflare TLS → nginx edge:80
     → nginx app:8080 → lobby), portanto em produção usa-se
     `TRUST_PROXY_HOPS=3`; dev/Docker Compose (cliente→nginx→lobby) usa 1.

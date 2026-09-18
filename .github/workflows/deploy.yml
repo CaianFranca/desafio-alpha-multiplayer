@@ -260,10 +260,11 @@ jobs:
             printf 'JWT_SECRET=%s\n' "$PROD_JWT_SECRET"
             printf 'JWT_REFRESH_SECRET=%s\n' "$PROD_JWT_REFRESH_SECRET"
             printf 'LOBBY_PUBLIC_URL=%s\n' "$LOBBY_PUBLIC_URL"
-            # Produção nativa tem 3 hops até o lobby (admin TLS → nginx edge →
-            # nginx app → lobby); o default do config (1) é só para dev/Docker Compose.
+            # Produção nativa tem 3 hops até o lobby (Cloudflare TLS → nginx
+            # edge:80 → nginx app:8080 → lobby); o default do config (1) é só
+            # para dev/Docker Compose.
             echo 'TRUST_PROXY_HOPS=3'
-            # TLS terminado na borda (proxy do admin): o navegador aceita
+            # TLS terminado no Cloudflare Quick Tunnel: o navegador aceita
             # cookie Secure, então mantemos o default seguro explicitamente.
             echo 'COOKIE_SECURE=true'
           } > /tmp/flicker-env
