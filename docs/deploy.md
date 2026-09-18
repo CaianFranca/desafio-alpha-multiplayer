@@ -120,9 +120,13 @@ zero sem erro.
 O tarball contém tudo que o servidor precisa em runtime (o servidor **nunca
 compila, nunca roda TS nem testes**):
 
-- backend lobby + game (fonte TS — produção roda com `node --import tsx`);
-- packages `config`, `shared`, `engine` (fonte TS, expostos via `main`/`exports`);
-- `node_modules` de produção da raiz (inclui `tsx`) e do `db/`;
+- backend lobby + game **compilados para JS em `dist/`** — o runtime é
+  `node backend/<srv>/dist/index.js`, sem `tsx`/`esbuild`;
+- packages `config`, `shared`, `engine` **compilados para JS em `dist/`** (o
+  `main`/`types`/`exports` do `package.json` do artefato é reescrito para
+  `dist/` por `scripts/rewrite-release-package-json.mjs`; o repo segue em `src/`);
+- `node_modules` de produção da raiz (o `tsx` é `devDependency` e fica de
+  fora) e do `db/`;
 - `db/` compilado para JS (`knexfile.js` + `dist/migrations`);
 - frontend buildado (vite) com base **`/server01/`** (`VITE_BASE_PATH=/server01/`)
   e a mídia de `frontend/web/media/` copiada para dentro do dist
@@ -163,8 +167,10 @@ Ordem exata do script:
    frontend/media; `o+x` em `/opt/flicker` e `releases`.
 3. **Migrations**: `knex migrate:latest` com o knexfile **compilado em JS**
    (`db/dist/knexfile.js`), usando o env de produção do EnvironmentFile.
-4. **Instalar units systemd + conf nginx**: copia `infra/systemd/*.service`
-   para `/etc/systemd/system/` + `daemon-reload`; copia `nginx.prod.conf` para
+4. **Instalar units systemd + conf nginx**: faz backup dos units instalados em
+   `/opt/flicker/unit-backup` (usado no rollback), copia `infra/systemd/*.service`
+   para `/etc/systemd/system/` + `daemon-reload` + `systemctl enable` das duas
+   units (voltam após reboot); copia `nginx.prod.conf` para
    `/etc/nginx/sites-available/flicker` + symlink em `sites-enabled/flicker`;
    instala os snippets (`hsts-map`, `security-headers`,
    `security-headers-static`, `rate-limit`, `cloudflare-realip`) em
@@ -174,12 +180,14 @@ Ordem exata do script:
    valida antes de aplicar.
 5. **Flip do symlink** (atômico): `/opt/flicker/current` → release nova e
    republica o docroot `/var/www/html` → `<release>/frontend/dist`.
-6. **Restart + health check**: `systemctl restart flicker-lobby.service
-   flicker-game.service` e, por até **60 s**, `curl` em `http://127.0.0.1:3001/health`
+6. **Restart + health check**: `systemctl reset-failed` das duas units (limpa o
+   estado herdado do loop de OOM) e `systemctl restart flicker-lobby.service
+   flicker-game.service`; por até **60 s**, `curl` em `http://127.0.0.1:3001/health`
    (lobby) e `http://127.0.0.1:1234/health` (game). **Falhou → rollback
    automático** para a release anterior (flip de volta + docroot de volta +
-   restart; a release problemática permanece em disco) e o script sai com erro,
-   após imprimir as últimas 30 linhas do `journalctl` das duas units.
+   restauração dos units do backup + restart; a release problemática permanece
+   em disco) e o script sai com erro, após imprimir as últimas 30 linhas do
+   `journalctl` das duas units.
 7. **Reload nginx** (`systemctl reload nginx` — zero downtime).
 8. **Retenção**: mantém as últimas **3 releases** em `/opt/flicker/releases`
    (as releases `current` e a anterior nunca são removidas).
@@ -196,7 +204,15 @@ systemctl status flicker-lobby flicker-game
 curl -fsS http://127.0.0.1:3001/health   # lobby
 curl -fsS http://127.0.0.1:1234/health   # game
 curl -fsS http://127.0.0.1:8080/         # nginx do app
+# Memória/estabilidade: teto por unit intacto, sem loop de restart, sem swap
+systemctl show flicker-lobby flicker-game \
+  -p UnitFileState -p NRestarts -p MemoryPeak -p MemoryMax -p MemorySwapMax
 ```
+
+> Esperado: `UnitFileState=enabled`, `MemoryMax=134217728` (128 MiB),
+> `MemorySwapMax=0`, `NRestarts` estável e `MemoryPeak` bem abaixo de 128 MiB.
+> Se `NRestarts` subir sozinho, veja `journalctl -u flicker-lobby -u flicker-game`
+> e a seção 7b.
 
 - No navegador: o app responde publicamente na URL do Cloudflare Quick Tunnel,
   `https://<nome-aleatorio>.trycloudflare.com/server01/` — URL **efêmera**,
@@ -340,8 +356,14 @@ Detalhes relevantes:
 
 - **Units systemd** (`infra/systemd/`): `User=flicker`,
   `WorkingDirectory=/opt/flicker/current`, `EnvironmentFile=/opt/flicker/env`,
-  `Environment=NODE_ENV=production`, `ExecStart=/usr/local/bin/node --import tsx
-  backend/<srv>/src/index.ts`, `Restart=on-failure` (3 s), `MemoryMax=128M`,
+  `Environment=NODE_ENV=production`,
+  `Environment="NODE_OPTIONS=--max-old-space-size=64 --max-semi-space-size=8"`
+  (o V8 coleta em vez de crescer até o teto),
+  `ExecStart=/usr/local/bin/node backend/<srv>/dist/index.js`,
+  `Restart=on-failure` (5 s) com `StartLimitIntervalSec=60`/`StartLimitBurst=10`
+  (o loop de restart **para** em vez de reiniciar indefinidamente),
+  `MemoryMax=128M` (teto por serviço, intocado) e `MemorySwapMax=0` (a unit não
+  usa swap; se estourar, morre contida em vez de pressionar o host),
   hardening (`NoNewPrivileges`, `ProtectSystem=strict`, `IPAddressDeny=any`
   com `IPAddressAllow=localhost` — os dois services são loopback-only; o
   nginx do app (`:8080`) é quem fala com eles, e o único serviço exposto é o
