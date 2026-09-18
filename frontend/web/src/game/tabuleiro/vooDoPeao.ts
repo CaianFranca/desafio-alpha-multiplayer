@@ -30,6 +30,7 @@
 
 import type { EventoDoCanalDaPartida } from '../../hooks/usePartidaWebSocket'
 import { comBase } from '../../api/basePath'
+import { obterVolumeDeEfeitos } from '../../components/partida/volumesDasCamadas'
 import { celulaParaMundo, chaveCelula, PEAO_Y } from './contrato'
 import type { Celula, CorDoPeao, PeaoDaExibicao } from './contrato'
 import type { EstadoDoTabuleiroNoCliente } from './reducao'
@@ -80,8 +81,9 @@ export const SOM_CAMINHO_CLIQUE_PEAO = comBase('/media/clique-peao.mp3')
 export const SOM_CAMINHO_BAQUE_PEAO = comBase('/media/baque-peao.mp3')
 
 /**
- * Volumes base (contrato com o futuro botão de volume, ADR-0007:
- * `audio.volume = master * SOM_VOLUME_BASE_*`, com master em [0, 1]).
+ * Volumes base (contrato com o modal de volume, ADR-0007 + issue #438:
+ * `audio.volume = camada de efeitos × SOM_VOLUME_BASE_*`, com a camada lida
+ * no momento do toque).
  */
 export const SOM_VOLUME_BASE_CLIQUE_PEAO = 0.3
 export const SOM_VOLUME_BASE_BAQUE_PEAO = 0.4
@@ -203,9 +205,9 @@ export function corDoVooPendente(
 function tocarArquivoDeAudio(caminho: string, volumeBase: number): void {
   try {
     const audio = new Audio(caminho)
-    // Contrato de volume (ADR-0007): base fixa; o futuro botão de volume
-    // aplica `audio.volume = master * SOM_VOLUME_BASE_*`.
-    audio.volume = volumeBase
+    // Contrato de volume (ADR-0007 + issue #438): base fixa vezes a camada
+    // de efeitos, lida no momento do toque (slider do modal de volume).
+    audio.volume = obterVolumeDeEfeitos() * volumeBase
     const tocando: unknown = audio.play()
     // jsdom não implementa play(): retorna undefined em vez de Promise.
     if (

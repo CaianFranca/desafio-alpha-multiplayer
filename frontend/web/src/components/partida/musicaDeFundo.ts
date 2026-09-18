@@ -9,36 +9,48 @@
  * ficam só as constantes e as operações sobre uma instância de `Audio`.
  *
  * Volume base 0.1 (VOLUME_BASE_MUSICA_DE_FUNDO): abaixo dos SFX (recusa/
- * clique em 0.3), confortável ao fundo. O futuro botão de volume controlará
- * este ponto sem recostura via `masterVolume * VOLUME_BASE`.
+ * clique em 0.3), confortável ao fundo. A camada de música do modal de
+ * volume (issue #438) controla este ponto via `camada * VOLUME_BASE`.
  * `play()` com `catch` silencioso como defensivo (no-op se falhar, ex.:
  * autoplay bloqueado ou asset ausente) — nunca quebra a Partida.
  */
 
 import { comBase } from '../../api/basePath'
-import { VOLUME_MASTER_PARTIDA } from './volumeMaster'
+import { obterVolumeDeMusica } from './volumesDasCamadas'
 
 /** Asset da música de fundo (web/media → servido em /media/), já com o subpath do build. */
 export const CAMINHO_MUSICA_DE_FUNDO = comBase('/media/musica-de-fundo.mp3')
 
 /**
- * Volume base da música de fundo (contrato com o futuro botão de volume,
- * ADR-0007: `audio.volume = master * VOLUME_BASE_MUSICA_DE_FUNDO`, com
- * master em [0, 1]).
+ * Volume base da música de fundo (contrato com o modal de volume,
+ * ADR-0007 + issue #438: `audio.volume = camada de música * VOLUME_BASE_MUSICA_DE_FUNDO`, com
+ * camada em [0, 1]).
  */
 export const VOLUME_BASE_MUSICA_DE_FUNDO = 0.1
 
 /**
  * Cria a instância da música de fundo: loop contínuo, volume
- * `VOLUME_MASTER_PARTIDA * VOLUME_BASE_MUSICA_DE_FUNDO`. Não toca sozinha —
+ * `obterVolumeDeMusica() * VOLUME_BASE_MUSICA_DE_FUNDO`. Não toca sozinha —
  * o hook decide quando chamar `tocarMusicaDeFundo` / `pararMusicaDeFundo`.
  */
 export function criarMusicaDeFundo(): HTMLAudioElement {
   const audio = new Audio(CAMINHO_MUSICA_DE_FUNDO)
   audio.loop = true
-  // Contrato de volume (ADR-0007): `audio.volume = master * VOLUME_BASE`.
-  audio.volume = VOLUME_MASTER_PARTIDA * VOLUME_BASE_MUSICA_DE_FUNDO
+  // Contrato de volume (ADR-0007 + issue #438): `audio.volume = camada de música * VOLUME_BASE`.
+  audio.volume = obterVolumeDeMusica() * VOLUME_BASE_MUSICA_DE_FUNDO
   return audio
+}
+
+/**
+ * Atualiza o volume da instância já em loop sem recriar ou interromper —
+ * lê a camada de música no momento da chamada (mesma fórmula da criação).
+ */
+export function atualizarVolumeDaMusicaDeFundo(audio: HTMLAudioElement): void {
+  try {
+    audio.volume = obterVolumeDeMusica() * VOLUME_BASE_MUSICA_DE_FUNDO
+  } catch {
+    // Atualização silenciosa — nunca quebra o loop.
+  }
 }
 
 /**

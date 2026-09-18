@@ -54,8 +54,24 @@ function servirMediaNoDev(): Plugin {
         }
         const tamanho = tamanhoDoArquivo(resolvido)
         if (tamanho === null) return next()
-        const tipo =
-          resolvido.endsWith('.mp3') ? 'audio/mpeg' : 'application/octet-stream'
+        // Mídias do Tutorial (#434) viajam no mesmo duto: o nginx já resolve
+        // o mime pelo alias, mas no dev puro o tipo precisa sair daqui.
+        const minusculas = resolvido.toLowerCase()
+        const tipo = minusculas.endsWith('.mp3')
+          ? 'audio/mpeg'
+          : minusculas.endsWith('.wav')
+            ? 'audio/wav'
+            : minusculas.endsWith('.gif')
+              ? 'image/gif'
+              : minusculas.endsWith('.png')
+                ? 'image/png'
+                : minusculas.endsWith('.jpg') || minusculas.endsWith('.jpeg')
+                  ? 'image/jpeg'
+                  : minusculas.endsWith('.webp')
+                    ? 'image/webp'
+                    : minusculas.endsWith('.svg')
+                      ? 'image/svg+xml'
+                      : 'application/octet-stream'
         res.setHeader('Content-Type', tipo)
         res.setHeader('Content-Length', String(tamanho))
         res.setHeader('Accept-Ranges', 'bytes')

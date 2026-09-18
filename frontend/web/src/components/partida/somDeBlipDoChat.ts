@@ -7,15 +7,15 @@
  * o painel está fechado e há mensagem nova de terceiro; a coalescência de
  * rajada (um blip por lote) vive no `useChatDaPartida`.
  *
- * Contrato de volume da ADR-0007: `ganho = master * VOLUME_BASE_SOM_DE_BLIP_
- * DO_CHAT`, com master em [0, 1] — hoje 1 (o futuro botão de volume
- * multiplica aqui, sem recostura), mesmo padrão de `somDeRecusa.ts`.
- * Falhas de áudio (autoplay/bloqueios) viram no-op silencioso.
+ * Contrato de volume da ADR-0007 (issue #438): `ganho = camada de efeitos ×
+ * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT`, com a camada lida no momento do toque
+ * (slider do modal de volume). Falhas de áudio (autoplay/bloqueios) viram
+ * no-op silencioso.
  */
 
-import { VOLUME_MASTER_PARTIDA } from './volumeMaster'
+import { obterVolumeDeEfeitos } from './volumesDasCamadas'
 
-/** Volume base do blip (ADR-0007: `master * VOLUME_BASE`, master em `volumeMaster`). */
+/** Volume base do blip (ADR-0007 + issue #438: `camada de efeitos * VOLUME_BASE`). */
 export const VOLUME_BASE_SOM_DE_BLIP_DO_CHAT = 0.15
 
 /** Frequência do blip (Hz) — tom curto e discreto, abaixo do estridente. */
@@ -63,9 +63,9 @@ export function tocarBlipDoChat(): void {
     const ganho = contexto.createGain()
     oscilador.type = 'sine'
     oscilador.frequency.value = FREQUENCIA_DO_BLIP_HZ
-    // Contrato de volume (ADR-0007): `ganho = master * VOLUME_BASE`; o
-    // futuro botão de volume controla só o master (`volumeMaster`).
-    ganho.gain.value = VOLUME_MASTER_PARTIDA * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT
+    // Contrato de volume (ADR-0007 + issue #438): `ganho = camada de efeitos
+    // × VOLUME_BASE`, lida no momento do toque (slider do modal de volume).
+    ganho.gain.value = obterVolumeDeEfeitos() * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT
     oscilador.connect(ganho)
     ganho.connect(contexto.destination)
     oscilador.start()

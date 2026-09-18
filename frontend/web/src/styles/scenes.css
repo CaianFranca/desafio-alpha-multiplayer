@@ -547,12 +547,30 @@
     animation: ataque-escudo 900ms ease-in-out infinite;
   }
   /* Espelho do token `COR_TELEGRAPH_ATAQUE` (#ef4444, `animacao.ts`): o CSS
-     não importa TS — o hex vive duplicado aqui por limite da plataforma;
-     mudou o token, atualize os `rgba(239, 68, 68, …)` abaixo e nos keyframes. */
+      não importa TS — o hex vive duplicado aqui por limite da plataforma;
+      mudou o token, atualize os `rgba(239, 68, 68, …)` abaixo e nos keyframes. */
   .ataque-telegraph {
     outline: 2px solid rgba(239, 68, 68, 0.9);
     outline-offset: 2px;
     animation: ataque-telegraph 600ms ease-in-out infinite;
+  }
+  /* Moldura (#436): brilho sutil permanente + pulso vermelho só em ataque com
+      penalidade real (estadosAplicados.length>0). O medidor `bordaRef` segue
+      intacto (border-0); este brilho é irmão visual separado. Espelha
+      COR_TELEGRAPH_ATAQUE (#ef4444). */
+  .moldura-brilho {
+    position: absolute;
+    inset: 0;
+    border: 1px solid rgba(245, 241, 232, 0.1);
+    box-shadow: inset 0 0 16px rgba(245, 241, 232, 0.04);
+    pointer-events: none;
+  }
+  .moldura-pulso-vermelho {
+    border-color: rgba(239, 68, 68, 0.95);
+    box-shadow:
+      inset 0 0 18px 18px rgba(239, 68, 68, 0.19),
+      0 0 16px 3px rgba(239, 68, 68, 0.44);
+    animation: moldura-pulso-vermelho 800ms ease-in-out infinite;
   }
 }
 
@@ -572,6 +590,21 @@
 @keyframes ataque-telegraph {
   0%, 100% { outline-color: rgba(239, 68, 68, 0.45); }
   50% { outline-color: rgba(239, 68, 68, 1); }
+}
+
+@keyframes moldura-pulso-vermelho {
+  0%, 100% {
+    border-color: rgba(239, 68, 68, 0.5);
+    box-shadow:
+      inset 0 0 18px 15px rgba(239, 68, 68, 0.15),
+      0 0 10px 1px rgba(239, 68, 68, 0.32);
+  }
+  50% {
+    border-color: rgba(239, 68, 68, 1);
+    box-shadow:
+      inset 0 0 26px 20px rgba(239, 68, 68, 0.32),
+      0 0 20px 4px rgba(239, 68, 68, 0.69);
+  }
 }
 
 @keyframes history-kenburns {
@@ -662,6 +695,13 @@
   .ataque-escudo,
   .ataque-telegraph {
     animation: none;
+  }
+  .moldura-brilho.moldura-pulso-vermelho {
+    animation: none !important;
+    border-color: rgba(239, 68, 68, 0.95);
+    box-shadow:
+      inset 0 0 18px 18px rgba(239, 68, 68, 0.19),
+      0 0 16px 3px rgba(239, 68, 68, 0.44);
   }
   .site-header__nav-link,
   .site-header__login,

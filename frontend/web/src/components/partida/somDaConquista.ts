@@ -11,9 +11,9 @@
  * pré/pós (`tocarConquistasDaConfirmacao`) — snapshots nunca soam (a baseline
  * pode trazer conquistas antigas sem fanfarra). Sem arquivo = no-op
  * silencioso (`new Audio(...)` + `play()` com `catch`, espelhando
- * `somDoAtaque.ts`). Volumes base próprios (contrato da ADR-0007:
- * `audio.volume = master × VOLUME_BASE_*`, com master em [0, 1] padrão 1 —
- * sem novo controle de volume nesta issue).
+ * `somDoAtaque.ts`). Volumes base próprios (contrato da ADR-0007 + issue
+ * #438: `audio.volume = camada de efeitos × VOLUME_BASE_*`, com a camada
+ * lida no momento do toque via slider do modal de volume).
  */
 
 import {
@@ -26,6 +26,7 @@ import {
 } from '../../game/tabuleiro/animacao'
 import type { EstadoDoTabuleiroNoCliente } from '../../game/tabuleiro/reducao'
 import { tocarAsset } from '../../game/audio/sons'
+import { obterVolumeDeEfeitos } from './volumesDasCamadas'
 
 /** Subconjunto do modelo necessário à comparação pré/pós (somente leitura). */
 export type ModeloParaConquista = Pick<
@@ -35,25 +36,28 @@ export type ModeloParaConquista = Pick<
 
 /**
  * Toca o gerador ao ligar — só na aquisição (id novo em `geradoresLigados`).
- * Habilitado por padrão, no-op silencioso se falhar.
+ * Habilitado por padrão, no-op silencioso se falhar. Sem mestre explícito,
+ * lê a camada de efeitos no momento do toque.
  */
-export function tocarGeradorLigado(mestre = 1): void {
+export function tocarGeradorLigado(mestre = obterVolumeDeEfeitos()): void {
   tocarAsset(CAMINHO_SOM_GERADOR_LIGADO, VOLUME_BASE_SOM_GERADOR_LIGADO, mestre)
 }
 
 /**
  * Toca o cartão ao obter o Cartão de Acesso — só na aquisição (false→true).
- * Habilitado por padrão, no-op silencioso se falhar.
+ * Habilitado por padrão, no-op silencioso se falhar. Sem mestre explícito,
+ * lê a camada de efeitos no momento do toque.
  */
-export function tocarCartaoDeAcesso(mestre = 1): void {
+export function tocarCartaoDeAcesso(mestre = obterVolumeDeEfeitos()): void {
   tocarAsset(CAMINHO_SOM_CARTAO_ACESSO, VOLUME_BASE_SOM_CARTAO_ACESSO, mestre)
 }
 
 /**
  * Toca o remédio ao adquirir a Proteção — só na aquisição (!antes &&
- * resultante). Habilitado por padrão, no-op silencioso se falhar.
+ * resultante). Habilitado por padrão, no-op silencioso se falhar. Sem mestre
+ * explícito, lê a camada de efeitos no momento do toque.
  */
-export function tocarProtecaoAdquirida(mestre = 1): void {
+export function tocarProtecaoAdquirida(mestre = obterVolumeDeEfeitos()): void {
   tocarAsset(
     CAMINHO_SOM_PROTECAO_ADQUIRIDA,
     VOLUME_BASE_SOM_PROTECAO_ADQUIRIDA,
@@ -76,7 +80,7 @@ export function tocarConquistasDaConfirmacao(
   antes: ModeloParaConquista,
   depois: ModeloParaConquista,
   jogadorId: string,
-  mestre = 1,
+  mestre = obterVolumeDeEfeitos(),
 ): void {
   const antesIds = new Set(antes.geradoresLigados)
   if (depois.geradoresLigados.some((id) => !antesIds.has(id))) {

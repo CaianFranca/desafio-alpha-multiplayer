@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor, act, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { routes } from '../web/src/app/router'
 import { AuthProvider, type AuthState } from '../web/src/state/AuthProvider'
 import { visitorState } from '../web/src/state/auth-context'
@@ -205,9 +205,9 @@ describe('HUD da Partida — 6 regiões do modelo real (#226 [2])', () => {
     ])
     // sup-centro: título.
     expect(screen.getByTestId('hud-titulo')).toHaveTextContent(/flicker of sanity/i)
-    // sup-dir: cronômetro + volume visual + SAIR.
+    // sup-dir: cronômetro + botão de volume + SAIR.
     expect(screen.getByTestId('hud-cronometro')).toBeInTheDocument()
-    expect(screen.getByTestId('hud-volume')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /volume/i })).toBeInTheDocument()
     expect(screen.getByTestId('hud-sair')).toBeInTheDocument()
     // inf-esq: jogador local (autenticado).
     expect(screen.getByTestId('hud-jogador-local')).toHaveAttribute('data-jogador-id', MEU_JOGADOR_ID)
@@ -1378,7 +1378,7 @@ describe('HUD da Partida — sem provisórios, com rótulos (#226 [7], #225)', (
     expect(screen.getByTestId('hud-da-partida')).toHaveAttribute('aria-label', 'HUD da Partida')
     expect(screen.getByRole('timer')).toHaveAttribute('aria-label', expect.stringMatching(/^Tempo de partida:/))
     expect(screen.getByTestId('hud-volume')).toHaveAttribute('aria-label', 'Volume')
-    expect(screen.queryByRole('button', { name: /volume/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /volume/i })).toHaveAttribute('aria-haspopup', 'dialog')
     expect(screen.getByTestId('hud-sanidade')).toHaveAttribute('aria-label', 'Sanidade 3 de 3')
     expect(screen.getByTestId('hud-turno')).toHaveAttribute('aria-label', 'Turno')
     expect(screen.getByTestId('hud-conquistas')).toHaveAttribute('aria-label', 'Conquistas')
@@ -1699,5 +1699,114 @@ describe('HUD da Partida — responsividade até tablet (#226 [9])', () => {  it
     expect(screen.getByTestId('hud-jogador-local')).toBeInTheDocument()
     expect(screen.getByTestId('hud-conquistas')).toBeInTheDocument()
     expect(screen.getByTestId('hud-turno')).toBeInTheDocument()
+  })
+})
+
+describe('HUD da Partida — modal de volume (#438)', () => {
+  const JOGADORES_MODAL: Record<string, PercepcaoDeJogador> = {
+    [MEU_JOGADOR_ID]: { apelido: 'JogadorTeste', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 1, protegido: false },
+    ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, ordem: 2, protegido: false },
+  }
+
+  function propsDoModal(compacto?: boolean | null) {
+    return {
+      jogadorPorId: JOGADORES_MODAL,
+      jogadorAtivoId: MEU_JOGADOR_ID,
+      jogadorLocalId: MEU_JOGADOR_ID,
+      geradoresLigados: [] as string[],
+      cartaoDeAcessoObtido: false,
+      emAndamento: true,
+      emResultado: false,
+      compacto,
+      onSair: () => {},
+    }
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('botão de som abre o modal com os 3 sliders; X fecha', async () => {
+    await partidaComSnapshot(criarSnapshotBase())
+    expect(screen.queryByTestId('volume-modal')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /volume/i }))
+
+    const modal = screen.getByTestId('volume-modal')
+    expect(modal).toHaveAttribute('role', 'dialog')
+    expect(modal).toHaveAttribute('aria-modal', 'true')
+    expect(screen.getByTestId('volume-slider-musica')).toBeInTheDocument()
+    expect(screen.getByTestId('volume-slider-efeitos')).toBeInTheDocument()
+    expect(screen.getByTestId('volume-slider-monstros')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByTestId('volume-fechar'))
+    expect(screen.queryByTestId('volume-modal')).not.toBeInTheDocument()
+  })
+
+  it('clique no backdrop fecha o modal', async () => {
+    await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByRole('button', { name: /volume/i }))
+    expect(screen.getByTestId('volume-modal')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByTestId('volume-backdrop'))
+    expect(screen.queryByTestId('volume-modal')).not.toBeInTheDocument()
+  })
+
+  it('ESC fecha o modal', async () => {
+    await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByRole('button', { name: /volume/i }))
+    expect(screen.getByTestId('volume-modal')).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByTestId('volume-modal')).not.toBeInTheDocument()
+  })
+
+  it('slider de música habilitado com a faixa, valor persiste e respeita camada', async () => {
+    window.localStorage.setItem('flicker:volume:musica', '0.3')
+    await partidaComSnapshot(criarSnapshotBase())
+    await userEvent.click(screen.getByRole('button', { name: /volume/i }))
+
+    const sliderMusica = screen.getByTestId('volume-slider-musica') as HTMLInputElement
+    expect(sliderMusica).toBeEnabled()
+    expect(sliderMusica.value).toBe('0.3')
+    expect(screen.queryByText(/faixa ainda não foi publicada/i)).not.toBeInTheDocument()
+  })
+
+  it('cada slider ajusta só sua camada e o valor sobrevive a reload', () => {
+    const { unmount } = render(<HudDaPartida {...propsDoModal()} />)
+    fireEvent.click(screen.getByRole('button', { name: /volume/i }))
+
+    const sliderEfeitos = screen.getByTestId('volume-slider-efeitos') as HTMLInputElement
+    fireEvent.change(sliderEfeitos, { target: { value: '0.2' } })
+
+    expect(window.localStorage.getItem('flicker:volume:efeitos')).toBe('0.2')
+    expect(window.localStorage.getItem('flicker:volume:monstros')).toBeNull()
+    expect(window.localStorage.getItem('flicker:volume:musica')).toBeNull()
+    unmount()
+
+    // Reload: remonta e o slider reidrata do navegador.
+    render(<HudDaPartida {...propsDoModal()} />)
+    fireEvent.click(screen.getByRole('button', { name: /volume/i }))
+    expect((screen.getByTestId('volume-slider-efeitos') as HTMLInputElement).value).toBe('0.2')
+    expect((screen.getByTestId('volume-slider-monstros') as HTMLInputElement).value).toBe('1')
+  })
+
+  it('utilizável no modo compacto (800x360): abre com os 3 sliders operáveis', () => {
+    const { unmount } = render(<HudDaPartida {...propsDoModal(true)} />)
+    try {
+      expect(screen.getByTestId('hud-da-partida')).toHaveAttribute('data-modo-compacto', 'true')
+      fireEvent.click(screen.getByRole('button', { name: /volume/i }))
+
+      expect(screen.getByTestId('volume-modal')).toBeInTheDocument()
+      expect(screen.getByTestId('volume-slider-efeitos')).toBeEnabled()
+      expect(screen.getByTestId('volume-slider-monstros')).toBeEnabled()
+      expect(screen.getByTestId('volume-slider-musica')).toBeEnabled()
+    } finally {
+      unmount()
+    }
   })
 })

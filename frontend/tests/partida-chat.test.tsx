@@ -24,7 +24,7 @@ import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { registrosDeBlipDoChat } from './helpers/mockAudio'
 import { VOLUME_BASE_SOM_DE_BLIP_DO_CHAT } from '../web/src/components/partida/somDeBlipDoChat'
-import { VOLUME_MASTER_PARTIDA } from '../web/src/components/partida/volumeMaster'
+import { VOLUME_PADRAO_DA_CAMADA } from '../web/src/components/partida/volumesDasCamadas'
 import { HEX_COR_PEAO } from '../web/src/game/tabuleiro/contrato'
 import type { EstadoDaPartidaSnapshot } from '@flicker/shared'
 
@@ -211,9 +211,10 @@ describe('Chat da Partida — badge e blip (issue #389 [2])', () => {
     })
     expect(screen.getByTestId('chat-badge')).toHaveTextContent('4')
 
-    // Contrato de volume (ADR-0007): ganho = master * VOLUME_BASE.
+    // Contrato de volume (ADR-0007 + issue #438): ganho = camada de efeitos
+    // × VOLUME_BASE (camada padrão 1 sem valor persistido).
     expect(registrosDeBlipDoChat).toHaveLength(2)
-    expect(registrosDeBlipDoChat[0]?.ganho).toBe(VOLUME_MASTER_PARTIDA * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT)
+    expect(registrosDeBlipDoChat[0]?.ganho).toBe(VOLUME_PADRAO_DA_CAMADA * VOLUME_BASE_SOM_DE_BLIP_DO_CHAT)
 
     // Abrir zera o badge; fechar e receber nova mensagem reacende com 1.
     await userEvent.click(screen.getByTestId('chat-botao'))

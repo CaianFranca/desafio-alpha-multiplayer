@@ -8,7 +8,7 @@ import {
 } from '../web/src/components/partida/musicaDeFundo'
 import { useMusicaDeFundo } from '../web/src/components/partida/useMusicaDeFundo'
 import { VOLUME_BASE_SOM_DE_RECUSA } from '../web/src/components/partida/somDeRecusa'
-import { VOLUME_MASTER_PARTIDA } from '../web/src/components/partida/volumeMaster'
+import { VOLUME_PADRAO_DA_CAMADA } from '../web/src/components/partida/volumesDasCamadas'
 import {
   armarExcecaoNoProximoPlay,
   armarFalhaNoProximoPlay,
@@ -32,10 +32,10 @@ describe('música de fundo — constantes (issue #403)', () => {
     expect(VOLUME_BASE_MUSICA_DE_FUNDO).toBeLessThan(VOLUME_BASE_SOM_DE_RECUSA)
   })
 
-  it('instância nasce em loop com volume master * base (ADR-0007)', () => {
+  it('instância nasce em loop com volume camada de música * base (ADR-0007 + #438)', () => {
     const audio = criarMusicaDeFundo()
     expect(audio.loop).toBe(true)
-    expect(audio.volume).toBe(VOLUME_MASTER_PARTIDA * VOLUME_BASE_MUSICA_DE_FUNDO)
+    expect(audio.volume).toBe(VOLUME_PADRAO_DA_CAMADA * VOLUME_BASE_MUSICA_DE_FUNDO)
   })
 })
 
