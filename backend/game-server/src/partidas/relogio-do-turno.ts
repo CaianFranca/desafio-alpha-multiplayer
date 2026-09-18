@@ -118,6 +118,15 @@ export interface RelogioAgendado {
 }
 
 const entradas = new Map<string, EntradaDoRelogio>();
+/**
+ * Cadeia serial por partida da pausa/retomada (issue #431, review da PR #450
+ * item 1): o `close` (sync) e o upgrade (async) enfileiram na mesma ordem de
+ * chamada — o enfileiramento é síncrono, então a retomada (`await` no
+ * `ws.ts:500`) nunca lê antes da pausa persistir, mesmo em fire-and-forget.
+ * Mesmo padrão do `enfileirarMutacao` dos handlers; mononodo como o resto do
+ * canal. A cadeia ignora falha anterior para não bloquear as seguintes.
+ */
+const cadeiasDoRelogio = new Map<string, Promise<unknown>>();
 let turnoSegundos = DEFAULT_PARTIDA_TURNO_SEGUNDOS;
 let avisoSegundos = DEFAULT_PARTIDA_TURNO_AVISO_SEGUNDOS;
 let globalRedis: Redis | undefined;
@@ -151,6 +160,23 @@ export function definirResolvedorDeExpiracaoDoTurno(
   fn: ((partidaId: string) => Promise<boolean>) | undefined,
 ): void {
   resolvedor = fn;
+}
+
+function limparCadeiaDoRelogio(partidaId: string, vigencia: Promise<unknown>): void {
+  if (cadeiasDoRelogio.get(partidaId) === vigencia) {
+    cadeiasDoRelogio.delete(partidaId);
+  }
+}
+
+function enfileirarRelogio<T>(partidaId: string, fn: () => Promise<T>): Promise<T> {
+  const anterior = cadeiasDoRelogio.get(partidaId) ?? Promise.resolve();
+  const proxima = anterior.catch(() => undefined).then(fn) as Promise<T>;
+  cadeiasDoRelogio.set(partidaId, proxima as Promise<unknown>);
+  void (proxima as Promise<unknown>).then(
+    () => limparCadeiaDoRelogio(partidaId, proxima as Promise<unknown>),
+    () => limparCadeiaDoRelogio(partidaId, proxima as Promise<unknown>),
+  );
+  return proxima;
 }
 
 // Guarda única do Amedrontado (espelho do engine em avancarVez/partida.ts):
@@ -438,8 +464,21 @@ export async function estenderRelogioDoTurno(
  * restante, cancela os timers e anuncia TURNO_INICIADO sem deadline. Nunca
  * lança (retorna false) — a expiração tem guarda própria de presença, então
  * uma pausa atrasada nunca resolve o turno de um ausente.
+ *
+ * Serializada por partida via `enfileirarRelogio` (review da PR #450 item 1):
+ * o enfileiramento é síncrono, então pausa→retomada têm ordem determinística
+ * mesmo quando a pausa é fire-and-forget no `close` e a retomada é `await` no
+ * upgrade.
  */
-export async function pausarRelogioDoTurnoSeAtivo(
+export function pausarRelogioDoTurnoSeAtivo(
+  redis: Redis,
+  partidaId: string,
+  jogadorId: string,
+): Promise<boolean> {
+  return enfileirarRelogio(partidaId, () => pausarRelogioDoTurnoSeAtivoInterno(redis, partidaId, jogadorId));
+}
+
+async function pausarRelogioDoTurnoSeAtivoInterno(
   redis: Redis,
   partidaId: string,
   jogadorId: string,
@@ -529,8 +568,19 @@ function anunciarTurnoSemDeadline(partidaId: string, jogadorId: string, rodada: 
  * o início da partida na N-ésima admissão e o vão de um restart com chave
  * expirada — nunca pune com falta imediata o que pode ser queda do servidor).
  * Nunca lança.
+ *
+ * Serializada por partida via `enfileirarRelogio` (review da PR #450 item 1):
+ * par da pausa — ver `pausarRelogioDoTurnoSeAtivo`.
  */
-export async function retomarRelogioDoTurnoSeAtivo(
+export function retomarRelogioDoTurnoSeAtivo(
+  redis: Redis,
+  partidaId: string,
+  jogadorId: string,
+): Promise<boolean> {
+  return enfileirarRelogio(partidaId, () => retomarRelogioDoTurnoSeAtivoInterno(redis, partidaId, jogadorId));
+}
+
+async function retomarRelogioDoTurnoSeAtivoInterno(
   redis: Redis,
   partidaId: string,
   jogadorId: string,
@@ -599,6 +649,7 @@ export async function retomarRelogioDoTurnoSeAtivo(
     } catch {
       bruto = null;
     }
+    let motivo: 'chave-ausente' | 'chave-expirada' | 'chave-divergente' | 'chave-ilegivel' = 'chave-ausente';
     if (bruto !== null) {
       try {
         const valor: unknown = JSON.parse(bruto) as unknown;
@@ -612,18 +663,34 @@ export async function retomarRelogioDoTurnoSeAtivo(
               avisoEmitido: valor.avisoEmitido,
               pausadoComRestanteMs: valor.pausadoComRestanteMs,
             });
-            return await retomarRelogioDoTurnoSeAtivo(redis, partidaId, jogadorId);
+            return await retomarRelogioDoTurnoSeAtivoInterno(redis, partidaId, jogadorId);
           }
           const restanteMs = valor.deadlineDoTurnoEm - Date.now();
           if (restanteMs > 0) {
             await armarRelogioDoTurnoComRestante(redis, partidaId, valor, restanteMs);
             return true;
           }
+          motivo = 'chave-expirada';
+        } else {
+          motivo = 'chave-divergente';
         }
       } catch {
         // Chave ilegível: cai no prazo cheio abaixo.
+        motivo = 'chave-ilegivel';
       }
     }
+    // Ramo leniente (review da PR #450 item 2): sem relógio mas com a partida
+    // em andamento e Ativo presente, arma prazo cheio em vez de punir com
+    // falta imediata. Só rastro, sem mudar comportamento — partida, jogador e
+    // motivo (ausente cobre a N-ésima admissão que inicia a partida e o vão
+    // de restart com TTL expirado).
+    console.info('[relogio-do-turno] retomada leniente arma prazo cheio', {
+      partidaId,
+      jogadorId,
+      motivo,
+      jogadorAtivoId: estado.jogadorAtivoId,
+      rodada: estado.rodada,
+    });
     await armarRelogioDoTurno(partidaId, { jogadorAtivoId: estado.jogadorAtivoId, rodada: estado.rodada }, { redis });
     return true;
   } catch (e) {

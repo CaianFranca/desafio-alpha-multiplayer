@@ -824,6 +824,48 @@ test('retomada sem relógio arma prazo cheio leniente', async () => {
   }
 });
 
+// Review da PR #450 item 1: pausa (fire-and-forget no `close`) imediatamente
+// seguida da retomada (`await` no upgrade) termina sempre retomada — a cadeia
+// serial por partida ordena pausa→retomada mesmo sem `await` na pausa. Sem
+// entrada em memória (restart simulado: só a chave), o caminho lento de Redis
+// das duas competiria sem a cadeia. Tempo falso: determinístico, sem sleeps.
+test('interleaving: pausa imediatamente seguida de retomada termina retomado (tempo falso)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
+    estado: estadoEmTurnoNormal(),
+  });
+  try {
+    await armarRelogioDoTurno(
+      montada.partidaId,
+      { jogadorAtivoId: 'jogador-1', rodada: 2 },
+      { redis: montada.redis.comoRedis(), duracaoMs: 60_000, avisoEmMs: 50_000 },
+    );
+    // Restart: derruba a memória, preserva a chave — pausa e retomada seguem
+    // o caminho lento de Redis e competiriam sem a cadeia serial.
+    __simularRestartDoRelogioParaTestes();
+    assert.equal(obterDeadlineDoTurno(montada.partidaId), null);
+
+    // Pausa disparada sem await (como no `close`) e retomada imediata (como
+    // no upgrade): a ordem de enfileiramento define pausa→retomada.
+    const pausa = pausarRelogioDoTurnoSeAtivo(montada.redis.comoRedis(), montada.partidaId, 'jogador-1');
+    const retomada = retomarRelogioDoTurnoSeAtivo(montada.redis.comoRedis(), montada.partidaId, 'jogador-1');
+    const [pausou, retomou] = await Promise.all([pausa, retomada]);
+    assert.equal(pausou, true, 'pausa persistiu');
+    assert.equal(retomou, true, 'retomada retomou o restante pausado');
+
+    // Relógio retomado com o restante correto (≈60s, sem tempo decorrido no
+    // relógio falso) — nunca termina pausado (deadline nulo = inconsistente).
+    const deadline = obterDeadlineDoTurno(montada.partidaId);
+    assert.ok(typeof deadline === 'number', 'retomado: deadline vigente');
+    const agora = Date.now();
+    assert.ok((deadline as number) >= agora + 58_000 && (deadline as number) <= agora + 60_000);
+    assert.equal(await lerDeadlineDoTurno(montada.redis.comoRedis(), montada.partidaId), deadline);
+  } finally {
+    t.mock.timers.reset();
+    await limparPartida(montada);
+  }
+});
+
 test('pausa de quem não é o Ativo é no-op', async () => {
   const montada = await montarPartida(['jogador-1', 'jogador-2', 'jogador-3'], {
     estado: estadoEmTurnoNormal(),
