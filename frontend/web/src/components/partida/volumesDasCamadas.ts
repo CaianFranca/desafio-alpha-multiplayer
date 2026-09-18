@@ -34,6 +34,9 @@ export const CHAVE_VOLUME_POR_CAMADA: Record<CamadaDeVolume, string> = {
 /** Camada padrão: cheia (1). Ausência/valor inválido no storage volta aqui. */
 export const VOLUME_PADRAO_DA_CAMADA = 1
 
+/** Evento intra-aba para mudanças de camada (storage só dispara cross-tab). */
+export const EVENTO_VOLUME_CAMADA = 'flicker:volume-change'
+
 /**
  * Música de fundo disponível? Verdadeiro desde a #403 (asset
  * `musica-de-fundo.mp3` + player já na main). O modal habilita o slider
@@ -68,7 +71,9 @@ export function obterVolumeDaCamada(camada: CamadaDeVolume): number {
 
 /**
  * Persiste a camada (prendendo em [0, 1]). Falha de escrita = no-op
- * silencioso. Retorna o valor efetivamente gravado (preso).
+ * silencioso. Retorna o valor efetivamente gravado (preso). Dispara
+ * `EVENTO_VOLUME_CAMADA` para atualizar áudio já em loop na mesma aba
+ * (storage só dispara cross-tab).
  */
 export function definirVolumeDaCamada(camada: CamadaDeVolume, valor: number): number {
   const preso = prenderVolumeDaCamada(valor)
@@ -78,6 +83,13 @@ export function definirVolumeDaCamada(camada: CamadaDeVolume, valor: number): nu
     }
   } catch {
     // Sem persistência desta vez; o valor em memória do hook segue valendo.
+  }
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent(EVENTO_VOLUME_CAMADA, { detail: { camada, valor: preso } }))
+    }
+  } catch {
+    // Evento intra-aba opcional — nunca quebra.
   }
   return preso
 }
@@ -99,7 +111,7 @@ export function obterVolumeDeMonstros(): number {
 
 /**
  * Hook do slider do modal: estado vivo da camada + escrita persistente.
- * Sincroniza entre abas via evento `storage` (mesma chave, outro documento).
+ * Sincroniza entre abas via `storage` e intra-aba via `EVENTO_VOLUME_CAMADA`.
  */
 export function useVolumeDaCamada(camada: CamadaDeVolume): readonly [number, (valor: number) => void] {
   // A camada é fixa por instância de slider e o modal remonta a cada
@@ -113,8 +125,17 @@ export function useVolumeDaCamada(camada: CamadaDeVolume): readonly [number, (va
       if (evento.key !== null && evento.key !== chave) return
       setVolume(obterVolumeDaCamada(camada))
     }
+    const aoMudarLocal = (evento: Event): void => {
+      const detalhe = (evento as CustomEvent<{ camada: CamadaDeVolume; valor: number }>).detail
+      if (detalhe !== undefined && detalhe.camada !== camada) return
+      setVolume(obterVolumeDaCamada(camada))
+    }
     window.addEventListener('storage', aoMudarStorage)
-    return () => window.removeEventListener('storage', aoMudarStorage)
+    window.addEventListener(EVENTO_VOLUME_CAMADA, aoMudarLocal)
+    return () => {
+      window.removeEventListener('storage', aoMudarStorage)
+      window.removeEventListener(EVENTO_VOLUME_CAMADA, aoMudarLocal)
+    }
   }, [camada])
 
   const definir = useCallback(

@@ -42,6 +42,18 @@ export function criarMusicaDeFundo(): HTMLAudioElement {
 }
 
 /**
+ * Atualiza o volume da instância já em loop sem recriar ou interromper —
+ * lê a camada de música no momento da chamada (mesma fórmula da criação).
+ */
+export function atualizarVolumeDaMusicaDeFundo(audio: HTMLAudioElement): void {
+  try {
+    audio.volume = obterVolumeDeMusica() * VOLUME_BASE_MUSICA_DE_FUNDO
+  } catch {
+    // Atualização silenciosa — nunca quebra o loop.
+  }
+}
+
+/**
  * Toca a música de fundo — no-op silencioso se o áudio falhar (autoplay
  * bloqueado, asset ausente). Guarda para o jsdom, que não implementa
  * `play()` (retorna undefined em vez de Promise).
