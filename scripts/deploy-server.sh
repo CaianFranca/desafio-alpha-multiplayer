@@ -20,6 +20,7 @@ ROOT=/opt/flicker
 RELEASES="$ROOT/releases"
 CURRENT="$ROOT/current"
 ENV_FILE="$ROOT/env"
+UNIT_BACKUP_DIR="$ROOT/unit-backup"
 REDIS_CONF="${REDIS_CONF:-/etc/redis/redis.conf}"
 KEEP_RELEASES=3
 HEALTH_TIMEOUT=60
@@ -121,9 +122,18 @@ cleanup_conf
 
 # ── 4. Instalar units systemd + conf nginx ──────────────────────────────────
 log "instalando units e nginx conf"
+# Backup dos units instalados: a release anterior pode não ter dist/ (artefato
+# pré-compilado), então um rollback precisa restaurar os units antigos.
+mkdir -p "$UNIT_BACKUP_DIR"
+for unit in flicker-lobby flicker-game; do
+  if [ -f "/etc/systemd/system/$unit.service" ]; then
+    cp -f "/etc/systemd/system/$unit.service" "$UNIT_BACKUP_DIR/$unit.service"
+  fi
+done
 cp "$RELEASE_DIR/infra/systemd/"*.service /etc/systemd/system/ 2>/dev/null \
   || die "units systemd não encontradas no tarball (esperado: infra/systemd/)"
 systemctl daemon-reload
+systemctl enable flicker-lobby.service flicker-game.service
 cp "$RELEASE_DIR/infra/nginx/nginx.prod.conf" /etc/nginx/sites-available/flicker
 ln -sfn /etc/nginx/sites-available/flicker /etc/nginx/sites-enabled/flicker
 # Snippets incluídos por nginx.prod.conf e nginx.edge.conf via caminho absoluto
@@ -156,6 +166,7 @@ ln -sfn "$RELEASE_DIR/frontend/dist" /var/www/html
 
 # ── 6. Restart + health check (rollback automático p/ release anterior) ─────
 log "reiniciando flicker-lobby e flicker-game"
+systemctl reset-failed flicker-lobby.service flicker-game.service || true
 systemctl restart flicker-lobby.service flicker-game.service
 
 LOBBY_PORT="${LOBBY_SERVER_PORT:-3001}"
@@ -169,6 +180,14 @@ rollback() {
     # o backend mas continuaria servindo o frontend da release que falhou.
     rm -rf /var/www/html
     ln -sfn "$PREVIOUS/frontend/dist" /var/www/html
+    if [ -f "$UNIT_BACKUP_DIR/flicker-lobby.service" ] || [ -f "$UNIT_BACKUP_DIR/flicker-game.service" ]; then
+      for unit in flicker-lobby flicker-game; do
+        if [ -f "$UNIT_BACKUP_DIR/$unit.service" ]; then
+          cp -f "$UNIT_BACKUP_DIR/$unit.service" "/etc/systemd/system/$unit.service"
+        fi
+      done
+      systemctl daemon-reload
+    fi
     systemctl restart flicker-lobby.service flicker-game.service
     log "rollback concluído; release $SHA permanece em disco"
   else
