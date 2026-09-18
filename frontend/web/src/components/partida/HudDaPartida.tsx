@@ -83,7 +83,7 @@ export interface HudDaPartidaProps {
    * Card fixo pequeno com blur acima dos objetivos, sem interceptar cliques.
    */
   etapaDoGuiaTexto?: string | null
-  /** Alvo atual do guia (só `vez` acende aqui — o resto vive no espelho). */
+  /** Alvo atual do guia (só `turno` acende aqui — o resto vive no espelho). */
   guiaAlvo?: AlvoDoGuiaDeTurno | null
   /** Switch "Guia do Jogador" (persistido no navegador, default ligado). */
   guiaLigado?: boolean
@@ -265,8 +265,8 @@ export function HudDaPartida({
     (jogadorLocalId !== null ? ordenados.find((j) => j.jogadorId === jogadorLocalId) : undefined) ??
     ordenados.find((j) => j.jogadorId === jogadorAtivoId) ??
     ordenados[0]
-  // Anel da vez: só pisca quando a vez é de fato do jogador local.
-  const ehMinhaVez =
+  // Anel do turno: só pisca quando o turno é de fato do jogador local.
+  const ehMeuTurno =
     jogadorLocalId !== null &&
     jogadorLocal.jogadorId === jogadorLocalId &&
     jogadorAtivoId === jogadorLocalId
@@ -615,7 +615,7 @@ export function HudDaPartida({
       >
         <div data-testid="hud-jogador-local" data-jogador-id={jogadorLocal.jogadorId} className="flex items-center gap-3">
           <div className={`relative flex items-center justify-center ${emModoCompacto ? 'h-12 w-12' : 'h-20 w-20'}`}>
-            {ehMinhaVez ? (
+            {ehMeuTurno ? (
               <span
                 data-testid="hud-anel-da-vez"
                 aria-hidden="true"
@@ -624,10 +624,10 @@ export function HudDaPartida({
             ) : null}
             <div
               role="img"
-              aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMinhaVez ? ', com a vez' : ''}`}
+              aria-label={`Retrato de ${jogadorLocal.dados.apelido}${ehMeuTurno ? ', com a vez' : ''}`}
               data-compacto={emModoCompacto ? 'true' : undefined}
               className={`flex items-center justify-center overflow-hidden rounded-full border-2 bg-zinc-900/80 font-display font-semibold transition-colors duration-500 ${emModoCompacto ? 'h-12 w-12 text-base' : 'h-20 w-20 text-2xl'} ${
-                ehMinhaVez ? 'border-amber-300/40' : 'border-zinc-700'
+                ehMeuTurno ? 'border-amber-300/40' : 'border-zinc-700'
               }`}
             >
               <ConteudoDoAvatar
@@ -893,7 +893,7 @@ export function HudDaPartida({
                     data-testid={ehAtivo ? 'hud-turno-ativo' : 'hud-turno-proximo'}
                     data-jogador-id={jogadorId}
                     data-presenca={emReconexaoTurno ? 'em_reconexao' : undefined}
-                    data-guia={ehAtivo && guiaAlvo === 'vez' ? 'true' : undefined}
+                    data-guia={ehAtivo && guiaAlvo === 'turno' ? 'true' : undefined}
                     role="img"
                     aria-label={`${ehAtivo ? `Vez de ${dados.apelido}` : `Próximo: ${dados.apelido}`}${emReconexaoTurno ? ', reconectando' : ''}`}
                     title={emReconexaoTurno ? `${dados.apelido} — reconectando` : dados.apelido}

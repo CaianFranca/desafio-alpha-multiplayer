@@ -274,7 +274,8 @@ interface AmbienteCenaProps {
    * Guia de turno (issue #441): alvo atual + ids do dono do turno, derivados
    * uma vez no pai (mesma fonte do espelho DOM). A cena aplica o contorno
    * ciano nos meshes reais (Inicial própria, peão próprio, corrente da
-   * bandeja, peça do giro/OK) — só visual, nunca bloqueia cliques.
+   * bandeja, destinos, bordas do tabuleiro, anel das vagas) — giro/OK é só
+   * texto, sem destaque. Só visual, nunca bloqueia cliques.
    */
   guiaAlvo?: AlvoDoGuiaDeTurno | null
   guiaPecaId?: string | null
@@ -443,7 +444,6 @@ export function AmbienteCena({
         estadoInteracao={estadoInteracao ?? null}
         estadoPeoes={estadoPeoes}
         onComando={onComando ?? noop}
-        emGuia={guiaAlvo === 'manipulacao'}
       />
     </>
   )

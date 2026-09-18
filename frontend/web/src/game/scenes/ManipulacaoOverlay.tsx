@@ -41,7 +41,6 @@ import {
   previewsProvisorios,
 } from '../tabuleiro/interacaoPeoes'
 import { handlersDeCursor } from '../tabuleiro/cursor'
-import { COR_CONTORNO_GUIA, propsDoMaterialDeContorno } from '../tabuleiro/contorno'
 
 // ── Geometria do overlay ──
 // Botões e setas são planos horizontais (vistos de cima), flutuando acima da
@@ -154,12 +153,6 @@ interface ManipulacaoOverlayProps {
   /** Ciclo do peão: fonte dos previews provisórios pré-encaixe (#357). */
   estadoPeoes?: EstadoInteracaoPeoes | null
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
-  /**
-   * Guia de turno (issue #441): passo do giro/OK — anel ciano sob os
-   * controles, mesma linguagem inédita dos demais alvos; só visual, nunca
-   * intercepta os cliques de girar/confirmar.
-   */
-  emGuia?: boolean
 }
 
 export function ManipulacaoOverlay({
@@ -167,7 +160,6 @@ export function ManipulacaoOverlay({
   estadoInteracao = null,
   estadoPeoes = null,
   onComando,
-  emGuia = false,
 }: ManipulacaoOverlayProps) {
   const pecaEmManipulacaoId = estadoInteracao?.pecaEmManipulacaoId ?? null
   const peca = pecaEmManipulacaoId
@@ -194,7 +186,6 @@ export function ManipulacaoOverlay({
           pecaId={preview.pecaId}
           tipo={preview.tipo}
           onComando={onComando}
-          emGuia={emGuia}
           comandoOK={{
             type: 'POSICIONAR_PECA',
             pecaId: preview.pecaId,
@@ -220,7 +211,6 @@ export function ManipulacaoOverlay({
       pecaId={peca.pecaId}
       tipo={peca.tipo}
       onComando={onComando}
-      emGuia={emGuia}
       comandoOK={mapearFinalizarManipulacao()}
     />
   )
@@ -236,14 +226,12 @@ function OverlayControles({
   pecaId,
   tipo,
   onComando,
-  emGuia = false,
   comandoOK,
 }: {
   posMundo: readonly [number, number, number]
   pecaId: string
   tipo: Parameters<typeof giroAlteraConexao>[0]
   onComando?: (comando: TabuleiroComandoDoCliente | null) => void
-  emGuia?: boolean
   comandoOK: TabuleiroComandoDoCliente
 }) {
   const texturaOK = useMemo(() => criarTexturaOK(), [])
@@ -268,27 +256,6 @@ function OverlayControles({
 
   return (
     <group position={[posMundo[0], posMundo[1] + ALTURA_OVERLAY, posMundo[2]]}>
-      {/* Anel do guia (issue #441): chapado sob os controles no ciano
-          inédito — mesma linguagem do anel de seleção do peão, sem tone
-          mapping, sem raycast (nunca rouba o clique das setas/OK), estático
-          (vale com `prefers-reduced-motion`). */}
-      {emGuia ? (
-        <mesh
-          position={[0, -ALTURA_OVERLAY + 0.02, 0.35]}
-          rotation={[-Math.PI / 2, 0, 0]}
-          raycast={() => null}
-          renderOrder={998}
-        >
-          <ringGeometry args={[1.15, 1.32, 48]} />
-          <meshBasicMaterial
-            {...propsDoMaterialDeContorno(COR_CONTORNO_GUIA)}
-            transparent
-            opacity={0.9}
-            depthTest={false}
-            depthWrite={false}
-          />
-        </mesh>
-      ) : null}
       {/* Seta da Direita (Leste) */}
       {exibirGiro ? (
       <>

@@ -4,11 +4,12 @@
 // texto do card + atributo de guia no espelho) + unidade pura da máquina.
 //
 // Cobertura das 18 histórias: sequência inicial (1–10, confirmar via fase
-// `confirmar` — no turno inicial o faseamento leva direto a encerrar),
+// `confirmar` — no Primeiro Turno o faseamento leva direto a encerrar),
 // normal 3 passos + fim (11–12), switch persistido (13–14), região viva
-// (15), compacto (16), Amedrontado (17) e espectador (18). Vez e bandeja
-// avançam ao exibir (transitórios por desenho): no seam assentam no passo
-// seguinte e a exibição é provada pela memória "já ensinado" + unidade pura.
+// (15), compacto (16), Amedrontado (17) e espectador (18). Turno e
+// permanecer avançam ao exibir (transitórios por desenho): no seam assentam
+// no passo seguinte e a exibição é provada pela memória "já ensinado" +
+// unidade pura. Giro é só texto; bandeja fixa 1 ciclo antes das vagas.
 
 import { act, render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -18,7 +19,12 @@ import { AuthProvider } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { HudDaPartida } from '../web/src/components/partida/HudDaPartida'
-import { etapaDoGuiaDeTurno } from '../web/src/game/tabuleiro/guiaDeTurno'
+import {
+  etapaDoGuiaDeTurno,
+  passoDeAvancoImediato,
+  passoDeExibicaoUnica,
+} from '../web/src/game/tabuleiro/guiaDeTurno'
+import { guiaDaCelula } from '../web/src/game/tabuleiro/Tabuleiro'
 import { inicialDaCorDoPeao } from '../web/src/game/tabuleiro/interacaoPeoes'
 import type { EntradaDoGuiaDeTurno } from '../web/src/game/tabuleiro/guiaDeTurno'
 import { MockWebSocket } from './helpers/mockWebSocket'
@@ -104,12 +110,6 @@ async function partidaComSnapshot(partidaId: string, snapshot: EstadoDaPartidaSn
   return ws
 }
 
-function ensinadosDa(partidaId: string): string[] {
-  const cru = window.localStorage.getItem(`guia-de-turno-ensinados:${partidaId}`)
-  if (!cru) return []
-  return JSON.parse(cru) as string[]
-}
-
 function alvosComGuia(): Element[] {
   return Array.from(document.querySelectorAll('[data-guia="true"]'))
 }
@@ -153,7 +153,7 @@ afterEach(() => {
 
 function entradaBase(overrides: Partial<EntradaDoGuiaDeTurno> = {}): EntradaDoGuiaDeTurno {
   return {
-    minhaVez: true,
+    meuTurno: true,
     amedrontado: false,
     guiaLigado: true,
     rodada: 1,
@@ -176,9 +176,9 @@ function entradaBase(overrides: Partial<EntradaDoGuiaDeTurno> = {}): EntradaDoGu
 }
 
 describe('Guia de turno — máquina pura (issue #441)', () => {
-  it('sem guia desligado, fora da vez ou Amedrontado', () => {
+  it('sem guia desligado, fora do turno ou Amedrontado', () => {
     expect(etapaDoGuiaDeTurno(entradaBase({ guiaLigado: false }))).toBeNull()
-    expect(etapaDoGuiaDeTurno(entradaBase({ minhaVez: false }))).toBeNull()
+    expect(etapaDoGuiaDeTurno(entradaBase({ meuTurno: false }))).toBeNull()
     expect(etapaDoGuiaDeTurno(entradaBase({ amedrontado: true }))).toBeNull()
   })
 
@@ -201,23 +201,24 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
     expect(inicialDaCorDoPeao('peao-sintetico')).toBeNull()
   })
 
-  it('vez abre o fluxo inicial e cede à Inicial quando ensinada', () => {
-    const vez = etapaDoGuiaDeTurno(entradaBase())
-    expect(vez?.alvo).toBe('vez')
-    const inicial = etapaDoGuiaDeTurno(entradaBase({ ensinados: new Set(['guia-inicial-vez']) }))
+  it('turno abre o fluxo inicial e cede à Inicial quando ensinado', () => {
+    const turno = etapaDoGuiaDeTurno(entradaBase())
+    expect(turno?.alvo).toBe('turno')
+    const inicial = etapaDoGuiaDeTurno(entradaBase({ ensinados: new Set(['guia-inicial-turno']) }))
     expect(inicial?.alvo).toBe('inicial-propria')
   })
 
-  it('giro, bandeja e vagas exibem uma vez por Partida', () => {
+  it('giro é só texto (sem alvo), bandeja fixa 1 ciclo antes das vagas', () => {
     const estadoManipulando = {
       inicialPropriaNaMesa: false,
       inicialPropriaPosicionada: true,
       temManipulacao: true,
     }
     const giro = etapaDoGuiaDeTurno(entradaBase(estadoManipulando))
-    expect(giro?.alvo).toBe('manipulacao')
+    expect(giro?.texto).toMatch(/Gire a peça/)
+    expect(giro?.alvo).toBeNull()
     const depoisDoGiro = etapaDoGuiaDeTurno(
-      entradaBase({ ...estadoManipulando, ensinados: new Set(['guia-inicial-vez', 'guia-inicial-giro']) }),
+      entradaBase({ ...estadoManipulando, ensinados: new Set(['guia-inicial-turno', 'guia-inicial-giro']) }),
     )
     expect(depoisDoGiro?.id).not.toBe('guia-inicial-giro')
     const bandeja = etapaDoGuiaDeTurno(
@@ -226,7 +227,7 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
         inicialPropriaPosicionada: true,
         peaoProprioPosicionado: true,
         temRecebidaPendente: true,
-        ensinados: new Set(['guia-inicial-vez']),
+        ensinados: new Set(['guia-inicial-turno']),
       }),
     )
     expect(bandeja?.alvo).toBe('bandeja')
@@ -236,7 +237,7 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
         inicialPropriaPosicionada: true,
         peaoProprioPosicionado: true,
         temRecebidaPendente: true,
-        ensinados: new Set(['guia-inicial-vez', 'guia-inicial-bandeja']),
+        ensinados: new Set(['guia-inicial-turno', 'guia-inicial-bandeja']),
       }),
     )
     expect(vagas?.alvo).toBe('vagas')
@@ -246,10 +247,27 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
         inicialPropriaPosicionada: true,
         peaoProprioPosicionado: true,
         temRecebidaPendente: true,
-        ensinados: new Set(['guia-inicial-vez', 'guia-inicial-bandeja', 'guia-inicial-vagas']),
+        ensinados: new Set(['guia-inicial-turno', 'guia-inicial-bandeja', 'guia-inicial-vagas']),
       }),
     )
     expect(depoisDasVagas).toBeNull()
+  })
+
+  it('bandeja é exibição única sem avanço imediato (fixa 1 ciclo)', () => {
+    expect(passoDeExibicaoUnica('guia-inicial-bandeja')).toBe(true)
+    expect(passoDeAvancoImediato('guia-inicial-bandeja')).toBe(false)
+    expect(passoDeAvancoImediato('guia-inicial-turno')).toBe(true)
+    expect(passoDeAvancoImediato('guia-normal-permanecer')).toBe(true)
+  })
+
+  it('guia por célula: tabuleiro acende a grade, vagas só nas vagas', () => {
+    const vagas = new Set(['3:3', '3:4'])
+    expect(guiaDaCelula('3:3', 'tabuleiro', vagas)).toEqual({ tabuleiroEmGuia: true, vagaEmGuia: false })
+    expect(guiaDaCelula('0:0', 'tabuleiro', new Set())).toEqual({ tabuleiroEmGuia: true, vagaEmGuia: false })
+    expect(guiaDaCelula('3:3', 'vagas', vagas)).toEqual({ tabuleiroEmGuia: false, vagaEmGuia: true })
+    expect(guiaDaCelula('0:0', 'vagas', vagas)).toEqual({ tabuleiroEmGuia: false, vagaEmGuia: false })
+    expect(guiaDaCelula('3:3', null, vagas)).toEqual({ tabuleiroEmGuia: false, vagaEmGuia: false })
+    expect(guiaDaCelula('3:3', 'bandeja', vagas)).toEqual({ tabuleiroEmGuia: false, vagaEmGuia: false })
   })
 
   it('fluxo normal tem 3 passos e depois termina', () => {
@@ -275,12 +293,11 @@ describe('Guia de turno — máquina pura (issue #441)', () => {
 // ── Sequência inicial no seam ──
 
 describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
-  it('vez assenta na Inicial, tabuleiro, giro, peão, destino, encerrar, bandeja, vagas e encerrar de novo', async () => {
+  it('turno assenta na Inicial, tabuleiro, giro só texto, peão, destino, encerrar, bandeja, vagas e encerrar de novo', async () => {
     const partidaId = 'guia-seq'
     const ws = await partidaComSnapshot(partidaId, criarSnapshotBase())
 
-    // [1] vez (transitória): exibida uma vez e memorizada; o card assenta na Inicial.
-    expect(ensinadosDa(partidaId)).toContain('guia-inicial-vez')
+    // [1] turno (transitório): cede à Inicial no mesmo ciclo; o card assenta na Inicial.
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Seu turno — selecione sua Peça Inicial.')
 
     // [2] só a minha Inicial destaca — no espelho E na cena 3D real.
@@ -304,7 +321,7 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     expect(screen.getByTestId('tabuleiro')).toHaveAttribute('data-guia', 'true')
     expect(sondaDaCena()).toEqual({ alvo: 'tabuleiro', pecaId: null, peaoId: 'peao-branco' })
 
-    // [4] giro/OK na manipulação (só visual, sem bloquear).
+    // [4] giro/OK é só texto informativo (sem alvo, sem ciano, controles clicáveis).
     act(() =>
       ws.simulateMessage({
         type: 'ESTADO_DA_PARTIDA',
@@ -319,9 +336,10 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
       }),
     )
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Gire a peça e confirme com OK.')
-    expect(screen.getByTestId('peca-posicionada')).toHaveAttribute('data-guia', 'true')
-    // Cena 3D real: peça do giro/OK com o id do passo de manipulação.
-    expect(sondaDaCena()).toEqual({ alvo: 'manipulacao', pecaId: 'inicial-1', peaoId: 'peao-branco' })
+    expect(screen.getByTestId('peca-posicionada')).not.toHaveAttribute('data-guia', 'true')
+    expect(alvosComGuia()).toHaveLength(0)
+    // Cena 3D real: giro só texto — sem peça em guia.
+    expect(sondaDaCena()).toEqual({ alvo: null, pecaId: null, peaoId: 'peao-branco' })
 
     // [5] meu peão.
     act(() =>
@@ -336,7 +354,6 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
         }),
       }),
     )
-    expect(ensinadosDa(partidaId)).toContain('guia-inicial-giro')
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Selecione seu peão.')
     const peoes = screen.getAllByTestId('peao')
     expect(peoes.filter((el) => el.getAttribute('data-guia') === 'true').map((el) => el.getAttribute('data-peao-id'))).toEqual([
@@ -390,7 +407,9 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     expect(screen.getByTestId('guia-de-turno').className).toContain('pointer-events-none')
     expect(sondaDaCena()).toEqual({ alvo: 'botao-encerrar', pecaId: null, peaoId: 'peao-branco' })
 
-    // [8→9] recebida na bandeja: bandeja exibida uma vez, vagas assentam.
+    // [8→9] recebida na bandeja: bandeja fixa 1 ciclo com ciano na corrente,
+    // depois vagas assentam (ordem pura provada acima; no seam o flush assenta
+    // em vagas, com a corrente ainda presente para o pull).
     act(() =>
       ws.simulateMessage({
         type: 'ESTADO_DA_PARTIDA',
@@ -411,10 +430,10 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
         }),
       }),
     )
-    expect(ensinadosDa(partidaId)).toContain('guia-inicial-bandeja')
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Puxe a peça da bandeja e encaixe nas vagas.')
     expect(screen.getByTestId('caixa-peca-sorteada')).toBeInTheDocument()
-    // Cena 3D real: a corrente da bandeja com o id da recebida do passo.
+    // Cena 3D real: passo das vagas (a bandeja de 1 ciclo cedeu; a ordem
+    // bandeja→vagas vive na unidade pura + no ciano da corrente abaixo).
     expect(sondaDaCena()).toEqual({ alvo: 'vagas', pecaId: null, peaoId: 'peao-branco' })
 
     // Puxar revela as vagas vizinhas com o destaque do guia.
@@ -450,8 +469,6 @@ describe('Guia de turno — sequência inicial (issues #441 [1–10])', () => {
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Encerre seu turno.')
     await userEvent.click(screen.getByTestId('botao-encerrar-turno'))
     expect(ws.sentMessages.map(String).join(' ')).toMatch(/ENCERRAR_TURNO/)
-    // Vagas de exibição única: ao concluir o passo, entra na memória da Partida.
-    expect(ensinadosDa(partidaId)).toContain('guia-inicial-vagas')
   })
 })
 
@@ -531,7 +548,6 @@ describe('Guia de turno — confirmar e fluxo normal (issues #441 [7,11,12])', (
         snapshot: { ...baseNormal(), tabuleiro: { ...baseNormal().tabuleiro, peaoSelecionadoId: 'peao-branco' } },
       }),
     )
-    expect(ensinadosDa(partidaId)).toContain('guia-normal-permanecer')
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Desloque seu peão para uma peça vizinha conectada.')
     expect(screen.getByTestId('botao-permanecer')).toBeInTheDocument()
     const destinos = screen.getAllByTestId('peca-posicionada')
@@ -546,7 +562,6 @@ describe('Guia de turno — confirmar e fluxo normal (issues #441 [7,11,12])', (
     expect(screen.queryByTestId('guia-de-turno')).not.toBeInTheDocument()
     await enviarLote(ws, { type: 'TURNO_INICIADO', jogadorId: MEU_JOGADOR_ID, rodada: 3 })
     expect(screen.queryByTestId('guia-de-turno')).not.toBeInTheDocument()
-    expect(window.localStorage.getItem(`guia-de-turno-normal-concluido:${partidaId}`)).toBe('1')
     expect(alvosComGuia()).toHaveLength(0)
   })
 })
@@ -669,7 +684,62 @@ describe('Guia de turno — região viva e compacto (issues #441 [15,16])', () =
     }
   })
 
-  it('destaque da vez acende no indicador do HUD', () => {
+  it('memória zerada por Partida: legado expira e o guia recomeça do zero', async () => {
+    const partidaId = 'guia-memoria-zerada'
+    window.localStorage.setItem(`guia-de-turno-ensinados:${partidaId}`, JSON.stringify(['guia-inicial-turno', 'guia-inicial-bandeja']))
+    window.localStorage.setItem(`guia-de-turno-normal-concluido:${partidaId}`, '1')
+    await partidaComSnapshot(partidaId, criarSnapshotBase())
+    // Legado expirado na montagem/troca de Partida; só o switch global persiste.
+    expect(window.localStorage.getItem(`guia-de-turno-ensinados:${partidaId}`)).toBeNull()
+    expect(window.localStorage.getItem(`guia-de-turno-normal-concluido:${partidaId}`)).toBeNull()
+    // Recomeça do zero: card assenta na Inicial, com a Inicial em guia.
+    expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Seu turno — selecione sua Peça Inicial.')
+    expect(
+      screen.getAllByTestId('mesa-peca-inicial').filter((el) => el.getAttribute('data-guia') === 'true'),
+    ).toHaveLength(1)
+  })
+
+  it('bandeja acende a corrente antes das vagas (espelho por célula)', async () => {
+    const { TabuleiroMirrorDOM } = await import('../web/src/components/partida/TabuleiroMirrorDOM')
+    const { chaveCelula } = await import('../web/src/game/tabuleiro/contrato')
+    const celula = { linha: 3, coluna: 3 }
+    const chave = chaveCelula(celula)
+    const { unmount } = render(
+      <TabuleiroMirrorDOM
+        todasCelulas={[celula]}
+        ocupadasSet={new Set()}
+        iniciais={[]}
+        pecaCorrente={{ recebidaId: 'rec-1', pecaId: 'peca-rec-1', tipo: 'reta', orientacao: 0 }}
+        posicionadas={[]}
+        peoes={[]}
+        peaoSelecionadoId={null}
+        destinosSet={new Set()}
+        vagasSet={new Set([chave])}
+        guiaAlvo="bandeja"
+        guiaPecaId="peca-rec-1"
+      />,
+    )
+    expect(screen.getByTestId('caixa-peca-sorteada')).toHaveAttribute('data-guia', 'true')
+    unmount()
+    render(
+      <TabuleiroMirrorDOM
+        todasCelulas={[celula]}
+        ocupadasSet={new Set()}
+        iniciais={[]}
+        pecaCorrente={null}
+        posicionadas={[]}
+        peoes={[]}
+        peaoSelecionadoId={null}
+        destinosSet={new Set()}
+        vagasSet={new Set([chave])}
+        guiaAlvo="vagas"
+      />,
+    )
+    const celulas = screen.getAllByTestId('tabuleiro-celula')
+    expect(celulas.filter((el) => el.getAttribute('data-guia') === 'true')).toHaveLength(1)
+  })
+
+  it('destaque do turno acende no indicador do HUD', () => {
     const jogadorPorId = {
       [MEU_JOGADOR_ID]: { apelido: 'Eu', cor: 'branco', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false, ordem: 1 },
       ['jogador-2']: { apelido: 'Ana', cor: 'vermelho', sanidade: 3, emBaixaIluminacao: false, amedrontado: false, protegido: false, ordem: 2 },
@@ -685,7 +755,7 @@ describe('Guia de turno — região viva e compacto (issues #441 [15,16])', () =
         emResultado={false}
         onSair={() => {}}
         etapaDoGuiaTexto="Seu turno — veja a ordem do turno."
-        guiaAlvo="vez"
+        guiaAlvo="turno"
       />,
     )
     expect(screen.getByTestId('guia-de-turno')).toHaveTextContent('Seu turno — veja a ordem do turno.')

@@ -437,10 +437,13 @@ export function AmbienteDeJogo({
       </Canvas>
       </Suspense>
       {/*
-        Sonda do guia para a cena (issue #441): a cena WebGL é caixa-preta
-        no jsdom — esta sonda prova no mesmo seam o que foi entregue ao
-        `AmbienteCena` (alvo + ids do passo). Espelha 1:1 as props da cena;
-        oculta e fora da acessibilidade (sem informação nova).
+        Sonda do guia para a cena (issue #441, exceção justificada ao
+        "nenhum seam novo"): a cena WebGL é caixa-preta no jsdom — esta
+        sonda prova no mesmo seam o que foi entregue ao `AmbienteCena`
+        (alvo + ids do passo). Espelha 1:1 as props da cena; oculta e fora
+        da acessibilidade (sem informação nova). Os asserts por célula/mesh
+        vivem no espelho (`data-guia` por célula) + na unidade pura
+        (`guiaDaCelula`); a sonda cobre só o fio cena (props), nunca o mesh.
       */}
       <div
         data-testid="guia-cena"

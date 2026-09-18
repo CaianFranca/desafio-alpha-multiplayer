@@ -132,6 +132,23 @@ interface TabuleiroProps {
   quantidadeDePeoes?: number
 }
 
+/**
+ * Derivação por célula do guia de turno (issue #441, HU3/HU9): pura e
+ * testável sem WebGL — a mesma fonte da cena e do espelho DOM.
+ * - `tabuleiro` acende as bordas de todas as células;
+ * - `vagas` acende o anel só nas células do `vagasSet`.
+ */
+export function guiaDaCelula(
+  chave: string,
+  guiaAlvo: AlvoDoGuiaDeTurno | null,
+  vagasSet: ReadonlySet<string>,
+): { tabuleiroEmGuia: boolean; vagaEmGuia: boolean } {
+  return {
+    tabuleiroEmGuia: guiaAlvo === 'tabuleiro',
+    vagaEmGuia: guiaAlvo === 'vagas' && vagasSet.has(chave),
+  }
+}
+
 export function Tabuleiro({
   posicionadas,
   estadoInteracao,
@@ -276,16 +293,18 @@ export function Tabuleiro({
         const pecaIdEmDisparo = estadoVisualDoAtaque?.pecaIdEmDisparo ?? null
         const reacao = pecaExibida !== null ? (reacoesDoAtaque?.get(pecaExibida.pecaId) ?? null) : null
         // Guia de turno (issue #441): só alvos acionáveis do dono do turno —
-        // destino próprio/manipulação restringem à peça do passo
-        // (`guiaPecaId`); `destino` acende os destinos válidos já derivados;
-        // peão restringe ao próprio (`guiaPeaoId`). Só visual.
+        // destino próprio restringe à peça do passo (`guiaPecaId`); `destino`
+        // acende os destinos válidos já derivados; peão restringe ao próprio
+        // (`guiaPeaoId`); giro/OK é só texto (sem peça em guia); tabuleiro
+        // acende as bordas da grade; vagas acendem o anel nas vagas. Só visual.
         const pecaEmGuia =
           pecaExibida !== null &&
-          (((guiaAlvo === 'destino-proprio' || guiaAlvo === 'manipulacao') &&
+          ((guiaAlvo === 'destino-proprio' &&
             guiaPecaId !== null &&
             pecaExibida.pecaId === guiaPecaId) ||
             (guiaAlvo === 'destino' && peca !== null && destinosSet.has(peca.pecaId)))
         const peaoEmGuiaId = guiaAlvo === 'peao-proprio' ? guiaPeaoId : null
+        const guiaDaCelulaAtual = guiaDaCelula(chave, guiaAlvo ?? null, vagasSet)
         return (
           <Celula
             key={chave}
@@ -323,6 +342,8 @@ export function Tabuleiro({
             peaoAtivoId={peaoAtivoId}
             pecaEmGuia={pecaEmGuia}
             peaoEmGuiaId={peaoEmGuiaId}
+            tabuleiroEmGuia={guiaDaCelulaAtual.tabuleiroEmGuia}
+            vagaEmGuia={guiaDaCelulaAtual.vagaEmGuia}
             onSelecionarPeao={onSelecionarPeao}
           />
         )

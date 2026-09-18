@@ -29,7 +29,7 @@ import { COR_DESTAQUE_RESGATE, PecaPlaceholder } from './PecaPlaceholder'
 import { LimiteDeErroDoModelo } from './LimiteDeErroDoModelo'
 import { handlersDeCursor } from './cursor'
 import { texturaDoTabuleiro } from './texturasDoTabuleiro'
-import { COR_CONTORNO_PEAO_SELECIONADO, propsDoMaterialDeContorno } from './contorno'
+import { COR_CONTORNO_GUIA, COR_CONTORNO_PEAO_SELECIONADO, propsDoMaterialDeContorno } from './contorno'
 
 interface CelulaProps {
   celula: CelulaTipo
@@ -132,6 +132,16 @@ interface CelulaProps {
    * (coexiste com seleção/vez, nunca bloqueia cliques).
    */
   peaoEmGuiaId?: PeaoId | null
+  /**
+   * Guia de turno (issue #441): passo do tabuleiro — bordas da grade em
+   * ciano (só visual, sem raycast, estático).
+   */
+  tabuleiroEmGuia?: boolean
+  /**
+   * Guia de turno (issue #441): passo das vagas — anel ciano na célula vaga
+   * (só visual, sem raycast, estático).
+   */
+  vagaEmGuia?: boolean
   /**
    * Peões em Baixa Iluminação do dono (issue #297): o avatar 3D troca para a
    * variante apagado — apenas Baixa Iluminação, não Amedrontado (semântica
@@ -393,6 +403,56 @@ function ParedesDaCelula() {
   )
 }
 
+/**
+ * Moldura do guia no passo do tabuleiro (issue #441): as 4 bordas da grade
+ * em ciano chapado, reaproveitando `COR_CONTORNO_GUIA` (sem cor nova). Irmã
+ * das paredes, um fio acima para não z-fightar; sem raycast (nunca rouba o
+ * clique da célula/peça) e estática (vale com `prefers-reduced-motion`).
+ */
+function MolduraDoGuiaDoTabuleiro() {
+  return (
+    <group position={[0, CELULA_Y_BORDA + 0.006, 0]}>
+      {BORDAS_CONFIG.map((b, i) => (
+        <mesh key={i} position={b.pos} raycast={() => null}>
+          <boxGeometry args={b.args} />
+          <meshBasicMaterial {...propsDoMaterialDeContorno(COR_CONTORNO_GUIA)} transparent opacity={0.95} depthWrite={false} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+/** Anel quadrado vazado chapado no chão (travessia branca, guia ciano). */
+function criarAnelQuadradoVazado(cor: string, y: number, opacidade: number): THREE.Mesh {
+  const lado = LADO_MARCADOR_TRAVESSIA
+  const furo = lado * 0.82
+  const forma = new THREE.Shape()
+  forma.moveTo(-lado / 2, -lado / 2)
+  forma.lineTo(lado / 2, -lado / 2)
+  forma.lineTo(lado / 2, lado / 2)
+  forma.lineTo(-lado / 2, lado / 2)
+  forma.closePath()
+  const luz = new THREE.Path()
+  luz.moveTo(-furo / 2, -furo / 2)
+  luz.lineTo(-furo / 2, furo / 2)
+  luz.lineTo(furo / 2, furo / 2)
+  luz.lineTo(furo / 2, -furo / 2)
+  luz.closePath()
+  forma.holes.push(luz)
+  const anel = new THREE.Mesh(
+    new THREE.ShapeGeometry(forma),
+    new THREE.MeshBasicMaterial(propsDoMaterialDeContorno(cor)),
+  )
+  anel.rotation.x = -Math.PI / 2
+  anel.position.y = y
+  anel.material.side = THREE.FrontSide
+  anel.material.transparent = true
+  anel.material.opacity = opacidade
+  anel.material.depthWrite = false
+  anel.raycast = () => { }
+  return anel
+}
+
 export function Celula({
   celula,
   peca,
@@ -417,6 +477,8 @@ export function Celula({
   peaoAtivoId = null,
   pecaEmGuia = false,
   peaoEmGuiaId = null,
+  tabuleiroEmGuia = false,
+  vagaEmGuia = false,
   emBaixaIluminacaoPorPeaoId = new Set<PeaoId>(),
   onSelecionarPeao,
 }: CelulaProps) {
@@ -454,42 +516,23 @@ export function Celula({
         : '#1b1915'
   const opacidadePlano = ocupada ? 0.82 : 0.7
 
-  // Marcador da travessia (ADR-0017 / issue #377): anel branco no chão sobre
-  // a célula escura clicável — quadrado VAZADO no meio (borda fina, furo
-  // interno ≈ 82% do lado), mesma linguagem do peão selecionado (PeaoAvatar),
-  // legível sem ocultar a peça que encaixa dentro. Nunca rouba clique.
-  const anelDaTravessia = useMemo(() => {
-    if (!anelTravessia) return null
-    const lado = LADO_MARCADOR_TRAVESSIA
-    const furo = lado * 0.82
-    const forma = new THREE.Shape()
-    forma.moveTo(-lado / 2, -lado / 2)
-    forma.lineTo(lado / 2, -lado / 2)
-    forma.lineTo(lado / 2, lado / 2)
-    forma.lineTo(-lado / 2, lado / 2)
-    forma.closePath()
-    const luz = new THREE.Path()
-    luz.moveTo(-furo / 2, -furo / 2)
-    luz.lineTo(-furo / 2, furo / 2)
-    luz.lineTo(furo / 2, furo / 2)
-    luz.lineTo(furo / 2, -furo / 2)
-    luz.closePath()
-    forma.holes.push(luz)
-    const anel = new THREE.Mesh(
-      new THREE.ShapeGeometry(forma),
-      new THREE.MeshBasicMaterial(
-        propsDoMaterialDeContorno(COR_CONTORNO_PEAO_SELECIONADO),
-      ),
-    )
-    anel.rotation.x = -Math.PI / 2
-    anel.position.y = CELULA_Y_BASE + 0.004
-    anel.material.side = THREE.FrontSide
-    anel.material.transparent = true
-    anel.material.opacity = 0.9
-    anel.material.depthWrite = false
-    anel.raycast = () => { }
-    return anel
-  }, [anelTravessia])
+  // Anel quadrado vazado no chão (furo interno ≈ 82% do lado): mesma
+  // linguagem do peão selecionado (`PeaoAvatar`) — a travessia usa o branco,
+  // o guia usa o ciano inédito. Estático (vale com
+  // `prefers-reduced-motion`), sem raycast (nunca rouba clique).
+  const anelDaTravessia = useMemo(
+    () =>
+      anelTravessia
+        ? criarAnelQuadradoVazado(COR_CONTORNO_PEAO_SELECIONADO, CELULA_Y_BASE + 0.004, 0.9)
+        : null,
+    [anelTravessia],
+  )
+
+  // Guia de turno (issue #441): anel ciano nas vagas do passo das vagas.
+  const anelDoGuiaDaVaga = useMemo(
+    () => (vagaEmGuia ? criarAnelQuadradoVazado(COR_CONTORNO_GUIA, CELULA_Y_BASE + 0.005, 0.95) : null),
+    [vagaEmGuia],
+  )
 
   return (
     <group position={pos}>
@@ -501,7 +544,9 @@ export function Celula({
         cursorHandlers={cursorHandlers}
       />
       <ParedesDaCelula />
+      {tabuleiroEmGuia ? <MolduraDoGuiaDoTabuleiro /> : null}
       {anelDaTravessia !== null ? <primitive object={anelDaTravessia} /> : null}
+      {anelDoGuiaDaVaga !== null ? <primitive object={anelDoGuiaDaVaga} /> : null}
       {vagaPontilhada ? <PontosDaVaga /> : null}
       {peca ? (
         <PecaPlaceholder

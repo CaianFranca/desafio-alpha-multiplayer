@@ -300,15 +300,11 @@ export function TabuleiroMirrorDOM({
               : undefined
           }
           data-guia={
-            guiaAlvo === 'manipulacao' &&
-            estadoInteracao &&
-            estadoInteracao.pecaEmManipulacaoId === p.pecaId
+            guiaAlvo === 'destino-proprio' && p.pecaId === guiaPecaId
               ? 'true'
-              : guiaAlvo === 'destino-proprio' && p.pecaId === guiaPecaId
+              : guiaAlvo === 'destino' && destinosSet.has(p.pecaId)
                 ? 'true'
-                : guiaAlvo === 'destino' && destinosSet.has(p.pecaId)
-                  ? 'true'
-                  : undefined
+                : undefined
           }
           onClick={(e) => {
             aoClicarCelula(p.celula, e)
@@ -326,7 +322,6 @@ export function TabuleiroMirrorDOM({
               data-linha={preview.celula.linha}
               data-coluna={preview.celula.coluna}
               data-recebida-id={preview.recebidaId}
-              data-guia={guiaAlvo === 'manipulacao' ? 'true' : undefined}
               onClick={(e) => {
                 aoClicarCelula(preview.celula, e)
               }}
