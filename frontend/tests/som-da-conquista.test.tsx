@@ -23,7 +23,7 @@ import {
 import {
   armarExcecaoNoProximoPlay,
   armarFalhaNoProximoPlay,
-  toquesDeAudio,
+  toquesDeEfeito,
 } from './helpers/mockAudio'
 import type {
   EstadoDaPartidaSnapshot,
@@ -60,16 +60,16 @@ describe('som da conquista — pontos próprios com base × mestre (issue #385)'
     tocarCartaoDeAcesso()
     tocarProtecaoAdquirida()
 
-    expect(toquesDeAudio).toHaveLength(3)
-    expect(toquesDeAudio[0]).toMatchObject({
+    expect(toquesDeEfeito()).toHaveLength(3)
+    expect(toquesDeEfeito()[0]).toMatchObject({
       src: CAMINHO_SOM_GERADOR_LIGADO,
       volume: VOLUME_BASE_SOM_GERADOR_LIGADO,
     })
-    expect(toquesDeAudio[1]).toMatchObject({
+    expect(toquesDeEfeito()[1]).toMatchObject({
       src: CAMINHO_SOM_CARTAO_ACESSO,
       volume: VOLUME_BASE_SOM_CARTAO_ACESSO,
     })
-    expect(toquesDeAudio[2]).toMatchObject({
+    expect(toquesDeEfeito()[2]).toMatchObject({
       src: CAMINHO_SOM_PROTECAO_ADQUIRIDA,
       volume: VOLUME_BASE_SOM_PROTECAO_ADQUIRIDA,
     })
@@ -78,14 +78,14 @@ describe('som da conquista — pontos próprios com base × mestre (issue #385)'
   it('mestre escala a base (contrato ADR-0007: volume = mestre × base)', () => {
     tocarGeradorLigado(0.5)
 
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]?.volume).toBeCloseTo(VOLUME_BASE_SOM_GERADOR_LIGADO * 0.5, 5)
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]?.volume).toBeCloseTo(VOLUME_BASE_SOM_GERADOR_LIGADO * 0.5, 5)
   })
 
   it('falha de play() não quebra (no-op sem arquivo)', async () => {
     armarFalhaNoProximoPlay()
     expect(() => tocarCartaoDeAcesso()).not.toThrow()
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
     await Promise.resolve()
 
     armarExcecaoNoProximoPlay()
@@ -98,23 +98,23 @@ describe('tocarConquistasDaConfirmacao — só aquisição pré→pós soa', () 
     const antes = modeloBase()
     const depois = modeloBase({ geradoresLigados: ['gerador-1'] })
     tocarConquistasDaConfirmacao(antes, depois, 'jogador-1')
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_GERADOR_LIGADO })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_GERADOR_LIGADO })
 
     // Reconfirmar o mesmo gerador: sem id novo, sem som.
     tocarConquistasDaConfirmacao(depois, depois, 'jogador-1')
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
   })
 
   it('cartão soa só na transição false→true', () => {
     tocarConquistasDaConfirmacao(modeloBase(), modeloBase({ cartaoDeAcessoObtido: true }), 'jogador-1')
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_CARTAO_ACESSO })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_CARTAO_ACESSO })
 
     // Já obtido antes: sem som.
     const obtido = modeloBase({ cartaoDeAcessoObtido: true })
     tocarConquistasDaConfirmacao(obtido, obtido, 'jogador-1')
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
   })
 
   it('proteção soa só em !antes && resultante', () => {
@@ -134,19 +134,19 @@ describe('tocarConquistasDaConfirmacao — só aquisição pré→pós soa', () 
       })
     // Aquisição: soa.
     tocarConquistasDaConfirmacao(comProtecao(false), comProtecao(true), 'jogador-1')
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_PROTECAO_ADQUIRIDA })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_PROTECAO_ADQUIRIDA })
 
     // Já protegido antes: sem som. Resultante false: sem som.
     tocarConquistasDaConfirmacao(comProtecao(true), comProtecao(true), 'jogador-1')
     tocarConquistasDaConfirmacao(comProtecao(false), comProtecao(false), 'jogador-1')
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
   })
 
   it('sem aquisição, silêncio total', () => {
     const antes = modeloBase()
     tocarConquistasDaConfirmacao(antes, antes, 'jogador-1')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
   })
 })
 
@@ -271,7 +271,7 @@ describe('conquista na tela — POSICAO_CONFIRMADA soa, snapshot nunca', () => {
 
   it('confirmar no gerador soa o gerador uma vez; repetir não soa', async () => {
     const ws = await partidaComTabuleiro([GERADOR_1], PEOES)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     act(() =>
       ws.simulateMessage({
@@ -282,8 +282,8 @@ describe('conquista na tela — POSICAO_CONFIRMADA soa, snapshot nunca', () => {
         protegido: false,
       }),
     )
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_GERADOR_LIGADO })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_GERADOR_LIGADO })
 
     // Reconfirmar o mesmo gerador: dedupe por id, sem som novo.
     act(() =>
@@ -295,12 +295,12 @@ describe('conquista na tela — POSICAO_CONFIRMADA soa, snapshot nunca', () => {
         protegido: false,
       }),
     )
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
   })
 
   it('confirmar na sala do diretor soa o cartão; snapshot com cartão não soa', async () => {
     const ws = await partidaComTabuleiro([DIRETOR_1], PEOES)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     act(() =>
       ws.simulateMessage({
@@ -311,8 +311,8 @@ describe('conquista na tela — POSICAO_CONFIRMADA soa, snapshot nunca', () => {
         protegido: false,
       }),
     )
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_CARTAO_ACESSO })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_CARTAO_ACESSO })
 
     // Snapshot com o cartão já obtido: baseline sem fanfarra.
     act(() =>
@@ -321,7 +321,7 @@ describe('conquista na tela — POSICAO_CONFIRMADA soa, snapshot nunca', () => {
         snapshot: criarSnapshotBase({ cartaoDeAcessoObtido: true }),
       }),
     )
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
   })
 
   it('proteção resultante soa o remédio; sem aquisição, silêncio', async () => {
@@ -337,7 +337,7 @@ describe('conquista na tela — POSICAO_CONFIRMADA soa, snapshot nunca', () => {
         protegido: true,
       }),
     )
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_GERADOR_LIGADO,
       CAMINHO_SOM_PROTECAO_ADQUIRIDA,
     ])

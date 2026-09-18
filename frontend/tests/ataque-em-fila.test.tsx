@@ -5,7 +5,7 @@ import { AuthProvider } from '../web/src/state/AuthProvider'
 import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
-import { toquesDeAudio } from './helpers/mockAudio'
+import { toquesDeEfeito } from './helpers/mockAudio'
 import {
   CAMINHO_SOM_DEFESA_ATAQUE,
   CAMINHO_SOM_ESPECTRO,
@@ -244,7 +244,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
     // Telegraph silencioso de 1s: nenhum som, etiqueta de telegraph, sem
     // disparo nem reações — a consequência ainda não revela.
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     const telegraph = screen.getByTestId('ataque-coreografia')
     expect(telegraph).toHaveAttribute('data-atacante', 'vulto-1')
     expect(telegraph).toHaveAttribute('data-estagio', 'telegraph')
@@ -261,8 +261,8 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     // Fim do pulso: gesto de disparo soa (uivo, nunca o THUD genérico) — a
     // fatia ainda não aplicou (chegada é ~250ms depois).
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     // Overlay vira etiqueta de ataque: disparo + reações (com peão treme,
     // sem peão pula); a marca do telegraph apaga no disparo.
     const coreografia = screen.getByTestId('ataque-coreografia')
@@ -289,14 +289,14 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
     avancar(100)
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
 
     // Chegada ao alvo: tremor (só com atingido) + fatia do Vulto (só Baixa —
     // sanidade segue 3) + anúncio ao leitor (com vítimas, sem THUD).
     avancar(DURACAO_DISPARO_ATAQUE_MS - 100)
-    expect(toquesDeAudio).toHaveLength(2)
-    expect(toquesDeAudio[1]).toMatchObject({
+    expect(toquesDeEfeito()).toHaveLength(2)
+    expect(toquesDeEfeito()[1]).toMatchObject({
       src: CAMINHO_SOM_TREMOR_ATAQUE,
       volume: VOLUME_BASE_SOM_TREMOR_ATAQUE,
     })
@@ -313,7 +313,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(pecaNoEspelho('reta-1')).not.toHaveAttribute('data-reacao')
     expect(pecaNoEspelho('curva-1')).not.toHaveAttribute('data-reacao')
-    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeEfeito()).toHaveLength(2)
   })
 
   it('sem vítimas: telegraph silencioso, depois ataca e soa mesmo assim (só monstro)', async () => {
@@ -331,21 +331,21 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     )
 
     // Telegraph primeiro: silencioso, sem disparo.
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
     expect(screen.getByTestId('ataque-telegraph')).toHaveAttribute('data-peca-id', 'vulto-1')
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
 
     // Após o pulso: só monstro — tremor e defesa só com alvo na chegada.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
 
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS)
     expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
   })
 
   it('com protegidos: telegraph, depois escudo + som de defesa, sem tremor nem debilitação', async () => {
@@ -380,15 +380,15 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     )
 
     // Telegraph silencioso: proteção segue ativa até a chegada da fatia.
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-protegido')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(pecaNoEspelho('espectro-1')).toHaveAttribute('data-telegraph', 'true')
 
     // Após o pulso: trovão no disparo — a proteção ainda não consumiu.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({
       src: CAMINHO_SOM_ESPECTRO,
       volume: VOLUME_BASE_SOM_ESPECTRO,
     })
@@ -403,8 +403,8 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     // Chegada: defesa, sem tremor — a fatia consome a proteção; sem vítimas
     // na fatia, o anúncio silencia.
     avancar(DURACAO_DISPARO_ATAQUE_MS)
-    expect(toquesDeAudio).toHaveLength(2)
-    expect(toquesDeAudio[1]).toMatchObject({
+    expect(toquesDeEfeito()).toHaveLength(2)
+    expect(toquesDeEfeito()[1]).toMatchObject({
       src: CAMINHO_SOM_DEFESA_ATAQUE,
       volume: VOLUME_BASE_SOM_DEFESA_ATAQUE,
     })
@@ -414,7 +414,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
 
     avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS)
     expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
-    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeEfeito()).toHaveLength(2)
   })
 
   it('dois monstros animam em fila com telegraph por atacante, sem sobreposição (ordem do wire)', async () => {
@@ -458,13 +458,13 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     // Telegraph do primeiro: Vulto (ordem do wire), silencioso.
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     // Disparo do primeiro + chegada: uivo, depois tremor.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
     avancar(DURACAO_DISPARO_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO, CAMINHO_SOM_TREMOR_ATAQUE])
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO, CAMINHO_SOM_TREMOR_ATAQUE])
     // Chegada do Vulto: Baixa do vermelho aplica; sanidade do azul intacta.
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
     expect(avatarDoAdversario('jogador-3')).toHaveAttribute('data-sanidade', '3')
@@ -476,14 +476,14 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
     expect(pecaNoEspelho('espectro-1')).toHaveAttribute('data-telegraph', 'true')
     expect(pecaNoEspelho('vulto-1')).not.toHaveAttribute('data-telegraph')
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
     ])
 
     // Disparo do segundo + chegada + dreno total (~3,9s): sem marcas.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_ESPECTRO,
@@ -491,7 +491,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     avancar(DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
     expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_ESPECTRO,
@@ -546,13 +546,13 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
 
     // Slot 1 (Vulto, ordem do wire): telegraph silencioso, depois uivo.
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'ataque')
     // Com peão sobre reta-1: a peça treme junto.
     expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-reacao', 'tremor')
     avancar(DURACAO_DISPARO_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO, CAMINHO_SOM_TREMOR_ATAQUE])
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO, CAMINHO_SOM_TREMOR_ATAQUE])
     // Chegada do Vulto: Baixa aplica, sanidade ainda não, com anúncio.
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
@@ -565,9 +565,9 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
     expect(pecaNoEspelho('espectro-1')).toHaveAttribute('data-telegraph', 'true')
-    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeEfeito()).toHaveLength(2)
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_ESPECTRO,
@@ -575,7 +575,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     // Sem peão sobre curva-1: a peça pula, mas a tremor soa (dono do alcance).
     expect(screen.getByTestId('ataque-reacao')).toHaveAttribute('data-reacao', 'pulo')
     avancar(DURACAO_DISPARO_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_ESPECTRO,
@@ -645,12 +645,12 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['curva-1'] }))
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
     expect(temPecaNoEspelho('curva-1')).toBe(true)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     // Slot do Vulto: telegraph, disparo, chegada — Baixa do vermelho aplica e
     // a limpeza segura libera junto (último Vulto da fila).
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
     expect(temPecaNoEspelho('curva-1')).toBe(true)
     avancar(DURACAO_DISPARO_ATAQUE_MS)
@@ -658,7 +658,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(avatarDoAdversario('jogador-3')).toHaveAttribute('data-sanidade', '3')
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3'])
     expect(temPecaNoEspelho('curva-1')).toBe(false)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_SOMBRIO_LIMPEZA,
@@ -670,7 +670,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'espectro-1')
     expect(temPecaNoEspelho('curva-1')).toBe(false)
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_SOMBRIO_LIMPEZA,
@@ -682,7 +682,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     // limpeza (já liberada no Vulto).
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     expect(avatarDoAdversario('jogador-3')).toHaveAttribute('data-sanidade', '2')
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_SOMBRIO_LIMPEZA,
@@ -735,7 +735,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
     expect(temPecaNoEspelho('espectro-1')).toBe(true)
     expect(temPecaNoEspelho('curva-1')).toBe(true)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     // Ataque do mesmo gatilho fecha a janela entregando o buffer à fila; a
     // virada segura na fila ativa.
@@ -769,11 +769,11 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(temPecaNoEspelho('curva-1')).toBe(true)
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     // Disparo: uivo — a limpeza segue segurada até a chegada.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([CAMINHO_SOM_VULTO])
     expect(temPecaNoEspelho('espectro-1')).toBe(true)
     expect(temPecaNoEspelho('curva-1')).toBe(true)
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
@@ -803,7 +803,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(temPecaNoEspelho('espectro-1')).toBe(false)
     expect(temPecaNoEspelho('curva-1')).toBe(false)
     expect(temPecaNoEspelho('reta-1')).toBe(true)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_SOMBRIO_LIMPEZA,
@@ -848,14 +848,14 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['curva-1'] }))
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:4', '5:5'])
     expect(temPecaNoEspelho('curva-1')).toBe(true)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     // Sem ATAQUE no prazo da janela: aplica ao confirmar — sem esperar turno.
     avancar(DURACAO_JANELA_GATILHO_MS)
     await act(async () => {})
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3'])
     expect(temPecaNoEspelho('curva-1')).toBe(false)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA])
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA])
     expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
   })
 
@@ -916,7 +916,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
     // Sombrio da limpeza liberada no fecho + uivo no disparo do Vulto.
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA, CAMINHO_SOM_VULTO])
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA, CAMINHO_SOM_VULTO])
 
     // A onda varre as 3: reta-1 (wire) + espectro-1/curva-1 (retidas) —
     // legenda do overlay, com camadas toroidais reais da célula pré-limpeza.
@@ -982,7 +982,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     // Limpeza chega com a fila ativa (2 Vultos): segura até o último Vulto.
     act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['curva-1'] }))
     expect(temPecaNoEspelho('curva-1')).toBe(true)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     // Chegada do 1º Vulto: a fatia dele aplica (Baixa), mas a limpeza segue
     // segurada — ainda há Vulto restante na fila.
@@ -990,7 +990,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
     expect(temPecaNoEspelho('curva-1')).toBe(true)
-    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(0)
+    expect(toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(0)
 
     // Passagem ao slot 2 (último Vulto): telegraph do vulto-2.
     avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
@@ -1001,7 +1001,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     expect(temPecaNoEspelho('curva-1')).toBe(false)
-    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1)
+    expect(toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1)
 
     // Drenou sem marcas.
     avancar(DURACAO_ATAQUE_POR_ATACANTE_MS - DURACAO_DISPARO_ATAQUE_MS)
@@ -1035,7 +1035,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['curva-1'] }))
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3', '3:4', '5:5'])
     expect(temPecaNoEspelho('curva-1')).toBe(true)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     // Fechamento sem ataque: libera em ordem (luz encolhe, peça some com o
     // som sombrio) e a virada passa direto, sem fila.
@@ -1045,7 +1045,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
     expect(celulasIluminadasNoEspelho()).toEqual(['3:3'])
     expect(temPecaNoEspelho('curva-1')).toBe(false)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA])
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([CAMINHO_SOM_SOMBRIO_LIMPEZA])
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-2')
   })
 
@@ -1080,20 +1080,20 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     // Limpeza chega com a fila ativa (só Espectro): segura até drenar.
     act(() => ws.simulateMessage({ type: 'LIMPEZA_APLICADA', pecasRemovidas: ['reta-1'] }))
     expect(temPecaNoEspelho('reta-1')).toBe(true)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     // Slot do Espectro resolve por completo sem liberar a limpeza.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
     avancar(DURACAO_DISPARO_ATAQUE_MS)
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '2')
     expect(temPecaNoEspelho('reta-1')).toBe(true)
-    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(0)
+    expect(toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(0)
 
     // Drenou: a limpeza libera (peça some + som sombrio).
     avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS)
     expect(screen.queryByTestId('ataque-coreografia')).not.toBeInTheDocument()
     expect(temPecaNoEspelho('reta-1')).toBe(false)
-    expect(toquesDeAudio.map((t) => t.src)).toEqual([
+    expect(toquesDeEfeito().map((t) => t.src)).toEqual([
       CAMINHO_SOM_ESPECTRO,
       CAMINHO_SOM_TREMOR_ATAQUE,
       CAMINHO_SOM_SOMBRIO_LIMPEZA,
@@ -1367,7 +1367,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-3')
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
   })
 
   it('payload legado sem pecasNoAlcance ativa o fallback sem quebra (com telegraph)', async () => {
@@ -1391,21 +1391,21 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
     expect(pecaNoEspelho('vulto-1')).toHaveAttribute('data-telegraph', 'true')
 
     // Sem onda, sem quebra: monstro soa após o pulso, fila drena.
     avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'ataque')
     expect(screen.queryAllByTestId('ataque-reacao')).toHaveLength(0)
 
     // Chegada: tremor (dono do alcance) + Baixa da fatia + anúncio.
     avancar(DURACAO_DISPARO_ATAQUE_MS)
-    expect(toquesDeAudio).toHaveLength(2)
-    expect(toquesDeAudio[1]).toMatchObject({ src: CAMINHO_SOM_TREMOR_ATAQUE })
+    expect(toquesDeEfeito()).toHaveLength(2)
+    expect(toquesDeEfeito()[1]).toMatchObject({ src: CAMINHO_SOM_TREMOR_ATAQUE })
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
 
@@ -1455,12 +1455,12 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
       const telegraphEstatico = screen.getByTestId('ataque-telegraph')
       expect(telegraphEstatico).toHaveTextContent('Vulto prepara ataque')
       expect(telegraphEstatico.className).not.toMatch(/animate-/)
-      expect(toquesDeAudio).toHaveLength(0)
+      expect(toquesDeEfeito()).toHaveLength(0)
 
       // Sons seguem após o pulso: monstro, depois tremor na chegada.
       avancar(DURACAO_TELEGRAPH_ATAQUE_MS)
-      expect(toquesDeAudio).toHaveLength(1)
-      expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO })
+      expect(toquesDeEfeito()).toHaveLength(1)
+      expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO })
       // Legenda estática do disparo + reação (sem animação nem stagger).
       const disparoEstatico = screen.getByTestId('ataque-disparo')
       expect(disparoEstatico).toHaveTextContent('Vulto ataca')
@@ -1470,8 +1470,8 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
       expect(reacaoEstatica.className).not.toMatch(/animate-|ataque-tremor/)
       expect(reacaoEstatica.style.animationDelay).toBe('')
       avancar(DURACAO_DISPARO_ATAQUE_MS)
-      expect(toquesDeAudio).toHaveLength(2)
-      expect(toquesDeAudio[1]).toMatchObject({ src: CAMINHO_SOM_TREMOR_ATAQUE })
+      expect(toquesDeEfeito()).toHaveLength(2)
+      expect(toquesDeEfeito()[1]).toMatchObject({ src: CAMINHO_SOM_TREMOR_ATAQUE })
 
       // Bloqueio segue: turno segurado só libera ao drenar.
       act(() => ws.simulateMessage({ type: 'TURNO_INICIADO', jogadorId: 'jogador-2', rodada: 2 }))
@@ -1480,7 +1480,7 @@ describe('ataque em fila — sons próprios e coreografia (issue #385)', () => {
       avancar(DURACAO_BASE_ATAQUE_MS + DURACAO_ATAQUE_POR_ATACANTE_MS)
       await act(async () => {})
       expect(screen.getByTestId('hud-turno-ativo')).toHaveAttribute('data-jogador-id', 'jogador-2')
-      expect(toquesDeAudio).toHaveLength(2)
+      expect(toquesDeEfeito()).toHaveLength(2)
     } finally {
       window.matchMedia = originalMatchMedia
     }

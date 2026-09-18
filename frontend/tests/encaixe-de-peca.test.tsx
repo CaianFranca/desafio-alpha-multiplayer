@@ -8,7 +8,7 @@ import { MockWebSocket } from './helpers/mockWebSocket'
 import {
   armarExcecaoNoProximoPlay,
   armarFalhaNoProximoPlay,
-  toquesDeAudio,
+  toquesDeEfeito,
 } from './helpers/mockAudio'
 import {
   CAMINHO_SOM_MOVIMENTO_ENCAIXE,
@@ -89,7 +89,7 @@ function pecaPosicionadaDoEspelho(pecaId: string): HTMLElement {
 }
 
 function toquesPorSrc(src: string): readonly { src: string; volume: number }[] {
-  return toquesDeAudio.filter((t) => t.src === src)
+  return toquesDeEfeito().filter((t) => t.src === src)
 }
 
 afterEach(() => {
@@ -137,12 +137,12 @@ describe('som do encaixe — constantes centralizadas e toque (issue #241)', () 
     tocarSomDeGiroDoEncaixe()
     tocarSomDeMovimentoDoEncaixe()
 
-    expect(toquesDeAudio).toHaveLength(2)
-    expect(toquesDeAudio[0]).toMatchObject({
+    expect(toquesDeEfeito()).toHaveLength(2)
+    expect(toquesDeEfeito()[0]).toMatchObject({
       src: CAMINHO_SOM_GIRO_ENCAIXE,
       volume: VOLUME_BASE_SOM_DE_GIRO,
     })
-    expect(toquesDeAudio[1]).toMatchObject({
+    expect(toquesDeEfeito()[1]).toMatchObject({
       src: CAMINHO_SOM_MOVIMENTO_ENCAIXE,
       volume: VOLUME_BASE_SOM_DE_MOVIMENTO,
     })
@@ -156,7 +156,7 @@ describe('som do encaixe — constantes centralizadas e toque (issue #241)', () 
     armarFalhaNoProximoPlay()
     expect(() => tocarSomDeGiroDoEncaixe()).not.toThrow()
     // O toque foi registrado (src/volume); a rejeição foi engolida.
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
     await Promise.resolve()
 
     armarExcecaoNoProximoPlay()
@@ -347,7 +347,7 @@ describe('encaixe na tela — voo, sons e estado final (issue #241)', () => {
 
       // Só o enigmático, imediato no início do movimento (a carta
       // vive no giro, fora deste branch).
-      expect(toquesDeAudio.map((t) => t.src)).toEqual([
+      expect(toquesDeEfeito().map((t) => t.src)).toEqual([
         CAMINHO_SOM_MOVIMENTO_ENCAIXE,
       ])
     } finally {

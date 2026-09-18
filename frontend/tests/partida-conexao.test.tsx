@@ -6,7 +6,7 @@ import { mockAuthenticatedState } from '../web/src/state/mock-auth'
 import { PartidaPage } from '../web/src/pages/PartidaPage'
 import { MockWebSocket } from './helpers/mockWebSocket'
 import { enviarLote } from './helpers/partida-ws'
-import { toquesDeAudio } from './helpers/mockAudio'
+import { toquesDeAudio, toquesDeEfeito } from './helpers/mockAudio'
 import {
   CAMINHO_SOM_DE_RECUSA,
   VOLUME_BASE_SOM_DE_RECUSA,
@@ -204,7 +204,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
     // Aprovação → silêncio: sem som, sem clarão, sem anúncio.
     act(() => ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-1' }))
     await screen.findByTestId('tabuleiro')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     expect(screen.getByTestId('anuncio-de-recusa')).toHaveTextContent('')
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
@@ -217,8 +217,8 @@ describe('partida conectada ao game-server (issue #85)', () => {
         mensagem: 'Peças de caminho só entram pelo Recebimento.',
       }),
     )
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('rejeicao_do_servico')
@@ -235,7 +235,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
     act(() => {
       ws.simulateMessage({ type: 'PECA_SELECIONADA', pecaId: 'inicial-2' })
     })
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
     // Cada recusa toca uma vez, com seu motivo; o anúncio acompanha a última.
@@ -253,7 +253,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
         mensagem: 'Não é a sua vez.',
       })
     })
-    expect(toquesDeAudio).toHaveLength(2)
+    expect(toquesDeEfeito()).toHaveLength(2)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     expect(screen.getByTestId('anuncio-de-recusa').getAttribute('data-motivo')).toBe('fora_da_vez')
   })
@@ -271,7 +271,7 @@ describe('partida conectada ao game-server (issue #85)', () => {
       })
 
     recusarForaDaVez()
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('fora_da_vez')
     expect(anuncio).toHaveTextContent('Ação recusada: aguarde a sua vez.')
@@ -282,8 +282,8 @@ describe('partida conectada ao game-server (issue #85)', () => {
     // (novo id = remontagem por key; sem isso o texto idêntico calaria o
     // segundo anúncio para o leitor de tela).
     recusarForaDaVez()
-    expect(toquesDeAudio).toHaveLength(2)
-    expect(toquesDeAudio[1]).toMatchObject({
+    expect(toquesDeEfeito()).toHaveLength(2)
+    expect(toquesDeEfeito()[1]).toMatchObject({
       src: CAMINHO_SOM_DE_RECUSA,
       volume: VOLUME_BASE_SOM_DE_RECUSA,
     })
@@ -457,10 +457,10 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     // Encaixe com sons (issue #241 + mudanças de spec): posicionamento sem
     // carta (a carta vive no giro) — o enigmático sai de imediato no início
     // do movimento, sem clarão.
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_GIRO_ENCAIXE)).toHaveLength(0)
-    expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_MOVIMENTO_ENCAIXE)).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_GIRO_ENCAIXE)).toHaveLength(0)
+    expect(toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_MOVIMENTO_ENCAIXE)).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({
       src: CAMINHO_SOM_MOVIMENTO_ENCAIXE,
       volume: VOLUME_BASE_SOM_DE_MOVIMENTO,
     })
@@ -480,7 +480,7 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     // Limpeza com som único (issue #239): um toque sombrio por comando, sem clarão
     // (filtrado por asset: os sons do Encaixe da #241 convivem no mesmo array).
     await waitFor(() =>
-      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+      expect(toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
     )
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
 
@@ -524,7 +524,7 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     // Exatamente 1 som de limpeza por comando, mesmo com N=3 (nunca um por
     // peça) — filtrado por asset: os sons do Encaixe da #241 convivem no mesmo array.
     await waitFor(() =>
-      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+      expect(toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
     )
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     // Células liberadas
@@ -556,7 +556,7 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
       await screen.findByTestId('peca-posicionada')
       // Encaixe com reduce = snap (issue #241 + mudança de spec): sem voo,
       // estado final imediato e SÓ o enigmático (a carta vive no giro).
-      expect(toquesDeAudio.map((t) => t.src)).toEqual([
+      expect(toquesDeEfeito().map((t) => t.src)).toEqual([
         CAMINHO_SOM_MOVIMENTO_ENCAIXE,
       ])
 
@@ -566,8 +566,8 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
       await waitFor(() => expect(screen.queryByTestId('peca-posicionada')).not.toBeInTheDocument())
       expect(celulaDoEspelho(3, 3).getAttribute('data-ocupada')).toBe('false')
       // Som único de limpeza mesmo com reduce ativo (ordem total determinística).
-      await waitFor(() => expect(toquesDeAudio).toHaveLength(2))
-      expect(toquesDeAudio.map((t) => t.src)).toEqual([
+      await waitFor(() => expect(toquesDeEfeito()).toHaveLength(2))
+      expect(toquesDeEfeito().map((t) => t.src)).toEqual([
         CAMINHO_SOM_MOVIMENTO_ENCAIXE,
         CAMINHO_SOM_SOMBRIO_LIMPEZA,
       ])
@@ -616,7 +616,7 @@ describe('iluminação e limpeza no cliente via WebSocket (issue #151)', () => {
     // A limpeza tocou seu som único (filtrado por asset: o Encaixe da #241
     // convive no mesmo array).
     await waitFor(() =>
-      expect(toquesDeAudio.filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
+      expect(toquesDeEfeito().filter((t) => t.src === CAMINHO_SOM_SOMBRIO_LIMPEZA)).toHaveLength(1),
     )
   })
 })
@@ -838,8 +838,8 @@ describe('turnos no cliente — rodada, destaque do ativo e botões por fase (is
         mensagem: 'Não é a sua vez.',
       })
     })
-    expect(toquesDeAudio).toHaveLength(1)
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
+    expect(toquesDeEfeito()).toHaveLength(1)
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_DE_RECUSA, volume: VOLUME_BASE_SOM_DE_RECUSA })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     const anuncio = screen.getByTestId('anuncio-de-recusa')
     expect(anuncio.getAttribute('data-motivo')).toBe('fora_da_vez')
@@ -1084,13 +1084,13 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
     // Som próprio do ataque (issue #385): telegraph silencioso de 1s e só
     // depois o uivo no disparo, nunca o THUD genérico (Recusas de Ação
     // mantêm o genérico).
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    await waitFor(() => expect(toquesDeEfeito()).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     // Na chegada do slot: Baixa aplica (sanidade intacta — Vulto só causa
     // Baixa) + anúncio ao leitor, sem THUD genérico.
     await waitFor(
@@ -1127,12 +1127,12 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-amedrontado')
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
     // Ataque com penalidade usa os sons dos monstros (issue #385): telegraph
     // silencioso e só depois o trovão no disparo do Espectro, sem THUD.
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
-    expect(toquesDeAudio[0]).toMatchObject({
+    await waitFor(() => expect(toquesDeEfeito()).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeEfeito()[0]).toMatchObject({
       src: CAMINHO_SOM_ESPECTRO,
       volume: VOLUME_BASE_SOM_ESPECTRO,
     })
@@ -1167,10 +1167,10 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
         estadosAplicados: [],
       }),
     )
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-estagio', 'telegraph')
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    await waitFor(() => expect(toquesDeEfeito()).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
 
@@ -1186,7 +1186,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
         estadosAplicados: [],
       }),
     )
-    expect(toquesDeAudio).toHaveLength(1)
+    expect(toquesDeEfeito()).toHaveLength(1)
     expect(screen.getByTestId('ataque-coreografia')).toHaveAttribute('data-atacante', 'vulto-1')
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     // Sem estadosAplicados, o avatar não muda (o eco é feedback, não autoridade).
@@ -1303,7 +1303,7 @@ describe('ATAQUE/RESGATE na tela — chips e feedback ponta a ponta (#174/#145-e
       expect(avatar).toHaveAttribute('data-sanidade', '2')
     })
     // Resgate em silêncio: nenhum toque, nenhum clarão, nenhum anúncio.
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
   })
@@ -1322,7 +1322,7 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
 
     // Gatilho da Permanência (wire #235): o peão permanece na peça do início do turno.
     act(() => ws.simulateMessage({ type: 'PEAO_PERMANECEU', peaoId: 'peao-vermelho', pecaId: 'inicial-1' }))
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
 
     act(() =>
       ws.simulateMessage({
@@ -1340,10 +1340,10 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     // Telegraph silencioso de 1s; o uivo soa após o pulso.
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    await waitFor(() => expect(toquesDeEfeito()).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     // Na chegada: Baixa (Vulto não toca sanidade) + anúncio.
     await waitFor(
       () => {
@@ -1381,9 +1381,9 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
     // Gatilho vazio: no-op no HUD, mas o monstro soa após o telegraph
     // silencioso (ataque anima e soa mesmo sem vítimas — só monstro, sem
     // tremor e sem anúncio).
-    expect(toquesDeAudio).toHaveLength(0)
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    expect(toquesDeEfeito()).toHaveLength(0)
+    await waitFor(() => expect(toquesDeEfeito()).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     expect(screen.queryByTestId('flash-overlay')).not.toBeInTheDocument()
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
@@ -1414,8 +1414,8 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
     // aplica na chegada, ~250ms depois — a virada só aplica ao drenar).
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
     expect(avatarDoAdversario('jogador-2')).not.toHaveAttribute('data-em-baixa')
-    expect(toquesDeAudio).toHaveLength(0)
-    await waitFor(() => expect(toquesDeAudio).toHaveLength(1), { timeout: 3000 })
+    expect(toquesDeEfeito()).toHaveLength(0)
+    await waitFor(() => expect(toquesDeEfeito()).toHaveLength(1), { timeout: 3000 })
     await waitFor(
       () => {
         expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
@@ -1423,7 +1423,7 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
       { timeout: 3000 },
     )
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
-    expect(toquesDeAudio[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
+    expect(toquesDeEfeito()[0]).toMatchObject({ src: CAMINHO_SOM_VULTO, volume: VOLUME_BASE_SOM_VULTO })
     expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
 
     // O ciclo segue: com a fila ativa, a virada (encerramento + entrada) é
@@ -1445,7 +1445,7 @@ describe('ataque da Permanência — momentos novos do gatilho centrado no atuan
     )
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-em-baixa', 'true')
     expect(avatarDoAdversario('jogador-2')).toHaveAttribute('data-sanidade', '3')
-    expect(toquesDeAudio.map((toque) => toque.src)).toEqual([
+    expect(toquesDeEfeito().map((toque) => toque.src)).toEqual([
       CAMINHO_SOM_VULTO,
       CAMINHO_SOM_TREMOR_ATAQUE,
     ])
@@ -1850,7 +1850,7 @@ describe('reload do primeiro turno — peça de volta à mesa e turno concluíve
     // A tela segue viva (painel do chat ainda não existe — issue #389) e
     // nenhum som de recusa dispara para o evento novo.
     expect(screen.getByTestId('tabuleiro')).toBeInTheDocument()
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
   })
 })
 
@@ -2000,7 +2000,7 @@ describe('controles só para o dono da vez — gate de montagem do espectador (i
     await user.click(pecaInicialDoEspelho2('inicial-2'))
     await user.click(screen.getByTestId('tabuleiro'))
     expect(ws.sentMessages).toHaveLength(comandosBase)
-    expect(toquesDeAudio).toHaveLength(0)
+    expect(toquesDeEfeito()).toHaveLength(0)
     expect(screen.getByTestId('anuncio-de-recusa')).not.toHaveAttribute('data-motivo')
   })
 
