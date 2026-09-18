@@ -74,8 +74,6 @@ export {
 export type {
   AtravessarOEscuroDaPartidaComando,
   AtravessouOEscuroEvento,
-  AvisoFinalDoPrimeiroTurnoEvento,
-  CausaDesistencia,
   CelulasIluminadasEvento,
   CodigoDeErroDaPartida,
   ComandoDePartida,
@@ -87,12 +85,10 @@ export type {
   ErroDeDominioDaPartida,
   EstadoDaPartida,
   EventoDaPartida,
-  FaltaRegistradaEvento,
   JogadorDaPartida,
   OperacaoBemSucedidaDaPartida,
   OperacaoRejeitadaDaPartida,
   PartidaTerminadaEvento,
-  PecasQueimadasEvento,
   PosicaoConfirmadaEvento,
   ResgateRealizadoEvento,
   ResultadoDaPartida,
@@ -201,10 +197,7 @@ export {
 export {
   aplicarComandoDePartida,
   avaliarTerminoDaPartida,
-  CARENCIA_AVISO_FINAL_SEGUNDOS,
   estadoInicialDaPartida,
-  LIMITE_FALTAS_PARA_DESISTENCIA,
-  resolverExpiracaoDoTurno,
 } from './partida.ts';
 
 export {

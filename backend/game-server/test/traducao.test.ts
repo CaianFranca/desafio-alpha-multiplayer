@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CARENCIA_AVISO_FINAL_SEGUNDOS, type EventoDaPartida } from '@flicker/engine';
+import type { EventoDaPartida } from '@flicker/engine';
 import { traduzirEventos } from '../src/partidas/traducao.ts';
 
 test('traduzirEventos mapeia celulas_iluminadas para CELULAS_ILUMINADAS', () => {
@@ -268,50 +268,5 @@ test('traduzirEventos normaliza posicao_confirmada sem protegido para false (#22
     peaoId: 'peao-branco',
     pecaId: 'reta-1',
     protegido: false,
-  });
-});
-
-// Tempo de turno (issue #429, B1): o aviso final do Primeiro Turno tem par no
-// wire — PRIMEIRO_TURNO_AVISO_FINAL com segundosExtras = carência do engine.
-test('traduzirEventos mapeia aviso_final_do_primeiro_turno para PRIMEIRO_TURNO_AVISO_FINAL (#429)', () => {
-  const eventos = [
-    { tipo: 'aviso_final_do_primeiro_turno', jogadorId: 'jogador-1' },
-  ] as const satisfies readonly EventoDaPartida[];
-  const saida = traduzirEventos(eventos);
-  assert.equal(saida.length, 1);
-  assert.deepEqual(saida[0], {
-    type: 'PRIMEIRO_TURNO_AVISO_FINAL',
-    jogadorId: 'jogador-1',
-    segundosExtras: CARENCIA_AVISO_FINAL_SEGUNDOS,
-  });
-});
-
-// Tempo de turno (issue #429, B1): falta/queima sem par no wire neste ticket —
-// filtro explícito (F1 reserva o contrato ao ticket 2/3), sem descarte
-// silencioso no default exaustivo.
-test('traduzirEventos filtra falta_registrada e pecas_queimadas sem wire (#429)', () => {
-  const eventos = [
-    { tipo: 'falta_registrada', jogadorId: 'jogador-1', totalDeFaltas: 1 },
-    { tipo: 'pecas_queimadas', pecaIds: ['reta-7'] },
-    { tipo: 'turno_encerrado', jogadorId: 'jogador-1' },
-  ] as const satisfies readonly EventoDaPartida[];
-  const saida = traduzirEventos(eventos);
-  assert.equal(saida.length, 1);
-  assert.deepEqual(saida[0], { type: 'TURNO_ENCERRADO', jogadorId: 'jogador-1' });
-});
-
-// Tempo de turno (issue #429, B1): a causa 'tempo' viaja viva no
-// DESISTENCIA_REGISTRADA (4ª falta ou 2º expiry do Primeiro Turno).
-test('traduzirEventos propaga causa tempo no DESISTENCIA_REGISTRADA (#429)', () => {
-  const eventos = [
-    { tipo: 'desistencia_registrada', jogadorId: 'jogador-1', peaoId: 'peao-branco', causa: 'tempo' },
-  ] as const satisfies readonly EventoDaPartida[];
-  const saida = traduzirEventos(eventos);
-  assert.equal(saida.length, 1);
-  assert.deepEqual(saida[0], {
-    type: 'DESISTENCIA_REGISTRADA',
-    jogadorId: 'jogador-1',
-    peaoId: 'peao-branco',
-    causa: 'tempo',
   });
 });
