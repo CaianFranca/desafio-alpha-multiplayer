@@ -126,10 +126,6 @@ export function adaptarSnapshotParaEspelho(
     cartaoDeAcessoObtido: snapshot.cartaoDeAcessoObtido,
     peoesNoAlcance: {},
     pecasEmPeriodoDeGraca: [],
-    // Tempo de turno (issue #429): o espelho nasce zerado como peoesNoAlcance —
-    // as faltas e o aviso final são dobrados pelos eventos ao vivo.
-    faltasPorJogador: {},
-    avisoFinalConsumidoPorJogador: {},
   };
 }
 

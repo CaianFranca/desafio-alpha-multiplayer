@@ -6,25 +6,11 @@
 // Peões (issues #80 e #88) e os do ciclo de Turnos do ST-11. A saída é
 // `SalaServerMessage`, pois os eventos chegam pelo mesmo canal da partida.
 
-import { CARENCIA_AVISO_FINAL_SEGUNDOS, type EventoDaPartida } from '@flicker/engine';
+import type { EventoDaPartida } from '@flicker/engine';
 import type { SalaServerMessage } from '@flicker/shared';
-
-/**
- * Contexto do relógio do turno (issue #431): o engine é puro e sem timers, então
- * o `turno_iniciado` do domínio não carrega deadline — o game-server o anexa aqui.
- * O `aviso_final_do_primeiro_turno` recebe o mesmo anexo (deadline estendido de
- * +30s, bloqueante da PR #431): o lote de expiração já calcula e persiste o novo
- * marco, só a tradução o descartava.
- * Só `number` viaja (ausente ≡ sem relógio: o cliente normaliza ausente para null,
- * no mesmo padrão defensivo do snapshot): sem contexto, o shape antigo é preservado.
- */
-export interface ContextoDoRelogioNaTraducao {
-  readonly deadlineDoTurnoEm?: number;
-}
 
 export function traduzirEventos(
   eventos: readonly EventoDaPartida[],
-  contexto?: ContextoDoRelogioNaTraducao,
 ): SalaServerMessage[] {
   const saida: SalaServerMessage[] = [];
   for (const evento of eventos) {
@@ -119,11 +105,6 @@ export function traduzirEventos(
           type: 'TURNO_INICIADO',
           jogadorId: evento.jogadorId,
           rodada: evento.rodada,
-          // Deadline absoluto do relógio (issue #431): só number viaja —
-          // ausente ≡ sem relógio (cliente normaliza para null).
-          ...(typeof contexto?.deadlineDoTurnoEm === 'number'
-            ? { deadlineDoTurnoEm: contexto.deadlineDoTurnoEm }
-            : {}),
         });
         break;
       case 'turno_encerrado':
@@ -229,41 +210,6 @@ export function traduzirEventos(
           resgatadorPeaoId: evento.resgatadorPeaoId,
           emBaixaIluminacao: evento.emBaixaIluminacao,
           sanidade: evento.sanidade,
-        });
-        break;
-      // Tempo de turno (issue #429, ticket 1/3 regra pura): o aviso final do
-      // Primeiro Turno tem par no wire — PRIMEIRO_TURNO_AVISO_FINAL com
-      // segundosExtras = CARENCIA_AVISO_FINAL_SEGUNDOS (o relógio do ticket
-      // 2/3 estende aquele turno em +30s únicos).
-      case 'aviso_final_do_primeiro_turno':
-        saida.push({
-          type: 'PRIMEIRO_TURNO_AVISO_FINAL',
-          jogadorId: evento.jogadorId,
-          segundosExtras: CARENCIA_AVISO_FINAL_SEGUNDOS,
-          // Deadline estendido do relógio (issue #431, bloqueante da PR): o lote
-          // de expiração já entrega o contexto (handlers.ts:916-927 e :280-291)
-          // — só number viaja, ausente ≡ binário antigo (mesmo spread defensivo
-          // do TURNO_INICIADO acima).
-          ...(typeof contexto?.deadlineDoTurnoEm === 'number'
-            ? { deadlineDoTurnoEm: contexto.deadlineDoTurnoEm }
-            : {}),
-        });
-        break;
-      // Tempo de turno (issue #431, ticket 2/3 relógio — contrato ao vivo
-      // decidido aqui, reservado pela F1 da #429): falta_registrada abre o lote
-      // de cada resolução por expiry e pecas_queimadas informa a queima, ambos
-      // 1:1 com o domínio no padrão do PRIMEIRO_TURNO_AVISO_FINAL.
-      case 'falta_registrada':
-        saida.push({
-          type: 'FALTA_REGISTRADA',
-          jogadorId: evento.jogadorId,
-          totalDeFaltas: evento.totalDeFaltas,
-        });
-        break;
-      case 'pecas_queimadas':
-        saida.push({
-          type: 'PECAS_QUEIMADAS',
-          pecaIds: [...evento.pecaIds],
         });
         break;
       default: {

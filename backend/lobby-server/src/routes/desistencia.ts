@@ -14,11 +14,10 @@ import type { SalasContexto } from '../salas/index.ts';
  * Idempotente: jogador já sem vínculo com a sala responde 200 sem mutação
  * (cobre retries e a ordem detach → retorno no término 2→1).
  *
- * Causa informativa da origem (issues #295/#429): o game-server envia
- * `causa: 'desistencia'` no ato explícito, `'expiracao'` na conversão
- * automática da janela de reconexão e `'tempo'` na Desistência automática do
- * relógio do turno (4ª falta ou 2º expiry do Primeiro Turno incompleto); o
- * lobby valida quando presente e não muda o detach por causa dela.
+ * Causa informativa da origem (issue #295): o game-server envia
+ * `causa: 'desistencia'` no ato explícito e `'expiracao'` na conversão
+ * automática da janela de reconexão; o lobby valida quando presente e não
+ * muda o detach por causa dela.
  */
 export function criarDesistenciaRouter(contexto: SalasContexto): Router {
   const router = Router();
@@ -36,8 +35,8 @@ export function criarDesistenciaRouter(contexto: SalasContexto): Router {
     const jogadorId = typeof body.jogadorId === 'string' ? body.jogadorId.trim() : '';
     const partidaId = typeof body.partidaId === 'string' ? body.partidaId.trim() : undefined;
     const serverId = typeof body.serverId === 'string' ? body.serverId.trim() : undefined;
-    // Causa informativa da origem (#295 + #429): validada quando presente, sem
-    // efeito comportamental — o detach é idêntico nas três origens.
+    // Causa informativa da origem (#295): validada quando presente, sem
+    // efeito comportamental — o detach é idêntico nas duas origens.
     const causa = body.causa === undefined || body.causa === null ? undefined : body.causa;
 
     if (
@@ -47,7 +46,7 @@ export function criarDesistenciaRouter(contexto: SalasContexto): Router {
       (body.serverId !== undefined && body.serverId !== null && typeof body.serverId !== 'string') ||
       (partidaId !== undefined && partidaId.length === 0) ||
       (serverId !== undefined && serverId.length === 0) ||
-      (causa !== undefined && causa !== 'desistencia' && causa !== 'expiracao' && causa !== 'tempo')
+      (causa !== undefined && causa !== 'desistencia' && causa !== 'expiracao')
     ) {
       res.status(400).json({ codigo: 'DADOS_INVALIDOS', mensagem: 'Payload inválido.' });
       return;

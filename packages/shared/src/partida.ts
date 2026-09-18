@@ -21,14 +21,6 @@
 //   shared type:'ENVIAR_MENSAGEM_DE_CHAT' + jogadorId — SEM par no engine (issue #390): o Chat de Partida não é Ação de jogo; o julgamento tem rota própria no game-server (recusas MENSAGEM_VAZIA/MENSAGEM_LONGA_DEMAIS/LIMITE_DE_MENSAGENS, fora das guardas de turno e de término). O literal coincide com o comando do chat da Sala (./sala.ts) — canais são servidores distintos e as sub-uniões narrow separadamente.
 //   Eventos:
 //   shared type:'TURNO_INICIADO' { jogadorId, rodada } <-> engine tipo:'turno_iniciado' { jogadorId, rodada }
-//   (Tempo de turno #429: o wire carrega ainda `deadlineDoTurnoEm?` — epoch ms
-//   do relógio do game-server — sem par no engine, que é puro e sem timers;
-//   o snapshot `EstadoDaPartidaSnapshot.deadlineDoTurnoEm?` espelha o mesmo marco.)
-//   shared type:'TURNO_AVISO_30S' { jogadorId, segundosRestantes } — sem par no
-//   engine (#429): aviso único do relógio aos 30s restantes (urgência + bipes no HUD).
-//   shared type:'PRIMEIRO_TURNO_AVISO_FINAL' { jogadorId, segundosExtras } <-> engine
-//   tipo:'aviso_final_do_primeiro_turno' { jogadorId } (#429): o relógio estende
-//   aquele turno em +30s únicos (segundosExtras = CARENCIA_AVISO_FINAL_SEGUNDOS).
 //   shared type:'TURNO_ENCERRADO' { jogadorId } <-> engine tipo:'turno_encerrado' { jogadorId }
 //   shared type:'POSICAO_CONFIRMADA' { jogadorId, peaoId, pecaId, protegido } <-> engine tipo:'posicao_confirmada' idem — protegido (issue #227) é o estado RESULTANTE do ator no fim do gatilho completo (concessão da Sala Médica, consumo pelo ataque do MESMO gatilho e Proteção prévia não consumida incluídos).
 //   shared type:'PECA_SORTEADA' { pecaId, tipoDaPeca, orientacao } <-> engine tipo:'peca_sorteada' idem — emitido pelo Recebimento da #138 (e pelo sorteio unitário da Caixa)
@@ -40,14 +32,7 @@
 //   shared type:'CELULAS_ILUMINADAS' { celulas } <-> engine tipo:'celulas_iluminadas' { celulas }
 //   shared type:'LIMPEZA_APLICADA' { pecasRemovidas } <-> engine tipo:'limpeza_aplicada' { pecasRemovidas }
 //   shared type:'PARTIDA_TERMINADA' { resultado, motivo? } <-> engine tipo:'partida_terminada' { desfecho } — issue #179; motivo da derrota (#145-exp, 'desistencia' pela #289/ADR-0013, consumida na #288)
-//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId, causa? } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez); causa #295 ('desistencia'|'expiracao', ausente = desistencia implícita) + 'tempo' pela #429 (Desistência automática do relógio do turno: 4ª falta ou 2º expiry do Primeiro Turno incompleto)
-//   shared type:'FALTA_REGISTRADA' { jogadorId, totalDeFaltas } <-> engine
-//   tipo:'falta_registrada' idem (#431, ticket 2/3 — contrato ao vivo decidido
-//   aqui, reservado pela F1 da #429: abre o lote de cada resolução por expiry,
-//   antes da Passagem/queima/Desistência).
-//   shared type:'PECAS_QUEIMADAS' { pecaIds } <-> engine tipo:'pecas_queimadas'
-//   idem (#431: as pendentes saem de circulação sem retorno à Caixa; a aposta
-//   da Travessia queima no mesmo funil).
+//   shared type:'DESISTENCIA_REGISTRADA' { jogadorId, peaoId, causa? } <-> engine tipo:'desistencia_registrada' idem — núcleo #289 (ADR-0013), fiação/aviso #288 (abre o lote do comando, antes de celulas_iluminadas/limpeza_aplicada e da Passagem de Vez); causa #295 ('desistencia'|'expiracao', ausente = desistencia implícita)
 //   shared type:'JOGADOR_EM_RECONEXAO' { jogadorId } — sem par no engine (#295, spec #292 história 2): anúncio de presença da entrada na janela, broadcast só em `em_andamento` (a `preparada` nunca emite)
 //   shared type:'JOGADOR_RECONECTADO' { jogadorId } — sem par no engine (#295): anúncio de presença da volta dentro da janela, broadcast só na re-admissão em `em_andamento` (exclui as admissões iniciais)
 //   (O Resultado wire é 'vitoria' | 'derrota' (ResultadoDaPartidaWire) e o
@@ -236,53 +221,19 @@ export type PartidaComandoDoCliente =
   | AtivarDebugDaPartidaComando
   | DesativarDebugDaPartidaComando;
 
-// --- Eventos servidor → cliente (18: Turno/posição/iluminação/limpeza,
+// --- Eventos servidor → cliente (16: Turno/posição/iluminação/limpeza,
 // sorteio+vaga da #138, iniciada+estado, término da #179, ataque #172/#173,
-// resgate #171, desistência #288, presença em reconexão #295, chat #390,
-// avisos de tempo de turno #429, falta/queima #431) ---
+// resgate #171, desistência #288, presença em reconexão #295, chat #390) ---
 
 export interface TurnoIniciadoEvento {
   readonly type: 'TURNO_INICIADO';
   readonly jogadorId: string;
   readonly rodada: number;
-  // Tempo de turno (issue #429, spec #405): deadline absoluto do turno (epoch
-  // ms, autoridade do game-server, ticket 2/3) — o HUD deriva a contagem MM:SS
-  // sem eventos por segundo. Opcional/defensivo: payloads de binário anterior
-  // omitem o campo e o cliente normaliza ausente para null (sem cronômetro).
-  readonly deadlineDoTurnoEm?: number | null;
 }
 
 export interface TurnoEncerradoEvento {
   readonly type: 'TURNO_ENCERRADO';
   readonly jogadorId: string;
-}
-
-// Tempo de turno (issue #429, spec #405): aviso único aos 30s restantes do
-// turno vigente — o relógio (game-server, ticket 2/3) o emite uma única vez
-// por turno; o HUD entra em urgência e toca os 3 bipes (ticket 3/3) na chegada.
-// `segundosRestantes` viaja no evento para o cliente não fixar a carência.
-export interface TurnoAviso30sEvento {
-  readonly type: 'TURNO_AVISO_30S';
-  readonly jogadorId: string;
-  readonly segundosRestantes: number;
-}
-
-// Tempo de turno (issue #429, spec #405): aviso final do Primeiro Turno com a
-// etapa da Peça Inicial ou do peão incompleta ("jogue ou a Desistência é
-// automática") —
-// evento próprio com destaque no HUD (ticket 3/3); o relógio estende aquele
-// turno em +30s únicos (flag por Jogador, uma vez por Partida, no engine).
-// `segundosExtras` viaja no evento para o cliente não fixar a carência.
-export interface PrimeiroTurnoAvisoFinalEvento {
-  readonly type: 'PRIMEIRO_TURNO_AVISO_FINAL';
-  readonly jogadorId: string;
-  readonly segundosExtras: number;
-  // Tempo de turno (issue #431, ticket 2/3 relógio): deadline estendido do turno
-  // (epoch ms, agora + segundosExtras, autoridade do game-server) — o HUD
-  // reconcilia o cronômetro sem derivar do relógio local. Opcional/defensivo no
-  // padrão do `TURNO_INICIADO`: payloads de binário anterior omitem o campo e o
-  // cliente normaliza ausente para null (segue contando para o deadline antigo).
-  readonly deadlineDoTurnoEm?: number | null;
 }
 
 export interface PosicaoConfirmadaEvento {
@@ -427,12 +378,6 @@ export interface EstadoDaPartidaSnapshot {
   readonly rodada: number;
   readonly pecaDoInicioDoTurnoId: PecaId | null;
   readonly posicaoConfirmada: boolean;
-  // Tempo de turno (issue #429, spec #405): deadline absoluto do turno vigente
-  // (epoch ms, autoridade do game-server, ticket 2/3) — o HUD deriva a contagem
-  // MM:SS sem eventos por segundo. Opcional/defensivo como `iniciadaEm?`: snapshots
-  // persistidos por binário anterior omitem o campo e o cliente normaliza
-  // ausente para null.
-  readonly deadlineDoTurnoEm?: number | null;
   // Fase da Travessia do Escuro (ADR-0017 / issue #377): pelo contrário da
   // posição confirmada, a readmissão NÃO re-aprende por deltas (o servidor só
   // re-entrega ESTADO_DA_PARTIDA) — sem os campos, recarregar/reconectar no
@@ -578,36 +523,15 @@ export interface ResgateRealizadoWireEvento {
 // mesmo lote). Shape 1:1 com DesistenciaRegistradaEvento do domínio.
 // Causa (issue #295): ausente = 'desistencia' implícita (compat com binários
 // antigos); 'expiracao' = conversão automática da janela de reconexão.
-// Causa (issue #429, spec #405): 'tempo' = Desistência automática do relógio
-// do turno (4ª falta ou 2º expiry do Primeiro Turno ainda incompleto), com o
-// mesmo efeito e eventos da Desistência.
 // Alias local por pacote: mesmo shape do `CausaDesistencia` do engine — sync
 // manual entre os dois (o shared não pode depender do engine).
-export type CausaDesistencia = 'desistencia' | 'expiracao' | 'tempo';
+export type CausaDesistencia = 'desistencia' | 'expiracao';
 
 export interface DesistenciaRegistradaWireEvento {
   readonly type: 'DESISTENCIA_REGISTRADA';
   readonly jogadorId: string;
   readonly peaoId: PeaoId;
   readonly causa?: CausaDesistencia;
-}
-
-// Tempo de turno (issue #431, spec #405): falta ao vivo — cada turno encerrado
-// pelo relógio soma 1 (exceto o aviso final jogado dentro do acréscimo); na 4ª
-// (LIMITE_FALTAS_PARA_DESISTENCIA do engine) a Desistência causa 'tempo' segue
-// no mesmo lote. Shape 1:1 com FaltaRegistradaEvento do domínio.
-export interface FaltaRegistradaWireEvento {
-  readonly type: 'FALTA_REGISTRADA';
-  readonly jogadorId: string;
-  readonly totalDeFaltas: number;
-}
-
-// Tempo de turno (issue #431): queima ao vivo — peças pendentes do Recebimento
-// (e a aposta da Travessia, quando posicionada) saem de circulação sem retorno
-// à Caixa. Shape 1:1 com PecasQueimadasEvento do domínio.
-export interface PecasQueimadasWireEvento {
-  readonly type: 'PECAS_QUEIMADAS';
-  readonly pecaIds: readonly PecaId[];
 }
 
 // Presença em reconexão (issue #295, spec #292 história 2): a entrada na
@@ -647,8 +571,6 @@ export interface MensagemDeChatDaPartidaEvento {
 export type PartidaEventoDoServidor =
   | TurnoIniciadoEvento
   | TurnoEncerradoEvento
-  | TurnoAviso30sEvento
-  | PrimeiroTurnoAvisoFinalEvento
   | PosicaoConfirmadaEvento
   | CelulasIluminadasWireEvento
   | LimpezaAplicadaWireEvento
@@ -660,8 +582,6 @@ export type PartidaEventoDoServidor =
   | AtaqueResolvidoWireEvento
   | ResgateRealizadoWireEvento
   | DesistenciaRegistradaWireEvento
-  | FaltaRegistradaWireEvento
-  | PecasQueimadasWireEvento
   | JogadorEmReconexaoWireEvento
   | JogadorReconectadoWireEvento
   | MensagemDeChatDaPartidaEvento;
