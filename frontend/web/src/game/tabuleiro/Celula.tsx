@@ -533,6 +533,17 @@ export function Celula({
     () => (vagaEmGuia ? criarAnelQuadradoVazado(COR_CONTORNO_GUIA, CELULA_Y_BASE + 0.005, 0.95) : null),
     [vagaEmGuia],
   )
+  // Dispose dos anéis manuais (travessia + guia, mesma fábrica): o `primitive`
+  // não tem dispose automático do R3F — sem o cleanup a geometria/material
+  // vazam a cada toggle (mesmo padrão B1 do plano de fundo acima).
+  useEffect(() => () => {
+    anelDaTravessia?.geometry.dispose()
+    ;(anelDaTravessia?.material as THREE.Material | undefined)?.dispose()
+  }, [anelDaTravessia])
+  useEffect(() => () => {
+    anelDoGuiaDaVaga?.geometry.dispose()
+    ;(anelDoGuiaDaVaga?.material as THREE.Material | undefined)?.dispose()
+  }, [anelDoGuiaDaVaga])
 
   return (
     <group position={pos}>
